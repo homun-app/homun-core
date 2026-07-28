@@ -1,7 +1,8 @@
 use local_first_execution_protocol::{
-    CancelReason, CheckpointDataRef, CheckpointEnvelope, CheckpointRef, DurableDataRef,
-    ExecutionContract, ExecutionFailure, ExecutionOutcome, ExecutionScope, ExecutionState,
-    ValidatedExecutionContract, ValidatedExecutionOutcome, WakeCondition, WakeDelivery,
+    ApprovalPolicy, CancelReason, CheckpointDataRef, CheckpointEnvelope, CheckpointRef,
+    DurableDataRef, EffectClass, ExecutionContract, ExecutionFailure, ExecutionOutcome,
+    ExecutionScope, ExecutionState, ObjectiveRef, ResourceRequirement, ValidatedExecutionContract,
+    ValidatedExecutionOutcome, WakeCondition, WakeDelivery,
 };
 use local_first_task_runtime::{
     CreateExecution, ExecutionJournalEvent, ExecutionRecord, OutcomeCommit, StartExecutionRevision,
@@ -81,7 +82,7 @@ fn next_revision(
         condition: wake.clone(),
         dedup_key: wake.dedup_key(),
         payload: json!({"signal": "delivered"}),
-        delivered_at_unix_seconds: 1_700_000_000,
+        delivered_at_unix_seconds: 2_000_000_000,
     });
     ValidatedExecutionContract::try_from(contract).unwrap()
 }
@@ -108,6 +109,246 @@ fn raw_connection(path: &Path) -> Connection {
         .execute_batch("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;")
         .unwrap();
     connection
+}
+
+fn raw_event_rows(
+    connection: &Connection,
+    execution_id: &str,
+) -> Vec<(i64, i64, i64, String, String, i64)> {
+    let mut statement = connection
+        .prepare(
+            "SELECT event_id, revision, seq, kind, payload_json, created_at
+             FROM execution_events WHERE execution_id = ?1
+             ORDER BY revision, seq, event_id",
+        )
+        .unwrap();
+    statement
+        .query_map([execution_id], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+}
+
+fn insert_delivered_wake(
+    path: &Path,
+    suspension: &ValidatedExecutionOutcome,
+    next: &ValidatedExecutionContract,
+) {
+    let (wake, revision, execution_id) = match suspension.as_ref() {
+        ExecutionOutcome::Suspended { wake, checkpoint } => {
+            (wake, checkpoint.revision, checkpoint.execution_id.as_str())
+        }
+        _ => panic!("delivered wake requires a suspended outcome"),
+    };
+    let delivery = next
+        .as_ref()
+        .wake
+        .as_ref()
+        .expect("next revision must contain a wake delivery");
+    let connection = raw_connection(path);
+    let suspended_at = connection
+        .query_row(
+            "SELECT created_at FROM execution_events
+             WHERE execution_id = ?1 AND revision = ?2 AND kind = 'outcome_committed'",
+            params![execution_id, i64::try_from(revision).unwrap()],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO execution_wakes (
+                execution_id, revision, dedup_key, condition_json, status,
+                delivery_json, created_at, delivered_at
+             ) VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, ?6, ?7)",
+            params![
+                execution_id,
+                i64::try_from(revision).unwrap(),
+                wake.dedup_key(),
+                serde_json::to_string(wake).unwrap(),
+                serde_json::to_string(delivery).unwrap(),
+                suspended_at,
+                delivery.delivered_at_unix_seconds,
+            ],
+        )
+        .unwrap();
+}
+
+struct InitialV12Fixture {
+    expected: ExecutionRecord,
+    wake: (
+        String,
+        i64,
+        String,
+        String,
+        String,
+        Option<String>,
+        i64,
+        Option<i64>,
+    ),
+    malformed_payload: String,
+}
+
+fn install_initial_v12_fixture(path: &Path, malformed_fence: bool) -> InitialV12Fixture {
+    let original = contract("exec-initial-v12", 1, 7);
+    let mut latest_raw = original.as_ref().clone();
+    latest_raw.fencing_token = 8;
+    let latest = ValidatedExecutionContract::try_from(latest_raw).unwrap();
+    let outcome = completed(&latest, json!({"migrated": true}));
+    let created_at = 100_i64;
+    let fence_at = 101_i64;
+    let outcome_at = 102_i64;
+    let fence_payload = if malformed_fence {
+        json!({"expected": 7})
+    } else {
+        json!({"expected": 7, "next": 8})
+    };
+    let wake = (
+        "exec-initial-v12".to_string(),
+        1_i64,
+        "legacy-wake-key".to_string(),
+        serde_json::to_string(&WakeCondition::Signal {
+            kind: "legacy.signal".into(),
+            correlation_id: "legacy-correlation".into(),
+        })
+        .unwrap(),
+        "pending".to_string(),
+        None,
+        99_i64,
+        None,
+    );
+
+    let connection = raw_connection(path);
+    connection
+        .execute_batch(
+            "PRAGMA foreign_keys=OFF;
+             DROP TABLE execution_wakes;
+             DROP TABLE execution_events;
+             DROP TABLE executions;
+             CREATE TABLE executions (
+                execution_id TEXT PRIMARY KEY,
+                parent_execution_id TEXT,
+                kind TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                fencing_token INTEGER NOT NULL,
+                state TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                thread_id TEXT,
+                contract_json TEXT NOT NULL,
+                outcome_json TEXT,
+                outcome_committed_at INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+             );
+             CREATE TABLE execution_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                execution_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                seq INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                UNIQUE(execution_id, revision, seq),
+                FOREIGN KEY(execution_id) REFERENCES executions(execution_id) ON DELETE CASCADE
+             );
+             CREATE TABLE execution_wakes (
+                execution_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                dedup_key TEXT NOT NULL,
+                condition_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                delivery_json TEXT,
+                created_at INTEGER NOT NULL,
+                delivered_at INTEGER,
+                PRIMARY KEY(execution_id, revision, dedup_key),
+                FOREIGN KEY(execution_id) REFERENCES executions(execution_id) ON DELETE CASCADE
+             );
+             UPDATE task_runtime_metadata SET value = '12' WHERE key = 'schema_version';
+             PRAGMA foreign_keys=ON;",
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO executions (
+                execution_id, parent_execution_id, kind, revision, fencing_token, state,
+                user_id, workspace_id, thread_id, contract_json, outcome_json,
+                outcome_committed_at, created_at, updated_at
+             ) VALUES (?1, NULL, ?2, 1, 8, 'completed', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                latest.as_ref().execution_id,
+                latest.as_ref().kind,
+                latest.as_ref().scope.user_id,
+                latest.as_ref().scope.workspace_id,
+                latest.as_ref().scope.thread_id,
+                serde_json::to_string(latest.as_ref()).unwrap(),
+                serde_json::to_string(outcome.as_ref()).unwrap(),
+                outcome_at,
+                created_at,
+                outcome_at,
+            ],
+        )
+        .unwrap();
+    for (seq, kind, payload, timestamp) in [
+        (
+            1_i64,
+            "execution_created",
+            json!({"state": "ready"}),
+            created_at,
+        ),
+        (2, "fence_advanced", fence_payload.clone(), fence_at),
+        (
+            3,
+            "outcome_committed",
+            json!({"state": "completed"}),
+            outcome_at,
+        ),
+    ] {
+        connection
+            .execute(
+                "INSERT INTO execution_events (
+                    execution_id, revision, seq, kind, payload_json, created_at
+                 ) VALUES ('exec-initial-v12', 1, ?1, ?2, ?3, ?4)",
+                params![
+                    seq,
+                    kind,
+                    serde_json::to_string(&payload).unwrap(),
+                    timestamp
+                ],
+            )
+            .unwrap();
+    }
+    connection
+        .execute(
+            "INSERT INTO execution_wakes (
+                execution_id, revision, dedup_key, condition_json, status,
+                delivery_json, created_at, delivered_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                wake.0, wake.1, wake.2, wake.3, wake.4, wake.5, wake.6, wake.7
+            ],
+        )
+        .unwrap();
+
+    InitialV12Fixture {
+        expected: ExecutionRecord {
+            contract: latest,
+            state: ExecutionState::Completed,
+            outcome: Some(outcome),
+            created_at,
+            updated_at: outcome_at,
+        },
+        wake,
+        malformed_payload: serde_json::to_string(&fence_payload).unwrap(),
+    }
 }
 
 #[test]
@@ -158,12 +399,13 @@ fn journal_events_are_typed_complete_and_timestamp_the_projection() {
 
 #[test]
 fn suspended_revision_can_start_and_complete_the_next_revision() {
-    let store = TaskStore::open_in_memory().unwrap();
+    let (path, store) = file_store();
     let revision_one = contract("exec-multi-revision", 1, 2);
     store.create_execution(&revision_one).unwrap();
     let suspended = suspended(&revision_one);
     store.commit_execution_outcome(&suspended).unwrap();
     let revision_two = next_revision(&revision_one, &suspended, 3);
+    insert_delivered_wake(&path, &suspended, &revision_two);
 
     let started = match store.start_execution_revision(&revision_two).unwrap() {
         StartExecutionRevision::Inserted(record) => record,
@@ -212,16 +454,19 @@ fn suspended_revision_can_start_and_complete_the_next_revision() {
             contract,
         } if contract == revision_two.as_ref()
     ));
+    drop(store);
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]
 fn create_and_revision_start_retries_return_the_latest_projection() {
-    let store = TaskStore::open_in_memory().unwrap();
+    let (path, store) = file_store();
     let revision_one = contract("exec-multi-retry", 1, 1);
     store.create_execution(&revision_one).unwrap();
     let suspended = suspended(&revision_one);
     store.commit_execution_outcome(&suspended).unwrap();
     let revision_two = next_revision(&revision_one, &suspended, 2);
+    insert_delivered_wake(&path, &suspended, &revision_two);
     let started = match store.start_execution_revision(&revision_two).unwrap() {
         StartExecutionRevision::Inserted(record) => record,
         StartExecutionRevision::Existing(_) => unreachable!(),
@@ -245,6 +490,8 @@ fn create_and_revision_start_retries_return_the_latest_projection() {
         store.execution_events("exec-multi-retry", 2).unwrap().len(),
         1
     );
+    drop(store);
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -324,6 +571,216 @@ fn revision_start_rejects_invalid_aggregate_transitions() {
         )
         .to_string()
     );
+}
+
+#[test]
+fn revision_start_rejects_each_immutable_contract_field_change() {
+    for (index, field) in [
+        "objective",
+        "input",
+        "allowed effects",
+        "approval policy",
+        "resources",
+        "budget",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (path, store) = file_store();
+        let execution_id = format!("exec-immutable-revision-fields-{index}");
+        let revision_one = contract(&execution_id, 1, 4);
+        store.create_execution(&revision_one).unwrap();
+        let suspended = suspended(&revision_one);
+        store.commit_execution_outcome(&suspended).unwrap();
+        let valid = next_revision(&revision_one, &suspended, 5);
+        insert_delivered_wake(&path, &suspended, &valid);
+        let mut candidate = valid.as_ref().clone();
+        match field {
+            "objective" => {
+                candidate.objective = Some(ObjectiveRef {
+                    thread_id: "thread-1".into(),
+                    revision: 2,
+                });
+            }
+            "input" => candidate.input = json!({"prompt": "changed"}),
+            "allowed effects" => {
+                candidate.policy.allowed_effects = vec![EffectClass::FilesystemWrite];
+            }
+            "approval policy" => {
+                candidate.policy.approval_policy = ApprovalPolicy::OnRequest;
+            }
+            "resources" => {
+                candidate.resources = vec![ResourceRequirement {
+                    class: "browser".into(),
+                    units: 1,
+                }];
+            }
+            "budget" => candidate.budget.max_attempts = 2,
+            _ => unreachable!(),
+        }
+        let candidate = ValidatedExecutionContract::try_from(candidate).unwrap();
+        assert!(
+            matches!(
+                store.start_execution_revision(&candidate),
+                Err(TaskRuntimeError::InvalidTransition(_))
+            ),
+            "revision start accepted changed {field}"
+        );
+        assert!(matches!(
+            store.execution_events(&execution_id, 2),
+            Err(TaskRuntimeError::NotFound(_))
+        ));
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn revision_start_rejects_unauthenticated_wake_history() {
+    for case in [
+        "missing",
+        "pending",
+        "wrong delivery",
+        "wrong timestamp",
+        "wrong condition",
+        "before suspension",
+    ] {
+        let (path, store) = file_store();
+        let execution_id = format!("exec-wake-auth-{}", case.replace(' ', "-"));
+        let revision_one = contract(&execution_id, 1, 4);
+        store.create_execution(&revision_one).unwrap();
+        let suspended = suspended(&revision_one);
+        store.commit_execution_outcome(&suspended).unwrap();
+        let mut revision_two = next_revision(&revision_one, &suspended, 5);
+
+        if case != "missing" && case != "before suspension" {
+            insert_delivered_wake(&path, &suspended, &revision_two);
+        }
+        let connection = raw_connection(&path);
+        match case {
+            "missing" => {}
+            "pending" => {
+                connection
+                    .execute(
+                        "UPDATE execution_wakes SET status = 'pending' WHERE execution_id = ?1",
+                        [&execution_id],
+                    )
+                    .unwrap();
+            }
+            "wrong delivery" => {
+                let mut delivery = revision_two.as_ref().wake.as_ref().unwrap().clone();
+                delivery.payload = json!({"signal": "forged"});
+                connection
+                    .execute(
+                        "UPDATE execution_wakes SET delivery_json = ?1 WHERE execution_id = ?2",
+                        params![serde_json::to_string(&delivery).unwrap(), execution_id],
+                    )
+                    .unwrap();
+            }
+            "wrong timestamp" => {
+                connection
+                    .execute(
+                        "UPDATE execution_wakes SET delivered_at = delivered_at + 1
+                         WHERE execution_id = ?1",
+                        [&execution_id],
+                    )
+                    .unwrap();
+            }
+            "wrong condition" => {
+                let other = WakeCondition::User {
+                    wait_ref: "forged-wait".into(),
+                };
+                connection
+                    .execute(
+                        "UPDATE execution_wakes SET condition_json = ?1 WHERE execution_id = ?2",
+                        params![serde_json::to_string(&other).unwrap(), execution_id],
+                    )
+                    .unwrap();
+            }
+            "before suspension" => {
+                let suspended_at = connection
+                    .query_row(
+                        "SELECT created_at FROM execution_events
+                         WHERE execution_id = ?1 AND revision = 1 AND kind = 'outcome_committed'",
+                        [&execution_id],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .unwrap();
+                let raw = revision_two.as_ref().clone();
+                let mut delivery = raw.wake.clone().unwrap();
+                delivery.delivered_at_unix_seconds = suspended_at - 1;
+                let mut raw = raw;
+                raw.wake = Some(delivery.clone());
+                revision_two = ValidatedExecutionContract::try_from(raw).unwrap();
+                let wake = match suspended.as_ref() {
+                    ExecutionOutcome::Suspended { wake, .. } => wake,
+                    _ => unreachable!(),
+                };
+                connection
+                    .execute(
+                        "INSERT INTO execution_wakes (
+                            execution_id, revision, dedup_key, condition_json, status,
+                            delivery_json, created_at, delivered_at
+                         ) VALUES (?1, 1, ?2, ?3, 'delivered', ?4, ?5, ?6)",
+                        params![
+                            execution_id,
+                            wake.dedup_key(),
+                            serde_json::to_string(wake).unwrap(),
+                            serde_json::to_string(&delivery).unwrap(),
+                            suspended_at - 2,
+                            suspended_at - 1,
+                        ],
+                    )
+                    .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        drop(connection);
+
+        assert!(
+            matches!(
+                store.start_execution_revision(&revision_two),
+                Err(TaskRuntimeError::InvalidTransition(_))
+            ),
+            "revision start accepted {case} wake history"
+        );
+        assert!(matches!(
+            store.execution_events(&execution_id, 2),
+            Err(TaskRuntimeError::NotFound(_))
+        ));
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn revision_start_accepts_exact_delivered_wake_and_retries_idempotently() {
+    let (path, store) = file_store();
+    let revision_one = contract("exec-authenticated-revision", 1, 4);
+    store.create_execution(&revision_one).unwrap();
+    let suspended = suspended(&revision_one);
+    store.commit_execution_outcome(&suspended).unwrap();
+    let revision_two = next_revision(&revision_one, &suspended, 5);
+    insert_delivered_wake(&path, &suspended, &revision_two);
+
+    assert!(matches!(
+        store.start_execution_revision(&revision_two).unwrap(),
+        StartExecutionRevision::Inserted(_)
+    ));
+    assert!(matches!(
+        store.start_execution_revision(&revision_two).unwrap(),
+        StartExecutionRevision::Existing(_)
+    ));
+    assert_eq!(
+        store
+            .execution_events("exec-authenticated-revision", 2)
+            .unwrap()
+            .len(),
+        1
+    );
+
+    drop(store);
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -707,6 +1164,7 @@ fn rebuild_restores_only_the_latest_revision_projection() {
     let suspended = suspended(&revision_one);
     store.commit_execution_outcome(&suspended).unwrap();
     let revision_two = next_revision(&revision_one, &suspended, 2);
+    insert_delivered_wake(&path, &suspended, &revision_two);
     store.start_execution_revision(&revision_two).unwrap();
     let completed = completed(&revision_two, json!({"latest": true}));
     let expected = match store.commit_execution_outcome(&completed).unwrap() {
@@ -743,6 +1201,74 @@ fn rebuild_restores_only_the_latest_revision_projection() {
 }
 
 #[test]
+fn execution_repairs_an_internally_valid_stale_projection_from_latest_journal() {
+    let (path, store) = file_store();
+    let revision_one = contract("exec-stale-valid-projection", 1, 1);
+    store.create_execution(&revision_one).unwrap();
+    let suspended = suspended(&revision_one);
+    let revision_one_record = match store.commit_execution_outcome(&suspended).unwrap() {
+        OutcomeCommit::Inserted(record) => record,
+        OutcomeCommit::Existing(_) => unreachable!(),
+    };
+    let revision_two = next_revision(&revision_one, &suspended, 2);
+    insert_delivered_wake(&path, &suspended, &revision_two);
+    let latest = match store.start_execution_revision(&revision_two).unwrap() {
+        StartExecutionRevision::Inserted(record) => record,
+        StartExecutionRevision::Existing(_) => unreachable!(),
+    };
+    let revision_one_outcome_at = raw_connection(&path)
+        .query_row(
+            "SELECT created_at FROM execution_events
+             WHERE execution_id = 'exec-stale-valid-projection' AND revision = 1
+               AND kind = 'outcome_committed'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    raw_connection(&path)
+        .execute(
+            "UPDATE executions
+             SET revision = 1,
+                 fencing_token = 1,
+                 state = 'suspended',
+                 contract_json = ?1,
+                 outcome_json = ?2,
+                 outcome_committed_at = ?3,
+                 created_at = ?4,
+                 updated_at = ?3
+             WHERE execution_id = 'exec-stale-valid-projection'",
+            params![
+                serde_json::to_string(revision_one.as_ref()).unwrap(),
+                serde_json::to_string(suspended.as_ref()).unwrap(),
+                revision_one_outcome_at,
+                revision_one_record.created_at,
+            ],
+        )
+        .unwrap();
+
+    assert_eq!(
+        store.execution("exec-stale-valid-projection").unwrap(),
+        Some(latest.clone())
+    );
+    let connection = raw_connection(&path);
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT revision FROM executions
+                 WHERE execution_id = 'exec-stale-valid-projection'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        2
+    );
+    drop(connection);
+
+    drop(store);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn historical_wake_survives_revision_start_and_projection_rebuild() {
     let (path, store) = file_store();
     let revision_one = contract("exec-wake-history", 1, 1);
@@ -755,15 +1281,24 @@ fn historical_wake_survives_revision_start_and_projection_rebuild() {
         ExecutionOutcome::Suspended { wake, .. } => wake,
         _ => unreachable!(),
     };
+    let connection = raw_connection(&path);
+    let suspended_at = connection
+        .query_row(
+            "SELECT created_at FROM execution_events
+             WHERE execution_id = 'exec-wake-history' AND revision = 1
+               AND kind = 'outcome_committed'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
     let expected = (
         wake.dedup_key(),
         serde_json::to_string(wake).unwrap(),
         "delivered".to_string(),
         serde_json::to_string(delivery).unwrap(),
-        10_i64,
-        11_i64,
+        suspended_at,
+        delivery.delivered_at_unix_seconds,
     );
-    let connection = raw_connection(&path);
     connection
         .execute(
             "INSERT INTO execution_wakes (
@@ -832,12 +1367,13 @@ fn historical_wake_survives_revision_start_and_projection_rebuild() {
 
 #[test]
 fn stale_prior_revision_outcome_never_rewrites_the_latest_projection() {
-    let store = TaskStore::open_in_memory().unwrap();
+    let (path, store) = file_store();
     let revision_one = contract("exec-stale-prior-outcome", 1, 1);
     store.create_execution(&revision_one).unwrap();
     let suspended = suspended(&revision_one);
     store.commit_execution_outcome(&suspended).unwrap();
     let revision_two = next_revision(&revision_one, &suspended, 2);
+    insert_delivered_wake(&path, &suspended, &revision_two);
     let latest = match store.start_execution_revision(&revision_two).unwrap() {
         StartExecutionRevision::Inserted(record) => record,
         StartExecutionRevision::Existing(_) => unreachable!(),
@@ -869,6 +1405,8 @@ fn stale_prior_revision_outcome_never_rewrites_the_latest_projection() {
             .len(),
         2
     );
+    drop(store);
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -879,6 +1417,7 @@ fn journal_fold_revalidates_revision_start_transition_data() {
     let suspended = suspended(&revision_one);
     store.commit_execution_outcome(&suspended).unwrap();
     let revision_two = next_revision(&revision_one, &suspended, 2);
+    insert_delivered_wake(&path, &suspended, &revision_two);
     store.start_execution_revision(&revision_two).unwrap();
 
     let connection = raw_connection(&path);
@@ -1137,7 +1676,7 @@ fn schema_constraints_reject_invalid_projection_event_and_wake_rows() {
 }
 
 #[test]
-fn populated_v11_database_migrates_to_constrained_v12() {
+fn populated_v11_database_migrates_to_constrained_v13() {
     let (path, seed) = file_store();
     let task = TaskRecord::new(
         "legacy-task",
@@ -1161,7 +1700,7 @@ fn populated_v11_database_migrates_to_constrained_v12() {
     drop(connection);
 
     let migrated = TaskStore::open(&path).unwrap();
-    assert_eq!(migrated.schema_version().unwrap(), 12);
+    assert_eq!(migrated.schema_version().unwrap(), 13);
     assert!(
         migrated
             .get_task(
@@ -1208,7 +1747,197 @@ fn populated_v11_database_migrates_to_constrained_v12() {
 }
 
 #[test]
-fn legacy_v12_wake_foreign_key_is_migrated_in_place_without_data_loss() {
+fn initial_v12_execution_tables_migrate_to_typed_authoritative_v13() {
+    let (path, seed) = file_store();
+    drop(seed);
+    let fixture = install_initial_v12_fixture(&path, false);
+
+    let migrated = TaskStore::open(&path).unwrap();
+    assert_eq!(migrated.schema_version().unwrap(), 13);
+    let events = migrated.execution_events("exec-initial-v12", 1).unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| (event.seq, event.created_at))
+            .collect::<Vec<_>>(),
+        vec![(1, 100), (2, 101), (3, 102)]
+    );
+    assert!(matches!(
+        &events[0].event,
+        ExecutionJournalEvent::Created { contract, .. }
+            if contract.fencing_token == 7
+    ));
+    assert!(matches!(
+        &events[1].event,
+        ExecutionJournalEvent::FenceAdvanced {
+            previous_fencing_token: 7,
+            contract,
+            ..
+        } if contract.fencing_token == 8
+    ));
+    assert!(matches!(
+        &events[2].event,
+        ExecutionJournalEvent::OutcomeCommitted {
+            state: ExecutionState::Completed,
+            outcome,
+            ..
+        } if outcome == fixture.expected.outcome.as_ref().unwrap().as_ref()
+    ));
+    assert_eq!(
+        migrated.execution("exec-initial-v12").unwrap(),
+        Some(fixture.expected.clone())
+    );
+
+    let connection = raw_connection(&path);
+    for table in ["executions", "execution_events", "execution_wakes"] {
+        assert_eq!(
+            connection
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM pragma_foreign_key_list('{table}')"),
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0,
+            "{table} retained projection ownership"
+        );
+    }
+    let wake = connection
+        .query_row(
+            "SELECT execution_id, revision, dedup_key, condition_json, status,
+                    delivery_json, created_at, delivered_at
+             FROM execution_wakes WHERE execution_id = 'exec-initial-v12'",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, Option<i64>>(7)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(wake, fixture.wake);
+    assert!(
+        connection
+            .execute(
+                "UPDATE executions SET revision = 0 WHERE execution_id = 'exec-initial-v12'",
+                [],
+            )
+            .is_err()
+    );
+    assert!(
+        connection
+            .execute(
+                "UPDATE execution_events SET kind = ' ' WHERE execution_id = 'exec-initial-v12'",
+                [],
+            )
+            .is_err()
+    );
+    assert!(
+        connection
+            .execute(
+                "UPDATE execution_wakes SET status = ' ' WHERE execution_id = 'exec-initial-v12'",
+                [],
+            )
+            .is_err()
+    );
+    connection
+        .execute(
+            "DELETE FROM executions WHERE execution_id = 'exec-initial-v12'",
+            [],
+        )
+        .unwrap();
+    drop(connection);
+    assert_eq!(
+        migrated
+            .rebuild_execution_projection("exec-initial-v12")
+            .unwrap(),
+        fixture.expected
+    );
+
+    drop(migrated);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn malformed_initial_v12_event_aborts_migration_without_dropping_data() {
+    let (path, seed) = file_store();
+    drop(seed);
+    let fixture = install_initial_v12_fixture(&path, true);
+
+    assert!(matches!(
+        TaskStore::open(&path),
+        Err(TaskRuntimeError::Store(_))
+    ));
+    let connection = raw_connection(&path);
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT value FROM task_runtime_metadata WHERE key = 'schema_version'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+        "12"
+    );
+    for table in ["execution_events", "execution_wakes"] {
+        assert!(
+            connection
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM pragma_foreign_key_list('{table}')"),
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap()
+                > 0,
+            "{table} was replaced despite failed migration"
+        );
+    }
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT payload_json FROM execution_events
+                 WHERE execution_id = 'exec-initial-v12' AND seq = 2",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+        fixture.malformed_payload
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM executions", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM execution_events", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM execution_wakes", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+
+    drop(connection);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn legacy_v12_wake_foreign_key_is_migrated_to_v13_without_data_loss() {
     let (path, store) = file_store();
     let revision_one = contract("exec-legacy-wake-migration", 1, 1);
     store.create_execution(&revision_one).unwrap();
@@ -1220,6 +1949,21 @@ fn legacy_v12_wake_foreign_key_is_migrated_in_place_without_data_loss() {
         _ => unreachable!(),
     };
     let delivery = revision_two.as_ref().wake.as_ref().unwrap();
+    let connection = raw_connection(&path);
+    let expected_events = raw_event_rows(&connection, "exec-legacy-wake-migration");
+    let expected_projection = store
+        .execution("exec-legacy-wake-migration")
+        .unwrap()
+        .unwrap();
+    let suspended_at = connection
+        .query_row(
+            "SELECT created_at FROM execution_events
+             WHERE execution_id = 'exec-legacy-wake-migration' AND revision = 1
+               AND kind = 'outcome_committed'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
     let expected = (
         "exec-legacy-wake-migration".to_string(),
         1_i64,
@@ -1227,12 +1971,11 @@ fn legacy_v12_wake_foreign_key_is_migrated_in_place_without_data_loss() {
         serde_json::to_string(wake).unwrap(),
         "delivered".to_string(),
         serde_json::to_string(delivery).unwrap(),
-        100_i64,
-        101_i64,
+        suspended_at,
+        delivery.delivered_at_unix_seconds,
     );
     drop(store);
 
-    let connection = raw_connection(&path);
     connection
         .execute_batch(
             "DROP TABLE execution_wakes;
@@ -1281,7 +2024,7 @@ fn legacy_v12_wake_foreign_key_is_migrated_in_place_without_data_loss() {
     drop(connection);
 
     let migrated = TaskStore::open(&path).unwrap();
-    assert_eq!(migrated.schema_version().unwrap(), 12);
+    assert_eq!(migrated.schema_version().unwrap(), 13);
     let connection = raw_connection(&path);
     assert_eq!(
         connection
@@ -1292,6 +2035,14 @@ fn legacy_v12_wake_foreign_key_is_migrated_in_place_without_data_loss() {
             )
             .unwrap(),
         0
+    );
+    assert_eq!(
+        raw_event_rows(&connection, "exec-legacy-wake-migration"),
+        expected_events
+    );
+    assert_eq!(
+        migrated.execution("exec-legacy-wake-migration").unwrap(),
+        Some(expected_projection)
     );
     let load_wake = || {
         connection.query_row(
@@ -1496,6 +2247,7 @@ fn concurrent_same_revision_start_is_inserted_once_and_existing_once() {
     let suspended = suspended(&revision_one);
     seed.commit_execution_outcome(&suspended).unwrap();
     let revision_two = next_revision(&revision_one, &suspended, 2);
+    insert_delivered_wake(&path, &suspended, &revision_two);
     drop(seed);
 
     let barrier = Arc::new(Barrier::new(3));
@@ -1560,6 +2312,7 @@ fn concurrent_conflicting_revision_starts_serialize_to_one_contract() {
     let suspended = suspended(&revision_one);
     seed.commit_execution_outcome(&suspended).unwrap();
     let first = next_revision(&revision_one, &suspended, 2);
+    insert_delivered_wake(&path, &suspended, &first);
     let mut second = first.as_ref().clone();
     second.input = json!({"prompt": "conflicting retry"});
     let second = ValidatedExecutionContract::try_from(second).unwrap();
@@ -1591,7 +2344,12 @@ fn concurrent_conflicting_revision_starts_serialize_to_one_contract() {
     assert_eq!(
         results
             .iter()
-            .filter(|result| matches!(result, Err(TaskRuntimeError::Conflict(_))))
+            .filter(|result| {
+                matches!(
+                    result,
+                    Err(TaskRuntimeError::InvalidTransition(_) | TaskRuntimeError::Conflict(_))
+                )
+            })
             .count(),
         1
     );

@@ -484,10 +484,10 @@ impl TaskStore {
 
             INSERT INTO task_runtime_metadata(key, value)
             VALUES ('schema_version', '8')
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+            ON CONFLICT(key) DO NOTHING;
             ",
         )?;
-        migrate_legacy_execution_wake_ownership(&self.connection)?;
+        crate::execution_store::migrate_execution_schema_v13(&self.connection)?;
 
         // ── chat_turn columns (schema_version 4). Guarded: idempotent on existing DBs.
         // Indexed columns for chat turns. Remain NULL on non-chat_turn rows.
@@ -535,7 +535,7 @@ impl TaskStore {
             [],
         )?;
         self.connection.execute(
-            "UPDATE task_runtime_metadata SET value = '12' WHERE key = 'schema_version'",
+            "UPDATE task_runtime_metadata SET value = '13' WHERE key = 'schema_version'",
             [],
         )?;
         // Partial index: only chat_turn rows (thread_id IS NOT NULL). Indexes the
@@ -3651,56 +3651,6 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
     }
 }
 
-fn migrate_legacy_execution_wake_ownership(conn: &Connection) -> TaskRuntimeResult<()> {
-    let references_execution_projection = {
-        let mut statement = conn.prepare("PRAGMA foreign_key_list(execution_wakes)")?;
-        let referenced_tables = statement.query_map([], |row| row.get::<_, String>(2))?;
-        let mut found = false;
-        for table in referenced_tables {
-            if table? == "executions" {
-                found = true;
-            }
-        }
-        found
-    };
-    if !references_execution_projection {
-        return Ok(());
-    }
-
-    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
-    tx.execute_batch(
-        "CREATE TABLE execution_wakes_without_projection_owner (
-            execution_id TEXT NOT NULL,
-            revision INTEGER NOT NULL CHECK(revision > 0),
-            dedup_key TEXT NOT NULL CHECK(length(trim(dedup_key)) > 0),
-            condition_json TEXT NOT NULL,
-            status TEXT NOT NULL CHECK(length(trim(status)) > 0),
-            delivery_json TEXT,
-            created_at INTEGER NOT NULL,
-            delivered_at INTEGER,
-            PRIMARY KEY(execution_id, revision, dedup_key),
-            CHECK(
-                (delivery_json IS NULL AND delivered_at IS NULL)
-                OR (delivery_json IS NOT NULL AND delivered_at IS NOT NULL)
-            ),
-            CHECK(delivered_at IS NULL OR delivered_at >= created_at)
-        );
-
-        INSERT INTO execution_wakes_without_projection_owner (
-            execution_id, revision, dedup_key, condition_json, status,
-            delivery_json, created_at, delivered_at
-        )
-        SELECT execution_id, revision, dedup_key, condition_json, status,
-               delivery_json, created_at, delivered_at
-        FROM execution_wakes;
-
-        DROP TABLE execution_wakes;
-        ALTER TABLE execution_wakes_without_projection_owner RENAME TO execution_wakes;",
-    )?;
-    tx.commit()?;
-    Ok(())
-}
-
 // Required by the Phase 0 plan; consumed by later tasks.
 #[allow(dead_code)]
 fn table_exists(conn: &Connection, table: &str) -> bool {
@@ -3741,7 +3691,7 @@ mod migration_tests {
         }
         // Re-running migrations must not panic (guarded ALTER).
         store.run_migrations().expect("idempotent re-run");
-        assert_eq!(store.schema_version().unwrap(), 12);
+        assert_eq!(store.schema_version().unwrap(), 13);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         assert!(table_exists(&store.connection, "runtime_plans"));
@@ -5110,7 +5060,7 @@ mod upgrade_tests {
         conn.execute_batch(&format!("VACUUM INTO '{}'", tmp.display()))
             .unwrap();
         let store = TaskStore::open(&tmp).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 12);
+        assert_eq!(store.schema_version().unwrap(), 13);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         for col in ["thread_id", "request_id", "source", "approval"] {

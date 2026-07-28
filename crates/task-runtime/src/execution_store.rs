@@ -5,6 +5,7 @@ use local_first_execution_protocol::{
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use time::OffsetDateTime;
 
 const JOURNAL_EVENT_VERSION: u32 = 1;
@@ -77,6 +78,33 @@ struct FoldedExecution {
 
 struct FoldedJournal {
     revisions: Vec<FoldedExecution>,
+}
+
+#[derive(Clone)]
+struct MigrationProjection {
+    record: ExecutionRecord,
+    outcome_committed_at: Option<i64>,
+}
+
+struct RawMigrationEvent {
+    event_id: i64,
+    execution_id: String,
+    revision: i64,
+    seq: i64,
+    kind: String,
+    payload_json: String,
+    created_at: i64,
+}
+
+#[derive(Deserialize)]
+struct LegacyFenceAdvanced {
+    expected: u64,
+    next: u64,
+}
+
+#[derive(Deserialize)]
+struct LegacyStatePayload {
+    state: String,
 }
 
 impl FoldedJournal {
@@ -159,87 +187,38 @@ impl TaskStore {
         &self,
         contract: &ValidatedExecutionContract,
     ) -> TaskRuntimeResult<StartExecutionRevision> {
-        let raw = contract.as_ref();
-        let execution_id = validated_text(&raw.execution_id, "execution id")?;
-        if raw.revision <= 1 {
-            return Err(TaskRuntimeError::InvalidTransition(
-                "a subsequent execution revision must be greater than one".into(),
-            ));
-        }
-        let revision = sqlite_integer(raw.revision, "execution revision")?;
-        sqlite_integer(raw.fencing_token, "execution fencing token")?;
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
-        let (events, journal) = load_validated_journal_on(&tx, execution_id)?
-            .ok_or_else(|| TaskRuntimeError::NotFound(format!("execution {execution_id}")))?;
-        let latest = journal.latest()?;
-
-        if journal.revision(raw.revision).is_some() {
-            let started_contract = events
-                .iter()
-                .find(|event| event.revision == raw.revision && event.seq == 1)
-                .and_then(|event| match &event.event {
-                    ExecutionJournalEvent::RevisionStarted { contract, .. } => Some(contract),
-                    _ => None,
-                })
-                .ok_or_else(|| {
-                    TaskRuntimeError::Store(
-                        "execution revision has no leading revision-start event".into(),
-                    )
-                })?;
-            if started_contract != raw {
-                return Err(TaskRuntimeError::Conflict(format!(
-                    "execution revision already exists with a different contract: {execution_id}/{}",
-                    raw.revision
-                )));
-            }
-            write_projection_on(&tx, latest)?;
-            let record = latest.record.clone();
-            tx.commit()?;
-            return Ok(StartExecutionRevision::Existing(record));
-        }
-
-        let expected_revision = latest
-            .record
-            .contract
-            .as_ref()
-            .revision
-            .checked_add(1)
-            .ok_or_else(|| {
-                TaskRuntimeError::InvalidTransition("execution revision exhausted".into())
-            })?;
-        if raw.revision != expected_revision {
-            return Err(TaskRuntimeError::InvalidTransition(format!(
-                "execution revision must advance contiguously to {expected_revision}"
-            )));
-        }
-        validate_revision_transition(&latest.record, contract).map_err(|reason| {
-            TaskRuntimeError::InvalidTransition(format!("invalid execution revision: {reason}"))
-        })?;
-
-        let now = OffsetDateTime::now_utc().unix_timestamp();
-        append_journal_event_on(
-            &tx,
-            execution_id,
-            revision,
-            &ExecutionJournalEvent::RevisionStarted {
-                version: JOURNAL_EVENT_VERSION,
-                previous_revision: raw.revision - 1,
-                contract: raw.clone(),
-            },
-            now,
-        )?;
-        let (_, journal) = load_validated_journal_on(&tx, execution_id)?
-            .ok_or_else(|| TaskRuntimeError::Store("started revision disappeared".into()))?;
-        let latest = journal.latest()?;
-        write_projection_on(&tx, latest)?;
-        let record = latest.record.clone();
+        let result = start_execution_revision_on(&tx, contract)?;
         tx.commit()?;
-        Ok(StartExecutionRevision::Inserted(record))
+        Ok(result)
     }
 
     pub fn execution(&self, execution_id: &str) -> TaskRuntimeResult<Option<ExecutionRecord>> {
         let execution_id = validated_text(execution_id, "execution id")?;
-        load_projection_on(&self.connection, execution_id)
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let projection = load_projection_on(&tx, execution_id)?;
+        let Some((_, journal)) = load_validated_journal_on(&tx, execution_id)? else {
+            if projection.is_some() {
+                return Err(TaskRuntimeError::Store(
+                    "execution projection exists without an authoritative journal".into(),
+                ));
+            }
+            tx.commit()?;
+            return Ok(None);
+        };
+        let Some(projection) = projection else {
+            tx.commit()?;
+            return Ok(None);
+        };
+        let latest = journal.latest()?;
+        let record = if projection_matches_folded_on(&tx, execution_id, &projection, latest)? {
+            projection
+        } else {
+            write_projection_on(&tx, latest)?;
+            latest.record.clone()
+        };
+        tx.commit()?;
+        Ok(Some(record))
     }
 
     pub fn execution_events(
@@ -414,6 +393,600 @@ impl TaskStore {
         tx.commit()?;
         Ok(OutcomeCommit::Inserted(record))
     }
+}
+
+pub(crate) fn start_execution_revision_on(
+    connection: &Connection,
+    contract: &ValidatedExecutionContract,
+) -> TaskRuntimeResult<StartExecutionRevision> {
+    let raw = contract.as_ref();
+    let execution_id = validated_text(&raw.execution_id, "execution id")?;
+    if raw.revision <= 1 {
+        return Err(TaskRuntimeError::InvalidTransition(
+            "a subsequent execution revision must be greater than one".into(),
+        ));
+    }
+    let revision = sqlite_integer(raw.revision, "execution revision")?;
+    sqlite_integer(raw.fencing_token, "execution fencing token")?;
+    let (events, journal) = load_validated_journal_on(connection, execution_id)?
+        .ok_or_else(|| TaskRuntimeError::NotFound(format!("execution {execution_id}")))?;
+    let latest = journal.latest()?;
+
+    if journal.revision(raw.revision).is_some() {
+        let started_contract = events
+            .iter()
+            .find(|event| event.revision == raw.revision && event.seq == 1)
+            .and_then(|event| match &event.event {
+                ExecutionJournalEvent::RevisionStarted { contract, .. } => Some(contract),
+                _ => None,
+            })
+            .ok_or_else(|| {
+                TaskRuntimeError::Store(
+                    "execution revision has no leading revision-start event".into(),
+                )
+            })?;
+        if started_contract != raw {
+            return Err(TaskRuntimeError::Conflict(format!(
+                "execution revision already exists with a different contract: {execution_id}/{}",
+                raw.revision
+            )));
+        }
+        let prior = journal.revision(raw.revision - 1).ok_or_else(|| {
+            TaskRuntimeError::Store("execution revision has no prior revision".into())
+        })?;
+        validate_revision_transition(&prior.record, contract).map_err(|reason| {
+            TaskRuntimeError::InvalidTransition(format!("invalid execution revision: {reason}"))
+        })?;
+        verify_delivered_wake_on(connection, prior, contract)?;
+        write_projection_on(connection, latest)?;
+        let record = latest.record.clone();
+        return Ok(StartExecutionRevision::Existing(record));
+    }
+
+    let expected_revision = latest
+        .record
+        .contract
+        .as_ref()
+        .revision
+        .checked_add(1)
+        .ok_or_else(|| {
+            TaskRuntimeError::InvalidTransition("execution revision exhausted".into())
+        })?;
+    if raw.revision != expected_revision {
+        return Err(TaskRuntimeError::InvalidTransition(format!(
+            "execution revision must advance contiguously to {expected_revision}"
+        )));
+    }
+    validate_revision_transition(&latest.record, contract).map_err(|reason| {
+        TaskRuntimeError::InvalidTransition(format!("invalid execution revision: {reason}"))
+    })?;
+    verify_delivered_wake_on(connection, latest, contract)?;
+
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    append_journal_event_on(
+        connection,
+        execution_id,
+        revision,
+        &ExecutionJournalEvent::RevisionStarted {
+            version: JOURNAL_EVENT_VERSION,
+            previous_revision: raw.revision - 1,
+            contract: raw.clone(),
+        },
+        now,
+    )?;
+    let (_, journal) = load_validated_journal_on(connection, execution_id)?
+        .ok_or_else(|| TaskRuntimeError::Store("started revision disappeared".into()))?;
+    let latest = journal.latest()?;
+    write_projection_on(connection, latest)?;
+    let record = latest.record.clone();
+    Ok(StartExecutionRevision::Inserted(record))
+}
+
+fn verify_delivered_wake_on(
+    connection: &Connection,
+    prior: &FoldedExecution,
+    next: &ValidatedExecutionContract,
+) -> TaskRuntimeResult<()> {
+    let (condition, prior_revision) = match prior.record.outcome.as_ref().map(AsRef::as_ref) {
+        Some(ExecutionOutcome::Suspended { wake, .. }) => {
+            (wake, prior.record.contract.as_ref().revision)
+        }
+        _ => {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "prior revision has no suspended wake to authenticate".into(),
+            ));
+        }
+    };
+    let delivery = next.as_ref().wake.as_ref().ok_or_else(|| {
+        TaskRuntimeError::InvalidTransition("next revision has no wake delivery".into())
+    })?;
+    let revision = sqlite_integer(prior_revision, "prior execution revision")?;
+    let row = connection
+        .query_row(
+            "SELECT dedup_key, condition_json, status, delivery_json, delivered_at
+             FROM execution_wakes
+             WHERE execution_id = ?1 AND revision = ?2 AND dedup_key = ?3",
+            params![
+                prior.record.contract.as_ref().execution_id,
+                revision,
+                condition.dedup_key(),
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                ))
+            },
+        )
+        .optional()?
+        .ok_or_else(|| {
+            TaskRuntimeError::InvalidTransition(
+                "prior revision has no durable wake delivery".into(),
+            )
+        })?;
+    let canonical_condition = serde_json::to_string(condition)?;
+    let canonical_delivery = serde_json::to_string(delivery)?;
+    let suspended_at = prior.outcome_committed_at.ok_or_else(|| {
+        TaskRuntimeError::Store("suspended journal revision has no outcome timestamp".into())
+    })?;
+    if row.0 != condition.dedup_key()
+        || row.1 != canonical_condition
+        || row.2 != "delivered"
+        || row.3.as_deref() != Some(canonical_delivery.as_str())
+        || row.4 != Some(delivery.delivered_at_unix_seconds)
+        || delivery.delivered_at_unix_seconds < suspended_at
+    {
+        return Err(TaskRuntimeError::InvalidTransition(
+            "durable wake delivery does not authenticate the revision start".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn migrate_execution_schema_v13(connection: &Connection) -> TaskRuntimeResult<()> {
+    if !execution_tables_need_v13_rebuild(connection)? {
+        return Ok(());
+    }
+
+    let tx = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    let projections = read_migration_projections(&tx)?;
+    let raw_events = read_raw_migration_events(&tx)?;
+    let events_by_execution = transform_migration_events(raw_events, &projections)?;
+    for execution_id in projections.keys() {
+        if !events_by_execution.contains_key(execution_id) {
+            return Err(TaskRuntimeError::Store(format!(
+                "execution projection has no journal during v13 migration: {execution_id}"
+            )));
+        }
+    }
+
+    tx.execute_batch(
+        "ALTER TABLE execution_wakes RENAME TO execution_wakes_v12_legacy;
+         ALTER TABLE execution_events RENAME TO execution_events_v12_legacy;
+         ALTER TABLE executions RENAME TO executions_v12_legacy;
+
+         CREATE TABLE executions (
+            execution_id TEXT PRIMARY KEY,
+            parent_execution_id TEXT,
+            kind TEXT NOT NULL,
+            revision INTEGER NOT NULL CHECK(revision > 0),
+            fencing_token INTEGER NOT NULL CHECK(fencing_token > 0),
+            state TEXT NOT NULL CHECK(
+                state IN ('ready', 'running', 'suspended', 'completed', 'cancelled', 'failed')
+            ),
+            user_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
+            thread_id TEXT,
+            contract_json TEXT NOT NULL,
+            outcome_json TEXT,
+            outcome_committed_at INTEGER,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            UNIQUE(execution_id, revision),
+            CHECK(
+                (outcome_json IS NULL AND outcome_committed_at IS NULL
+                    AND state IN ('ready', 'running'))
+                OR
+                (outcome_json IS NOT NULL AND outcome_committed_at IS NOT NULL
+                    AND state IN ('suspended', 'completed', 'cancelled', 'failed'))
+            )
+         );
+
+         CREATE TABLE execution_events (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            execution_id TEXT NOT NULL,
+            revision INTEGER NOT NULL CHECK(revision > 0),
+            seq INTEGER NOT NULL CHECK(seq > 0),
+            kind TEXT NOT NULL CHECK(length(trim(kind)) > 0),
+            payload_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            UNIQUE(execution_id, revision, seq)
+         );
+
+         CREATE TABLE execution_wakes (
+            execution_id TEXT NOT NULL,
+            revision INTEGER NOT NULL CHECK(revision > 0),
+            dedup_key TEXT NOT NULL CHECK(length(trim(dedup_key)) > 0),
+            condition_json TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(length(trim(status)) > 0),
+            delivery_json TEXT,
+            created_at INTEGER NOT NULL,
+            delivered_at INTEGER,
+            PRIMARY KEY(execution_id, revision, dedup_key),
+            CHECK(
+                (delivery_json IS NULL AND delivered_at IS NULL)
+                OR (delivery_json IS NOT NULL AND delivered_at IS NOT NULL)
+            ),
+            CHECK(delivered_at IS NULL OR delivered_at >= created_at)
+         );",
+    )?;
+
+    for events in events_by_execution.values() {
+        for event in events {
+            tx.execute(
+                "INSERT INTO execution_events (
+                    event_id, execution_id, revision, seq, kind, payload_json, created_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    event.event_id,
+                    event.execution_id,
+                    sqlite_integer_from_store(event.revision, "execution event revision")?,
+                    sqlite_integer_from_store(event.seq, "execution event sequence")?,
+                    journal_event_kind(&event.event),
+                    serde_json::to_string(&event.event)?,
+                    event.created_at,
+                ],
+            )?;
+        }
+        let folded = fold_journal(events, &events[0].execution_id)?;
+        write_projection_on(&tx, folded.latest()?)?;
+    }
+    tx.execute(
+        "INSERT INTO execution_wakes (
+            execution_id, revision, dedup_key, condition_json, status,
+            delivery_json, created_at, delivered_at
+         )
+         SELECT execution_id, revision, dedup_key, condition_json, status,
+                delivery_json, created_at, delivered_at
+         FROM execution_wakes_v12_legacy",
+        [],
+    )?;
+
+    for (execution_id, expected_events) in &events_by_execution {
+        let (stored_events, folded) = load_validated_journal_on(&tx, execution_id)?
+            .ok_or_else(|| TaskRuntimeError::Store("migrated execution journal vanished".into()))?;
+        if &stored_events != expected_events {
+            return Err(TaskRuntimeError::Store(format!(
+                "migrated execution journal changed during v13 validation: {execution_id}"
+            )));
+        }
+        let stored_projection = load_projection_on(&tx, execution_id)?.ok_or_else(|| {
+            TaskRuntimeError::Store("migrated execution projection vanished".into())
+        })?;
+        if stored_projection != folded.latest()?.record {
+            return Err(TaskRuntimeError::Store(format!(
+                "migrated execution projection does not match its journal: {execution_id}"
+            )));
+        }
+    }
+
+    tx.execute_batch(
+        "DROP TABLE execution_wakes_v12_legacy;
+         DROP TABLE execution_events_v12_legacy;
+         DROP TABLE executions_v12_legacy;",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn execution_tables_need_v13_rebuild(connection: &Connection) -> TaskRuntimeResult<bool> {
+    let required_fragments = [
+        (
+            "executions",
+            [
+                "check(revision>0)",
+                "check(fencing_token>0)",
+                "unique(execution_id,revision)",
+            ]
+            .as_slice(),
+        ),
+        (
+            "execution_events",
+            [
+                "check(revision>0)",
+                "check(seq>0)",
+                "check(length(trim(kind))>0)",
+            ]
+            .as_slice(),
+        ),
+        (
+            "execution_wakes",
+            [
+                "check(revision>0)",
+                "check(length(trim(dedup_key))>0)",
+                "check(length(trim(status))>0)",
+            ]
+            .as_slice(),
+        ),
+    ];
+    for (table, fragments) in required_fragments {
+        let sql: String = connection.query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            [table],
+            |row| row.get(0),
+        )?;
+        let normalized = sql
+            .chars()
+            .filter(|character| !character.is_ascii_whitespace())
+            .flat_map(char::to_lowercase)
+            .collect::<String>();
+        if fragments
+            .iter()
+            .any(|fragment| !normalized.contains(fragment))
+            || table_references_execution_projection(connection, table)?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn table_references_execution_projection(
+    connection: &Connection,
+    table: &str,
+) -> TaskRuntimeResult<bool> {
+    let mut statement = connection.prepare(&format!("PRAGMA foreign_key_list({table})"))?;
+    let referenced_tables = statement.query_map([], |row| row.get::<_, String>(2))?;
+    for referenced_table in referenced_tables {
+        if referenced_table? == "executions" {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn read_migration_projections(
+    connection: &Connection,
+) -> TaskRuntimeResult<BTreeMap<String, MigrationProjection>> {
+    let mut statement =
+        connection.prepare("SELECT execution_id FROM executions ORDER BY execution_id")?;
+    let ids = statement.query_map([], |row| row.get::<_, String>(0))?;
+    let mut projections = BTreeMap::new();
+    for execution_id in ids {
+        let execution_id = execution_id?;
+        let record = load_projection_on(connection, &execution_id)?.ok_or_else(|| {
+            TaskRuntimeError::Store("execution projection disappeared during migration".into())
+        })?;
+        let outcome_committed_at = connection.query_row(
+            "SELECT outcome_committed_at FROM executions WHERE execution_id = ?1",
+            [&execution_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )?;
+        projections.insert(
+            execution_id,
+            MigrationProjection {
+                record,
+                outcome_committed_at,
+            },
+        );
+    }
+    Ok(projections)
+}
+
+fn read_raw_migration_events(connection: &Connection) -> TaskRuntimeResult<Vec<RawMigrationEvent>> {
+    let mut statement = connection.prepare(
+        "SELECT event_id, execution_id, revision, seq, kind, payload_json, created_at
+         FROM execution_events ORDER BY execution_id, revision, seq, event_id",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(RawMigrationEvent {
+            event_id: row.get(0)?,
+            execution_id: row.get(1)?,
+            revision: row.get(2)?,
+            seq: row.get(3)?,
+            kind: row.get(4)?,
+            payload_json: row.get(5)?,
+            created_at: row.get(6)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+fn transform_migration_events(
+    raw_events: Vec<RawMigrationEvent>,
+    projections: &BTreeMap<String, MigrationProjection>,
+) -> TaskRuntimeResult<BTreeMap<String, Vec<ExecutionEvent>>> {
+    let mut raw_by_execution: BTreeMap<String, Vec<RawMigrationEvent>> = BTreeMap::new();
+    for event in raw_events {
+        raw_by_execution
+            .entry(event.execution_id.clone())
+            .or_default()
+            .push(event);
+    }
+    let mut transformed = BTreeMap::new();
+    for (execution_id, raw) in raw_by_execution {
+        let typed_count = raw
+            .iter()
+            .filter(|event| {
+                serde_json::from_str::<ExecutionJournalEvent>(&event.payload_json).is_ok()
+            })
+            .count();
+        let events = if typed_count == raw.len() {
+            raw.into_iter()
+                .map(raw_typed_migration_event)
+                .collect::<TaskRuntimeResult<Vec<_>>>()?
+        } else if typed_count == 0 {
+            let projection = projections.get(&execution_id).ok_or_else(|| {
+                TaskRuntimeError::Store(format!(
+                    "legacy execution journal has no validated projection: {execution_id}"
+                ))
+            })?;
+            transform_initial_v12_events(raw, projection)?
+        } else {
+            return Err(TaskRuntimeError::Store(format!(
+                "execution journal mixes legacy and typed payloads: {execution_id}"
+            )));
+        };
+        let folded = fold_journal(&events, &execution_id)?;
+        if let Some(projection) = projections.get(&execution_id)
+            && (folded.latest()?.record != projection.record
+                || folded.latest()?.outcome_committed_at != projection.outcome_committed_at)
+        {
+            return Err(TaskRuntimeError::Store(format!(
+                "execution journal does not reconstruct its v12 projection: {execution_id}"
+            )));
+        }
+        transformed.insert(execution_id, events);
+    }
+    Ok(transformed)
+}
+
+fn raw_typed_migration_event(raw: RawMigrationEvent) -> TaskRuntimeResult<ExecutionEvent> {
+    let event: ExecutionJournalEvent = serde_json::from_str(&raw.payload_json)?;
+    if raw.kind != journal_event_kind(&event) {
+        return Err(TaskRuntimeError::Store(
+            "typed v12 execution event kind does not match its payload".into(),
+        ));
+    }
+    Ok(ExecutionEvent {
+        event_id: raw.event_id,
+        execution_id: raw.execution_id,
+        revision: stored_u64(raw.revision, "execution event revision")?,
+        seq: stored_u64(raw.seq, "execution event sequence")?,
+        event,
+        created_at: raw.created_at,
+    })
+}
+
+fn transform_initial_v12_events(
+    raw: Vec<RawMigrationEvent>,
+    projection: &MigrationProjection,
+) -> TaskRuntimeResult<Vec<ExecutionEvent>> {
+    if raw.is_empty()
+        || raw.iter().any(|event| {
+            event.revision != 1
+                || event.execution_id != projection.record.contract.as_ref().execution_id
+        })
+        || projection.record.contract.as_ref().revision != 1
+    {
+        return Err(TaskRuntimeError::Store(
+            "initial v12 execution journal is not a single revision-one stream".into(),
+        ));
+    }
+    let first_fence = raw
+        .iter()
+        .find(|event| event.kind == "fence_advanced")
+        .map(|event| serde_json::from_str::<LegacyFenceAdvanced>(&event.payload_json))
+        .transpose()
+        .map_err(|error| {
+            TaskRuntimeError::Store(format!("legacy fence event is invalid: {error}"))
+        })?;
+    let mut contract = projection.record.contract.as_ref().clone();
+    if let Some(first_fence) = first_fence {
+        contract.fencing_token = first_fence.expected;
+    }
+    let mut current_contract = ValidatedExecutionContract::try_from(contract).map_err(|error| {
+        TaskRuntimeError::Store(format!("legacy creation contract is invalid: {error}"))
+    })?;
+    let mut outcome_used = false;
+    let mut transformed = Vec::with_capacity(raw.len());
+    for event in raw {
+        let typed = match event.kind.as_str() {
+            "execution_created" => {
+                let payload: LegacyStatePayload = serde_json::from_str(&event.payload_json)
+                    .map_err(|error| {
+                        TaskRuntimeError::Store(format!(
+                            "legacy creation event is invalid: {error}"
+                        ))
+                    })?;
+                if payload.state != "ready" {
+                    return Err(TaskRuntimeError::Store(
+                        "legacy creation event is not ready".into(),
+                    ));
+                }
+                ExecutionJournalEvent::Created {
+                    version: JOURNAL_EVENT_VERSION,
+                    contract: current_contract.as_ref().clone(),
+                }
+            }
+            "fence_advanced" => {
+                let payload: LegacyFenceAdvanced = serde_json::from_str(&event.payload_json)
+                    .map_err(|error| {
+                        TaskRuntimeError::Store(format!("legacy fence event is invalid: {error}"))
+                    })?;
+                if payload.expected != current_contract.as_ref().fencing_token
+                    || payload.next <= payload.expected
+                {
+                    return Err(TaskRuntimeError::Store(
+                        "legacy fence event is not contiguous".into(),
+                    ));
+                }
+                let mut updated = current_contract.as_ref().clone();
+                updated.fencing_token = payload.next;
+                current_contract =
+                    ValidatedExecutionContract::try_from(updated).map_err(|error| {
+                        TaskRuntimeError::Store(format!(
+                            "legacy fence contract is invalid: {error}"
+                        ))
+                    })?;
+                ExecutionJournalEvent::FenceAdvanced {
+                    version: JOURNAL_EVENT_VERSION,
+                    previous_fencing_token: payload.expected,
+                    contract: current_contract.as_ref().clone(),
+                }
+            }
+            "outcome_committed" => {
+                if outcome_used {
+                    return Err(TaskRuntimeError::Store(
+                        "legacy execution journal contains multiple outcomes".into(),
+                    ));
+                }
+                let payload: LegacyStatePayload = serde_json::from_str(&event.payload_json)
+                    .map_err(|error| {
+                        TaskRuntimeError::Store(format!("legacy outcome event is invalid: {error}"))
+                    })?;
+                let outcome = projection.record.outcome.as_ref().ok_or_else(|| {
+                    TaskRuntimeError::Store(
+                        "legacy outcome event has no durable projected outcome".into(),
+                    )
+                })?;
+                let state = state_for_outcome(outcome.as_ref());
+                if payload.state != state_name(&state) || state != projection.record.state {
+                    return Err(TaskRuntimeError::Store(
+                        "legacy outcome event state does not match its projection".into(),
+                    ));
+                }
+                outcome_used = true;
+                ExecutionJournalEvent::OutcomeCommitted {
+                    version: JOURNAL_EVENT_VERSION,
+                    outcome: outcome.as_ref().clone(),
+                    state,
+                }
+            }
+            kind => {
+                return Err(TaskRuntimeError::Store(format!(
+                    "legacy execution event cannot be transformed safely: {kind}"
+                )));
+            }
+        };
+        transformed.push(ExecutionEvent {
+            event_id: event.event_id,
+            execution_id: event.execution_id,
+            revision: stored_u64(event.revision, "execution event revision")?,
+            seq: stored_u64(event.seq, "execution event sequence")?,
+            event: typed,
+            created_at: event.created_at,
+        });
+    }
+    if projection.record.outcome.is_some() != outcome_used {
+        return Err(TaskRuntimeError::Store(
+            "legacy projected outcome has no matching journal event".into(),
+        ));
+    }
+    Ok(transformed)
 }
 
 fn load_validated_journal_on(
@@ -701,6 +1274,17 @@ fn validate_revision_transition(
     {
         return Err("execution identity, kind, parent, and scope must remain stable".into());
     }
+    if next_contract.schema_version != prior_contract.schema_version
+        || next_contract.objective != prior_contract.objective
+        || next_contract.input != prior_contract.input
+        || next_contract.policy != prior_contract.policy
+        || next_contract.resources != prior_contract.resources
+        || next_contract.budget != prior_contract.budget
+    {
+        return Err(
+            "schema, objective, input, policy, resources, and budget must remain stable".into(),
+        );
+    }
     if next_contract.fencing_token <= prior_contract.fencing_token {
         return Err("fencing token must strictly increase across revisions".into());
     }
@@ -928,6 +1512,20 @@ fn load_projection_on(
         },
     )
     .transpose()
+}
+
+fn projection_matches_folded_on(
+    connection: &Connection,
+    execution_id: &str,
+    projection: &ExecutionRecord,
+    folded: &FoldedExecution,
+) -> TaskRuntimeResult<bool> {
+    let outcome_committed_at = connection.query_row(
+        "SELECT outcome_committed_at FROM executions WHERE execution_id = ?1",
+        [execution_id],
+        |row| row.get::<_, Option<i64>>(0),
+    )?;
+    Ok(projection == &folded.record && outcome_committed_at == folded.outcome_committed_at)
 }
 
 fn projection_exists_on(connection: &Connection, execution_id: &str) -> TaskRuntimeResult<bool> {
