@@ -4,6 +4,7 @@ pub mod approval;
 pub mod broker;
 pub mod checkpoint;
 pub mod error;
+pub mod execution_store;
 pub mod executor;
 pub mod facade;
 pub mod lease;
@@ -22,6 +23,7 @@ pub use broker::{
 };
 pub use checkpoint::{RetryController, TaskCheckpoint};
 pub use error::{TaskRuntimeError, TaskRuntimeResult};
+pub use execution_store::{ExecutionEvent, ExecutionRecord, OutcomeCommit};
 pub use executor::{ExecutorResult, FakeTaskExecutor, TaskExecutor};
 pub use facade::{RunReadySummary, TaskRuntime};
 pub use lease::LeaseManager;

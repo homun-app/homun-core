@@ -27,7 +27,7 @@ fn subagent_name_from_kind(kind: &str) -> String {
 }
 
 pub struct TaskStore {
-    connection: Connection,
+    pub(crate) connection: Connection,
 }
 
 fn insert_turn_event_on(
@@ -422,6 +422,48 @@ impl TaskStore {
             CREATE INDEX IF NOT EXISTS idx_agent_tool_receipts_scope
                 ON agent_tool_receipts(user_id, workspace_id, thread_id, started_at DESC);
 
+            CREATE TABLE IF NOT EXISTS executions (
+                execution_id TEXT PRIMARY KEY,
+                parent_execution_id TEXT,
+                kind TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                fencing_token INTEGER NOT NULL,
+                state TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                thread_id TEXT,
+                contract_json TEXT NOT NULL,
+                outcome_json TEXT,
+                outcome_committed_at INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS execution_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                execution_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                seq INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                UNIQUE(execution_id, revision, seq),
+                FOREIGN KEY(execution_id) REFERENCES executions(execution_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS execution_wakes (
+                execution_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                dedup_key TEXT NOT NULL,
+                condition_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                delivery_json TEXT,
+                created_at INTEGER NOT NULL,
+                delivered_at INTEGER,
+                PRIMARY KEY(execution_id, revision, dedup_key),
+                FOREIGN KEY(execution_id) REFERENCES executions(execution_id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS broker_meta (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -479,7 +521,7 @@ impl TaskStore {
             [],
         )?;
         self.connection.execute(
-            "UPDATE task_runtime_metadata SET value = '11' WHERE key = 'schema_version'",
+            "UPDATE task_runtime_metadata SET value = '12' WHERE key = 'schema_version'",
             [],
         )?;
         // Partial index: only chat_turn rows (thread_id IS NOT NULL). Indexes the
@@ -3635,7 +3677,7 @@ mod migration_tests {
         }
         // Re-running migrations must not panic (guarded ALTER).
         store.run_migrations().expect("idempotent re-run");
-        assert_eq!(store.schema_version().unwrap(), 11);
+        assert_eq!(store.schema_version().unwrap(), 12);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         assert!(table_exists(&store.connection, "runtime_plans"));
@@ -3643,6 +3685,9 @@ mod migration_tests {
         assert!(table_exists(&store.connection, "agent_tool_receipts"));
         assert!(table_exists(&store.connection, "objective_contracts"));
         assert!(table_exists(&store.connection, "turn_steering"));
+        assert!(table_exists(&store.connection, "executions"));
+        assert!(table_exists(&store.connection, "execution_events"));
+        assert!(table_exists(&store.connection, "execution_wakes"));
     }
 
     #[test]
@@ -5001,7 +5046,7 @@ mod upgrade_tests {
         conn.execute_batch(&format!("VACUUM INTO '{}'", tmp.display()))
             .unwrap();
         let store = TaskStore::open(&tmp).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 11);
+        assert_eq!(store.schema_version().unwrap(), 12);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         for col in ["thread_id", "request_id", "source", "approval"] {
