@@ -25,6 +25,11 @@ pub enum ExecutionJournalEvent {
         version: u32,
         contract: ExecutionContract,
     },
+    RevisionStarted {
+        version: u32,
+        previous_revision: u64,
+        contract: ExecutionContract,
+    },
     FenceAdvanced {
         version: u32,
         previous_fencing_token: u64,
@@ -54,6 +59,12 @@ pub enum CreateExecution {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StartExecutionRevision {
+    Inserted(ExecutionRecord),
+    Existing(ExecutionRecord),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OutcomeCommit {
     Inserted(ExecutionRecord),
     Existing(ExecutionRecord),
@@ -64,6 +75,23 @@ struct FoldedExecution {
     outcome_committed_at: Option<i64>,
 }
 
+struct FoldedJournal {
+    revisions: Vec<FoldedExecution>,
+}
+
+impl FoldedJournal {
+    fn latest(&self) -> TaskRuntimeResult<&FoldedExecution> {
+        self.revisions
+            .last()
+            .ok_or_else(|| TaskRuntimeError::Store("execution journal has no revisions".into()))
+    }
+
+    fn revision(&self, revision: u64) -> Option<&FoldedExecution> {
+        let index = usize::try_from(revision.checked_sub(1)?).ok()?;
+        self.revisions.get(index)
+    }
+}
+
 impl TaskStore {
     pub fn create_execution(
         &self,
@@ -71,19 +99,16 @@ impl TaskStore {
     ) -> TaskRuntimeResult<CreateExecution> {
         let raw = contract.as_ref();
         let execution_id = validated_text(&raw.execution_id, "execution id")?;
+        if raw.revision != 1 {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "initial execution creation must use revision one".into(),
+            ));
+        }
         let revision = sqlite_integer(raw.revision, "execution revision")?;
         sqlite_integer(raw.fencing_token, "execution fencing token")?;
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
 
-        if authoritative_journal_revision_on(&tx, execution_id)?
-            .is_some_and(|stored| stored != revision)
-        {
-            return Err(TaskRuntimeError::Conflict(format!(
-                "execution journal already exists at another revision: {execution_id}"
-            )));
-        }
-
-        if let Some((events, folded)) = load_validated_journal_on(&tx, execution_id, revision)? {
+        if let Some((events, journal)) = load_validated_journal_on(&tx, execution_id)? {
             let created_contract = match events.first().map(|event| &event.event) {
                 Some(ExecutionJournalEvent::Created { contract, .. }) => contract,
                 _ => {
@@ -97,8 +122,9 @@ impl TaskStore {
                     "execution journal already exists with a different contract: {execution_id}"
                 )));
             }
-            write_projection_on(&tx, &folded)?;
-            let record = folded.record;
+            let latest = journal.latest()?;
+            write_projection_on(&tx, latest)?;
+            let record = latest.record.clone();
             tx.commit()?;
             return Ok(CreateExecution::Existing(record));
         }
@@ -120,12 +146,95 @@ impl TaskStore {
             },
             now,
         )?;
-        let (_, folded) = load_validated_journal_on(&tx, execution_id, revision)?
+        let (_, journal) = load_validated_journal_on(&tx, execution_id)?
             .ok_or_else(|| TaskRuntimeError::Store("created journal disappeared".into()))?;
-        write_projection_on(&tx, &folded)?;
-        let record = folded.record;
+        let latest = journal.latest()?;
+        write_projection_on(&tx, latest)?;
+        let record = latest.record.clone();
         tx.commit()?;
         Ok(CreateExecution::Inserted(record))
+    }
+
+    pub fn start_execution_revision(
+        &self,
+        contract: &ValidatedExecutionContract,
+    ) -> TaskRuntimeResult<StartExecutionRevision> {
+        let raw = contract.as_ref();
+        let execution_id = validated_text(&raw.execution_id, "execution id")?;
+        if raw.revision <= 1 {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "a subsequent execution revision must be greater than one".into(),
+            ));
+        }
+        let revision = sqlite_integer(raw.revision, "execution revision")?;
+        sqlite_integer(raw.fencing_token, "execution fencing token")?;
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let (events, journal) = load_validated_journal_on(&tx, execution_id)?
+            .ok_or_else(|| TaskRuntimeError::NotFound(format!("execution {execution_id}")))?;
+        let latest = journal.latest()?;
+
+        if journal.revision(raw.revision).is_some() {
+            let started_contract = events
+                .iter()
+                .find(|event| event.revision == raw.revision && event.seq == 1)
+                .and_then(|event| match &event.event {
+                    ExecutionJournalEvent::RevisionStarted { contract, .. } => Some(contract),
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    TaskRuntimeError::Store(
+                        "execution revision has no leading revision-start event".into(),
+                    )
+                })?;
+            if started_contract != raw {
+                return Err(TaskRuntimeError::Conflict(format!(
+                    "execution revision already exists with a different contract: {execution_id}/{}",
+                    raw.revision
+                )));
+            }
+            write_projection_on(&tx, latest)?;
+            let record = latest.record.clone();
+            tx.commit()?;
+            return Ok(StartExecutionRevision::Existing(record));
+        }
+
+        let expected_revision = latest
+            .record
+            .contract
+            .as_ref()
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| {
+                TaskRuntimeError::InvalidTransition("execution revision exhausted".into())
+            })?;
+        if raw.revision != expected_revision {
+            return Err(TaskRuntimeError::InvalidTransition(format!(
+                "execution revision must advance contiguously to {expected_revision}"
+            )));
+        }
+        validate_revision_transition(&latest.record, contract).map_err(|reason| {
+            TaskRuntimeError::InvalidTransition(format!("invalid execution revision: {reason}"))
+        })?;
+
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        append_journal_event_on(
+            &tx,
+            execution_id,
+            revision,
+            &ExecutionJournalEvent::RevisionStarted {
+                version: JOURNAL_EVENT_VERSION,
+                previous_revision: raw.revision - 1,
+                contract: raw.clone(),
+            },
+            now,
+        )?;
+        let (_, journal) = load_validated_journal_on(&tx, execution_id)?
+            .ok_or_else(|| TaskRuntimeError::Store("started revision disappeared".into()))?;
+        let latest = journal.latest()?;
+        write_projection_on(&tx, latest)?;
+        let record = latest.record.clone();
+        tx.commit()?;
+        Ok(StartExecutionRevision::Inserted(record))
     }
 
     pub fn execution(&self, execution_id: &str) -> TaskRuntimeResult<Option<ExecutionRecord>> {
@@ -139,26 +248,34 @@ impl TaskStore {
         revision: u64,
     ) -> TaskRuntimeResult<Vec<ExecutionEvent>> {
         let execution_id = validated_text(execution_id, "execution id")?;
-        let revision = sqlite_integer(revision, "execution event revision")?;
-        load_validated_journal_on(&self.connection, execution_id, revision)?
-            .map(|(events, _)| events)
-            .ok_or_else(|| TaskRuntimeError::NotFound(format!("execution journal {execution_id}")))
+        sqlite_integer(revision, "execution event revision")?;
+        let (events, journal) = load_validated_journal_on(&self.connection, execution_id)?
+            .ok_or_else(|| {
+                TaskRuntimeError::NotFound(format!("execution journal {execution_id}"))
+            })?;
+        if journal.revision(revision).is_none() {
+            return Err(TaskRuntimeError::NotFound(format!(
+                "execution journal {execution_id} revision {revision}"
+            )));
+        }
+        Ok(events
+            .into_iter()
+            .filter(|event| event.revision == revision)
+            .collect())
     }
 
     pub fn rebuild_execution_projection(
         &self,
         execution_id: &str,
-        revision: u64,
     ) -> TaskRuntimeResult<ExecutionRecord> {
         let execution_id = validated_text(execution_id, "execution id")?;
-        let revision = sqlite_integer(revision, "execution revision")?;
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
-        let (_, folded) =
-            load_validated_journal_on(&tx, execution_id, revision)?.ok_or_else(|| {
-                TaskRuntimeError::NotFound(format!("execution journal {execution_id}"))
-            })?;
-        write_projection_on(&tx, &folded)?;
-        let record = folded.record;
+        let (_, journal) = load_validated_journal_on(&tx, execution_id)?.ok_or_else(|| {
+            TaskRuntimeError::NotFound(format!("execution journal {execution_id}"))
+        })?;
+        let latest = journal.latest()?;
+        write_projection_on(&tx, latest)?;
+        let record = latest.record.clone();
         tx.commit()?;
         Ok(record)
     }
@@ -180,21 +297,15 @@ impl TaskStore {
         sqlite_integer(expected, "expected execution fence")?;
         sqlite_integer(next, "next execution fence")?;
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
-        match authoritative_journal_revision_on(&tx, execution_id)? {
-            Some(stored) if stored != revision => {
-                return Err(TaskRuntimeError::InvalidTransition(
-                    "execution revision is stale".into(),
-                ));
-            }
-            None => {
-                return Err(TaskRuntimeError::NotFound(format!(
-                    "execution {execution_id}"
-                )));
-            }
-            Some(_) => {}
-        }
-        let (_, current) = load_validated_journal_on(&tx, execution_id, revision)?
+        let (_, journal) = load_validated_journal_on(&tx, execution_id)?
             .ok_or_else(|| TaskRuntimeError::NotFound(format!("execution {execution_id}")))?;
+        let current = journal.latest()?;
+        if current.record.contract.as_ref().revision != stored_u64(revision, "execution revision")?
+        {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "execution revision is stale".into(),
+            ));
+        }
         let raw = current.record.contract.as_ref();
         if raw.revision != stored_u64(revision, "execution revision")?
             || raw.fencing_token != expected
@@ -227,10 +338,11 @@ impl TaskStore {
             },
             now,
         )?;
-        let (_, folded) = load_validated_journal_on(&tx, execution_id, revision)?
+        let (_, journal) = load_validated_journal_on(&tx, execution_id)?
             .ok_or_else(|| TaskRuntimeError::Store("advanced journal disappeared".into()))?;
-        write_projection_on(&tx, &folded)?;
-        let record = folded.record;
+        let latest = journal.latest()?;
+        write_projection_on(&tx, latest)?;
+        let record = latest.record.clone();
         tx.commit()?;
         Ok(record)
     }
@@ -244,25 +356,14 @@ impl TaskStore {
         let revision = sqlite_integer(binding.revision(), "execution outcome revision")?;
         sqlite_integer(binding.fencing_token(), "execution outcome fencing token")?;
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
-        match authoritative_journal_revision_on(&tx, execution_id)? {
-            Some(stored) if stored != revision => {
-                return Err(TaskRuntimeError::InvalidTransition(
-                    "execution outcome revision is stale".into(),
-                ));
-            }
-            None => {
-                return Err(TaskRuntimeError::InvalidTransition(format!(
-                    "execution outcome binding references unknown execution {execution_id}"
-                )));
-            }
-            Some(_) => {}
-        }
-        let (_, current) =
-            load_validated_journal_on(&tx, execution_id, revision)?.ok_or_else(|| {
-                TaskRuntimeError::InvalidTransition(format!(
-                    "execution outcome binding references unknown execution {execution_id}"
-                ))
-            })?;
+        let (_, journal) = load_validated_journal_on(&tx, execution_id)?.ok_or_else(|| {
+            TaskRuntimeError::InvalidTransition(format!(
+                "execution outcome binding references unknown execution {execution_id}"
+            ))
+        })?;
+        let current = journal.revision(binding.revision()).ok_or_else(|| {
+            TaskRuntimeError::InvalidTransition("execution outcome revision is unknown".into())
+        })?;
         let contract = current.record.contract.as_ref();
         if binding.execution_id() != contract.execution_id
             || binding.revision() != contract.revision
@@ -277,13 +378,18 @@ impl TaskStore {
         let canonical_outcome = serde_json::to_string(outcome.as_ref())?;
         if let Some(existing) = current.record.outcome.as_ref() {
             if serde_json::to_string(existing.as_ref())? == canonical_outcome {
-                write_projection_on(&tx, &current)?;
-                let record = current.record;
+                let record = current.record.clone();
                 tx.commit()?;
                 return Ok(OutcomeCommit::Existing(record));
             }
             return Err(TaskRuntimeError::InvalidTransition(
                 "a conflicting execution outcome is already committed".into(),
+            ));
+        }
+
+        if journal.latest()?.record.contract.as_ref().revision != binding.revision() {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "cannot commit an outcome to a stale execution revision".into(),
             ));
         }
 
@@ -300,10 +406,11 @@ impl TaskStore {
             },
             now,
         )?;
-        let (_, folded) = load_validated_journal_on(&tx, execution_id, revision)?
+        let (_, journal) = load_validated_journal_on(&tx, execution_id)?
             .ok_or_else(|| TaskRuntimeError::Store("committed journal disappeared".into()))?;
-        write_projection_on(&tx, &folded)?;
-        let record = folded.record;
+        let latest = journal.latest()?;
+        write_projection_on(&tx, latest)?;
+        let record = latest.record.clone();
         tx.commit()?;
         Ok(OutcomeCommit::Inserted(record))
     }
@@ -312,44 +419,24 @@ impl TaskStore {
 fn load_validated_journal_on(
     connection: &Connection,
     execution_id: &str,
-    revision: i64,
-) -> TaskRuntimeResult<Option<(Vec<ExecutionEvent>, FoldedExecution)>> {
-    let events = read_journal_events_on(connection, execution_id, revision)?;
+) -> TaskRuntimeResult<Option<(Vec<ExecutionEvent>, FoldedJournal)>> {
+    let events = read_journal_events_on(connection, execution_id)?;
     if events.is_empty() {
         return Ok(None);
     }
-    let folded = fold_journal(&events, execution_id, revision)?;
+    let folded = fold_journal(&events, execution_id)?;
     Ok(Some((events, folded)))
-}
-
-fn authoritative_journal_revision_on(
-    connection: &Connection,
-    execution_id: &str,
-) -> TaskRuntimeResult<Option<i64>> {
-    let mut statement = connection.prepare(
-        "SELECT DISTINCT revision FROM execution_events
-         WHERE execution_id = ?1 ORDER BY revision ASC",
-    )?;
-    let mut rows = statement.query_map([execution_id], |row| row.get::<_, i64>(0))?;
-    let first = rows.next().transpose()?;
-    if rows.next().transpose()?.is_some() {
-        return Err(TaskRuntimeError::Store(
-            "execution journal contains multiple revisions for one execution".into(),
-        ));
-    }
-    Ok(first)
 }
 
 fn read_journal_events_on(
     connection: &Connection,
     execution_id: &str,
-    expected_revision: i64,
 ) -> TaskRuntimeResult<Vec<ExecutionEvent>> {
     let mut statement = connection.prepare(
         "SELECT event_id, execution_id, revision, seq, kind, payload_json, created_at
          FROM execution_events
          WHERE execution_id = ?1
-         ORDER BY seq ASC, event_id ASC",
+         ORDER BY revision ASC, seq ASC, event_id ASC",
     )?;
     let rows = statement.query_map([execution_id], |row| {
         Ok((
@@ -364,18 +451,22 @@ fn read_journal_events_on(
     })?;
 
     let mut events = Vec::new();
-    for (index, row) in rows.enumerate() {
+    let mut previous_revision = None;
+    let mut expected_seq = 1_i64;
+    for row in rows {
         let (event_id, row_execution_id, revision, seq, kind, payload_json, created_at) = row?;
-        let expected_seq = i64::try_from(index)
-            .ok()
-            .and_then(|index| index.checked_add(1))
-            .ok_or_else(|| TaskRuntimeError::Store("execution event sequence exhausted".into()))?;
-        if row_execution_id != execution_id || revision != expected_revision || seq != expected_seq
-        {
+        if previous_revision != Some(revision) {
+            expected_seq = 1;
+            previous_revision = Some(revision);
+        }
+        if row_execution_id != execution_id || seq != expected_seq {
             return Err(TaskRuntimeError::Store(
                 "execution journal ownership or sequence is invalid".into(),
             ));
         }
+        expected_seq = expected_seq
+            .checked_add(1)
+            .ok_or_else(|| TaskRuntimeError::Store("execution event sequence exhausted".into()))?;
         let event: ExecutionJournalEvent =
             serde_json::from_str(&payload_json).map_err(|error| {
                 TaskRuntimeError::Store(format!(
@@ -399,36 +490,86 @@ fn read_journal_events_on(
     Ok(events)
 }
 
-fn fold_journal(
-    events: &[ExecutionEvent],
-    execution_id: &str,
-    revision: i64,
-) -> TaskRuntimeResult<FoldedExecution> {
-    let mut folded: Option<FoldedExecution> = None;
+fn fold_journal(events: &[ExecutionEvent], execution_id: &str) -> TaskRuntimeResult<FoldedJournal> {
+    let mut revisions: Vec<FoldedExecution> = Vec::new();
     for event in events {
         match &event.event {
             ExecutionJournalEvent::Created { version, contract } => {
                 require_event_version(*version)?;
-                if folded.is_some() || event.seq != 1 {
+                if !revisions.is_empty() || event.revision != 1 || event.seq != 1 {
                     return Err(TaskRuntimeError::Store(
                         "execution journal must contain exactly one leading creation".into(),
                     ));
                 }
                 let contract = validate_journal_contract(contract.clone())?;
                 let raw = contract.as_ref();
-                if raw.execution_id != execution_id
-                    || sqlite_integer_from_store(raw.revision, "contract revision")? != revision
-                {
+                if raw.execution_id != execution_id || raw.revision != 1 {
                     return Err(TaskRuntimeError::Store(
                         "created contract does not match journal ownership".into(),
                     ));
                 }
-                folded = Some(FoldedExecution {
+                revisions.push(FoldedExecution {
                     record: ExecutionRecord {
                         contract,
                         state: ExecutionState::Ready,
                         outcome: None,
                         created_at: event.created_at,
+                        updated_at: event.created_at,
+                    },
+                    outcome_committed_at: None,
+                });
+            }
+            ExecutionJournalEvent::RevisionStarted {
+                version,
+                previous_revision,
+                contract,
+            } => {
+                require_event_version(*version)?;
+                if event.seq != 1 || event.revision <= 1 {
+                    return Err(TaskRuntimeError::Store(
+                        "later execution revisions must begin with revision-start".into(),
+                    ));
+                }
+                let expected_revision = u64::try_from(revisions.len())
+                    .ok()
+                    .and_then(|count| count.checked_add(1))
+                    .ok_or_else(|| {
+                        TaskRuntimeError::Store("execution revision sequence exhausted".into())
+                    })?;
+                if event.revision != expected_revision
+                    || *previous_revision != expected_revision - 1
+                {
+                    return Err(TaskRuntimeError::Store(
+                        "execution revisions are not contiguous".into(),
+                    ));
+                }
+                let prior = revisions.last().ok_or_else(|| {
+                    TaskRuntimeError::Store("revision-start precedes execution creation".into())
+                })?;
+                if event.created_at < prior.record.updated_at {
+                    return Err(TaskRuntimeError::Store(
+                        "execution journal timestamps are not monotonic".into(),
+                    ));
+                }
+                let contract = validate_journal_contract(contract.clone())?;
+                if contract.as_ref().execution_id != execution_id
+                    || contract.as_ref().revision != event.revision
+                {
+                    return Err(TaskRuntimeError::Store(
+                        "revision-start contract does not match journal ownership".into(),
+                    ));
+                }
+                validate_revision_transition(&prior.record, &contract).map_err(|reason| {
+                    TaskRuntimeError::Store(format!(
+                        "stored execution revision transition is invalid: {reason}"
+                    ))
+                })?;
+                revisions.push(FoldedExecution {
+                    record: ExecutionRecord {
+                        contract,
+                        state: ExecutionState::Ready,
+                        outcome: None,
+                        created_at: prior.record.created_at,
                         updated_at: event.created_at,
                     },
                     outcome_committed_at: None,
@@ -440,9 +581,14 @@ fn fold_journal(
                 contract,
             } => {
                 require_event_version(*version)?;
-                let current = folded.as_mut().ok_or_else(|| {
+                let current = revisions.last_mut().ok_or_else(|| {
                     TaskRuntimeError::Store("fence event precedes execution creation".into())
                 })?;
+                if current.record.contract.as_ref().revision != event.revision {
+                    return Err(TaskRuntimeError::Store(
+                        "fence event does not belong to the current revision".into(),
+                    ));
+                }
                 require_nonterminal_fold(current, event.created_at)?;
                 let updated = validate_journal_contract(contract.clone())?;
                 let current_raw = current.record.contract.as_ref();
@@ -469,9 +615,14 @@ fn fold_journal(
                 state,
             } => {
                 require_event_version(*version)?;
-                let current = folded.as_mut().ok_or_else(|| {
+                let current = revisions.last_mut().ok_or_else(|| {
                     TaskRuntimeError::Store("outcome event precedes execution creation".into())
                 })?;
+                if current.record.contract.as_ref().revision != event.revision {
+                    return Err(TaskRuntimeError::Store(
+                        "outcome event does not belong to the current revision".into(),
+                    ));
+                }
                 require_nonterminal_fold(current, event.created_at)?;
                 if state_for_outcome(outcome) != *state {
                     return Err(TaskRuntimeError::Store(
@@ -492,7 +643,12 @@ fn fold_journal(
             }
         }
     }
-    folded.ok_or_else(|| TaskRuntimeError::Store("execution journal has no creation event".into()))
+    if revisions.is_empty() {
+        return Err(TaskRuntimeError::Store(
+            "execution journal has no creation event".into(),
+        ));
+    }
+    Ok(FoldedJournal { revisions })
 }
 
 fn require_nonterminal_fold(
@@ -520,6 +676,56 @@ fn validate_journal_contract(
             "stored execution journal contract is invalid: {error}"
         ))
     })
+}
+
+fn validate_revision_transition(
+    prior: &ExecutionRecord,
+    next: &ValidatedExecutionContract,
+) -> Result<(), String> {
+    let prior_contract = prior.contract.as_ref();
+    let next_contract = next.as_ref();
+    let expected_revision = prior_contract
+        .revision
+        .checked_add(1)
+        .ok_or_else(|| "execution revision exhausted".to_string())?;
+    if next_contract.revision != expected_revision {
+        return Err(format!(
+            "revision must advance from {} to {expected_revision}",
+            prior_contract.revision
+        ));
+    }
+    if next_contract.execution_id != prior_contract.execution_id
+        || next_contract.kind != prior_contract.kind
+        || next_contract.parent_execution_id != prior_contract.parent_execution_id
+        || next_contract.scope != prior_contract.scope
+    {
+        return Err("execution identity, kind, parent, and scope must remain stable".into());
+    }
+    if next_contract.fencing_token <= prior_contract.fencing_token {
+        return Err("fencing token must strictly increase across revisions".into());
+    }
+
+    let (wake, checkpoint) = match prior.outcome.as_ref().map(AsRef::as_ref) {
+        Some(ExecutionOutcome::Suspended { wake, checkpoint }) => (wake, checkpoint),
+        _ => return Err("the prior revision must have one suspended outcome".into()),
+    };
+    let checkpoint_ref = next_contract
+        .checkpoint
+        .as_ref()
+        .ok_or_else(|| "next revision must reference the suspended checkpoint".to_string())?;
+    if checkpoint_ref.checkpoint_id != checkpoint.checkpoint_id()
+        || checkpoint_ref.producer_schema_version != checkpoint.producer_schema_version
+    {
+        return Err("next revision checkpoint does not match the suspended checkpoint".into());
+    }
+    let delivery = next_contract
+        .wake
+        .as_ref()
+        .ok_or_else(|| "next revision must include the delivered wake".to_string())?;
+    if delivery.condition != *wake || delivery.dedup_key != wake.dedup_key() {
+        return Err("wake delivery does not match the suspended wake condition".into());
+    }
+    Ok(())
 }
 
 fn append_journal_event_on(
@@ -738,6 +944,7 @@ fn projection_exists_on(connection: &Connection, execution_id: &str) -> TaskRunt
 fn journal_event_kind(event: &ExecutionJournalEvent) -> &'static str {
     match event {
         ExecutionJournalEvent::Created { .. } => "execution_created",
+        ExecutionJournalEvent::RevisionStarted { .. } => "revision_started",
         ExecutionJournalEvent::FenceAdvanced { .. } => "fence_advanced",
         ExecutionJournalEvent::OutcomeCommitted { .. } => "outcome_committed",
     }

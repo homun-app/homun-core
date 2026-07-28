@@ -1,11 +1,11 @@
 use local_first_execution_protocol::{
-    CancelReason, CheckpointDataRef, CheckpointEnvelope, DurableDataRef, ExecutionContract,
-    ExecutionFailure, ExecutionOutcome, ExecutionScope, ExecutionState, ValidatedExecutionContract,
-    ValidatedExecutionOutcome, WakeCondition,
+    CancelReason, CheckpointDataRef, CheckpointEnvelope, CheckpointRef, DurableDataRef,
+    ExecutionContract, ExecutionFailure, ExecutionOutcome, ExecutionScope, ExecutionState,
+    ValidatedExecutionContract, ValidatedExecutionOutcome, WakeCondition, WakeDelivery,
 };
 use local_first_task_runtime::{
-    CreateExecution, ExecutionJournalEvent, ExecutionRecord, OutcomeCommit, TaskRecord,
-    TaskRuntimeError, TaskStore, UserId, WorkspaceId,
+    CreateExecution, ExecutionJournalEvent, ExecutionRecord, OutcomeCommit, StartExecutionRevision,
+    TaskRecord, TaskRuntimeError, TaskStore, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
@@ -61,6 +61,31 @@ fn suspended(contract: &ValidatedExecutionContract) -> ValidatedExecutionOutcome
     .unwrap()
 }
 
+fn next_revision(
+    prior: &ValidatedExecutionContract,
+    suspension: &ValidatedExecutionOutcome,
+    fencing_token: u64,
+) -> ValidatedExecutionContract {
+    let (wake, checkpoint) = match suspension.as_ref() {
+        ExecutionOutcome::Suspended { wake, checkpoint } => (wake, checkpoint),
+        _ => panic!("next revision requires a suspended outcome"),
+    };
+    let mut contract = prior.as_ref().clone();
+    contract.revision += 1;
+    contract.fencing_token = fencing_token;
+    contract.checkpoint = Some(CheckpointRef {
+        checkpoint_id: checkpoint.checkpoint_id().into(),
+        producer_schema_version: checkpoint.producer_schema_version,
+    });
+    contract.wake = Some(WakeDelivery {
+        condition: wake.clone(),
+        dedup_key: wake.dedup_key(),
+        payload: json!({"signal": "delivered"}),
+        delivered_at_unix_seconds: 1_700_000_000,
+    });
+    ValidatedExecutionContract::try_from(contract).unwrap()
+}
+
 fn inserted(result: CreateExecution) -> ExecutionRecord {
     match result {
         CreateExecution::Inserted(record) => record,
@@ -88,18 +113,18 @@ fn raw_connection(path: &Path) -> Connection {
 #[test]
 fn journal_events_are_typed_complete_and_timestamp_the_projection() {
     let store = TaskStore::open_in_memory().unwrap();
-    let original = contract("exec-journal", 3, 7);
+    let original = contract("exec-journal", 1, 7);
     let created = inserted(store.create_execution(&original).unwrap());
     let advanced = store
-        .advance_execution_fence("exec-journal", 3, 7, 8)
+        .advance_execution_fence("exec-journal", 1, 7, 8)
         .unwrap();
-    let after_fence = store.execution_events("exec-journal", 3).unwrap();
+    let after_fence = store.execution_events("exec-journal", 1).unwrap();
     let outcome = completed(&advanced.contract, json!({"ok": true}));
     let committed = match store.commit_execution_outcome(&outcome).unwrap() {
         OutcomeCommit::Inserted(record) => record,
         OutcomeCommit::Existing(_) => panic!("first outcome must insert"),
     };
-    let events = store.execution_events("exec-journal", 3).unwrap();
+    let events = store.execution_events("exec-journal", 1).unwrap();
 
     assert_eq!(
         events.iter().map(|event| event.seq).collect::<Vec<_>>(),
@@ -132,6 +157,176 @@ fn journal_events_are_typed_complete_and_timestamp_the_projection() {
 }
 
 #[test]
+fn suspended_revision_can_start_and_complete_the_next_revision() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let revision_one = contract("exec-multi-revision", 1, 2);
+    store.create_execution(&revision_one).unwrap();
+    let suspended = suspended(&revision_one);
+    store.commit_execution_outcome(&suspended).unwrap();
+    let revision_two = next_revision(&revision_one, &suspended, 3);
+
+    let started = match store.start_execution_revision(&revision_two).unwrap() {
+        StartExecutionRevision::Inserted(record) => record,
+        StartExecutionRevision::Existing(_) => panic!("first revision start must insert"),
+    };
+    assert_eq!(started.contract, revision_two);
+    assert_eq!(started.state, ExecutionState::Ready);
+
+    let completed = completed(&revision_two, json!({"done": true}));
+    let latest = match store.commit_execution_outcome(&completed).unwrap() {
+        OutcomeCommit::Inserted(record) => record,
+        OutcomeCommit::Existing(_) => panic!("first outcome must insert"),
+    };
+    assert_eq!(latest.contract, revision_two);
+    assert_eq!(latest.state, ExecutionState::Completed);
+    assert_eq!(
+        store.execution("exec-multi-revision").unwrap(),
+        Some(latest)
+    );
+
+    let revision_one_events = store.execution_events("exec-multi-revision", 1).unwrap();
+    let revision_two_events = store.execution_events("exec-multi-revision", 2).unwrap();
+    assert_eq!(
+        revision_one_events
+            .iter()
+            .map(|event| event.seq)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert_eq!(
+        revision_two_events
+            .iter()
+            .map(|event| event.seq)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert!(matches!(
+        &revision_one_events[0].event,
+        ExecutionJournalEvent::Created { contract, .. } if contract == revision_one.as_ref()
+    ));
+    assert!(matches!(
+        &revision_two_events[0].event,
+        ExecutionJournalEvent::RevisionStarted {
+            version: 1,
+            previous_revision: 1,
+            contract,
+        } if contract == revision_two.as_ref()
+    ));
+}
+
+#[test]
+fn create_and_revision_start_retries_return_the_latest_projection() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let revision_one = contract("exec-multi-retry", 1, 1);
+    store.create_execution(&revision_one).unwrap();
+    let suspended = suspended(&revision_one);
+    store.commit_execution_outcome(&suspended).unwrap();
+    let revision_two = next_revision(&revision_one, &suspended, 2);
+    let started = match store.start_execution_revision(&revision_two).unwrap() {
+        StartExecutionRevision::Inserted(record) => record,
+        StartExecutionRevision::Existing(_) => unreachable!(),
+    };
+
+    let create_retry = match store.create_execution(&revision_one).unwrap() {
+        CreateExecution::Existing(record) => record,
+        CreateExecution::Inserted(_) => panic!("initial creation retry must be existing"),
+    };
+    let revision_retry = match store.start_execution_revision(&revision_two).unwrap() {
+        StartExecutionRevision::Existing(record) => record,
+        StartExecutionRevision::Inserted(_) => panic!("revision retry must be existing"),
+    };
+    assert_eq!(create_retry, started);
+    assert_eq!(revision_retry, started);
+    assert_eq!(
+        store.execution_events("exec-multi-retry", 1).unwrap().len(),
+        2
+    );
+    assert_eq!(
+        store.execution_events("exec-multi-retry", 2).unwrap().len(),
+        1
+    );
+}
+
+#[test]
+fn revision_start_rejects_invalid_aggregate_transitions() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let revision_one = contract("exec-invalid-revision-start", 1, 4);
+    store.create_execution(&revision_one).unwrap();
+    let premature = contract("exec-invalid-revision-start", 2, 5);
+    assert!(matches!(
+        store.start_execution_revision(&premature),
+        Err(TaskRuntimeError::InvalidTransition(_))
+    ));
+
+    let suspended = suspended(&revision_one);
+    store.commit_execution_outcome(&suspended).unwrap();
+    let valid = next_revision(&revision_one, &suspended, 5);
+    let mut candidates = Vec::new();
+
+    let mut skipped = valid.as_ref().clone();
+    skipped.revision = 3;
+    candidates.push(skipped);
+
+    let mut checkpoint = valid.as_ref().clone();
+    checkpoint.checkpoint.as_mut().unwrap().checkpoint_id = "wrong-checkpoint".into();
+    candidates.push(checkpoint);
+
+    let mut checkpoint_schema = valid.as_ref().clone();
+    checkpoint_schema
+        .checkpoint
+        .as_mut()
+        .unwrap()
+        .producer_schema_version += 1;
+    candidates.push(checkpoint_schema);
+
+    let mut wake = valid.as_ref().clone();
+    let condition = WakeCondition::User {
+        wait_ref: "another-wait".into(),
+    };
+    wake.wake = Some(WakeDelivery {
+        dedup_key: condition.dedup_key(),
+        condition,
+        payload: json!({}),
+        delivered_at_unix_seconds: 1_700_000_001,
+    });
+    candidates.push(wake);
+
+    let mut scope = valid.as_ref().clone();
+    scope.scope.workspace_id = "other-workspace".into();
+    candidates.push(scope);
+
+    let mut kind = valid.as_ref().clone();
+    kind.kind = "other-kind".into();
+    candidates.push(kind);
+
+    let mut parent = valid.as_ref().clone();
+    parent.parent_execution_id = Some("other-parent".into());
+    candidates.push(parent);
+
+    let mut fence = valid.as_ref().clone();
+    fence.fencing_token = revision_one.as_ref().fencing_token;
+    candidates.push(fence);
+
+    for candidate in candidates {
+        let candidate = ValidatedExecutionContract::try_from(candidate).unwrap();
+        assert!(matches!(
+            store.start_execution_revision(&candidate),
+            Err(TaskRuntimeError::InvalidTransition(_))
+        ));
+    }
+    assert_eq!(
+        store
+            .execution_events("exec-invalid-revision-start", 2)
+            .unwrap_err()
+            .to_string(),
+        TaskRuntimeError::NotFound(
+            "execution journal exec-invalid-revision-start revision 2".into()
+        )
+        .to_string()
+    );
+}
+
+#[test]
 fn journal_survives_projection_deletion_and_rebuilds_exactly() {
     let (path, store) = file_store();
     let contract = contract("exec-rebuild-missing", 1, 4);
@@ -153,7 +348,7 @@ fn journal_survives_projection_deletion_and_rebuilds_exactly() {
     assert_eq!(events.len(), 2);
     assert!(store.execution("exec-rebuild-missing").unwrap().is_none());
     let rebuilt = store
-        .rebuild_execution_projection("exec-rebuild-missing", 1)
+        .rebuild_execution_projection("exec-rebuild-missing")
         .unwrap();
     assert_eq!(rebuilt, expected);
     assert_eq!(
@@ -168,7 +363,7 @@ fn journal_survives_projection_deletion_and_rebuilds_exactly() {
 #[test]
 fn corrupt_projection_is_replaced_from_the_journal() {
     let (path, store) = file_store();
-    let contract = contract("exec-rebuild-corrupt", 2, 5);
+    let contract = contract("exec-rebuild-corrupt", 1, 5);
     let expected = inserted(store.create_execution(&contract).unwrap());
     raw_connection(&path)
         .execute(
@@ -182,7 +377,7 @@ fn corrupt_projection_is_replaced_from_the_journal() {
     ));
 
     let rebuilt = store
-        .rebuild_execution_projection("exec-rebuild-corrupt", 2)
+        .rebuild_execution_projection("exec-rebuild-corrupt")
         .unwrap();
     assert_eq!(rebuilt, expected);
     assert_eq!(
@@ -213,7 +408,7 @@ fn journal_fold_rejects_sequence_gaps() {
         Err(TaskRuntimeError::Store(_))
     ));
     assert!(matches!(
-        store.rebuild_execution_projection("exec-gap", 1),
+        store.rebuild_execution_projection("exec-gap"),
         Err(TaskRuntimeError::Store(_))
     ));
 
@@ -476,7 +671,7 @@ fn different_contract_with_the_same_id_conflicts() {
     let different_revision = contract("exec-create-conflict", 2, 1);
     assert!(matches!(
         store.create_execution(&different_revision),
-        Err(TaskRuntimeError::Conflict(_))
+        Err(TaskRuntimeError::InvalidTransition(_))
     ));
     assert_eq!(
         store
@@ -485,6 +680,153 @@ fn different_contract_with_the_same_id_conflicts() {
             .len(),
         1
     );
+}
+
+#[test]
+fn initial_creation_requires_revision_one() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let revision_two = contract("exec-create-revision-two", 2, 2);
+
+    assert!(matches!(
+        store.create_execution(&revision_two),
+        Err(TaskRuntimeError::InvalidTransition(_))
+    ));
+    assert!(
+        store
+            .execution("exec-create-revision-two")
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn rebuild_restores_only_the_latest_revision_projection() {
+    let (path, store) = file_store();
+    let revision_one = contract("exec-rebuild-latest", 1, 1);
+    store.create_execution(&revision_one).unwrap();
+    let suspended = suspended(&revision_one);
+    store.commit_execution_outcome(&suspended).unwrap();
+    let revision_two = next_revision(&revision_one, &suspended, 2);
+    store.start_execution_revision(&revision_two).unwrap();
+    let completed = completed(&revision_two, json!({"latest": true}));
+    let expected = match store.commit_execution_outcome(&completed).unwrap() {
+        OutcomeCommit::Inserted(record) => record,
+        OutcomeCommit::Existing(_) => unreachable!(),
+    };
+
+    raw_connection(&path)
+        .execute(
+            "DELETE FROM executions WHERE execution_id = ?1",
+            ["exec-rebuild-latest"],
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .execution_events("exec-rebuild-latest", 1)
+            .unwrap()
+            .len(),
+        2
+    );
+    let rebuilt = store
+        .rebuild_execution_projection("exec-rebuild-latest")
+        .unwrap();
+
+    assert_eq!(rebuilt, expected);
+    assert_eq!(rebuilt.contract.as_ref().revision, 2);
+    assert_eq!(
+        store.execution("exec-rebuild-latest").unwrap(),
+        Some(expected)
+    );
+
+    drop(store);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn stale_prior_revision_outcome_never_rewrites_the_latest_projection() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let revision_one = contract("exec-stale-prior-outcome", 1, 1);
+    store.create_execution(&revision_one).unwrap();
+    let suspended = suspended(&revision_one);
+    store.commit_execution_outcome(&suspended).unwrap();
+    let revision_two = next_revision(&revision_one, &suspended, 2);
+    let latest = match store.start_execution_revision(&revision_two).unwrap() {
+        StartExecutionRevision::Inserted(record) => record,
+        StartExecutionRevision::Existing(_) => unreachable!(),
+    };
+
+    let repeated = match store.commit_execution_outcome(&suspended).unwrap() {
+        OutcomeCommit::Existing(record) => record,
+        OutcomeCommit::Inserted(_) => panic!("prior outcome retry must not append"),
+    };
+    assert_eq!(repeated.contract.as_ref().revision, 1);
+    assert_eq!(
+        store.execution("exec-stale-prior-outcome").unwrap(),
+        Some(latest.clone())
+    );
+
+    let conflicting = completed(&revision_one, json!({"stale": true}));
+    assert!(matches!(
+        store.commit_execution_outcome(&conflicting),
+        Err(TaskRuntimeError::InvalidTransition(_))
+    ));
+    assert_eq!(
+        store.execution("exec-stale-prior-outcome").unwrap(),
+        Some(latest)
+    );
+    assert_eq!(
+        store
+            .execution_events("exec-stale-prior-outcome", 1)
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn journal_fold_revalidates_revision_start_transition_data() {
+    let (path, store) = file_store();
+    let revision_one = contract("exec-corrupt-revision-start", 1, 1);
+    store.create_execution(&revision_one).unwrap();
+    let suspended = suspended(&revision_one);
+    store.commit_execution_outcome(&suspended).unwrap();
+    let revision_two = next_revision(&revision_one, &suspended, 2);
+    store.start_execution_revision(&revision_two).unwrap();
+
+    let connection = raw_connection(&path);
+    let payload: String = connection
+        .query_row(
+            "SELECT payload_json FROM execution_events
+             WHERE execution_id = ?1 AND revision = 2 AND seq = 1",
+            ["exec-corrupt-revision-start"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut payload: Value = serde_json::from_str(&payload).unwrap();
+    payload["previous_revision"] = json!(0);
+    connection
+        .execute(
+            "UPDATE execution_events SET payload_json = ?1
+             WHERE execution_id = ?2 AND revision = 2 AND seq = 1",
+            params![
+                serde_json::to_string(&payload).unwrap(),
+                "exec-corrupt-revision-start"
+            ],
+        )
+        .unwrap();
+
+    assert!(matches!(
+        store.execution_events("exec-corrupt-revision-start", 1),
+        Err(TaskRuntimeError::Store(_))
+    ));
+    assert!(matches!(
+        store.rebuild_execution_projection("exec-corrupt-revision-start"),
+        Err(TaskRuntimeError::Store(_))
+    ));
+
+    drop(connection);
+    drop(store);
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -512,14 +854,14 @@ fn stale_fence_cannot_commit_and_fence_updates_journal_binding() {
 #[test]
 fn advance_fence_rejects_stale_revision_and_invalid_tokens() {
     let store = TaskStore::open_in_memory().unwrap();
-    let contract = contract("exec-fence-invalid", 2, 4);
+    let contract = contract("exec-fence-invalid", 1, 4);
     store.create_execution(&contract).unwrap();
 
     for result in [
-        store.advance_execution_fence("exec-fence-invalid", 3, 4, 5),
-        store.advance_execution_fence("exec-fence-invalid", 2, 3, 5),
-        store.advance_execution_fence("exec-fence-invalid", 2, 4, 4),
-        store.advance_execution_fence("exec-fence-invalid", 2, 4, u64::MAX),
+        store.advance_execution_fence("exec-fence-invalid", 2, 4, 5),
+        store.advance_execution_fence("exec-fence-invalid", 1, 3, 5),
+        store.advance_execution_fence("exec-fence-invalid", 1, 4, 4),
+        store.advance_execution_fence("exec-fence-invalid", 1, 4, u64::MAX),
     ] {
         assert!(matches!(
             result,
@@ -593,7 +935,7 @@ fn all_canonical_outcomes_fold_to_their_states() {
         assert_eq!(record.state, expected);
         assert_eq!(
             store
-                .rebuild_execution_projection(&format!("exec-state-{name}"), 1)
+                .rebuild_execution_projection(&format!("exec-state-{name}"))
                 .unwrap(),
             record
         );
@@ -603,18 +945,18 @@ fn all_canonical_outcomes_fold_to_their_states() {
 #[test]
 fn outcome_binding_must_match_persisted_revision_kind_fence_and_id() {
     let store = TaskStore::open_in_memory().unwrap();
-    let persisted = contract("exec-binding", 2, 7);
+    let persisted = contract("exec-binding", 1, 7);
     store.create_execution(&persisted).unwrap();
     let mut wrong_kind = persisted.as_ref().clone();
     wrong_kind.kind = "other_kind".into();
     let candidates = [
-        ("revision", contract("exec-binding", 3, 7)),
-        ("fence", contract("exec-binding", 2, 8)),
+        ("revision", contract("exec-binding", 2, 7)),
+        ("fence", contract("exec-binding", 1, 8)),
         (
             "kind",
             ValidatedExecutionContract::try_from(wrong_kind).unwrap(),
         ),
-        ("id", contract("unknown-execution", 2, 7)),
+        ("id", contract("unknown-execution", 1, 7)),
     ];
 
     for (dimension, candidate) in candidates {
@@ -868,6 +1210,136 @@ fn concurrent_same_outcome_is_inserted_once_and_existing_once() {
 }
 
 #[test]
+fn concurrent_same_revision_start_is_inserted_once_and_existing_once() {
+    let (path, seed) = file_store();
+    let revision_one = contract("exec-race-revision-same", 1, 1);
+    seed.create_execution(&revision_one).unwrap();
+    let suspended = suspended(&revision_one);
+    seed.commit_execution_outcome(&suspended).unwrap();
+    let revision_two = next_revision(&revision_one, &suspended, 2);
+    drop(seed);
+
+    let barrier = Arc::new(Barrier::new(3));
+    let store_a = TaskStore::open(&path).unwrap();
+    let store_b = TaskStore::open(&path).unwrap();
+    let barrier_a = Arc::clone(&barrier);
+    let barrier_b = Arc::clone(&barrier);
+    let revision_two_b = revision_two.clone();
+    let thread_a = thread::spawn(move || {
+        barrier_a.wait();
+        store_a.start_execution_revision(&revision_two)
+    });
+    let thread_b = thread::spawn(move || {
+        barrier_b.wait();
+        store_b.start_execution_revision(&revision_two_b)
+    });
+    barrier.wait();
+    let results = [thread_a.join().unwrap(), thread_b.join().unwrap()];
+
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Ok(StartExecutionRevision::Inserted(_))))
+            .count(),
+        1
+    );
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Ok(StartExecutionRevision::Existing(_))))
+            .count(),
+        1
+    );
+    let store = TaskStore::open(&path).unwrap();
+    assert_eq!(
+        store
+            .execution_events("exec-race-revision-same", 2)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        store
+            .execution("exec-race-revision-same")
+            .unwrap()
+            .unwrap()
+            .contract
+            .as_ref()
+            .revision,
+        2
+    );
+
+    drop(store);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn concurrent_conflicting_revision_starts_serialize_to_one_contract() {
+    let (path, seed) = file_store();
+    let revision_one = contract("exec-race-revision-conflict", 1, 1);
+    seed.create_execution(&revision_one).unwrap();
+    let suspended = suspended(&revision_one);
+    seed.commit_execution_outcome(&suspended).unwrap();
+    let first = next_revision(&revision_one, &suspended, 2);
+    let mut second = first.as_ref().clone();
+    second.input = json!({"prompt": "conflicting retry"});
+    let second = ValidatedExecutionContract::try_from(second).unwrap();
+    drop(seed);
+
+    let barrier = Arc::new(Barrier::new(3));
+    let store_a = TaskStore::open(&path).unwrap();
+    let store_b = TaskStore::open(&path).unwrap();
+    let barrier_a = Arc::clone(&barrier);
+    let barrier_b = Arc::clone(&barrier);
+    let thread_a = thread::spawn(move || {
+        barrier_a.wait();
+        store_a.start_execution_revision(&first)
+    });
+    let thread_b = thread::spawn(move || {
+        barrier_b.wait();
+        store_b.start_execution_revision(&second)
+    });
+    barrier.wait();
+    let results = [thread_a.join().unwrap(), thread_b.join().unwrap()];
+
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Ok(StartExecutionRevision::Inserted(_))))
+            .count(),
+        1
+    );
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Err(TaskRuntimeError::Conflict(_))))
+            .count(),
+        1
+    );
+    let store = TaskStore::open(&path).unwrap();
+    assert_eq!(
+        store
+            .execution_events("exec-race-revision-conflict", 2)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        store
+            .execution("exec-race-revision-conflict")
+            .unwrap()
+            .unwrap()
+            .contract
+            .as_ref()
+            .revision,
+        2
+    );
+
+    drop(store);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn fence_and_outcome_race_leaves_one_valid_journal_projection() {
     let (path, seed) = file_store();
     let contract = contract("exec-race-fence", 1, 1);
@@ -917,7 +1389,7 @@ fn fence_and_outcome_race_leaves_one_valid_journal_projection() {
     }
     assert_eq!(
         store
-            .rebuild_execution_projection("exec-race-fence", 1)
+            .rebuild_execution_projection("exec-race-fence")
             .unwrap(),
         projected
     );

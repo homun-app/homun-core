@@ -25,6 +25,7 @@ pub use checkpoint::{RetryController, TaskCheckpoint};
 pub use error::{TaskRuntimeError, TaskRuntimeResult};
 pub use execution_store::{
     CreateExecution, ExecutionEvent, ExecutionJournalEvent, ExecutionRecord, OutcomeCommit,
+    StartExecutionRevision,
 };
 pub use executor::{ExecutorResult, FakeTaskExecutor, TaskExecutor};
 pub use facade::{RunReadySummary, TaskRuntime};
