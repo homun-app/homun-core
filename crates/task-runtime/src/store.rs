@@ -2185,7 +2185,7 @@ impl TaskStore {
     ) -> TaskRuntimeResult<TaskCheckpoint> {
         let sequence = self.next_checkpoint_sequence(task_id, user_id, workspace_id)?;
         let checkpoint = TaskCheckpoint::new(
-            uuid::Uuid::new_v4().to_string(),
+            uuid::Uuid::new_v4().simple().to_string(),
             task_id.clone(),
             user_id.clone(),
             workspace_id.clone(),

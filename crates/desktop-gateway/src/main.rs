@@ -18,6 +18,7 @@ mod db_migrate;
 // doc.json. Wired into make_document's templated path (F2-T8,
 // make_templated_document).
 mod document_content;
+mod execution_runtime;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod inference_transport;
 mod model_client;
@@ -226,7 +227,8 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
     time::Duration as StdDuration,
 };
-use task_registry::{GatewayTaskExecutorKind, TaskExecutorRegistry};
+use execution_runtime::{ExecutionRuntime, contract_for_acquired_task};
+use task_registry::TaskExecutorRegistry;
 use time::{Duration, OffsetDateTime};
 use tokio::net::TcpListener;
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -537,7 +539,7 @@ impl AppState {
                 CapabilityRegistryStore::open_in_memory().expect("in-memory capability store"),
             )),
             task_executor_status: Arc::new(Mutex::new(TaskExecutorStatus::new(false))),
-            task_executor_registry: TaskExecutorRegistry::with_defaults(),
+            task_executor_registry: ExecutionRuntime::default_registry(),
             browser_capability_client: Arc::new(Mutex::new(None)),
             browser_thread_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             hitl_resume_by_thread: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -1124,7 +1126,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         task_executor_status: Arc::new(Mutex::new(TaskExecutorStatus::new(
             task_executor_worker_enabled(),
         ))),
-        task_executor_registry: TaskExecutorRegistry::with_defaults(),
+        task_executor_registry: ExecutionRuntime::default_registry(),
         browser_capability_client: Arc::new(Mutex::new(None)),
         browser_thread_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
         hitl_resume_by_thread: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -41166,29 +41168,6 @@ fn approval_allows_browser_policy(approval: &ApprovalRequest) -> bool {
         || approval.explanation.to_lowercase().contains("browser")
 }
 
-/// True once `run_agent_rounds`'s outcome consumer has parked this turn's task (steering
-/// pending, model unavailable — see `park_chat_turn_task`/`TaskStore::park_chat_turn`).
-/// Checked AFTER `execute_read_only_task` returns, mirroring the `externally_cancelled`
-/// reload right above its call site in `run_next_task_once`: the executor's own
-/// `TaskExecutionOutcome` has no way to say "parked" (it's a generic shape shared by every
-/// task kind), so the authoritative signal is the task's OWN status, re-read fresh.
-fn chat_turn_task_is_parked(
-    state: &AppState,
-    task: &TaskRecord,
-    user: &UserId,
-    workspace: &WorkspaceId,
-) -> bool {
-    lock_task_store(state)
-        .ok()
-        .and_then(|store| {
-            store
-                .get_task(&task.task_id, user, workspace)
-                .ok()
-                .flatten()
-        })
-        .is_some_and(|persisted| persisted.status == TaskStatus::Parked)
-}
-
 /// Pick the next ready task for this user across EVERY non-terminal workspace.
 /// Channel turns live in `local-workspace`; without this, a worker scoped to the
 /// UI-selected project never sees them and WhatsApp/Telegram replies stay queued.
@@ -41363,11 +41342,30 @@ fn run_next_task_once(
         worker_id.to_string(),
     );
 
-    let outcome = match execute_read_only_task(state, &execution_task) {
+    let execution_contract = contract_for_acquired_task(&execution_task)
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "execution_contract_invalid",
+            message: error.message,
+        })?;
+    let execution_runtime = ExecutionRuntime::new(state.task_executor_registry.clone());
+    let runtime_result = match block_on_execution_runtime(execution_runtime.execute(
+        state,
+        execution_contract,
+    )) {
         Ok(outcome) => outcome,
+        Err(error) if execution_runtime::is_lease_lost_error(&error) => {
+            if let Some(handle) = &watchdog {
+                handle.abort();
+            }
+            return Ok(lease_stolen_task_response(task_id));
+        }
         Err(error) => {
             if let Some(handle) = &watchdog {
                 handle.abort();
+            }
+            if !is_lease_still_ours(state, &task, worker_id)? {
+                return Ok(lease_stolen_task_response(task_id));
             }
             handle_failed_task_run(state, &mut task, true, &error.message)?;
             let retried = matches!(task.status, TaskStatus::Queued);
@@ -41395,11 +41393,24 @@ fn run_next_task_once(
             });
         }
     };
-
-    // Stop the watchdog — execution is done, no more heartbeats needed.
+    // Execution no longer needs heartbeats once the canonical outcome is committed or recovered.
     if let Some(handle) = &watchdog {
         handle.abort();
     }
+    if runtime_result.execution_id() != task_id {
+        return Err(GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "execution_identity_mismatch",
+            message: "Execution runtime returned a different execution identity.".to_string(),
+        });
+    }
+    let canonical_projection = runtime_result.projection();
+    let outcome = runtime_result.into_compatibility().ok_or_else(|| GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "execution_compatibility_missing",
+        message: "Production execution adapter returned no Task 5 compatibility result."
+            .to_string(),
+    })?;
 
     // Guard: if the lease was stolen during execution (recovery + re-acquire by
     // another worker), do NOT write the result. The task is now owned by the
@@ -41408,32 +41419,9 @@ fn run_next_task_once(
         eprintln!(
             "lease guard: task {task_id} lease was stolen during execution — discarding result to avoid double-execution"
         );
-        return Ok(TaskRunBatchResponse {
-            status: "lease_stolen".to_string(),
-            completed: 0,
-            stopped_reason: Some(
-                "Task lease expired and was re-queued by another worker.".to_string(),
-            ),
-            results: vec![TaskRunStepResponse {
-                status: "lease_stolen".to_string(),
-                task_id: Some(task_id),
-                message: "Result discarded: lease stolen during execution.".to_string(),
-            }],
-        });
+        return Ok(lease_stolen_task_response(task_id));
     }
 
-    {
-        let store = lock_task_store(state)?;
-        store
-            .append_checkpoint(
-                &task.task_id,
-                &user,
-                &workspace,
-                outcome.checkpoint_payload.clone(),
-                outcome.checkpoint_redacted.clone(),
-            )
-            .map_err(GatewayError::task)?;
-    }
     append_task_observation_to_session(state, &task, &outcome)?;
     // Guard: a turn cancelled mid-flight (cancel_chat_turn set status=Cancelled while the
     // executor was racing to a stop via its select! on the cancel Notify) must NOT be
@@ -41481,8 +41469,8 @@ fn run_next_task_once(
     // for a chat_turn, clobbering `Parked` back to `Failed` AND marking the assistant bubble
     // `Failed` (`set_chat_turn_message_delivery_state(..., Failed)`), regressing both "the bubble
     // stays open" and "the SAME turn resumes" invariants. Mirrors the `externally_cancelled`
-    // guard above: reload the authoritative status rather than trust the stale local `task`.
-    if chat_turn_task_is_parked(state, &task, &user, &workspace) {
+    // guard above, but now uses the canonical projection instead of another task-status read.
+    if canonical_projection.task_status == TaskStatus::Parked {
         surface_task_execution_outcome(state, &task_id, &outcome)?;
         return Ok(TaskRunBatchResponse {
             status: "parked".to_string(),
@@ -41495,7 +41483,7 @@ fn run_next_task_once(
             }],
         });
     }
-    if outcome.completed {
+    if canonical_projection.task_status == TaskStatus::Completed {
         record_subagent_task_step_outcome(state, &task, &outcome);
         mark_task_completed(state, &mut task)?;
         record_automation_run_for_task(state, &task, true, "");
@@ -41505,7 +41493,13 @@ fn run_next_task_once(
             store.insert_task(&next).map_err(GatewayError::task)?;
         }
         sync_session_for_task_run(state, &task, SessionStatus::Completed, 3, None)?;
-    } else if let Some(approval) = outcome.pending_approval.as_ref() {
+    } else if canonical_projection.task_status == TaskStatus::WaitingUserApproval {
+        let approval = outcome.pending_approval.as_ref().ok_or_else(|| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "execution_approval_projection_missing",
+            message: "Canonical approval suspension has no compatibility approval data."
+                .to_string(),
+        })?;
         request_task_executor_approval(state, &mut task, approval)?;
         set_chat_turn_message_delivery_state(
             state,
@@ -41519,7 +41513,12 @@ fn run_next_task_once(
             2,
             Some(approval.explanation.clone()),
         )?;
-    } else if let Some(wait_until) = outcome.wait_until {
+    } else if canonical_projection.task_status == TaskStatus::WaitingTime {
+        let wait_until = outcome.wait_until.ok_or_else(|| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "execution_timer_projection_missing",
+            message: "Canonical timer suspension has no compatibility wake time.".to_string(),
+        })?;
         let reason = outcome
             .blocked_reason
             .as_deref()
@@ -41561,23 +41560,23 @@ fn run_next_task_once(
     surface_task_execution_outcome(state, &task_id, &outcome)?;
 
     Ok(TaskRunBatchResponse {
-        status: if outcome.completed {
+        status: if canonical_projection.task_status == TaskStatus::Completed {
             "completed".to_string()
-        } else if outcome.pending_approval.is_some() {
+        } else if canonical_projection.task_status == TaskStatus::WaitingUserApproval {
             "waiting_user_approval".to_string()
-        } else if outcome.wait_until.is_some() {
+        } else if canonical_projection.task_status == TaskStatus::WaitingTime {
             "waiting_time".to_string()
         } else {
             "blocked".to_string()
         },
-        completed: u32::from(outcome.completed),
+        completed: u32::from(canonical_projection.task_status == TaskStatus::Completed),
         stopped_reason: outcome.blocked_reason.clone(),
         results: vec![TaskRunStepResponse {
-            status: if outcome.completed {
+            status: if canonical_projection.task_status == TaskStatus::Completed {
                 "completed".to_string()
-            } else if outcome.pending_approval.is_some() {
+            } else if canonical_projection.task_status == TaskStatus::WaitingUserApproval {
                 "waiting_user_approval".to_string()
-            } else if outcome.wait_until.is_some() {
+            } else if canonical_projection.task_status == TaskStatus::WaitingTime {
                 "waiting_time".to_string()
             } else {
                 "blocked".to_string()
@@ -41586,6 +41585,35 @@ fn run_next_task_once(
             message: outcome.summary,
         }],
     })
+}
+
+fn lease_stolen_task_response(task_id: String) -> TaskRunBatchResponse {
+    TaskRunBatchResponse {
+        status: "lease_stolen".to_string(),
+        completed: 0,
+        stopped_reason: Some(
+            "Task lease expired and was re-queued by another worker.".to_string(),
+        ),
+        results: vec![TaskRunStepResponse {
+            status: "lease_stolen".to_string(),
+            task_id: Some(task_id),
+            message: "Result discarded: lease stolen during execution.".to_string(),
+        }],
+    }
+}
+
+fn block_on_execution_runtime<F>(future: F) -> F::Output
+where
+    F: std::future::Future,
+{
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        return handle.block_on(future);
+    }
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build execution runtime")
+        .block_on(future)
 }
 
 fn effective_task_resource_limits() -> ResourceLimits {
@@ -41754,7 +41782,7 @@ enum TaskAcquireResult {
 /// and prevent writing a result that belongs to another worker.
 ///
 /// SAFETY: the watchdog acquires `task_store`'s mutex on its own (no shared guard).
-/// During `execute_read_only_task` the worker does NOT hold the task_store lock,
+/// During unified execution the worker does not hold the task_store lock,
 /// so there is no contention/deadlock risk. The heartbeat interval (60s) leaves
 /// a 4-minute safety margin before the 5-minute lease expires.
 fn spawn_lease_watchdog(
@@ -41807,7 +41835,7 @@ fn spawn_lease_watchdog(
 }
 
 /// Checks whether the task lease still belongs to this worker. Used AFTER
-/// `execute_read_only_task` returns and BEFORE writing the result: if the lease
+/// unified execution returns and before writing the compatibility projection: if the lease
 /// was stolen (recovery + re-acquire by another worker), the result must NOT be
 /// written — it would corrupt the task state owned by the other worker.
 fn is_lease_still_ours(
@@ -42561,27 +42589,6 @@ fn task_with_dependency_outputs(
     input.insert("previous_step_outputs".to_string(), Value::Array(outputs));
     enriched.input_json = Value::Object(input);
     Ok(enriched)
-}
-
-fn execute_read_only_task(
-    state: &AppState,
-    task: &TaskRecord,
-) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
-    match state
-        .task_executor_registry
-        .resolve(task.kind.as_str())
-        .unwrap_or(GatewayTaskExecutorKind::LegacyLocal)
-    {
-        GatewayTaskExecutorKind::CapabilityBrowser => execute_capability_browser_task(state, task),
-        GatewayTaskExecutorKind::CapabilityGeneric => execute_capability_generic(state, task),
-        GatewayTaskExecutorKind::Subagent => execute_subagent_task(task),
-        GatewayTaskExecutorKind::ProactivePrompt => execute_proactive_prompt_task(state, task),
-        GatewayTaskExecutorKind::ChatTurn => {
-            crate::turn_executor::execute_chat_turn_task(state, task)
-        }
-        GatewayTaskExecutorKind::LegacyShell => execute_shell_read_only_task(task),
-        GatewayTaskExecutorKind::LegacyLocal => execute_local_read_only_task(task),
-    }
 }
 
 fn agent_output_incomplete_reason(answer: &str) -> Option<String> {
@@ -45412,10 +45419,10 @@ where
                 }
                 let mut task: TaskRecord = serde_json::from_str(&task_json)?;
                 let supported = task.kind == "chat_turn"
-                    || matches!(
-                        state.task_executor_registry.resolve(task.kind.as_str()),
-                        Some(GatewayTaskExecutorKind::ProactivePrompt)
-                    );
+                    || state
+                        .task_executor_registry
+                        .resolve(task.kind.as_str())
+                        .is_some_and(|adapter| adapter.name() == "proactive_prompt");
                 let exact_source = task.input_json.get("thread_id").and_then(Value::as_str)
                     == Some(thread_id)
                     && task
@@ -45493,10 +45500,10 @@ where
             .map_err(GatewayError::task)?
             .ok_or_else(|| actionable_claim_error("linked actionable task is missing"))?;
         let supported = task.kind == "chat_turn"
-            || matches!(
-                state.task_executor_registry.resolve(task.kind.as_str()),
-                Some(GatewayTaskExecutorKind::ProactivePrompt)
-            );
+            || state
+                .task_executor_registry
+                .resolve(task.kind.as_str())
+                .is_some_and(|adapter| adapter.name() == "proactive_prompt");
         let exact_source = task.input_json.get("thread_id").and_then(Value::as_str)
             == Some(thread_id)
             && task
@@ -45597,10 +45604,10 @@ where
             .map_err(GatewayError::task)?
             .ok_or_else(|| actionable_source_error("linked actionable source task is missing"))?;
         let supported_persisted_bubble = task.kind == "chat_turn"
-            || matches!(
-                state.task_executor_registry.resolve(task.kind.as_str()),
-                Some(GatewayTaskExecutorKind::ProactivePrompt)
-            );
+            || state
+                .task_executor_registry
+                .resolve(task.kind.as_str())
+                .is_some_and(|adapter| adapter.name() == "proactive_prompt");
         let lifecycle_matches = match resolution {
             ActionableSourceResolution::Cancelled => {
                 (task.status == TaskStatus::WaitingUserApproval
@@ -77120,7 +77127,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             task_executor_status: std::sync::Arc::new(std::sync::Mutex::new(
                 super::TaskExecutorStatus::new(false),
             )),
-            task_executor_registry: super::TaskExecutorRegistry::with_defaults(),
+            task_executor_registry: super::ExecutionRuntime::default_registry(),
             browser_capability_client: std::sync::Arc::new(std::sync::Mutex::new(None)),
             browser_thread_sessions: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
@@ -84261,9 +84268,15 @@ data: [DONE]\n";
 
         // (b) the runner's guard sees the task as parked — this is what makes it skip
         // `handle_failed_task_run` in `run_next_task_once` instead of clobbering the status.
-        assert!(super::chat_turn_task_is_parked(
-            &state, &task, &user, &workspace
-        ));
+        assert_eq!(
+            super::lock_task_store(&state)
+                .unwrap()
+                .get_task(&task.task_id, &user, &workspace)
+                .unwrap()
+                .expect("parked task")
+                .status,
+            TaskStatus::Parked
+        );
         let runs = super::lock_task_store(&state)
             .unwrap()
             .list_agent_runs_for_turn(task.task_id.as_str(), user.as_str(), workspace.as_str())

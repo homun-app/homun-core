@@ -38,7 +38,15 @@ fn store_appends_and_loads_latest_checkpoint_with_redacted_payload() {
         .unwrap();
 
     assert_eq!(second.sequence, 2);
+    assert_eq!(second.checkpoint_id.len(), 32);
+    assert!(
+        second
+            .checkpoint_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    );
     assert_eq!(latest.sequence, 2);
+    assert_eq!(latest.checkpoint_id, second.checkpoint_id);
     assert_eq!(latest.payload, json!({"step": 2, "password": "secret"}));
     assert_eq!(
         latest.redacted_payload,
