@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::semantic_decision::{
-    DeliverableDecision, DeliverableKind, EffectClass, ExecutionShape, MemoryIntent,
-    ObjectiveRelationship, SEMANTIC_DECISION_SCHEMA_VERSION, SemanticDecision,
-    SemanticDecisionProvenance, SemanticScope, SteeringDisposition, ValidatedSemanticDecision,
+    EffectClass, ExecutionShape, MemoryIntent, ObjectiveEffectPolicy, ObjectiveRelationship,
+    SteeringDisposition, ValidatedSemanticDecision, safe_fallback, semantic_decision_from_contract,
+    validate_decision,
 };
 use local_first_task_runtime::{ObjectiveContractRecord, ObjectiveMode};
 
@@ -37,9 +37,121 @@ pub(crate) enum HitlWaitStatus {
     Resolved,
 }
 
+/// Bounded copy of the objective contract needed to resume safely even if the
+/// canonical projection cannot be loaded during the next turn.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ResumeContractSnapshot {
+    pub(crate) objective_revision: u64,
+    pub(crate) objective: String,
+    pub(crate) mode: ObjectiveMode,
+    #[serde(default)]
+    pub(crate) allowed_effect_classes: Vec<EffectClass>,
+    #[serde(default)]
+    pub(crate) forbidden_effect_classes: Vec<EffectClass>,
+    pub(crate) memory_intent: MemoryIntent,
+    #[serde(default)]
+    pub(crate) completion: Value,
+}
+
+impl ResumeContractSnapshot {
+    pub(crate) fn from_objective(contract: &ObjectiveContractRecord) -> Self {
+        let semantic = semantic_decision_from_contract(contract);
+        let allowed_effect_classes = ObjectiveEffectPolicy::from_contract(Some(contract))
+            .allowed_effects()
+            .to_vec();
+        let forbidden_effect_classes = complement_effects(&allowed_effect_classes);
+        let memory_intent = semantic
+            .map(|row| row.decision.memory_intent)
+            .unwrap_or_else(MemoryIntent::safe_default);
+        Self {
+            objective_revision: contract.revision,
+            objective: contract.objective.clone(),
+            mode: contract.mode,
+            allowed_effect_classes,
+            forbidden_effect_classes,
+            memory_intent,
+            completion: contract.completion_json.clone(),
+        }
+    }
+
+    fn as_objective_record(&self, wait: &OpenHitlWait) -> ObjectiveContractRecord {
+        let mut semantic = safe_fallback(None, HITL_RESUME_CODE);
+        semantic.decision.objective = self.objective.clone();
+        semantic.decision.mode = self.mode;
+        semantic.decision.allowed_effect_classes = self.allowed_effect_classes.clone();
+        semantic.decision.forbidden_effect_classes = self.forbidden_effect_classes.clone();
+        semantic.decision.memory_intent = self.memory_intent.clone();
+        ObjectiveContractRecord {
+            user_id: String::new(),
+            workspace_id: String::new(),
+            thread_id: wait.thread_id.clone(),
+            source_message_id: wait.source_message_id.clone(),
+            objective: self.objective.clone(),
+            mode: self.mode,
+            scope_json: serde_json::json!({"semantic_decision": semantic}),
+            allowed_actions_json: serde_json::to_value(&self.allowed_effect_classes)
+                .unwrap_or_else(|_| Value::Array(Vec::new())),
+            completion_json: self.completion.clone(),
+            status: "active".to_string(),
+            revision: self.objective_revision,
+            created_at: wait.created_at,
+            updated_at: wait.created_at,
+        }
+    }
+}
+
+const ALL_EFFECTS: [EffectClass; 5] = [
+    EffectClass::Read,
+    EffectClass::RequestAuthorization,
+    EffectClass::FilesystemWrite,
+    EffectClass::ArtifactCreation,
+    EffectClass::ExternalWrite,
+];
+
+fn complement_effects(allowed: &[EffectClass]) -> Vec<EffectClass> {
+    ALL_EFFECTS
+        .into_iter()
+        .filter(|effect| !allowed.contains(effect))
+        .collect()
+}
+
+pub(crate) fn bounded_remaining_plan(plan: Vec<Value>) -> Vec<Value> {
+    plan.into_iter()
+        .filter(|step| step.get("status").and_then(Value::as_str) != Some("done"))
+        .take(12)
+        .filter_map(|step| {
+            let title = step.get("title").and_then(Value::as_str)?.trim();
+            if title.is_empty() {
+                return None;
+            }
+            Some(serde_json::json!({
+                "id": step.get("id").and_then(Value::as_str).unwrap_or_default(),
+                "title": title.chars().take(500).collect::<String>(),
+                "status": step.get("status").and_then(Value::as_str).unwrap_or("doing"),
+                "detail": step
+                    .get("detail")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .chars()
+                    .take(1_000)
+                    .collect::<String>(),
+                "done_criterion": step
+                    .get("done_criterion")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .chars()
+                    .take(1_000)
+                    .collect::<String>(),
+            }))
+        })
+        .collect()
+}
+
 /// Machine snapshot of work that must survive across the user wait.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct OpenWorkSnapshot {
+    #[serde(default = "open_work_schema_version")]
+    pub(crate) schema_version: u32,
     /// Thread still held a live warm browser session when the wait was opened.
     #[serde(default)]
     pub(crate) browser_session_live: bool,
@@ -49,6 +161,31 @@ pub(crate) struct OpenWorkSnapshot {
     /// Capability the open work already depended on (e.g. "browse").
     #[serde(default)]
     pub(crate) capability_hint: Option<String>,
+    /// Contract in force when the wait opened.
+    #[serde(default)]
+    pub(crate) contract: Option<ResumeContractSnapshot>,
+    /// Canonical open plan steps, bounded and sanitized before persistence.
+    #[serde(default)]
+    pub(crate) remaining_plan: Vec<Value>,
+}
+
+pub(crate) const OPEN_WORK_SCHEMA_VERSION: u32 = 1;
+
+const fn open_work_schema_version() -> u32 {
+    OPEN_WORK_SCHEMA_VERSION
+}
+
+impl Default for OpenWorkSnapshot {
+    fn default() -> Self {
+        Self {
+            schema_version: open_work_schema_version(),
+            browser_session_live: false,
+            last_url: None,
+            capability_hint: None,
+            contract: None,
+            remaining_plan: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -130,8 +267,14 @@ pub(crate) fn hitl_resume_semantic_decision(
     resolution: &str,
     active: Option<&ObjectiveContractRecord>,
 ) -> ValidatedSemanticDecision {
+    let snapshot_record = wait
+        .open_work
+        .contract
+        .as_ref()
+        .map(|contract| contract.as_objective_record(wait));
+    let governing_contract = active.or(snapshot_record.as_ref());
     let kind_label = wait.kind_label();
-    let objective = active
+    let objective = governing_contract
         .map(|row| row.objective.clone())
         .filter(|text| !text.trim().is_empty())
         .unwrap_or_else(|| {
@@ -139,59 +282,38 @@ pub(crate) fn hitl_resume_semantic_decision(
                 .map(|q| format!("Continue after user {kind_label}: {q}"))
                 .unwrap_or_else(|| format!("Continue the open task after the user's {kind_label}"))
         });
-    let mode = active.map(|row| row.mode).unwrap_or(ObjectiveMode::Mixed);
-    ValidatedSemanticDecision {
-        decision: SemanticDecision {
-            objective,
-            relationship_to_active_objective: ObjectiveRelationship::SameObjective,
-            mode,
-            scope: SemanticScope {
-                resources: Vec::new(),
-                may_request_additional_access: true,
-            },
-            allowed_effect_classes: vec![
-                EffectClass::Read,
-                EffectClass::RequestAuthorization,
-                EffectClass::FilesystemWrite,
-                EffectClass::ArtifactCreation,
-                EffectClass::ExternalWrite,
-            ],
-            forbidden_effect_classes: Vec::new(),
-            deliverable: DeliverableDecision {
-                kind: DeliverableKind::ChatReport,
-                artifact_requested: false,
-            },
-            execution_shape: ExecutionShape::AgentLoop,
-            selected_capability: wait.open_work.capability_hint.clone().or_else(|| {
-                wait.open_work
-                    .browser_session_live
-                    .then(|| "browse".to_string())
-            }),
-            memory_intent: MemoryIntent {
-                use_current_thread: true,
-                search_personal: false,
-                search_project: false,
-                vault_value_requested: false,
-                standalone_choice_request: false,
-                durable_memory_candidate: false,
-            },
-            steering_disposition: SteeringDisposition::ContinueCurrentWork,
-            requires_user_confirmation: false,
-            confidence: 1.0,
-            rationale: format!(
-                "HITL {kind_label} resume (wait_id={}): continue open work with resolution «{}».",
-                wait.wait_id,
-                resolution.trim()
-            ),
-        },
-        provenance: SemanticDecisionProvenance {
-            schema_version: SEMANTIC_DECISION_SCHEMA_VERSION,
-            provider: None,
-            model: None,
-            // Keep disposition actionable (steering reads fallback_reason.is_none()).
-            fallback_reason: None,
-            validator_rejection_code: Some(HITL_RESUME_CODE.to_string()),
-        },
+    let mut candidate = safe_fallback(governing_contract, HITL_RESUME_CODE);
+    if let Some(contract) = governing_contract {
+        candidate.decision.allowed_effect_classes =
+            ObjectiveEffectPolicy::from_contract(Some(contract))
+                .allowed_effects()
+                .to_vec();
+        candidate.decision.forbidden_effect_classes =
+            complement_effects(&candidate.decision.allowed_effect_classes);
+    }
+    candidate.decision.objective = objective;
+    candidate.decision.relationship_to_active_objective = ObjectiveRelationship::SameObjective;
+    candidate.decision.execution_shape = ExecutionShape::AgentLoop;
+    candidate.decision.selected_capability = None;
+    candidate.decision.steering_disposition = SteeringDisposition::ContinueCurrentWork;
+    candidate.decision.requires_user_confirmation = false;
+    candidate.decision.confidence = 1.0;
+    candidate.decision.rationale = format!(
+        "HITL {kind_label} resume (wait_id={}): continue open work with resolution «{}».",
+        wait.wait_id,
+        resolution.trim()
+    );
+
+    match validate_decision(candidate.decision, &[], governing_contract) {
+        Ok(mut validated) => {
+            validated.provenance.validator_rejection_code = Some(HITL_RESUME_CODE.to_string());
+            validated
+        }
+        Err(error) => {
+            let mut fallback = safe_fallback(governing_contract, error.code);
+            fallback.provenance.validator_rejection_code = Some(error.code.to_string());
+            fallback
+        }
     }
 }
 
@@ -243,13 +365,53 @@ pub(crate) fn hitl_resume_harness_slot(
         .filter(|u| !u.is_empty())
         .map(|u| format!(" Last URL at wait-open: {u}."))
         .unwrap_or_default();
+    let contract = wait
+        .open_work
+        .contract
+        .as_ref()
+        .map(|contract| {
+            format!(
+                "\nOpenWork.contract: objective revision {revision}, mode {mode:?}. Objective: {objective}",
+                revision = contract.objective_revision,
+                mode = contract.mode,
+                objective = contract.objective,
+            )
+        })
+        .unwrap_or_default();
+    let remaining_plan = wait
+        .open_work
+        .remaining_plan
+        .iter()
+        .take(12)
+        .filter_map(|step| {
+            let title = step.get("title").and_then(Value::as_str)?.trim();
+            if title.is_empty() {
+                return None;
+            }
+            let detail = step
+                .get("detail")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|detail| !detail.is_empty())
+                .map(|detail| format!(" — {detail}"))
+                .unwrap_or_default();
+            Some(format!("- {title}{detail}"))
+        })
+        .collect::<Vec<_>>();
+    let remaining_plan = if remaining_plan.is_empty() {
+        String::new()
+    } else {
+        format!("\nOpenWork.remaining_plan:\n{}", remaining_plan.join("\n"))
+    };
     format!(
         "HITL RESUME ({kind_label} wait_id={wait_id}): {detail}. \
-Continue the SAME open work — this is NOT a new objective.\n{browser_line}{url}",
+Continue the SAME open work — this is NOT a new objective.\n{browser_line}{url}{contract}{remaining_plan}",
         wait_id = wait.wait_id,
         detail = detail,
         browser_line = browser_line,
         url = url,
+        contract = contract,
+        remaining_plan = remaining_plan,
     )
 }
 
@@ -285,6 +447,48 @@ pub(crate) fn prune_cold_discovery_tools(tools: &mut Vec<Value>, allow_rediscove
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::semantic_decision::EffectClass;
+    use local_first_task_runtime::ObjectiveMode;
+
+    fn active_contract(decision: ValidatedSemanticDecision) -> ObjectiveContractRecord {
+        ObjectiveContractRecord {
+            user_id: "user_1".into(),
+            workspace_id: "workspace_1".into(),
+            thread_id: "thread_1".into(),
+            source_message_id: "msg_0".into(),
+            objective: decision.decision.objective.clone(),
+            mode: decision.decision.mode,
+            scope_json: serde_json::json!({"semantic_decision": decision}),
+            allowed_actions_json: serde_json::to_value(&decision.decision.allowed_effect_classes)
+                .unwrap(),
+            completion_json: serde_json::json!({"deliverable":"chat_report"}),
+            status: "active".into(),
+            revision: 7,
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    fn read_only_contract() -> ObjectiveContractRecord {
+        active_contract(crate::semantic_decision::safe_fallback(None, "fixture"))
+    }
+
+    fn mixed_contract() -> ObjectiveContractRecord {
+        let mut decision = crate::semantic_decision::safe_fallback(None, "fixture");
+        decision.decision.objective = "Prepare an external draft using the saved profile".into();
+        decision.decision.mode = ObjectiveMode::Mixed;
+        decision.decision.allowed_effect_classes = vec![
+            EffectClass::Read,
+            EffectClass::RequestAuthorization,
+            EffectClass::ExternalWrite,
+        ];
+        decision.decision.forbidden_effect_classes =
+            vec![EffectClass::FilesystemWrite, EffectClass::ArtifactCreation];
+        decision.decision.memory_intent.search_personal = true;
+        decision.decision.memory_intent.vault_value_requested = true;
+        decision.provenance.fallback_reason = None;
+        active_contract(decision)
+    }
 
     fn sample_choice_wait(options: &[&str]) -> OpenHitlWait {
         OpenHitlWait {
@@ -301,6 +505,7 @@ mod tests {
                 browser_session_live: true,
                 last_url: Some("https://example.test/results".into()),
                 capability_hint: Some("browse".into()),
+                ..OpenWorkSnapshot::default()
             },
             status: HitlWaitStatus::Open,
             created_at: 1,
@@ -321,6 +526,7 @@ mod tests {
                 browser_session_live: true,
                 last_url: None,
                 capability_hint: Some("browse".into()),
+                ..OpenWorkSnapshot::default()
             },
             status: HitlWaitStatus::Open,
             created_at: 1,
@@ -370,6 +576,61 @@ mod tests {
     }
 
     #[test]
+    fn read_only_resume_preserves_effect_policy_and_has_no_route_conflict() {
+        let wait = sample_choice_wait(&["A", "B"]);
+        let active = read_only_contract();
+
+        let decision = hitl_resume_semantic_decision(&wait, "A", Some(&active));
+
+        assert_eq!(decision.decision.mode, ObjectiveMode::ReadOnlyAnalysis);
+        assert_eq!(
+            decision.decision.allowed_effect_classes,
+            vec![EffectClass::Read, EffectClass::RequestAuthorization]
+        );
+        assert_eq!(
+            decision.decision.forbidden_effect_classes,
+            vec![
+                EffectClass::FilesystemWrite,
+                EffectClass::ArtifactCreation,
+                EffectClass::ExternalWrite,
+            ]
+        );
+        assert_eq!(decision.decision.execution_shape, ExecutionShape::AgentLoop);
+        assert_eq!(decision.decision.selected_capability, None);
+        assert!(
+            crate::semantic_decision::validate_decision(
+                decision.decision.clone(),
+                &[],
+                Some(&active),
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn mixed_resume_preserves_exact_effect_and_memory_intent() {
+        let wait = sample_choice_wait(&["A", "B"]);
+        let active = mixed_contract();
+
+        let decision = hitl_resume_semantic_decision(&wait, "B", Some(&active));
+
+        assert_eq!(
+            decision.decision.allowed_effect_classes,
+            vec![
+                EffectClass::Read,
+                EffectClass::RequestAuthorization,
+                EffectClass::ExternalWrite,
+            ]
+        );
+        assert_eq!(
+            decision.decision.forbidden_effect_classes,
+            vec![EffectClass::FilesystemWrite, EffectClass::ArtifactCreation,]
+        );
+        assert!(decision.decision.memory_intent.search_personal);
+        assert!(decision.decision.memory_intent.vault_value_requested);
+    }
+
+    #[test]
     fn harness_slot_mentions_warm_or_gone_browser() {
         let wait = sample_choice_wait(&["A"]);
         let warm = hitl_resume_harness_slot(&wait, "A", true);
@@ -381,6 +642,78 @@ mod tests {
         let clarify = hitl_resume_harness_slot(&sample_clarify_wait(), "details here", true);
         assert!(clarify.contains("Clarify"));
         assert!(clarify.contains("free text"));
+    }
+
+    #[test]
+    fn open_work_round_trips_resume_contract_and_remaining_plan() {
+        let persisted = serde_json::json!({
+            "browser_session_live": true,
+            "last_url": "https://example.test/results",
+            "capability_hint": "browse",
+            "contract": {
+                "objective_revision": 7,
+                "objective": "Compare options, wait for a choice, then prepare a draft without confirming it.",
+                "mode": "mixed",
+                "allowed_effect_classes": ["read", "request_authorization", "external_write"],
+                "forbidden_effect_classes": ["filesystem_write", "artifact_creation"],
+                "memory_intent": {
+                    "use_current_thread": true,
+                    "search_personal": false,
+                    "search_project": false,
+                    "vault_value_requested": false,
+                    "standalone_choice_request": false,
+                    "durable_memory_candidate": false
+                },
+                "completion": {"deliverable":"chat_report","requires_evidence":true}
+            },
+            "remaining_plan": [
+                {"id":"s2","title":"Prepare the draft","status":"doing","detail":"Do not confirm"}
+            ]
+        });
+
+        let decoded: OpenWorkSnapshot = serde_json::from_value(persisted).unwrap();
+        let encoded = serde_json::to_value(decoded).unwrap();
+
+        assert_eq!(encoded["contract"]["objective_revision"], 7);
+        assert_eq!(encoded["schema_version"], 1);
+        assert_eq!(encoded["contract"]["mode"], "mixed");
+        assert_eq!(encoded["remaining_plan"][0]["id"], "s2");
+        assert_eq!(encoded["remaining_plan"][0]["detail"], "Do not confirm");
+    }
+
+    #[test]
+    fn harness_slot_includes_durable_objective_and_remaining_work() {
+        let mut wait = sample_choice_wait(&["A"]);
+        wait.open_work = serde_json::from_value(serde_json::json!({
+            "browser_session_live": true,
+            "capability_hint": "browse",
+            "contract": {
+                "objective_revision": 7,
+                "objective": "Compare options, wait for a choice, then prepare a draft without confirming it.",
+                "mode": "mixed",
+                "allowed_effect_classes": ["read", "request_authorization", "external_write"],
+                "forbidden_effect_classes": ["filesystem_write", "artifact_creation"],
+                "memory_intent": {
+                    "use_current_thread": true,
+                    "search_personal": false,
+                    "search_project": false,
+                    "vault_value_requested": false,
+                    "standalone_choice_request": false,
+                    "durable_memory_candidate": false
+                },
+                "completion": {"deliverable":"chat_report","requires_evidence":true}
+            },
+            "remaining_plan": [
+                {"id":"s2","title":"Prepare the draft","status":"doing","detail":"Do not confirm"}
+            ]
+        })).unwrap();
+
+        let slot = hitl_resume_harness_slot(&wait, "A", true);
+
+        assert!(slot.contains("objective revision 7"));
+        assert!(slot.contains("prepare a draft without confirming it"));
+        assert!(slot.contains("Prepare the draft"));
+        assert!(slot.contains("Do not confirm"));
     }
 
     #[test]

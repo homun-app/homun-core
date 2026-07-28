@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-28
 
-**Status:** Approved for implementation by the user's instruction to proceed autonomously after the live train-booking analysis.
+**Status:** Implemented and verified; browser-page recovery remains an explicit residual item.
 
 ## Purpose
 
@@ -118,3 +118,29 @@ Automated tests must prove:
 ## Completion boundary
 
 This change completes the contract convergence discovered by the live test. It does not claim that every broader roadmap item is implemented. After the smoke, the implementation is audited against the prior security, sandbox, Vault, connector, long-running, stream ownership, and open-source comparison findings; any remaining item is reported explicitly rather than inferred from passing tests.
+
+## Implementation audit (2026-07-28)
+
+Implemented and verified:
+
+- normal and resumed turns use the same validated objective/effect/memory contract;
+- the complete user request is durable while the router summary remains metadata;
+- invalid semantic JSON gets one bounded retry; non-security memory-choice metadata is normalized;
+- browser form selection/fill is `external_write` while final payment keeps its independent one-use gate;
+- every Free wait stores schema version, objective revision, exact effects, memory intent and bounded remaining plan;
+- tool exposure, dynamic discovery and dispatch consume one `ObjectiveEffectPolicy`;
+- delivered/cancelled outcomes transition only the owned objective revision;
+- Rust workspace tests, warning-free build, desktop build/tests and browser-runtime tests pass.
+
+Live V5 evidence:
+
+- objective revision 1 remained `mixed` with `read + external_write + request_authorization` through three Choice resumes;
+- browser generation continued from 12 through 76 across those resumes;
+- all waits were resolved and task/run projections terminalized at each wait boundary;
+- cancelling the final failed browser attempt converged objective=`cancelled`, task=`cancelled`, run=`aborted`, message=`cancelled`.
+
+Not implemented by this change:
+
+- a restorable browser page/form checkpoint. During the post-choice phase the live session reset from generation 76 to 1, so the draft form could not be completed;
+- exactly-once recovery for an arbitrary external action whose remote outcome is unknown after process/session loss;
+- a single physical status row replacing task, run, message and objective projections. They now converge at broker boundaries but remain separate read models.

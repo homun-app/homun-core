@@ -5,7 +5,7 @@
 > Inventario converge/kill: [superpowers/2026-07-27-foundations-and-kill-list.md](superpowers/2026-07-27-foundations-and-kill-list.md).
 > Piano di convergenza: [superpowers/plans/2026-07-27-turn-contract-convergence.md](superpowers/plans/2026-07-27-turn-contract-convergence.md).
 
-**Ultimo aggiornamento: 2026-07-27 (Always Contract — un chokepoint HITL).**
+**Ultimo aggiornamento: 2026-07-28 (contratto generale objective/effect/resume/terminal).**
 
 ---
 
@@ -69,8 +69,8 @@ Running
 |---|---|
 | `HitlEnvelope` + `AwaitingUser` | Stop: ownership → user. Nessun nudge/synthesis/tool. Free = thread libero; Hold = approval. |
 | `UserResolution` | Click/RPC tipizzato (opzione, approve, clarify text). |
-| `ResumeBinding` | Il turn successivo **deve** riprendere `open_work`, non “nuovo obiettivo” / discovery a freddo. |
-| `OpenWork` | Piano, capability, sessione browser (warm). Carrier, non contratto. |
+| `ResumeBinding` | Il turn successivo **deve** riprendere `open_work`, non “nuovo obiettivo” / discovery a freddo; passa dal normale `validate_decision`. |
+| `OpenWork` | Carrier versionato della copia di recovery del contratto, piano residuo, capability e sessione browser (warm). Non è una seconda SoT: il record objective attivo vince quando disponibile. |
 
 **Estensioni (dati, non protocolli):**
 
@@ -81,6 +81,63 @@ Running
 
 Il browser **non** è il contratto. Prosa che chiede dati/scelta **non** è wait.
 
+## Contratto objective ed effetti
+
+`ObjectiveContractRecord` è la SoT per thread e conserva la richiesta utente completa
+entro un limite, non la sola sintesi del router. La sintesi resta in
+`scope_json.semantic_decision` per routing e osservabilità.
+
+`allowed_actions_json` è la policy tipizzata autorevole. `mode` è descrittivo e serve
+solo come fallback per record legacy con lista vuota. Metadati malformati o assenti
+falliscono chiusi su `read + request_authorization`.
+
+| Classe | Esempi | Gate aggiuntivo |
+|---|---|---|
+| `read` | letture, ricerca, planning, `browse` | Browser action lattice per le azioni nella pagina |
+| `filesystem_write` | file/patch/comandi progetto, memoria durevole | sandbox/path jail/policy esistenti |
+| `artifact_creation` | documenti, deck, immagini, salvataggio artifact | pipeline artifact esistente |
+| `external_write` | connector write, messaggi, automazioni, computer/browser action | approval/perimeter/browser safety; pagamento one-use invariato |
+
+Esposizione iniziale, discovery dinamica e dispatch consultano la stessa policy.
+Selezionare un'opzione o digitare in un form esterno è `external_write` anche senza
+submit; vietare conferma/acquisto/pagamento non trasforma le azioni preparatorie in read.
+`read` e `request_authorization` restano sempre disponibili perché non mutano stato.
+
+Il preflight semantico ritenta una sola volta un JSON troncato/invalido con budget
+compatibile con modelli reasoning. Una contraddizione tra ricerca memoria e il solo flag
+di ottimizzazione `standalone_choice_request` disattiva il flag, senza perdere l'intero
+contratto in un fallback read-only.
+
+## OpenWork durevole
+
+Ogni wait Free salva in `open_work_json`:
+
+- `schema_version`;
+- revisione, obiettivo completo, mode, allowed/forbidden effects;
+- `MemoryIntent`, incluso il solo intento Vault (mai valori segreti);
+- completion contract;
+- al massimo 12 step non conclusi con soli campi noti;
+- stato browser, URL se disponibile e capability hint.
+
+Sul resume il record objective attivo ha precedenza; altrimenti vale lo snapshot. Un
+wait legacy senza entrambi usa il fallback read-only. `selected_capability` viene
+azzerata per `execution_shape=agent_loop`, così la ripresa non aggira il validator.
+
+## Convergenza terminale
+
+Il broker proietta lo stato objective alla stessa frontiera che consegna il risultato:
+
+| Esito turn | Stato objective |
+|---|---|
+| risposta finale consegnata, nessun wait | `completed` |
+| cancel utente | `cancelled` |
+| Choice/Clarify Free, Confirm/Vault/Payment Hold | resta `active` |
+| park, errore retryable, nessuna risposta | resta `active` |
+
+La transizione è protetta da `revision`: un turn vecchio non può chiudere un obiettivo
+sostitutivo più recente. Lo stato del thread può restare `active`, perché descrive la
+conversazione e non il lavoro in corso.
+
 ## Regole d’oro (anti-sovrapposizione)
 
 1. **Un solo ingresso** in `AwaitingUser`: `classify_no_tools_stop` → envelope validato.
@@ -90,6 +147,9 @@ Il browser **non** è il contratto. Prosa che chiede dati/scelta **non** è wait
 5. Prima di aggiungere un meccanismo: **estende** `HitlEnvelope.kind` oppure **non entra**.
 6. `Parked` (macchina) ≠ `AwaitingUser` (persona).
 7. Sul resume: **vietata** discovery a freddo se `OpenWork` vivo.
+8. Nessun path può costruire un `ValidatedSemanticDecision` di resume senza validator.
+9. Nessun tool viene esposto o eseguito fuori dalle classi effetto del contratto.
+10. Solo il broker terminale può completare/cancellare l’obiettivo, con revisione attesa.
 
 ## Mapping oggi → contratto
 
@@ -123,3 +183,6 @@ Il browser **non** è il contratto. Prosa che chiede dati/scelta **non** è wait
 4. OpenWork.browser caldo → no cold discovery; morto → harness dichiara.
 5. Confirm Hold invariato.
 6. Messaggio con wait Free aperto **non** crea steering `Applying #n`.
+7. Resume conserva policy effetti e Memory/Vault intent senza escalation.
+8. Policy mista espone ed esegue solo le classi autorizzate.
+9. Delivery completa la revisione corrente; wait/park/no-answer restano active; revisione stale non transiziona.

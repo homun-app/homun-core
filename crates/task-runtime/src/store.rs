@@ -722,6 +722,41 @@ impl TaskStore {
         load_objective_contract_on(&self.connection, user_id, workspace_id, thread_id)
     }
 
+    /// Moves the currently active objective to a terminal state only when the
+    /// caller still owns the revision it executed against.
+    pub fn transition_objective_contract_status(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+        expected_revision: u64,
+        status: &str,
+    ) -> TaskRuntimeResult<bool> {
+        if !matches!(status, "completed" | "cancelled") {
+            return Err(TaskRuntimeError::Store(format!(
+                "invalid terminal objective contract status: {status}"
+            )));
+        }
+        let expected_revision = i64::try_from(expected_revision).map_err(|_| {
+            TaskRuntimeError::Store("objective revision exceeds SQLite range".to_string())
+        })?;
+        let changed = self.connection.execute(
+            "UPDATE objective_contracts
+             SET status = ?1, updated_at = ?2
+             WHERE user_id = ?3 AND workspace_id = ?4 AND thread_id = ?5
+               AND revision = ?6 AND status = 'active'",
+            params![
+                status,
+                OffsetDateTime::now_utc().unix_timestamp(),
+                user_id,
+                workspace_id,
+                thread_id,
+                expected_revision,
+            ],
+        )?;
+        Ok(changed == 1)
+    }
+
     pub fn append_turn_steering(
         &self,
         user_id: &str,
@@ -3445,6 +3480,56 @@ mod runtime_plan_tests {
             )
             .unwrap();
         assert_eq!(third.revision, second.revision + 1, "a changed objective still bumps");
+    }
+
+    #[test]
+    fn objective_terminal_transition_requires_matching_revision() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let objective = store
+            .upsert_objective_contract(
+                "u", "w", "t", "message-1", "Complete the analysis",
+                ObjectiveMode::ReadOnlyAnalysis, &json!({}), &json!(["read"]),
+                &json!({"kind": "report"}), "active",
+            )
+            .unwrap();
+
+        assert!(store
+            .transition_objective_contract_status(
+                "u", "w", "t", objective.revision, "completed",
+            )
+            .unwrap());
+        assert_eq!(
+            store.load_objective_contract("u", "w", "t").unwrap().unwrap().status,
+            "completed"
+        );
+    }
+
+    #[test]
+    fn stale_turn_cannot_close_a_replacement_objective() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let old = store
+            .upsert_objective_contract(
+                "u", "w", "t", "message-1", "Analyze",
+                ObjectiveMode::ReadOnlyAnalysis, &json!({}), &json!(["read"]), &json!({}),
+                "active",
+            )
+            .unwrap();
+        let replacement = store
+            .upsert_objective_contract(
+                "u", "w", "t", "message-2", "Analyze and implement", ObjectiveMode::Mixed,
+                &json!({}), &json!(["read", "filesystem_write"]), &json!({}), "active",
+            )
+            .unwrap();
+
+        assert!(!store
+            .transition_objective_contract_status(
+                "u", "w", "t", old.revision, "cancelled",
+            )
+            .unwrap());
+        assert_eq!(
+            store.load_objective_contract("u", "w", "t").unwrap().unwrap(),
+            replacement
+        );
     }
 
     #[test]

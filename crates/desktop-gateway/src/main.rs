@@ -195,7 +195,8 @@ use local_first_secrets::{
     DevelopmentSecretKeyProvider, EncryptedFileSecretStore, SecretMaterial, SecretRef, SecretStore,
 };
 use local_first_subagents::{
-    GenerateJsonRequest, GenerateStreamEvent, SubagentTaskExecutor, TokenMetrics,
+    GenerateJsonRequest, GenerateJsonResponse, GenerateStreamEvent, SubagentTaskExecutor,
+    TokenMetrics,
 };
 use local_first_task_runtime::{
     ApprovalGate, ApprovalPolicy, ApprovalRequest, Automation, AutomationSource, AutomationTrigger,
@@ -8340,6 +8341,39 @@ pub(crate) fn resolve_steering_semantic_decision(
     resolve_semantic_decision_for_context(state, thread_id, prompt, active, binding, true)
 }
 
+#[derive(Debug)]
+enum SemanticJsonGenerationError<E> {
+    Runtime(E),
+    Invalid(Vec<String>),
+}
+
+fn generate_semantic_json_with_invalid_retry<E>(
+    mut generate: impl FnMut() -> Result<GenerateJsonResponse, E>,
+) -> Result<serde_json::Value, SemanticJsonGenerationError<E>> {
+    let mut errors = Vec::new();
+    for attempt in 1..=2 {
+        match generate() {
+            Ok(response) if response.valid => return Ok(response.json),
+            Ok(response) => {
+                if response.errors.is_empty() {
+                    errors.push(format!(
+                        "attempt {attempt}: invalid response without diagnostics"
+                    ));
+                } else {
+                    errors.extend(
+                        response
+                            .errors
+                            .into_iter()
+                            .map(|error| format!("attempt {attempt}: {error}")),
+                    );
+                }
+            }
+            Err(error) => return Err(SemanticJsonGenerationError::Runtime(error)),
+        }
+    }
+    Err(SemanticJsonGenerationError::Invalid(errors))
+}
+
 fn resolve_semantic_decision_for_context(
     state: &AppState,
     thread_id: Option<&str>,
@@ -8387,10 +8421,13 @@ fn resolve_semantic_decision_for_context(
             usage
         },
         prompt: semantic_prompt,
-        max_tokens: 2_500,
+        // Reasoning models can spend most of a small budget before emitting the
+        // schema-bound JSON. A truncated contract is safe-fallback only, so leave
+        // enough room for reasoning plus the complete decision object.
+        max_tokens: 6_000,
         temperature: 0.0,
         wait_if_busy: true,
-        request_timeout_seconds: Some(45.0),
+        request_timeout_seconds: Some(75.0),
         json_schema: Some(semantic_decision::semantic_decision_schema()),
         required_keys: vec![
             "objective".to_string(),
@@ -8410,17 +8447,19 @@ fn resolve_semantic_decision_for_context(
         repair: true,
     };
     let mut effective_resolved = resolved.clone();
-    let model_value = match router.generate_json_with(&Requirements::default(), &request) {
-        Ok(response) if response.valid => Ok(response.json),
-        Ok(response) => {
+    let model_value = match generate_semantic_json_with_invalid_retry(|| {
+        router.generate_json_with(&Requirements::default(), &request)
+    }) {
+        Ok(value) => Ok(value),
+        Err(SemanticJsonGenerationError::Invalid(errors)) => {
             tracing::warn!(
                 target: "semantic::decision",
-                errors = ?response.errors,
-                "semantic decision did not satisfy the structured contract"
+                ?errors,
+                "semantic decision did not satisfy the structured contract after retry"
             );
             Err("invalid_model_output".to_string())
         }
-        Err(error) => {
+        Err(SemanticJsonGenerationError::Runtime(error)) => {
             if let Some(fallback) = semantic_decision_auth_fallback(&error, resolved.as_ref()) {
                 tracing::warn!(
                     target: "semantic::decision",
@@ -8431,17 +8470,19 @@ fn resolve_semantic_decision_for_context(
                 );
                 let fallback_router = build_router_for_resolved(&fallback);
                 effective_resolved = Some(fallback);
-                match fallback_router.generate_json_with(&Requirements::default(), &request) {
-                    Ok(response) if response.valid => Ok(response.json),
-                    Ok(response) => {
+                match generate_semantic_json_with_invalid_retry(|| {
+                    fallback_router.generate_json_with(&Requirements::default(), &request)
+                }) {
+                    Ok(value) => Ok(value),
+                    Err(SemanticJsonGenerationError::Invalid(errors)) => {
                         tracing::warn!(
                             target: "semantic::decision",
-                            errors = ?response.errors,
-                            "semantic fallback decision did not satisfy the structured contract"
+                            ?errors,
+                            "semantic fallback decision did not satisfy the structured contract after retry"
                         );
                         Err("invalid_model_output".to_string())
                     }
-                    Err(fallback_error) => {
+                    Err(SemanticJsonGenerationError::Runtime(fallback_error)) => {
                         tracing::warn!(
                             target: "semantic::decision",
                             ?fallback_error,
@@ -27021,46 +27062,67 @@ fn effectful_tool_name(name: &str, composio_writes: &std::collections::BTreeSet<
     })
 }
 
-fn objective_blocks_tool(
-    mode: local_first_task_runtime::ObjectiveMode,
+fn tool_effect_class(
     name: &str,
     composio_writes: &std::collections::BTreeSet<String>,
-) -> bool {
-    if mode != local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis {
-        return false;
-    }
-    if matches!(name, "update_plan" | "step_advance") {
-        return false;
-    }
-    composio_writes.contains(name)
+) -> semantic_decision::EffectClass {
+    use semantic_decision::EffectClass;
+
+    if HARNESS_CONTROL_TOOLS.contains(&name) {
+        EffectClass::Read
+    } else if composio_writes.contains(name)
         || matches!(
             name,
-            "create_artifact"
+            "schedule_task"
+                | "create_automation"
+                | "update_automation"
+                | "cancel_scheduled_task"
+                | "send_message"
+                | "use_computer"
+        )
+    {
+        EffectClass::ExternalWrite
+    } else if matches!(
+        name,
+        "create_artifact"
                 | "generate_image"
                 | "render_deck"
                 | "make_deck"
                 | "make_document"
                 | "save_artifact"
-                | "write_file"
+    ) {
+        EffectClass::ArtifactCreation
+    } else if matches!(
+        name,
+        "write_file"
                 | "edit_file"
                 | "apply_patch"
                 | "run_in_project"
-                | "schedule_task"
-                | "create_automation"
-                | "update_automation"
-                | "cancel_scheduled_task"
-                | "send_message"
+                | "run_in_sandbox"
                 | "customize_addon"
                 | "create_skill"
                 | "record_decision"
                 | "forget_memory"
-        )
-        || effectful_tool_name(name, composio_writes)
+    ) {
+        EffectClass::FilesystemWrite
+    } else if effectful_tool_name(name, composio_writes) {
+        EffectClass::ExternalWrite
+    } else {
+        EffectClass::Read
+    }
 }
 
-fn prune_tools_for_objective_mode(
+fn objective_blocks_tool(
+    policy: &semantic_decision::ObjectiveEffectPolicy,
+    name: &str,
+    composio_writes: &std::collections::BTreeSet<String>,
+) -> bool {
+    !policy.allows(tool_effect_class(name, composio_writes))
+}
+
+fn prune_tools_for_objective_policy(
     tools: &mut Vec<serde_json::Value>,
-    mode: local_first_task_runtime::ObjectiveMode,
+    policy: &semantic_decision::ObjectiveEffectPolicy,
     composio_writes: &std::collections::BTreeSet<String>,
 ) {
     tools.retain(|schema| {
@@ -27068,18 +27130,17 @@ fn prune_tools_for_objective_mode(
             .pointer("/function/name")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
-        !objective_blocks_tool(mode, name, composio_writes)
+        !objective_blocks_tool(policy, name, composio_writes)
     });
 }
 
-fn objective_mode_for_execution(
+fn objective_effect_policy_for_execution(
     state: &AppState,
     thread_id: Option<&str>,
     _prompt: &str,
-) -> local_first_task_runtime::ObjectiveMode {
-    objective_contract_for_execution(state, thread_id)
-        .map(|objective| objective.mode)
-        .unwrap_or(local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis)
+) -> semantic_decision::ObjectiveEffectPolicy {
+    let contract = objective_contract_for_execution(state, thread_id);
+    semantic_decision::ObjectiveEffectPolicy::from_contract(contract.as_ref())
 }
 
 fn objective_contract_for_execution(
@@ -27116,14 +27177,15 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 effects: Default::default(),
             });
         }
-        let objective_mode = objective_mode_for_execution(self.state, self.thread_id, self.prompt);
-        if objective_blocks_tool(objective_mode, name, self.composio_writes) {
+        let objective_policy =
+            objective_effect_policy_for_execution(self.state, self.thread_id, self.prompt);
+        if objective_blocks_tool(&objective_policy, name, self.composio_writes) {
             // Log the refusal: it used to be silent, so a task that quietly lost its effectful tools
             // looked like the model simply choosing not to act.
             tracing::warn!(
                 target: "objective::contract",
                 tool = name,
-                ?objective_mode,
+                effect_class = ?tool_effect_class(name, self.composio_writes),
                 "objective contract blocked an effectful tool"
             );
             return Ok(local_first_engine::ToolOutcome {
@@ -27132,7 +27194,8 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 // IS possible: read-only work continues; anything with an effect needs the user to say
                 // so in a new message.
                 result: format!(
-                    "OBJECTIVE CONTRACT BLOCKED `{name}`: this task is read-only analysis, so nothing was executed and no change was made. You cannot widen the objective yourself and there is no tool for it. Continue with read-only work (reading, searching, analysing) and report what you found; if the task genuinely requires a change, stop and tell the user plainly which action you would need to take, so they can ask for it."
+                    "OBJECTIVE CONTRACT BLOCKED `{name}`: the current objective does not authorize the {:?} effect class, so nothing was executed. Continue using the effects that are already allowed. If this effect is required, stop and tell the user exactly which action would need a new or expanded objective.",
+                    tool_effect_class(name, self.composio_writes)
                 ),
                 effects: Default::default(),
             });
@@ -27214,7 +27277,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 thread_id: self.thread_id,
                 prompt: self.prompt,
                 read_only: self.read_only
-                    || objective_mode == local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
+                    || !objective_policy.allows(semantic_decision::EffectClass::ExternalWrite),
                 channel_owner: self.channel_owner,
                 agent_run_id: self.run_id.map(str::to_string),
             };
@@ -28818,9 +28881,16 @@ save/export a file to a folder, call save_artifact(file, destination)."
     // prompt text-compatible while exposing the real content boundary to the
     // Prompt Inspector and independent budgets.
     let prompt_core = system.clone();
-    let semantic_contract = objective_contract_for_execution(state, request.thread_id.as_deref())
+    let active_objective_contract =
+        objective_contract_for_execution(state, request.thread_id.as_deref());
+    let semantic_contract = active_objective_contract
         .as_ref()
         .and_then(semantic_decision::semantic_decision_from_contract);
+    let objective_effect_policy =
+        semantic_decision::ObjectiveEffectPolicy::from_contract(active_objective_contract.as_ref());
+    catalog_index.retain(|(name, _, _)| {
+        !objective_blocks_tool(&objective_effect_policy, name, &composio_writes)
+    });
     let memory_intent = semantic_contract
         .as_ref()
         .map(|semantic| semantic.decision.memory_intent.clone())
@@ -29150,10 +29220,6 @@ switch language on your own. (Tool arguments, code, file paths and URLs stay as-
     // bindings fall back to that structured decision, never to prompt keyword routing.
     let routing_binding: Option<RoutingBinding> =
         active_routing_binding(state, request.thread_id.as_deref());
-    let semantic_objective_mode = semantic_contract
-        .as_ref()
-        .map(|semantic| semantic.decision.mode)
-        .unwrap_or(local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis);
     let capability_route =
         route_capability_with_binding(semantic_contract.as_ref(), routing_binding.as_ref());
     let workflow_route = workflow_route_from_capability(&capability_route);
@@ -29360,7 +29426,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     if !artifact_destinations.is_empty() && !read_only {
         base_tools.push(save_artifact_tool_schema(&artifact_destinations));
     }
-    prune_tools_for_objective_mode(&mut base_tools, semantic_objective_mode, &composio_writes);
+    prune_tools_for_objective_policy(&mut base_tools, &objective_effect_policy, &composio_writes);
     prune_tools_for_route(&mut base_tools, &workflow_route, &workflow_deny_tools);
     // Tool Search (Anthropic pattern): split the full toolset into a SMALL always-loaded
     // CORE + a DEFERRED registry the model discovers via `find_capability`. Keeps the
@@ -29445,7 +29511,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             }
         }
     }
-    prune_tools_for_objective_mode(&mut base_tools, semantic_objective_mode, &composio_writes);
+    prune_tools_for_objective_policy(&mut base_tools, &objective_effect_policy, &composio_writes);
     prune_tools_for_route(&mut base_tools, &workflow_route, &workflow_deny_tools);
     // Unified capability corpus for `find_capability`: deferred native tools + installed
     // skills + connected connector tools, all in one BM25-searchable list. One discovery
@@ -29460,14 +29526,48 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             capability_corpus.push(entry);
         }
     }
-    if !read_only
-        && semantic_objective_mode != local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis
-    {
-        capability_corpus.extend(native_workflow_capability_entries());
-        capability_corpus.extend(native_atomic_capability_entries());
-        capability_corpus.extend(template_catalog_capability_entries());
+    if !read_only && objective_effect_policy.allows_mutation() {
+        capability_corpus.extend(
+            native_workflow_capability_entries()
+                .into_iter()
+                .filter(|entry| {
+                    !objective_blocks_tool(
+                        &objective_effect_policy,
+                        &entry.key,
+                        &composio_writes,
+                    )
+                }),
+        );
+        capability_corpus.extend(
+            native_atomic_capability_entries()
+                .into_iter()
+                .filter(|entry| {
+                    !objective_blocks_tool(
+                        &objective_effect_policy,
+                        &entry.key,
+                        &composio_writes,
+                    )
+                }),
+        );
+        capability_corpus.extend(
+            template_catalog_capability_entries()
+                .into_iter()
+                .filter(|entry| {
+                    !objective_blocks_tool(
+                        &objective_effect_policy,
+                        &entry.key,
+                        &composio_writes,
+                    )
+                }),
+        );
     }
-    capability_corpus.extend(mcp_capability_entries(&mcp_catalog.schemas));
+    capability_corpus.extend(
+        mcp_capability_entries(&mcp_catalog.schemas)
+            .into_iter()
+            .filter(|entry| {
+                !objective_blocks_tool(&objective_effect_policy, &entry.key, &composio_writes)
+            }),
+    );
     if has_skills {
         for (id, sname, sdesc) in &enabled_skills {
             capability_corpus.push(CapabilityEntry {
@@ -36227,10 +36327,38 @@ fn persist_hitl_wait_payload(
     payload: serde_json::Value,
 ) {
     let browser_live = thread_has_live_browser_session(state, thread_id);
+    // `store` is already held by both callers. Resolve the workspace through that
+    // guard and read task state directly; calling `runtime_plan_control_scope` here
+    // would try to acquire the same chat-store mutex again and self-deadlock.
+    let (contract, remaining_plan) = store
+        .workspace_for_thread(thread_id)
+        .ok()
+        .and_then(|workspace_id| {
+            let task_store = state.task_store.lock().ok()?;
+            let user_id = gateway_user_id();
+            let contract = task_store
+                .load_objective_contract(user_id.as_str(), &workspace_id, thread_id)
+                .ok()
+                .flatten()
+                .as_ref()
+                .map(hitl_resume::ResumeContractSnapshot::from_objective);
+            let plan = task_store
+                .load_runtime_plan(user_id.as_str(), &workspace_id, thread_id)
+                .ok()
+                .flatten()
+                .filter(|plan| plan.status == "open")
+                .and_then(|plan| plan.plan_json.as_array().cloned())
+                .unwrap_or_default();
+            Some((contract, hitl_resume::bounded_remaining_plan(plan)))
+        })
+        .unwrap_or_default();
     let open_work = hitl_resume::OpenWorkSnapshot {
+        schema_version: hitl_resume::OPEN_WORK_SCHEMA_VERSION,
         browser_session_live: browser_live,
         last_url: None,
         capability_hint: browser_live.then(|| "browse".to_string()),
+        contract,
+        remaining_plan,
     };
     let wait_id = format!("hitl_{wait_kind}_{message_id}");
     let Ok(payload_json) = serde_json::to_string(&payload) else {
@@ -68974,30 +69102,38 @@ prs.save(Path({path:?}))
 
     #[test]
     fn read_only_objective_blocks_mutating_tools_but_keeps_analysis_tools() {
-        use local_first_task_runtime::ObjectiveMode;
+        use crate::semantic_decision::{EffectClass, ObjectiveEffectPolicy};
+        let read_only = ObjectiveEffectPolicy::from_allowed_effects([
+            EffectClass::Read,
+            EffectClass::RequestAuthorization,
+        ]);
+        let mutation = ObjectiveEffectPolicy::from_allowed_effects([
+            EffectClass::Read,
+            EffectClass::FilesystemWrite,
+        ]);
 
         assert!(super::objective_blocks_tool(
-            ObjectiveMode::ReadOnlyAnalysis,
+            &read_only,
             "create_artifact",
             &Default::default(),
         ));
         assert!(super::objective_blocks_tool(
-            ObjectiveMode::ReadOnlyAnalysis,
+            &read_only,
             "apply_patch",
             &Default::default(),
         ));
         assert!(!super::objective_blocks_tool(
-            ObjectiveMode::ReadOnlyAnalysis,
+            &read_only,
             "read_file",
             &Default::default(),
         ));
         assert!(!super::objective_blocks_tool(
-            ObjectiveMode::ReadOnlyAnalysis,
+            &read_only,
             "update_plan",
             &Default::default(),
         ));
         assert!(!super::objective_blocks_tool(
-            ObjectiveMode::Mutation,
+            &mutation,
             "apply_patch",
             &Default::default(),
         ));
@@ -69011,9 +69147,13 @@ prs.save(Path({path:?}))
             super::make_document_tool_schema(),
             super::write_file_tool_schema(),
         ];
-        super::prune_tools_for_objective_mode(
+        let policy = crate::semantic_decision::ObjectiveEffectPolicy::from_allowed_effects([
+            crate::semantic_decision::EffectClass::Read,
+            crate::semantic_decision::EffectClass::RequestAuthorization,
+        ]);
+        super::prune_tools_for_objective_policy(
             &mut tools,
-            local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
+            &policy,
             &Default::default(),
         );
         let names = tools
@@ -69026,6 +69166,72 @@ prs.save(Path({path:?}))
             .collect::<Vec<_>>();
 
         assert_eq!(names, vec!["list_directory", "read_text_file"]);
+    }
+
+    #[test]
+    fn tool_effect_classification_distinguishes_mutation_boundaries() {
+        use crate::semantic_decision::EffectClass;
+
+        assert_eq!(
+            super::tool_effect_class("write_file", &Default::default()),
+            EffectClass::FilesystemWrite
+        );
+        assert_eq!(
+            super::tool_effect_class("make_document", &Default::default()),
+            EffectClass::ArtifactCreation
+        );
+        assert_eq!(
+            super::tool_effect_class("send_message", &Default::default()),
+            EffectClass::ExternalWrite
+        );
+        assert_eq!(
+            super::tool_effect_class("read_file", &Default::default()),
+            EffectClass::Read
+        );
+        assert_eq!(
+            super::tool_effect_class("browse", &Default::default()),
+            EffectClass::Read,
+            "browser mutations remain governed by the browser action lattice"
+        );
+    }
+
+    #[test]
+    fn typed_effect_policy_controls_pruning_independently_of_mode() {
+        use crate::semantic_decision::{EffectClass, ObjectiveEffectPolicy};
+
+        let policy = ObjectiveEffectPolicy::from_allowed_effects([
+            EffectClass::Read,
+            EffectClass::RequestAuthorization,
+            EffectClass::ArtifactCreation,
+        ]);
+        let mut tools = vec![
+            super::read_file_tool_schema(),
+            super::make_document_tool_schema(),
+            super::write_file_tool_schema(),
+            super::send_message_tool_schema(),
+        ];
+
+        super::prune_tools_for_objective_policy(&mut tools, &policy, &Default::default());
+        let names = tools
+            .iter()
+            .filter_map(|schema| {
+                schema
+                    .pointer("/function/name")
+                    .and_then(serde_json::Value::as_str)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["read_file", "make_document"]);
+        assert!(super::objective_blocks_tool(
+            &policy,
+            "write_file",
+            &Default::default(),
+        ));
+        assert!(!super::objective_blocks_tool(
+            &policy,
+            "make_document",
+            &Default::default(),
+        ));
     }
 
     #[test]
@@ -74867,6 +75073,47 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 message: "too long".to_string(),
             }
         ));
+    }
+
+    #[test]
+    fn semantic_decision_retries_one_invalid_json_response() {
+        use local_first_subagents::{GenerateJsonResponse, TokenMetrics};
+
+        let metrics = || TokenMetrics {
+            prompt_tokens: 0,
+            generation_tokens: 0,
+            prompt_tps: 0.0,
+            generation_tps: 0.0,
+            peak_memory_gb: 0.0,
+            elapsed_seconds: 0.0,
+        };
+        let mut calls = 0;
+        let value = super::generate_semantic_json_with_invalid_retry(|| {
+            calls += 1;
+            Ok::<_, &'static str>(if calls == 1 {
+                GenerateJsonResponse {
+                    valid: false,
+                    errors: vec!["EOF while parsing JSON".to_string()],
+                    json: serde_json::Value::Null,
+                    raw_output: String::new(),
+                    repaired: false,
+                    metrics: metrics(),
+                }
+            } else {
+                GenerateJsonResponse {
+                    valid: true,
+                    errors: Vec::new(),
+                    json: serde_json::json!({"objective": "ok"}),
+                    raw_output: "{\"objective\":\"ok\"}".to_string(),
+                    repaired: false,
+                    metrics: metrics(),
+                }
+            })
+        })
+        .unwrap();
+
+        assert_eq!(calls, 2);
+        assert_eq!(value["objective"], "ok");
     }
 
     #[test]

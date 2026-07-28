@@ -30,6 +30,13 @@ enum ChatTurnRunBranch {
     NoAnswer,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ObjectiveTerminalProjection {
+    Completed,
+    Cancelled,
+    KeepActive,
+}
+
 /// Pure decision: given the three independently-observed signals, which branch applies.
 /// Kept as a free function (not inlined into the executor's if/else chain) so the
 /// precedence — cancel beats park beats a real answer beats nothing — is a single,
@@ -43,6 +50,21 @@ fn classify_chat_turn_run(cancelled: bool, generated: bool, parked: bool) -> Cha
         ChatTurnRunBranch::Generated
     } else {
         ChatTurnRunBranch::NoAnswer
+    }
+}
+
+fn project_objective_terminal(
+    branch: ChatTurnRunBranch,
+    has_actionable_wait: bool,
+) -> ObjectiveTerminalProjection {
+    match branch {
+        ChatTurnRunBranch::Cancelled => ObjectiveTerminalProjection::Cancelled,
+        ChatTurnRunBranch::Generated if !has_actionable_wait => {
+            ObjectiveTerminalProjection::Completed
+        }
+        ChatTurnRunBranch::Generated | ChatTurnRunBranch::Parked | ChatTurnRunBranch::NoAnswer => {
+            ObjectiveTerminalProjection::KeepActive
+        }
     }
 }
 
@@ -361,12 +383,13 @@ pub fn execute_chat_turn_task(
         routing_binding.as_ref(),
     );
     let project_root = crate::effective_thread_folder(thread_id);
-    let projection = crate::semantic_decision::objective_contract_projection(
+    let projection = crate::semantic_decision::objective_contract_projection_for_request(
         &semantic_decision,
         existing_objective.as_ref(),
         thread_id,
         &workspace_id,
         project_root.as_deref(),
+        visible_prompt,
     );
     let objective = state.task_store.lock().ok().and_then(|store| {
         store
@@ -579,6 +602,12 @@ pub fn execute_chat_turn_task(
     }
     let cancelled = run.is_none();
     let agent_result = run.and_then(|result| result.ok()).flatten();
+    let has_actionable_wait = agent_result.as_ref().is_some_and(|result| {
+        result
+            .actionable_cards
+            .iter()
+            .any(|card| card.requires_user)
+    });
     let waiting_for_user = crate::agent_turn_waits_for_user(agent_result.as_ref());
     let waiting_action = agent_result
         .as_ref()
@@ -615,7 +644,8 @@ pub fn execute_chat_turn_task(
                     .flatten()
             })
             .is_some_and(|persisted| persisted.status == TaskStatus::Parked);
-    match classify_chat_turn_run(cancelled, generated, parked) {
+    let run_branch = classify_chat_turn_run(cancelled, generated, parked);
+    match run_branch {
         ChatTurnRunBranch::Cancelled => {
             if let Ok(store) = state.chat_store.lock() {
                 let partial = store
@@ -793,6 +823,48 @@ pub fn execute_chat_turn_task(
         tracing::info!(target: "broker::executor", turn_id = %turn_id, cancelled, "turn did not produce a final reply — skipping finalization + done event");
     }
 
+    if let Some(objective) = objective.as_ref() {
+        let terminal_status = match project_objective_terminal(run_branch, has_actionable_wait) {
+            ObjectiveTerminalProjection::Completed => Some("completed"),
+            ObjectiveTerminalProjection::Cancelled => Some("cancelled"),
+            ObjectiveTerminalProjection::KeepActive => None,
+        };
+        if let Some(terminal_status) = terminal_status
+            && let Ok(store) = state.task_store.lock()
+        {
+            match store.transition_objective_contract_status(
+                task.user_id.as_str(),
+                &workspace_id,
+                thread_id,
+                objective.revision,
+                terminal_status,
+            ) {
+                Ok(true) => tracing::info!(
+                    target: "objective::contract",
+                    thread_id,
+                    revision = objective.revision,
+                    status = terminal_status,
+                    "objective reached broker-owned terminal state"
+                ),
+                Ok(false) => tracing::warn!(
+                    target: "objective::contract",
+                    thread_id,
+                    revision = objective.revision,
+                    status = terminal_status,
+                    "objective terminal transition skipped because ownership changed"
+                ),
+                Err(error) => tracing::warn!(
+                    target: "objective::contract",
+                    thread_id,
+                    revision = objective.revision,
+                    status = terminal_status,
+                    %error,
+                    "objective terminal transition failed"
+                ),
+            }
+        }
+    }
+
     // 8. Drop the live broadcast (subscribers see the channel close).
     unregister_turn(turn_id);
 
@@ -949,6 +1021,31 @@ mod tests {
         assert_eq!(
             classify_chat_turn_run(false, true, false),
             ChatTurnRunBranch::Generated
+        );
+    }
+
+    #[test]
+    fn objective_terminal_projection_covers_all_turn_boundaries() {
+        assert_eq!(
+            project_objective_terminal(ChatTurnRunBranch::Generated, false),
+            ObjectiveTerminalProjection::Completed
+        );
+        assert_eq!(
+            project_objective_terminal(ChatTurnRunBranch::Generated, true),
+            ObjectiveTerminalProjection::KeepActive,
+            "free and hold waits both keep open work active"
+        );
+        assert_eq!(
+            project_objective_terminal(ChatTurnRunBranch::Parked, false),
+            ObjectiveTerminalProjection::KeepActive
+        );
+        assert_eq!(
+            project_objective_terminal(ChatTurnRunBranch::NoAnswer, false),
+            ObjectiveTerminalProjection::KeepActive
+        );
+        assert_eq!(
+            project_objective_terminal(ChatTurnRunBranch::Cancelled, false),
+            ObjectiveTerminalProjection::Cancelled
         );
     }
 
