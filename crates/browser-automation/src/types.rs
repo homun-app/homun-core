@@ -24,6 +24,12 @@ pub enum BrowserMethod {
     Navigate,
     #[serde(rename = "browser.snapshot")]
     Snapshot,
+    #[serde(rename = "browser.checkpoint")]
+    Checkpoint,
+    #[serde(rename = "browser.restore")]
+    Restore,
+    #[serde(rename = "browser.rehydrate")]
+    Rehydrate,
     #[serde(rename = "browser.screenshot")]
     Screenshot,
     #[serde(rename = "browser.act")]
@@ -40,7 +46,7 @@ pub enum BrowserMethod {
     Pdf,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct BrowserRequest {
     pub id: String,
     pub method: BrowserMethod,
@@ -65,7 +71,7 @@ pub struct BrowserSidecarError {
     pub manual_action_required: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum BrowserResponse {
     Success {
@@ -129,4 +135,91 @@ pub enum BrowserActKind {
     Wait,
     Evaluate,
     Close,
+}
+
+pub const MAX_BROWSER_DRAFT_CONTROLS: usize = 32;
+pub const MAX_BROWSER_DRAFT_VALUE_CHARS: usize = 2_000;
+pub const MAX_BROWSER_DRAFT_BYTES: usize = 16 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserDraftControl {
+    pub draft_ref: String,
+    pub tag: String,
+    #[serde(rename = "type")]
+    pub control_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autocomplete: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form_id: Option<String>,
+    pub value: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserCheckpoint {
+    pub schema_version: u8,
+    pub target_id: String,
+    pub url: String,
+    pub origin: String,
+    pub browser_epoch: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cdp_target_id: Option<String>,
+    pub generation: u64,
+    pub controls: Vec<BrowserDraftControl>,
+    pub omitted_sensitive_count: u64,
+    pub omitted_bounded_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserRestoreRequest {
+    pub target_id: String,
+    pub url: String,
+    pub origin: String,
+    pub browser_epoch: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cdp_target_id: Option<String>,
+    pub generation: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserRestoreTier {
+    AdoptedLivePage,
+    DraftAvailable,
+    DegradedUrlOnly,
+}
+
+impl BrowserRestoreTier {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AdoptedLivePage => "adopted_live_page",
+            Self::DraftAvailable => "draft_available",
+            Self::DegradedUrlOnly => "degraded_url_only",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserRestoreResult {
+    pub tier: BrowserRestoreTier,
+    pub target_id: String,
+    pub generation: u64,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserRehydrateResult {
+    pub rehydrated: u64,
+    pub skipped: u64,
+    pub generation: u64,
 }

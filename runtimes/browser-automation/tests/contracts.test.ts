@@ -8,6 +8,18 @@ import {
 } from "../src/contracts.js";
 
 describe("browser sidecar contracts", () => {
+  it("accepts checkpoint restore and rehydrate methods", () => {
+    for (const method of [
+      "browser.checkpoint",
+      "browser.restore",
+      "browser.rehydrate",
+    ]) {
+      expect(
+        parseRequestLine(JSON.stringify({ id: `req_${method}`, method, params: {} })).method,
+      ).toBe(method);
+    }
+  });
+
   it("parses a JSON-line request envelope", () => {
     const request = parseRequestLine(
       JSON.stringify({

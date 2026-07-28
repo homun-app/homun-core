@@ -1,8 +1,12 @@
 import { createServer, Server } from "node:http";
-import { readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createServer as createNetServer } from "node:net";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BrowserSessionManager } from "../src/browser/session_manager.js";
+import { discoverChromiumExecutable } from "../src/browser/profiles.js";
 
 let server: Server;
 let baseUrl: string;
@@ -142,6 +146,236 @@ describe("browser sidecar engine", () => {
     await manager.act({ targetId: "plain", kind: "type", ref: name!.ref, text: "Ada" });
     const after = await manager.snapshot({ targetId: "plain" });
     expect(after.snapshot).not.toContain("Submitted");
+  });
+
+  it("captures only bounded non-sensitive visible form controls", async () => {
+    await manager.start();
+    await manager.open({ url: baseUrl, label: "checkpoint" });
+    const snapshot = await manager.snapshot({ targetId: "checkpoint" });
+    const name = snapshot.refs.find((ref) => ref.name === "Name");
+    const email = snapshot.refs.find((ref) => ref.name === "Email");
+    await manager.act({ targetId: "checkpoint", kind: "fill", ref: name!.ref, text: "Ada" } as never);
+    await manager.act({
+      targetId: "checkpoint",
+      kind: "fill",
+      ref: email!.ref,
+      text: "ada@example.test",
+    } as never);
+
+    const checkpoint = await manager.checkpoint({ targetId: "checkpoint" });
+    expect(checkpoint.schemaVersion).toBe(1);
+    expect(checkpoint.generation).toBeGreaterThan(0);
+    expect(checkpoint.controls.map((control) => control.name)).toEqual(
+      expect.arrayContaining(["name", "email"]),
+    );
+    expect(checkpoint.controls.map((control) => control.value)).toEqual(
+      expect.arrayContaining(["Ada", "ada@example.test"]),
+    );
+    expect(checkpoint.omittedSensitiveCount).toBeGreaterThanOrEqual(6);
+  });
+
+  it("checkpoint output excludes password payment file hidden and contenteditable values", async () => {
+    await manager.start();
+    await manager.open({ url: baseUrl, label: "sensitive-checkpoint" });
+
+    const serialized = JSON.stringify(
+      await manager.checkpoint({ targetId: "sensitive-checkpoint" }),
+    );
+    for (const forbidden of [
+      "never-store-password",
+      "4111111111111111",
+      "999",
+      "never-store-hidden",
+      "never-store-contenteditable",
+      "hidden-secret",
+      "security-code",
+      "card-number",
+      "attachment",
+    ]) {
+      expect(serialized).not.toContain(forbidden);
+    }
+  });
+
+  it("adopts the exact live page and keeps draft state with a monotonic generation", async () => {
+    await manager.start();
+    await manager.open({ url: baseUrl, label: "recoverable" });
+    const first = await manager.snapshot({ targetId: "recoverable" });
+    const name = first.refs.find((ref) => ref.name === "Name");
+    await manager.act({
+      targetId: "recoverable",
+      kind: "fill",
+      ref: name!.ref,
+      text: "Ada checkpoint",
+    } as never);
+    const checkpoint = await manager.checkpoint({ targetId: "recoverable" });
+    expect(checkpoint.cdpTargetId).toBeTruthy();
+
+    // Simulate replacement of the sidecar's process-local target map while the
+    // underlying Chromium page remains alive in the shared context.
+    (manager as unknown as { pages: Map<string, unknown> }).pages.clear();
+
+    const restored = await manager.restore({
+      targetId: checkpoint.targetId,
+      url: checkpoint.url,
+      origin: checkpoint.origin,
+      browserEpoch: checkpoint.browserEpoch,
+      cdpTargetId: checkpoint.cdpTargetId,
+      generation: checkpoint.generation,
+    });
+    expect(restored.tier).toBe("adopted_live_page");
+
+    const after = await manager.snapshot({ targetId: "recoverable" });
+    expect(after.generation).toBe(checkpoint.generation + 1);
+    expect(after.snapshot).toContain("Ada checkpoint");
+  });
+
+  it("adopts an exact live target across two independent CDP managers", async () => {
+    const port = await new Promise<number>((resolve, reject) => {
+      const probe = createNetServer();
+      probe.once("error", reject);
+      probe.listen(0, "127.0.0.1", () => {
+        const address = probe.address();
+        if (!address || typeof address === "string") {
+          reject(new Error("failed to reserve CDP port"));
+          return;
+        }
+        probe.close(() => resolve(address.port));
+      });
+    });
+    const profile = await mkdtemp(path.join(tmpdir(), "homun-cdp-recovery-"));
+    const chromiumProcess = spawn(await discoverChromiumExecutable(), [
+      "--headless=new",
+      "--remote-debugging-address=127.0.0.1",
+      `--remote-debugging-port=${port}`,
+      `--user-data-dir=${profile}`,
+      "--no-first-run",
+      "--no-default-browser-check",
+      "about:blank",
+    ]);
+    const endpoint = `http://127.0.0.1:${port}`;
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      try {
+        if ((await fetch(`${endpoint}/json/version`)).ok) break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (attempt === 79) throw new Error("CDP browser did not start");
+    }
+    const firstManager = new BrowserSessionManager({
+      allowPrivateNetwork: true,
+      userCdpEndpoint: endpoint,
+      browserEpoch: "shared-browser-epoch",
+    });
+    const secondManager = new BrowserSessionManager({
+      allowPrivateNetwork: true,
+      userCdpEndpoint: endpoint,
+      browserEpoch: "shared-browser-epoch",
+    });
+    try {
+      await firstManager.start();
+      await firstManager.open({ url: baseUrl, label: "cross-sidecar" });
+      const first = await firstManager.snapshot({ targetId: "cross-sidecar" });
+      const name = first.refs.find((ref) => ref.name === "Name")!;
+      await firstManager.act({
+        targetId: "cross-sidecar",
+        kind: "fill",
+        ref: name.ref,
+        text: "Ada survives sidecar loss",
+      } as never);
+      const checkpoint = await firstManager.checkpoint({ targetId: "cross-sidecar" });
+      await firstManager.detachForParentLoss();
+
+      const restored = await secondManager.restore({
+        targetId: checkpoint.targetId,
+        url: checkpoint.url,
+        origin: checkpoint.origin,
+        browserEpoch: checkpoint.browserEpoch,
+        cdpTargetId: checkpoint.cdpTargetId,
+        generation: checkpoint.generation,
+      });
+      expect(restored.tier).toBe("adopted_live_page");
+      const after = await secondManager.snapshot({ targetId: "cross-sidecar" });
+      expect(after.generation).toBe(checkpoint.generation + 1);
+      expect(after.snapshot).toContain("Ada survives sidecar loss");
+    } finally {
+      await firstManager.detachForParentLoss();
+      await secondManager.stop();
+      chromiumProcess.kill("SIGTERM");
+      await new Promise<void>((resolve) => chromiumProcess.once("exit", () => resolve()));
+      await rm(profile, { recursive: true, force: true });
+    }
+  });
+
+  it("explicit stop closes pages instead of detaching them", async () => {
+    await manager.start();
+    await manager.open({ url: baseUrl, label: "explicit-stop" });
+    const page = (
+      manager as unknown as { pages: Map<string, { page: { isClosed(): boolean } }> }
+    ).pages.get("explicit-stop")!.page;
+
+    await manager.stop();
+
+    expect(page.isClosed()).toBe(true);
+  });
+
+  it("rehydrates only matching empty controls at the current generation", async () => {
+    await manager.start();
+    await manager.open({ url: baseUrl, label: "rehydrate" });
+    const first = await manager.snapshot({ targetId: "rehydrate" });
+    const name = first.refs.find((ref) => ref.name === "Name")!;
+    const travelClass = first.refs.find((ref) => ref.name === "Class")!;
+    const remember = first.refs.find((ref) => ref.name === "Remember passenger")!;
+    await manager.act({ targetId: "rehydrate", kind: "fill", ref: name.ref, text: "Ada" } as never);
+    await manager.act({ targetId: "rehydrate", kind: "select_option", ref: travelClass.ref, value: "business" } as never);
+    await manager.act({ targetId: "rehydrate", kind: "click", ref: remember.ref });
+    const checkpoint = await manager.checkpoint({ targetId: "rehydrate" });
+    expect(checkpoint.controls.map((control) => ({ name: control.name, tag: control.tag }))).toEqual(
+      expect.arrayContaining([
+        { name: "name", tag: "input" },
+        { name: undefined, tag: "select" },
+        { name: "remember", tag: "input" },
+      ]),
+    );
+
+    const state = (
+      manager as unknown as {
+        pages: Map<string, { page: { evaluate<T>(fn: () => T): Promise<T> } }>;
+      }
+    ).pages.get("rehydrate")!;
+    await state.page.evaluate(() => {
+      (document.querySelector("input[name=name]") as HTMLInputElement).value = "";
+      (document.querySelector("select[aria-label=Class]") as HTMLSelectElement).value = "";
+      (document.querySelector("input[name=remember]") as HTMLInputElement).checked = false;
+    });
+    const current = await manager.snapshot({ targetId: "rehydrate" });
+    const currentRefs = new Map(current.refs.map((ref) => [ref.name, ref.ref]));
+    const byName = new Map(checkpoint.controls.map((control) => [control.name, control]));
+    const fields = [
+      ["Name", "name"],
+      ["Class", undefined],
+      ["Remember passenger", "remember"],
+    ].map(([accessibleName, controlName]) => {
+      const control = controlName
+        ? byName.get(controlName)
+        : checkpoint.controls.find((candidate) => candidate.tag === "select");
+      const { draftRef: _draftRef, value, ...descriptor } = control!;
+      return { ref: currentRefs.get(accessibleName!)!, value, descriptor };
+    });
+
+    await expect(
+      manager.rehydrate({
+        targetId: "rehydrate",
+        generation: current.generation - 1,
+        fields,
+      }),
+    ).rejects.toMatchObject({ code: "BROWSER_STALE_GENERATION" });
+    expect(
+      await manager.rehydrate({ targetId: "rehydrate", generation: current.generation, fields }),
+    ).toEqual({ rehydrated: 3, skipped: 0, generation: current.generation });
+    const restored = await manager.checkpoint({ targetId: "rehydrate" });
+    expect(restored.controls.find((control) => control.name === "name")?.value).toBe("Ada");
+    expect(restored.controls.find((control) => control.tag === "select")?.value).toBe("business");
+    expect(restored.controls.find((control) => control.name === "remember")?.value).toBe(true);
   });
 
   it("types into autocomplete-style fields and returns a fresh snapshot", async () => {

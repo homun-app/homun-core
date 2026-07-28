@@ -27,7 +27,52 @@ export type BrowserSessionOptions = {
   // reusing the shared default context. This is what lets multiple parallel
   // workers drive the same contained Chromium without colliding on tabs/state.
   isolatedContext?: boolean;
+  browserEpoch?: string;
 };
+
+export type BrowserDraftControl = {
+  draftRef: string;
+  tag: "input" | "textarea" | "select";
+  type: string;
+  name?: string;
+  id?: string;
+  autocomplete?: string;
+  label?: string;
+  formId?: string;
+  value: string | boolean | string[];
+};
+
+export type BrowserCheckpoint = {
+  schemaVersion: 1;
+  targetId: string;
+  url: string;
+  origin: string;
+  browserEpoch: string;
+  cdpTargetId?: string;
+  generation: number;
+  controls: BrowserDraftControl[];
+  omittedSensitiveCount: number;
+  omittedBoundedCount: number;
+};
+
+export type BrowserRestoreRequest = {
+  targetId: string;
+  url: string;
+  origin: string;
+  browserEpoch: string;
+  cdpTargetId?: string;
+  generation: number;
+};
+
+export type BrowserRehydrateField = {
+  ref: string;
+  value: string | boolean | string[];
+  descriptor: Omit<BrowserDraftControl, "draftRef" | "value">;
+};
+
+const MAX_DRAFT_CONTROLS = 32;
+const MAX_DRAFT_VALUE_CHARS = 2_000;
+const MAX_DRAFT_BYTES = 16 * 1024;
 
 export type BrowserTab = {
   targetId: string;
@@ -136,6 +181,21 @@ export class BrowserSessionManager {
     }
     // A full stop ends the session: forget how to recover targets too.
     this.targetMeta.clear();
+  }
+
+  async detachForParentLoss(): Promise<void> {
+    if (this.options.userCdpEndpoint && !this.options.isolatedContext) {
+      // The contained Chromium owns this shared context. Process exit closes
+      // only the CDP socket; its tabs remain available for exact adoption.
+      this.pages.clear();
+      this.targetMeta.clear();
+      await this.attachedBrowser?.close().catch(() => undefined);
+      this.context = undefined;
+      this.attachedBrowser = undefined;
+      this.activeProfile = "assistant";
+      return;
+    }
+    await this.stop();
   }
 
   // Closes the browser context without forgetting target metadata, so the
@@ -258,6 +318,7 @@ export class BrowserSessionManager {
     state.refs = snapshot.refLocators;
     state.lastFullSnapshot = snapshot.rawSnapshot;
     state.lastSnapshotFingerprint = snapshot.fingerprint;
+    this.rememberTarget(params.targetId, state, state.label);
     return {
       targetId: snapshot.targetId,
       url: snapshot.url,
@@ -272,6 +333,233 @@ export class BrowserSessionManager {
       paymentFloorRefs: snapshot.paymentFloorRefs,
       focusPaymentContext: snapshot.focusPaymentContext,
     };
+  }
+
+  async checkpoint(params: { targetId: string }): Promise<BrowserCheckpoint> {
+    const state = await this.resolvePage(params.targetId);
+    const page = state.page;
+    const captured = await page.evaluate(
+      ({ maxControls, maxValueChars, maxBytes }) => {
+        type CapturedControl = BrowserDraftControl;
+        const candidates = Array.from(
+          document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLElement>(
+            "input,textarea,select,[contenteditable=true]",
+          ),
+        );
+        const controls: CapturedControl[] = [];
+        let omittedSensitiveCount = 0;
+        let omittedBoundedCount = 0;
+        let bytes = 0;
+        const encoder = new TextEncoder();
+        const sensitivePattern = /(password|cvv|cvc|security.?code|card.?number|credit.?card|cc-?num)/i;
+        const sensitiveAutocomplete = new Set([
+          "current-password",
+          "new-password",
+          "cc-name",
+          "cc-given-name",
+          "cc-additional-name",
+          "cc-family-name",
+          "cc-number",
+          "cc-exp",
+          "cc-exp-month",
+          "cc-exp-year",
+          "cc-csc",
+          "cc-type",
+        ]);
+
+        for (const candidate of candidates) {
+          const tag = candidate.tagName.toLowerCase();
+          const input = candidate instanceof HTMLInputElement ? candidate : undefined;
+          const type = input?.type.toLowerCase() ?? tag;
+          const name = (candidate.getAttribute("name") ?? "").trim();
+          const id = (candidate.id ?? "").trim();
+          const autocomplete = (candidate.getAttribute("autocomplete") ?? "").trim().toLowerCase();
+          const ariaLabel = (candidate.getAttribute("aria-label") ?? "").trim();
+          const explicitLabel = id
+            ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.innerText.trim()
+            : "";
+          const wrappingLabel = candidate.closest("label")?.innerText.trim() ?? "";
+          const label = ariaLabel || explicitLabel || wrappingLabel;
+          const descriptorText = `${type} ${name} ${id} ${autocomplete} ${label}`;
+          const excluded =
+            tag === "div" ||
+            type === "password" ||
+            type === "file" ||
+            type === "hidden" ||
+            sensitiveAutocomplete.has(autocomplete) ||
+            sensitivePattern.test(descriptorText);
+          if (excluded) {
+            omittedSensitiveCount += 1;
+            continue;
+          }
+          if (
+            !(candidate instanceof HTMLInputElement || candidate instanceof HTMLTextAreaElement || candidate instanceof HTMLSelectElement) ||
+            candidate.disabled
+          ) {
+            continue;
+          }
+          const style = getComputedStyle(candidate);
+          const rect = candidate.getBoundingClientRect();
+          if (style.display === "none" || style.visibility === "hidden" || rect.width <= 0 || rect.height <= 0) {
+            continue;
+          }
+
+          let value: string | boolean | string[];
+          if (candidate instanceof HTMLInputElement && (type === "checkbox" || type === "radio")) {
+            value = candidate.checked;
+          } else if (candidate instanceof HTMLSelectElement && candidate.multiple) {
+            value = Array.from(candidate.selectedOptions).map((option) => option.value);
+          } else {
+            value = candidate.value;
+          }
+          const serializedValue = typeof value === "string" ? value : JSON.stringify(value);
+          if (serializedValue.length > maxValueChars || controls.length >= maxControls) {
+            omittedBoundedCount += 1;
+            continue;
+          }
+          const control: CapturedControl = {
+            draftRef: `draft_${controls.length + 1}`,
+            tag: tag as CapturedControl["tag"],
+            type,
+            ...(name ? { name } : {}),
+            ...(id ? { id } : {}),
+            ...(autocomplete ? { autocomplete } : {}),
+            ...(label ? { label: label.slice(0, 200) } : {}),
+            ...(candidate.form?.id ? { formId: candidate.form.id.slice(0, 200) } : {}),
+            value,
+          };
+          const controlBytes = encoder.encode(JSON.stringify(control)).length;
+          if (bytes + controlBytes > maxBytes) {
+            omittedBoundedCount += 1;
+            continue;
+          }
+          bytes += controlBytes;
+          controls.push(control);
+        }
+        return { controls, omittedSensitiveCount, omittedBoundedCount };
+      },
+      {
+        maxControls: MAX_DRAFT_CONTROLS,
+        maxValueChars: MAX_DRAFT_VALUE_CHARS,
+        maxBytes: MAX_DRAFT_BYTES,
+      },
+    );
+    const url = page.url();
+    return {
+      schemaVersion: 1,
+      targetId: params.targetId,
+      url,
+      origin: safeOrigin(url),
+      browserEpoch: this.options.browserEpoch ?? "standalone",
+      ...(await this.cdpTargetId(page)),
+      generation: state.generation,
+      ...captured,
+    };
+  }
+
+  async restore(params: BrowserRestoreRequest): Promise<{
+    tier: "adopted_live_page" | "draft_available" | "degraded_url_only";
+    targetId: string;
+    generation: number;
+    url: string;
+  }> {
+    if (safeOrigin(params.url) !== params.origin) {
+      throw new BrowserAutomationError({
+        code: "BROWSER_RESTORE_ORIGIN_MISMATCH",
+        message: "checkpoint origin does not match URL",
+        retryable: false,
+      });
+    }
+    if (
+      params.cdpTargetId &&
+      params.browserEpoch === (this.options.browserEpoch ?? "standalone")
+    ) {
+      await this.start();
+      for (const page of this.requireContext().pages()) {
+        const identity = await this.cdpTargetId(page);
+        if (
+          identity.cdpTargetId !== params.cdpTargetId ||
+          safeOrigin(page.url()) !== params.origin
+        ) {
+          continue;
+        }
+        const state = this.createPageState(page, params.targetId);
+        state.generation = Math.max(0, Math.floor(params.generation));
+        this.pages.set(params.targetId, state);
+        this.rememberTarget(params.targetId, state, params.targetId);
+        return {
+          tier: "adopted_live_page",
+          targetId: params.targetId,
+          generation: state.generation,
+          url: state.page.url(),
+        };
+      }
+    }
+    await this.open({ url: params.url, label: params.targetId });
+    const state = await this.resolvePage(params.targetId);
+    state.generation = Math.max(0, Math.floor(params.generation));
+    state.refs.clear();
+    return {
+      tier: "degraded_url_only",
+      targetId: params.targetId,
+      generation: state.generation,
+      url: state.page.url(),
+    };
+  }
+
+  async rehydrate(params: {
+    targetId: string;
+    generation: number;
+    fields: BrowserRehydrateField[];
+  }): Promise<{ rehydrated: number; skipped: number; generation: number }> {
+    const state = await this.resolvePage(params.targetId);
+    if (params.generation !== state.generation) {
+      throw new BrowserAutomationError({
+        code: "BROWSER_STALE_GENERATION",
+        message: `rehydrate generation ${params.generation} does not match current page generation ${state.generation}`,
+        retryable: true,
+      });
+    }
+    let rehydrated = 0;
+    let skipped = 0;
+    for (const field of params.fields.slice(0, MAX_DRAFT_CONTROLS)) {
+      const locator = requireRef(state.refs, field.ref);
+      const result = await locator.evaluate(
+        (element, requested) => {
+          if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) return false;
+          if (element.disabled) return false;
+          const tag = element.tagName.toLowerCase();
+          const type = element instanceof HTMLInputElement ? element.type.toLowerCase() : tag;
+          if (tag !== requested.descriptor.tag || type !== requested.descriptor.type) return false;
+          if ((element.getAttribute("name") ?? "") !== (requested.descriptor.name ?? "")) return false;
+          if ((element.id ?? "") !== (requested.descriptor.id ?? "")) return false;
+          if (element instanceof HTMLInputElement && (type === "checkbox" || type === "radio")) {
+            return !element.checked;
+          }
+          return element.value === "";
+        },
+        field,
+      );
+      if (!result) {
+        skipped += 1;
+        continue;
+      }
+      if (typeof field.value === "boolean") {
+        if (!field.value) {
+          skipped += 1;
+          continue;
+        }
+        await locator.check();
+      } else if (Array.isArray(field.value)) {
+        await locator.selectOption(field.value);
+      } else if (field.descriptor.tag === "select") {
+        await locator.selectOption(field.value);
+      } else {
+        await locator.fill(field.value);
+      }
+      rehydrated += 1;
+    }
+    return { rehydrated, skipped, generation: state.generation };
   }
 
   async act(action: BrowserActRequest): Promise<BrowserActionResult> {
@@ -314,6 +602,7 @@ export class BrowserSessionManager {
     state.refs = snapshot.refLocators;
     state.lastFullSnapshot = snapshot.rawSnapshot;
     state.lastSnapshotFingerprint = snapshot.fingerprint;
+    this.rememberTarget(action.targetId, state, state.label);
     return {
       ...result,
       targetId: snapshot.targetId,
@@ -515,6 +804,18 @@ export class BrowserSessionManager {
       });
     }
     return this.context;
+  }
+
+  private async cdpTargetId(page: Page): Promise<{ cdpTargetId?: string }> {
+    try {
+      const session = await page.context().newCDPSession(page);
+      const response = await session.send("Target.getTargetInfo");
+      await session.detach();
+      const targetId = response?.targetInfo?.targetId;
+      return typeof targetId === "string" && targetId ? { cdpTargetId: targetId } : {};
+    } catch {
+      return {};
+    }
   }
 
 
@@ -740,6 +1041,14 @@ function hostTimezone(): string | undefined {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
   } catch {
     return undefined;
+  }
+}
+
+function safeOrigin(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return "null";
   }
 }
 

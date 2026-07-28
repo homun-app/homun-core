@@ -1,5 +1,6 @@
 use local_first_browser_automation::{
-    BrowserMethod, BrowserRequest, BrowserResponse, BrowserSidecarError,
+    BrowserCheckpoint, BrowserDraftControl, BrowserMethod, BrowserRequest, BrowserResponse,
+    BrowserRestoreResult, BrowserSidecarError,
 };
 
 #[test]
@@ -30,6 +31,9 @@ fn all_browser_methods_serialize_to_sidecar_names() {
         (BrowserMethod::CloseTab, "browser.close_tab"),
         (BrowserMethod::Navigate, "browser.navigate"),
         (BrowserMethod::Snapshot, "browser.snapshot"),
+        (BrowserMethod::Checkpoint, "browser.checkpoint"),
+        (BrowserMethod::Restore, "browser.restore"),
+        (BrowserMethod::Rehydrate, "browser.rehydrate"),
         (BrowserMethod::Screenshot, "browser.screenshot"),
         (BrowserMethod::Act, "browser.act"),
         (BrowserMethod::ArmFileChooser, "browser.arm_file_chooser"),
@@ -42,6 +46,66 @@ fn all_browser_methods_serialize_to_sidecar_names() {
     for (method, expected) in methods {
         assert_eq!(serde_json::to_value(method).unwrap(), expected);
     }
+}
+
+#[test]
+fn browser_checkpoint_contract_round_trips_exact_wire_shape() {
+    let checkpoint: BrowserCheckpoint = serde_json::from_value(serde_json::json!({
+        "schemaVersion": 1,
+        "targetId": "booking",
+        "url": "https://rail.example/checkout",
+        "origin": "https://rail.example",
+        "browserEpoch": "container-42",
+        "cdpTargetId": "ABC123",
+        "generation": 9,
+        "controls": [{
+            "draftRef": "draft-1",
+            "tag": "input",
+            "type": "email",
+            "name": "email",
+            "value": "ada@example.test"
+        }],
+        "omittedSensitiveCount": 2,
+        "omittedBoundedCount": 0
+    }))
+    .unwrap();
+
+    assert_eq!(checkpoint.schema_version, 1);
+    assert_eq!(checkpoint.controls.len(), 1);
+    assert_eq!(checkpoint.controls[0].draft_ref, "draft-1");
+    assert_eq!(
+        serde_json::to_value(&checkpoint).unwrap()["browserEpoch"],
+        "container-42"
+    );
+}
+
+#[test]
+fn browser_restore_result_deserializes_adoption_tier() {
+    let result: BrowserRestoreResult = serde_json::from_value(serde_json::json!({
+        "tier": "adopted_live_page",
+        "targetId": "booking",
+        "generation": 9,
+        "url": "https://rail.example/checkout"
+    }))
+    .unwrap();
+
+    assert_eq!(result.target_id, "booking");
+    assert_eq!(result.generation, 9);
+    assert_eq!(result.tier.as_str(), "adopted_live_page");
+}
+
+#[test]
+fn draft_values_are_structured_and_not_displayable_contract_text() {
+    let control: BrowserDraftControl = serde_json::from_value(serde_json::json!({
+        "draftRef": "draft-1",
+        "tag": "select",
+        "type": "select-one",
+        "value": ["first", "second"]
+    }))
+    .unwrap();
+
+    assert_eq!(control.draft_ref, "draft-1");
+    assert_eq!(control.value.as_array().unwrap().len(), 2);
 }
 
 #[test]

@@ -20,9 +20,9 @@ fn browser_sidecar_timeout_secs() -> u64 {
 
 pub struct BrowserSidecarSession {
     child: RefCell<Child>,
-    // `Option` so `Drop` can close the pipe (take + drop) before killing: the
-    // sidecar treats stdin EOF as "parent gone" and shuts the browser down
-    // gracefully, which avoids orphaning Chromium.
+    // `Option` so `Drop` can close the pipe (take + drop) before killing. The
+    // sidecar treats stdin EOF as parent loss: shared CDP pages stay live while
+    // owned contexts are closed.
     stdin: RefCell<Option<ChildStdin>>,
     // stdout is drained on a dedicated reader thread into this channel, so `send` can wait
     // for a reply WITH a timeout instead of blocking forever on a raw pipe read.
@@ -163,9 +163,8 @@ impl crate::BrowserTransport for BrowserSidecarSession {
 
 impl Drop for BrowserSidecarSession {
     fn drop(&mut self) {
-        // Close stdin first: the sidecar sees EOF, shuts the browser down
-        // gracefully (closing Chromium so it is not orphaned), and exits. Give
-        // it a brief grace period, then force-kill only if it is still alive.
+        // Close stdin first so the sidecar can apply its ownership-aware detach
+        // policy. Give it a brief grace period, then force-kill if still alive.
         self.stdin.borrow_mut().take();
         let mut child = self.child.borrow_mut();
         for _ in 0..30 {

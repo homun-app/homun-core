@@ -10,9 +10,10 @@
 use serde_json::Value;
 
 /// The canonical native browser tool names (the granular set the chat agent drives).
-const NATIVE_BROWSER_TOOLS: [&str; 7] = [
+const NATIVE_BROWSER_TOOLS: [&str; 8] = [
     "browser_navigate",
     "browser_snapshot",
+    "browser_rehydrate",
     "browser_act",
     "browser_screenshot",
     "browser_tabs",
@@ -55,6 +56,7 @@ pub fn is_browser_granular_tool(name: &str) -> bool {
         name,
         "browser_navigate"
             | "browser_snapshot"
+            | "browser_rehydrate"
             | "browser_act"
             | "browser_screenshot"
             | "browser_tabs"

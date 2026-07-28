@@ -101,7 +101,7 @@ use base64::Engine as _;
 use bytes::Bytes;
 use chat_store::{BranchPoint, ChatStore, RemoteApprovalInput, RemoteApprovalRow, Tag, TagEntity};
 use local_first_browser_automation::{
-    BrowserAutomationClient, BrowserAutomationError, BrowserMethod, BrowserResponse,
+    BrowserAutomationClient, BrowserAutomationError, BrowserCheckpoint, BrowserMethod, BrowserResponse,
     BrowserSidecarSession, BrowserSidecarSpawnOptions, BrowserUrlApprovalGrant,
     BrowserUrlApprovalScope, BrowserUrlPolicyStore, BrowserVisibilityMode,
 };
@@ -122,6 +122,7 @@ use local_first_desktop_gateway::integrity_api::{
     LinkedMemoryRepairApplyResponse, canonical_integrity_actions, gateway_approval_token,
     gateway_audit_checksum, inspect_registered_graph,
 };
+use local_first_desktop_gateway::browser_checkpoint::BrowserCheckpointSecretStore;
 use local_first_desktop_gateway::linked_memory_repair::{
     LinkedMemoryRepairPreview, LinkedRepairError, LinkedRepairFailureInjection,
     apply_linked_memory_repair, preview_linked_memory_repair,
@@ -202,7 +203,7 @@ use local_first_task_runtime::{
     ApprovalGate, ApprovalPolicy, ApprovalRequest, Automation, AutomationSource, AutomationTrigger,
     EventTrigger, ExecutorResult, LeaseManager, ResourceClass, ResourceGovernor, ResourceLimits,
     TaskExecutor, TaskId, TaskQueueSnapshot, TaskRecord, TaskRuntimeError, TaskRuntimeResult,
-    TaskScheduler, TaskStatus, TaskStore, TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId,
+    NewBrowserCheckpoint, TaskScheduler, TaskStatus, TaskStore, TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId,
     WorkspaceId,
 };
 use local_first_vault::{
@@ -277,6 +278,7 @@ pub(crate) struct AppState {
     payment_approvals: Arc<Mutex<std::collections::HashMap<String, PaymentApprovalGrant>>>,
     setup_computer: Arc<setup_computer::SetupComputerCoordinator>,
     secret_store: Arc<EncryptedFileSecretStore<DevelopmentSecretKeyProvider>>,
+    browser_checkpoint_secret_store: Arc<BrowserCheckpointSecretStore>,
     auth_token: Arc<str>,
     /// Short-lived tickets authorizing the noVNC live-view proxy. The iframe and
     /// its WebSocket can't carry the Bearer header, so a Bearer-authed endpoint
@@ -493,6 +495,14 @@ impl AppState {
             DevelopmentSecretKeyProvider::new([0u8; 32]),
         )
         .expect("open test secret store");
+        let browser_checkpoint_secret_store = BrowserCheckpointSecretStore::open(
+            secret_path.with_file_name(format!(
+                "desktop-gateway-test-browser-checkpoints-{}.json",
+                uuid::Uuid::new_v4().simple()
+            )),
+            [0u8; 32],
+        )
+        .expect("open test browser checkpoint secret store");
         let state = AppState {
             http: reqwest::Client::new(),
             usage_store: Arc::new(Mutex::new(
@@ -534,6 +544,7 @@ impl AppState {
             payment_approvals: Arc::new(Mutex::new(std::collections::HashMap::new())),
             setup_computer: Arc::new(setup_computer::SetupComputerCoordinator::default()),
             secret_store: Arc::new(secret_store),
+            browser_checkpoint_secret_store: Arc::new(browser_checkpoint_secret_store),
             auth_token: "test-token".into(),
             novnc_tickets: Arc::new(Mutex::new(std::collections::HashMap::new())),
             novnc_view_ticket: Arc::new(Mutex::new(None)),
@@ -1120,6 +1131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         payment_approvals: Arc::new(Mutex::new(std::collections::HashMap::new())),
         setup_computer: Arc::new(setup_computer::SetupComputerCoordinator::default()),
         secret_store: Arc::new(open_gateway_secret_store()?),
+        browser_checkpoint_secret_store: Arc::new(open_browser_checkpoint_secret_store()?),
         auth_token: resolve_gateway_auth_token()?.into(),
         novnc_tickets: Arc::new(Mutex::new(std::collections::HashMap::new())),
         novnc_view_ticket: Arc::new(Mutex::new(None)),
@@ -3134,13 +3146,19 @@ async fn archive_chat_thread(
     State(state): State<AppState>,
     Path(thread_id): Path<String>,
 ) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
+    let workspace_id = lock_store(&state)?
+        .workspace_for_thread(&thread_id)
+        .map_err(GatewayError::store)?;
     let snapshot = lock_store(&state)?
         .set_status(&thread_id, "archived")
         .map_err(GatewayError::store)?;
     // Archiving ends the thread → close its warm browser session.
     let st = state.clone();
     let tid = thread_id.clone();
-    let _ = tokio::task::spawn_blocking(move || close_thread_browser_session(&st, &tid)).await;
+    let _ = tokio::task::spawn_blocking(move || {
+        close_thread_browser_session(&st, &tid, &workspace_id)
+    })
+    .await;
     Ok(Json(snapshot))
 }
 
@@ -3182,7 +3200,11 @@ async fn delete_chat_thread(
     // Deleting ends the thread → close its warm browser session.
     let st = state.clone();
     let tid = thread_id.clone();
-    let _ = tokio::task::spawn_blocking(move || close_thread_browser_session(&st, &tid)).await;
+    let cleanup_workspace = workspace_id.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        close_thread_browser_session(&st, &tid, &cleanup_workspace)
+    })
+    .await;
     // WS2-3.3: deleting chat history must NOT delete deliverables. Artifacts are
     // product outputs with their own lifecycle; users delete them explicitly from
     // the Artifacts surface so memory/provenance can be tombstoned coherently.
@@ -18539,6 +18561,40 @@ fn browser_snapshot_tool_schema() -> serde_json::Value {
     })
 }
 
+fn browser_rehydrate_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "browser_rehydrate",
+            "description": "Explicitly restore selected non-sensitive draft values after browser recovery. This is an external write: use only the opaque draft_ref reported by recovery, the current snapshot generation, and current [ref=...] targets. It fills only empty controls whose descriptors still match; it never submits, clicks, books, logs in, or pays.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["draft_ref", "generation", "fields"],
+                "properties": {
+                    "draft_ref": { "type": "string" },
+                    "generation": { "type": "integer", "minimum": 0 },
+                    "target": { "type": "string", "description": "id of the tab; default: current tab." },
+                    "fields": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": ["ref", "draft_control_ref"],
+                            "properties": {
+                                "ref": { "type": "string", "description": "Current page ref from the fresh recovery snapshot." },
+                                "draft_control_ref": { "type": "string", "description": "Opaque draft control id; never a field value." }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
 /// Granular browser tool: perform ONE interaction on the page (then auto-snapshot).
 fn browser_act_tool_schema() -> serde_json::Value {
     serde_json::json!({
@@ -22229,7 +22285,8 @@ const CORE_TOOL_NAMES: &[&str] = &[
 
 /// Which tools stay in the LIVE (non-deferred) set for THIS turn.
 ///
-/// The fixed core, PLUS `browse` while the thread holds a live warm browser session. Root cause
+/// The fixed core, PLUS `browse` while the thread holds a live warm browser session or a durable
+/// active checkpoint. Root cause
 /// this closes: `browse` is not in `CORE_TOOL_NAMES`, so after a successful browse the follow-up
 /// turn ("book the first one") reached a manager that did not have `browse` in its tool set at all
 /// — while `run_in_project`/`read_file`/`write_file`/`apply_patch` always are — and it did the only
@@ -22238,10 +22295,10 @@ const CORE_TOOL_NAMES: &[&str] = &[
 ///
 /// `browse` stays OUT of `CORE_TOOL_NAMES` on purpose: making it always-live would spend the
 /// tokens on every turn of every thread, including the ones that never touched a browser. The
-/// signal is derived from state (`thread_has_live_browser_session`), never from the wording of
+/// signal is derived from state (`thread_has_browser_continuation`), never from the wording of
 /// the user's message.
-fn tool_stays_live_this_turn(name: &str, browser_session_live: bool) -> bool {
-    CORE_TOOL_NAMES.contains(&name) || (browser_session_live && name == "browse")
+fn tool_stays_live_this_turn(name: &str, browser_continuation_available: bool) -> bool {
+    CORE_TOOL_NAMES.contains(&name) || (browser_continuation_available && name == "browse")
 }
 
 fn find_capability_tool_schema() -> serde_json::Value {
@@ -23186,6 +23243,7 @@ async fn execute_browser_tool(
     // manager — against a per-turn session.
     let args: serde_json::Value =
         serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+    let mut spawned_fresh = false;
     // First browser tool this turn: mark used (raises round
     // budget), publish live activity, acquire the session
     // (reuse the thread's warm one, else spawn a chat sidecar).
@@ -23235,6 +23293,7 @@ async fn execute_browser_tool(
                     match spawned {
                         Ok(Ok(session)) => {
                             *browser_session = Some(BrowserAutomationClient::new(session));
+                            spawned_fresh = true;
                             break;
                         }
                         // First failure → recycle the container + retry.
@@ -23255,12 +23314,52 @@ async fn execute_browser_tool(
             }
         }
     }
+    let recovery_notice = if spawned_fresh {
+        match (ctx.thread_id, browser_session.take()) {
+            (Some(thread_id), Some(client)) => {
+                let guard = browse_web_lock().lock().await;
+                let (client_back, notice) = restore_browser_checkpoint(
+                    ctx.state,
+                    thread_id,
+                    ctx.current_target.as_str(),
+                    client,
+                    BrowserCheckpointTelemetry { journal: ctx.journal, call_id },
+                )
+                .await;
+                drop(guard);
+                *browser_session = client_back;
+                if notice.is_some()
+                    && !ctx
+                        .opened_targets
+                        .iter()
+                        .any(|target| target == ctx.current_target)
+                {
+                    ctx.opened_targets.push(ctx.current_target.clone());
+                }
+                notice
+            }
+            (_, restored) => {
+                *browser_session = restored;
+                None
+            }
+        }
+    } else {
+        None
+    };
     // Mark this tool result as carrying a (potentially large)
     // snapshot so the pruner stubs older ones.
     ctx.browser_tool_call_ids.insert(call_id.to_string());
     // We hold the session for the duration of this branch; the
     // GLOBAL lock is acquired only around each single call.
-    let outcome: Result<String, String> = match browser_session.take() {
+    let outcome: Result<String, String> = if let Some(notice) = recovery_notice {
+        // Recovery re-establishes an observation boundary but deliberately does not replay the
+        // interrupted operation. Keep the loop's progress accounting honest so the model must
+        // inspect the fresh snapshot and issue a new, explicit next action.
+        *ctx.outcome_hint =
+            Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
+        Ok(notice)
+    } else {
+        match browser_session.take() {
         None => {
             push_browser_step("browser: session unavailable".to_string(), "error");
             Err(
@@ -23337,10 +23436,14 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     let mut client_now = client_back;
                     let snap_result = if nav_err.is_none() {
                         if let Some(c) = client_now.take() {
-                            let (c2, snap) = chat_browser_call_bounded(
+                            let (c2, snap) = chat_browser_call_checkpointed(
+                                ctx.state,
+                                ctx.thread_id,
+                                ctx.current_target.as_str(),
                                 c,
                                 BrowserMethod::Snapshot,
                                 browser_chat_act_snapshot_params(ctx.current_target.as_str()),
+                                BrowserCheckpointTelemetry { journal: ctx.journal, call_id },
                             )
                             .await;
                             client_now = c2;
@@ -23472,10 +23575,14 @@ or tell the user to start the contained computer (Settings → Local computer)."
                 )
                 .await;
                 let guard = browse_web_lock().lock().await;
-                let (client_back, snap) = chat_browser_call_bounded(
+                let (client_back, snap) = chat_browser_call_checkpointed(
+                    ctx.state,
+                    ctx.thread_id,
+                    ctx.current_target.as_str(),
                     client,
                     BrowserMethod::Snapshot,
                     browser_chat_snapshot_params(ctx.current_target.as_str()),
+                    BrowserCheckpointTelemetry { journal: ctx.journal, call_id },
                 )
                 .await;
                 drop(guard);
@@ -23523,6 +23630,141 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     Err(error) => {
                         push_browser_step("snapshot".to_string(), "error");
                         Err(format!("Snapshot failed: {error}"))
+                    }
+                }
+            }
+            "browser_rehydrate" => {
+                if ctx.read_only {
+                    *browser_session = Some(client);
+                    Err("Draft rehydration is an external write and is unavailable in a read-only objective.".into())
+                } else {
+                    if let Some(target) = args.get("target").and_then(Value::as_str)
+                        && !target.trim().is_empty()
+                    {
+                        *ctx.current_target = target.to_string();
+                    }
+                    let draft_ref = args
+                        .get("draft_ref")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let generation = args
+                        .get("generation")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(u64::MAX);
+                    let workspace_id = ctx
+                        .thread_id
+                        .and_then(|thread_id| browser_thread_workspace_id(ctx.state, thread_id));
+                    let checkpoint = ctx.thread_id.and_then(|thread_id| {
+                        workspace_id.as_deref().and_then(|workspace_id| {
+                            ctx.state.task_store.lock().ok().and_then(|store| {
+                            store
+                                .load_active_browser_checkpoint(
+                                    gateway_user_id().as_str(),
+                                    workspace_id,
+                                    thread_id,
+                                    ctx.current_target.as_str(),
+                                )
+                                .ok()
+                                .flatten()
+                            })
+                        })
+                    });
+                    let payload = checkpoint.as_ref().and_then(|checkpoint| {
+                        if checkpoint.checkpoint_id != draft_ref {
+                            return None;
+                        }
+                        checkpoint.draft_secret_ref.as_deref().and_then(|reference| {
+                            ctx.state
+                                .browser_checkpoint_secret_store
+                                .get(
+                                    reference,
+                                    gateway_user_id().as_str(),
+                                    workspace_id.as_deref()?,
+                                )
+                                .ok()
+                                .flatten()
+                        })
+                    });
+                    let fields = payload.as_ref().and_then(|payload| {
+                        checkpoint.as_ref().and_then(|checkpoint| {
+                            if payload.objective_revision != checkpoint.objective_revision
+                                || payload.target_id != checkpoint.target_id
+                                || payload.origin != checkpoint.origin
+                            {
+                                None
+                            } else {
+                                build_browser_rehydrate_fields(payload, &args).ok()
+                            }
+                        })
+                    });
+                    let Some(fields) = fields else {
+                        *browser_session = Some(client);
+                        *ctx.outcome_hint =
+                            Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
+                        return "Draft reference, scope, or field mapping is invalid. Nothing was written.".into();
+                    };
+                    let guard = browse_web_lock().lock().await;
+                    let (client_back, rehydrated) = chat_browser_call_bounded(
+                        client,
+                        BrowserMethod::Rehydrate,
+                        serde_json::json!({
+                            "target_id": ctx.current_target.as_str(),
+                            "generation": generation,
+                            "fields": fields,
+                        }),
+                    )
+                    .await;
+                    let mut client_now = client_back;
+                    let snapshot = if rehydrated.is_ok() {
+                        if let Some(client) = client_now.take() {
+                            let (back, snapshot) = chat_browser_call_checkpointed(
+                                ctx.state,
+                                ctx.thread_id,
+                                ctx.current_target.as_str(),
+                                client,
+                                BrowserMethod::Snapshot,
+                                browser_chat_act_snapshot_params(ctx.current_target.as_str()),
+                                BrowserCheckpointTelemetry { journal: ctx.journal, call_id },
+                            )
+                            .await;
+                            client_now = back;
+                            snapshot
+                        } else {
+                            Err("session lost after draft rehydration".into())
+                        }
+                    } else {
+                        Err(rehydrated.as_ref().err().cloned().unwrap_or_default())
+                    };
+                    drop(guard);
+                    *browser_session = client_now;
+                    match (rehydrated, snapshot) {
+                        (Ok(result), Ok(snapshot)) => {
+                            let count = result
+                                .get("rehydrated")
+                                .and_then(Value::as_u64)
+                                .unwrap_or(0);
+                            let skipped = result
+                                .get("skipped")
+                                .and_then(Value::as_u64)
+                                .unwrap_or(0);
+                            ctx.journal.record(browser_protocol_journal_event(
+                                call_id,
+                                "browser_draft_rehydrated",
+                                &serde_json::json!({
+                                    "generation": result.get("generation").and_then(Value::as_u64),
+                                    "restored_count": count,
+                                    "skipped_count": skipped,
+                                    "reason": "explicit_selected_fields",
+                                }),
+                            ));
+                            Ok(format!(
+                                "Draft rehydration completed: {count} filled, {skipped} skipped. No form was submitted and no other action was replayed.\nFresh snapshot:\n{}",
+                                browser_snapshot_text(&snapshot)
+                            ))
+                        }
+                        (Err(error), _) | (_, Err(error)) => Err(format!(
+                            "Draft rehydration failed: {error}. No submit, click, booking, or payment action was executed."
+                        )),
                     }
                 }
             }
@@ -23754,8 +23996,16 @@ navigate elsewhere to work around it.",
                         let targeted_floored_ref =
                             browser_action_targeted_a_floored_ref(&action, &current_floor_refs);
                         let guard = browse_web_lock().lock().await;
-                        let (client_back, act_res) =
-                            chat_browser_call_bounded(client, BrowserMethod::Act, action).await;
+                        let (client_back, act_res) = chat_browser_call_checkpointed(
+                            ctx.state,
+                            ctx.thread_id,
+                            ctx.current_target.as_str(),
+                            client,
+                            BrowserMethod::Act,
+                            action,
+                            BrowserCheckpointTelemetry { journal: ctx.journal, call_id },
+                        )
+                        .await;
                         drop(guard);
                         *browser_session = client_back;
                         match act_res {
@@ -23904,12 +24154,16 @@ chosen. Otherwise try a different element, scroll, or wait (kind=wait).]",
                                     (true, Some(c)) => {
                                         let guard = browse_web_lock().lock().await;
                                         // Stale-ref recovery is an ACTING re-observation → small view.
-                                        let (c_back, snap_res) = chat_browser_call_bounded(
+                                        let (c_back, snap_res) = chat_browser_call_checkpointed(
+                                            ctx.state,
+                                            ctx.thread_id,
+                                            ctx.current_target.as_str(),
                                             c,
                                             BrowserMethod::Snapshot,
                                             browser_chat_act_snapshot_params(
                                                 ctx.current_target.as_str(),
                                             ),
+                                            BrowserCheckpointTelemetry { journal: ctx.journal, call_id },
                                         )
                                         .await;
                                         drop(guard);
@@ -24205,7 +24459,8 @@ Use the text snapshot."
                 }
             }
             _ => Err(format!("Unknown browser tool: {name}")),
-        },
+        }
+    }
     };
     // D2 fallback for arms that set no explicit hint (navigate / snapshot / tabs / dialog /
     // screenshot): the `Result` VARIANT is itself a machine signal — an errored action is no
@@ -27079,6 +27334,7 @@ fn tool_effect_class(
                 | "cancel_scheduled_task"
                 | "send_message"
                 | "use_computer"
+                | "browser_rehydrate"
         )
     {
         EffectClass::ExternalWrite
@@ -27601,11 +27857,15 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
 /// sub-agent's ONE job is to reach the goal in the real browser and OUTPUT the concrete value, then stop.
 /// This tightness is the point: a clean, short context is what keeps the weak browser model from the
 /// reasoning-floods / plan-JSON leaks it produces when handed the full orchestrator prompt.
-fn browse_subagent_system_prompt() -> String {
+fn browse_subagent_system_prompt(allow_rehydrate: bool) -> String {
+    let available_tools = if allow_rehydrate {
+        "browser_navigate, browser_snapshot, browser_act, browser_rehydrate, browser_screenshot, browser_tabs, browser_dialog"
+    } else {
+        "browser_navigate, browser_snapshot, browser_act, browser_screenshot, browser_tabs, browser_dialog"
+    };
     format!(
         "You drive a REAL web browser to accomplish ONE information goal, then report the result. \
-{now}. You have ONLY these tools: browser_navigate, browser_snapshot, browser_act, \
-browser_screenshot, browser_tabs, browser_dialog. There is no other tool and no plan to track — just \
+{now}. You have ONLY these tools: {available_tools}. There is no other tool and no plan to track — just \
 browse and answer.\n\
 \n\
 METHOD:\n\
@@ -27666,6 +27926,22 @@ genuinely unavailable after trying your sources, say so explicitly (e.g. \"not a
 NOT invent it.",
         now = now_block(),
     )
+}
+
+fn browse_subagent_tool_schemas(read_only: bool) -> Vec<serde_json::Value> {
+    let mut schemas = vec![
+        browser_navigate_tool_schema(),
+        browser_snapshot_tool_schema(),
+        browser_act_tool_schema(),
+        browser_done_tool_schema(),
+        browser_screenshot_tool_schema(),
+        browser_tabs_tool_schema(),
+        browser_dialog_tool_schema(),
+    ];
+    if !read_only {
+        schemas.insert(2, browser_rehydrate_tool_schema());
+    }
+    schemas
 }
 
 /// A `StreamSink` whose events go NOWHERE (ADR 0025 isolation). The sub-agent's raw token/event stream
@@ -27874,22 +28150,14 @@ impl GatewayBrowseExecutor<'_> {
             None => request.goal.clone(),
         };
 
-        // Seed the ISOLATED sub-state: a clean 2-message context (browser prompt + goal) and ONLY the 6
-        // granular browser tools. Nothing from the manager's turn crosses in — isolation by construction.
+        // Seed the ISOLATED sub-state: a clean 2-message context and only granular browser tools.
+        // Read-only objectives omit rehydration. Nothing from the manager crosses this boundary.
         let mut ls = local_first_engine::LoopState::new();
         ls.messages = local_first_engine::browse::seed_browse_messages(
-            &browse_subagent_system_prompt(),
+            &browse_subagent_system_prompt(!self.read_only),
             &user_goal,
         );
-        ls.tool_schemas = vec![
-            browser_navigate_tool_schema(),
-            browser_snapshot_tool_schema(),
-            browser_act_tool_schema(),
-            browser_done_tool_schema(),
-            browser_screenshot_tool_schema(),
-            browser_tabs_tool_schema(),
-            browser_dialog_tool_schema(),
-        ];
+        ls.tool_schemas = browse_subagent_tool_schemas(self.read_only);
         ls.provider = local_first_engine::ProviderBinding {
             model,
             base_url,
@@ -27937,7 +28205,7 @@ impl GatewayBrowseExecutor<'_> {
             ),
             "done",
         );
-        // The tool chokepoint is browser-only: the 6 browser tools route through the fresh browser
+        // The tool chokepoint is browser-only: offered browser tools route through the fresh browser
         // executor below; any non-browser call is refused (defense — none are offered in tool_schemas).
         let capability_executor = BrowseOnlyCapabilityExecutor;
         let mut browser_executor = GatewayBrowserExecutor {
@@ -28035,7 +28303,7 @@ impl GatewayBrowseExecutor<'_> {
             autoadvance_from_evidence: false,
             step_verification: false,
             verbose: verbose_debug(),
-            // The browse sub-turn only ever offers the 6 browser tools (BrowseOnlyCapabilityExecutor
+            // The browse sub-turn only ever offers its browser tools (BrowseOnlyCapabilityExecutor
             // above) — a deterministic plugin routing (S2) never targets one of those, so forcing is
             // never applicable here.
             forced_tool: None,
@@ -28309,7 +28577,7 @@ impl local_first_engine::CapabilityExecutor for BrowseOnlyCapabilityExecutor {
     ) -> Result<local_first_engine::ToolOutcome, String> {
         Err(format!(
             "Tool '{name}' is not available while browsing. Use only the browser tools \
-(browser_navigate / browser_snapshot / browser_act / browser_screenshot / browser_tabs / \
+(browser_navigate / browser_snapshot / browser_act / browser_rehydrate / browser_screenshot / browser_tabs / \
 browser_dialog), then write the final answer."
         ))
     }
@@ -28493,7 +28761,7 @@ date; \"June 10\" = June 10 of the correct year relative to this date; ALWAYS pi
 time in the FUTURE. For any time slot (dates/times), call the resolve_datetime tool \
 FIRST: it returns the correct absolute date to use (e.g. to fill in a form). Do not \
 compute dates by hand. You have access to a real browser that YOU drive via granular \
-tools (browser_navigate / browser_snapshot / browser_act / browser_screenshot).\n\
+tools (browser_navigate / browser_snapshot / browser_act / browser_rehydrate / browser_screenshot).\n\
 \n\
 METHOD (applies to any request, not just travel):\n\
 1. UNDERSTAND: what the user wants and what the concrete EXPECTED RESULT is.\n\
@@ -29433,20 +29701,19 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // upfront tool count low (selection accuracy + context budget) as tools grow, and makes
     // the browser a discovered last-resort instead of the silent catch-all. `find_capability`
     // pushes matches into the live `tool_schemas` (same mechanism as `find_connected_tools`).
-    // One machine-derived exception (see `tool_stays_live_this_turn`): a thread that still holds a
-    // LIVE warm browser session is MID web task, so `browse` stays live for this turn instead of
-    // requiring a `find_capability` hop the manager may never think to take. Read-only probe — it
-    // must not take, park or extend the session.
-    let browser_session_live = request
+    // One machine-derived exception (see `tool_stays_live_this_turn`): a thread with either a warm
+    // browser session or an active revision-matched checkpoint is MID web task, so `browse` stays
+    // live instead of requiring a discovery hop. This probe consumes neither state source.
+    let browser_continuation_available = request
         .thread_id
         .as_deref()
-        .is_some_and(|thread_id| thread_has_live_browser_session(state, thread_id));
+        .is_some_and(|thread_id| thread_has_browser_continuation(state, thread_id));
     let (mut base_tools, deferred_tools): (Vec<serde_json::Value>, Vec<serde_json::Value>) =
         base_tools.into_iter().partition(|schema| {
             schema
                 .pointer("/function/name")
                 .and_then(|v| v.as_str())
-                .map(|name| tool_stays_live_this_turn(name, browser_session_live))
+                .map(|name| tool_stays_live_this_turn(name, browser_continuation_available))
                 .unwrap_or(false)
         });
     match &capability_route {
@@ -29466,14 +29733,17 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         }
     }
     // HITL Choice resume: strip cold discovery so the model cannot derail to
-    // suggest_capabilities / CONNECT_SUGGEST. Warm OpenWork.browser keeps browse live
-    // via tool_stays_live_this_turn; dead session keeps find_capability for rediscovery.
+    // suggest_capabilities / CONNECT_SUGGEST. Warm state or a durable checkpoint keeps browse
+    // live via tool_stays_live_this_turn; only a truly dead continuation permits rediscovery.
     if hitl_choice_resume.is_some() {
-        let browser_live_now = request
+        let browser_continuation_available = request
             .thread_id
             .as_deref()
-            .is_some_and(|tid| thread_has_live_browser_session(state, tid));
-        hitl_resume::prune_cold_discovery_tools(&mut base_tools, !browser_live_now);
+            .is_some_and(|tid| thread_has_browser_continuation(state, tid));
+        hitl_resume::prune_cold_discovery_tools(
+            &mut base_tools,
+            !browser_continuation_available,
+        );
     }
     // MCP servers are installed deliberately and are few, so their tools go STRAIGHT
     // into the live tool set (not deferred behind find_capability) when the count is
@@ -32512,6 +32782,466 @@ async fn chat_browser_call_bounded(
     }
 }
 
+fn browser_thread_workspace_id(state: &AppState, thread_id: &str) -> Option<String> {
+    state
+        .chat_store
+        .lock()
+        .ok()?
+        .workspace_for_thread(thread_id)
+        .ok()
+}
+
+#[derive(Clone, Copy)]
+struct BrowserCheckpointTelemetry<'a> {
+    journal: &'a agent_journal::GatewayJournal,
+    call_id: &'a str,
+}
+
+async fn persist_browser_checkpoint(
+    state: &AppState,
+    thread_id: Option<&str>,
+    target_id: &str,
+    client: BrowserAutomationClient<BrowserSidecarSession>,
+    telemetry: BrowserCheckpointTelemetry<'_>,
+) -> Option<BrowserAutomationClient<BrowserSidecarSession>> {
+    let Some(thread_id) = thread_id else {
+        return Some(client);
+    };
+    let Some(workspace_id) = browser_thread_workspace_id(state, thread_id) else {
+        return Some(client);
+    };
+    let (client_back, result) = chat_browser_call_bounded(
+        client,
+        BrowserMethod::Checkpoint,
+        serde_json::json!({"target_id": target_id}),
+    )
+    .await;
+    let Ok(value) = result else {
+        return client_back;
+    };
+    let Ok(checkpoint) = serde_json::from_value::<BrowserCheckpoint>(value) else {
+        return client_back;
+    };
+    if checkpoint.schema_version != 1 || checkpoint.target_id != target_id {
+        return client_back;
+    }
+    let (objective_revision, previous_secret_ref) = {
+        let Ok(store) = state.task_store.lock() else {
+            return client_back;
+        };
+        let Ok(Some(objective)) = store.load_objective_contract(
+            gateway_user_id().as_str(),
+            &workspace_id,
+            thread_id,
+        ) else {
+            return client_back;
+        };
+        if objective.status != "active" {
+            return client_back;
+        }
+        let previous = store
+            .load_active_browser_checkpoint(
+                gateway_user_id().as_str(),
+                &workspace_id,
+                thread_id,
+                target_id,
+            )
+            .ok()
+            .flatten()
+            .and_then(|record| record.draft_secret_ref);
+        (objective.revision, previous)
+    };
+    let checkpoint_id = uuid::Uuid::new_v4().simple().to_string();
+    let draft_secret_ref = if checkpoint.controls.is_empty() {
+        None
+    } else {
+        let payload = local_first_desktop_gateway::browser_checkpoint::BrowserDraftSecret {
+            schema_version: 1,
+            objective_revision,
+            target_id: target_id.to_string(),
+            origin: checkpoint.origin.clone(),
+            generation: checkpoint.generation,
+            controls: checkpoint.controls.clone(),
+        };
+        state
+            .browser_checkpoint_secret_store
+            .put(
+                gateway_user_id().as_str(),
+                &workspace_id,
+                &checkpoint_id,
+                &payload,
+            )
+            .ok()
+    };
+    let record = NewBrowserCheckpoint {
+        checkpoint_id,
+        user_id: gateway_user_id().as_str().to_string(),
+        workspace_id,
+        thread_id: thread_id.to_string(),
+        target_id: target_id.to_string(),
+        objective_revision,
+        schema_version: checkpoint.schema_version as u32,
+        url: checkpoint.url,
+        origin: checkpoint.origin,
+        browser_epoch: checkpoint.browser_epoch,
+        cdp_target_id: checkpoint.cdp_target_id,
+        generation: checkpoint.generation,
+        draft_secret_ref: draft_secret_ref.clone(),
+        draft_control_count: checkpoint.controls.len() as u32,
+        omitted_sensitive_count: checkpoint.omitted_sensitive_count as u32,
+        omitted_bounded_count: checkpoint.omitted_bounded_count as u32,
+        expires_at: (OffsetDateTime::now_utc() + Duration::minutes(30)).unix_timestamp(),
+    };
+    let stored = state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| store.upsert_browser_checkpoint(&record).ok())
+        .unwrap_or(false);
+    if stored {
+        telemetry.journal.record(browser_protocol_journal_event(
+            telemetry.call_id,
+            "browser_checkpoint_saved",
+            &serde_json::json!({
+                "schema_version": record.schema_version,
+                "generation": record.generation,
+                "draft_control_count": record.draft_control_count,
+                "omitted_sensitive_count": record.omitted_sensitive_count,
+                "omitted_bounded_count": record.omitted_bounded_count,
+            }),
+        ));
+        if let Some(previous) = previous_secret_ref.filter(|previous| {
+            draft_secret_ref.as_deref() != Some(previous.as_str())
+        }) {
+            let _ = state.browser_checkpoint_secret_store.delete(&previous);
+        }
+    } else if let Some(reference) = draft_secret_ref {
+        let _ = state.browser_checkpoint_secret_store.delete(&reference);
+    }
+    client_back
+}
+
+async fn chat_browser_call_checkpointed(
+    state: &AppState,
+    thread_id: Option<&str>,
+    target_id: &str,
+    client: BrowserAutomationClient<BrowserSidecarSession>,
+    method: BrowserMethod,
+    params: serde_json::Value,
+    telemetry: BrowserCheckpointTelemetry<'_>,
+) -> (
+    Option<BrowserAutomationClient<BrowserSidecarSession>>,
+    Result<serde_json::Value, String>,
+) {
+    let (mut client_back, result) = chat_browser_call_bounded(client, method, params).await;
+    if result.is_ok()
+        && matches!(method, BrowserMethod::Snapshot | BrowserMethod::Act)
+        && let Some(client) = client_back.take()
+    {
+        client_back =
+            persist_browser_checkpoint(state, thread_id, target_id, client, telemetry).await;
+    }
+    (client_back, result)
+}
+
+async fn restore_browser_checkpoint(
+    state: &AppState,
+    thread_id: &str,
+    target_id: &str,
+    client: BrowserAutomationClient<BrowserSidecarSession>,
+    telemetry: BrowserCheckpointTelemetry<'_>,
+) -> (
+    Option<BrowserAutomationClient<BrowserSidecarSession>>,
+    Option<String>,
+) {
+    let Some(workspace_id) = browser_thread_workspace_id(state, thread_id) else {
+        return (Some(client), None);
+    };
+    let checkpoint = state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store
+                .load_active_browser_checkpoint(
+                    gateway_user_id().as_str(),
+                    &workspace_id,
+                    thread_id,
+                    target_id,
+                )
+                .ok()
+                .flatten()
+        });
+    let Some(checkpoint) = checkpoint else {
+        return (Some(client), None);
+    };
+    let draft_payload = checkpoint
+        .draft_secret_ref
+        .as_deref()
+        .and_then(|reference| {
+            state
+                .browser_checkpoint_secret_store
+                .get(
+                    reference,
+                    gateway_user_id().as_str(),
+                    &workspace_id,
+                )
+                .ok()
+                .flatten()
+        })
+        .filter(|payload| {
+            payload.objective_revision == checkpoint.objective_revision
+                && payload.target_id == checkpoint.target_id
+                && payload.origin == checkpoint.origin
+        });
+    let (client_back, restored) = chat_browser_call_bounded(
+        client,
+        BrowserMethod::Restore,
+        serde_json::json!({
+            "target_id": checkpoint.target_id,
+            "url": checkpoint.url,
+            "origin": checkpoint.origin,
+            "browser_epoch": checkpoint.browser_epoch,
+            "cdp_target_id": checkpoint.cdp_target_id,
+            "generation": checkpoint.generation,
+        }),
+    )
+    .await;
+    let Some(client) = client_back else {
+        telemetry.journal.record(browser_protocol_journal_event(
+            telemetry.call_id,
+            "browser_restore_degraded",
+            &serde_json::json!({"reason": "restore_timeout"}),
+        ));
+        return (
+            None,
+            Some("Browser recovery timed out. No pending browser action was executed; retry after the session respawns.".into()),
+        );
+    };
+    let restore_value = match restored {
+        Ok(value) => value,
+        Err(error) => {
+            telemetry.journal.record(browser_protocol_journal_event(
+                telemetry.call_id,
+                "browser_restore_degraded",
+                &serde_json::json!({"reason": "restore_error"}),
+            ));
+            return (
+                Some(client),
+                Some(format!(
+                    "Browser recovery failed: {error}. No pending browser action was executed."
+                )),
+            );
+        }
+    };
+    let tier = restore_value
+        .get("tier")
+        .and_then(Value::as_str)
+        .unwrap_or("degraded_url_only");
+    let (client_back, snapshot) = chat_browser_call_bounded(
+        client,
+        BrowserMethod::Snapshot,
+        browser_chat_act_snapshot_params(target_id),
+    )
+    .await;
+    let (snapshot, snapshot_generation) = match snapshot {
+        Ok(value) => (
+            browser_snapshot_text(&value),
+            value.get("generation").and_then(Value::as_u64),
+        ),
+        Err(error) => {
+            telemetry.journal.record(browser_protocol_journal_event(
+                telemetry.call_id,
+                "browser_restore_degraded",
+                &serde_json::json!({
+                    "reason": "mandatory_snapshot_failed",
+                    "recovery_tier": tier,
+                }),
+            ));
+            return (
+                client_back,
+                Some(format!(
+                    "Browser target restored ({tier}) but the mandatory fresh snapshot failed: {error}. No pending browser action was executed."
+                )),
+            );
+        }
+    };
+    let draft_available = draft_payload.is_some() && tier != "adopted_live_page";
+    let draft_notice = if let Some(payload) = draft_payload.filter(|_| tier != "adopted_live_page") {
+        format!(
+            " A safe form draft is available as draft_ref `{}`. Rehydrate only explicitly selected empty fields with browser_rehydrate. Available draft controls: {}.",
+            checkpoint.checkpoint_id,
+            browser_draft_manifest(&payload),
+        )
+    } else {
+        String::new()
+    };
+    let boundary = if tier == "adopted_live_page" {
+        "browser_restore_adopted"
+    } else if draft_available {
+        "browser_restore_draft_available"
+    } else {
+        "browser_restore_degraded"
+    };
+    telemetry.journal.record(browser_protocol_journal_event(
+        telemetry.call_id,
+        boundary,
+        &serde_json::json!({
+            "schema_version": checkpoint.schema_version,
+            "generation": snapshot_generation,
+            "target_count": 1,
+            "draft_control_count": checkpoint.draft_control_count,
+            "recovery_tier": tier,
+            "reason": if tier == "adopted_live_page" { "exact_target_adopted" } else if draft_available { "live_target_missing_draft_available" } else { "url_only" },
+        }),
+    ));
+    (
+        client_back,
+        Some(format!(
+            "Browser session recovered ({tier}). The pending operation was NOT replayed.{draft_notice}\nFresh snapshot:\n{snapshot}"
+        )),
+    )
+}
+
+fn browser_draft_manifest(
+    payload: &local_first_desktop_gateway::browser_checkpoint::BrowserDraftSecret,
+) -> String {
+    payload
+        .controls
+        .iter()
+        .map(|control| {
+            format!(
+                "{} ({} {}, name={}, label={})",
+                control.draft_ref,
+                control.tag,
+                control.control_type,
+                control.name.as_deref().unwrap_or("-"),
+                control.label.as_deref().unwrap_or("-"),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn build_browser_rehydrate_fields(
+    payload: &local_first_desktop_gateway::browser_checkpoint::BrowserDraftSecret,
+    args: &Value,
+) -> Result<Vec<Value>, String> {
+    let mappings = args
+        .get("fields")
+        .and_then(Value::as_array)
+        .filter(|fields| !fields.is_empty() && fields.len() <= 32)
+        .ok_or_else(|| "rehydration requires 1..32 field mappings".to_string())?;
+    let mut seen_refs = HashSet::new();
+    let mut fields = Vec::with_capacity(mappings.len());
+    for mapping in mappings {
+        let current_ref = mapping
+            .get("ref")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "rehydration mapping is missing current ref".to_string())?;
+        let draft_control_ref = mapping
+            .get("draft_control_ref")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "rehydration mapping is missing draft control ref".to_string())?;
+        if !seen_refs.insert(current_ref) {
+            return Err("rehydration mapping contains duplicate current refs".into());
+        }
+        let control = payload
+            .controls
+            .iter()
+            .find(|control| control.draft_ref == draft_control_ref)
+            .ok_or_else(|| "rehydration mapping references an unknown draft control".to_string())?;
+        fields.push(serde_json::json!({
+            "ref": current_ref,
+            "value": control.value,
+            "descriptor": {
+                "tag": control.tag,
+                "type": control.control_type,
+                "name": control.name,
+                "id": control.id,
+                "autocomplete": control.autocomplete,
+                "label": control.label,
+                "formId": control.form_id,
+            }
+        }));
+    }
+    Ok(fields)
+}
+
+#[cfg(test)]
+mod browser_rehydrate_contract_tests {
+    use super::*;
+    use local_first_browser_automation::BrowserDraftControl;
+
+    fn payload() -> local_first_desktop_gateway::browser_checkpoint::BrowserDraftSecret {
+        local_first_desktop_gateway::browser_checkpoint::BrowserDraftSecret {
+            schema_version: 1,
+            objective_revision: 4,
+            target_id: "chat_0".into(),
+            origin: "https://rail.example".into(),
+            generation: 8,
+            controls: vec![BrowserDraftControl {
+                draft_ref: "draft_1".into(),
+                tag: "input".into(),
+                control_type: "email".into(),
+                name: Some("email".into()),
+                id: None,
+                autocomplete: Some("email".into()),
+                label: Some("Email".into()),
+                form_id: None,
+                value: serde_json::json!("ada.private@example.test"),
+            }],
+        }
+    }
+
+    #[test]
+    fn explicit_rehydrate_maps_only_requested_opaque_control_refs() {
+        let fields = build_browser_rehydrate_fields(
+            &payload(),
+            &serde_json::json!({
+                "fields": [{"ref": "e12", "draft_control_ref": "draft_1"}]
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0]["ref"], "e12");
+        assert_eq!(fields[0]["descriptor"]["name"], "email");
+        assert_eq!(fields[0]["value"], "ada.private@example.test");
+    }
+
+    #[test]
+    fn invalid_rehydrate_mapping_never_echoes_private_value_in_error() {
+        let error = build_browser_rehydrate_fields(
+            &payload(),
+            &serde_json::json!({
+                "fields": [{"ref": "e12", "draft_control_ref": "unknown"}]
+            }),
+        )
+        .unwrap_err();
+
+        assert!(!error.contains("ada.private@example.test"));
+    }
+
+    #[test]
+    fn draft_manifest_exposes_descriptors_but_never_values() {
+        let manifest = browser_draft_manifest(&payload());
+        assert!(manifest.contains("draft_1"));
+        assert!(manifest.contains("email"));
+        assert!(!manifest.contains("ada.private@example.test"));
+    }
+
+    #[test]
+    fn browser_rehydrate_is_an_external_write() {
+        assert_eq!(
+            tool_effect_class("browser_rehydrate", &std::collections::BTreeSet::new()),
+            semantic_decision::EffectClass::ExternalWrite,
+        );
+    }
+}
+
 /// Canonical Snapshot params for the chat-driven browser.
 ///
 /// CONTENT-PRESERVING (not `interactive`-only): the old `mode:"efficient" +
@@ -32775,6 +33505,32 @@ fn thread_has_live_browser_session(state: &AppState, thread_id: &str) -> bool {
         .is_some_and(|session| thread_browser_session_is_live(session.last_used))
 }
 
+/// Read-only general continuation signal. A durable active checkpoint keeps `browse` reachable
+/// after sidecar loss; exact scope/revision/expiry is revalidated again by restore-before-use.
+fn thread_has_browser_continuation(state: &AppState, thread_id: &str) -> bool {
+    if thread_has_live_browser_session(state, thread_id) {
+        return true;
+    }
+    let Some(workspace_id) = browser_thread_workspace_id(state, thread_id) else {
+        return false;
+    };
+    state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store
+                .load_active_browser_checkpoint_for_thread(
+                    gateway_user_id().as_str(),
+                    &workspace_id,
+                    thread_id,
+                )
+                .ok()
+                .flatten()
+        })
+        .is_some()
+}
+
 /// Take (remove) a thread's warm browser session for reuse. Returns `None` if
 /// absent or stale (a stale one is gracefully closed here so it doesn't leak).
 fn take_thread_browser_session(
@@ -32816,7 +33572,7 @@ fn store_thread_browser_session(
 
 /// Close and forget a thread's browser session (graceful browser.stop + drop).
 /// Called when a thread is archived/closed/deleted.
-fn close_thread_browser_session(state: &AppState, thread_id: &str) {
+fn close_thread_browser_session(state: &AppState, thread_id: &str, workspace_id: &str) {
     let session = state
         .browser_thread_sessions
         .lock()
@@ -32827,43 +33583,92 @@ fn close_thread_browser_session(state: &AppState, thread_id: &str) {
             .client
             .call(BrowserMethod::Stop, serde_json::json!({}));
     }
+    let secret_refs = state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store
+                .delete_browser_checkpoints_for_thread(
+                    gateway_user_id().as_str(),
+                    workspace_id,
+                    thread_id,
+                )
+                .ok()
+        })
+        .unwrap_or_default();
+    let cleared_secret_count = secret_refs.len();
+    for reference in secret_refs {
+        let _ = state.browser_checkpoint_secret_store.delete(&reference);
+    }
+    tracing::info!(
+        target: "browser::checkpoint",
+        event = "browser_checkpoint_cleared",
+        reason = "thread_closed",
+        cleared_secret_count,
+        "browser checkpoint lifecycle cleanup"
+    );
 }
 
-/// Background reaper: every 60s, close per-thread browser sessions idle past the
-/// timeout so abandoned threads don't keep a sidecar (and its tab) alive forever.
+/// Startup cleanup plus a 60s reaper for expired checkpoints and idle browser sessions.
 fn spawn_thread_browser_session_reaper(state: AppState) {
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             let stale: Vec<ThreadBrowserSession> = {
-                let Ok(mut map) = state.browser_thread_sessions.lock() else {
-                    continue;
-                };
-                let expired: Vec<String> = map
-                    .iter()
-                    .filter(|(_, session)| {
-                        session.last_used.elapsed() > THREAD_BROWSER_SESSION_IDLE
-                    })
-                    .map(|(thread, _)| thread.clone())
-                    .collect();
-                expired
-                    .into_iter()
-                    .filter_map(|thread| map.remove(&thread))
-                    .collect()
-            };
-            if stale.is_empty() {
-                continue;
-            }
-            // Closing talks to the sidecar over a blocking pipe — do it off the
-            // async runtime.
-            let _ = tokio::task::spawn_blocking(move || {
-                for session in stale {
-                    let _ = session
-                        .client
-                        .call(BrowserMethod::Stop, serde_json::json!({}));
+                if let Ok(mut map) = state.browser_thread_sessions.lock() {
+                    let expired: Vec<String> = map
+                        .iter()
+                        .filter(|(_, session)| {
+                            session.last_used.elapsed() > THREAD_BROWSER_SESSION_IDLE
+                        })
+                        .map(|(thread, _)| thread.clone())
+                        .collect();
+                    expired
+                        .into_iter()
+                        .filter_map(|thread| map.remove(&thread))
+                        .collect()
+                } else {
+                    Vec::new()
                 }
-            })
-            .await;
+            };
+            let expired_secret_refs = state
+                .task_store
+                .lock()
+                .ok()
+                .and_then(|store| {
+                    store
+                        .take_expired_browser_checkpoint_secret_refs(
+                            OffsetDateTime::now_utc().unix_timestamp(),
+                        )
+                        .ok()
+                })
+                .unwrap_or_default();
+            let cleared_secret_count = expired_secret_refs.len();
+            for reference in expired_secret_refs {
+                let _ = state.browser_checkpoint_secret_store.delete(&reference);
+            }
+            if cleared_secret_count > 0 {
+                tracing::info!(
+                    target: "browser::checkpoint",
+                    event = "browser_checkpoint_cleared",
+                    reason = "expired",
+                    cleared_secret_count,
+                    "browser checkpoint lifecycle cleanup"
+                );
+            }
+            if !stale.is_empty() {
+                // Closing talks to the sidecar over a blocking pipe — do it off the
+                // async runtime.
+                let _ = tokio::task::spawn_blocking(move || {
+                    for session in stale {
+                        let _ = session
+                            .client
+                            .call(BrowserMethod::Stop, serde_json::json!({}));
+                    }
+                })
+                .await;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         }
     });
 }
@@ -33147,6 +33952,15 @@ fn browser_protocol_journal_event(
         "fields_missing",
         "status",
         "elapsed_ms",
+        "schema_version",
+        "target_count",
+        "recovery_tier",
+        "restored_count",
+        "skipped_count",
+        "draft_control_count",
+        "omitted_sensitive_count",
+        "omitted_bounded_count",
+        "reason",
     ];
     let mut redacted = serde_json::Map::new();
     redacted.insert(
@@ -36330,7 +37144,7 @@ fn persist_hitl_wait_payload(
     // `store` is already held by both callers. Resolve the workspace through that
     // guard and read task state directly; calling `runtime_plan_control_scope` here
     // would try to acquire the same chat-store mutex again and self-deadlock.
-    let (contract, remaining_plan) = store
+    let (contract, remaining_plan, browser_checkpoint_generation) = store
         .workspace_for_thread(thread_id)
         .ok()
         .and_then(|workspace_id| {
@@ -36349,14 +37163,30 @@ fn persist_hitl_wait_payload(
                 .filter(|plan| plan.status == "open")
                 .and_then(|plan| plan.plan_json.as_array().cloned())
                 .unwrap_or_default();
-            Some((contract, hitl_resume::bounded_remaining_plan(plan)))
+            let checkpoint_generation = task_store
+                .load_active_browser_checkpoint_for_thread(
+                    user_id.as_str(),
+                    &workspace_id,
+                    thread_id,
+                )
+                .ok()
+                .flatten()
+                .map(|checkpoint| checkpoint.generation);
+            Some((
+                contract,
+                hitl_resume::bounded_remaining_plan(plan),
+                checkpoint_generation,
+            ))
         })
         .unwrap_or_default();
     let open_work = hitl_resume::OpenWorkSnapshot {
         schema_version: hitl_resume::OPEN_WORK_SCHEMA_VERSION,
         browser_session_live: browser_live,
+        browser_checkpoint_available: browser_checkpoint_generation.is_some(),
+        browser_checkpoint_generation,
         last_url: None,
-        capability_hint: browser_live.then(|| "browse".to_string()),
+        capability_hint: (browser_live || browser_checkpoint_generation.is_some())
+            .then(|| "browse".to_string()),
         contract,
         remaining_plan,
     };
@@ -42166,6 +42996,9 @@ fn normalize_browser_call(method: BrowserMethod, mut params: Value) -> (BrowserM
             (BrowserMethod::Open, params)
         }
         BrowserMethod::Snapshot
+        | BrowserMethod::Checkpoint
+        | BrowserMethod::Restore
+        | BrowserMethod::Rehydrate
         | BrowserMethod::Act
         | BrowserMethod::Screenshot
         | BrowserMethod::Console
@@ -58568,6 +59401,9 @@ fn browser_sidecar_env_with_headless(headless: String) -> Vec<(String, String)> 
         ));
     }
     if let Some(endpoint) = contained_computer_cdp_endpoint() {
+        if let Some(epoch) = contained_browser_epoch(&endpoint) {
+            env.push(("BROWSER_AUTOMATION_BROWSER_EPOCH".to_string(), epoch));
+        }
         env.push(("BROWSER_AUTOMATION_USER_CDP_ENDPOINT".to_string(), endpoint));
         // Isolated context is OFF by default: measured that a fresh ("cold")
         // context regresses reliability (no cookies -> consent/geo walls ->
@@ -58582,6 +59418,30 @@ fn browser_sidecar_env_with_headless(headless: String) -> Vec<(String, String)> 
         }
     }
     env
+}
+
+fn contained_browser_epoch(endpoint: &str) -> Option<String> {
+    if let Some(explicit) = env::var("HOMUN_CONTAINED_COMPUTER_EPOCH")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        return Some(explicit);
+    }
+    let version_url = format!("{}/json/version", endpoint.trim_end_matches('/'));
+    let response = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_millis(750))
+        .build()
+        .ok()?
+        .get(version_url)
+        .send()
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json::<serde_json::Value>()
+        .ok()?;
+    let browser_socket = response.get("webSocketDebuggerUrl")?.as_str()?;
+    Some(format!("cdp-{:x}", Sha256::digest(browser_socket.as_bytes())))
 }
 
 fn browser_headless_env_value_for_task(state: &AppState, task: &TaskRecord) -> String {
@@ -58951,7 +59811,7 @@ fn seed_default_capabilities(
     Ok(())
 }
 
-/// The browser capability AS THE MODEL SEES IT: the six chat browser tools with their real
+/// The browser capability AS THE MODEL SEES IT: the seven chat browser tools with their real
 /// names + schemas, built from the SAME `browser_*_tool_schema()` functions the live tool
 /// set uses, so the registry never becomes a second source of truth for the browser surface
 /// (caposaldo #5). Read vs WriteWithConfirmation mirrors the chat safety posture: reading
@@ -58965,6 +59825,10 @@ fn browser_registry_cached_tools() -> Vec<CachedCapabilityTool> {
             ActionClass::WriteWithConfirmation,
         ),
         (browser_snapshot_tool_schema(), ActionClass::Read),
+        (
+            browser_rehydrate_tool_schema(),
+            ActionClass::WriteWithConfirmation,
+        ),
         (
             browser_act_tool_schema(),
             ActionClass::WriteWithConfirmation,
@@ -61086,6 +61950,13 @@ fn open_gateway_secret_store()
     .map_err(|error| std::io::Error::other(error.to_string()))
 }
 
+fn open_browser_checkpoint_secret_store() -> Result<BrowserCheckpointSecretStore, std::io::Error> {
+    let seed = gateway_secret_key_seed()?;
+    let base = gateway_data_dir()?;
+    BrowserCheckpointSecretStore::open(base.join("browser-checkpoint-secrets.json"), seed)
+        .map_err(std::io::Error::other)
+}
+
 async fn workspaces_list() -> Json<WorkspacesResponse> {
     let file = load_workspaces_file();
     Json(WorkspacesResponse {
@@ -61761,6 +62632,23 @@ where
             let task_workspace = WorkspaceId::new(workspace_id.to_string());
             let store = lock_task_store(state)
                 .map_err(|error| WorkspaceDeleteError::Task(error.message))?;
+            let secret_refs = store
+                .delete_browser_checkpoints_for_workspace(
+                    task_user.as_str(),
+                    task_workspace.as_str(),
+                )
+                .map_err(|error| WorkspaceDeleteError::Task(error.to_string()))?;
+            let cleared_secret_count = secret_refs.len();
+            for reference in secret_refs {
+                let _ = state.browser_checkpoint_secret_store.delete(&reference);
+            }
+            tracing::info!(
+                target: "browser::checkpoint",
+                event = "browser_checkpoint_cleared",
+                reason = "workspace_deleted",
+                cleared_secret_count,
+                "browser checkpoint lifecycle cleanup"
+            );
             store
                 .purge_workspace(&task_user, &task_workspace)
                 .map_err(|error| WorkspaceDeleteError::Task(error.to_string()))
@@ -65164,16 +66052,24 @@ mod tests {
     fn browser_protocol_journal_event_keeps_metrics_and_drops_page_text() {
         let metrics = serde_json::json!({
             "observation_chars": 5000, "refs": 12, "action_kinds": ["click","type"],
-            "stop_reason": "completed", "page_text": "SECRET STATION NAMES"
+            "stop_reason": "completed", "generation": 8,
+            "recovery_tier": "adopted_live_page", "draft_control_count": 2,
+            "reason": "exact_target_adopted", "page_text": "SECRET STATION NAMES",
+            "url": "https://private.example/path", "value": "Fabio Private"
         });
         let event = super::browser_protocol_journal_event("run_1", "action_bundle", &metrics);
         let (_kind, _round, value) = event.into_parts();
         assert_eq!(value["boundary"], "action_bundle");
         assert_eq!(value["stop_reason"], "completed");
+        assert_eq!(value["generation"], 8);
+        assert_eq!(value["recovery_tier"], "adopted_live_page");
+        assert_eq!(value["draft_control_count"], 2);
         assert!(
             value.get("page_text").is_none(),
             "raw page text must not be journaled"
         );
+        assert!(value.get("url").is_none());
+        assert!(value.get("value").is_none());
     }
 
     #[test]
@@ -65452,6 +66348,65 @@ mod tests {
             "browse",
             super::thread_has_live_browser_session(&state, "thread-1")
         ));
+    }
+
+    #[test]
+    fn active_checkpoint_keeps_browser_continuation_live_without_a_warm_sidecar() {
+        let state = super::AppState::for_tests();
+        let thread = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .create_thread("checkpoint-workspace")
+            .unwrap();
+        let user_id = super::gateway_user_id();
+        let store = state.task_store.lock().unwrap();
+        let objective = store
+            .upsert_objective_contract(
+                user_id.as_str(),
+                "checkpoint-workspace",
+                &thread.thread_id,
+                "message-1",
+                "Continue the browser task",
+                local_first_task_runtime::ObjectiveMode::Mixed,
+                &serde_json::json!({}),
+                &serde_json::json!(["read", "external_write"]),
+                &serde_json::json!({"kind":"browser_done"}),
+                "active",
+            )
+            .unwrap();
+        assert!(store
+            .upsert_browser_checkpoint(&local_first_task_runtime::NewBrowserCheckpoint {
+                checkpoint_id: "checkpoint-1".into(),
+                user_id: user_id.as_str().into(),
+                workspace_id: "checkpoint-workspace".into(),
+                thread_id: thread.thread_id.clone(),
+                target_id: "booking".into(),
+                objective_revision: objective.revision,
+                schema_version: 1,
+                url: "https://example.test/form".into(),
+                origin: "https://example.test".into(),
+                browser_epoch: "epoch-1".into(),
+                cdp_target_id: Some("target-1".into()),
+                generation: 4,
+                draft_secret_ref: None,
+                draft_control_count: 0,
+                omitted_sensitive_count: 0,
+                omitted_bounded_count: 0,
+                expires_at: 2_000_000_000,
+            })
+            .unwrap());
+        drop(store);
+
+        assert!(!super::thread_has_live_browser_session(
+            &state,
+            &thread.thread_id
+        ));
+        assert!(super::thread_has_browser_continuation(
+            &state,
+            &thread.thread_id
+        ));
+        assert!(super::tool_stays_live_this_turn("browse", true));
     }
 
     #[test]
@@ -66839,11 +67794,39 @@ prs.save(Path({path:?}))
 
     #[test]
     fn browse_subagent_prompt_prefers_result_card_over_duplicate_cta_labels() {
-        let prompt = super::browse_subagent_system_prompt();
+        let prompt = super::browse_subagent_system_prompt(true);
         assert!(prompt.contains("SELECTING A RESULT"));
         assert!(prompt.contains("unnamed `button [ref=…]`"));
         assert!(prompt.contains("Continua"));
         assert!(prompt.contains("SCELTA VIAGGIO"));
+    }
+
+    #[test]
+    fn read_only_browse_subagent_does_not_see_rehydrate() {
+        let names = super::browse_subagent_tool_schemas(true)
+            .iter()
+            .filter_map(|schema| {
+                schema
+                    .pointer("/function/name")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect::<Vec<_>>();
+        assert!(!names.iter().any(|name| name == "browser_rehydrate"));
+        assert!(!super::browse_subagent_system_prompt(false).contains("browser_rehydrate"));
+
+        let writable_names = super::browse_subagent_tool_schemas(false)
+            .iter()
+            .filter_map(|schema| {
+                schema
+                    .pointer("/function/name")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect::<Vec<_>>();
+        assert!(writable_names
+            .iter()
+            .any(|name| name == "browser_rehydrate"));
     }
 
     // Stand-in for the OS-keychain-held vault wrap key; injected so vault tests
@@ -70343,6 +71326,7 @@ prs.save(Path({path:?}))
             vec![
                 "browser_navigate",
                 "browser_snapshot",
+                "browser_rehydrate",
                 "browser_act",
                 "browser_tabs",
                 "browser_screenshot",
@@ -70411,7 +71395,7 @@ prs.save(Path({path:?}))
         let registry = super::CapabilityRegistryStore::open_in_memory().unwrap();
         let browser = super::CapabilityProviderId::new("browser");
 
-        // First seed creates the provider + the six real tools.
+        // First seed creates the provider + the seven real tools.
         super::seed_default_capabilities(&registry).unwrap();
         // Simulate an older build's stale dot-named row left in the cache.
         registry
@@ -70437,8 +71421,8 @@ prs.save(Path({path:?}))
             .collect();
         assert_eq!(
             names.len(),
-            6,
-            "exactly the six chat browser tools, no dup, no stale: {names:?}"
+            7,
+            "exactly the seven chat browser tools, no dup, no stale: {names:?}"
         );
         assert!(
             names.iter().all(|name| name.starts_with("browser_")),
@@ -70477,13 +71461,13 @@ prs.save(Path({path:?}))
             tools,
         ));
 
-        // The browser grant (Read + WriteWithConfirmation, autonomy 3) makes all six visible
+        // The browser grant (Read + WriteWithConfirmation, autonomy 3) makes all seven visible
         // and executable, so calls reach argument validation.
         let plan = facade.list_tools(&policy).unwrap();
-        assert_eq!(plan.visible_tools.len(), 6, "all six browser tools visible");
+        assert_eq!(plan.visible_tools.len(), 7, "all seven browser tools visible");
         assert_eq!(
             plan.executable_tools.len(),
-            6,
+            7,
             "and executable under the grant"
         );
 
@@ -76094,6 +77078,12 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             local_first_secrets::DevelopmentSecretKeyProvider::new([0u8; 32]),
         )
         .expect("secret store");
+        let browser_checkpoint_secret_store =
+            local_first_desktop_gateway::browser_checkpoint::BrowserCheckpointSecretStore::open(
+                secret_dir.join("browser-checkpoint-secrets.json"),
+                [0u8; 32],
+            )
+            .expect("browser checkpoint secret store");
         super::AppState {
             http: reqwest::Client::new(),
             usage_store: std::sync::Arc::new(std::sync::Mutex::new(
@@ -76145,6 +77135,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 crate::setup_computer::SetupComputerCoordinator::default(),
             ),
             secret_store: std::sync::Arc::new(secret_store),
+            browser_checkpoint_secret_store: std::sync::Arc::new(
+                browser_checkpoint_secret_store,
+            ),
             auth_token: "test-token".into(),
             novnc_tickets: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),

@@ -13,6 +13,28 @@
         <input aria-label="Name" name="name" />
       </label>
       <label>
+        Email
+        <input aria-label="Email" name="email" type="email" autocomplete="email" />
+      </label>
+      <label>
+        Password
+        <input aria-label="Password" name="password" type="password" value="never-store-password" />
+      </label>
+      <label>
+        Card number
+        <input aria-label="Card number" name="card-number" autocomplete="cc-number" value="4111111111111111" />
+      </label>
+      <label>
+        CVV
+        <input aria-label="CVV" name="security-code" value="999" />
+      </label>
+      <label>
+        Attachment
+        <input aria-label="Attachment" name="attachment" type="file" />
+      </label>
+      <input name="hidden-secret" type="hidden" value="never-store-hidden" />
+      <div contenteditable="true">never-store-contenteditable</div>
+      <label>
         Destination
         <input id="destination" placeholder="Destination" />
       </label>
@@ -23,6 +45,10 @@
           <option value="standard">Standard</option>
           <option value="business">Business</option>
         </select>
+      </label>
+      <label>
+        <input aria-label="Remember passenger" name="remember" type="checkbox" />
+        Remember passenger
       </label>
       <label for="travel-date">Travel date</label>
       <input id="travel-date" type="button" value="Today" />

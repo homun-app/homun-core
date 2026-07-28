@@ -333,6 +333,50 @@ pub struct ObjectiveContractRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewBrowserCheckpoint {
+    pub checkpoint_id: String,
+    pub user_id: String,
+    pub workspace_id: String,
+    pub thread_id: String,
+    pub target_id: String,
+    pub objective_revision: u64,
+    pub schema_version: u32,
+    pub url: String,
+    pub origin: String,
+    pub browser_epoch: String,
+    pub cdp_target_id: Option<String>,
+    pub generation: u64,
+    pub draft_secret_ref: Option<String>,
+    pub draft_control_count: u32,
+    pub omitted_sensitive_count: u32,
+    pub omitted_bounded_count: u32,
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrowserCheckpointRecord {
+    pub checkpoint_id: String,
+    pub user_id: String,
+    pub workspace_id: String,
+    pub thread_id: String,
+    pub target_id: String,
+    pub objective_revision: u64,
+    pub schema_version: u32,
+    pub url: String,
+    pub origin: String,
+    pub browser_epoch: String,
+    pub cdp_target_id: Option<String>,
+    pub generation: u64,
+    pub draft_secret_ref: Option<String>,
+    pub draft_control_count: u32,
+    pub omitted_sensitive_count: u32,
+    pub omitted_bounded_count: u32,
+    pub expires_at: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnSteeringRecord {
     pub steering_id: i64,
     pub user_id: String,

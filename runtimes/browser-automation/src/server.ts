@@ -18,6 +18,7 @@ const manager = new BrowserSessionManager({
   uploadRoots: process.env.BROWSER_AUTOMATION_UPLOAD_ROOTS?.split(":").filter(Boolean),
   userCdpEndpoint: process.env.BROWSER_AUTOMATION_USER_CDP_ENDPOINT,
   isolatedContext: process.env.BROWSER_AUTOMATION_ISOLATED_CONTEXT === "1",
+  browserEpoch: process.env.BROWSER_AUTOMATION_BROWSER_EPOCH,
 });
 
 export async function handleRequestLine(line: string): Promise<string> {
@@ -79,6 +80,25 @@ async function dispatch(request: BrowserRequest): Promise<unknown> {
         timeoutMs: optionalNumber(request.params, "timeout_ms"),
         maxChars: optionalNumber(request.params, "max_chars"),
         urls: optionalBoolean(request.params, "urls"),
+      });
+    case "browser.checkpoint":
+      return await manager.checkpoint({
+        targetId: requireString(request.params, "target_id"),
+      });
+    case "browser.restore":
+      return await manager.restore({
+        targetId: requireString(request.params, "target_id"),
+        url: requireString(request.params, "url"),
+        origin: requireString(request.params, "origin"),
+        browserEpoch: requireString(request.params, "browser_epoch"),
+        cdpTargetId: optionalString(request.params, "cdp_target_id"),
+        generation: requireNonNegativeNumber(request.params, "generation"),
+      });
+    case "browser.rehydrate":
+      return await manager.rehydrate({
+        targetId: requireString(request.params, "target_id"),
+        generation: requireNonNegativeNumber(request.params, "generation"),
+        fields: requireObjectArray(request.params, "fields") as never,
       });
     case "browser.act":
       return await manager.act({
@@ -156,6 +176,36 @@ function optionalBoolean(params: Record<string, unknown> | undefined, key: strin
 function optionalNumber(params: Record<string, unknown> | undefined, key: string): number | undefined {
   const value = params?.[key];
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function requireNonNegativeNumber(
+  params: Record<string, unknown> | undefined,
+  key: string,
+): number {
+  const value = optionalNumber(params, key);
+  if (value === undefined || value < 0) {
+    throw new BrowserAutomationError({
+      code: "BROWSER_INVALID_REQUEST",
+      message: `${key} must be a non-negative number`,
+      retryable: false,
+    });
+  }
+  return value;
+}
+
+function requireObjectArray(
+  params: Record<string, unknown> | undefined,
+  key: string,
+): Record<string, unknown>[] {
+  const value = params?.[key];
+  if (!Array.isArray(value) || !value.every((entry) => entry && typeof entry === "object" && !Array.isArray(entry))) {
+    throw new BrowserAutomationError({
+      code: "BROWSER_INVALID_REQUEST",
+      message: `${key} must be an object array`,
+      retryable: false,
+    });
+  }
+  return value as Record<string, unknown>[];
 }
 
 function optionalObject(
@@ -257,13 +307,13 @@ function optionalSnapshotMode(
 }
 
 async function main() {
-  // Tear the browser down on any exit path so Chromium is never orphaned:
-  // a clean stdin EOF (parent closed the pipe) or a termination signal.
+  // A lost parent must not close shared contained-browser tabs. Explicit
+  // browser.stop remains the operation that owns page teardown.
   let shuttingDown = false;
   const shutdown = async (code: number) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    await manager.stop().catch(() => undefined);
+    await manager.detachForParentLoss().catch(() => undefined);
     process.exit(code);
   };
   process.on("SIGTERM", () => void shutdown(0));
@@ -273,7 +323,7 @@ async function main() {
   for await (const line of rl) {
     output.write(await handleRequestLine(line));
   }
-  // stdin closed (parent gone): stop the browser and exit cleanly.
+  // stdin closed (parent gone): apply the ownership-aware detach policy.
   await shutdown(0);
 }
 

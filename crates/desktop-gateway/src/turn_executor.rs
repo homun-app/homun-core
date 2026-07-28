@@ -407,6 +407,37 @@ pub fn execute_chat_turn_task(
             )
             .ok()
     });
+    if let (Some(previous), Some(current)) = (existing_objective.as_ref(), objective.as_ref())
+        && previous.revision != current.revision
+    {
+        let secret_refs = state
+            .task_store
+            .lock()
+            .ok()
+            .and_then(|store| {
+                store
+                    .delete_browser_checkpoints_for_objective(
+                        task.user_id.as_str(),
+                        &workspace_id,
+                        thread_id,
+                        previous.revision,
+                    )
+                    .ok()
+            })
+            .unwrap_or_default();
+        let cleared_secret_count = secret_refs.len();
+        for reference in secret_refs {
+            let _ = state.browser_checkpoint_secret_store.delete(&reference);
+        }
+        tracing::info!(
+            target: "browser::checkpoint",
+            event = "browser_checkpoint_cleared",
+            reason = "objective_superseded",
+            revision = previous.revision,
+            cleared_secret_count,
+            "browser checkpoint lifecycle cleanup"
+        );
+    }
     if objective.is_none() {
         tracing::warn!(target: "objective::contract", turn_id, "objective contract unavailable; execution policy will fail closed from the prompt");
     }
@@ -839,13 +870,35 @@ pub fn execute_chat_turn_task(
                 objective.revision,
                 terminal_status,
             ) {
-                Ok(true) => tracing::info!(
-                    target: "objective::contract",
-                    thread_id,
-                    revision = objective.revision,
-                    status = terminal_status,
-                    "objective reached broker-owned terminal state"
-                ),
+                Ok(true) => {
+                    let secret_refs = store
+                        .delete_browser_checkpoints_for_objective(
+                            task.user_id.as_str(),
+                            &workspace_id,
+                            thread_id,
+                            objective.revision,
+                        )
+                        .unwrap_or_default();
+                    drop(store);
+                    let cleared_secret_count = secret_refs.len();
+                    for reference in secret_refs {
+                        let _ = state.browser_checkpoint_secret_store.delete(&reference);
+                    }
+                    tracing::info!(
+                        target: "browser::checkpoint",
+                        event = "browser_checkpoint_cleared",
+                        reason = terminal_status,
+                        cleared_secret_count,
+                        "browser checkpoint lifecycle cleanup"
+                    );
+                    tracing::info!(
+                        target: "objective::contract",
+                        thread_id,
+                        revision = objective.revision,
+                        status = terminal_status,
+                        "objective reached broker-owned terminal state"
+                    )
+                }
                 Ok(false) => tracing::warn!(
                     target: "objective::contract",
                     thread_id,

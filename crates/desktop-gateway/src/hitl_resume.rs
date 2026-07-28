@@ -155,6 +155,12 @@ pub(crate) struct OpenWorkSnapshot {
     /// Thread still held a live warm browser session when the wait was opened.
     #[serde(default)]
     pub(crate) browser_session_live: bool,
+    /// A revision-matched durable checkpoint can reactivate browser continuation even when the
+    /// warm sidecar is gone. This is metadata only; no target, URL, descriptor, or value is stored.
+    #[serde(default)]
+    pub(crate) browser_checkpoint_available: bool,
+    #[serde(default)]
+    pub(crate) browser_checkpoint_generation: Option<u64>,
     /// Last known page URL if available (optional; empty when unknown).
     #[serde(default)]
     pub(crate) last_url: Option<String>,
@@ -169,7 +175,7 @@ pub(crate) struct OpenWorkSnapshot {
     pub(crate) remaining_plan: Vec<Value>,
 }
 
-pub(crate) const OPEN_WORK_SCHEMA_VERSION: u32 = 1;
+pub(crate) const OPEN_WORK_SCHEMA_VERSION: u32 = 2;
 
 const fn open_work_schema_version() -> u32 {
     OPEN_WORK_SCHEMA_VERSION
@@ -180,6 +186,8 @@ impl Default for OpenWorkSnapshot {
         Self {
             schema_version: open_work_schema_version(),
             browser_session_live: false,
+            browser_checkpoint_available: false,
+            browser_checkpoint_generation: None,
             last_url: None,
             capability_hint: None,
             contract: None,
@@ -351,6 +359,14 @@ pub(crate) fn hitl_resume_harness_slot(
     let browser_line = if browser_still_live {
         "OpenWork.browser: WARM session is live for this thread — continue with `browse` on the page already open. Do NOT call find_capability or suggest_capabilities. Do NOT restart discovery/search from scratch."
             .to_string()
+    } else if wait.open_work.browser_checkpoint_available {
+        format!(
+            "OpenWork.browser: the warm sidecar is gone, but a revision-matched CHECKPOINT{} is available. Continue with `browse`: recovery will force a fresh snapshot and will NOT replay the interrupted action. Do NOT call find_capability or suggest_capabilities. Do NOT restart discovery/search from scratch.",
+            wait.open_work
+                .browser_checkpoint_generation
+                .map(|generation| format!(" at generation {generation}"))
+                .unwrap_or_default()
+        )
     } else if wait.open_work.browser_session_live {
         "OpenWork.browser: the warm session that was live at wait-open is GONE — say so briefly if needed, then you MAY re-search. Still do NOT call suggest_capabilities."
             .to_string()
@@ -426,8 +442,8 @@ pub(crate) fn choice_resume_harness_slot(
 }
 
 /// On an HITL resume, strip cold-discovery tools from the live set.
-/// When the warm browser is gone, `find_capability` stays so the model can re-activate
-/// browse; `suggest_capabilities` (CONNECT_SUGGEST) is always forbidden on resume.
+/// When both warm browser and durable checkpoint are gone, `find_capability` stays so the model
+/// can re-activate browse; `suggest_capabilities` (CONNECT_SUGGEST) is always forbidden on resume.
 pub(crate) fn prune_cold_discovery_tools(tools: &mut Vec<Value>, allow_rediscovery: bool) {
     tools.retain(|schema| {
         let name = schema
@@ -645,6 +661,20 @@ mod tests {
     }
 
     #[test]
+    fn harness_slot_keeps_browser_continuation_when_only_checkpoint_survives() {
+        let mut wait = sample_choice_wait(&["A"]);
+        wait.open_work.browser_checkpoint_available = true;
+        wait.open_work.browser_checkpoint_generation = Some(12);
+
+        let slot = hitl_resume_harness_slot(&wait, "A", false);
+
+        assert!(slot.contains("CHECKPOINT"));
+        assert!(slot.contains("generation 12"));
+        assert!(slot.contains("Do NOT restart discovery/search from scratch"));
+        assert!(!slot.contains("MAY re-search"));
+    }
+
+    #[test]
     fn open_work_round_trips_resume_contract_and_remaining_plan() {
         let persisted = serde_json::json!({
             "browser_session_live": true,
@@ -675,7 +705,7 @@ mod tests {
         let encoded = serde_json::to_value(decoded).unwrap();
 
         assert_eq!(encoded["contract"]["objective_revision"], 7);
-        assert_eq!(encoded["schema_version"], 1);
+        assert_eq!(encoded["schema_version"], 2);
         assert_eq!(encoded["contract"]["mode"], "mixed");
         assert_eq!(encoded["remaining_plan"][0]["id"], "s2");
         assert_eq!(encoded["remaining_plan"][0]["detail"], "Do not confirm");

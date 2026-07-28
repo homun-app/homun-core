@@ -9,6 +9,9 @@ export type BrowserMethod =
   | "browser.close_tab"
   | "browser.navigate"
   | "browser.snapshot"
+  | "browser.checkpoint"
+  | "browser.restore"
+  | "browser.rehydrate"
   | "browser.screenshot"
   | "browser.act"
   | "browser.arm_file_chooser"
@@ -53,6 +56,9 @@ const METHODS = new Set<BrowserMethod>([
   "browser.close_tab",
   "browser.navigate",
   "browser.snapshot",
+  "browser.checkpoint",
+  "browser.restore",
+  "browser.rehydrate",
   "browser.screenshot",
   "browser.act",
   "browser.arm_file_chooser",

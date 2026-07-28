@@ -1,6 +1,7 @@
 use crate::{
     AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus, AgentToolReceipt, ApprovalRequest,
-    Automation, AutomationRun, NewAgentRun, NewAgentToolReceipt, ObjectiveContractRecord,
+    Automation, AutomationRun, BrowserCheckpointRecord, NewAgentRun, NewAgentToolReceipt,
+    NewBrowserCheckpoint, ObjectiveContractRecord,
     ObjectiveMode, ResourceClass, RuntimePlanRecord, SubagentInfo, TaskCheckpoint, ToolReceiptClaim,
     TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
     ActiveTurnProjection, NewTurnSteering, TerminalWrite, ThreadActivityProjection, ThreadAttention,
@@ -338,6 +339,32 @@ impl TaskStore {
             CREATE INDEX IF NOT EXISTS idx_objective_contracts_scope_status
                 ON objective_contracts(user_id, workspace_id, status, updated_at DESC);
 
+            CREATE TABLE IF NOT EXISTS browser_checkpoints (
+                checkpoint_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                objective_revision INTEGER NOT NULL,
+                schema_version INTEGER NOT NULL,
+                url TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                browser_epoch TEXT NOT NULL,
+                cdp_target_id TEXT,
+                generation INTEGER NOT NULL,
+                draft_secret_ref TEXT,
+                draft_control_count INTEGER NOT NULL,
+                omitted_sensitive_count INTEGER NOT NULL,
+                omitted_bounded_count INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (user_id, workspace_id, thread_id, target_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_browser_checkpoints_expiry
+                ON browser_checkpoints(expires_at);
+
             CREATE TABLE IF NOT EXISTS turn_steering (
                 steering_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT NOT NULL,
@@ -452,7 +479,7 @@ impl TaskStore {
             [],
         )?;
         self.connection.execute(
-            "UPDATE task_runtime_metadata SET value = '10' WHERE key = 'schema_version'",
+            "UPDATE task_runtime_metadata SET value = '11' WHERE key = 'schema_version'",
             [],
         )?;
         // Partial index: only chat_turn rows (thread_id IS NOT NULL). Indexes the
@@ -554,6 +581,10 @@ impl TaskStore {
         let tx = self.connection.unchecked_transaction()?;
         tx.execute(
             "DELETE FROM turn_steering WHERE user_id = ?1 AND workspace_id = ?2",
+            rusqlite::params![user_id.as_str(), workspace_id.as_str()],
+        )?;
+        tx.execute(
+            "DELETE FROM browser_checkpoints WHERE user_id = ?1 AND workspace_id = ?2",
             rusqlite::params![user_id.as_str(), workspace_id.as_str()],
         )?;
         tx.execute(
@@ -755,6 +786,239 @@ impl TaskStore {
             ],
         )?;
         Ok(changed == 1)
+    }
+
+    pub fn upsert_browser_checkpoint(
+        &self,
+        checkpoint: &NewBrowserCheckpoint,
+    ) -> TaskRuntimeResult<bool> {
+        let objective_revision = i64::try_from(checkpoint.objective_revision)
+            .map_err(|_| TaskRuntimeError::Store("objective revision exceeds SQLite range".into()))?;
+        let generation = i64::try_from(checkpoint.generation)
+            .map_err(|_| TaskRuntimeError::Store("browser generation exceeds SQLite range".into()))?;
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let changed = self.connection.execute(
+            "INSERT INTO browser_checkpoints (
+                checkpoint_id, user_id, workspace_id, thread_id, target_id,
+                objective_revision, schema_version, url, origin, browser_epoch,
+                cdp_target_id, generation, draft_secret_ref, draft_control_count,
+                omitted_sensitive_count, omitted_bounded_count, expires_at, created_at, updated_at
+             )
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                    ?14, ?15, ?16, ?17, ?18, ?18
+               FROM objective_contracts
+              WHERE user_id = ?2 AND workspace_id = ?3 AND thread_id = ?4
+                AND revision = ?6 AND status = 'active'
+             ON CONFLICT(user_id, workspace_id, thread_id, target_id) DO UPDATE SET
+                checkpoint_id = excluded.checkpoint_id,
+                objective_revision = excluded.objective_revision,
+                schema_version = excluded.schema_version,
+                url = excluded.url,
+                origin = excluded.origin,
+                browser_epoch = excluded.browser_epoch,
+                cdp_target_id = excluded.cdp_target_id,
+                generation = excluded.generation,
+                draft_secret_ref = excluded.draft_secret_ref,
+                draft_control_count = excluded.draft_control_count,
+                omitted_sensitive_count = excluded.omitted_sensitive_count,
+                omitted_bounded_count = excluded.omitted_bounded_count,
+                expires_at = excluded.expires_at,
+                updated_at = excluded.updated_at",
+            params![
+                checkpoint.checkpoint_id,
+                checkpoint.user_id,
+                checkpoint.workspace_id,
+                checkpoint.thread_id,
+                checkpoint.target_id,
+                objective_revision,
+                checkpoint.schema_version as i64,
+                checkpoint.url,
+                checkpoint.origin,
+                checkpoint.browser_epoch,
+                checkpoint.cdp_target_id,
+                generation,
+                checkpoint.draft_secret_ref,
+                checkpoint.draft_control_count as i64,
+                checkpoint.omitted_sensitive_count as i64,
+                checkpoint.omitted_bounded_count as i64,
+                checkpoint.expires_at,
+                now,
+            ],
+        )?;
+        Ok(changed == 1)
+    }
+
+    pub fn load_active_browser_checkpoint(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+        target_id: &str,
+    ) -> TaskRuntimeResult<Option<BrowserCheckpointRecord>> {
+        self.connection
+            .query_row(
+                "SELECT b.checkpoint_id, b.user_id, b.workspace_id, b.thread_id, b.target_id,
+                        b.objective_revision, b.schema_version, b.url, b.origin, b.browser_epoch,
+                        b.cdp_target_id, b.generation, b.draft_secret_ref, b.draft_control_count,
+                        b.omitted_sensitive_count, b.omitted_bounded_count, b.expires_at,
+                        b.created_at, b.updated_at
+                   FROM browser_checkpoints b
+                   JOIN objective_contracts o
+                     ON o.user_id = b.user_id AND o.workspace_id = b.workspace_id
+                    AND o.thread_id = b.thread_id AND o.revision = b.objective_revision
+                  WHERE b.user_id = ?1 AND b.workspace_id = ?2 AND b.thread_id = ?3
+                    AND b.target_id = ?4 AND o.status = 'active' AND b.expires_at > ?5",
+                params![
+                    user_id,
+                    workspace_id,
+                    thread_id,
+                    target_id,
+                    OffsetDateTime::now_utc().unix_timestamp()
+                ],
+                map_browser_checkpoint_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Returns the newest checkpoint that can continue this thread's active objective.
+    /// The caller uses this only as a capability-liveness signal; exact target restore still
+    /// goes through `load_active_browser_checkpoint` immediately before use.
+    pub fn load_active_browser_checkpoint_for_thread(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+    ) -> TaskRuntimeResult<Option<BrowserCheckpointRecord>> {
+        self.connection
+            .query_row(
+                "SELECT b.checkpoint_id, b.user_id, b.workspace_id, b.thread_id, b.target_id,
+                        b.objective_revision, b.schema_version, b.url, b.origin, b.browser_epoch,
+                        b.cdp_target_id, b.generation, b.draft_secret_ref, b.draft_control_count,
+                        b.omitted_sensitive_count, b.omitted_bounded_count, b.expires_at,
+                        b.created_at, b.updated_at
+                   FROM browser_checkpoints b
+                   JOIN objective_contracts o
+                     ON o.user_id = b.user_id AND o.workspace_id = b.workspace_id
+                    AND o.thread_id = b.thread_id AND o.revision = b.objective_revision
+                  WHERE b.user_id = ?1 AND b.workspace_id = ?2 AND b.thread_id = ?3
+                    AND o.status = 'active' AND b.expires_at > ?4
+                  ORDER BY b.updated_at DESC, b.target_id ASC
+                  LIMIT 1",
+                params![
+                    user_id,
+                    workspace_id,
+                    thread_id,
+                    OffsetDateTime::now_utc().unix_timestamp()
+                ],
+                map_browser_checkpoint_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn delete_browser_checkpoints_for_thread(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+    ) -> TaskRuntimeResult<Vec<String>> {
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let refs = {
+            let mut statement = tx.prepare(
+                "SELECT draft_secret_ref FROM browser_checkpoints
+                 WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3
+                   AND draft_secret_ref IS NOT NULL ORDER BY draft_secret_ref",
+            )?;
+            statement
+                .query_map(params![user_id, workspace_id, thread_id], |row| row.get(0))?
+                .collect::<Result<Vec<String>, _>>()?
+        };
+        tx.execute(
+            "DELETE FROM browser_checkpoints
+             WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3",
+            params![user_id, workspace_id, thread_id],
+        )?;
+        tx.commit()?;
+        Ok(refs)
+    }
+
+    pub fn delete_browser_checkpoints_for_workspace(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<Vec<String>> {
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let refs = {
+            let mut statement = tx.prepare(
+                "SELECT draft_secret_ref FROM browser_checkpoints
+                 WHERE user_id = ?1 AND workspace_id = ?2
+                   AND draft_secret_ref IS NOT NULL ORDER BY draft_secret_ref",
+            )?;
+            statement
+                .query_map(params![user_id, workspace_id], |row| row.get(0))?
+                .collect::<Result<Vec<String>, _>>()?
+        };
+        tx.execute(
+            "DELETE FROM browser_checkpoints WHERE user_id = ?1 AND workspace_id = ?2",
+            params![user_id, workspace_id],
+        )?;
+        tx.commit()?;
+        Ok(refs)
+    }
+
+    pub fn delete_browser_checkpoints_for_objective(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+        objective_revision: u64,
+    ) -> TaskRuntimeResult<Vec<String>> {
+        let revision = i64::try_from(objective_revision)
+            .map_err(|_| TaskRuntimeError::Store("objective revision exceeds SQLite range".into()))?;
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let refs = {
+            let mut statement = tx.prepare(
+                "SELECT draft_secret_ref FROM browser_checkpoints
+                 WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3
+                   AND objective_revision = ?4 AND draft_secret_ref IS NOT NULL
+                 ORDER BY draft_secret_ref",
+            )?;
+            statement
+                .query_map(params![user_id, workspace_id, thread_id, revision], |row| row.get(0))?
+                .collect::<Result<Vec<String>, _>>()?
+        };
+        tx.execute(
+            "DELETE FROM browser_checkpoints
+             WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3
+               AND objective_revision = ?4",
+            params![user_id, workspace_id, thread_id, revision],
+        )?;
+        tx.commit()?;
+        Ok(refs)
+    }
+
+    pub fn take_expired_browser_checkpoint_secret_refs(
+        &self,
+        now: i64,
+    ) -> TaskRuntimeResult<Vec<String>> {
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let refs = {
+            let mut statement = tx.prepare(
+                "SELECT draft_secret_ref FROM browser_checkpoints
+                 WHERE expires_at <= ?1 AND draft_secret_ref IS NOT NULL
+                 ORDER BY draft_secret_ref",
+            )?;
+            statement
+                .query_map(params![now], |row| row.get(0))?
+                .collect::<Result<Vec<String>, _>>()?
+        };
+        tx.execute(
+            "DELETE FROM browser_checkpoints WHERE expires_at <= ?1",
+            params![now],
+        )?;
+        tx.commit()?;
+        Ok(refs)
     }
 
     pub fn append_turn_steering(
@@ -3141,6 +3405,32 @@ fn load_objective_contract_on(
     .transpose()
 }
 
+fn map_browser_checkpoint_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<BrowserCheckpointRecord> {
+    Ok(BrowserCheckpointRecord {
+        checkpoint_id: row.get(0)?,
+        user_id: row.get(1)?,
+        workspace_id: row.get(2)?,
+        thread_id: row.get(3)?,
+        target_id: row.get(4)?,
+        objective_revision: row.get::<_, i64>(5)? as u64,
+        schema_version: row.get::<_, i64>(6)? as u32,
+        url: row.get(7)?,
+        origin: row.get(8)?,
+        browser_epoch: row.get(9)?,
+        cdp_target_id: row.get(10)?,
+        generation: row.get::<_, i64>(11)? as u64,
+        draft_secret_ref: row.get(12)?,
+        draft_control_count: row.get::<_, i64>(13)? as u32,
+        omitted_sensitive_count: row.get::<_, i64>(14)? as u32,
+        omitted_bounded_count: row.get::<_, i64>(15)? as u32,
+        expires_at: row.get(16)?,
+        created_at: row.get(17)?,
+        updated_at: row.get(18)?,
+    })
+}
+
 fn map_turn_steering_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TurnSteeringRecord> {
     let content: String = row.get(6)?;
     let payload_json: String = row.get(7)?;
@@ -3345,7 +3635,7 @@ mod migration_tests {
         }
         // Re-running migrations must not panic (guarded ALTER).
         store.run_migrations().expect("idempotent re-run");
-        assert_eq!(store.schema_version().unwrap(), 10);
+        assert_eq!(store.schema_version().unwrap(), 11);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         assert!(table_exists(&store.connection, "runtime_plans"));
@@ -4711,7 +5001,7 @@ mod upgrade_tests {
         conn.execute_batch(&format!("VACUUM INTO '{}'", tmp.display()))
             .unwrap();
         let store = TaskStore::open(&tmp).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 10);
+        assert_eq!(store.schema_version().unwrap(), 11);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         for col in ["thread_id", "request_id", "source", "approval"] {
