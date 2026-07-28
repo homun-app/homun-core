@@ -17,9 +17,9 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::{
-    cosine, dedup_tokens, jaccard, MemoryFacade, MemoryLifecycleRequest, MemoryRef, MemoryRefKind,
-    PERSONAL_WORKSPACE, PrivacyDomain, DataSensitivity, UserId, WikiPage, WorkspaceId,
-    recall::DEDUP_JACCARD, embedding::DEDUP_COSINE, THREADS_WORKSPACE, memory_is_current_at,
+    DataSensitivity, MemoryFacade, MemoryLifecycleRequest, MemoryRef, MemoryRefKind,
+    PERSONAL_WORKSPACE, PrivacyDomain, THREADS_WORKSPACE, UserId, WikiPage, WorkspaceId, cosine,
+    dedup_tokens, embedding::DEDUP_COSINE, jaccard, memory_is_current_at, recall::DEDUP_JACCARD,
 };
 
 fn unix_now() -> i64 {
@@ -133,9 +133,7 @@ pub fn rebuild_decisions_wiki(
     let now_unix = unix_now();
     let mut decisions: Vec<_> = memories
         .into_iter()
-        .filter(|m| {
-            m.memory_type == "decision" && memory_is_current_at(m, now_unix, true)
-        })
+        .filter(|m| m.memory_type == "decision" && memory_is_current_at(m, now_unix, true))
         .collect();
     if decisions.is_empty() {
         return;
@@ -165,10 +163,10 @@ pub fn rebuild_decisions_wiki(
         let title = memory.text.lines().next().unwrap_or(&memory.text).trim();
         body.push_str(&format!("## {title}\n\n"));
         if let Some(decision) = memory.metadata.get("decision") {
-            if let Some(rationale) = decision.get("rationale").and_then(|r| r.as_str()) {
-                if !rationale.trim().is_empty() {
-                    body.push_str(&format!("{}\n\n", rationale.trim()));
-                }
+            if let Some(rationale) = decision.get("rationale").and_then(|r| r.as_str())
+                && !rationale.trim().is_empty()
+            {
+                body.push_str(&format!("{}\n\n", rationale.trim()));
             }
             if let Some(alts) = decision.get("alternatives").and_then(|a| a.as_array()) {
                 for alt in alts {
@@ -250,16 +248,12 @@ pub fn rebuild_project_brief(
     let now_unix = unix_now();
     let goals: Vec<String> = memories
         .iter()
-        .filter(|m| {
-            m.memory_type == "goal" && memory_is_current_at(m, now_unix, true)
-        })
+        .filter(|m| m.memory_type == "goal" && memory_is_current_at(m, now_unix, true))
         .map(|m| m.text.trim().to_string())
         .collect();
     let decisions: Vec<String> = memories
         .iter()
-        .filter(|m| {
-            m.memory_type == "decision" && memory_is_current_at(m, now_unix, true)
-        })
+        .filter(|m| m.memory_type == "decision" && memory_is_current_at(m, now_unix, true))
         .map(|m| m.text.lines().next().unwrap_or(&m.text).trim().to_string())
         .collect();
     if goals.is_empty() && decisions.is_empty() {
@@ -524,12 +518,7 @@ pub fn consolidate_prepare(
     let mut order: Vec<usize> = (0..mems.len()).collect();
     order.sort_by_key(|&i| std::cmp::Reverse(mems[i].2.chars().count()));
     let mut survivor_idx: Vec<usize> = Vec::new();
-    type KeptMeta = (
-        String,
-        HashSet<String>,
-        Option<Vec<f32>>,
-        BTreeSet<String>,
-    );
+    type KeptMeta = (String, HashSet<String>, Option<Vec<f32>>, BTreeSet<String>);
     let mut kept_meta: Vec<KeptMeta> = Vec::new();
     let mut redundant: Vec<MemoryRef> = Vec::new();
     for &i in &order {
@@ -598,13 +587,14 @@ pub fn consolidate_prepare(
     (merged, Some(ConsolidateInput { mems, listing }))
 }
 
-/// Fase 3 (sync, lock re-acquisito): applica i merge (create candidate + confirm
-/// + delete from) e i drop (delete_memory) decisi dal curatore LLM, poi ricostruisce
+/// Fase 3 (sync, lock re-acquisito): applica i merge (create candidate, confirm e
+/// delete from) e i drop (delete_memory) decisi dal curatore LLM, poi ricostruisce
 /// le 3 pagine wiki. Ritorna `(merged, dropped)`. Spostato fedelmente dal corpo di
 /// `consolidate_scope`.
 ///
 /// `redact` è un callback (pattern = hooks): nel gateway è `redact_sensitive_text`
 /// (pura, ma con molti caller gateway-side). `is_edited` pilota le pagine wiki.
+#[allow(clippy::too_many_arguments)]
 pub fn consolidate_apply(
     facade: &MemoryFacade,
     user: &UserId,
@@ -695,10 +685,10 @@ pub fn consolidate_apply(
             .get("reason")
             .and_then(|v| v.as_str())
             .unwrap_or("rumore/ininfluente");
-        if let Some((reference, _, _)) = mems.get(idx) {
-            if facade.delete_memory(&lifecycle, reference, reason).is_ok() {
-                dropped += 1;
-            }
+        if let Some((reference, _, _)) = mems.get(idx)
+            && facade.delete_memory(&lifecycle, reference, reason).is_ok()
+        {
+            dropped += 1;
         }
     }
     rebuild_decisions_wiki(facade, user, workspace, is_edited);

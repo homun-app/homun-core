@@ -32,7 +32,7 @@ impl RuntimeDiscoveryProbe for LocalRuntimeDiscovery {
         };
         let text = String::from_utf8_lossy(&output.stdout);
         text.lines()
-            .filter_map(|line| parse_ps_line(line))
+            .filter_map(parse_ps_line)
             .filter(|process| process.command.contains(needle))
             .collect()
     }

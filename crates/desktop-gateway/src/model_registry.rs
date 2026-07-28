@@ -286,12 +286,12 @@ fn has_small_param_size(lower: &str) -> bool {
             }
             // A parameter size is "<digits>b" (e.g. 8b, 70b) — the digit run must
             // be immediately followed by 'b'.
-            if i < bytes.len() && (bytes[i] == b'b' || bytes[i] == b'B') {
-                if let Ok(size) = lower[start..i].parse::<u32>() {
-                    if size >= 1 && size <= 13 {
-                        return true;
-                    }
-                }
+            if i < bytes.len()
+                && (bytes[i] == b'b' || bytes[i] == b'B')
+                && let Ok(size) = lower[start..i].parse::<u32>()
+                && (1..=13).contains(&size)
+            {
+                return true;
             }
         } else {
             i += 1;

@@ -80,9 +80,9 @@ impl LeaseManager {
             if task.status != TaskStatus::Running {
                 continue;
             }
-            if !task
+            if task
                 .lease_expires_at
-                .is_some_and(|expires_at| expires_at <= now)
+                .is_none_or(|expires_at| expires_at > now)
             {
                 continue;
             }

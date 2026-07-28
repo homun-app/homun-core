@@ -107,10 +107,11 @@ pub fn format_recall_entry(summary: &str, metadata: &serde_json::Value) -> Strin
         return summary.to_string();
     };
     let mut out = summary.to_string();
-    if let Some(rationale) = decision.get("rationale").and_then(|r| r.as_str()) {
-        if !rationale.is_empty() && !summary.contains(rationale) {
-            out.push_str(&format!(" — why: {rationale}"));
-        }
+    if let Some(rationale) = decision.get("rationale").and_then(|r| r.as_str())
+        && !rationale.is_empty()
+        && !summary.contains(rationale)
+    {
+        out.push_str(&format!(" — why: {rationale}"));
     }
     if let Some(alternatives) = decision.get("alternatives").and_then(|a| a.as_array()) {
         let rejected: Vec<String> = alternatives
@@ -197,6 +198,13 @@ use crate::{
     UserId, WorkspaceId, memory_is_current_at,
 };
 
+pub type GraphContextHook<'a> =
+    dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync + 'a;
+pub type MemorySourceFilter<'a> = dyn Fn(&[AuthorizedMemorySource]) -> Vec<bool> + Sync + 'a;
+type DegradedSources = Vec<(WorkspaceId, String)>;
+type RevalidatedRecallHits = (Vec<RecallHit>, DegradedSources);
+type ResolvedRecallSources = (Vec<AuthorizedMemorySource>, DegradedSources);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemorySourceAccessOutcome {
@@ -279,10 +287,10 @@ pub fn merge_recall_hits(
         if !refs.insert(hit.memory_ref.clone()) || !texts.insert(normalized_text) {
             return false;
         }
-        match hit.publication_link.as_ref() {
-            Some(link) if !publication_links.insert(link.clone()) => false,
-            _ => true,
-        }
+        !matches!(
+            hit.publication_link.as_ref(),
+            Some(link) if !publication_links.insert(link.clone())
+        )
     });
 
     let selected = if hits.len() <= limit {
@@ -341,7 +349,7 @@ pub fn revalidate_recall_hits_before_injection(
     hits: Vec<RecallHit>,
     now_unix: i64,
     limit: usize,
-) -> MemoryResult<(Vec<RecallHit>, Vec<(WorkspaceId, String)>)> {
+) -> MemoryResult<RevalidatedRecallHits> {
     revalidate_recall_hits_before_injection_with_source_filter(
         facade,
         user,
@@ -359,8 +367,8 @@ fn resolve_recall_sources_with_filter(
     user: &UserId,
     consumer_workspace: &WorkspaceId,
     now_unix: i64,
-    source_allowed: &(dyn Fn(&[AuthorizedMemorySource]) -> Vec<bool> + Sync),
-) -> MemoryResult<(Vec<AuthorizedMemorySource>, Vec<(WorkspaceId, String)>)> {
+    source_allowed: &MemorySourceFilter<'_>,
+) -> MemoryResult<ResolvedRecallSources> {
     let sources = facade.resolve_memory_sources(user, consumer_workspace, now_unix)?;
     let allowed_by_source = source_allowed(&sources);
     let mut unavailable = Vec::new();
@@ -378,6 +386,7 @@ fn resolve_recall_sources_with_filter(
     Ok((allowed, unavailable))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn revalidate_recall_hits_before_injection_with_source_filter(
     facade: &MemoryFacade,
     user: &UserId,
@@ -386,8 +395,8 @@ fn revalidate_recall_hits_before_injection_with_source_filter(
     hits: Vec<RecallHit>,
     now_unix: i64,
     limit: usize,
-    source_allowed: &(dyn Fn(&[AuthorizedMemorySource]) -> Vec<bool> + Sync),
-) -> MemoryResult<(Vec<RecallHit>, Vec<(WorkspaceId, String)>)> {
+    source_allowed: &MemorySourceFilter<'_>,
+) -> MemoryResult<RevalidatedRecallHits> {
     let initial_fingerprint = crate::memory_source_policy_fingerprint(initial_sources);
     let current_sources = resolve_recall_sources_with_filter(
         facade,
@@ -428,14 +437,15 @@ fn revalidate_recall_hits_before_injection_with_source_filter(
         .iter()
         .filter(|source| source.grant_id.is_some())
         .map(|source| {
-            let reason = unavailable
-                .is_some_and(|unavailable| {
-                    unavailable
-                        .iter()
-                        .any(|(workspace, _)| workspace == &source.source_workspace_id)
-                })
-                .then_some("source_unavailable")
-                .unwrap_or(reason);
+            let reason = if unavailable.is_some_and(|unavailable| {
+                unavailable
+                    .iter()
+                    .any(|(workspace, _)| workspace == &source.source_workspace_id)
+            }) {
+                "source_unavailable"
+            } else {
+                reason
+            };
             (source.source_workspace_id.clone(), reason.to_string())
         })
         .collect();
@@ -452,9 +462,7 @@ pub fn recall_authorized_sources_on_facade(
     query: &str,
     query_vec: &[f32],
     now_unix: i64,
-    graph_context: Option<
-        &(dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync),
-    >,
+    graph_context: Option<&GraphContextHook<'_>>,
 ) -> MemoryResult<RecallPack> {
     recall_authorized_sources_on_facade_with_source_filter(
         facade,
@@ -472,6 +480,7 @@ pub fn recall_authorized_sources_on_facade(
 /// The memory crate does not own project lifecycle; callers can therefore
 /// provide a fail-closed predicate while the compatibility API remains
 /// allow-all for existing integrations.
+#[allow(clippy::too_many_arguments)]
 pub fn recall_authorized_sources_on_facade_with_source_filter(
     facade: &MemoryFacade,
     user: &UserId,
@@ -479,10 +488,8 @@ pub fn recall_authorized_sources_on_facade_with_source_filter(
     query: &str,
     query_vec: &[f32],
     now_unix: i64,
-    graph_context: Option<
-        &(dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync),
-    >,
-    source_allowed: &(dyn Fn(&[AuthorizedMemorySource]) -> Vec<bool> + Sync),
+    graph_context: Option<&GraphContextHook<'_>>,
+    source_allowed: &MemorySourceFilter<'_>,
 ) -> MemoryResult<RecallPack> {
     let (sources, initially_unavailable) = resolve_recall_sources_with_filter(
         facade,
@@ -661,9 +668,7 @@ pub fn recall_source_on_facade(
     source: &AuthorizedMemorySource,
     query: &str,
     query_vec: &[f32],
-    _graph_context: Option<
-        &(dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync),
-    >,
+    _graph_context: Option<&GraphContextHook<'_>>,
 ) -> MemoryResult<RecallPack> {
     let query = query.trim();
     let scope = if source.source_workspace_id.as_str() == PERSONAL_WORKSPACE {
@@ -903,9 +908,7 @@ pub fn recall_search_on_facade(
     workspace: &WorkspaceId,
     query: &str,
     query_vec: &[f32],
-    graph_context: Option<
-        &(dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync),
-    >,
+    graph_context: Option<&GraphContextHook<'_>>,
 ) -> Option<String> {
     let query = query.trim();
     if query.chars().count() < RECALL_MIN_QUERY_CHARS {
@@ -967,18 +970,18 @@ pub fn recall_search_on_facade(
 
     // Semantic pass (dense) → rank per reference.
     let mut dense_rank: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    if !query_vec.is_empty() {
-        if let Ok(hits) = facade.search_embeddings(user, workspace, query_vec, 32) {
-            for (i, hit) in hits
-                .into_iter()
-                .filter(|hit| hit.score >= RECALL_DENSE_MIN_SCORE)
-                .take(8)
-                .enumerate()
-            {
-                dense_rank
-                    .entry(hit.memory_ref.to_string())
-                    .or_insert(i + 1);
-            }
+    if !query_vec.is_empty()
+        && let Ok(hits) = facade.search_embeddings(user, workspace, query_vec, 32)
+    {
+        for (i, hit) in hits
+            .into_iter()
+            .filter(|hit| hit.score >= RECALL_DENSE_MIN_SCORE)
+            .take(8)
+            .enumerate()
+        {
+            dense_rank
+                .entry(hit.memory_ref.to_string())
+                .or_insert(i + 1);
         }
     }
 
@@ -1019,10 +1022,10 @@ pub fn recall_search_on_facade(
     }
 
     // Graph-context enrichment (opzionale, iniettato dal gateway).
-    if let Some(enrich) = graph_context {
-        if let Some(extra) = enrich(facade, user, workspace, query) {
-            lines.insert(0, extra);
-        }
+    if let Some(enrich) = graph_context
+        && let Some(extra) = enrich(facade, user, workspace, query)
+    {
+        lines.insert(0, extra);
     }
     lines.truncate(10);
     if lines.is_empty() {
@@ -1189,11 +1192,7 @@ mod tests {
         let user = UserId::new("current-user");
         let ws = WorkspaceId::new("current-project");
         let make_record = |text: &str| MemoryRecord {
-            reference: crate::MemoryRef::generated(
-                MemoryRefKind::Memory,
-                user.clone(),
-                ws.clone(),
-            ),
+            reference: crate::MemoryRef::generated(MemoryRefKind::Memory, user.clone(), ws.clone()),
             user_id: user.clone(),
             workspace_id: ws.clone(),
             memory_type: "decision".to_string(),

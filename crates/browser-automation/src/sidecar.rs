@@ -128,33 +128,6 @@ impl BrowserSidecarSession {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::BrowserMethod;
-    use serde_json::json;
-    use std::time::Instant;
-
-    #[test]
-    fn send_times_out_when_sidecar_never_replies() {
-        // `sleep` reads no stdin and writes no stdout — a stand-in for a WEDGED sidecar. The
-        // request line sits in the pipe buffer with no reply; `send` must TIME OUT promptly
-        // rather than block the turn forever (the regression this guards against).
-        unsafe { std::env::set_var("HOMUN_BROWSER_SIDECAR_TIMEOUT_SECS", "1") };
-        let session = BrowserSidecarSession::spawn("sleep", &["30"]).expect("spawn sleep");
-        unsafe { std::env::remove_var("HOMUN_BROWSER_SIDECAR_TIMEOUT_SECS") };
-        let request = BrowserRequest::new("req_1".to_string(), BrowserMethod::Snapshot, json!({}));
-        let start = Instant::now();
-        let result = session.send(&request);
-        assert!(result.is_err(), "a non-replying sidecar must error, not hang");
-        assert!(
-            start.elapsed() < Duration::from_secs(5),
-            "send must time out promptly (took {:?})",
-            start.elapsed()
-        );
-    }
-}
-
 impl crate::BrowserTransport for BrowserSidecarSession {
     fn send(&self, request: &BrowserRequest) -> BrowserResult<String> {
         self.send(request)
@@ -176,5 +149,35 @@ impl Drop for BrowserSidecarSession {
         }
         let _ = child.kill();
         let _ = child.wait();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::BrowserMethod;
+    use serde_json::json;
+    use std::time::Instant;
+
+    #[test]
+    fn send_times_out_when_sidecar_never_replies() {
+        // `sleep` reads no stdin and writes no stdout — a stand-in for a WEDGED sidecar. The
+        // request line sits in the pipe buffer with no reply; `send` must TIME OUT promptly
+        // rather than block the turn forever (the regression this guards against).
+        unsafe { std::env::set_var("HOMUN_BROWSER_SIDECAR_TIMEOUT_SECS", "1") };
+        let session = BrowserSidecarSession::spawn("sleep", &["30"]).expect("spawn sleep");
+        unsafe { std::env::remove_var("HOMUN_BROWSER_SIDECAR_TIMEOUT_SECS") };
+        let request = BrowserRequest::new("req_1".to_string(), BrowserMethod::Snapshot, json!({}));
+        let start = Instant::now();
+        let result = session.send(&request);
+        assert!(
+            result.is_err(),
+            "a non-replying sidecar must error, not hang"
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "send must time out promptly (took {:?})",
+            start.elapsed()
+        );
     }
 }

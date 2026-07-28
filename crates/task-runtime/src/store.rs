@@ -1,12 +1,11 @@
 use crate::{
-    AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus, AgentToolReceipt, ApprovalRequest,
-    Automation, AutomationRun, BrowserCheckpointRecord, NewAgentRun, NewAgentToolReceipt,
-    NewBrowserCheckpoint, ObjectiveContractRecord,
-    ObjectiveMode, ResourceClass, RuntimePlanRecord, SubagentInfo, TaskCheckpoint, ToolReceiptClaim,
-    TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
-    ActiveTurnProjection, NewTurnSteering, TerminalWrite, ThreadActivityProjection, ThreadAttention,
-    TurnEvent, TurnEventKind,
-    TurnSteeringRecord, TurnSteeringStatus, UserId, WorkspaceId,
+    ActiveTurnProjection, AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus,
+    AgentToolReceipt, ApprovalRequest, Automation, AutomationRun, BrowserCheckpointRecord,
+    NewAgentRun, NewAgentToolReceipt, NewBrowserCheckpoint, NewTurnSteering,
+    ObjectiveContractRecord, ObjectiveMode, ResourceClass, RuntimePlanRecord, SubagentInfo,
+    TaskCheckpoint, TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult,
+    TaskStatus, TerminalWrite, ThreadActivityProjection, ThreadAttention, ToolReceiptClaim,
+    TurnEvent, TurnEventKind, TurnSteeringRecord, TurnSteeringStatus, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::Value;
@@ -87,21 +86,19 @@ fn first_terminal_event_on(
             },
         )
         .optional()?;
-    row.map(
-        |(event_id, turn_id, seq, kind, payload_json, created_at)| {
-            let kind = TurnEventKind::parse(&kind).ok_or_else(|| {
-                TaskRuntimeError::Store("unknown terminal turn event kind".to_string())
-            })?;
-            Ok(TurnEvent {
-                event_id,
-                turn_id,
-                seq,
-                kind,
-                payload: serde_json::from_str(&payload_json)?,
-                created_at,
-            })
-        },
-    )
+    row.map(|(event_id, turn_id, seq, kind, payload_json, created_at)| {
+        let kind = TurnEventKind::parse(&kind).ok_or_else(|| {
+            TaskRuntimeError::Store("unknown terminal turn event kind".to_string())
+        })?;
+        Ok(TurnEvent {
+            event_id,
+            turn_id,
+            seq,
+            kind,
+            payload: serde_json::from_str(&payload_json)?,
+            created_at,
+        })
+    })
     .transpose()
 }
 
@@ -113,9 +110,9 @@ impl TaskStore {
         // WAL enables concurrent readers + serialized writers — required when two
         // stores (chat + task) point at the same file. busy_timeout avoids transient
         // SQLITE_BUSY when the other writer is mid-commit.
-        store
-            .connection
-            .execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;")?;
+        store.connection.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;",
+        )?;
         store.run_migrations()?;
         Ok(store)
     }
@@ -494,10 +491,8 @@ impl TaskStore {
         let chat_turn_cols = ["thread_id", "request_id", "source", "approval"];
         for col in chat_turn_cols {
             if !column_exists(&self.connection, "tasks", col) {
-                self.connection.execute(
-                    &format!("ALTER TABLE tasks ADD COLUMN {col} TEXT"),
-                    [],
-                )?;
+                self.connection
+                    .execute(&format!("ALTER TABLE tasks ADD COLUMN {col} TEXT"), [])?;
             }
         }
         if !column_exists(&self.connection, "runtime_plans", "objective_revision") {
@@ -712,8 +707,10 @@ impl TaskStore {
                 now,
             ],
         )?;
-        let record = load_runtime_plan_on(&tx, user_id, workspace_id, thread_id)?
-            .ok_or_else(|| TaskRuntimeError::Store("runtime plan disappeared after upsert".into()))?;
+        let record =
+            load_runtime_plan_on(&tx, user_id, workspace_id, thread_id)?.ok_or_else(|| {
+                TaskRuntimeError::Store("runtime plan disappeared after upsert".into())
+            })?;
         tx.commit()?;
         Ok(record)
     }
@@ -795,7 +792,9 @@ impl TaskStore {
             ],
         )?;
         let record = load_objective_contract_on(&tx, user_id, workspace_id, thread_id)?
-            .ok_or_else(|| TaskRuntimeError::Store("objective contract disappeared after upsert".into()))?;
+            .ok_or_else(|| {
+                TaskRuntimeError::Store("objective contract disappeared after upsert".into())
+            })?;
         tx.commit()?;
         Ok(record)
     }
@@ -848,10 +847,12 @@ impl TaskStore {
         &self,
         checkpoint: &NewBrowserCheckpoint,
     ) -> TaskRuntimeResult<bool> {
-        let objective_revision = i64::try_from(checkpoint.objective_revision)
-            .map_err(|_| TaskRuntimeError::Store("objective revision exceeds SQLite range".into()))?;
-        let generation = i64::try_from(checkpoint.generation)
-            .map_err(|_| TaskRuntimeError::Store("browser generation exceeds SQLite range".into()))?;
+        let objective_revision = i64::try_from(checkpoint.objective_revision).map_err(|_| {
+            TaskRuntimeError::Store("objective revision exceeds SQLite range".into())
+        })?;
+        let generation = i64::try_from(checkpoint.generation).map_err(|_| {
+            TaskRuntimeError::Store("browser generation exceeds SQLite range".into())
+        })?;
         let now = OffsetDateTime::now_utc().unix_timestamp();
         let changed = self.connection.execute(
             "INSERT INTO browser_checkpoints (
@@ -1030,8 +1031,9 @@ impl TaskStore {
         thread_id: &str,
         objective_revision: u64,
     ) -> TaskRuntimeResult<Vec<String>> {
-        let revision = i64::try_from(objective_revision)
-            .map_err(|_| TaskRuntimeError::Store("objective revision exceeds SQLite range".into()))?;
+        let revision = i64::try_from(objective_revision).map_err(|_| {
+            TaskRuntimeError::Store("objective revision exceeds SQLite range".into())
+        })?;
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
         let refs = {
             let mut statement = tx.prepare(
@@ -1041,7 +1043,9 @@ impl TaskStore {
                  ORDER BY draft_secret_ref",
             )?;
             statement
-                .query_map(params![user_id, workspace_id, thread_id, revision], |row| row.get(0))?
+                .query_map(params![user_id, workspace_id, thread_id, revision], |row| {
+                    row.get(0)
+                })?
                 .collect::<Result<Vec<String>, _>>()?
         };
         tx.execute(
@@ -1141,7 +1145,10 @@ impl TaskStore {
                  ORDER BY steering_id ASC",
             )?;
             statement
-                .query_map(params![user_id, workspace_id, thread_id, active_turn_id, now], map_turn_steering_row)?
+                .query_map(
+                    params![user_id, workspace_id, thread_id, active_turn_id, now],
+                    map_turn_steering_row,
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
         tx.execute(
@@ -1152,7 +1159,15 @@ impl TaskStore {
              WHERE user_id = ?4 AND workspace_id = ?5 AND thread_id = ?6
                AND active_turn_id = ?7 AND status = 'pending'
                AND (next_retry_at IS NULL OR next_retry_at <= ?3)",
-            params![run_id, round as i64, now, user_id, workspace_id, thread_id, active_turn_id],
+            params![
+                run_id,
+                round as i64,
+                now,
+                user_id,
+                workspace_id,
+                thread_id,
+                active_turn_id
+            ],
         )?;
         tx.commit()?;
         Ok(records
@@ -1178,7 +1193,12 @@ impl TaskStore {
         active_turn_id: &str,
     ) -> TaskRuntimeResult<Vec<TurnSteeringRecord>> {
         self.claim_pending_turn_steering(
-            user_id, workspace_id, thread_id, active_turn_id, "legacy", 0,
+            user_id,
+            workspace_id,
+            thread_id,
+            active_turn_id,
+            "legacy",
+            0,
         )
     }
 
@@ -1200,7 +1220,10 @@ impl TaskStore {
              ORDER BY steering_id ASC",
         )?;
         Ok(statement
-            .query_map(params![user_id, workspace_id, thread_id], map_turn_steering_row)?
+            .query_map(
+                params![user_id, workspace_id, thread_id],
+                map_turn_steering_row,
+            )?
             .collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -1267,15 +1290,32 @@ impl TaskStore {
                     revision=revision+1, updated_at=?4
              WHERE steering_id=?5 AND user_id=?6 AND workspace_id=?7 AND revision=?8
                AND status IN ('pending','held')",
-            params![input.source_message_id, input.prompt, serde_json::to_string(input)?, now,
-                steering_id, user_id, workspace_id, expected_revision as i64],
+            params![
+                input.source_message_id,
+                input.prompt,
+                serde_json::to_string(input)?,
+                now,
+                steering_id,
+                user_id,
+                workspace_id,
+                expected_revision as i64
+            ],
         )?;
-        if changed == 0 { return Err(TaskRuntimeError::Conflict("steering changed or is no longer editable".into())); }
-        self.load_turn_steering(steering_id, user_id, workspace_id)?.ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
+        if changed == 0 {
+            return Err(TaskRuntimeError::Conflict(
+                "steering changed or is no longer editable".into(),
+            ));
+        }
+        self.load_turn_steering(steering_id, user_id, workspace_id)?
+            .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
     }
 
     pub fn cancel_turn_steering(
-        &self, steering_id: i64, user_id: &str, workspace_id: &str, expected_revision: u64,
+        &self,
+        steering_id: i64,
+        user_id: &str,
+        workspace_id: &str,
+        expected_revision: u64,
     ) -> TaskRuntimeResult<TurnSteeringRecord> {
         let now = OffsetDateTime::now_utc().unix_timestamp();
         let changed = self.connection.execute(
@@ -1283,13 +1323,29 @@ impl TaskStore {
                     cancelled_at=?1, updated_at=?1
              WHERE steering_id=?2 AND user_id=?3 AND workspace_id=?4 AND revision=?5
                AND status IN ('pending','held')",
-            params![now, steering_id, user_id, workspace_id, expected_revision as i64],
+            params![
+                now,
+                steering_id,
+                user_id,
+                workspace_id,
+                expected_revision as i64
+            ],
         )?;
-        if changed == 0 { return Err(TaskRuntimeError::Conflict("steering changed or is no longer cancellable".into())); }
-        self.load_turn_steering(steering_id, user_id, workspace_id)?.ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
+        if changed == 0 {
+            return Err(TaskRuntimeError::Conflict(
+                "steering changed or is no longer cancellable".into(),
+            ));
+        }
+        self.load_turn_steering(steering_id, user_id, workspace_id)?
+            .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
     }
 
-    pub fn load_turn_steering(&self, steering_id: i64, user_id: &str, workspace_id: &str) -> TaskRuntimeResult<Option<TurnSteeringRecord>> {
+    pub fn load_turn_steering(
+        &self,
+        steering_id: i64,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<Option<TurnSteeringRecord>> {
         load_turn_steering_by_id_on(&self.connection, steering_id, user_id, workspace_id)
     }
 
@@ -1303,7 +1359,10 @@ impl TaskStore {
     }
 
     pub(crate) fn promote_turn_steering_on(
-        tx: &Transaction<'_>, steering_id: i64, user_id: &str, workspace_id: &str,
+        tx: &Transaction<'_>,
+        steering_id: i64,
+        user_id: &str,
+        workspace_id: &str,
         expected_revision: u64,
     ) -> TaskRuntimeResult<TurnSteeringRecord> {
         let now = OffsetDateTime::now_utc().unix_timestamp();
@@ -1312,19 +1371,35 @@ impl TaskStore {
              WHERE steering_id=?2 AND user_id=?3 AND workspace_id=?4 AND revision=?5 AND status='held'",
             params![now, steering_id, user_id, workspace_id, expected_revision as i64],
         )?;
-        if changed == 0 { return Err(TaskRuntimeError::Conflict("held steering changed".into())); }
-        load_turn_steering_by_id_on(tx, steering_id, user_id, workspace_id)?.ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
+        if changed == 0 {
+            return Err(TaskRuntimeError::Conflict("held steering changed".into()));
+        }
+        load_turn_steering_by_id_on(tx, steering_id, user_id, workspace_id)?
+            .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
     }
 
-    pub fn current_turn_steering(&self, steering_id: i64, user_id: &str, workspace_id: &str) -> TaskRuntimeResult<Option<TurnSteeringRecord>> {
+    pub fn current_turn_steering(
+        &self,
+        steering_id: i64,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<Option<TurnSteeringRecord>> {
         self.load_turn_steering(steering_id, user_id, workspace_id)
     }
 
-    pub fn workspace_for_turn_steering(&self, steering_id: i64, user_id: &str) -> TaskRuntimeResult<Option<String>> {
-        self.connection.query_row(
-            "SELECT workspace_id FROM turn_steering WHERE steering_id=?1 AND user_id=?2",
-            params![steering_id, user_id], |row| row.get(0),
-        ).optional().map_err(Into::into)
+    pub fn workspace_for_turn_steering(
+        &self,
+        steering_id: i64,
+        user_id: &str,
+    ) -> TaskRuntimeResult<Option<String>> {
+        self.connection
+            .query_row(
+                "SELECT workspace_id FROM turn_steering WHERE steering_id=?1 AND user_id=?2",
+                params![steering_id, user_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
     }
 
     pub fn mark_turn_steering_interpreted(
@@ -1341,10 +1416,18 @@ impl TaskStore {
                  last_interpretation_error=NULL, next_retry_at=NULL,
                  revision=revision+1, updated_at=?2
              WHERE steering_id=?3 AND revision=?4 AND status='claimed' AND claimed_run_id=?5",
-            params![serde_json::to_string(semantic_decision_json)?, now, steering_id, expected_revision as i64, run_id],
+            params![
+                serde_json::to_string(semantic_decision_json)?,
+                now,
+                steering_id,
+                expected_revision as i64,
+                run_id
+            ],
         )?;
         if changed == 0 {
-            return Err(TaskRuntimeError::Conflict("steering changed before interpretation".into()));
+            return Err(TaskRuntimeError::Conflict(
+                "steering changed before interpretation".into(),
+            ));
         }
         load_turn_steering_unscoped_by_id(&self.connection, steering_id)?
             .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
@@ -1357,7 +1440,12 @@ impl TaskStore {
         run_id: &str,
     ) -> TaskRuntimeResult<TurnSteeringRecord> {
         self.transition_interpreted_steering(
-            steering_id, expected_revision, run_id, "interpreted", "applied", "applied_at",
+            steering_id,
+            expected_revision,
+            run_id,
+            "interpreted",
+            "applied",
+            "applied_at",
         )
     }
 
@@ -1368,7 +1456,12 @@ impl TaskStore {
         run_id: &str,
     ) -> TaskRuntimeResult<TurnSteeringRecord> {
         self.transition_interpreted_steering(
-            steering_id, expected_revision, run_id, "applied", "completed", "completed_at",
+            steering_id,
+            expected_revision,
+            run_id,
+            "applied",
+            "completed",
+            "completed_at",
         )
     }
 
@@ -1389,10 +1482,19 @@ impl TaskStore {
         );
         let changed = self.connection.execute(
             &sql,
-            params![to_status, now, steering_id, expected_revision as i64, from_status, run_id],
+            params![
+                to_status,
+                now,
+                steering_id,
+                expected_revision as i64,
+                from_status,
+                run_id
+            ],
         )?;
         if changed == 0 {
-            return Err(TaskRuntimeError::Conflict(format!("steering changed before transition to {to_status}")));
+            return Err(TaskRuntimeError::Conflict(format!(
+                "steering changed before transition to {to_status}"
+            )));
         }
         load_turn_steering_unscoped_by_id(&self.connection, steering_id)?
             .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
@@ -1414,10 +1516,18 @@ impl TaskStore {
                  interpretation_attempts=interpretation_attempts+1,
                  revision=revision+1, updated_at=?3
              WHERE steering_id=?4 AND revision=?5 AND status='claimed'",
-            params![error, next_retry_at, now, steering_id, expected_revision as i64],
+            params![
+                error,
+                next_retry_at,
+                now,
+                steering_id,
+                expected_revision as i64
+            ],
         )?;
         if changed == 0 {
-            return Err(TaskRuntimeError::Conflict("steering changed before retry release".into()));
+            return Err(TaskRuntimeError::Conflict(
+                "steering changed before retry release".into(),
+            ));
         }
         load_turn_steering_unscoped_by_id(&self.connection, steering_id)?
             .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
@@ -1446,16 +1556,29 @@ impl TaskStore {
                  interpretation_attempts=interpretation_attempts+1,
                  revision=revision+1, updated_at=?3
              WHERE steering_id=?4 AND revision=?5 AND status='pending'",
-            params![error, next_retry_at, now, steering_id, expected_revision as i64],
+            params![
+                error,
+                next_retry_at,
+                now,
+                steering_id,
+                expected_revision as i64
+            ],
         )?;
         if changed == 0 {
-            return Err(TaskRuntimeError::Conflict("steering changed before retry defer".into()));
+            return Err(TaskRuntimeError::Conflict(
+                "steering changed before retry defer".into(),
+            ));
         }
         load_turn_steering_unscoped_by_id(&self.connection, steering_id)?
             .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
     }
 
-    pub fn hold_pending_turn_steering(&self, user_id: &str, workspace_id: &str, active_turn_id: &str) -> TaskRuntimeResult<usize> {
+    pub fn hold_pending_turn_steering(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        active_turn_id: &str,
+    ) -> TaskRuntimeResult<usize> {
         let now = OffsetDateTime::now_utc().unix_timestamp();
         Ok(self.connection.execute(
             "UPDATE turn_steering SET status='held', revision=revision+1, updated_at=?1
@@ -1489,7 +1612,12 @@ impl TaskStore {
         tx.execute(
             "UPDATE tasks SET status='finalizing', updated_at=?1
              WHERE task_id=?2 AND user_id=?3 AND workspace_id=?4 AND status='running'",
-            params![OffsetDateTime::now_utc().unix_timestamp(), active_turn_id, user_id, workspace_id],
+            params![
+                OffsetDateTime::now_utc().unix_timestamp(),
+                active_turn_id,
+                user_id,
+                workspace_id
+            ],
         )?;
         tx.commit()?;
         Ok(true)
@@ -1569,9 +1697,17 @@ impl TaskStore {
                 resumable = excluded.resumable,
                 created_at = excluded.created_at",
             params![
-                checkpoint_id, run_id, turn_id, thread_id, user_id, workspace_id,
-                round as i64, serde_json::to_string(state)?, fingerprint,
-                if resumable { 1 } else { 0 }, created_at,
+                checkpoint_id,
+                run_id,
+                turn_id,
+                thread_id,
+                user_id,
+                workspace_id,
+                round as i64,
+                serde_json::to_string(state)?,
+                fingerprint,
+                if resumable { 1 } else { 0 },
+                created_at,
             ],
         )?;
         Ok(AgentCheckpoint {
@@ -1611,25 +1747,50 @@ impl TaskStore {
                 |row| {
                     let state_json: String = row.get(7)?;
                     Ok((
-                        row.get::<_, String>(0)?, row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?, row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?, row.get::<_, String>(5)?,
-                        row.get::<_, i64>(6)?, state_json,
-                        row.get::<_, String>(8)?, row.get::<_, i64>(9)?,
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
+                        state_json,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, i64>(9)?,
                         row.get::<_, i64>(10)?,
                     ))
                 },
             )
             .optional()?
-            .map(|(checkpoint_id, run_id, turn_id, thread_id, user_id, workspace_id,
-                   round, state_json, fingerprint, resumable, created_at)| {
-                Ok(AgentCheckpoint {
-                    checkpoint_id, run_id, turn_id, thread_id, user_id, workspace_id,
-                    round: round as u32,
-                    state_json: serde_json::from_str(&state_json)?, fingerprint,
-                    resumable: resumable != 0, created_at,
-                })
-            })
+            .map(
+                |(
+                    checkpoint_id,
+                    run_id,
+                    turn_id,
+                    thread_id,
+                    user_id,
+                    workspace_id,
+                    round,
+                    state_json,
+                    fingerprint,
+                    resumable,
+                    created_at,
+                )| {
+                    Ok(AgentCheckpoint {
+                        checkpoint_id,
+                        run_id,
+                        turn_id,
+                        thread_id,
+                        user_id,
+                        workspace_id,
+                        round: round as u32,
+                        state_json: serde_json::from_str(&state_json)?,
+                        fingerprint,
+                        resumable: resumable != 0,
+                        created_at,
+                    })
+                },
+            )
             .transpose()
     }
 
@@ -1645,13 +1806,22 @@ impl TaskStore {
                 tool_name, arguments_hash, status, started_at
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'started', ?9)",
             params![
-                new_receipt.turn_id, new_receipt.idempotency_key, new_receipt.run_id,
-                new_receipt.thread_id, new_receipt.user_id, new_receipt.workspace_id,
-                new_receipt.tool_name, new_receipt.arguments_hash, now,
+                new_receipt.turn_id,
+                new_receipt.idempotency_key,
+                new_receipt.run_id,
+                new_receipt.thread_id,
+                new_receipt.user_id,
+                new_receipt.workspace_id,
+                new_receipt.tool_name,
+                new_receipt.arguments_hash,
+                now,
             ],
         )?;
-        let receipt = load_tool_receipt_on(&tx, &new_receipt.turn_id, &new_receipt.idempotency_key)?
-            .ok_or_else(|| TaskRuntimeError::Store("tool receipt disappeared after claim".into()))?;
+        let receipt =
+            load_tool_receipt_on(&tx, &new_receipt.turn_id, &new_receipt.idempotency_key)?
+                .ok_or_else(|| {
+                    TaskRuntimeError::Store("tool receipt disappeared after claim".into())
+                })?;
         let claim = if inserted == 1 {
             ToolReceiptClaim::Execute
         } else if receipt.status == "completed" {
@@ -1675,11 +1845,18 @@ impl TaskStore {
             "UPDATE agent_tool_receipts
              SET status = 'completed', result_json = ?1, effects_json = ?2, completed_at = ?3
              WHERE turn_id = ?4 AND idempotency_key = ?5 AND status = 'started'",
-            params![serde_json::to_string(result)?, serde_json::to_string(effects)?,
-                    completed_at, turn_id, idempotency_key],
+            params![
+                serde_json::to_string(result)?,
+                serde_json::to_string(effects)?,
+                completed_at,
+                turn_id,
+                idempotency_key
+            ],
         )?;
         if changed != 1 {
-            return Err(TaskRuntimeError::Store("tool receipt is not claimable".into()));
+            return Err(TaskRuntimeError::Store(
+                "tool receipt is not claimable".into(),
+            ));
         }
         load_tool_receipt_on(&self.connection, turn_id, idempotency_key)?
             .ok_or_else(|| TaskRuntimeError::Store("completed tool receipt disappeared".into()))
@@ -1699,7 +1876,10 @@ impl TaskStore {
              WHERE thread_id = ?1 AND user_id = ?2 AND workspace_id = ?3
              ORDER BY started_at ASC, idempotency_key ASC",
         )?;
-        let rows = stmt.query_map(params![thread_id, user_id, workspace_id], map_tool_receipt_row)?;
+        let rows = stmt.query_map(
+            params![thread_id, user_id, workspace_id],
+            map_tool_receipt_row,
+        )?;
         rows.map(|row| row.map_err(Into::into)).collect()
     }
 
@@ -1780,9 +1960,7 @@ impl TaskStore {
                AND status NOT IN ('completed', 'failed', 'cancelled', 'expired')
              ORDER BY workspace_id ASC",
         )?;
-        let rows = statement.query_map(params![user_id.as_str()], |row| {
-            row.get::<_, String>(0)
-        })?;
+        let rows = statement.query_map(params![user_id.as_str()], |row| row.get::<_, String>(0))?;
         rows.map(|row| Ok(WorkspaceId::new(row?))).collect()
     }
 
@@ -2345,10 +2523,18 @@ impl TaskStore {
         let mut out = Vec::new();
         for row in rows {
             let (event_id, turn_id, seq, kind_str, payload_json, created_at) = row?;
-            let kind = TurnEventKind::parse(&kind_str)
-                .ok_or_else(|| TaskRuntimeError::Store(format!("unknown turn_event kind: {kind_str}")))?;
+            let kind = TurnEventKind::parse(&kind_str).ok_or_else(|| {
+                TaskRuntimeError::Store(format!("unknown turn_event kind: {kind_str}"))
+            })?;
             let payload: Value = serde_json::from_str(&payload_json)?;
-            out.push(TurnEvent { event_id, turn_id, seq, kind, payload, created_at });
+            out.push(TurnEvent {
+                event_id,
+                turn_id,
+                seq,
+                kind,
+                payload,
+                created_at,
+            });
         }
         Ok(out)
     }
@@ -2435,13 +2621,13 @@ impl TaskStore {
             ],
         )?;
         let event_id = tx.last_insert_rowid();
-        if kind == "prompt_snapshot" {
-            if let Some(fingerprint) = payload.get("fingerprint").and_then(Value::as_str) {
-                tx.execute(
-                    "UPDATE agent_runs SET prompt_fingerprint = ?2 WHERE run_id = ?1",
-                    params![run_id, fingerprint],
-                )?;
-            }
+        if kind == "prompt_snapshot"
+            && let Some(fingerprint) = payload.get("fingerprint").and_then(Value::as_str)
+        {
+            tx.execute(
+                "UPDATE agent_runs SET prompt_fingerprint = ?2 WHERE run_id = ?1",
+                params![run_id, fingerprint],
+            )?;
         }
         tx.commit()?;
         Ok(AgentRunEvent {
@@ -2575,12 +2761,20 @@ impl TaskStore {
             let status: String = row.get(6)?;
             Ok((
                 AgentRun {
-                    run_id: row.get(0)?, turn_id: row.get(1)?, thread_id: row.get(2)?,
-                    user_id: row.get(3)?, workspace_id: row.get(4)?, attempt: row.get(5)?,
+                    run_id: row.get(0)?,
+                    turn_id: row.get(1)?,
+                    thread_id: row.get(2)?,
+                    user_id: row.get(3)?,
+                    workspace_id: row.get(4)?,
+                    attempt: row.get(5)?,
                     status: AgentRunStatus::parse(&status).unwrap_or(AgentRunStatus::Failed),
-                    model: row.get(7)?, provider: row.get(8)?, prompt_fingerprint: row.get(9)?,
-                    started_at: row.get(10)?, completed_at: row.get(11)?,
-                    terminal_reason: row.get(12)?, schema_version: row.get(13)?,
+                    model: row.get(7)?,
+                    provider: row.get(8)?,
+                    prompt_fingerprint: row.get(9)?,
+                    started_at: row.get(10)?,
+                    completed_at: row.get(11)?,
+                    terminal_reason: row.get(12)?,
+                    schema_version: row.get(13)?,
                 },
                 status,
             ))
@@ -2589,7 +2783,9 @@ impl TaskStore {
         for row in rows {
             let (run, status) = row?;
             if AgentRunStatus::parse(&status).is_none() {
-                return Err(TaskRuntimeError::Store(format!("unknown agent run status: {status}")));
+                return Err(TaskRuntimeError::Store(format!(
+                    "unknown agent run status: {status}"
+                )));
             }
             runs.push(run);
         }
@@ -2601,11 +2797,14 @@ impl TaskStore {
         run_id: &str,
         user_id: &str,
     ) -> TaskRuntimeResult<Option<String>> {
-        Ok(self.connection.query_row(
-            "SELECT workspace_id FROM agent_runs WHERE run_id = ?1 AND user_id = ?2",
-            params![run_id, user_id],
-            |row| row.get(0),
-        ).optional()?)
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT workspace_id FROM agent_runs WHERE run_id = ?1 AND user_id = ?2",
+                params![run_id, user_id],
+                |row| row.get(0),
+            )
+            .optional()?)
     }
 
     pub fn latest_agent_checkpoint(
@@ -2614,29 +2813,64 @@ impl TaskStore {
         user_id: &str,
         workspace_id: &str,
     ) -> TaskRuntimeResult<Option<AgentCheckpoint>> {
-        self.connection.query_row(
-            "SELECT c.checkpoint_id, c.run_id, c.turn_id, c.thread_id, c.user_id,
+        self.connection
+            .query_row(
+                "SELECT c.checkpoint_id, c.run_id, c.turn_id, c.thread_id, c.user_id,
                     c.workspace_id, c.round, c.state_json, c.fingerprint,
                     c.resumable, c.created_at
              FROM agent_checkpoints c
              JOIN agent_runs r ON r.run_id = c.run_id
              WHERE c.run_id = ?1 AND r.user_id = ?2 AND r.workspace_id = ?3
              ORDER BY c.round DESC LIMIT 1",
-            params![run_id, user_id, workspace_id],
-            |row| {
-                let state_json: String = row.get(7)?;
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?, row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?, row.get::<_, String>(5)?,
-                    row.get::<_, i64>(6)?, state_json, row.get::<_, String>(8)?,
-                    row.get::<_, i64>(9)?, row.get::<_, i64>(10)?))
-            },
-        ).optional()?.map(|(checkpoint_id, run_id, turn_id, thread_id, user_id,
-                            workspace_id, round, state_json, fingerprint, resumable, created_at)| {
-            Ok(AgentCheckpoint { checkpoint_id, run_id, turn_id, thread_id, user_id, workspace_id,
-                round: round as u32, state_json: serde_json::from_str(&state_json)?, fingerprint,
-                resumable: resumable != 0, created_at })
-        }).transpose()
+                params![run_id, user_id, workspace_id],
+                |row| {
+                    let state_json: String = row.get(7)?;
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
+                        state_json,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, i64>(9)?,
+                        row.get::<_, i64>(10)?,
+                    ))
+                },
+            )
+            .optional()?
+            .map(
+                |(
+                    checkpoint_id,
+                    run_id,
+                    turn_id,
+                    thread_id,
+                    user_id,
+                    workspace_id,
+                    round,
+                    state_json,
+                    fingerprint,
+                    resumable,
+                    created_at,
+                )| {
+                    Ok(AgentCheckpoint {
+                        checkpoint_id,
+                        run_id,
+                        turn_id,
+                        thread_id,
+                        user_id,
+                        workspace_id,
+                        round: round as u32,
+                        state_json: serde_json::from_str(&state_json)?,
+                        fingerprint,
+                        resumable: resumable != 0,
+                        created_at,
+                    })
+                },
+            )
+            .transpose()
     }
 
     pub fn list_agent_run_events(
@@ -3000,7 +3234,9 @@ impl TaskStore {
             )
             .optional()?;
         let latest_turn_id = latest_turn.as_ref().map(|(id, _, _, _, _)| id.clone());
-        let latest_turn_status = latest_turn.as_ref().map(|(_, status, _, _, _)| status.clone());
+        let latest_turn_status = latest_turn
+            .as_ref()
+            .map(|(_, status, _, _, _)| status.clone());
         let latest_turn_last_seq = latest_turn_id
             .as_deref()
             .map(|turn_id| {
@@ -3012,22 +3248,27 @@ impl TaskStore {
             })
             .transpose()?
             .unwrap_or(0);
-        let active_turn = latest_turn.as_ref().and_then(|(turn_id, status, task_json, updated_at, blocked_reason)| {
-            if matches!(status.as_str(), "completed" | "failed" | "cancelled" | "expired" | "finalizing") {
-                return None;
-            }
-            let task = serde_json::from_str::<TaskRecord>(task_json).ok()?;
-            Some(ActiveTurnProjection {
-                turn_id: turn_id.clone(),
-                last_event_seq: latest_turn_last_seq,
-                status: status.clone(),
-                attempt: task.attempt_count,
-                max_attempts: task.retry_policy.max_attempts,
-                not_before: task.not_before.map(|value| value.unix_timestamp()),
-                blocked_reason: blocked_reason.clone(),
-                updated_at: *updated_at,
-            })
-        });
+        let active_turn = latest_turn.as_ref().and_then(
+            |(turn_id, status, task_json, updated_at, blocked_reason)| {
+                if matches!(
+                    status.as_str(),
+                    "completed" | "failed" | "cancelled" | "expired" | "finalizing"
+                ) {
+                    return None;
+                }
+                let task = serde_json::from_str::<TaskRecord>(task_json).ok()?;
+                Some(ActiveTurnProjection {
+                    turn_id: turn_id.clone(),
+                    last_event_seq: latest_turn_last_seq,
+                    status: status.clone(),
+                    attempt: task.attempt_count,
+                    max_attempts: task.retry_policy.max_attempts,
+                    not_before: task.not_before.map(|value| value.unix_timestamp()),
+                    blocked_reason: blocked_reason.clone(),
+                    updated_at: *updated_at,
+                })
+            },
+        );
 
         let mut stmt = self.connection.prepare(
             "SELECT te.turn_id, te.kind, te.payload_json
@@ -3058,10 +3299,10 @@ impl TaskStore {
                 }
                 // Plan is scoped to the LATEST turn: a newer, plan-less task clears the old plan.
                 "plan_update" if Some(&turn_id) == latest_turn_id.as_ref() => {
-                    if let Some(md) = payload.get("markdown").and_then(|v| v.as_str()) {
-                        if !md.trim().is_empty() {
-                            plan_markdown = Some(md.to_string());
-                        }
+                    if let Some(md) = payload.get("markdown").and_then(|v| v.as_str())
+                        && !md.trim().is_empty()
+                    {
+                        plan_markdown = Some(md.to_string());
                     }
                 }
                 _ => {}
@@ -3286,14 +3527,18 @@ impl TaskStore {
     /// Returns the task_id of the active (queued/running) chat_turn for a thread, if any.
     /// Used by enqueue to enforce the 1-turn-per-thread constraint (409 if busy).
     /// Uses the partial index idx_tasks_chat_turn_thread.
-    pub fn active_chat_turn_for_thread(&self, thread_id: &str) -> TaskRuntimeResult<Option<String>> {
+    pub fn active_chat_turn_for_thread(
+        &self,
+        thread_id: &str,
+    ) -> TaskRuntimeResult<Option<String>> {
         // An "active" turn is any non-terminal chat_turn: the 1-turn-per-thread
         // constraint must hold while a turn is queued, running, OR paused/waiting
         // (e.g. waiting_resource, waiting_external_event, waiting_user_approval).
         // Only terminal states (completed/failed/cancelled/expired) free the thread
         // for a new turn — otherwise a turn stuck in waiting_external_event would
         // silently stop blocking, letting a second turn race on the same transcript.
-        let task_id: Option<String> = self.connection
+        let task_id: Option<String> = self
+            .connection
             .query_row(
                 "SELECT task_id FROM tasks
                  WHERE thread_id = ?1 AND kind = 'chat_turn'
@@ -3323,8 +3568,13 @@ impl TaskStore {
             "UPDATE tasks SET thread_id = ?1, request_id = ?2, source = ?3, approval = ?4
              WHERE task_id = ?5 AND user_id = ?6 AND workspace_id = ?7",
             params![
-                thread_id, request_id, source, approval,
-                task.task_id.as_str(), task.user_id.as_str(), task.workspace_id.as_str(),
+                thread_id,
+                request_id,
+                source,
+                approval,
+                task.task_id.as_str(),
+                task.user_id.as_str(),
+                task.workspace_id.as_str(),
             ],
         )?;
         Ok(())
@@ -3374,22 +3624,35 @@ fn load_runtime_plan_on(
         },
     )
     .optional()?
-    .map(|(user_id, workspace_id, thread_id, status, plan_json, objective_revision, revision,
-           stall_turns, last_resume_done, created_at, updated_at)| {
-        Ok(RuntimePlanRecord {
+    .map(
+        |(
             user_id,
             workspace_id,
             thread_id,
             status,
-            plan_json: serde_json::from_str(&plan_json)?,
-            objective_revision: objective_revision as u64,
-            revision: revision as u64,
-            stall_turns: stall_turns as u32,
-            last_resume_done: last_resume_done.map(|value| value as usize),
+            plan_json,
+            objective_revision,
+            revision,
+            stall_turns,
+            last_resume_done,
             created_at,
             updated_at,
-        })
-    })
+        )| {
+            Ok(RuntimePlanRecord {
+                user_id,
+                workspace_id,
+                thread_id,
+                status,
+                plan_json: serde_json::from_str(&plan_json)?,
+                objective_revision: objective_revision as u64,
+                revision: revision as u64,
+                stall_turns: stall_turns as u32,
+                last_resume_done: last_resume_done.map(|value| value as usize),
+                created_at,
+                updated_at,
+            })
+        },
+    )
     .transpose()
 }
 
@@ -3490,14 +3753,16 @@ fn map_browser_checkpoint_row(
 fn map_turn_steering_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TurnSteeringRecord> {
     let content: String = row.get(6)?;
     let payload_json: String = row.get(7)?;
-    let payload = serde_json::from_str::<NewTurnSteering>(&payload_json).unwrap_or_else(|_| NewTurnSteering {
-        source_message_id: row.get::<_, String>(5).unwrap_or_default(),
-        prompt: content.clone(),
-        visible_prompt: content.clone(),
-        images: Vec::new(),
-        attachments: Value::Array(Vec::new()),
-        mode: None,
-        model: None,
+    let payload = serde_json::from_str::<NewTurnSteering>(&payload_json).unwrap_or_else(|_| {
+        NewTurnSteering {
+            source_message_id: row.get::<_, String>(5).unwrap_or_default(),
+            prompt: content.clone(),
+            visible_prompt: content.clone(),
+            images: Vec::new(),
+            attachments: Value::Array(Vec::new()),
+            mode: None,
+            model: None,
+        }
     });
     let status_text: String = row.get(9)?;
     let status = status_text.parse::<TurnSteeringStatus>().map_err(|error| {
@@ -3582,7 +3847,9 @@ fn load_turn_steering_by_id_on(
          FROM turn_steering WHERE steering_id=?1 AND user_id=?2 AND workspace_id=?3",
         params![steering_id, user_id, workspace_id],
         map_turn_steering_row,
-    ).optional().map_err(Into::into)
+    )
+    .optional()
+    .map_err(Into::into)
 }
 
 fn load_turn_steering_unscoped_by_id(
@@ -3599,7 +3866,9 @@ fn load_turn_steering_unscoped_by_id(
          FROM turn_steering WHERE steering_id=?1",
         params![steering_id],
         map_turn_steering_row,
-    ).optional().map_err(Into::into)
+    )
+    .optional()
+    .map_err(Into::into)
 }
 
 fn map_tool_receipt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentToolReceipt> {
@@ -3687,7 +3956,10 @@ mod migration_tests {
         let store = TaskStore::open_in_memory().expect("open");
         // Columns exist after the first migration.
         for col in ["thread_id", "request_id", "source", "approval"] {
-            assert!(column_exists(&store.connection, "tasks", col), "missing col {col}");
+            assert!(
+                column_exists(&store.connection, "tasks", col),
+                "missing col {col}"
+            );
         }
         // Re-running migrations must not panic (guarded ALTER).
         store.run_migrations().expect("idempotent re-run");
@@ -3707,7 +3979,10 @@ mod migration_tests {
     #[test]
     fn chat_turn_index_exists() {
         let store = TaskStore::open_in_memory().expect("open");
-        assert!(index_exists(&store.connection, "idx_tasks_chat_turn_thread"));
+        assert!(index_exists(
+            &store.connection,
+            "idx_tasks_chat_turn_thread"
+        ));
     }
 }
 
@@ -3758,10 +4033,12 @@ mod runtime_plan_tests {
                 .unwrap(),
             second
         );
-        assert!(store
-            .load_objective_contract("u", "other", "t")
-            .unwrap()
-            .is_none());
+        assert!(
+            store
+                .load_objective_contract("u", "other", "t")
+                .unwrap()
+                .is_none()
+        );
     }
 
     /// Review I1 regression: a resumed chat_turn re-derives its objective from a
@@ -3808,9 +4085,18 @@ mod runtime_plan_tests {
             )
             .unwrap();
 
-        assert_eq!(first.revision, second.revision, "unchanged objective/mode must not bump revision");
-        assert_eq!(second.source_message_id, "message-2", "provenance still updates");
-        assert_eq!(second.scope_json["semantic_decision"]["confidence"], 0.87, "other fields still update");
+        assert_eq!(
+            first.revision, second.revision,
+            "unchanged objective/mode must not bump revision"
+        );
+        assert_eq!(
+            second.source_message_id, "message-2",
+            "provenance still updates"
+        );
+        assert_eq!(
+            second.scope_json["semantic_decision"]["confidence"], 0.87,
+            "other fields still update"
+        );
 
         // A genuinely different objective still bumps (existing behavior preserved —
         // matches `objective_contract_is_created_and_replaced_in_place` above).
@@ -3828,7 +4114,11 @@ mod runtime_plan_tests {
                 "active",
             )
             .unwrap();
-        assert_eq!(third.revision, second.revision + 1, "a changed objective still bumps");
+        assert_eq!(
+            third.revision,
+            second.revision + 1,
+            "a changed objective still bumps"
+        );
     }
 
     #[test]
@@ -3836,19 +4126,36 @@ mod runtime_plan_tests {
         let store = TaskStore::open_in_memory().unwrap();
         let objective = store
             .upsert_objective_contract(
-                "u", "w", "t", "message-1", "Complete the analysis",
-                ObjectiveMode::ReadOnlyAnalysis, &json!({}), &json!(["read"]),
-                &json!({"kind": "report"}), "active",
+                "u",
+                "w",
+                "t",
+                "message-1",
+                "Complete the analysis",
+                ObjectiveMode::ReadOnlyAnalysis,
+                &json!({}),
+                &json!(["read"]),
+                &json!({"kind": "report"}),
+                "active",
             )
             .unwrap();
 
-        assert!(store
-            .transition_objective_contract_status(
-                "u", "w", "t", objective.revision, "completed",
-            )
-            .unwrap());
+        assert!(
+            store
+                .transition_objective_contract_status(
+                    "u",
+                    "w",
+                    "t",
+                    objective.revision,
+                    "completed",
+                )
+                .unwrap()
+        );
         assert_eq!(
-            store.load_objective_contract("u", "w", "t").unwrap().unwrap().status,
+            store
+                .load_objective_contract("u", "w", "t")
+                .unwrap()
+                .unwrap()
+                .status,
             "completed"
         );
     }
@@ -3858,25 +4165,43 @@ mod runtime_plan_tests {
         let store = TaskStore::open_in_memory().unwrap();
         let old = store
             .upsert_objective_contract(
-                "u", "w", "t", "message-1", "Analyze",
-                ObjectiveMode::ReadOnlyAnalysis, &json!({}), &json!(["read"]), &json!({}),
+                "u",
+                "w",
+                "t",
+                "message-1",
+                "Analyze",
+                ObjectiveMode::ReadOnlyAnalysis,
+                &json!({}),
+                &json!(["read"]),
+                &json!({}),
                 "active",
             )
             .unwrap();
         let replacement = store
             .upsert_objective_contract(
-                "u", "w", "t", "message-2", "Analyze and implement", ObjectiveMode::Mixed,
-                &json!({}), &json!(["read", "filesystem_write"]), &json!({}), "active",
+                "u",
+                "w",
+                "t",
+                "message-2",
+                "Analyze and implement",
+                ObjectiveMode::Mixed,
+                &json!({}),
+                &json!(["read", "filesystem_write"]),
+                &json!({}),
+                "active",
             )
             .unwrap();
 
-        assert!(!store
-            .transition_objective_contract_status(
-                "u", "w", "t", old.revision, "cancelled",
-            )
-            .unwrap());
+        assert!(
+            !store
+                .transition_objective_contract_status("u", "w", "t", old.revision, "cancelled",)
+                .unwrap()
+        );
         assert_eq!(
-            store.load_objective_contract("u", "w", "t").unwrap().unwrap(),
+            store
+                .load_objective_contract("u", "w", "t")
+                .unwrap()
+                .unwrap(),
             replacement
         );
     }
@@ -3924,7 +4249,12 @@ mod runtime_plan_tests {
             .unwrap();
         assert_eq!((first.revision, second.revision), (1, 2));
         assert_eq!(second.plan_json, json!({"steps": [1]}));
-        assert!(store.load_runtime_plan("u", "other", "t").unwrap().is_none());
+        assert!(
+            store
+                .load_runtime_plan("u", "other", "t")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -3932,14 +4262,26 @@ mod runtime_plan_tests {
         let store = TaskStore::open_in_memory().unwrap();
         store
             .upsert_runtime_plan(
-                "u", "w", "t", 0,
+                "u",
+                "w",
+                "t",
+                0,
                 &json!({"steps": [{"status": "in_progress"}]}),
                 "open",
             )
             .unwrap();
-        let first = store.bump_runtime_plan_stall("u", "w", "t", 0).unwrap().unwrap();
-        let repeated = store.bump_runtime_plan_stall("u", "w", "t", 0).unwrap().unwrap();
-        let progressed = store.bump_runtime_plan_stall("u", "w", "t", 1).unwrap().unwrap();
+        let first = store
+            .bump_runtime_plan_stall("u", "w", "t", 0)
+            .unwrap()
+            .unwrap();
+        let repeated = store
+            .bump_runtime_plan_stall("u", "w", "t", 0)
+            .unwrap()
+            .unwrap();
+        let progressed = store
+            .bump_runtime_plan_stall("u", "w", "t", 1)
+            .unwrap()
+            .unwrap();
         assert_eq!(first.stall_turns, 0);
         assert_eq!(repeated.stall_turns, 1);
         assert_eq!(progressed.stall_turns, 0);
@@ -3954,14 +4296,32 @@ mod runtime_plan_tests {
                 .upsert_runtime_plan("u", workspace, thread, 0, &json!({"steps": []}), "open")
                 .unwrap();
         }
-        assert_eq!(store.purge_runtime_plan_for_thread("u", "w", "t").unwrap(), 1);
+        assert_eq!(
+            store.purge_runtime_plan_for_thread("u", "w", "t").unwrap(),
+            1
+        );
         assert!(store.load_runtime_plan("u", "w", "t").unwrap().is_none());
-        assert!(store.load_runtime_plan("u", "w", "other").unwrap().is_some());
-        assert!(store.load_runtime_plan("u", "other", "t").unwrap().is_some());
+        assert!(
+            store
+                .load_runtime_plan("u", "w", "other")
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            store
+                .load_runtime_plan("u", "other", "t")
+                .unwrap()
+                .is_some()
+        );
         store
             .purge_workspace(&UserId::new("u"), &WorkspaceId::new("other"))
             .unwrap();
-        assert!(store.load_runtime_plan("u", "other", "t").unwrap().is_none());
+        assert!(
+            store
+                .load_runtime_plan("u", "other", "t")
+                .unwrap()
+                .is_none()
+        );
     }
 }
 
@@ -4001,10 +4361,12 @@ mod turn_steering_tests {
                 .collect::<Vec<_>>(),
             vec!["first", "second"]
         );
-        assert!(store
-            .consume_pending_turn_steering("u", "w", "thread", "turn-1")
-            .unwrap()
-            .is_empty());
+        assert!(
+            store
+                .consume_pending_turn_steering("u", "w", "thread", "turn-1")
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -4014,14 +4376,18 @@ mod turn_steering_tests {
             .append_turn_steering("u", "w", "thread", "turn-1", &new_steering("only"), 1)
             .unwrap();
 
-        assert!(store
-            .consume_pending_turn_steering("u", "other", "thread", "turn-1")
-            .unwrap()
-            .is_empty());
-        assert!(store
-            .consume_pending_turn_steering("u", "w", "thread", "turn-2")
-            .unwrap()
-            .is_empty());
+        assert!(
+            store
+                .consume_pending_turn_steering("u", "other", "thread", "turn-1")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            store
+                .consume_pending_turn_steering("u", "w", "thread", "turn-2")
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             store
                 .consume_pending_turn_steering("u", "w", "thread", "turn-1")
@@ -4036,42 +4402,103 @@ mod turn_steering_tests {
         let store = TaskStore::open_in_memory().unwrap();
         let mut first = new_steering("first");
         first.images.push("data:image/png;base64,abc".into());
-        let row = store.append_turn_steering("u", "w", "thread", "turn-1", &first, 3).unwrap();
-        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("second"), 3).unwrap();
+        let row = store
+            .append_turn_steering("u", "w", "thread", "turn-1", &first, 3)
+            .unwrap();
+        store
+            .append_turn_steering("u", "w", "thread", "turn-1", &new_steering("second"), 3)
+            .unwrap();
         assert_eq!(row.revision, 1);
         assert_eq!(row.status, TurnSteeringStatus::Pending);
         assert_eq!(row.images.len(), 1);
-        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 2).unwrap();
-        assert_eq!(claimed.iter().map(|row| row.prompt.as_str()).collect::<Vec<_>>(), vec!["first", "second"]);
-        assert!(claimed.iter().all(|row| row.status == TurnSteeringStatus::Claimed));
+        let claimed = store
+            .claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 2)
+            .unwrap();
+        assert_eq!(
+            claimed
+                .iter()
+                .map(|row| row.prompt.as_str())
+                .collect::<Vec<_>>(),
+            vec!["first", "second"]
+        );
+        assert!(
+            claimed
+                .iter()
+                .all(|row| row.status == TurnSteeringStatus::Claimed)
+        );
     }
 
     #[test]
     fn held_rows_are_revision_guarded() {
         let store = TaskStore::open_in_memory().unwrap();
-        let row = store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("first"), 1).unwrap();
-        store.hold_pending_turn_steering("u", "w", "turn-1").unwrap();
-        let held = store.list_turn_steering("u", "w", "thread").unwrap().remove(0);
+        let row = store
+            .append_turn_steering("u", "w", "thread", "turn-1", &new_steering("first"), 1)
+            .unwrap();
+        store
+            .hold_pending_turn_steering("u", "w", "turn-1")
+            .unwrap();
+        let held = store
+            .list_turn_steering("u", "w", "thread")
+            .unwrap()
+            .remove(0);
         assert_eq!(held.status, TurnSteeringStatus::Held);
-        let edited = store.update_turn_steering(row.steering_id, "u", "w", held.revision, &new_steering("edited")).unwrap();
-        assert!(matches!(store.update_turn_steering(row.steering_id, "u", "w", held.revision, &new_steering("stale")), Err(TaskRuntimeError::Conflict(_))));
-        assert_eq!(store.cancel_turn_steering(row.steering_id, "u", "w", edited.revision).unwrap().status, TurnSteeringStatus::Cancelled);
+        let edited = store
+            .update_turn_steering(
+                row.steering_id,
+                "u",
+                "w",
+                held.revision,
+                &new_steering("edited"),
+            )
+            .unwrap();
+        assert!(matches!(
+            store.update_turn_steering(
+                row.steering_id,
+                "u",
+                "w",
+                held.revision,
+                &new_steering("stale")
+            ),
+            Err(TaskRuntimeError::Conflict(_))
+        ));
+        assert_eq!(
+            store
+                .cancel_turn_steering(row.steering_id, "u", "w", edited.revision)
+                .unwrap()
+                .status,
+            TurnSteeringStatus::Cancelled
+        );
     }
 
     #[test]
     fn manual_stop_holds_claimed_or_interpreted_steering_for_recovery() {
         let store = TaskStore::open_in_memory().unwrap();
-        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("recover me"), 1).unwrap();
-        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1).unwrap().remove(0);
-        store.mark_turn_steering_interpreted(
-            claimed.steering_id,
-            claimed.revision,
-            &serde_json::json!({"steering_disposition": "finalize_with_current_evidence"}),
-            "run-1",
-        ).unwrap();
+        store
+            .append_turn_steering("u", "w", "thread", "turn-1", &new_steering("recover me"), 1)
+            .unwrap();
+        let claimed = store
+            .claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1)
+            .unwrap()
+            .remove(0);
+        store
+            .mark_turn_steering_interpreted(
+                claimed.steering_id,
+                claimed.revision,
+                &serde_json::json!({"steering_disposition": "finalize_with_current_evidence"}),
+                "run-1",
+            )
+            .unwrap();
 
-        assert_eq!(store.hold_pending_turn_steering("u", "w", "turn-1").unwrap(), 1);
-        let held = store.list_turn_steering("u", "w", "thread").unwrap().remove(0);
+        assert_eq!(
+            store
+                .hold_pending_turn_steering("u", "w", "turn-1")
+                .unwrap(),
+            1
+        );
+        let held = store
+            .list_turn_steering("u", "w", "thread")
+            .unwrap()
+            .remove(0);
         assert_eq!(held.status, TurnSteeringStatus::Held);
         assert!(held.semantic_decision_json.is_some());
     }
@@ -4079,20 +4506,41 @@ mod turn_steering_tests {
     #[test]
     fn steering_lifecycle_is_revision_guarded_until_runtime_completion() {
         let store = TaskStore::open_in_memory().unwrap();
-        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("answer from current evidence"), 1).unwrap();
-        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 2).unwrap().remove(0);
-        let interpreted = store.mark_turn_steering_interpreted(
-            claimed.steering_id,
-            claimed.revision,
-            &serde_json::json!({"steering_disposition": "finalize_with_current_evidence"}),
-            "run-1",
-        ).unwrap();
+        store
+            .append_turn_steering(
+                "u",
+                "w",
+                "thread",
+                "turn-1",
+                &new_steering("answer from current evidence"),
+                1,
+            )
+            .unwrap();
+        let claimed = store
+            .claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 2)
+            .unwrap()
+            .remove(0);
+        let interpreted = store
+            .mark_turn_steering_interpreted(
+                claimed.steering_id,
+                claimed.revision,
+                &serde_json::json!({"steering_disposition": "finalize_with_current_evidence"}),
+                "run-1",
+            )
+            .unwrap();
         assert_eq!(interpreted.status, TurnSteeringStatus::Interpreted);
-        assert_eq!(interpreted.semantic_decision_json, Some(serde_json::json!({"steering_disposition": "finalize_with_current_evidence"})));
+        assert_eq!(
+            interpreted.semantic_decision_json,
+            Some(serde_json::json!({"steering_disposition": "finalize_with_current_evidence"}))
+        );
 
-        let applied = store.mark_turn_steering_applied(interpreted.steering_id, interpreted.revision, "run-1").unwrap();
+        let applied = store
+            .mark_turn_steering_applied(interpreted.steering_id, interpreted.revision, "run-1")
+            .unwrap();
         assert_eq!(applied.status, TurnSteeringStatus::Applied);
-        let completed = store.mark_turn_steering_completed(applied.steering_id, applied.revision, "run-1").unwrap();
+        let completed = store
+            .mark_turn_steering_completed(applied.steering_id, applied.revision, "run-1")
+            .unwrap();
         assert_eq!(completed.status, TurnSteeringStatus::Completed);
         assert!(completed.completed_at.is_some());
         assert!(matches!(
@@ -4114,14 +4562,22 @@ mod turn_steering_tests {
                 1,
             )
             .unwrap();
-        assert!(!store.fence_chat_turn_finalization("u", "w", "turn-1").unwrap());
+        assert!(
+            !store
+                .fence_chat_turn_finalization("u", "w", "turn-1")
+                .unwrap()
+        );
 
         let claimed = store
             .claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1)
             .unwrap()
             .remove(0);
         assert_eq!(claimed.steering_id, pending.steering_id);
-        assert!(!store.fence_chat_turn_finalization("u", "w", "turn-1").unwrap());
+        assert!(
+            !store
+                .fence_chat_turn_finalization("u", "w", "turn-1")
+                .unwrap()
+        );
 
         let interpreted = store
             .mark_turn_steering_interpreted(
@@ -4131,29 +4587,53 @@ mod turn_steering_tests {
                 "run-1",
             )
             .unwrap();
-        assert!(!store.fence_chat_turn_finalization("u", "w", "turn-1").unwrap());
+        assert!(
+            !store
+                .fence_chat_turn_finalization("u", "w", "turn-1")
+                .unwrap()
+        );
 
         store
-            .mark_turn_steering_applied(
-                interpreted.steering_id,
-                interpreted.revision,
-                "run-1",
-            )
+            .mark_turn_steering_applied(interpreted.steering_id, interpreted.revision, "run-1")
             .unwrap();
-        assert!(store.fence_chat_turn_finalization("u", "w", "turn-1").unwrap());
+        assert!(
+            store
+                .fence_chat_turn_finalization("u", "w", "turn-1")
+                .unwrap()
+        );
     }
 
     #[test]
     fn unavailable_interpreter_returns_steering_to_pending_with_retry_time() {
         let store = TaskStore::open_in_memory().unwrap();
-        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("use what you already found"), 1).unwrap();
-        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 3).unwrap().remove(0);
-        let pending = store.release_turn_steering_for_retry(
-            claimed.steering_id, claimed.revision, "model_unavailable", 12345,
-        ).unwrap();
+        store
+            .append_turn_steering(
+                "u",
+                "w",
+                "thread",
+                "turn-1",
+                &new_steering("use what you already found"),
+                1,
+            )
+            .unwrap();
+        let claimed = store
+            .claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 3)
+            .unwrap()
+            .remove(0);
+        let pending = store
+            .release_turn_steering_for_retry(
+                claimed.steering_id,
+                claimed.revision,
+                "model_unavailable",
+                12345,
+            )
+            .unwrap();
         assert_eq!(pending.status, TurnSteeringStatus::Pending);
         assert_eq!(pending.next_retry_at, Some(12345));
-        assert_eq!(pending.last_interpretation_error.as_deref(), Some("model_unavailable"));
+        assert_eq!(
+            pending.last_interpretation_error.as_deref(),
+            Some("model_unavailable")
+        );
         assert_eq!(pending.interpretation_attempts, 1);
         assert!(pending.applied_at.is_none());
     }
@@ -4161,15 +4641,31 @@ mod turn_steering_tests {
     #[test]
     fn defer_pending_turn_steering_backs_off_a_never_claimed_row() {
         let store = TaskStore::open_in_memory().unwrap();
-        let row = store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("still waiting"), 1).unwrap();
+        let row = store
+            .append_turn_steering(
+                "u",
+                "w",
+                "thread",
+                "turn-1",
+                &new_steering("still waiting"),
+                1,
+            )
+            .unwrap();
         assert_eq!(row.status, TurnSteeringStatus::Pending);
 
-        let deferred = store.defer_pending_turn_steering(
-            row.steering_id, row.revision, "model_unavailable", 999,
-        ).unwrap();
-        assert_eq!(deferred.status, TurnSteeringStatus::Pending, "stays pending — never claimed");
+        let deferred = store
+            .defer_pending_turn_steering(row.steering_id, row.revision, "model_unavailable", 999)
+            .unwrap();
+        assert_eq!(
+            deferred.status,
+            TurnSteeringStatus::Pending,
+            "stays pending — never claimed"
+        );
         assert_eq!(deferred.next_retry_at, Some(999));
-        assert_eq!(deferred.last_interpretation_error.as_deref(), Some("model_unavailable"));
+        assert_eq!(
+            deferred.last_interpretation_error.as_deref(),
+            Some("model_unavailable")
+        );
         assert_eq!(deferred.interpretation_attempts, 1);
         assert!(deferred.claimed_run_id.is_none());
 
@@ -4183,29 +4679,74 @@ mod turn_steering_tests {
     #[test]
     fn retry_backoff_rows_are_not_claimed_early() {
         let store = TaskStore::open_in_memory().unwrap();
-        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("wait for semantic model"), 1).unwrap();
-        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1).unwrap().remove(0);
-        store.release_turn_steering_for_retry(
-            claimed.steering_id, claimed.revision, "model_unavailable", i64::MAX,
-        ).unwrap();
+        store
+            .append_turn_steering(
+                "u",
+                "w",
+                "thread",
+                "turn-1",
+                &new_steering("wait for semantic model"),
+                1,
+            )
+            .unwrap();
+        let claimed = store
+            .claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1)
+            .unwrap()
+            .remove(0);
+        store
+            .release_turn_steering_for_retry(
+                claimed.steering_id,
+                claimed.revision,
+                "model_unavailable",
+                i64::MAX,
+            )
+            .unwrap();
 
-        assert!(store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-2", 2).unwrap().is_empty());
-        assert_eq!(store.list_turn_steering("u", "w", "thread").unwrap().remove(0).status, TurnSteeringStatus::Pending);
+        assert!(
+            store
+                .claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-2", 2)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .list_turn_steering("u", "w", "thread")
+                .unwrap()
+                .remove(0)
+                .status,
+            TurnSteeringStatus::Pending
+        );
     }
 
     #[test]
     fn interpreted_rows_can_be_loaded_for_the_active_turn_without_pending_text() {
         let store = TaskStore::open_in_memory().unwrap();
-        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("semantic control"), 1).unwrap();
-        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1).unwrap().remove(0);
-        store.mark_turn_steering_interpreted(
-            claimed.steering_id,
-            claimed.revision,
-            &serde_json::json!({"steering_disposition": "replan_current_work"}),
-            "run-1",
-        ).unwrap();
+        store
+            .append_turn_steering(
+                "u",
+                "w",
+                "thread",
+                "turn-1",
+                &new_steering("semantic control"),
+                1,
+            )
+            .unwrap();
+        let claimed = store
+            .claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1)
+            .unwrap()
+            .remove(0);
+        store
+            .mark_turn_steering_interpreted(
+                claimed.steering_id,
+                claimed.revision,
+                &serde_json::json!({"steering_disposition": "replan_current_work"}),
+                "run-1",
+            )
+            .unwrap();
 
-        let rows = store.list_interpreted_turn_steering("u", "w", "thread", "turn-1", "run-1").unwrap();
+        let rows = store
+            .list_interpreted_turn_steering("u", "w", "thread", "turn-1", "run-1")
+            .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].status, TurnSteeringStatus::Interpreted);
         assert_eq!(rows[0].content, "semantic control");
@@ -4214,16 +4755,36 @@ mod turn_steering_tests {
     #[test]
     fn due_pending_scan_excludes_future_backoff_and_non_pending_rows() {
         let store = TaskStore::open_in_memory().unwrap();
-        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("due"), 1).unwrap();
-        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("future"), 1).unwrap();
-        let mut claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1).unwrap();
+        store
+            .append_turn_steering("u", "w", "thread", "turn-1", &new_steering("due"), 1)
+            .unwrap();
+        store
+            .append_turn_steering("u", "w", "thread", "turn-1", &new_steering("future"), 1)
+            .unwrap();
+        let mut claimed = store
+            .claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1)
+            .unwrap();
         let future = claimed.pop().unwrap();
         let due = claimed.pop().unwrap();
-        store.release_turn_steering_for_retry(future.steering_id, future.revision, "model_unavailable", i64::MAX).unwrap();
-        store.release_turn_steering_for_retry(due.steering_id, due.revision, "model_unavailable", 1).unwrap();
+        store
+            .release_turn_steering_for_retry(
+                future.steering_id,
+                future.revision,
+                "model_unavailable",
+                i64::MAX,
+            )
+            .unwrap();
+        store
+            .release_turn_steering_for_retry(due.steering_id, due.revision, "model_unavailable", 1)
+            .unwrap();
 
         let rows = store.list_due_pending_turn_steering(10, 20).unwrap();
-        assert_eq!(rows.iter().map(|row| row.content.as_str()).collect::<Vec<_>>(), vec!["due"]);
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.content.as_str())
+                .collect::<Vec<_>>(),
+            vec!["due"]
+        );
     }
 }
 
@@ -4265,14 +4826,14 @@ mod agent_control_state_tests {
         store
             .append_agent_checkpoint("run", 2, &json!({"round": 2}), "fp", true)
             .unwrap();
-        assert!(store
-            .latest_resumable_checkpoint_for_turn("turn", "user", "workspace")
-            .unwrap()
-            .is_none());
+        assert!(
+            store
+                .latest_resumable_checkpoint_for_turn("turn", "user", "workspace")
+                .unwrap()
+                .is_none()
+        );
         store
-            .abort_running_agent_runs_for_turn(
-                "turn", "user", "workspace", "gateway_restart",
-            )
+            .abort_running_agent_runs_for_turn("turn", "user", "workspace", "gateway_restart")
             .unwrap();
         let checkpoint = store
             .latest_resumable_checkpoint_for_turn("turn", "user", "workspace")
@@ -4296,8 +4857,10 @@ mod agent_control_state_tests {
             json!({}),
         );
         task.status = TaskStatus::Running;
-        task.resource_requirements =
-            vec![crate::ResourceRequirement::new(ResourceClass::BrowserSession, 1)];
+        task.resource_requirements = vec![crate::ResourceRequirement::new(
+            ResourceClass::BrowserSession,
+            1,
+        )];
         store
             .insert_chat_turn(&task, "thread", "req-1", "interactive", "full")
             .unwrap();
@@ -4313,7 +4876,9 @@ mod agent_control_state_tests {
         // Reserve the BrowserSession slot the way the real dispatcher does on acquire.
         store.reserve_resources(&task, "worker_a").unwrap();
         assert_eq!(
-            store.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            store
+                .resource_usage(&user, &workspace, ResourceClass::BrowserSession)
+                .unwrap(),
             1,
             "the running turn holds the shared browser_session slot"
         );
@@ -4323,35 +4888,57 @@ mod agent_control_state_tests {
             .unwrap();
 
         // Before park: nothing resumable (mirrors the gateway-restart case).
-        assert!(store
-            .latest_resumable_checkpoint_for_turn("turn", "user", "workspace")
-            .unwrap()
-            .is_none());
+        assert!(
+            store
+                .latest_resumable_checkpoint_for_turn("turn", "user", "workspace")
+                .unwrap()
+                .is_none()
+        );
 
         store.park_chat_turn("turn", "user", "workspace").unwrap();
 
         let parked_task = store
-            .get_task(&TaskId::new("turn"), &UserId::new("user"), &WorkspaceId::new("workspace"))
+            .get_task(
+                &TaskId::new("turn"),
+                &UserId::new("user"),
+                &WorkspaceId::new("workspace"),
+            )
             .unwrap()
             .unwrap();
         assert_eq!(parked_task.status, TaskStatus::Parked, "task is parked");
-        assert!(parked_task.lease_owner.is_none(), "park clears the lease owner");
-        assert!(parked_task.lease_expires_at.is_none(), "park clears the lease expiry");
-        assert!(parked_task.last_heartbeat_at.is_none(), "park clears the heartbeat");
+        assert!(
+            parked_task.lease_owner.is_none(),
+            "park clears the lease owner"
+        );
+        assert!(
+            parked_task.lease_expires_at.is_none(),
+            "park clears the lease expiry"
+        );
+        assert!(
+            parked_task.last_heartbeat_at.is_none(),
+            "park clears the heartbeat"
+        );
 
         // The critical fix under test: parking releases the shared resource reservation.
         // Without it, a turn parked indefinitely (model down) would hold the single
         // BrowserSession slot forever and block every other chat's browser use.
         assert_eq!(
-            store.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            store
+                .resource_usage(&user, &workspace, ResourceClass::BrowserSession)
+                .unwrap(),
             0,
             "park releases the browser_session reservation, not just the agent run"
         );
 
-        let runs = store.list_agent_runs_for_turn("turn", "user", "workspace").unwrap();
+        let runs = store
+            .list_agent_runs_for_turn("turn", "user", "workspace")
+            .unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].status, AgentRunStatus::Aborted);
-        assert_eq!(runs[0].terminal_reason.as_deref(), Some("parked_waiting_for_model"));
+        assert_eq!(
+            runs[0].terminal_reason.as_deref(),
+            Some("parked_waiting_for_model")
+        );
 
         // The park checkpoint is now resumable (filter widened beyond gateway_restart).
         let checkpoint = store
@@ -4361,21 +4948,39 @@ mod agent_control_state_tests {
         assert_eq!(checkpoint.round, 3);
 
         // Unpark: task flips back to queued, and returns true exactly once.
-        assert!(store.unpark_chat_turn_to_queued("turn", "user", "workspace").unwrap());
+        assert!(
+            store
+                .unpark_chat_turn_to_queued("turn", "user", "workspace")
+                .unwrap()
+        );
         let queued_task = store
-            .get_task(&TaskId::new("turn"), &UserId::new("user"), &WorkspaceId::new("workspace"))
+            .get_task(
+                &TaskId::new("turn"),
+                &UserId::new("user"),
+                &WorkspaceId::new("workspace"),
+            )
             .unwrap()
             .unwrap();
-        assert_eq!(queued_task.status, TaskStatus::Queued, "unpark queues the task");
-        assert!(!store.unpark_chat_turn_to_queued("turn", "user", "workspace").unwrap(),
-            "second unpark call is a no-op (already queued, not parked)");
+        assert_eq!(
+            queued_task.status,
+            TaskStatus::Queued,
+            "unpark queues the task"
+        );
+        assert!(
+            !store
+                .unpark_chat_turn_to_queued("turn", "user", "workspace")
+                .unwrap(),
+            "second unpark call is a no-op (already queued, not parked)"
+        );
 
         // Resume re-reserves through the normal dispatch path (out of this crate's scope to
         // simulate the gateway's acquire loop, but the store-level primitive works the same
         // way it did the first time the turn was dispatched):
         store.reserve_resources(&queued_task, "worker_b").unwrap();
         assert_eq!(
-            store.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            store
+                .resource_usage(&user, &workspace, ResourceClass::BrowserSession)
+                .unwrap(),
             1,
             "re-dispatch re-reserves the slot exactly like the first acquire"
         );
@@ -4417,11 +5022,24 @@ mod agent_control_state_tests {
             .claim_pending_turn_steering("user", "workspace", "thread", "turn", "run", 0)
             .unwrap();
         assert_eq!(claimed.len(), 1);
-        assert_eq!(claimed[0].status, TurnSteeringStatus::Claimed, "precondition");
+        assert_eq!(
+            claimed[0].status,
+            TurnSteeringStatus::Claimed,
+            "precondition"
+        );
 
         // Before park: a claimed row is invisible to the due-scan and blocks the fence.
-        assert!(store.list_due_pending_turn_steering(i64::MAX, 10).unwrap().is_empty());
-        assert!(!store.fence_chat_turn_finalization("user", "workspace", "turn").unwrap());
+        assert!(
+            store
+                .list_due_pending_turn_steering(i64::MAX, 10)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !store
+                .fence_chat_turn_finalization("user", "workspace", "turn")
+                .unwrap()
+        );
 
         store.park_chat_turn("turn", "user", "workspace").unwrap();
 
@@ -4431,7 +5049,11 @@ mod agent_control_state_tests {
             .into_iter()
             .find(|row| row.steering_id == claimed[0].steering_id)
             .unwrap();
-        assert_eq!(released.status, TurnSteeringStatus::Pending, "released back to pending");
+        assert_eq!(
+            released.status,
+            TurnSteeringStatus::Pending,
+            "released back to pending"
+        );
         assert!(released.claimed_run_id.is_none());
         assert!(released.claimed_round.is_none());
         assert!(released.claimed_at.is_none());
@@ -4452,7 +5074,10 @@ mod agent_control_state_tests {
     #[test]
     fn tool_receipt_never_reclaims_uncertain_started_action() {
         let store = TaskStore::open_in_memory().unwrap();
-        assert!(matches!(store.claim_tool_receipt(&receipt()).unwrap(), ToolReceiptClaim::Execute));
+        assert!(matches!(
+            store.claim_tool_receipt(&receipt()).unwrap(),
+            ToolReceiptClaim::Execute
+        ));
         assert!(matches!(
             store.claim_tool_receipt(&receipt()).unwrap(),
             ToolReceiptClaim::Uncertain(_)
@@ -4479,9 +5104,15 @@ mod turn_event_tests {
     #[test]
     fn append_assigns_monotonic_seq_per_turn() {
         let s = store();
-        let e1 = s.insert_turn_event("t1", TurnEventKind::Delta, json!({"text":"a"})).unwrap();
-        let e2 = s.insert_turn_event("t1", TurnEventKind::Delta, json!({"text":"b"})).unwrap();
-        let e3 = s.insert_turn_event("t2", TurnEventKind::Delta, json!({"text":"other"})).unwrap();
+        let e1 = s
+            .insert_turn_event("t1", TurnEventKind::Delta, json!({"text":"a"}))
+            .unwrap();
+        let e2 = s
+            .insert_turn_event("t1", TurnEventKind::Delta, json!({"text":"b"}))
+            .unwrap();
+        let e3 = s
+            .insert_turn_event("t2", TurnEventKind::Delta, json!({"text":"other"}))
+            .unwrap();
         assert_eq!(e1.seq, 1);
         assert_eq!(e2.seq, 2);
         assert_eq!(e3.seq, 1, "seq is per turn_id, independent across turns");
@@ -4505,9 +5136,12 @@ mod turn_event_tests {
     #[test]
     fn read_since_returns_only_newer_in_order() {
         let s = store();
-        s.insert_turn_event("t1", TurnEventKind::Delta, json!({"i":1})).unwrap();
-        s.insert_turn_event("t1", TurnEventKind::Activity, json!({"i":2})).unwrap();
-        s.insert_turn_event("t1", TurnEventKind::PlanUpdate, json!({"i":3})).unwrap();
+        s.insert_turn_event("t1", TurnEventKind::Delta, json!({"i":1}))
+            .unwrap();
+        s.insert_turn_event("t1", TurnEventKind::Activity, json!({"i":2}))
+            .unwrap();
+        s.insert_turn_event("t1", TurnEventKind::PlanUpdate, json!({"i":3}))
+            .unwrap();
         let since1 = s.read_turn_events("t1", 1).unwrap();
         assert_eq!(since1.len(), 2);
         assert_eq!(since1[0].seq, 2);
@@ -4520,13 +5154,21 @@ mod turn_event_tests {
     #[test]
     fn kind_round_trips() {
         let s = store();
-        for k in [TurnEventKind::Delta, TurnEventKind::Aborted, TurnEventKind::Cancelled] {
+        for k in [
+            TurnEventKind::Delta,
+            TurnEventKind::Aborted,
+            TurnEventKind::Cancelled,
+        ] {
             s.insert_turn_event("t", k, json!({})).unwrap();
         }
         let events = s.read_turn_events("t", 0).unwrap();
         assert_eq!(
             events.iter().map(|e| e.kind).collect::<Vec<_>>(),
-            vec![TurnEventKind::Delta, TurnEventKind::Aborted, TurnEventKind::Cancelled]
+            vec![
+                TurnEventKind::Delta,
+                TurnEventKind::Aborted,
+                TurnEventKind::Cancelled
+            ]
         );
     }
 }
@@ -4734,7 +5376,10 @@ mod agent_run_tests {
             .unwrap();
         store
             .connection
-            .execute("UPDATE agent_runs SET completed_at = 10 WHERE run_id = 'old'", [])
+            .execute(
+                "UPDATE agent_runs SET completed_at = 10 WHERE run_id = 'old'",
+                [],
+            )
             .unwrap();
 
         assert_eq!(store.purge_terminal_agent_runs_before(100, 10).unwrap(), 1);
@@ -4810,14 +5455,29 @@ mod chat_turn_query_tests {
         let t1 = make_chat_turn("t1", "thread_x", TaskStatus::Queued);
         s.insert_chat_turn(&t1, "thread_x", "chat_stream_1", "interactive", "full")
             .unwrap();
-        assert_eq!(s.active_chat_turn_for_thread("thread_x").unwrap().as_deref(), Some("t1"));
+        assert_eq!(
+            s.active_chat_turn_for_thread("thread_x")
+                .unwrap()
+                .as_deref(),
+            Some("t1")
+        );
 
         // a second thread doesn't collide
         let t2 = make_chat_turn("t2", "thread_y", TaskStatus::Running);
         s.insert_chat_turn(&t2, "thread_y", "chat_stream_2", "interactive", "full")
             .unwrap();
-        assert_eq!(s.active_chat_turn_for_thread("thread_y").unwrap().as_deref(), Some("t2"));
-        assert_eq!(s.active_chat_turn_for_thread("thread_x").unwrap().as_deref(), Some("t1"));
+        assert_eq!(
+            s.active_chat_turn_for_thread("thread_y")
+                .unwrap()
+                .as_deref(),
+            Some("t2")
+        );
+        assert_eq!(
+            s.active_chat_turn_for_thread("thread_x")
+                .unwrap()
+                .as_deref(),
+            Some("t1")
+        );
     }
 
     #[test]
@@ -4837,14 +5497,8 @@ mod chat_turn_query_tests {
     fn thread_attention_reports_latest_terminal_event() {
         let s = TaskStore::open_in_memory().unwrap();
         let task = make_chat_turn("turn-a", "thread-a", TaskStatus::Completed);
-        s.insert_chat_turn(
-            &task,
-            "thread-a",
-            "chat_stream_1",
-            "interactive",
-            "full",
-        )
-        .unwrap();
+        s.insert_chat_turn(&task, "thread-a", "chat_stream_1", "interactive", "full")
+            .unwrap();
         let event = s
             .insert_turn_event("turn-a", TurnEventKind::Done, json!({}))
             .unwrap();
@@ -4872,7 +5526,10 @@ mod chat_turn_query_tests {
         s.insert_task(&other).unwrap();
         // even if thread_id were set, kind != chat_turn -> ignored
         s.connection
-            .execute("UPDATE tasks SET thread_id = 'thread_x' WHERE task_id = 'bg1'", [])
+            .execute(
+                "UPDATE tasks SET thread_id = 'thread_x' WHERE task_id = 'bg1'",
+                [],
+            )
             .unwrap();
         assert_eq!(s.active_chat_turn_for_thread("thread_x").unwrap(), None);
     }
@@ -4911,21 +5568,47 @@ mod chat_turn_query_tests {
         // `t.created_at ASC` ordering is deterministic across turns.
         let mut t1 = make_chat_turn("turn_a", "threadX", TaskStatus::Completed);
         t1.created_at = OffsetDateTime::from_unix_timestamp(100).unwrap();
-        s.insert_chat_turn(&t1, "threadX", "reqa", "interactive", "full").unwrap();
-        s.insert_turn_event("turn_a", TurnEventKind::Activity, json!({"text": "A1"})).unwrap();
-        s.insert_turn_event("turn_a", TurnEventKind::PlanUpdate, json!({"markdown": "- [ ] uno"})).unwrap();
+        s.insert_chat_turn(&t1, "threadX", "reqa", "interactive", "full")
+            .unwrap();
+        s.insert_turn_event("turn_a", TurnEventKind::Activity, json!({"text": "A1"}))
+            .unwrap();
+        s.insert_turn_event(
+            "turn_a",
+            TurnEventKind::PlanUpdate,
+            json!({"markdown": "- [ ] uno"}),
+        )
+        .unwrap();
         // Turn 2 (newer, still running): one activity + a superseding plan.
         let mut t2 = make_chat_turn("turn_b", "threadX", TaskStatus::Running);
         t2.created_at = OffsetDateTime::from_unix_timestamp(200).unwrap();
-        s.insert_chat_turn(&t2, "threadX", "reqb", "interactive", "full").unwrap();
-        s.insert_turn_event("turn_b", TurnEventKind::Activity, json!({"text": "B1"})).unwrap();
-        s.insert_turn_event("turn_b", TurnEventKind::PlanUpdate, json!({"markdown": "- [x] due"})).unwrap();
+        s.insert_chat_turn(&t2, "threadX", "reqb", "interactive", "full")
+            .unwrap();
+        s.insert_turn_event("turn_b", TurnEventKind::Activity, json!({"text": "B1"}))
+            .unwrap();
+        s.insert_turn_event(
+            "turn_b",
+            TurnEventKind::PlanUpdate,
+            json!({"markdown": "- [x] due"}),
+        )
+        .unwrap();
 
         let p = s.project_thread_activity("threadX", 200).unwrap();
-        assert_eq!(p.activity, vec!["A1".to_string(), "B1".to_string()], "activity accumulates across turns in order");
-        assert_eq!(p.plan_markdown.as_deref(), Some("- [x] due"), "latest plan wins");
+        assert_eq!(
+            p.activity,
+            vec!["A1".to_string(), "B1".to_string()],
+            "activity accumulates across turns in order"
+        );
+        assert_eq!(
+            p.plan_markdown.as_deref(),
+            Some("- [x] due"),
+            "latest plan wins"
+        );
         assert_eq!(p.turn_count, 2);
-        assert_eq!(p.latest_turn_status.as_deref(), Some("running"), "status of the most recent turn");
+        assert_eq!(
+            p.latest_turn_status.as_deref(),
+            Some("running"),
+            "status of the most recent turn"
+        );
     }
 
     #[test]
@@ -4934,30 +5617,60 @@ mod chat_turn_query_tests {
         // Turn 1 (older): a planned task that completes with a plan.
         let mut t1 = make_chat_turn("turn_a", "threadZ", TaskStatus::Completed);
         t1.created_at = OffsetDateTime::from_unix_timestamp(100).unwrap();
-        s.insert_chat_turn(&t1, "threadZ", "reqa", "interactive", "full").unwrap();
-        s.insert_turn_event("turn_a", TurnEventKind::Activity, json!({"text": "A1"})).unwrap();
-        s.insert_turn_event("turn_a", TurnEventKind::PlanUpdate, json!({"markdown": "- [x] mini-ricerca"})).unwrap();
+        s.insert_chat_turn(&t1, "threadZ", "reqa", "interactive", "full")
+            .unwrap();
+        s.insert_turn_event("turn_a", TurnEventKind::Activity, json!({"text": "A1"}))
+            .unwrap();
+        s.insert_turn_event(
+            "turn_a",
+            TurnEventKind::PlanUpdate,
+            json!({"markdown": "- [x] mini-ricerca"}),
+        )
+        .unwrap();
         // Turn 2 (newer): a DIFFERENT task with no plan (e.g. a one-shot web search).
         let mut t2 = make_chat_turn("turn_b", "threadZ", TaskStatus::Completed);
         t2.created_at = OffsetDateTime::from_unix_timestamp(200).unwrap();
-        s.insert_chat_turn(&t2, "threadZ", "reqb", "interactive", "full").unwrap();
-        s.insert_turn_event("turn_b", TurnEventKind::Activity, json!({"text": "B1 search"})).unwrap();
+        s.insert_chat_turn(&t2, "threadZ", "reqb", "interactive", "full")
+            .unwrap();
+        s.insert_turn_event(
+            "turn_b",
+            TurnEventKind::Activity,
+            json!({"text": "B1 search"}),
+        )
+        .unwrap();
 
         let p = s.project_thread_activity("threadZ", 200).unwrap();
-        assert_eq!(p.plan_markdown, None, "the plan-less latest turn must clear the previous task's plan");
-        assert_eq!(p.activity, vec!["A1".to_string(), "B1 search".to_string()], "activity still accumulates");
+        assert_eq!(
+            p.plan_markdown, None,
+            "the plan-less latest turn must clear the previous task's plan"
+        );
+        assert_eq!(
+            p.activity,
+            vec!["A1".to_string(), "B1 search".to_string()],
+            "activity still accumulates"
+        );
     }
 
     #[test]
     fn project_thread_activity_caps_to_most_recent() {
         let s = store();
         let t = make_chat_turn("turn_c", "threadY", TaskStatus::Completed);
-        s.insert_chat_turn(&t, "threadY", "reqc", "interactive", "full").unwrap();
+        s.insert_chat_turn(&t, "threadY", "reqc", "interactive", "full")
+            .unwrap();
         for i in 0..5 {
-            s.insert_turn_event("turn_c", TurnEventKind::Activity, json!({"text": format!("step{i}")})).unwrap();
+            s.insert_turn_event(
+                "turn_c",
+                TurnEventKind::Activity,
+                json!({"text": format!("step{i}")}),
+            )
+            .unwrap();
         }
         let p = s.project_thread_activity("threadY", 2).unwrap();
-        assert_eq!(p.activity, vec!["step3".to_string(), "step4".to_string()], "cap keeps the most recent tail");
+        assert_eq!(
+            p.activity,
+            vec!["step3".to_string(), "step4".to_string()],
+            "cap keeps the most recent tail"
+        );
     }
 
     #[test]

@@ -7,6 +7,9 @@
 
 use crate::{MemoryFacade, MemoryLifecycleRequest, MemoryRef, UserId, WorkspaceId, cosine};
 
+pub type PendingEmbeddings = Vec<(MemoryRef, String, String)>;
+pub type SeenEmbeddings = Vec<(String, String, Vec<f32>)>;
+
 /// Soglia cosine sopra la quale due memorie same-type sono considerate duplicati
 /// semantici (sul write). Spostata fedelmente dal gateway (`main.rs:2838`).
 pub const DEDUP_COSINE: f32 = 0.85;
@@ -21,7 +24,7 @@ pub fn memory_type_participates_in_semantic_dedup(memory_type: &str) -> bool {
 /// Nome del modello di embedding usato per i metadati. Il gateway risolve il model
 /// dal suo env (`embed_model`); il crate lo riceve come argomento così resta puro.
 /// Spostato fedelmente dal corpo di `backfill_embeddings` (usava `embed_model()`).
-
+///
 /// Backfill incrementale: calcola e persiste gli embedding per le memorie che ne
 /// mancano (batch bounded), con semantic-dedup on-write. Spostato fedelmente dal
 /// corpo di `backfill_embeddings` (`main.rs:3015-3093`).
@@ -30,7 +33,7 @@ pub fn memory_type_participates_in_semantic_dedup(memory_type: &str) -> bool {
 /// NON attraversa l'await dell'embed. Il chiamante (gateway) orchesta:
 /// (1) [`backfill_collect_pending`] sync sotto lock → (2) loop embed off-lock →
 /// (3) [`backfill_persist_one`] sync sotto lock re-acquisito per ciascuno.
-
+///
 /// Fase 1 (sync, lock): carica pending (refs senza embedding) + seen (embedding
 /// esistenti, seed per il semantic dedup). Ritorna `None` se non c'è nulla da fare.
 pub fn backfill_collect_pending(
@@ -38,10 +41,7 @@ pub fn backfill_collect_pending(
     user: &UserId,
     workspace: &WorkspaceId,
     limit: usize,
-) -> Option<(
-    Vec<(MemoryRef, String, String)>,
-    Vec<(String, String, Vec<f32>)>,
-)> {
+) -> Option<(PendingEmbeddings, SeenEmbeddings)> {
     let refs = facade
         .refs_without_embeddings(user, workspace, limit)
         .ok()?;
@@ -78,6 +78,7 @@ pub fn backfill_collect_pending(
 /// Fase 3 (sync, lock re-acquisito): persiste un embedding (o deduplica se è un
 /// duplicato semantico). Aggiorna `seen` (così i dedup successivi vedono il nuovo).
 /// Ritorna `true` se la memoria era un duplicato (cancellata), `false` se persistita.
+#[allow(clippy::too_many_arguments)]
 pub fn backfill_persist_one(
     facade: &MemoryFacade,
     user: &UserId,
@@ -86,7 +87,7 @@ pub fn backfill_persist_one(
     mtype: &str,
     vector: &[f32],
     model: &str,
-    seen: &mut Vec<(String, String, Vec<f32>)>,
+    seen: &mut SeenEmbeddings,
 ) -> bool {
     let is_dup = memory_type_participates_in_semantic_dedup(mtype)
         && seen.iter().any(|(rs, ty, v)| {
@@ -121,6 +122,6 @@ mod tests {
     #[test]
     fn dedup_cosine_threshold_is_high() {
         // 0.85: solo parafrasi molto vicine sono duplicati.
-        assert!(DEDUP_COSINE >= 0.8);
+        const { assert!(DEDUP_COSINE >= 0.8) };
     }
 }

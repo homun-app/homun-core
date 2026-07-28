@@ -5,7 +5,7 @@ use local_first_local_computer_session::{
 
 #[test]
 fn shell_policy_classifies_read_write_destructive_and_network_commands() {
-    let policy = ShellCommandPolicy::default();
+    let policy = ShellCommandPolicy;
 
     assert_eq!(policy.classify("pwd").risk, ShellRisk::ReadOnly);
     assert_eq!(

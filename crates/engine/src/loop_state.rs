@@ -171,10 +171,10 @@ impl LoopState {
         for tool in effects.load_tools {
             // Same dedup-then-add as inline: `insert` returns false if already loaded → skip; add a
             // schema only when present (a connector key can be marked loaded with no schema).
-            if self.loaded_tools.insert(tool.key) {
-                if let Some(schema) = tool.schema {
-                    self.tool_schemas.push(schema);
-                }
+            if self.loaded_tools.insert(tool.key)
+                && let Some(schema) = tool.schema
+            {
+                self.tool_schemas.push(schema);
             }
         }
         for line in effects.trace {

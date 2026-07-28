@@ -168,15 +168,14 @@ pub fn turn_is_cancelled(turn_id: &str) -> bool {
 }
 
 pub fn attach_turn_engine_abort(turn_id: &str, abort: tokio::task::AbortHandle) {
-    if let Ok(map) = turn_broadcast_registry().lock() {
-        if let Some(turn) = map.get(turn_id) {
-            if let Ok(mut slot) = turn.engine_abort.lock() {
-                if turn.cancel.is_cancelled() {
-                    abort.abort();
-                } else {
-                    *slot = Some(abort);
-                }
-            }
+    if let Ok(map) = turn_broadcast_registry().lock()
+        && let Some(turn) = map.get(turn_id)
+        && let Ok(mut slot) = turn.engine_abort.lock()
+    {
+        if turn.cancel.is_cancelled() {
+            abort.abort();
+        } else {
+            *slot = Some(abort);
         }
     }
 }
@@ -209,14 +208,14 @@ pub fn emit_turn_event(
     };
     // Best-effort live broadcast on the per-turn channel (NDJSON stream — transitional).
     // No receivers is fine (broadcast::send errors are benign).
-    if let Ok(map) = turn_broadcast_registry().lock() {
-        if let Some(broadcast) = map.get(turn_id) {
-            let _ = broadcast.tx.send(TurnEvent {
-                seq: event.seq,
-                kind: event.kind.as_str().to_string(),
-                payload: payload.clone(),
-            });
-        }
+    if let Ok(map) = turn_broadcast_registry().lock()
+        && let Some(broadcast) = map.get(turn_id)
+    {
+        let _ = broadcast.tx.send(TurnEvent {
+            seq: event.seq,
+            kind: event.kind.as_str().to_string(),
+            payload: payload.clone(),
+        });
     }
     // Publish on the unified WS (fan-out to all connected clients).
     state.ws_registry.publish_turn_event(
@@ -234,14 +233,14 @@ pub struct GatewayCancelNotify;
 
 impl CancelNotify for GatewayCancelNotify {
     fn notify_cancel(&self, turn_id: &str) {
-        if let Ok(map) = turn_broadcast_registry().lock() {
-            if let Some(turn) = map.get(turn_id) {
-                turn.cancel.cancel();
-                if let Ok(slot) = turn.engine_abort.lock() {
-                    if let Some(abort) = slot.as_ref() {
-                        abort.abort();
-                    }
-                }
+        if let Ok(map) = turn_broadcast_registry().lock()
+            && let Some(turn) = map.get(turn_id)
+        {
+            turn.cancel.cancel();
+            if let Ok(slot) = turn.engine_abort.lock()
+                && let Some(abort) = slot.as_ref()
+            {
+                abort.abort();
             }
         }
         crate::abort_stream_generation(&format!("broker-{turn_id}"));
@@ -864,7 +863,7 @@ mod tests {
         let wait = std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                let _ = tokio::time::timeout(std::time::Duration::from_secs(1), cancel.cancelled())
+                tokio::time::timeout(std::time::Duration::from_secs(1), cancel.cancelled())
                     .await
                     .expect("latched cancellation must wake a late waiter");
             });

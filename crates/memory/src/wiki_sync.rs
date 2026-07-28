@@ -60,10 +60,8 @@ pub(crate) fn parse_wiki_markdown(markdown: &str) -> Result<ParsedWikiCorrection
             in_linked_refs = false;
         } else if line == "linked_refs:" {
             in_linked_refs = true;
-        } else if in_linked_refs {
-            if let Some(value) = line.trim().strip_prefix("- ") {
-                linked_refs.push(MemoryRef::from_str(value)?);
-            }
+        } else if in_linked_refs && let Some(value) = line.trim().strip_prefix("- ") {
+            linked_refs.push(MemoryRef::from_str(value)?);
         }
     }
 

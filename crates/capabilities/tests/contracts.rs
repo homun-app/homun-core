@@ -244,7 +244,12 @@ fn plugin_registry_entry_verifies_install_candidate_policy() {
 
     assert!(
         entry
-            .verify_install_candidate(package, "0.1.1046", false, &[trusted_key.clone()])
+            .verify_install_candidate(
+                package,
+                "0.1.1046",
+                false,
+                std::slice::from_ref(&trusted_key),
+            )
             .is_ok()
     );
     assert_eq!(

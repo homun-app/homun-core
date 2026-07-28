@@ -149,10 +149,9 @@ pub fn generate_json_request_from_task(task: &SubagentTask) -> GenerateJsonReque
         .get("language")
         .and_then(serde_json::Value::as_str)
         .filter(|s| !s.trim().is_empty())
+        && !prompt.contains("Reply in")
     {
-        if !prompt.contains("Reply in") {
-            prompt = format!("{prompt}\n\nReply in {lang}.");
-        }
+        prompt = format!("{prompt}\n\nReply in {lang}.");
     }
     let mut usage = local_first_inference_usage::UsageContext::new(
         format!("subagent:{}", task.task_id),
@@ -163,10 +162,26 @@ pub fn generate_json_request_from_task(task: &SubagentTask) -> GenerateJsonReque
             .unwrap_or("local"),
     );
     usage.purpose_detail = Some(format!("{:?}", task.agent_id).to_ascii_lowercase());
-    usage.workspace_id = task.input.get("workspace_id").and_then(serde_json::Value::as_str).map(str::to_string);
-    usage.thread_id = task.input.get("thread_id").and_then(serde_json::Value::as_str).map(str::to_string);
-    usage.turn_id = task.input.get("turn_id").and_then(serde_json::Value::as_str).map(str::to_string);
-    usage.run_id = task.input.get("run_id").and_then(serde_json::Value::as_str).map(str::to_string);
+    usage.workspace_id = task
+        .input
+        .get("workspace_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    usage.thread_id = task
+        .input
+        .get("thread_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    usage.turn_id = task
+        .input
+        .get("turn_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    usage.run_id = task
+        .input
+        .get("run_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
     usage.task_id = Some(task.task_id.clone());
     GenerateJsonRequest {
         usage,

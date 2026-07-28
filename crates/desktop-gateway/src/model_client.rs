@@ -533,6 +533,7 @@ impl<'a> AttemptLifecycle<'a> {
         Self { recorder, started }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn completed(
         self,
         recorded_at: i64,
@@ -848,41 +849,39 @@ tools={payload_has_tools} tool_count={} body={err_body}",
                             code.as_u16(),
                             payload_has_tools,
                             tool_compatibility_fallback_tried,
-                        ) {
-                            if let Some((fb_base, fb_model, fb_key)) =
-                                tool_compatibility_fallback_config(&base_url, &model)
-                            {
-                                tool_compatibility_fallback_tried = true;
-                                let _ = emit_stream_event(
-                                    self.tx,
-                                    GenerateStreamEvent::Delta {
-                                        text: format!(
-                                            "‹‹ACT››↩ «{model}» rejected the tool request (400); \
+                        ) && let Some((fb_base, fb_model, fb_key)) =
+                            tool_compatibility_fallback_config(&base_url, &model)
+                        {
+                            tool_compatibility_fallback_tried = true;
+                            let _ = emit_stream_event(
+                                self.tx,
+                                GenerateStreamEvent::Delta {
+                                    text: format!(
+                                        "‹‹ACT››↩ «{model}» rejected the tool request (400); \
 retrying through «{fb_model}»…‹‹/ACT››"
-                                        ),
-                                    },
-                                )
-                                .await;
-                                model = fb_model;
-                                base_url = fb_base;
-                                endpoint = chat_endpoint(&base_url);
-                                api_key = fb_key;
-                                // S2 T5: hardcoded `None`, not `forced_tool` — a provider SWAP is a
-                                // bigger fallback than the narrower branch above, and the new
-                                // provider/model hasn't been vetted against a forced tool_choice
-                                // shape at all.
-                                payload = build_chat_payload(
-                                    &model,
-                                    &base_url,
-                                    messages,
-                                    tool_schemas,
-                                    temperature,
-                                    is_final_round,
-                                    None,
-                                );
-                                attempt = 0;
-                                continue;
-                            }
+                                    ),
+                                },
+                            )
+                            .await;
+                            model = fb_model;
+                            base_url = fb_base;
+                            endpoint = chat_endpoint(&base_url);
+                            api_key = fb_key;
+                            // S2 T5: hardcoded `None`, not `forced_tool` — a provider SWAP is a
+                            // bigger fallback than the narrower branch above, and the new
+                            // provider/model hasn't been vetted against a forced tool_choice
+                            // shape at all.
+                            payload = build_chat_payload(
+                                &model,
+                                &base_url,
+                                messages,
+                                tool_schemas,
+                                temperature,
+                                is_final_round,
+                                None,
+                            );
+                            attempt = 0;
+                            continue;
                         }
                         let transient = matches!(code.as_u16(), 408 | 429 | 500 | 502 | 503 | 504);
                         if transient && attempt < 2 {
@@ -901,34 +900,33 @@ retrying through «{fb_model}»…‹‹/ACT››"
                         // valid key (or a local no-auth model) — even when the
                         // FAILING model is the orchestrator itself, so an
                         // unauthenticated binding doesn't break the turn.
-                        if code.as_u16() == 401 && !fallback_tried {
-                            if let Some((fb_base, fb_model, fb_key)) = auth_fallback_config(&model)
-                            {
-                                if fb_model != model {
-                                    fallback_tried = true;
-                                    let _ = emit_stream_event(self.tx, GenerateStreamEvent::Delta {
+                        if code.as_u16() == 401
+                            && !fallback_tried
+                            && let Some((fb_base, fb_model, fb_key)) = auth_fallback_config(&model)
+                            && fb_model != model
+                        {
+                            fallback_tried = true;
+                            let _ = emit_stream_event(self.tx, GenerateStreamEvent::Delta {
                                             text: format!("‹‹ACT››↩ «{model}» not authenticated (401): falling back to «{fb_model}»…‹‹/ACT››"),
                                         })
                                         .await;
-                                    model = fb_model;
-                                    base_url = fb_base;
-                                    endpoint = chat_endpoint(&base_url);
-                                    api_key = fb_key;
-                                    // S2 T5: `None`, same reasoning as the tool-compat swap above —
-                                    // the fallback provider hasn't been vetted against forcing.
-                                    payload = build_chat_payload(
-                                        &model,
-                                        &base_url,
-                                        messages,
-                                        tool_schemas,
-                                        temperature,
-                                        is_final_round,
-                                        None,
-                                    );
-                                    attempt = 0;
-                                    continue;
-                                }
-                            }
+                            model = fb_model;
+                            base_url = fb_base;
+                            endpoint = chat_endpoint(&base_url);
+                            api_key = fb_key;
+                            // S2 T5: `None`, same reasoning as the tool-compat swap above —
+                            // the fallback provider hasn't been vetted against forcing.
+                            payload = build_chat_payload(
+                                &model,
+                                &base_url,
+                                messages,
+                                tool_schemas,
+                                temperature,
+                                is_final_round,
+                                None,
+                            );
+                            attempt = 0;
+                            continue;
                         }
                         // 401 on a `:cloud` Ollama model = the cloud service
                         // needs auth (the local Ollama has no key). Make the
@@ -1053,33 +1051,32 @@ check/update the key in Settings → Model & Runtime."
                         // Persistent timeout/connect (e.g. a huge/slow cloud model,
                         // or a `:cloud` model on the local daemon): self-heal once
                         // onto a provider that has a key — same as the 401 path.
-                        if transient && !fallback_tried {
-                            if let Some((fb_base, fb_model, fb_key)) = auth_fallback_config(&model)
-                            {
-                                if fb_model != model {
-                                    fallback_tried = true;
-                                    let _ = emit_stream_event(self.tx, GenerateStreamEvent::Delta {
+                        if transient
+                            && !fallback_tried
+                            && let Some((fb_base, fb_model, fb_key)) = auth_fallback_config(&model)
+                            && fb_model != model
+                        {
+                            fallback_tried = true;
+                            let _ = emit_stream_event(self.tx, GenerateStreamEvent::Delta {
                                             text: format!("‹‹ACT››↩ «{model}» isn't responding (timeout): falling back to «{fb_model}»…‹‹/ACT››"),
                                         })
                                         .await;
-                                    model = fb_model;
-                                    base_url = fb_base;
-                                    endpoint = chat_endpoint(&base_url);
-                                    api_key = fb_key;
-                                    // S2 T5: `None` — same reasoning as the other provider swaps.
-                                    payload = build_chat_payload(
-                                        &model,
-                                        &base_url,
-                                        messages,
-                                        tool_schemas,
-                                        temperature,
-                                        is_final_round,
-                                        None,
-                                    );
-                                    attempt = 0;
-                                    continue;
-                                }
-                            }
+                            model = fb_model;
+                            base_url = fb_base;
+                            endpoint = chat_endpoint(&base_url);
+                            api_key = fb_key;
+                            // S2 T5: `None` — same reasoning as the other provider swaps.
+                            payload = build_chat_payload(
+                                &model,
+                                &base_url,
+                                messages,
+                                tool_schemas,
+                                temperature,
+                                is_final_round,
+                                None,
+                            );
+                            attempt = 0;
+                            continue;
                         }
                         let _ = emit_stream_event(
                             self.tx,

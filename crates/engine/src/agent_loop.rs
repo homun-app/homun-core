@@ -760,7 +760,7 @@ again to find the right control). Keep working on the task — do not stop and d
                             blocked_trace
                         {
                             let rec = crate::trace::ToolTraceRecord {
-                                round: round,
+                                round,
                                 idx,
                                 name: name.to_string(),
                                 args_hash,
@@ -789,7 +789,7 @@ again to find the right control). Keep working on the task — do not stop and d
                         if let Some(line) = summarize_tool_action(name, args_raw) {
                             ls.tool_trace.push(line);
                         } else if let Some(line) =
-                            connected_capability_execution_trace_line(name, &catalog_index)
+                            connected_capability_execution_trace_line(name, catalog_index)
                         {
                             ls.tool_trace.push(line);
                         } else if composio_writes.contains(name) {
@@ -1019,10 +1019,11 @@ again to find the right control). Keep working on the task — do not stop and d
                         // chrome (Wikipedia donate/edit/history, wikimedia/mediawiki footer
                         // links) lands in the "Sources" footer. The page visited IS the
                         // source. `is_low_value_source_url` stays as a defensive net.
-                        if let Some(url) = extract_source_urls(&result).into_iter().next() {
-                            if !is_low_value_source_url(&url) && !browse_sources.contains(&url) {
-                                browse_sources.push(url);
-                            }
+                        if let Some(url) = extract_source_urls(&result).into_iter().next()
+                            && !is_low_value_source_url(&url)
+                            && !browse_sources.contains(&url)
+                        {
+                            browse_sources.push(url);
                         }
                     }
                     if name == "recall_memory" {
@@ -1046,7 +1047,7 @@ again to find the right control). Keep working on the task — do not stop and d
                             execution_journal,
                             event_sink,
                             &cfg,
-                            thread_id.as_deref(),
+                            thread_id,
                             round,
                         )
                         .await;
@@ -1077,7 +1078,7 @@ again to find the right control). Keep working on the task — do not stop and d
                     // below.
                     if let Some((args_hash, result_hash, result_len, result_head)) = trace_fields {
                         let rec = crate::trace::ToolTraceRecord {
-                            round: round,
+                            round,
                             idx,
                             name: name.to_string(),
                             args_hash,
@@ -1351,36 +1352,31 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
                     || prose_asks_clarify_without_card(&content)
                 {
                     // Fall through to deliver without marking plan steps done.
-                } else if cfg.reconcile_on_delivery {
-                    if let Some(open_index) = plan_steps
+                } else if cfg.reconcile_on_delivery
+                    && let Some(open_index) = plan_steps
                         .iter()
                         .position(|s| plan_step_status(s) != "done")
-                    {
-                        // Turn trace: count open steps at DECISION time (before this reconcile closes
-                        // one) and the delivered size — the inputs the reconcile fired on.
-                        let reconcile_open_before = plan_steps
-                            .iter()
-                            .filter(|s| plan_step_status(s) != "done")
-                            .count();
-                        let reconcile_delivered = content.trim().chars().count();
-                        plan_steps[open_index]["status"] = serde_json::json!("done");
-                        content = replace_latest_plan_marker(&content, &plan_steps);
-                        plan_progress
-                            .persist_plan(thread_id.as_deref(), &plan_steps)
-                            .await;
-                        if std::env::var("HOMUN_DEBUG").is_ok() {
-                            eprintln!(
-                                "[plan] reconciled last open step to done on delivery: «{step}»"
-                            );
-                        }
-                        turn_trace.record(crate::turn_trace::TurnEvent::Reconcile {
-                            fired: true,
-                            step: step.clone(),
-                            open_steps: reconcile_open_before,
-                            delivered_chars: reconcile_delivered,
-                            threshold: crate::plan::MIN_DELIVERED_CHARS_TO_CONCLUDE,
-                        });
+                {
+                    // Turn trace: count open steps at DECISION time (before this reconcile closes
+                    // one) and the delivered size — the inputs the reconcile fired on.
+                    let reconcile_open_before = plan_steps
+                        .iter()
+                        .filter(|s| plan_step_status(s) != "done")
+                        .count();
+                    let reconcile_delivered = content.trim().chars().count();
+                    plan_steps[open_index]["status"] = serde_json::json!("done");
+                    content = replace_latest_plan_marker(&content, &plan_steps);
+                    plan_progress.persist_plan(thread_id, &plan_steps).await;
+                    if std::env::var("HOMUN_DEBUG").is_ok() {
+                        eprintln!("[plan] reconciled last open step to done on delivery: «{step}»");
                     }
+                    turn_trace.record(crate::turn_trace::TurnEvent::Reconcile {
+                        fired: true,
+                        step: step.clone(),
+                        open_steps: reconcile_open_before,
+                        delivered_chars: reconcile_delivered,
+                        threshold: crate::plan::MIN_DELIVERED_CHARS_TO_CONCLUDE,
+                    });
                 }
             } else if plan_steps.is_empty()
                 && turn_used_tools
@@ -1482,9 +1478,7 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
         let final_delivered_chars = delivered.trim().chars().count();
         let delivered = match plan_progress.reconcile_on_delivery(&ls.plan, &delivered) {
             Some(reconciled) => {
-                plan_progress
-                    .persist_plan(thread_id.as_deref(), &reconciled)
-                    .await;
+                plan_progress.persist_plan(thread_id, &reconciled).await;
                 turn_trace.record(crate::turn_trace::TurnEvent::Reconcile {
                     fired: true,
                     step: String::new(), // the whole plan is reconciled here, not a single named step
@@ -1799,9 +1793,7 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
                     let delivered = match plan_progress.reconcile_on_delivery(&ls.plan, &delivered)
                     {
                         Some(reconciled) => {
-                            plan_progress
-                                .persist_plan(thread_id.as_deref(), &reconciled)
-                                .await;
+                            plan_progress.persist_plan(thread_id, &reconciled).await;
                             replace_latest_plan_marker(&delivered, &reconciled)
                         }
                         None => delivered,

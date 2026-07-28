@@ -21,6 +21,15 @@ use local_first_subagents::{GenerateJsonRequest, JsonRuntime, TokenMetrics};
 use local_first_task_runtime::{TaskId, TaskStore};
 use std::collections::{BTreeMap, BTreeSet};
 
+type PlannedExecution = (
+    ExecutionPlan,
+    TokenMetrics,
+    usize,
+    Vec<ToolCard>,
+    Vec<CapabilityTool>,
+    Vec<crate::ContextBudgetUsage>,
+);
+
 pub struct OrchestratorBrain<R, M> {
     runtime: R,
     memory: M,
@@ -284,7 +293,10 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
             .search(&request.user_message, request.budgets.max_loaded_tools);
         let mut tools = Vec::new();
         for card in &cards {
-            if let Some(tool) = self.tool_corpus.tool_detail(&card.provider_id, &card.tool_name) {
+            if let Some(tool) = self
+                .tool_corpus
+                .tool_detail(&card.provider_id, &card.tool_name)
+            {
                 tools.push(tool);
             }
         }
@@ -297,14 +309,7 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         memory: &[crate::MemoryContextSnippet],
         initial_cards: &[ToolCard],
         initial_tools: &[CapabilityTool],
-    ) -> OrchestratorResult<(
-        ExecutionPlan,
-        TokenMetrics,
-        usize,
-        Vec<ToolCard>,
-        Vec<CapabilityTool>,
-        Vec<crate::ContextBudgetUsage>,
-    )> {
+    ) -> OrchestratorResult<PlannedExecution> {
         let mut rounds = 1;
         let first = self.call_planner(request, memory, initial_cards, initial_tools)?;
         if first.0.route != OrchestratorRoute::NeedsMoreTools {
@@ -339,7 +344,10 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
             .search(query, request.budgets.max_loaded_tools);
         let mut tools = Vec::new();
         for card in &cards {
-            if let Some(tool) = self.tool_corpus.tool_detail(&card.provider_id, &card.tool_name) {
+            if let Some(tool) = self
+                .tool_corpus
+                .tool_detail(&card.provider_id, &card.tool_name)
+            {
                 tools.push(tool);
             }
         }

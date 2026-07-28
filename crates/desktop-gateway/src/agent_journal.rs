@@ -90,8 +90,8 @@ impl GatewayExecutionJournal {
                             seq += 1;
                         }
                         WriterMessage::Checkpoint { round, state, fingerprint } => {
-                            if let Some(store) = &store {
-                                if let Err(error) = store.append_agent_checkpoint(
+                            if let Some(store) = &store
+                                && let Err(error) = store.append_agent_checkpoint(
                                     &run_id,
                                     round as u32,
                                     &state,
@@ -101,7 +101,6 @@ impl GatewayExecutionJournal {
                                     writer_dropped_events.fetch_add(1, Ordering::Relaxed);
                                     tracing::warn!(target: "agent::journal", %run_id, round, %error, "checkpoint write failed");
                                 }
-                            }
                         }
                         WriterMessage::Flush(ack) => {
                             let _ = ack.send(());
@@ -179,7 +178,10 @@ impl ExecutionJournal for GatewayExecutionJournal {
     }
 
     fn checkpoint(&self, checkpoint: LoopCheckpoint) {
-        let accepting = self.accepting.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let accepting = self
+            .accepting
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if !*accepting {
             self.dropped_events.fetch_add(1, Ordering::Relaxed);
             return;
@@ -192,7 +194,15 @@ impl ExecutionJournal for GatewayExecutionJournal {
             "{:x}",
             Sha256::digest(serde_json::to_vec(&state).unwrap_or_default())
         );
-        if self.sender.try_send(WriterMessage::Checkpoint { round, state, fingerprint }).is_err() {
+        if self
+            .sender
+            .try_send(WriterMessage::Checkpoint {
+                round,
+                state,
+                fingerprint,
+            })
+            .is_err()
+        {
             self.dropped_events.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -310,10 +320,7 @@ fn redact_prompt_text(text: &str) -> String {
 
 fn redact_data_urls(text: &str) -> String {
     let mut output = text.to_string();
-    loop {
-        let Some(start) = output.find("data:") else {
-            break;
-        };
+    while let Some(start) = output.find("data:") {
         let Some(relative_comma) = output[start..].find(";base64,") else {
             break;
         };

@@ -123,7 +123,7 @@ fn facade_compresses_large_tool_results_in_audit_payload() {
             .unwrap()
             .contains("secret-token")
     );
-    assert_eq!(audit_result["metrics"]["input_chars"].is_number(), true);
+    assert!(audit_result["metrics"]["input_chars"].is_number());
 }
 
 #[test]

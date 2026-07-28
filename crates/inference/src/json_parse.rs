@@ -55,7 +55,7 @@ pub fn extract_json_text(content: &str) -> String {
     let Some(stripped) = trimmed.strip_prefix("```") else {
         return trimmed.to_string();
     };
-    let after_lang = stripped.splitn(2, '\n').nth(1).unwrap_or("");
+    let after_lang = stripped.split_once('\n').map(|x| x.1).unwrap_or("");
     after_lang
         .trim_end()
         .strip_suffix("```")

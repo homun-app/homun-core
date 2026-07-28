@@ -18,8 +18,8 @@ mod db_migrate;
 // doc.json. Wired into make_document's templated path (F2-T8,
 // make_templated_document).
 mod document_content;
-mod execution_runtime;
 mod execution_projection;
+mod execution_runtime;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod inference_transport;
 mod model_client;
@@ -103,8 +103,8 @@ use base64::Engine as _;
 use bytes::Bytes;
 use chat_store::{BranchPoint, ChatStore, RemoteApprovalInput, RemoteApprovalRow, Tag, TagEntity};
 use local_first_browser_automation::{
-    BrowserAutomationClient, BrowserAutomationError, BrowserCheckpoint, BrowserMethod, BrowserResponse,
-    BrowserSidecarSession, BrowserSidecarSpawnOptions, BrowserUrlApprovalGrant,
+    BrowserAutomationClient, BrowserAutomationError, BrowserCheckpoint, BrowserMethod,
+    BrowserResponse, BrowserSidecarSession, BrowserSidecarSpawnOptions, BrowserUrlApprovalGrant,
     BrowserUrlApprovalScope, BrowserUrlPolicyStore, BrowserVisibilityMode,
 };
 use local_first_capabilities::{
@@ -117,6 +117,7 @@ use local_first_capabilities::{
     ProviderId as CapabilityProviderId, UserId as CapabilityUserId, WorkflowRoutingRegistry,
     WorkspaceId as CapabilityWorkspaceId,
 };
+use local_first_desktop_gateway::browser_checkpoint::BrowserCheckpointSecretStore;
 use local_first_desktop_gateway::integrity_api::{
     GraphIntegrityStatus, IntegrityAuditResponse, IntegrityBackupSummary, IntegrityRepairAction,
     IntegrityRepairApplyRequest, IntegrityRepairApplyResponse, IntegrityRepairEstimate,
@@ -124,7 +125,6 @@ use local_first_desktop_gateway::integrity_api::{
     LinkedMemoryRepairApplyResponse, canonical_integrity_actions, gateway_approval_token,
     gateway_audit_checksum, inspect_registered_graph,
 };
-use local_first_desktop_gateway::browser_checkpoint::BrowserCheckpointSecretStore;
 use local_first_desktop_gateway::linked_memory_repair::{
     LinkedMemoryRepairPreview, LinkedRepairError, LinkedRepairFailureInjection,
     apply_linked_memory_repair, preview_linked_memory_repair,
@@ -154,6 +154,7 @@ use local_first_engine::plan::{
 // Engine helpers exercised ONLY by this crate's tests (their non-test callers moved into
 // `engine::run_turn` at 5.D2). `#[cfg(test)]`-gated so they're in scope for `super::…` in `mod tests`
 // without reading as unused imports in the non-test build.
+use execution_runtime::{ExecutionRuntime, contract_for_acquired_task};
 #[cfg(test)]
 use local_first_engine::{
     browser::{prune_browser_history, resolve_browser_chat_tool_name},
@@ -203,10 +204,10 @@ use local_first_subagents::{
 };
 use local_first_task_runtime::{
     ApprovalGate, ApprovalPolicy, ApprovalRequest, Automation, AutomationSource, AutomationTrigger,
-    EventTrigger, ExecutorResult, LeaseManager, ResourceClass, ResourceGovernor, ResourceLimits,
-    TaskExecutor, TaskId, TaskQueueSnapshot, TaskRecord, TaskRuntimeError, TaskRuntimeResult,
-    NewBrowserCheckpoint, TaskScheduler, TaskStatus, TaskStore, TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId,
-    WorkspaceId,
+    EventTrigger, ExecutorResult, LeaseManager, NewBrowserCheckpoint, ResourceClass,
+    ResourceGovernor, ResourceLimits, TaskExecutor, TaskId, TaskQueueSnapshot, TaskRecord,
+    TaskRuntimeError, TaskRuntimeResult, TaskScheduler, TaskStatus, TaskStore, TaskUiDetail,
+    TaskUiItem, TaskUiReadModel, UserId, WorkspaceId,
 };
 use local_first_vault::{
     LocalPinVerifier, PaymentApprovalSnapshot, SQLiteVaultStore, VaultCategory, VaultRecord,
@@ -228,7 +229,6 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
     time::Duration as StdDuration,
 };
-use execution_runtime::{ExecutionRuntime, contract_for_acquired_task};
 use task_registry::TaskExecutorRegistry;
 use time::{Duration, OffsetDateTime};
 use tokio::net::TcpListener;
@@ -1241,7 +1241,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Ok(_) => {}
         Err(error) => {
-            eprintln!("execution projection: startup replay incomplete: {}", error.message);
+            eprintln!(
+                "execution projection: startup replay incomplete: {}",
+                error.message
+            );
         }
     }
     steering_control::start(state.clone());
@@ -1914,14 +1917,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // unit) when HOMUN_WEB_DIR points at the vite build output. Mounted outside
     // the token layer so the SPA can load; its JS then sends the bearer token for
     // /api calls. Unknown paths fall back to index.html for client-side routing.
-    if let Ok(web_dir) = env::var("HOMUN_WEB_DIR") {
-        if !web_dir.trim().is_empty() {
-            let index = std::path::Path::new(&web_dir).join("index.html");
-            app = app.fallback_service(
-                tower_http::services::ServeDir::new(&web_dir)
-                    .not_found_service(tower_http::services::ServeFile::new(index)),
-            );
-        }
+    if let Ok(web_dir) = env::var("HOMUN_WEB_DIR")
+        && !web_dir.trim().is_empty()
+    {
+        let index = std::path::Path::new(&web_dir).join("index.html");
+        app = app.fallback_service(
+            tower_http::services::ServeDir::new(&web_dir)
+                .not_found_service(tower_http::services::ServeFile::new(index)),
+        );
     }
     let app = app.layer(cors_layer());
     // Warm up the contained computer so the live view + browser are ready without waiting for
@@ -2891,8 +2894,8 @@ fn spawn_memory_hygiene_sweep(state: AppState) {
         for scope in scopes {
             let facade = memory_facade(&state);
             let ws = MemoryWorkspaceId::new(&scope);
-            total_gaps += local_first_memory::sweep_gap_facts(&facade, &user, &ws);
-            total_promoted += local_first_memory::promote_aged_candidates(&facade, &user, &ws);
+            total_gaps += local_first_memory::sweep_gap_facts(facade, &user, &ws);
+            total_promoted += local_first_memory::promote_aged_candidates(facade, &user, &ws);
             let lifecycle = MemoryLifecycleRequest {
                 actor_id: "memory-maintenance".to_string(),
                 user_id: user.clone(),
@@ -2929,10 +2932,10 @@ async fn proactivity_auto_review_tick(state: &AppState) {
         return;
     }
     // Real idle: only when the user has stepped away. Active → never interrupt.
-    if let Some(secs) = seconds_since_user_activity() {
-        if secs < homun_idle_threshold_secs() {
-            return;
-        }
+    if let Some(secs) = seconds_since_user_activity()
+        && secs < homun_idle_threshold_secs()
+    {
+        return;
     }
     // Candidate scopes: personal + every named project (the base id maps to personal).
     let mut scopes = vec![PERSONAL_WORKSPACE.to_string()];
@@ -3167,10 +3170,9 @@ async fn archive_chat_thread(
     // Archiving ends the thread → close its warm browser session.
     let st = state.clone();
     let tid = thread_id.clone();
-    let _ = tokio::task::spawn_blocking(move || {
-        close_thread_browser_session(&st, &tid, &workspace_id)
-    })
-    .await;
+    let _ =
+        tokio::task::spawn_blocking(move || close_thread_browser_session(&st, &tid, &workspace_id))
+            .await;
     Ok(Json(snapshot))
 }
 
@@ -3279,10 +3281,10 @@ pub(crate) async fn activate_remote_approvals_from_message(
         {
             continue;
         }
-        if dispatch_remote_approval(state, &row).await {
-            if let Ok(store) = lock_store(state) {
-                let _ = store.mark_remote_approval_dispatched(&row.approval_id);
-            }
+        if dispatch_remote_approval(state, &row).await
+            && let Ok(store) = lock_store(state)
+        {
+            let _ = store.mark_remote_approval_dispatched(&row.approval_id);
         }
     }
 }
@@ -3689,6 +3691,7 @@ fn memory_briefing_source_fingerprint(
     u64::from_be_bytes(digest[..8].try_into().expect("SHA-256 prefix is 8 bytes"))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn revalidated_cached_briefing<F>(
     state: &AppState,
     user: &MemoryUserId,
@@ -3866,15 +3869,17 @@ fn gather_profile_memory_with_provenance(
             )
         })
         .unwrap_or_default();
-    let project = (in_project && include_project)
-        .then(|| {
+    let project = if in_project && include_project {
+        {
             sources
                 .iter()
                 .find(|source| source.grant_id.is_none())
                 .map(|source| briefing_items_for_authorized_source(facade, source, false))
                 .unwrap_or_default()
-        })
-        .unwrap_or_default();
+        }
+    } else {
+        Default::default()
+    };
     (personal, project)
 }
 
@@ -4338,11 +4343,11 @@ fn image_provider_config() -> (String, String, Option<String>) {
 
     // 1) Manual pin — trusted even if the catalog wasn't refreshed (e.g. a cloud
     //    image-model id typed by hand).
-    if let Some((provider_id, model)) = registry.manual_binding("image_generation") {
-        if let Some(provider) = registry.get(&provider_id) {
-            let key = provider_api_key(&provider_id).or_else(image_env_key);
-            return (provider.base_url.clone(), model, key);
-        }
+    if let Some((provider_id, model)) = registry.manual_binding("image_generation")
+        && let Some(provider) = registry.get(&provider_id)
+    {
+        let key = provider_api_key(&provider_id).or_else(image_env_key);
+        return (provider.base_url.clone(), model, key);
     }
 
     // 2) Explicit env override.
@@ -4361,11 +4366,11 @@ fn image_provider_config() -> (String, String, Option<String>) {
     }
 
     // 3) Auto-matched image model from the catalog (only when one truly exists).
-    if !registry.eligible_models("image_generation").is_empty() {
-        if let Some(resolved) = registry.resolve_role("image_generation") {
-            let key = provider_api_key(&resolved.provider_id).or_else(image_env_key);
-            return (resolved.base_url, resolved.model, key);
-        }
+    if !registry.eligible_models("image_generation").is_empty()
+        && let Some(resolved) = registry.resolve_role("image_generation")
+    {
+        let key = provider_api_key(&resolved.provider_id).or_else(image_env_key);
+        return (resolved.base_url, resolved.model, key);
     }
 
     // 4) Local Ollama image default.
@@ -4496,7 +4501,7 @@ async fn backfill_embeddings(
     // Fase 1 (lock): collect pending + seen.
     let collected = {
         let facade = memory_facade(state);
-        local_first_memory::backfill_collect_pending(&facade, user, workspace, limit)
+        local_first_memory::backfill_collect_pending(facade, user, workspace, limit)
     };
     let Some((pending, mut seen)) = collected else {
         return;
@@ -4510,7 +4515,7 @@ async fn backfill_embeddings(
         {
             let facade = memory_facade(state);
             local_first_memory::backfill_persist_one(
-                &facade, user, workspace, &reference, &mtype, &vector, &model, &mut seen,
+                facade, user, workspace, &reference, &mtype, &vector, &model, &mut seen,
             );
         }
     }
@@ -4671,6 +4676,7 @@ fn provenance_key_fragment(value: &str) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn upsert_memory_relation(
     facade: &MemoryFacade,
     user: &MemoryUserId,
@@ -4806,6 +4812,7 @@ fn explicit_artifact_source_refs(metadata: &serde_json::Value) -> Vec<MemoryRef>
     refs
 }
 
+#[allow(clippy::too_many_arguments)]
 fn upsert_artifact_evidence_provenance_graph(
     facade: &MemoryFacade,
     user: &MemoryUserId,
@@ -4909,6 +4916,7 @@ fn upsert_artifact_evidence_provenance_graph(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn upsert_artifact_provenance_graph(
     facade: &MemoryFacade,
     user: &MemoryUserId,
@@ -5092,6 +5100,7 @@ fn upsert_artifact_provenance_graph(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn upsert_artifact_memory_record(
     facade: &MemoryFacade,
     user: &MemoryUserId,
@@ -5204,6 +5213,7 @@ fn upsert_artifact_memory_record(
     Ok(record.reference)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn remember_artifact_memory(
     state: &AppState,
     thread_id: Option<&str>,
@@ -5270,7 +5280,7 @@ fn remember_artifact_memory(
     };
     let facade = memory_facade(state);
     let reference = upsert_artifact_memory_record(
-        &facade,
+        facade,
         &user,
         &workspace,
         &lifecycle,
@@ -5283,6 +5293,7 @@ fn remember_artifact_memory(
     Ok((user, workspace, reference))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn register_artifact_memory(
     state: &AppState,
     thread_id: Option<&str>,
@@ -5307,6 +5318,7 @@ async fn register_artifact_memory(
     .await;
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn register_artifact_memory_with_metadata(
     state: &AppState,
     thread_id: Option<&str>,
@@ -5333,6 +5345,7 @@ async fn register_artifact_memory_with_metadata(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn emit_rendered_deck_artifacts(
     state: &AppState,
     tx: &StreamSink,
@@ -5439,7 +5452,7 @@ fn remember_project_file_artifact_memory(
     };
     let facade = memory_facade(state);
     let reference = upsert_artifact_memory_record(
-        &facade,
+        facade,
         &user,
         &workspace,
         &lifecycle,
@@ -5622,13 +5635,13 @@ fn rebuild_profile_wiki(
         .list_relations_for_ui(user_id, workspace)
         .unwrap_or_default()
     {
-        if rel.relation_type == "mentions" {
-            if let Some(name) = entity_name.get(&rel.target_ref.to_string()) {
-                mem_entities
-                    .entry(rel.source_ref.to_string())
-                    .or_default()
-                    .push(name.clone());
-            }
+        if rel.relation_type == "mentions"
+            && let Some(name) = entity_name.get(&rel.target_ref.to_string())
+        {
+            mem_entities
+                .entry(rel.source_ref.to_string())
+                .or_default()
+                .push(name.clone());
         }
     }
     // Group facts under each entity they mention; entity-less facts → "Generale".
@@ -6005,9 +6018,7 @@ fn recall_pack_on_facade(
     workspace: &MemoryWorkspaceId,
     query: &str,
     query_vec: &[f32],
-    graph_context: Option<
-        &(dyn Fn(&MemoryFacade, &MemoryUserId, &MemoryWorkspaceId, &str) -> Option<String> + Sync),
-    >,
+    graph_context: Option<&local_first_memory::GraphContextHook<'_>>,
 ) -> RecallPack {
     let scope = if workspace.as_str() == PERSONAL_WORKSPACE {
         MemoryScope::Personal
@@ -6117,9 +6128,7 @@ impl local_first_memory::LlmClient for GatewayLlmClient {
     ) -> local_first_memory::BoxFuture<'a, Option<String>> {
         let http = self.http.clone();
         Box::pin(async move {
-            let Some((base_url, model, api_key)) = extractor_openai_config() else {
-                return None;
-            };
+            let (base_url, model, api_key) = extractor_openai_config()?;
             let payload = serde_json::json!({
                 "model": model,
                 "temperature": 0.0,
@@ -6317,25 +6326,16 @@ impl MemoryRecallService for InProcessMemoryRecallService {
                 let facade = memory_facade(&state);
                 // Graph-context callback: inietta workflow_status / artifact_provenance.
                 // Le fn libere del gateway sono Sync; il closure è + Sync.
-                let graph_context: Option<
-                    &(
-                         dyn Fn(
-                        &local_first_memory::MemoryFacade,
-                        &MemoryUserId,
-                        &MemoryWorkspaceId,
-                        &str,
-                    ) -> Option<String>
-                             + Sync
-                     ),
-                > = Some(&|facade, user, workspace, q| {
-                    if let Some(workflow) =
-                        workflow_status_context_for_query(facade, user, workspace, q)
-                    {
-                        return Some(workflow);
-                    }
-                    artifact_provenance_context_for_query(facade, user, workspace, q)
-                });
-                recall_pack_on_facade(&facade, &user, &workspace, query, &query_vec, graph_context)
+                let graph_context: Option<&local_first_memory::GraphContextHook<'_>> =
+                    Some(&|facade, user, workspace, q| {
+                        if let Some(workflow) =
+                            workflow_status_context_for_query(facade, user, workspace, q)
+                        {
+                            return Some(workflow);
+                        }
+                        artifact_provenance_context_for_query(facade, user, workspace, q)
+                    });
+                recall_pack_on_facade(facade, &user, &workspace, query, &query_vec, graph_context)
             };
             let mut pack = block;
             pack.scope = scope_owned;
@@ -6372,7 +6372,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
             let prompt = {
                 let facade = memory_facade(&state);
                 local_first_memory::prepare_learn_prompt(
-                    &facade,
+                    facade,
                     &user,
                     &active,
                     &exchange,
@@ -6400,7 +6400,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
                 backfill_embeddings: None, // backfill async: resta al tick periodico.
             };
             local_first_memory::persist_learn_extraction(
-                &facade, &user, &active, &content, &exchange, hooks,
+                facade, &user, &active, &content, &exchange, hooks,
             );
         })
     }
@@ -6412,6 +6412,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
 /// path OFF usa le STESSE fn del crate (3 fasi: prepare_learn_prompt →
 /// LlmClient.chat → persist_learn_extraction) con capability client costruiti
 /// al volo — così `learn_from_exchange` non è più duplicata nel gateway.
+#[allow(clippy::too_many_arguments)]
 fn learn_via_service_or_inline(
     state: &AppState,
     user_message: &str,
@@ -6476,7 +6477,7 @@ fn learn_via_service_or_inline(
             let prompt = {
                 let facade = memory_facade(&state);
                 local_first_memory::prepare_learn_prompt(
-                    &facade,
+                    facade,
                     &user,
                     &active,
                     &exchange,
@@ -6504,7 +6505,7 @@ fn learn_via_service_or_inline(
                 backfill_embeddings: None,
             };
             local_first_memory::persist_learn_extraction(
-                &facade, &user, &active, &content, &exchange, hooks,
+                facade, &user, &active, &content, &exchange, hooks,
             );
         })
     }
@@ -6580,7 +6581,7 @@ async fn consolidate_scope(
     // Fase 1 (lock): dedup open-loop + pre-pass deterministico + listing.
     let (merged, prepared) = {
         let facade = memory_facade(state);
-        local_first_memory::consolidate_prepare(&facade, user, workspace, &is_edited)
+        local_first_memory::consolidate_prepare(facade, user, workspace, &is_edited)
     };
     let Some(input) = prepared else {
         // <3 memorie sopravvissute (o early-exit): wiki già ricostruite nella prepare.
@@ -6606,14 +6607,14 @@ async fn consolidate_scope(
         // rebuild the wiki pages.
         {
             let facade = memory_facade(state);
-            local_first_memory::rebuild_all_wiki(&facade, user, workspace, &is_edited);
+            local_first_memory::rebuild_all_wiki(facade, user, workspace, &is_edited);
         }
         return (merged, 0);
     };
     // Fase 3 (lock re-acquisito): applica merge/drop + ricostruisce wiki.
     let facade = memory_facade(state);
     local_first_memory::consolidate_apply(
-        &facade,
+        facade,
         user,
         workspace,
         &root,
@@ -6964,7 +6965,7 @@ fn sweep_graph_orphans(state: &AppState, workspace: &MemoryWorkspaceId) {
         .map(|(entity, _dead)| entity)
         .filter(|e| !is_graphify(e))
         .collect();
-    link_mentions_core(&facade, &user, workspace, &items, &all_entities, true);
+    link_mentions_core(facade, &user, workspace, &items, &all_entities, true);
     let touched: std::collections::HashSet<String> = facade
         .list_relations_for_ui(&user, workspace)
         .unwrap_or_default()
@@ -6995,7 +6996,7 @@ fn sweep_graph_orphans(state: &AppState, workspace: &MemoryWorkspaceId) {
     }
     // F6: refresh the human-readable profile view from the (now-consistent) graph.
     if workspace.as_str() == PERSONAL_WORKSPACE {
-        rebuild_profile_wiki(&facade, &user, workspace);
+        rebuild_profile_wiki(facade, &user, workspace);
     }
 }
 
@@ -7024,11 +7025,11 @@ fn reconcile_memory_scope(state: &AppState, workspace: &MemoryWorkspaceId) {
     let user = gateway_memory_user_id();
     {
         let facade = memory_facade(state);
-        rebuild_decisions_wiki(&facade, &user, workspace);
-        rebuild_project_brief(&facade, &user, workspace);
-        rebuild_status_wiki(&facade, &user, workspace);
+        rebuild_decisions_wiki(facade, &user, workspace);
+        rebuild_project_brief(facade, &user, workspace);
+        rebuild_status_wiki(facade, &user, workspace);
         if workspace.as_str() == PERSONAL_WORKSPACE {
-            rebuild_profile_wiki(&facade, &user, workspace);
+            rebuild_profile_wiki(facade, &user, workspace);
         }
     }
 }
@@ -7271,7 +7272,7 @@ fn record_decision(state: &AppState, args: &serde_json::Value) -> String {
     match record {
         Ok(rec) => {
             let _ = facade.confirm_memory(&lifecycle, &rec.reference, "decision recorded by agent");
-            rebuild_decisions_wiki(&facade, &user, &workspace);
+            rebuild_decisions_wiki(facade, &user, &workspace);
             "✅ Decision recorded in memory (the why will stay available in upcoming turns and \
 in future sessions)."
                 .to_string()
@@ -7447,21 +7448,21 @@ fn forget_memory(state: &AppState, args: &serde_json::Value) -> String {
     let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
-    let mut deleted = forget_in_scope(&facade, &user, &active, &query, reason);
+    let mut deleted = forget_in_scope(facade, &user, &active, &query, reason);
     deleted.extend(forget_topic_in_scope(
-        &facade, &user, &active, &query, reason, &protected,
+        facade, &user, &active, &query, reason, &protected,
     ));
     if active.as_str() != PERSONAL_WORKSPACE {
         let personal = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
-        deleted.extend(forget_in_scope(&facade, &user, &personal, &query, reason));
+        deleted.extend(forget_in_scope(facade, &user, &personal, &query, reason));
         deleted.extend(forget_topic_in_scope(
-            &facade, &user, &personal, &query, reason, &protected,
+            facade, &user, &personal, &query, reason, &protected,
         ));
     }
     deleted.sort();
     deleted.dedup();
     // Cascade: the graph already hides Deleted; refresh the wiki projection too.
-    rebuild_decisions_wiki(&facade, &user, &active);
+    rebuild_decisions_wiki(facade, &user, &active);
     // G5: deletions can orphan entities — re-optimize the touched scopes.
     // ADR 0027: no facade lock to release; the store serializes each op internally.
     if !deleted.is_empty() {
@@ -7692,10 +7693,10 @@ fn plan_stall_abort_enabled() -> bool {
 /// stuck at 1/2 while the delivered answer had already registered the last-step failure.
 /// `HOMUN_PLAN_RECONCILE=0`/`off` remains as a diagnostic opt-out.
 fn plan_reconcile_on_delivery_flag(value: Option<&str>) -> bool {
-    match value.map(str::trim).filter(|value| !value.is_empty()) {
-        Some(value) if value == "0" || value.eq_ignore_ascii_case("off") => false,
-        _ => true,
-    }
+    !matches!(
+        value.map(str::trim).filter(|value| !value.is_empty()),
+        Some(value) if value == "0" || value.eq_ignore_ascii_case("off")
+    )
 }
 
 fn plan_reconcile_on_delivery_enabled() -> bool {
@@ -8669,6 +8670,7 @@ fn semantic_decision_auth_fallback(
 // binary so it doesn't linger as dead_code there while it keeps serving test
 // fixtures below.
 #[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 fn template_catalog_entry(
     provider: &str,
     id: &str,
@@ -9172,13 +9174,13 @@ fn find_executable(candidates: &[String]) -> Option<PathBuf> {
         if path.components().count() > 1 && path.is_file() {
             return Some(path.to_path_buf());
         }
-        if path.components().count() == 1 {
-            if let Some(paths) = env::var_os("PATH") {
-                for dir in env::split_paths(&paths) {
-                    let executable = dir.join(candidate);
-                    if executable.is_file() {
-                        return Some(executable);
-                    }
+        if path.components().count() == 1
+            && let Some(paths) = env::var_os("PATH")
+        {
+            for dir in env::split_paths(&paths) {
+                let executable = dir.join(candidate);
+                if executable.is_file() {
+                    return Some(executable);
                 }
             }
         }
@@ -9650,10 +9652,7 @@ fn run_static_workflow_plan_through_brain(
     let mut brain = OrchestratorBrain::new(
         router,
         GatewayBrainMemory(None),
-        CapabilityFacade::new(
-            CapabilityPolicy::default(),
-            InMemoryCapabilityAudit::default(),
-        ),
+        CapabilityFacade::new(CapabilityPolicy, InMemoryCapabilityAudit::default()),
         TaskStore::open_in_memory().map_err(|error| error.to_string())?,
     );
     let user = gateway_capability_user_id();
@@ -10208,11 +10207,11 @@ fn record_runtime_plan_step_outcome_from_state(
         purpose: "runtime_plan_step_verified".to_string(),
     };
     if record_runtime_plan_step_outcome(
-        &facade, &user, &workspace, &lifecycle, thread_id, step, evidence,
+        facade, &user, &workspace, &lifecycle, thread_id, step, evidence,
     )
     .is_ok()
     {
-        rebuild_status_wiki(&facade, &user, &workspace);
+        rebuild_status_wiki(facade, &user, &workspace);
     }
 }
 
@@ -10288,7 +10287,7 @@ fn record_subagent_task_step_outcome(
         purpose: "subagent_plan_step_verified".to_string(),
     };
     if record_subagent_task_step_outcome_memory(
-        &facade,
+        facade,
         &user,
         &workspace,
         &lifecycle,
@@ -10298,7 +10297,7 @@ fn record_subagent_task_step_outcome(
     )
     .is_ok()
     {
-        rebuild_status_wiki(&facade, &user, &workspace);
+        rebuild_status_wiki(facade, &user, &workspace);
     }
 }
 
@@ -10628,8 +10627,8 @@ fn upsert_runtime_plan_memory_from_state(
         workspace_id: workspace.clone(),
         purpose: "sync_runtime_plan".to_string(),
     };
-    if upsert_runtime_plan_memory(&facade, &user, &workspace, &lifecycle, thread_id, plan).is_ok() {
-        rebuild_status_wiki(&facade, &user, &workspace);
+    if upsert_runtime_plan_memory(facade, &user, &workspace, &lifecycle, thread_id, plan).is_ok() {
+        rebuild_status_wiki(facade, &user, &workspace);
     }
 }
 
@@ -11167,23 +11166,23 @@ fn humanize_recurrence(rec: &str) -> String {
         }
     }
     let lower = rec.trim().to_ascii_lowercase();
-    if let Some(rest) = lower.strip_prefix("dow") {
-        if let Some((days, times)) = rest.trim_start_matches(['@', ' ']).split_once('@') {
-            let times_h = times
-                .split(',')
-                .map(str::trim)
+    if let Some(rest) = lower.strip_prefix("dow")
+        && let Some((days, times)) = rest.trim_start_matches(['@', ' ']).split_once('@')
+    {
+        let times_h = times
+            .split(',')
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let days_h = if matches!(days.trim(), "*" | "all" | "daily" | "") {
+            "Every day".to_string()
+        } else {
+            days.split(',')
+                .map(day_label)
                 .collect::<Vec<_>>()
-                .join(", ");
-            let days_h = if matches!(days.trim(), "*" | "all" | "daily" | "") {
-                "Every day".to_string()
-            } else {
-                days.split(',')
-                    .map(day_label)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
-            return format!("{days_h} · {times_h}");
-        }
+                .join(", ")
+        };
+        return format!("{days_h} · {times_h}");
     }
     if let Some(t) = lower.strip_prefix("daily") {
         return format!("Every day · {}", t.trim_start_matches(['@', ' ']).trim());
@@ -11601,7 +11600,7 @@ fn create_automation_from_chat_with_store(
         last_fired_at: None,
         state: None,
     };
-    match materialize_automation_task(&store, &automation) {
+    match materialize_automation_task(store, &automation) {
         Ok(task_id) => automation.task_id = task_id,
         Err(msg) => return format!("Invalid recurrence: {msg}"),
     }
@@ -11883,10 +11882,10 @@ fn channel_reply_target_for_message(message: &ChannelInbound) -> String {
 }
 
 fn channel_message_event_key(channel: &str, message: &ChannelInbound) -> String {
-    if let Some(message_id) = message.message_id.as_deref().map(str::trim) {
-        if !message_id.is_empty() {
-            return format!("{channel}:message:{message_id}");
-        }
+    if let Some(message_id) = message.message_id.as_deref().map(str::trim)
+        && !message_id.is_empty()
+    {
+        return format!("{channel}:message:{message_id}");
     }
 
     let ts = message.ts.map(|ts| ts.to_string()).unwrap_or_default();
@@ -12008,10 +12007,10 @@ fn fire_channel_event_automations(state: &AppState, channel: &str, message: &Cha
             } => (channel.clone(), from.clone()),
             _ => continue,
         };
-        if let Some(want) = &want_channel {
-            if !want.eq_ignore_ascii_case(channel) {
-                continue;
-            }
+        if let Some(want) = &want_channel
+            && !want.eq_ignore_ascii_case(channel)
+        {
+            continue;
         }
         if let Some(want) = &want_from {
             let needle = want.to_lowercase();
@@ -12188,8 +12187,6 @@ fn guess_key_field(tool: &str) -> &'static str {
     let t = tool.to_ascii_uppercase();
     if t.contains("GMAIL") || t.contains("EMAIL") {
         "messageId"
-    } else if t.contains("CALENDAR") || t.contains("EVENT") {
-        "id"
     } else {
         "id"
     }
@@ -12379,20 +12376,19 @@ async fn automation_create(
     Json(req): Json<AutomationCreateRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     // Validate a schedule trigger's recurrence up front (fail fast, like schedule_task).
-    if let AutomationTrigger::Schedule { recurrence, tz } = &req.trigger {
-        if local_first_task_runtime::next_occurrence(
+    if let AutomationTrigger::Schedule { recurrence, tz } = &req.trigger
+        && local_first_task_runtime::next_occurrence(
             recurrence,
             tz.as_deref(),
             OffsetDateTime::now_utc(),
         )
         .is_none()
-        {
-            return Err(GatewayError {
-                status: StatusCode::BAD_REQUEST,
-                code: "bad_recurrence",
-                message: format!("recurrence '{recurrence}' is not valid"),
-            });
-        }
+    {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "bad_recurrence",
+            message: format!("recurrence '{recurrence}' is not valid"),
+        });
     }
     let now = OffsetDateTime::now_utc();
     let workspace = automation_workspace_scope(req.workspace_id.as_deref());
@@ -12446,20 +12442,19 @@ async fn automation_update(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let workspace = automation_workspace_scope(scope.workspace_id.as_deref());
     // Validate a new schedule recurrence up front (fail fast, like create).
-    if let Some(AutomationTrigger::Schedule { recurrence, tz }) = &req.trigger {
-        if local_first_task_runtime::next_occurrence(
+    if let Some(AutomationTrigger::Schedule { recurrence, tz }) = &req.trigger
+        && local_first_task_runtime::next_occurrence(
             recurrence,
             tz.as_deref(),
             OffsetDateTime::now_utc(),
         )
         .is_none()
-        {
-            return Err(GatewayError {
-                status: StatusCode::BAD_REQUEST,
-                code: "bad_recurrence",
-                message: format!("recurrence '{recurrence}' is not valid"),
-            });
-        }
+    {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "bad_recurrence",
+            message: format!("recurrence '{recurrence}' is not valid"),
+        });
     }
     let store = lock_task_store(&state).map_err(|_| GatewayError {
         status: StatusCode::SERVICE_UNAVAILABLE,
@@ -12516,7 +12511,7 @@ async fn automation_update(
     let memory_workspace = MemoryWorkspaceId::new(automation.workspace_id.as_str());
     {
         let facade = memory_facade(&state);
-        let _ = tombstone_automation_memory_records(&facade, &memory_user, &memory_workspace, &id);
+        let _ = tombstone_automation_memory_records(facade, &memory_user, &memory_workspace, &id);
     }
     reconcile_memory_scope(&state, &memory_workspace);
     Ok(Json(automation_to_json(&automation)))
@@ -12585,10 +12580,10 @@ async fn automation_delete(
         message: "task store unavailable".into(),
     })?;
     // Stop the driving task (if any) before removing the rule.
-    if let Ok(Some(existing)) = store.get_automation(&id, &gateway_user_id(), &workspace) {
-        if let Some(tid) = existing.task_id.as_deref() {
-            cancel_automation_task(&store, tid);
-        }
+    if let Ok(Some(existing)) = store.get_automation(&id, &gateway_user_id(), &workspace)
+        && let Some(tid) = existing.task_id.as_deref()
+    {
+        cancel_automation_task(&store, tid);
     }
     store
         .delete_automation(&id, &gateway_user_id(), &workspace)
@@ -12602,7 +12597,7 @@ async fn automation_delete(
     let memory_workspace = MemoryWorkspaceId::new(workspace.as_str());
     {
         let facade = memory_facade(&state);
-        let _ = tombstone_automation_memory_records(&facade, &memory_user, &memory_workspace, &id);
+        let _ = tombstone_automation_memory_records(facade, &memory_user, &memory_workspace, &id);
     }
     reconcile_memory_scope(&state, &memory_workspace);
     Ok(Json(serde_json::json!({ "deleted": id })))
@@ -13075,10 +13070,10 @@ fn jail_in_root(root: &std::path::Path, rel: &str) -> Result<PathBuf, String> {
     let mut ancestor = joined.clone();
     loop {
         if ancestor.exists() {
-            if let Ok(canon) = ancestor.canonicalize() {
-                if !canon.starts_with(&root_canon) {
-                    return Err("path outside the project folder".to_string());
-                }
+            if let Ok(canon) = ancestor.canonicalize()
+                && !canon.starts_with(&root_canon)
+            {
+                return Err("path outside the project folder".to_string());
             }
             break;
         }
@@ -13537,10 +13532,10 @@ fn write_project_file(
         Ok(path) => path,
         Err(error) => return format!("Invalid path: {error}"),
     };
-    if let Some(parent) = path.parent() {
-        if let Err(error) = std::fs::create_dir_all(parent) {
-            return format!("Could not create the folders for '{rel}': {error}");
-        }
+    if let Some(parent) = path.parent()
+        && let Err(error) = std::fs::create_dir_all(parent)
+    {
+        return format!("Could not create the folders for '{rel}': {error}");
     }
     match std::fs::write(&path, content) {
         Ok(()) => format!("✅ Wrote '{rel}' ({} bytes).", content.len()),
@@ -14076,10 +14071,11 @@ fn format_recall_entry(summary: &str, metadata: &serde_json::Value) -> String {
         return summary.to_string();
     };
     let mut out = summary.to_string();
-    if let Some(rationale) = decision.get("rationale").and_then(|r| r.as_str()) {
-        if !rationale.is_empty() && !summary.contains(rationale) {
-            out.push_str(&format!(" — why: {rationale}"));
-        }
+    if let Some(rationale) = decision.get("rationale").and_then(|r| r.as_str())
+        && !rationale.is_empty()
+        && !summary.contains(rationale)
+    {
+        out.push_str(&format!(" — why: {rationale}"));
     }
     if let Some(alternatives) = decision.get("alternatives").and_then(|a| a.as_array()) {
         let rejected: Vec<String> = alternatives
@@ -14309,19 +14305,17 @@ fn artifact_provenance_context_for_query(
             .metadata
             .get("path_ref")
             .and_then(|value| value.as_str())
+            && !path_bits.iter().any(|bit| bit.contains(path))
         {
-            if !path_bits.iter().any(|bit| bit.contains(path)) {
-                path_bits.push(format!("ref: {path}"));
-            }
+            path_bits.push(format!("ref: {path}"));
         }
         if let Some(path) = artifact
             .metadata
             .get("managed_path")
             .and_then(|value| value.as_str())
+            && !path_bits.iter().any(|bit| bit.contains(path))
         {
-            if !path_bits.iter().any(|bit| bit.contains(path)) {
-                path_bits.push(format!("local managed path: {path}"));
-            }
+            path_bits.push(format!("local managed path: {path}"));
         }
         if !path_bits.is_empty() {
             detail.push_str(&format!(" [{}]", path_bits.join("; ")));
@@ -14338,10 +14332,11 @@ fn artifact_provenance_context_for_query(
             .unwrap_or_default();
         let mut source_refs = std::collections::BTreeSet::new();
         for relation in &relations {
-            if relation.target_ref == artifact_ref && relation.relation_type == "produced" {
-                if let Some(entity) = entity_by_ref.get(&relation.source_ref.to_string()) {
-                    producers.push(entity.name.clone());
-                }
+            if relation.target_ref == artifact_ref
+                && relation.relation_type == "produced"
+                && let Some(entity) = entity_by_ref.get(&relation.source_ref.to_string())
+            {
+                producers.push(entity.name.clone());
             }
             if relation.target_ref == artifact_ref && relation.relation_type == "affects" {
                 source_refs.insert(relation.source_ref.to_string());
@@ -14806,12 +14801,12 @@ async fn embed_query_for_memory_recall(
     timing: &mut MemoryRecallTiming,
 ) -> Option<Vec<f32>> {
     let key = memory_query_embedding_cache_key(query, workspace);
-    if let Ok(mut cache) = memory_query_embedding_cache().lock() {
-        if let Some(vector) = cache.get(&key, memory_query_embedding_cache_ttl()) {
-            timing.query_embedding_cache_hit = true;
-            timing.query_embedding_ms = Some(0);
-            return Some(vector);
-        }
+    if let Ok(mut cache) = memory_query_embedding_cache().lock()
+        && let Some(vector) = cache.get(&key, memory_query_embedding_cache_ttl())
+    {
+        timing.query_embedding_cache_hit = true;
+        timing.query_embedding_ms = Some(0);
+        return Some(vector);
     }
 
     let embedding_start = std::time::Instant::now();
@@ -14836,14 +14831,14 @@ async fn embed_query_for_memory_recall(
         }
     };
     timing.query_embedding_ms = Some(elapsed_ms(embedding_start));
-    if let Some(vector) = result.as_ref() {
-        if let Ok(mut cache) = memory_query_embedding_cache().lock() {
-            cache.insert(
-                key,
-                vector.clone(),
-                memory_query_embedding_cache_max_entries(),
-            );
-        }
+    if let Some(vector) = result.as_ref()
+        && let Ok(mut cache) = memory_query_embedding_cache().lock()
+    {
+        cache.insert(
+            key,
+            vector.clone(),
+            memory_query_embedding_cache_max_entries(),
+        );
     }
     result
 }
@@ -14994,7 +14989,7 @@ fn recall_memory(state: &AppState, query: &str, vault_value_requested: bool) -> 
     // Keep the full structured hit alongside the text given to the model.
     let mut ui_hits: Vec<local_first_subagents::RecallStreamHit> = Vec::new();
     if memory_sources_enabled() && in_project {
-        let pack = recall_pack_on_facade(&facade, &user, &active, query, &[], None);
+        let pack = recall_pack_on_facade(facade, &user, &active, query, &[], None);
         let payload = recall_stream_payload_from_pack(&pack);
         for hit in pack.hits {
             lines.push(format!("- [{}] {}", hit.kind, hit.text));
@@ -15006,31 +15001,30 @@ fn recall_memory(state: &AppState, query: &str, vault_value_requested: bool) -> 
             ui_hits.push(hit);
         }
     }
-    if let Some(workflow) = workflow_status_context_for_query(&facade, &user, &active, query) {
+    if let Some(workflow) = workflow_status_context_for_query(facade, &user, &active, query) {
         lines.push(workflow);
     } else if let Some(provenance) =
-        artifact_provenance_context_for_query(&facade, &user, &active, query)
+        artifact_provenance_context_for_query(facade, &user, &active, query)
     {
         lines.push(provenance);
     }
     let personal = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
-    if !in_project {
-        if let Ok(relations) = facade.list_relations_for_ui(&user, &personal) {
-            if !relations.is_empty() {
-                let names: std::collections::HashMap<String, String> = facade
-                    .list_entities_for_ui(&user, &personal)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|entity| (entity.reference.to_string(), entity.name))
-                    .collect();
-                for relation in relations.iter().take(12) {
-                    if let (Some(source), Some(target)) = (
-                        names.get(&relation.source_ref.to_string()),
-                        names.get(&relation.target_ref.to_string()),
-                    ) {
-                        lines.push(format!("- {source} —{}→ {target}", relation.relation_type));
-                    }
-                }
+    if !in_project
+        && let Ok(relations) = facade.list_relations_for_ui(&user, &personal)
+        && !relations.is_empty()
+    {
+        let names: std::collections::HashMap<String, String> = facade
+            .list_entities_for_ui(&user, &personal)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|entity| (entity.reference.to_string(), entity.name))
+            .collect();
+        for relation in relations.iter().take(12) {
+            if let (Some(source), Some(target)) = (
+                names.get(&relation.source_ref.to_string()),
+                names.get(&relation.target_ref.to_string()),
+            ) {
+                lines.push(format!("- {source} —{}→ {target}", relation.relation_type));
             }
         }
     }
@@ -15965,27 +15959,23 @@ fn provider_secret_ref(provider_id: &str) -> Option<SecretRef> {
 fn provider_api_key(provider_id: &str) -> Option<String> {
     let store = open_gateway_secret_store().ok()?;
     // Preferred global ref.
-    if let Some(reference) = provider_secret_ref(provider_id) {
-        if let Ok(Some(material)) = store.get(&reference) {
-            if let Ok(value) = material.expose_utf8() {
-                if !value.is_empty() {
-                    return Some(value);
-                }
-            }
-        }
+    if let Some(reference) = provider_secret_ref(provider_id)
+        && let Ok(Some(material)) = store.get(&reference)
+        && let Ok(value) = material.expose_utf8()
+        && !value.is_empty()
+    {
+        return Some(value);
     }
     // Legacy fallback: a key saved under a DIFFERENT workspace (the per-workspace
     // scoping bug) — find it under any scope so existing keys aren't lost.
     let suffix = format!("/inference/{provider_id}");
     for reference in store.references() {
-        if reference.to_string().ends_with(&suffix) {
-            if let Ok(Some(material)) = store.get(&reference) {
-                if let Ok(value) = material.expose_utf8() {
-                    if !value.is_empty() {
-                        return Some(value);
-                    }
-                }
-            }
+        if reference.to_string().ends_with(&suffix)
+            && let Ok(Some(material)) = store.get(&reference)
+            && let Ok(value) = material.expose_utf8()
+            && !value.is_empty()
+        {
+            return Some(value);
         }
     }
     None
@@ -16818,12 +16808,11 @@ fn orchestrator_is_local() -> bool {
 /// / shared GPU is the real constraint), cloud (OpenAI/Anthropic/OpenRouter) = 4.
 /// Env override `HOMUN_LLM_CONCURRENCY` is honored for ops/testing.
 fn active_llm_concurrency() -> u32 {
-    if let Ok(raw) = std::env::var("HOMUN_LLM_CONCURRENCY") {
-        if let Ok(value) = raw.trim().parse::<u32>() {
-            if value >= 1 {
-                return value;
-            }
-        }
+    if let Ok(raw) = std::env::var("HOMUN_LLM_CONCURRENCY")
+        && let Ok(value) = raw.trim().parse::<u32>()
+        && value >= 1
+    {
+        return value;
     }
     let registry = load_provider_registry();
     if let Some(forced) = registry.llm_concurrency_override() {
@@ -16873,7 +16862,7 @@ async fn set_llm_concurrency(
     Json(request): Json<SetLlmConcurrencyRequest>,
 ) -> Result<Json<LlmConcurrencyView>, GatewayError> {
     // Clamp to a sane range; reject 0 (would stall the LLM resource entirely).
-    let value = request.r#override.filter(|&n| n >= 1 && n <= 16);
+    let value = request.r#override.filter(|&n| (1..=16).contains(&n));
     let mut registry = load_provider_registry();
     registry.llm_concurrency_override = value;
     save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
@@ -16982,10 +16971,10 @@ fn reassemble_openai_stream(sse: &str) -> serde_json::Value {
             continue;
         };
         saw_event = true;
-        if let Some(fr) = choice.get("finish_reason").and_then(|f| f.as_str()) {
-            if !fr.is_empty() {
-                finish_reason = Some(fr.to_string());
-            }
+        if let Some(fr) = choice.get("finish_reason").and_then(|f| f.as_str())
+            && !fr.is_empty()
+        {
+            finish_reason = Some(fr.to_string());
         }
         let Some(delta) = choice.get("delta") else {
             continue;
@@ -17013,36 +17002,33 @@ fn reassemble_openai_stream(sse: &str) -> serde_json::Value {
                     }));
                 }
                 let slot = &mut tool_calls[index];
-                if let Some(id) = call.get("id").and_then(|v| v.as_str()) {
-                    if !id.is_empty() {
-                        slot["id"] = serde_json::Value::String(id.to_string());
-                    }
+                if let Some(id) = call.get("id").and_then(|v| v.as_str())
+                    && !id.is_empty()
+                {
+                    slot["id"] = serde_json::Value::String(id.to_string());
                 }
                 if let Some(function) = call.get("function") {
-                    if let Some(name) = function.get("name").and_then(|v| v.as_str()) {
-                        if !name.is_empty() {
-                            slot["function"]["name"] = serde_json::Value::String(name.to_string());
-                        }
+                    if let Some(name) = function.get("name").and_then(|v| v.as_str())
+                        && !name.is_empty()
+                    {
+                        slot["function"]["name"] = serde_json::Value::String(name.to_string());
                     }
-                    if let Some(args) = function.get("arguments").and_then(|v| v.as_str()) {
-                        if !args.is_empty() {
-                            let current = slot["function"]["arguments"]
-                                .as_str()
-                                .unwrap_or("")
-                                .to_string();
-                            slot["function"]["arguments"] =
-                                serde_json::Value::String(current + args);
-                        }
+                    if let Some(args) = function.get("arguments").and_then(|v| v.as_str())
+                        && !args.is_empty()
+                    {
+                        let current = slot["function"]["arguments"]
+                            .as_str()
+                            .unwrap_or("")
+                            .to_string();
+                        slot["function"]["arguments"] = serde_json::Value::String(current + args);
                     }
                 }
             }
         }
     }
     // Provider ignored stream:true and sent a plain completion JSON → use it as-is.
-    if !saw_event {
-        if let Ok(full) = serde_json::from_str::<serde_json::Value>(sse.trim()) {
-            return full;
-        }
+    if !saw_event && let Ok(full) = serde_json::from_str::<serde_json::Value>(sse.trim()) {
+        return full;
     }
     // Canonical assembly (F0 / ADR 0019): the reasoning-fallback + message shape live ONCE in
     // `model_normalize::assistant_response`, shared with the Ollama collector.
@@ -17477,13 +17463,11 @@ async fn warm_ollama_capabilities(http: &reqwest::Client, base_url: &str, model:
         .json(&serde_json::json!({ "name": model }))
         .send()
         .await
+        && resp.status().is_success()
+        && let Ok(body) = resp.json::<serde_json::Value>().await
     {
-        if resp.status().is_success() {
-            if let Ok(body) = resp.json::<serde_json::Value>().await {
-                caps = parse_ollama_capabilities(&body);
-                autofill_model_entry_capabilities(base_url, model, &caps);
-            }
-        }
+        caps = parse_ollama_capabilities(&body);
+        autofill_model_entry_capabilities(base_url, model, &caps);
     }
     if let Ok(mut cache) = ollama_capabilities_cache().lock() {
         cache.insert(key, caps);
@@ -17703,26 +17687,26 @@ pub(crate) async fn collect_ollama_native_stream(
     // single response, or the last NDJSON line. Without this the whole non-streamed
     // body (tool rounds) would be silently dropped.
     let tail = pending.trim().to_string();
-    if !tail.is_empty() {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&tail) {
-            prompt_eval_count = json
-                .get("prompt_eval_count")
-                .and_then(serde_json::Value::as_u64)
-                .or(prompt_eval_count);
-            eval_count = json
-                .get("eval_count")
-                .and_then(serde_json::Value::as_u64)
-                .or(eval_count);
-            process_ollama_line(
-                &json,
-                &mut content,
-                &mut reasoning,
-                &mut tool_calls,
-                &mut markers,
-                sink,
-            )
-            .await;
-        }
+    if !tail.is_empty()
+        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&tail)
+    {
+        prompt_eval_count = json
+            .get("prompt_eval_count")
+            .and_then(serde_json::Value::as_u64)
+            .or(prompt_eval_count);
+        eval_count = json
+            .get("eval_count")
+            .and_then(serde_json::Value::as_u64)
+            .or(eval_count);
+        process_ollama_line(
+            &json,
+            &mut content,
+            &mut reasoning,
+            &mut tool_calls,
+            &mut markers,
+            sink,
+        )
+        .await;
     }
     // Drain the filter (held partial marker + close a dangling reasoning block).
     let tail_delta = markers.flush();
@@ -17850,20 +17834,19 @@ fn auth_fallback_resolved_role_from_registry(
 ) -> Option<ResolvedRole> {
     // 1) Any provider with a key + a usable model different from the failing one.
     for provider in &registry.providers {
-        if provider_has_key(&provider.id) {
-            if let Some(model) = provider.effective_model() {
-                if model != failing_model {
-                    return Some(ResolvedRole {
-                        role: "auth_fallback".to_string(),
-                        provider_id: provider.id.clone(),
-                        model: model.clone(),
-                        kind: provider.kind,
-                        base_url: provider.base_url.clone(),
-                        auto: true,
-                        tier: registry.tier_for(&provider.id, &model),
-                    });
-                }
-            }
+        if provider_has_key(&provider.id)
+            && let Some(model) = provider.effective_model()
+            && model != failing_model
+        {
+            return Some(ResolvedRole {
+                role: "auth_fallback".to_string(),
+                provider_id: provider.id.clone(),
+                model: model.clone(),
+                kind: provider.kind,
+                base_url: provider.base_url.clone(),
+                auto: true,
+                tier: registry.tier_for(&provider.id, &model),
+            });
         }
     }
     // 2) A loopback provider with a non-cloud model (runs locally, no auth).
@@ -18008,12 +17991,9 @@ fn chat_role_config_for_thread(
             b.provider_id.as_deref().is_some_and(|p| !p.is_empty())
                 && b.model.as_deref().is_some_and(|m| !m.is_empty())
         });
-        if bound {
-            if let Some(resolved) = registry.resolve_role("coding") {
-                let api_key =
-                    provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
-                return Some((resolved.base_url, resolved.model, api_key));
-            }
+        if bound && let Some(resolved) = registry.resolve_role("coding") {
+            let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
+            return Some((resolved.base_url, resolved.model, api_key));
         }
     }
     chat_openai_stream_config()
@@ -18115,6 +18095,7 @@ fn extractor_openai_config() -> Option<(String, String, Option<String>)> {
 ///    This is the point: budget against what THIS model can actually read.
 /// 3. `32_768` tokens — a safe default when the model isn't in any catalog (e.g. a raw
 ///    cloud endpoint) and no override is set.
+///
 /// Chars = window_tokens × 3: 3 chars/token is conservative vs the real ~4, so the char
 /// budget maps to ~75% of the window in tokens, implicitly reserving headroom for the
 /// system prompt and the model's reply.
@@ -19970,13 +19951,8 @@ fn apply_deck_design_components(deck: &mut serde_json::Value, components: &[Stri
     else {
         return;
     };
-    let mut target_cursor = 0usize;
-    for component in components {
-        if target_cursor >= target_indices.len() {
-            break;
-        }
+    for (target_cursor, component) in components.iter().take(target_indices.len()).enumerate() {
         let index = target_indices[target_cursor];
-        target_cursor += 1;
         let Some(slide) = slides.get_mut(index) else {
             continue;
         };
@@ -20045,7 +20021,7 @@ fn apply_deck_design_components(deck: &mut serde_json::Value, components: &[Stri
                 slide["want_image"] = serde_json::json!(false);
             }
             "process_steps" => {
-                let midpoint = (bullets.len().max(2) + 1) / 2;
+                let midpoint = bullets.len().max(2).div_ceil(2);
                 let first = bullets.iter().take(midpoint).cloned().collect::<Vec<_>>();
                 let second = bullets.iter().skip(midpoint).cloned().collect::<Vec<_>>();
                 slide["layout"] = serde_json::json!("two_column");
@@ -20454,10 +20430,8 @@ fn apply_deck_template_chrome(deck: &mut serde_json::Value, example: &serde_json
             .and_then(|v| v.as_str())
             .map(|v| v.trim().is_empty())
             .unwrap_or(true);
-        if model_eyebrow_blank {
-            if let Some(eyebrow) = pack.get("eyebrow").cloned() {
-                slide["eyebrow"] = eyebrow;
-            }
+        if model_eyebrow_blank && let Some(eyebrow) = pack.get("eyebrow").cloned() {
+            slide["eyebrow"] = eyebrow;
         }
     }
 }
@@ -20480,6 +20454,7 @@ fn build_document_render_command(container_out: &str, stem: &str) -> String {
 /// definition (`structured_response_format`, caposaldo #5 / ADR 0016); only the
 /// async transport + degrade control-flow live here (they differ from the
 /// blocking provider: system+user messages, richer empty/reasoning-only handling).
+#[allow(clippy::too_many_arguments)]
 async fn generate_deck_content(
     http: &reqwest::Client,
     base_url: &str,
@@ -20842,10 +20817,10 @@ fn document_generation_directives(options: &DocumentGenerationOptions) -> String
     if let Some(template_ref) = options.template_ref.as_deref() {
         directives.push(format!("Template reference: {template_ref}."));
     }
-    if let Some(document_type) = options.document_type.as_deref() {
-        if document_type != "generic" {
-            directives.push(format!("Document type: {document_type}."));
-        }
+    if let Some(document_type) = options.document_type.as_deref()
+        && document_type != "generic"
+    {
+        directives.push(format!("Document type: {document_type}."));
     }
     if let Some(audience) = options.audience.as_deref() {
         directives.push(format!("Audience: {audience}."));
@@ -20978,6 +20953,7 @@ an AI. The output must be ready to save as a deliverable artifact.{directives}"
 /// would launder content the model never wrote into the deliverable) — the
 /// retry hands the model the exact missing-slot error and one more chance
 /// before we give up honestly.
+#[allow(clippy::too_many_arguments)]
 async fn generate_templated_document_json(
     http: &reqwest::Client,
     base_url: &str,
@@ -21562,7 +21538,7 @@ fn markdown_table_separator(line: &str) -> bool {
         return false;
     };
     cells.iter().all(|cell| {
-        let compact = cell.replace(':', "").replace('-', "");
+        let compact = cell.replace([':', '-'], "");
         compact.trim().is_empty() && cell.chars().filter(|ch| *ch == '-').count() >= 3
     })
 }
@@ -21631,25 +21607,26 @@ fn markdown_to_docx(title: &str, markdown: &str) -> Result<Vec<u8>, String> {
             i += 1;
             continue;
         }
-        if let Some(header) = markdown_table_cells(line) {
-            if i + 1 < lines.len() && markdown_table_separator(lines[i + 1]) {
-                let mut rows = vec![header];
-                i += 2;
-                while i < lines.len() {
-                    let Some(row) = markdown_table_cells(lines[i]) else {
-                        break;
-                    };
-                    if markdown_table_separator(lines[i]) {
-                        break;
-                    }
-                    rows.push(row);
-                    i += 1;
+        if let Some(header) = markdown_table_cells(line)
+            && i + 1 < lines.len()
+            && markdown_table_separator(lines[i + 1])
+        {
+            let mut rows = vec![header];
+            i += 2;
+            while i < lines.len() {
+                let Some(row) = markdown_table_cells(lines[i]) else {
+                    break;
+                };
+                if markdown_table_separator(lines[i]) {
+                    break;
                 }
-                saw_content = true;
-                first_content = false;
-                document_body.push_str(&markdown_table_to_docx(&rows));
-                continue;
+                rows.push(row);
+                i += 1;
             }
+            saw_content = true;
+            first_content = false;
+            document_body.push_str(&markdown_table_to_docx(&rows));
+            continue;
         }
         saw_content = true;
         document_body.push_str(&markdown_line_to_docx_paragraph(line, first_content));
@@ -22449,7 +22426,7 @@ async fn auto_retrieve_composio(
         })
         .filter(|(_, score)| *score > 0)
         .collect();
-    keyword.sort_by(|a, b| b.1.cmp(&a.1));
+    keyword.sort_by_key(|entry| std::cmp::Reverse(entry.1));
     keyword.truncate(24);
     if keyword.is_empty() {
         return Vec::new();
@@ -22567,7 +22544,7 @@ fn search_composio_catalog(
         })
         .filter(|(score, _)| *score > 0)
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|entry| std::cmp::Reverse(entry.0));
 
     // Toolkit-aware: return the FULL tool set of the best-matching toolkit (its
     // CRUD), not just the few keyword hits — so the model sees update/create/
@@ -23019,10 +22996,10 @@ fn resolve_skill_confirmations_core(
     };
     let mut out: Vec<crate::skills::SensitiveCategory> = Vec::new();
     for token in tokens {
-        if let Some(cat) = crate::skills::SensitiveCategory::parse(token) {
-            if !out.contains(&cat) {
-                out.push(cat);
-            }
+        if let Some(cat) = crate::skills::SensitiveCategory::parse(token)
+            && !out.contains(&cat)
+        {
+            out.push(cat);
         }
     }
     out
@@ -23335,7 +23312,10 @@ async fn execute_browser_tool(
                     thread_id,
                     ctx.current_target.as_str(),
                     client,
-                    BrowserCheckpointTelemetry { journal: ctx.journal, call_id },
+                    BrowserCheckpointTelemetry {
+                        journal: ctx.journal,
+                        call_id,
+                    },
                 )
                 .await;
                 drop(guard);
@@ -23367,159 +23347,245 @@ async fn execute_browser_tool(
         // Recovery re-establishes an observation boundary but deliberately does not replay the
         // interrupted operation. Keep the loop's progress accounting honest so the model must
         // inspect the fresh snapshot and issue a new, explicit next action.
-        *ctx.outcome_hint =
-            Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
+        *ctx.outcome_hint = Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
         Ok(notice)
     } else {
         match browser_session.take() {
-        None => {
-            push_browser_step("browser: session unavailable".to_string(), "error");
-            Err(
-                "Browser unavailable: the contained-computer browser (a headless \
+            None => {
+                push_browser_step("browser: session unavailable".to_string(), "error");
+                Err(
+                    "Browser unavailable: the contained-computer browser (a headless \
 Chromium in a Docker container, driven over CDP — there is NO local browser binary) did not start. \
 Usually transient, or the contained computer isn't running yet. Do NOT look for a local \
 chromium/firefox install and do NOT conclude Chromium is missing or that it's a known bug. Retry, \
 or tell the user to start the contained computer (Settings → Local computer)."
-                    .to_string(),
-            )
-        }
-        Some(client) => match name {
-            "browser_navigate" => {
-                // Multi-tab: an explicit `target` switches the current
-                // tab; `new_tab` allocates a fresh chat_N id (so the
-                // logic below treats it as not-yet-opened → Open).
-                if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                    if !t.trim().is_empty() {
+                        .to_string(),
+                )
+            }
+            Some(client) => match name {
+                "browser_navigate" => {
+                    // Multi-tab: an explicit `target` switches the current
+                    // tab; `new_tab` allocates a fresh chat_N id (so the
+                    // logic below treats it as not-yet-opened → Open).
+                    if let Some(t) = args.get("target").and_then(|v| v.as_str())
+                        && !t.trim().is_empty()
+                    {
                         *ctx.current_target = t.to_string();
                     }
-                }
-                if args
-                    .get("new_tab")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false)
-                {
-                    *ctx.current_target = format!("chat_{}", ctx.opened_targets.len());
-                }
-                let url = args
-                    .get("url")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                if url.trim().is_empty() {
-                    *browser_session = Some(client);
-                    Err("Missing URL for browser_navigate.".to_string())
-                } else {
-                    let _ = emit_stream_event(
-                        ctx.tx,
-                        GenerateStreamEvent::Delta {
-                            text: format!("‹‹ACT››🌐 Opening {url}‹‹/ACT››"),
-                        },
-                    )
-                    .await;
-                    let guard = browse_web_lock().lock().await;
-                    // Open the current tab the first time, then Navigate.
-                    let already_open = ctx
-                        .opened_targets
-                        .iter()
-                        .any(|t| t.as_str() == ctx.current_target.as_str());
-                    let (open_method, open_params) = if already_open {
-                        (
-                            BrowserMethod::Navigate,
-                            serde_json::json!({
-                                "target_id": ctx.current_target.as_str(),
-                                "url": url,
-                            }),
-                        )
+                    if args
+                        .get("new_tab")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
+                        *ctx.current_target = format!("chat_{}", ctx.opened_targets.len());
+                    }
+                    let url = args
+                        .get("url")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if url.trim().is_empty() {
+                        *browser_session = Some(client);
+                        Err("Missing URL for browser_navigate.".to_string())
                     } else {
-                        (
-                            BrowserMethod::Open,
-                            serde_json::json!({
-                                "url": url,
-                                "label": ctx.current_target.as_str(),
-                            }),
+                        let _ = emit_stream_event(
+                            ctx.tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!("‹‹ACT››🌐 Opening {url}‹‹/ACT››"),
+                            },
                         )
-                    };
-                    let (client_back, nav_res) =
-                        chat_browser_call_bounded(client, open_method, open_params).await;
-                    let nav_err = nav_res.err();
-                    // Navigate/Open return no snapshot → snapshot now. ACTING view (small,
-                    // interactive-only): the model has just landed and needs the controls to act
-                    // on, not the whole page — reading content is a later explicit browser_snapshot.
-                    let mut client_now = client_back;
-                    let snap_result = if nav_err.is_none() {
-                        if let Some(c) = client_now.take() {
-                            let (c2, snap) = chat_browser_call_checkpointed(
-                                ctx.state,
-                                ctx.thread_id,
-                                ctx.current_target.as_str(),
-                                c,
-                                BrowserMethod::Snapshot,
-                                browser_chat_act_snapshot_params(ctx.current_target.as_str()),
-                                BrowserCheckpointTelemetry { journal: ctx.journal, call_id },
-                            )
-                            .await;
-                            client_now = c2;
-                            snap
-                        } else {
-                            Err("session lost after navigation".to_string())
-                        }
-                    } else {
-                        Err(nav_err.clone().unwrap_or_default())
-                    };
-                    drop(guard);
-                    *browser_session = client_now;
-                    // Mark this tab opened once the Open/Navigate succeeds.
-                    if nav_err.is_none()
-                        && !ctx
+                        .await;
+                        let guard = browse_web_lock().lock().await;
+                        // Open the current tab the first time, then Navigate.
+                        let already_open = ctx
                             .opened_targets
                             .iter()
-                            .any(|t| t.as_str() == ctx.current_target.as_str())
-                    {
-                        ctx.opened_targets.push(ctx.current_target.clone());
-                    }
-                    match (nav_err, snap_result) {
-                        (Some(error), _) => {
-                            if verbose_debug() {
-                                eprintln!("[browser] navigate {url} FAILED: {error}");
+                            .any(|t| t.as_str() == ctx.current_target.as_str());
+                        let (open_method, open_params) = if already_open {
+                            (
+                                BrowserMethod::Navigate,
+                                serde_json::json!({
+                                    "target_id": ctx.current_target.as_str(),
+                                    "url": url,
+                                }),
+                            )
+                        } else {
+                            (
+                                BrowserMethod::Open,
+                                serde_json::json!({
+                                    "url": url,
+                                    "label": ctx.current_target.as_str(),
+                                }),
+                            )
+                        };
+                        let (client_back, nav_res) =
+                            chat_browser_call_bounded(client, open_method, open_params).await;
+                        let nav_err = nav_res.err();
+                        // Navigate/Open return no snapshot → snapshot now. ACTING view (small,
+                        // interactive-only): the model has just landed and needs the controls to act
+                        // on, not the whole page — reading content is a later explicit browser_snapshot.
+                        let mut client_now = client_back;
+                        let snap_result = if nav_err.is_none() {
+                            if let Some(c) = client_now.take() {
+                                let (c2, snap) = chat_browser_call_checkpointed(
+                                    ctx.state,
+                                    ctx.thread_id,
+                                    ctx.current_target.as_str(),
+                                    c,
+                                    BrowserMethod::Snapshot,
+                                    browser_chat_act_snapshot_params(ctx.current_target.as_str()),
+                                    BrowserCheckpointTelemetry {
+                                        journal: ctx.journal,
+                                        call_id,
+                                    },
+                                )
+                                .await;
+                                client_now = c2;
+                                snap
+                            } else {
+                                Err("session lost after navigation".to_string())
                             }
-                            push_browser_step(format!("navigate {url}"), "error");
-                            // CDP wedge (connectOverCDP timeout despite an
-                            // HTTP-OK /json/version): recycle the contained
-                            // computer once per window and DROP the session so
-                            // the next call respawns against fresh CDP. motore
-                            // #1's pre-spawn `browser_cdp_ok` can't see this
-                            // ws-level wedge, so heal it on the failure (same
-                            // self-heal the drive's shared path already has).
-                            if cdp_wedge_signature(&error) {
-                                let _ = emit_stream_event(
+                        } else {
+                            Err(nav_err.clone().unwrap_or_default())
+                        };
+                        drop(guard);
+                        *browser_session = client_now;
+                        // Mark this tab opened once the Open/Navigate succeeds.
+                        if nav_err.is_none()
+                            && !ctx
+                                .opened_targets
+                                .iter()
+                                .any(|t| t.as_str() == ctx.current_target.as_str())
+                        {
+                            ctx.opened_targets.push(ctx.current_target.clone());
+                        }
+                        match (nav_err, snap_result) {
+                            (Some(error), _) => {
+                                if verbose_debug() {
+                                    eprintln!("[browser] navigate {url} FAILED: {error}");
+                                }
+                                push_browser_step(format!("navigate {url}"), "error");
+                                // CDP wedge (connectOverCDP timeout despite an
+                                // HTTP-OK /json/version): recycle the contained
+                                // computer once per window and DROP the session so
+                                // the next call respawns against fresh CDP. motore
+                                // #1's pre-spawn `browser_cdp_ok` can't see this
+                                // ws-level wedge, so heal it on the failure (same
+                                // self-heal the drive's shared path already has).
+                                if cdp_wedge_signature(&error) {
+                                    let _ = emit_stream_event(
                                         ctx.tx,
                                         GenerateStreamEvent::Delta {
                                             text: "‹‹ACT››🔧 Browser bloccato: riavvio il computer…‹‹/ACT››".to_string(),
                                         },
                                     )
                                     .await;
-                                let healed = force_recycle_contained_computer(ctx.state).await;
-                                *browser_session = None;
-                                ctx.opened_targets.clear();
-                                if healed {
-                                    Err("The browser was wedged; I recycled the contained computer. Retry the SAME navigation now.".to_string())
+                                    let healed = force_recycle_contained_computer(ctx.state).await;
+                                    *browser_session = None;
+                                    ctx.opened_targets.clear();
+                                    if healed {
+                                        Err("The browser was wedged; I recycled the contained computer. Retry the SAME navigation now.".to_string())
+                                    } else {
+                                        Err("The browser is unavailable (the contained computer did not recover). Tell the user to check Settings → Local computer.".to_string())
+                                    }
                                 } else {
-                                    Err("The browser is unavailable (the contained computer did not recover). Tell the user to check Settings → Local computer.".to_string())
+                                    let fails = {
+                                        let entry =
+                                            ctx.nav_failures.entry(url.to_string()).or_insert(0);
+                                        *entry += 1;
+                                        *entry
+                                    };
+                                    Err(format!(
+                                        "Navigation failed: {error}{}",
+                                        browser_navigate_failure_hint(&url, fails)
+                                    ))
                                 }
-                            } else {
-                                let fails = {
-                                    let entry =
-                                        ctx.nav_failures.entry(url.to_string()).or_insert(0);
-                                    *entry += 1;
-                                    *entry
-                                };
-                                Err(format!(
-                                    "Navigation failed: {error}{}",
-                                    browser_navigate_failure_hint(&url, fails)
-                                ))
+                            }
+                            (None, Ok(value)) => {
+                                let snap = browser_snapshot_text(&value);
+                                if !snap.is_empty() {
+                                    *ctx.last_snapshot = snap.clone();
+                                    browser_set_target_floor(
+                                        ctx.payment_floor_refs,
+                                        ctx.current_target.as_str(),
+                                        browser_floor_refs(&value),
+                                    );
+                                    // A navigate is an explicit fresh observation of THIS target's
+                                    // page: update the best-effort focus flag AND clear the robust
+                                    // last-acted-floored flag (the page just changed under us).
+                                    browser_set_target_focus(
+                                        ctx.payment_context_by_target,
+                                        ctx.current_target.as_str(),
+                                        browser_focus_payment_context(&value),
+                                    );
+                                    browser_clear_target_acted_floored(
+                                        ctx.payment_context_by_target,
+                                        ctx.current_target.as_str(),
+                                    );
+                                }
+                                push_browser_step(format!("navigate {url}"), "done");
+                                let metrics = browser_observation_metrics(
+                                    &value,
+                                    vec!["navigate".to_string()],
+                                    "completed",
+                                );
+                                ctx.journal.record(browser_protocol_journal_event(
+                                    call_id,
+                                    "navigation_observation",
+                                    &metrics,
+                                ));
+                                push_browser_step(
+                                    browser_protocol_event_summary(
+                                        call_id,
+                                        "navigation_observation",
+                                        metrics,
+                                    ),
+                                    "done",
+                                );
+                                let page_url = value
+                                    .get("url")
+                                    .and_then(|u| u.as_str())
+                                    .unwrap_or(url.as_str());
+                                Ok(format!("Page opened ({page_url}). Snapshot:\n{snap}"))
+                            }
+                            (None, Err(error)) => {
+                                push_browser_step(format!("navigate {url}"), "error");
+                                Err(format!("Page opened but snapshot failed: {error}"))
                             }
                         }
-                        (None, Ok(value)) => {
+                    }
+                }
+                "browser_snapshot" => {
+                    if let Some(t) = args.get("target").and_then(|v| v.as_str())
+                        && !t.trim().is_empty()
+                    {
+                        *ctx.current_target = t.to_string();
+                    }
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: "‹‹ACT››👁️ Re-reading the page‹‹/ACT››".to_string(),
+                        },
+                    )
+                    .await;
+                    let guard = browse_web_lock().lock().await;
+                    let (client_back, snap) = chat_browser_call_checkpointed(
+                        ctx.state,
+                        ctx.thread_id,
+                        ctx.current_target.as_str(),
+                        client,
+                        BrowserMethod::Snapshot,
+                        browser_chat_snapshot_params(ctx.current_target.as_str()),
+                        BrowserCheckpointTelemetry {
+                            journal: ctx.journal,
+                            call_id,
+                        },
+                    )
+                    .await;
+                    drop(guard);
+                    *browser_session = client_back;
+                    match snap {
+                        Ok(value) => {
                             let snap = browser_snapshot_text(&value);
                             if !snap.is_empty() {
                                 *ctx.last_snapshot = snap.clone();
@@ -23528,9 +23594,9 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                     ctx.current_target.as_str(),
                                     browser_floor_refs(&value),
                                 );
-                                // A navigate is an explicit fresh observation of THIS target's
-                                // page: update the best-effort focus flag AND clear the robust
-                                // last-acted-floored flag (the page just changed under us).
+                                // Explicit re-observation of THIS target: refresh the focus flag
+                                // and clear the robust flag (a model-requested snapshot is the
+                                // canonical "re-orient on this page" moment).
                                 browser_set_target_focus(
                                     ctx.payment_context_by_target,
                                     ctx.current_target.as_str(),
@@ -23541,225 +23607,148 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                     ctx.current_target.as_str(),
                                 );
                             }
-                            push_browser_step(format!("navigate {url}"), "done");
+                            push_browser_step("snapshot".to_string(), "done");
                             let metrics = browser_observation_metrics(
                                 &value,
-                                vec!["navigate".to_string()],
+                                vec!["snapshot".to_string()],
                                 "completed",
                             );
                             ctx.journal.record(browser_protocol_journal_event(
                                 call_id,
-                                "navigation_observation",
+                                "observation",
                                 &metrics,
                             ));
                             push_browser_step(
-                                browser_protocol_event_summary(
-                                    call_id,
-                                    "navigation_observation",
-                                    metrics,
-                                ),
+                                browser_protocol_event_summary(call_id, "observation", metrics),
                                 "done",
                             );
-                            let page_url = value
-                                .get("url")
-                                .and_then(|u| u.as_str())
-                                .unwrap_or(url.as_str());
-                            Ok(format!("Page opened ({page_url}). Snapshot:\n{snap}"))
+                            Ok(format!("Page snapshot:\n{snap}"))
                         }
-                        (None, Err(error)) => {
-                            push_browser_step(format!("navigate {url}"), "error");
-                            Err(format!("Page opened but snapshot failed: {error}"))
+                        Err(error) => {
+                            push_browser_step("snapshot".to_string(), "error");
+                            Err(format!("Snapshot failed: {error}"))
                         }
                     }
                 }
-            }
-            "browser_snapshot" => {
-                if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                    if !t.trim().is_empty() {
-                        *ctx.current_target = t.to_string();
-                    }
-                }
-                let _ = emit_stream_event(
-                    ctx.tx,
-                    GenerateStreamEvent::Delta {
-                        text: "‹‹ACT››👁️ Re-reading the page‹‹/ACT››".to_string(),
-                    },
-                )
-                .await;
-                let guard = browse_web_lock().lock().await;
-                let (client_back, snap) = chat_browser_call_checkpointed(
-                    ctx.state,
-                    ctx.thread_id,
-                    ctx.current_target.as_str(),
-                    client,
-                    BrowserMethod::Snapshot,
-                    browser_chat_snapshot_params(ctx.current_target.as_str()),
-                    BrowserCheckpointTelemetry { journal: ctx.journal, call_id },
-                )
-                .await;
-                drop(guard);
-                *browser_session = client_back;
-                match snap {
-                    Ok(value) => {
-                        let snap = browser_snapshot_text(&value);
-                        if !snap.is_empty() {
-                            *ctx.last_snapshot = snap.clone();
-                            browser_set_target_floor(
-                                ctx.payment_floor_refs,
-                                ctx.current_target.as_str(),
-                                browser_floor_refs(&value),
-                            );
-                            // Explicit re-observation of THIS target: refresh the focus flag
-                            // and clear the robust flag (a model-requested snapshot is the
-                            // canonical "re-orient on this page" moment).
-                            browser_set_target_focus(
-                                ctx.payment_context_by_target,
-                                ctx.current_target.as_str(),
-                                browser_focus_payment_context(&value),
-                            );
-                            browser_clear_target_acted_floored(
-                                ctx.payment_context_by_target,
-                                ctx.current_target.as_str(),
-                            );
-                        }
-                        push_browser_step("snapshot".to_string(), "done");
-                        let metrics = browser_observation_metrics(
-                            &value,
-                            vec!["snapshot".to_string()],
-                            "completed",
-                        );
-                        ctx.journal.record(browser_protocol_journal_event(
-                            call_id,
-                            "observation",
-                            &metrics,
-                        ));
-                        push_browser_step(
-                            browser_protocol_event_summary(call_id, "observation", metrics),
-                            "done",
-                        );
-                        Ok(format!("Page snapshot:\n{snap}"))
-                    }
-                    Err(error) => {
-                        push_browser_step("snapshot".to_string(), "error");
-                        Err(format!("Snapshot failed: {error}"))
-                    }
-                }
-            }
-            "browser_rehydrate" => {
-                if ctx.read_only {
-                    *browser_session = Some(client);
-                    Err("Draft rehydration is an external write and is unavailable in a read-only objective.".into())
-                } else {
-                    if let Some(target) = args.get("target").and_then(Value::as_str)
-                        && !target.trim().is_empty()
-                    {
-                        *ctx.current_target = target.to_string();
-                    }
-                    let draft_ref = args
-                        .get("draft_ref")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default();
-                    let generation = args
-                        .get("generation")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(u64::MAX);
-                    let workspace_id = ctx
-                        .thread_id
-                        .and_then(|thread_id| browser_thread_workspace_id(ctx.state, thread_id));
-                    let checkpoint = ctx.thread_id.and_then(|thread_id| {
-                        workspace_id.as_deref().and_then(|workspace_id| {
-                            ctx.state.task_store.lock().ok().and_then(|store| {
-                            store
-                                .load_active_browser_checkpoint(
-                                    gateway_user_id().as_str(),
-                                    workspace_id,
-                                    thread_id,
-                                    ctx.current_target.as_str(),
-                                )
-                                .ok()
-                                .flatten()
-                            })
-                        })
-                    });
-                    let payload = checkpoint.as_ref().and_then(|checkpoint| {
-                        if checkpoint.checkpoint_id != draft_ref {
-                            return None;
-                        }
-                        checkpoint.draft_secret_ref.as_deref().and_then(|reference| {
-                            ctx.state
-                                .browser_checkpoint_secret_store
-                                .get(
-                                    reference,
-                                    gateway_user_id().as_str(),
-                                    workspace_id.as_deref()?,
-                                )
-                                .ok()
-                                .flatten()
-                        })
-                    });
-                    let fields = payload.as_ref().and_then(|payload| {
-                        checkpoint.as_ref().and_then(|checkpoint| {
-                            if payload.objective_revision != checkpoint.objective_revision
-                                || payload.target_id != checkpoint.target_id
-                                || payload.origin != checkpoint.origin
-                            {
-                                None
-                            } else {
-                                build_browser_rehydrate_fields(payload, &args).ok()
-                            }
-                        })
-                    });
-                    let Some(fields) = fields else {
+                "browser_rehydrate" => {
+                    if ctx.read_only {
                         *browser_session = Some(client);
-                        *ctx.outcome_hint =
-                            Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
-                        return "Draft reference, scope, or field mapping is invalid. Nothing was written.".into();
-                    };
-                    let guard = browse_web_lock().lock().await;
-                    let (client_back, rehydrated) = chat_browser_call_bounded(
-                        client,
-                        BrowserMethod::Rehydrate,
-                        serde_json::json!({
-                            "target_id": ctx.current_target.as_str(),
-                            "generation": generation,
-                            "fields": fields,
-                        }),
-                    )
-                    .await;
-                    let mut client_now = client_back;
-                    let snapshot = if rehydrated.is_ok() {
-                        if let Some(client) = client_now.take() {
-                            let (back, snapshot) = chat_browser_call_checkpointed(
-                                ctx.state,
-                                ctx.thread_id,
-                                ctx.current_target.as_str(),
-                                client,
-                                BrowserMethod::Snapshot,
-                                browser_chat_act_snapshot_params(ctx.current_target.as_str()),
-                                BrowserCheckpointTelemetry { journal: ctx.journal, call_id },
-                            )
-                            .await;
-                            client_now = back;
-                            snapshot
-                        } else {
-                            Err("session lost after draft rehydration".into())
-                        }
+                        Err("Draft rehydration is an external write and is unavailable in a read-only objective.".into())
                     } else {
-                        Err(rehydrated.as_ref().err().cloned().unwrap_or_default())
-                    };
-                    drop(guard);
-                    *browser_session = client_now;
-                    match (rehydrated, snapshot) {
-                        (Ok(result), Ok(snapshot)) => {
-                            let count = result
-                                .get("rehydrated")
-                                .and_then(Value::as_u64)
-                                .unwrap_or(0);
-                            let skipped = result
-                                .get("skipped")
-                                .and_then(Value::as_u64)
-                                .unwrap_or(0);
-                            ctx.journal.record(browser_protocol_journal_event(
+                        if let Some(target) = args.get("target").and_then(Value::as_str)
+                            && !target.trim().is_empty()
+                        {
+                            *ctx.current_target = target.to_string();
+                        }
+                        let draft_ref = args
+                            .get("draft_ref")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        let generation = args
+                            .get("generation")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(u64::MAX);
+                        let workspace_id = ctx.thread_id.and_then(|thread_id| {
+                            browser_thread_workspace_id(ctx.state, thread_id)
+                        });
+                        let checkpoint = ctx.thread_id.and_then(|thread_id| {
+                            workspace_id.as_deref().and_then(|workspace_id| {
+                                ctx.state.task_store.lock().ok().and_then(|store| {
+                                    store
+                                        .load_active_browser_checkpoint(
+                                            gateway_user_id().as_str(),
+                                            workspace_id,
+                                            thread_id,
+                                            ctx.current_target.as_str(),
+                                        )
+                                        .ok()
+                                        .flatten()
+                                })
+                            })
+                        });
+                        let payload = checkpoint.as_ref().and_then(|checkpoint| {
+                            if checkpoint.checkpoint_id != draft_ref {
+                                return None;
+                            }
+                            checkpoint
+                                .draft_secret_ref
+                                .as_deref()
+                                .and_then(|reference| {
+                                    ctx.state
+                                        .browser_checkpoint_secret_store
+                                        .get(
+                                            reference,
+                                            gateway_user_id().as_str(),
+                                            workspace_id.as_deref()?,
+                                        )
+                                        .ok()
+                                        .flatten()
+                                })
+                        });
+                        let fields = payload.as_ref().and_then(|payload| {
+                            checkpoint.as_ref().and_then(|checkpoint| {
+                                if payload.objective_revision != checkpoint.objective_revision
+                                    || payload.target_id != checkpoint.target_id
+                                    || payload.origin != checkpoint.origin
+                                {
+                                    None
+                                } else {
+                                    build_browser_rehydrate_fields(payload, &args).ok()
+                                }
+                            })
+                        });
+                        let Some(fields) = fields else {
+                            *browser_session = Some(client);
+                            *ctx.outcome_hint =
+                                Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
+                            return "Draft reference, scope, or field mapping is invalid. Nothing was written.".into();
+                        };
+                        let guard = browse_web_lock().lock().await;
+                        let (client_back, rehydrated) = chat_browser_call_bounded(
+                            client,
+                            BrowserMethod::Rehydrate,
+                            serde_json::json!({
+                                "target_id": ctx.current_target.as_str(),
+                                "generation": generation,
+                                "fields": fields,
+                            }),
+                        )
+                        .await;
+                        let mut client_now = client_back;
+                        let snapshot = if rehydrated.is_ok() {
+                            if let Some(client) = client_now.take() {
+                                let (back, snapshot) = chat_browser_call_checkpointed(
+                                    ctx.state,
+                                    ctx.thread_id,
+                                    ctx.current_target.as_str(),
+                                    client,
+                                    BrowserMethod::Snapshot,
+                                    browser_chat_act_snapshot_params(ctx.current_target.as_str()),
+                                    BrowserCheckpointTelemetry {
+                                        journal: ctx.journal,
+                                        call_id,
+                                    },
+                                )
+                                .await;
+                                client_now = back;
+                                snapshot
+                            } else {
+                                Err("session lost after draft rehydration".into())
+                            }
+                        } else {
+                            Err(rehydrated.as_ref().err().cloned().unwrap_or_default())
+                        };
+                        drop(guard);
+                        *browser_session = client_now;
+                        match (rehydrated, snapshot) {
+                            (Ok(result), Ok(snapshot)) => {
+                                let count = result
+                                    .get("rehydrated")
+                                    .and_then(Value::as_u64)
+                                    .unwrap_or(0);
+                                let skipped =
+                                    result.get("skipped").and_then(Value::as_u64).unwrap_or(0);
+                                ctx.journal.record(browser_protocol_journal_event(
                                 call_id,
                                 "browser_draft_rehydrated",
                                 &serde_json::json!({
@@ -23769,710 +23758,733 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                     "reason": "explicit_selected_fields",
                                 }),
                             ));
-                            Ok(format!(
-                                "Draft rehydration completed: {count} filled, {skipped} skipped. No form was submitted and no other action was replayed.\nFresh snapshot:\n{}",
-                                browser_snapshot_text(&snapshot)
-                            ))
+                                Ok(format!(
+                                    "Draft rehydration completed: {count} filled, {skipped} skipped. No form was submitted and no other action was replayed.\nFresh snapshot:\n{}",
+                                    browser_snapshot_text(&snapshot)
+                                ))
+                            }
+                            (Err(error), _) | (_, Err(error)) => Err(format!(
+                                "Draft rehydration failed: {error}. No submit, click, booking, or payment action was executed."
+                            )),
                         }
-                        (Err(error), _) | (_, Err(error)) => Err(format!(
-                            "Draft rehydration failed: {error}. No submit, click, booking, or payment action was executed."
-                        )),
                     }
                 }
-            }
-            "browser_act" => {
-                // Build the action the sidecar runs (and the safety gate
-                // inspects), coercing a common model mistake that otherwise
-                // dead-ends in a retry loop: an element ref (e83) passed as
-                // `target` — which is a TAB id, so the sidecar errors "tab
-                // not found: e83". Re-route a ref-shaped target into `ref`
-                // (when none was given) instead of switching to a missing tab.
-                let mut action = args.clone();
-                let target_arg = args
-                    .get("target")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string);
-                let has_ref = action
-                    .get("ref")
-                    .and_then(|v| v.as_str())
-                    .is_some_and(|r| !r.trim().is_empty());
-                let target_is_ref = target_arg.as_deref().is_some_and(|t| {
-                    t.len() >= 2 && t.starts_with('e') && t[1..].chars().all(|c| c.is_ascii_digit())
-                });
-                if let Some(obj) = action.as_object_mut() {
-                    if target_is_ref && !has_ref {
-                        if let Some(t) = target_arg.clone() {
-                            obj.insert("ref".to_string(), serde_json::Value::String(t));
-                        }
-                        obj.remove("target");
-                    } else if let Some(t) = target_arg.as_deref() {
-                        if !t.trim().is_empty() {
+                "browser_act" => {
+                    // Build the action the sidecar runs (and the safety gate
+                    // inspects), coercing a common model mistake that otherwise
+                    // dead-ends in a retry loop: an element ref (e83) passed as
+                    // `target` — which is a TAB id, so the sidecar errors "tab
+                    // not found: e83". Re-route a ref-shaped target into `ref`
+                    // (when none was given) instead of switching to a missing tab.
+                    let mut action = args.clone();
+                    let target_arg = args
+                        .get("target")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string);
+                    let has_ref = action
+                        .get("ref")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|r| !r.trim().is_empty());
+                    let target_is_ref = target_arg.as_deref().is_some_and(|t| {
+                        t.len() >= 2
+                            && t.starts_with('e')
+                            && t[1..].chars().all(|c| c.is_ascii_digit())
+                    });
+                    if let Some(obj) = action.as_object_mut() {
+                        if target_is_ref && !has_ref {
+                            if let Some(t) = target_arg.clone() {
+                                obj.insert("ref".to_string(), serde_json::Value::String(t));
+                            }
+                            obj.remove("target");
+                        } else if let Some(t) = target_arg.as_deref()
+                            && !t.trim().is_empty()
+                        {
                             *ctx.current_target = t.to_string();
                         }
+                        obj.insert(
+                            "target_id".to_string(),
+                            serde_json::Value::String(ctx.current_target.clone()),
+                        );
                     }
-                    obj.insert(
-                        "target_id".to_string(),
-                        serde_json::Value::String(ctx.current_target.clone()),
+                    // Single-action payment context for the CURRENT target: the best-effort
+                    // focus flag OR'd with the robust last-acted-floored flag (IMPORTANT C —
+                    // a cross-origin PSP OOPIF fails the focus check whenever the app isn't
+                    // OS-frontmost, but `last_acted_floored` is frame-aware for free via the
+                    // per-ref floor). No "prior nested item" concept outside a bundle.
+                    let focus_ctx = browser_payment_context_for(
+                        ctx.payment_context_by_target,
+                        ctx.current_target.as_str(),
                     );
-                }
-                // Single-action payment context for the CURRENT target: the best-effort
-                // focus flag OR'd with the robust last-acted-floored flag (IMPORTANT C —
-                // a cross-origin PSP OOPIF fails the focus check whenever the app isn't
-                // OS-frontmost, but `last_acted_floored` is frame-aware for free via the
-                // per-ref floor). No "prior nested item" concept outside a bundle.
-                let focus_ctx = browser_payment_context_for(
-                    ctx.payment_context_by_target,
-                    ctx.current_target.as_str(),
-                );
-                // Build1 Fix 3: resolve THIS target's floor set once, up front — every
-                // read below in this arm is against the PRE-act observation of the SAME
-                // target the action is about to run on, so a single owned snapshot is
-                // correct (and sidesteps holding an immutable borrow of the map across
-                // the later mutable `browser_set_target_floor` post-act refresh).
-                let current_floor_refs = browser_floor_refs_for_target(
-                    ctx.payment_floor_refs,
-                    ctx.current_target.as_str(),
-                );
-                if let Some(error) = normalize_browser_action_bundle(
-                    &mut action,
-                    ctx.current_target.as_str(),
-                    &current_floor_refs,
-                    focus_ctx,
-                ) {
-                    *browser_session = Some(client);
-                    // Log WHY (same gap as the act-error line): "bundle blocked" alone cannot
-                    // distinguish a payment gate from a schema-illegal item or a missing
-                    // action_class, and the browse sub-turn keeps no other record.
-                    push_browser_step(
-                        format!("browser action bundle blocked: {}", clip_chars(&error, 200)),
-                        "error",
+                    // Build1 Fix 3: resolve THIS target's floor set once, up front — every
+                    // read below in this arm is against the PRE-act observation of the SAME
+                    // target the action is about to run on, so a single owned snapshot is
+                    // correct (and sidesteps holding an immutable borrow of the map across
+                    // the later mutable `browser_set_target_floor` post-act refresh).
+                    let current_floor_refs = browser_floor_refs_for_target(
+                        ctx.payment_floor_refs,
+                        ctx.current_target.as_str(),
                     );
-                    *ctx.outcome_hint =
-                        Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
-                    Err(error)
-                } else {
-                    // A non-schema action (clickCoords, any other unrecognized kind, or a
-                    // selector-bearing action) must be rejected before ANY payment-approval
-                    // side effect: none of it is ref-based (the ref floor can't cover a
-                    // selector or an unrecognized kind) and none of it is Enter/Return (the
-                    // page floor above doesn't apply either), so no machine signal can ever
-                    // classify it — fail closed regardless of declared action_class. Checked
-                    // here, FIRST, before `apply_payment_approval_secret_for_action` and
-                    // before `should_claim_payment_approval`/`claim_payment_approval_for_action`
-                    // below, because a hallucinated non-schema action can still carry a
-                    // declared action_class:"payment_commit" plus a valid
-                    // payment_approval_id — which resolves to a genuine PaymentCommit
-                    // on the declared class alone — so checking this only as part of
-                    // the gate (after claiming) would let it burn a one-shot
-                    // Payment Approval Card grant for an action that gets rejected
-                    // anyway. Defense-in-depth: verified no production path emits these
-                    // and the schema doesn't expose them, but a model could still
-                    // hallucinate one.
-                    let blocked_before_claim =
-                        single_action_rejects_unsupported_execution_before_payment_claim(&action);
-                    let mut preflight_error = None;
-                    let vault_secret_used = if blocked_before_claim.is_some() {
-                        false
-                    } else {
-                        match apply_payment_approval_secret_for_action(ctx.state, &mut action) {
-                            Ok(used) => used,
-                            Err(error) => {
-                                push_browser_step(
-                                    "payment vault secret blocked".to_string(),
-                                    "error",
-                                );
-                                preflight_error = Some(format!(
-                                    "Payment vault secret unavailable: {error}. Ask the user to approve the Payment Approval Card again."
-                                ));
-                                false
-                            }
-                        }
-                    };
-                    // SAFETY GATE: arbitrary page script remains forbidden and
-                    // the final action that transfers money requires a matching
-                    // Payment Approval Card. Search, login and booking actions
-                    // are ordinary user-directed browser interactions; objective
-                    // read-only mode must not be reused as an origin-trust gate.
-                    // The decision is on the EFFECTIVE action class (declared ⊔
-                    // machine floor), never on control label text.
-                    //
-                    // Claiming (consuming) the one-shot grant is gated on
-                    // `should_claim_payment_approval`, which is intentionally
-                    // NARROWER than `action_is_payment_commit`: the latter also
-                    // treats a class error (missing/conflicting action_class) as
-                    // "payment" so the gate below re-rejects it fail-closed —
-                    // right for the gate, wrong for claiming. Claiming on a class
-                    // error would burn the grant on an under-declared action and
-                    // then still reject it for the class error, forcing full
-                    // re-approval on the corrected retry even though nothing
-                    // unauthorized executed. Claim only when the effective class
-                    // GENUINELY resolves to payment; on a class error, leave the
-                    // grant unconsumed so the re-declared retry can use it.
-                    let approved_payment_id = if blocked_before_claim.is_some() {
-                        None
-                    } else if should_claim_payment_approval(&action, &current_floor_refs, focus_ctx)
-                    {
-                        match claim_payment_approval_for_action(
-                            ctx.state,
-                            &action,
-                            &current_floor_refs,
-                            focus_ctx,
-                            ctx.thread_id,
-                        ) {
-                            Ok(id) => Some(id),
-                            Err(error) if action.get("payment_approval_id").is_some() => {
-                                preflight_error = Some(error);
-                                None
-                            }
-                            Err(_) => None,
-                        }
-                    } else {
-                        None
-                    };
-                    let blocked = blocked_before_claim.map(str::to_string).or_else(|| {
-                        browser_safety::evaluate_browser_action(
-                            &action,
-                            &current_floor_refs,
-                            focus_ctx,
-                            approved_payment_id.as_deref(),
-                        )
-                    });
-                    if let Some(error) = preflight_error {
+                    if let Some(error) = normalize_browser_action_bundle(
+                        &mut action,
+                        ctx.current_target.as_str(),
+                        &current_floor_refs,
+                        focus_ctx,
+                    ) {
                         *browser_session = Some(client);
+                        // Log WHY (same gap as the act-error line): "bundle blocked" alone cannot
+                        // distinguish a payment gate from a schema-illegal item or a missing
+                        // action_class, and the browse sub-turn keeps no other record.
+                        push_browser_step(
+                            format!("browser action bundle blocked: {}", clip_chars(&error, 200)),
+                            "error",
+                        );
                         *ctx.outcome_hint =
                             Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
                         Err(error)
-                    } else if let Some(reason) = blocked {
-                        eprintln!("browser-gate: BLOCKED ({reason})");
-                        *browser_session = Some(client);
-                        *ctx.outcome_hint =
-                            Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
-                        // Log the REASON, not just the kind (the bundle path already does): without
-                        // it a gate refusal is indistinguishable from a stale ref in a post-mortem.
-                        push_browser_step(
-                            format!(
-                                "action blocked: {} — {}",
-                                args.get("kind").and_then(|k| k.as_str()).unwrap_or("?"),
-                                clip_chars(&reason, 200)
-                            ),
-                            "error",
-                        );
-                        // Branch the guidance on WHAT was wrong. The old single message told the
-                        // model "user confirmation needed … propose to the user and wait — do NOT
-                        // retry" for EVERY refusal, including a plain missing argument. In the browse
-                        // sub-turn there is no user to propose to (its stream is drained) and the only
-                        // correct recovery for a missing//conflicting `action_class` IS to re-send the
-                        // same action with the field — so the message forbade the fix and pushed the
-                        // model to wander to another site instead. Argument-shaped errors now say
-                        // "fix and retry the same ref"; only a real payment/hazard refusal keeps the
-                        // stop-and-ask wording, and for that one the sub-agent is told to report
-                        // `blocked` (it cannot obtain a Payment Approval Card itself).
-                        let model_fixable = reason.contains("BROWSER_ACTION_CLASS_MISSING")
-                            || reason.contains("BROWSER_ACTION_CLASS_CONFLICT")
-                            || reason.contains("BROWSER_UNSUPPORTED_COMMITTING_ACTION");
-                        if model_fixable {
-                            Err(format!(
-                                "🚫 action rejected, nothing was executed: {reason}.{} \
+                    } else {
+                        // A non-schema action (clickCoords, any other unrecognized kind, or a
+                        // selector-bearing action) must be rejected before ANY payment-approval
+                        // side effect: none of it is ref-based (the ref floor can't cover a
+                        // selector or an unrecognized kind) and none of it is Enter/Return (the
+                        // page floor above doesn't apply either), so no machine signal can ever
+                        // classify it — fail closed regardless of declared action_class. Checked
+                        // here, FIRST, before `apply_payment_approval_secret_for_action` and
+                        // before `should_claim_payment_approval`/`claim_payment_approval_for_action`
+                        // below, because a hallucinated non-schema action can still carry a
+                        // declared action_class:"payment_commit" plus a valid
+                        // payment_approval_id — which resolves to a genuine PaymentCommit
+                        // on the declared class alone — so checking this only as part of
+                        // the gate (after claiming) would let it burn a one-shot
+                        // Payment Approval Card grant for an action that gets rejected
+                        // anyway. Defense-in-depth: verified no production path emits these
+                        // and the schema doesn't expose them, but a model could still
+                        // hallucinate one.
+                        let blocked_before_claim =
+                            single_action_rejects_unsupported_execution_before_payment_claim(
+                                &action,
+                            );
+                        let mut preflight_error = None;
+                        let vault_secret_used = if blocked_before_claim.is_some() {
+                            false
+                        } else {
+                            match apply_payment_approval_secret_for_action(ctx.state, &mut action) {
+                                Ok(used) => used,
+                                Err(error) => {
+                                    push_browser_step(
+                                        "payment vault secret blocked".to_string(),
+                                        "error",
+                                    );
+                                    preflight_error = Some(format!(
+                                        "Payment vault secret unavailable: {error}. Ask the user to approve the Payment Approval Card again."
+                                    ));
+                                    false
+                                }
+                            }
+                        };
+                        // SAFETY GATE: arbitrary page script remains forbidden and
+                        // the final action that transfers money requires a matching
+                        // Payment Approval Card. Search, login and booking actions
+                        // are ordinary user-directed browser interactions; objective
+                        // read-only mode must not be reused as an origin-trust gate.
+                        // The decision is on the EFFECTIVE action class (declared ⊔
+                        // machine floor), never on control label text.
+                        //
+                        // Claiming (consuming) the one-shot grant is gated on
+                        // `should_claim_payment_approval`, which is intentionally
+                        // NARROWER than `action_is_payment_commit`: the latter also
+                        // treats a class error (missing/conflicting action_class) as
+                        // "payment" so the gate below re-rejects it fail-closed —
+                        // right for the gate, wrong for claiming. Claiming on a class
+                        // error would burn the grant on an under-declared action and
+                        // then still reject it for the class error, forcing full
+                        // re-approval on the corrected retry even though nothing
+                        // unauthorized executed. Claim only when the effective class
+                        // GENUINELY resolves to payment; on a class error, leave the
+                        // grant unconsumed so the re-declared retry can use it.
+                        let approved_payment_id = if blocked_before_claim.is_some() {
+                            None
+                        } else if should_claim_payment_approval(
+                            &action,
+                            &current_floor_refs,
+                            focus_ctx,
+                        ) {
+                            match claim_payment_approval_for_action(
+                                ctx.state,
+                                &action,
+                                &current_floor_refs,
+                                focus_ctx,
+                                ctx.thread_id,
+                            ) {
+                                Ok(id) => Some(id),
+                                Err(error) if action.get("payment_approval_id").is_some() => {
+                                    preflight_error = Some(error);
+                                    None
+                                }
+                                Err(_) => None,
+                            }
+                        } else {
+                            None
+                        };
+                        let blocked = blocked_before_claim.map(str::to_string).or_else(|| {
+                            browser_safety::evaluate_browser_action(
+                                &action,
+                                &current_floor_refs,
+                                focus_ctx,
+                                approved_payment_id.as_deref(),
+                            )
+                        });
+                        if let Some(error) = preflight_error {
+                            *browser_session = Some(client);
+                            *ctx.outcome_hint =
+                                Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
+                            Err(error)
+                        } else if let Some(reason) = blocked {
+                            eprintln!("browser-gate: BLOCKED ({reason})");
+                            *browser_session = Some(client);
+                            *ctx.outcome_hint =
+                                Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
+                            // Log the REASON, not just the kind (the bundle path already does): without
+                            // it a gate refusal is indistinguishable from a stale ref in a post-mortem.
+                            push_browser_step(
+                                format!(
+                                    "action blocked: {} — {}",
+                                    args.get("kind").and_then(|k| k.as_str()).unwrap_or("?"),
+                                    clip_chars(&reason, 200)
+                                ),
+                                "error",
+                            );
+                            // Branch the guidance on WHAT was wrong. The old single message told the
+                            // model "user confirmation needed … propose to the user and wait — do NOT
+                            // retry" for EVERY refusal, including a plain missing argument. In the browse
+                            // sub-turn there is no user to propose to (its stream is drained) and the only
+                            // correct recovery for a missing//conflicting `action_class` IS to re-send the
+                            // same action with the field — so the message forbade the fix and pushed the
+                            // model to wander to another site instead. Argument-shaped errors now say
+                            // "fix and retry the same ref"; only a real payment/hazard refusal keeps the
+                            // stop-and-ask wording, and for that one the sub-agent is told to report
+                            // `blocked` (it cannot obtain a Payment Approval Card itself).
+                            let model_fixable = reason.contains("BROWSER_ACTION_CLASS_MISSING")
+                                || reason.contains("BROWSER_ACTION_CLASS_CONFLICT")
+                                || reason.contains("BROWSER_UNSUPPORTED_COMMITTING_ACTION");
+                            if model_fixable {
+                                Err(format!(
+                                    "🚫 action rejected, nothing was executed: {reason}.{} \
 Fix THIS action and re-send it on the SAME ref — for example \
 {{\"kind\":\"click\",\"ref\":\"e42\",\"action_class\":\"ordinary\"}}. \
 Do NOT navigate to another site because of this error.",
-                                browser_act_error_hint(&reason)
-                            ))
-                        } else {
-                            Err(format!(
-                                "🚫 action blocked, user confirmation needed: {reason}.{} \
+                                    browser_act_error_hint(&reason)
+                                ))
+                            } else {
+                                Err(format!(
+                                    "🚫 action blocked, user confirmation needed: {reason}.{} \
 I did nothing. You cannot approve this yourself: stop here and report what is blocked \
 (browser_done with the evidence you already have) — do NOT retry the same action and do NOT \
 navigate elsewhere to work around it.",
-                                browser_act_error_hint(&reason)
-                            ))
-                        }
-                    } else {
-                        let kind = args
-                            .get("kind")
-                            .and_then(|k| k.as_str())
-                            .unwrap_or("action")
-                            .to_string();
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››✋ {kind} on the page‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        let action_kinds = browser_action_kinds(&action);
-                        // Captured BEFORE `action` is moved into the sidecar call below, against
-                        // the PRE-act `payment_floor_refs` — the robust IMPORTANT-C signal (design
-                        // 1.2): acting on a ref the floor already marked is proof positive of a
-                        // payment interaction regardless of OS window focus.
-                        let targeted_floored_ref =
-                            browser_action_targeted_a_floored_ref(&action, &current_floor_refs);
-                        let guard = browse_web_lock().lock().await;
-                        let (client_back, act_res) = chat_browser_call_checkpointed(
-                            ctx.state,
-                            ctx.thread_id,
-                            ctx.current_target.as_str(),
-                            client,
-                            BrowserMethod::Act,
-                            action,
-                            BrowserCheckpointTelemetry { journal: ctx.journal, call_id },
-                        )
-                        .await;
-                        drop(guard);
-                        *browser_session = client_back;
-                        match act_res {
-                            Ok(value) => {
-                                let snap = browser_snapshot_text(&value);
-                                // No-progress detection: if the action left
-                                // the page identical, nudge the model to try
-                                // a different element/approach instead of
-                                // repeating the same move.
-                                let no_change = !snap.is_empty() && snap == *ctx.last_snapshot;
-                                if targeted_floored_ref {
-                                    browser_mark_target_acted_floored(
-                                        ctx.payment_context_by_target,
-                                        ctx.current_target.as_str(),
+                                    browser_act_error_hint(&reason)
+                                ))
+                            }
+                        } else {
+                            let kind = args
+                                .get("kind")
+                                .and_then(|k| k.as_str())
+                                .unwrap_or("action")
+                                .to_string();
+                            let _ = emit_stream_event(
+                                ctx.tx,
+                                GenerateStreamEvent::Delta {
+                                    text: format!("‹‹ACT››✋ {kind} on the page‹‹/ACT››"),
+                                },
+                            )
+                            .await;
+                            let action_kinds = browser_action_kinds(&action);
+                            // Captured BEFORE `action` is moved into the sidecar call below, against
+                            // the PRE-act `payment_floor_refs` — the robust IMPORTANT-C signal (design
+                            // 1.2): acting on a ref the floor already marked is proof positive of a
+                            // payment interaction regardless of OS window focus.
+                            let targeted_floored_ref =
+                                browser_action_targeted_a_floored_ref(&action, &current_floor_refs);
+                            let guard = browse_web_lock().lock().await;
+                            let (client_back, act_res) = chat_browser_call_checkpointed(
+                                ctx.state,
+                                ctx.thread_id,
+                                ctx.current_target.as_str(),
+                                client,
+                                BrowserMethod::Act,
+                                action,
+                                BrowserCheckpointTelemetry {
+                                    journal: ctx.journal,
+                                    call_id,
+                                },
+                            )
+                            .await;
+                            drop(guard);
+                            *browser_session = client_back;
+                            match act_res {
+                                Ok(value) => {
+                                    let snap = browser_snapshot_text(&value);
+                                    // No-progress detection: if the action left
+                                    // the page identical, nudge the model to try
+                                    // a different element/approach instead of
+                                    // repeating the same move.
+                                    let no_change = !snap.is_empty() && snap == *ctx.last_snapshot;
+                                    if targeted_floored_ref {
+                                        browser_mark_target_acted_floored(
+                                            ctx.payment_context_by_target,
+                                            ctx.current_target.as_str(),
+                                        );
+                                    }
+                                    if !snap.is_empty() {
+                                        *ctx.last_snapshot = snap.clone();
+                                        browser_set_target_floor(
+                                            ctx.payment_floor_refs,
+                                            ctx.current_target.as_str(),
+                                            browser_floor_refs(&value),
+                                        );
+                                        browser_set_target_focus(
+                                            ctx.payment_context_by_target,
+                                            ctx.current_target.as_str(),
+                                            browser_focus_payment_context(&value),
+                                        );
+                                        // Deliberately NOT clearing last_acted_floored here: this is the
+                                        // act's OWN post-action refresh, not an independent
+                                        // re-observation. Clearing here would erase the flag just set
+                                        // above for THIS SAME action, breaking "type CVV into a floored
+                                        // ref, then press Enter" across the next call. See
+                                        // `browser_clear_target_acted_floored`'s doc comment.
+                                    }
+                                    push_browser_step(kind.to_string(), "done");
+                                    let boundary = if action_kinds.len() > 1 {
+                                        "action_bundle"
+                                    } else {
+                                        "browser_act"
+                                    };
+                                    let metrics = browser_observation_metrics(
+                                        &value,
+                                        action_kinds.clone(),
+                                        "completed",
                                     );
-                                }
-                                if !snap.is_empty() {
-                                    *ctx.last_snapshot = snap.clone();
-                                    browser_set_target_floor(
-                                        ctx.payment_floor_refs,
-                                        ctx.current_target.as_str(),
-                                        browser_floor_refs(&value),
+                                    ctx.journal.record(browser_protocol_journal_event(
+                                        call_id, boundary, &metrics,
+                                    ));
+                                    push_browser_step(
+                                        browser_protocol_event_summary(call_id, boundary, metrics),
+                                        "done",
                                     );
-                                    browser_set_target_focus(
-                                        ctx.payment_context_by_target,
-                                        ctx.current_target.as_str(),
-                                        browser_focus_payment_context(&value),
-                                    );
-                                    // Deliberately NOT clearing last_acted_floored here: this is the
-                                    // act's OWN post-action refresh, not an independent
-                                    // re-observation. Clearing here would erase the flag just set
-                                    // above for THIS SAME action, breaking "type CVV into a floored
-                                    // ref, then press Enter" across the next call. See
-                                    // `browser_clear_target_acted_floored`'s doc comment.
-                                }
-                                push_browser_step(format!("{kind}"), "done");
-                                let boundary = if action_kinds.len() > 1 {
-                                    "action_bundle"
-                                } else {
-                                    "browser_act"
-                                };
-                                let metrics = browser_observation_metrics(
-                                    &value,
-                                    action_kinds.clone(),
-                                    "completed",
-                                );
-                                ctx.journal.record(browser_protocol_journal_event(
-                                    call_id, boundary, &metrics,
-                                ));
-                                push_browser_step(
-                                    browser_protocol_event_summary(call_id, boundary, metrics),
-                                    "done",
-                                );
-                                let mut out = if snap.is_empty() {
-                                    "Action performed.".to_string()
-                                } else {
-                                    format!("Action performed. Updated snapshot:\n{snap}")
-                                };
-                                if no_change {
-                                    out.push_str(
-                                        "\n[note: the page did NOT change from before — \
+                                    let mut out = if snap.is_empty() {
+                                        "Action performed.".to_string()
+                                    } else {
+                                        format!("Action performed. Updated snapshot:\n{snap}")
+                                    };
+                                    if no_change {
+                                        out.push_str(
+                                            "\n[note: the page did NOT change from before — \
 don't repeat the same action/ref. On a results list, labeled CTAs next to a solution \
 (e.g. \"Vedi i dettagli…\") are often screen-reader duplicates: click instead the \
 unnamed button/card or price control that CONTAINS that solution's times/train number. \
 \"Continua\"/\"Avanti\" usually appears only after the solution is opened and a fare is \
 chosen. Otherwise try a different element, scroll, or wait (kind=wait).]",
-                                    );
-                                }
-                                if let Some(committed) = value.get("committedOption") {
-                                    out.push_str(&format!("\n[automatic selection: {committed}]"));
-                                }
-                                if let Some(sugg) = value.get("suggestions") {
-                                    out.push_str(&format!("\n[suggestions: {sugg}]"));
-                                }
-                                // Guardrail (advisory, Layer C.3): if the model just
-                                // typed/filled a date that is in the PAST, nudge it to
-                                // re-resolve via resolve_datetime instead of submitting.
-                                // Advisory (not a hard block) because some past dates are
-                                // legitimate (birthdays, historical lookups).
-                                if matches!(
-                                    args.get("kind").and_then(|k| k.as_str()),
-                                    Some("type") | Some("fill")
-                                ) {
-                                    if let Some(typed) = args.get("text").and_then(|t| t.as_str()) {
-                                        if let Some(hint) = past_date_hint(typed) {
-                                            out.push_str(&hint);
-                                        }
+                                        );
                                     }
+                                    if let Some(committed) = value.get("committedOption") {
+                                        out.push_str(&format!(
+                                            "\n[automatic selection: {committed}]"
+                                        ));
+                                    }
+                                    if let Some(sugg) = value.get("suggestions") {
+                                        out.push_str(&format!("\n[suggestions: {sugg}]"));
+                                    }
+                                    // Guardrail (advisory, Layer C.3): if the model just
+                                    // typed/filled a date that is in the PAST, nudge it to
+                                    // re-resolve via resolve_datetime instead of submitting.
+                                    // Advisory (not a hard block) because some past dates are
+                                    // legitimate (birthdays, historical lookups).
+                                    if matches!(
+                                        args.get("kind").and_then(|k| k.as_str()),
+                                        Some("type") | Some("fill")
+                                    ) && let Some(typed) =
+                                        args.get("text").and_then(|t| t.as_str())
+                                        && let Some(hint) = past_date_hint(typed)
+                                    {
+                                        out.push_str(&hint);
+                                    }
+                                    // D2: machine progress classification for the guarded loop's stall
+                                    // budget — from the sidecar's signals (committed suggestion, whether
+                                    // a suggestion list appeared, page change), never re-derived from the
+                                    // prose in `out` above.
+                                    let committed_option = value
+                                        .get("committedOption")
+                                        .and_then(|v| v.as_str())
+                                        .is_some_and(|s| !s.trim().is_empty());
+                                    let suggestions_present = value
+                                        .get("suggestions")
+                                        .and_then(|v| v.as_array())
+                                        .is_some_and(|a| !a.is_empty());
+                                    *ctx.outcome_hint = Some(browser_action_outcome_hint(
+                                        args.get("kind").and_then(|k| k.as_str()).unwrap_or(""),
+                                        true,
+                                        no_change,
+                                        committed_option,
+                                        suggestions_present,
+                                        false,
+                                    ));
+                                    Ok(out)
                                 }
-                                // D2: machine progress classification for the guarded loop's stall
-                                // budget — from the sidecar's signals (committed suggestion, whether
-                                // a suggestion list appeared, page change), never re-derived from the
-                                // prose in `out` above.
-                                let committed_option = value
-                                    .get("committedOption")
-                                    .and_then(|v| v.as_str())
-                                    .is_some_and(|s| !s.trim().is_empty());
-                                let suggestions_present = value
-                                    .get("suggestions")
-                                    .and_then(|v| v.as_array())
-                                    .is_some_and(|a| !a.is_empty());
-                                *ctx.outcome_hint = Some(browser_action_outcome_hint(
-                                    args.get("kind").and_then(|k| k.as_str()).unwrap_or(""),
-                                    true,
-                                    no_change,
-                                    committed_option,
-                                    suggestions_present,
-                                    false,
-                                ));
-                                Ok(out)
-                            }
-                            Err(error) => {
-                                // Always log the REAL error text (not only under HOMUN_DEBUG): the
-                                // browse sub-turn has no persisted journal, so this terse line was the
-                                // only record — and without the message a session death (a hung anti-bot
-                                // page timing out every call) is indistinguishable from a stale ref. The
-                                // per-action detail below stays debug-gated; this one line is the record.
-                                push_browser_step(
-                                    format!("{kind}: {}", clip_chars(&error.to_string(), 200)),
-                                    "error",
-                                );
-                                *ctx.outcome_hint =
-                                    Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
-                                // DIAG (HOMUN_DEBUG): what the model tried + why it
-                                // failed, to root-cause the repeated browser_act loop.
-                                if verbose_debug() {
-                                    eprintln!(
-                                        "[browser_act] kind={kind} ref={:?} selector={:?} text={:?} → ERROR: {}",
-                                        args.get("ref").and_then(|v| v.as_str()),
-                                        args.get("selector").and_then(|v| v.as_str()),
-                                        if vault_secret_used {
-                                            Some("[vault-secret]")
-                                        } else {
-                                            args.get("text").and_then(|v| v.as_str())
-                                        },
-                                        error.chars().take(220).collect::<String>()
+                                Err(error) => {
+                                    // Always log the REAL error text (not only under HOMUN_DEBUG): the
+                                    // browse sub-turn has no persisted journal, so this terse line was the
+                                    // only record — and without the message a session death (a hung anti-bot
+                                    // page timing out every call) is indistinguishable from a stale ref. The
+                                    // per-action detail below stays debug-gated; this one line is the record.
+                                    push_browser_step(
+                                        format!("{kind}: {}", clip_chars(&error.to_string(), 200)),
+                                        "error",
                                     );
-                                }
-                                // Stale-ref auto-recovery: the page changed under us
-                                // so the [ref=eN] is gone. Instead of just erroring
-                                // (forcing the model to spend a round re-snapshotting),
-                                // take a fresh snapshot NOW and hand it back so it
-                                // retries with new refs in the same round.
-                                let stale = is_stale_ref_error(&error);
-                                match (stale, browser_session.take()) {
-                                    (true, Some(c)) => {
-                                        let guard = browse_web_lock().lock().await;
-                                        // Stale-ref recovery is an ACTING re-observation → small view.
-                                        let (c_back, snap_res) = chat_browser_call_checkpointed(
-                                            ctx.state,
-                                            ctx.thread_id,
-                                            ctx.current_target.as_str(),
-                                            c,
-                                            BrowserMethod::Snapshot,
-                                            browser_chat_act_snapshot_params(
-                                                ctx.current_target.as_str(),
-                                            ),
-                                            BrowserCheckpointTelemetry { journal: ctx.journal, call_id },
-                                        )
-                                        .await;
-                                        drop(guard);
-                                        *browser_session = c_back;
-                                        let snap = snap_res
-                                            .as_ref()
-                                            .map(browser_snapshot_text)
-                                            .unwrap_or_default();
-                                        if snap.is_empty() {
+                                    *ctx.outcome_hint = Some(
+                                        local_first_engine::contract::ToolOutcomeHint::NoProgress,
+                                    );
+                                    // DIAG (HOMUN_DEBUG): what the model tried + why it
+                                    // failed, to root-cause the repeated browser_act loop.
+                                    if verbose_debug() {
+                                        eprintln!(
+                                            "[browser_act] kind={kind} ref={:?} selector={:?} text={:?} → ERROR: {}",
+                                            args.get("ref").and_then(|v| v.as_str()),
+                                            args.get("selector").and_then(|v| v.as_str()),
+                                            if vault_secret_used {
+                                                Some("[vault-secret]")
+                                            } else {
+                                                args.get("text").and_then(|v| v.as_str())
+                                            },
+                                            error.chars().take(220).collect::<String>()
+                                        );
+                                    }
+                                    // Stale-ref auto-recovery: the page changed under us
+                                    // so the [ref=eN] is gone. Instead of just erroring
+                                    // (forcing the model to spend a round re-snapshotting),
+                                    // take a fresh snapshot NOW and hand it back so it
+                                    // retries with new refs in the same round.
+                                    let stale = is_stale_ref_error(&error);
+                                    match (stale, browser_session.take()) {
+                                        (true, Some(c)) => {
+                                            let guard = browse_web_lock().lock().await;
+                                            // Stale-ref recovery is an ACTING re-observation → small view.
+                                            let (c_back, snap_res) =
+                                                chat_browser_call_checkpointed(
+                                                    ctx.state,
+                                                    ctx.thread_id,
+                                                    ctx.current_target.as_str(),
+                                                    c,
+                                                    BrowserMethod::Snapshot,
+                                                    browser_chat_act_snapshot_params(
+                                                        ctx.current_target.as_str(),
+                                                    ),
+                                                    BrowserCheckpointTelemetry {
+                                                        journal: ctx.journal,
+                                                        call_id,
+                                                    },
+                                                )
+                                                .await;
+                                            drop(guard);
+                                            *browser_session = c_back;
+                                            let snap = snap_res
+                                                .as_ref()
+                                                .map(browser_snapshot_text)
+                                                .unwrap_or_default();
+                                            if snap.is_empty() {
+                                                Err(format!(
+                                                    "Action failed: {error}{}",
+                                                    browser_act_error_hint(&error)
+                                                ))
+                                            } else {
+                                                *ctx.last_snapshot = snap.clone();
+                                                browser_set_target_floor(
+                                                    ctx.payment_floor_refs,
+                                                    ctx.current_target.as_str(),
+                                                    browser_floor_refs(snap_res.as_ref().unwrap()),
+                                                );
+                                                // A stale ref means the page genuinely changed under us —
+                                                // this recovery snapshot is a real fresh observation of
+                                                // THIS target, so treat it like an explicit
+                                                // browser_snapshot: refresh focus AND clear the robust flag.
+                                                browser_set_target_focus(
+                                                    ctx.payment_context_by_target,
+                                                    ctx.current_target.as_str(),
+                                                    browser_focus_payment_context(
+                                                        snap_res.as_ref().unwrap(),
+                                                    ),
+                                                );
+                                                browser_clear_target_acted_floored(
+                                                    ctx.payment_context_by_target,
+                                                    ctx.current_target.as_str(),
+                                                );
+                                                let metrics = browser_observation_metrics(
+                                                    snap_res.as_ref().unwrap(),
+                                                    vec!["snapshot".to_string()],
+                                                    "stale_ref_recovered",
+                                                );
+                                                ctx.journal.record(browser_protocol_journal_event(
+                                                    call_id,
+                                                    "stale_ref_recovery_observation",
+                                                    &metrics,
+                                                ));
+                                                push_browser_step(
+                                                    browser_protocol_event_summary(
+                                                        call_id,
+                                                        "stale_ref_recovery_observation",
+                                                        metrics,
+                                                    ),
+                                                    "done",
+                                                );
+                                                Ok(stale_ref_recovery_message(
+                                                    args.get("ref").and_then(|v| v.as_str()),
+                                                    &snap,
+                                                ))
+                                            }
+                                        }
+                                        (_, restored) => {
+                                            *browser_session = restored;
                                             Err(format!(
                                                 "Action failed: {error}{}",
                                                 browser_act_error_hint(&error)
                                             ))
-                                        } else {
-                                            *ctx.last_snapshot = snap.clone();
-                                            browser_set_target_floor(
-                                                ctx.payment_floor_refs,
-                                                ctx.current_target.as_str(),
-                                                browser_floor_refs(snap_res.as_ref().unwrap()),
-                                            );
-                                            // A stale ref means the page genuinely changed under us —
-                                            // this recovery snapshot is a real fresh observation of
-                                            // THIS target, so treat it like an explicit
-                                            // browser_snapshot: refresh focus AND clear the robust flag.
-                                            browser_set_target_focus(
-                                                ctx.payment_context_by_target,
-                                                ctx.current_target.as_str(),
-                                                browser_focus_payment_context(
-                                                    snap_res.as_ref().unwrap(),
-                                                ),
-                                            );
-                                            browser_clear_target_acted_floored(
-                                                ctx.payment_context_by_target,
-                                                ctx.current_target.as_str(),
-                                            );
-                                            let metrics = browser_observation_metrics(
-                                                snap_res.as_ref().unwrap(),
-                                                vec!["snapshot".to_string()],
-                                                "stale_ref_recovered",
-                                            );
-                                            ctx.journal.record(browser_protocol_journal_event(
-                                                call_id,
-                                                "stale_ref_recovery_observation",
-                                                &metrics,
-                                            ));
-                                            push_browser_step(
-                                                browser_protocol_event_summary(
-                                                    call_id,
-                                                    "stale_ref_recovery_observation",
-                                                    metrics,
-                                                ),
-                                                "done",
-                                            );
-                                            Ok(stale_ref_recovery_message(
-                                                args.get("ref").and_then(|v| v.as_str()),
-                                                &snap,
-                                            ))
                                         }
                                     }
-                                    (_, restored) => {
-                                        *browser_session = restored;
-                                        Err(format!(
-                                            "Action failed: {error}{}",
-                                            browser_act_error_hint(&error)
-                                        ))
-                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            "browser_screenshot" => {
-                if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                    if !t.trim().is_empty() {
+                "browser_screenshot" => {
+                    if let Some(t) = args.get("target").and_then(|v| v.as_str())
+                        && !t.trim().is_empty()
+                    {
                         *ctx.current_target = t.to_string();
                     }
-                }
-                let full_page = args
-                    .get("full_page")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                let marks = args.get("marks").and_then(|v| v.as_bool()).unwrap_or(false);
-                let _ = emit_stream_event(
-                    ctx.tx,
-                    GenerateStreamEvent::Delta {
-                        text: "‹‹ACT››📸 Capturing a screenshot‹‹/ACT››".to_string(),
-                    },
-                )
-                .await;
-                let file_name = format!("chat_shot_{}.png", uuid::Uuid::new_v4().simple());
-                let guard = browse_web_lock().lock().await;
-                let (client_back, shot_res) = chat_browser_call_bounded(
-                    client,
-                    BrowserMethod::Screenshot,
-                    serde_json::json!({
-                        "target_id": ctx.current_target.as_str(),
-                        "file_name": file_name,
-                        "full_page": full_page,
-                        "labels": marks,
-                    }),
-                )
-                .await;
-                drop(guard);
-                *browser_session = client_back;
-                match shot_res {
-                    Ok(value) => {
-                        let path = value
-                            .get("path")
-                            .and_then(|p| p.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        // Set-of-marks legend: map each numbered badge
-                        // in the image back to the element's ref so the
-                        // model can act precisely (browser_act ref=eN).
-                        let legend = value
-                            .get("marks")
-                            .and_then(|m| m.as_array())
-                            .map(|entries| {
-                                let mut text = String::from(
-                                    "\nNumbered elements in the screenshot \
-(number = element):",
-                                );
-                                for entry in entries {
-                                    let mark = entry
-                                        .get("mark")
-                                        .and_then(|v| v.as_i64())
-                                        .unwrap_or_default();
-                                    let role =
-                                        entry.get("role").and_then(|v| v.as_str()).unwrap_or("");
-                                    let name =
-                                        entry.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                                    let ref_id =
-                                        entry.get("ref").and_then(|v| v.as_str()).unwrap_or("");
-                                    text.push_str(&format!(
-                                        "\n{mark} = {role} \"{name}\" [ref={ref_id}]"
-                                    ));
-                                }
-                                text
-                            })
-                            .unwrap_or_default();
-                        // Read + base64 the PNG. Skip the image (text
-                        // note only) if missing or too large (~1.5MB
-                        // encoded ≈ 1.1MB raw).
-                        match std::fs::read(&path) {
-                            Ok(bytes) if bytes.len() <= 1_100_000 => {
-                                let encoded =
-                                    base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                let dataurl = format!("data:image/png;base64,{encoded}");
-                                *ctx.pending_browser_image = Some(dataurl);
-                                push_browser_step("screenshot".to_string(), "done");
-                                Ok(format!(
-                                    "Screenshot captured (see the image attached \
-below).{legend}"
-                                ))
-                            }
-                            Ok(bytes) => {
-                                push_browser_step("screenshot".to_string(), "done");
-                                Ok(format!(
-                                    "Screenshot captured but too large for \
-the preview ({} bytes). Proceed with the text snapshot.",
-                                    bytes.len()
-                                ))
-                            }
-                            Err(error) => {
-                                push_browser_step("screenshot".to_string(), "error");
-                                Ok(format!(
-                                    "Screenshot not readable from disk: {error}. \
-Use the text snapshot."
-                                ))
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        push_browser_step("screenshot".to_string(), "error");
-                        Err(format!("Screenshot failed: {error}"))
-                    }
-                }
-            }
-            "browser_tabs" => {
-                let _ = emit_stream_event(
-                    ctx.tx,
-                    GenerateStreamEvent::Delta {
-                        text: "‹‹ACT››🗂️ Listing tabs‹‹/ACT››".to_string(),
-                    },
-                )
-                .await;
-                let guard = browse_web_lock().lock().await;
-                let (client_back, tabs_res) =
-                    chat_browser_call_bounded(client, BrowserMethod::Tabs, serde_json::json!({}))
-                        .await;
-                drop(guard);
-                *browser_session = client_back;
-                match tabs_res {
-                    Ok(value) => {
-                        // Sidecar shape: { tabs: [ { targetId, url,
-                        // label?, title? } ] }. Parse defensively in
-                        // case it's a bare array or uses target_id/id.
-                        let list = value
-                            .get("tabs")
-                            .and_then(|t| t.as_array())
-                            .or_else(|| value.as_array())
-                            .cloned()
-                            .unwrap_or_default();
-                        let mut lines: Vec<String> = Vec::new();
-                        for tab in &list {
-                            let id = tab
-                                .get("targetId")
-                                .or_else(|| tab.get("target_id"))
-                                .or_else(|| tab.get("id"))
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("?");
-                            let url = tab.get("url").and_then(|v| v.as_str()).unwrap_or("");
-                            let title = tab
-                                .get("title")
-                                .or_else(|| tab.get("label"))
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            let mut line = format!("- {id}");
-                            if !url.is_empty() {
-                                line.push_str(&format!(" | {url}"));
-                            }
-                            if !title.is_empty() {
-                                line.push_str(&format!(" | {title}"));
-                            }
-                            lines.push(line);
-                        }
-                        push_browser_step("tabs".to_string(), "done");
-                        if lines.is_empty() {
-                            Ok("No tabs open.".to_string())
-                        } else {
-                            Ok(format!("Open tabs:\n{}", lines.join("\n")))
-                        }
-                    }
-                    Err(error) => {
-                        push_browser_step("tabs".to_string(), "error");
-                        Err(format!("Listing tabs failed: {error}"))
-                    }
-                }
-            }
-            "browser_dialog" => {
-                // Native alert/confirm/prompt blocks the page until
-                // answered. In read-only (channel) turns we only allow
-                // DISMISS, never accept (an accept could confirm an
-                // action). The dialog message is returned so the model
-                // sees what it answered.
-                let accept = !ctx.read_only
-                    && args
-                        .get("accept")
+                    let full_page = args
+                        .get("full_page")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
-                let prompt_text = args
-                    .get("prompt_text")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let _ = emit_stream_event(
-                    ctx.tx,
-                    GenerateStreamEvent::Delta {
-                        text: format!(
-                            "‹‹ACT››💬 Dialog: {}‹‹/ACT››",
-                            if accept { "confirming" } else { "cancelling" }
-                        ),
-                    },
-                )
-                .await;
-                let guard = browse_web_lock().lock().await;
-                let (client_back, dialog_res) = chat_browser_call_bounded(
-                    client,
-                    BrowserMethod::RespondDialog,
-                    serde_json::json!({
-                        "target_id": ctx.current_target.as_str(),
-                        "accept": accept,
-                        "promptText": prompt_text,
-                        "timeoutMs": 5_000,
-                    }),
-                )
-                .await;
-                drop(guard);
-                *browser_session = client_back;
-                match dialog_res {
-                    Ok(value) => {
-                        let msg = value.get("message").and_then(|m| m.as_str()).unwrap_or("");
-                        push_browser_step("dialog".to_string(), "done");
-                        Ok(format!(
-                            "Dialog {} (message: \"{msg}\"). Re-read the page with browser_snapshot.",
-                            if accept { "confirmed" } else { "cancelled" }
-                        ))
-                    }
-                    Err(error) => {
-                        push_browser_step("dialog".to_string(), "error");
-                        Err(format!("No dialog to handle or error: {error}"))
+                    let marks = args.get("marks").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: "‹‹ACT››📸 Capturing a screenshot‹‹/ACT››".to_string(),
+                        },
+                    )
+                    .await;
+                    let file_name = format!("chat_shot_{}.png", uuid::Uuid::new_v4().simple());
+                    let guard = browse_web_lock().lock().await;
+                    let (client_back, shot_res) = chat_browser_call_bounded(
+                        client,
+                        BrowserMethod::Screenshot,
+                        serde_json::json!({
+                            "target_id": ctx.current_target.as_str(),
+                            "file_name": file_name,
+                            "full_page": full_page,
+                            "labels": marks,
+                        }),
+                    )
+                    .await;
+                    drop(guard);
+                    *browser_session = client_back;
+                    match shot_res {
+                        Ok(value) => {
+                            let path = value
+                                .get("path")
+                                .and_then(|p| p.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            // Set-of-marks legend: map each numbered badge
+                            // in the image back to the element's ref so the
+                            // model can act precisely (browser_act ref=eN).
+                            let legend = value
+                                .get("marks")
+                                .and_then(|m| m.as_array())
+                                .map(|entries| {
+                                    let mut text = String::from(
+                                        "\nNumbered elements in the screenshot \
+(number = element):",
+                                    );
+                                    for entry in entries {
+                                        let mark = entry
+                                            .get("mark")
+                                            .and_then(|v| v.as_i64())
+                                            .unwrap_or_default();
+                                        let role = entry
+                                            .get("role")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        let name = entry
+                                            .get("name")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        let ref_id =
+                                            entry.get("ref").and_then(|v| v.as_str()).unwrap_or("");
+                                        text.push_str(&format!(
+                                            "\n{mark} = {role} \"{name}\" [ref={ref_id}]"
+                                        ));
+                                    }
+                                    text
+                                })
+                                .unwrap_or_default();
+                            // Read + base64 the PNG. Skip the image (text
+                            // note only) if missing or too large (~1.5MB
+                            // encoded ≈ 1.1MB raw).
+                            match std::fs::read(&path) {
+                                Ok(bytes) if bytes.len() <= 1_100_000 => {
+                                    let encoded =
+                                        base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                    let dataurl = format!("data:image/png;base64,{encoded}");
+                                    *ctx.pending_browser_image = Some(dataurl);
+                                    push_browser_step("screenshot".to_string(), "done");
+                                    Ok(format!(
+                                        "Screenshot captured (see the image attached \
+below).{legend}"
+                                    ))
+                                }
+                                Ok(bytes) => {
+                                    push_browser_step("screenshot".to_string(), "done");
+                                    Ok(format!(
+                                        "Screenshot captured but too large for \
+the preview ({} bytes). Proceed with the text snapshot.",
+                                        bytes.len()
+                                    ))
+                                }
+                                Err(error) => {
+                                    push_browser_step("screenshot".to_string(), "error");
+                                    Ok(format!(
+                                        "Screenshot not readable from disk: {error}. \
+Use the text snapshot."
+                                    ))
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            push_browser_step("screenshot".to_string(), "error");
+                            Err(format!("Screenshot failed: {error}"))
+                        }
                     }
                 }
-            }
-            _ => Err(format!("Unknown browser tool: {name}")),
+                "browser_tabs" => {
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: "‹‹ACT››🗂️ Listing tabs‹‹/ACT››".to_string(),
+                        },
+                    )
+                    .await;
+                    let guard = browse_web_lock().lock().await;
+                    let (client_back, tabs_res) = chat_browser_call_bounded(
+                        client,
+                        BrowserMethod::Tabs,
+                        serde_json::json!({}),
+                    )
+                    .await;
+                    drop(guard);
+                    *browser_session = client_back;
+                    match tabs_res {
+                        Ok(value) => {
+                            // Sidecar shape: { tabs: [ { targetId, url,
+                            // label?, title? } ] }. Parse defensively in
+                            // case it's a bare array or uses target_id/id.
+                            let list = value
+                                .get("tabs")
+                                .and_then(|t| t.as_array())
+                                .or_else(|| value.as_array())
+                                .cloned()
+                                .unwrap_or_default();
+                            let mut lines: Vec<String> = Vec::new();
+                            for tab in &list {
+                                let id = tab
+                                    .get("targetId")
+                                    .or_else(|| tab.get("target_id"))
+                                    .or_else(|| tab.get("id"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("?");
+                                let url = tab.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                                let title = tab
+                                    .get("title")
+                                    .or_else(|| tab.get("label"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                let mut line = format!("- {id}");
+                                if !url.is_empty() {
+                                    line.push_str(&format!(" | {url}"));
+                                }
+                                if !title.is_empty() {
+                                    line.push_str(&format!(" | {title}"));
+                                }
+                                lines.push(line);
+                            }
+                            push_browser_step("tabs".to_string(), "done");
+                            if lines.is_empty() {
+                                Ok("No tabs open.".to_string())
+                            } else {
+                                Ok(format!("Open tabs:\n{}", lines.join("\n")))
+                            }
+                        }
+                        Err(error) => {
+                            push_browser_step("tabs".to_string(), "error");
+                            Err(format!("Listing tabs failed: {error}"))
+                        }
+                    }
+                }
+                "browser_dialog" => {
+                    // Native alert/confirm/prompt blocks the page until
+                    // answered. In read-only (channel) turns we only allow
+                    // DISMISS, never accept (an accept could confirm an
+                    // action). The dialog message is returned so the model
+                    // sees what it answered.
+                    let accept = !ctx.read_only
+                        && args
+                            .get("accept")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                    let prompt_text = args
+                        .get("prompt_text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: format!(
+                                "‹‹ACT››💬 Dialog: {}‹‹/ACT››",
+                                if accept { "confirming" } else { "cancelling" }
+                            ),
+                        },
+                    )
+                    .await;
+                    let guard = browse_web_lock().lock().await;
+                    let (client_back, dialog_res) = chat_browser_call_bounded(
+                        client,
+                        BrowserMethod::RespondDialog,
+                        serde_json::json!({
+                            "target_id": ctx.current_target.as_str(),
+                            "accept": accept,
+                            "promptText": prompt_text,
+                            "timeoutMs": 5_000,
+                        }),
+                    )
+                    .await;
+                    drop(guard);
+                    *browser_session = client_back;
+                    match dialog_res {
+                        Ok(value) => {
+                            let msg = value.get("message").and_then(|m| m.as_str()).unwrap_or("");
+                            push_browser_step("dialog".to_string(), "done");
+                            Ok(format!(
+                                "Dialog {} (message: \"{msg}\"). Re-read the page with browser_snapshot.",
+                                if accept { "confirmed" } else { "cancelled" }
+                            ))
+                        }
+                        Err(error) => {
+                            push_browser_step("dialog".to_string(), "error");
+                            Err(format!("No dialog to handle or error: {error}"))
+                        }
+                    }
+                }
+                _ => Err(format!("Unknown browser tool: {name}")),
+            },
         }
-    }
     };
     // D2 fallback for arms that set no explicit hint (navigate / snapshot / tabs / dialog /
     // screenshot): the `Result` VARIANT is itself a machine signal — an errored action is no
@@ -24599,6 +24611,7 @@ fn templated_document_outcome(
 /// drop the binding and let the retry fall back to BM25 — the regression S2 closes). Chosen
 /// over string-sniffing `result` (the message text is user-facing prose, not a status
 /// contract).
+#[allow(clippy::too_many_arguments)]
 async fn make_templated_document(
     ctx: &ChatToolCtx<'_>,
     append_output: &mut Vec<String>,
@@ -24973,10 +24986,10 @@ available tools (for data from the web use the browser: browser_navigate on the 
                 // skill's files are always synced before running.
                 let sid = skill_id.clone().or_else(|| skill_id_from_command(&command));
                 let outcome = tokio::task::spawn_blocking(move || {
-                    if let Some(id) = sid.as_deref() {
-                        if let Ok(dir) = skills_dir() {
-                            sandbox::sync_skill(&dir.join(id), id);
-                        }
+                    if let Some(id) = sid.as_deref()
+                        && let Ok(dir) = skills_dir()
+                    {
+                        sandbox::sync_skill(&dir.join(id), id);
                     }
                     sandbox::run_command(&cmd, sid.as_deref())
                 })
@@ -25360,10 +25373,10 @@ available tools (for data from the web use the browser: browser_navigate on the 
         // S2 T4: the thread's deterministic routing binding (if any) OWNS `template_ref` —
         // merge it into the tool-call args before anything downstream reads them, so the
         // model can't lose or override the user's "Use template" choice.
-        if let Some(binding) = active_routing_binding(ctx.state, ctx.thread_id) {
-            if let Some(template_ref) = binding.args.get("template_ref").and_then(|v| v.as_str()) {
-                merge_bound_template_ref(&mut parsed, template_ref);
-            }
+        if let Some(binding) = active_routing_binding(ctx.state, ctx.thread_id)
+            && let Some(template_ref) = binding.args.get("template_ref").and_then(|v| v.as_str())
+        {
+            merge_bound_template_ref(&mut parsed, template_ref);
         }
         let brief = parsed
             .get("brief")
@@ -25512,10 +25525,10 @@ available tools (for data from the web use the browser: browser_navigate on the 
                     // eyebrow refinable) so the generated deck matches the preview.
                     // Fail-open when the template is not a bundled presentation pack or
                     // its example.json is unreadable.
-                    if let Some(pack) = deck_template_pack(catalog_template.as_ref()) {
-                        if let Ok(example) = document_content::load_pack_example(pack) {
-                            apply_deck_template_chrome(&mut deck, &example);
-                        }
+                    if let Some(pack) = deck_template_pack(catalog_template.as_ref())
+                        && let Ok(example) = document_content::load_pack_example(pack)
+                    {
+                        apply_deck_template_chrome(&mut deck, &example);
                     }
                     let quality_issues = apply_deck_quality_guardrails(&mut deck);
                     if !quality_issues.is_empty() {
@@ -25733,10 +25746,10 @@ available tools (for data from the web use the browser: browser_navigate on the 
         // S2 T4: same deterministic-binding merge as make_deck above — the bound
         // `template_ref` wins over whatever the model put (or omitted) in `args`, and
         // `document_generation_options` below reads it via `deliverable_template_ref`.
-        if let Some(binding) = active_routing_binding(ctx.state, ctx.thread_id) {
-            if let Some(template_ref) = binding.args.get("template_ref").and_then(|v| v.as_str()) {
-                merge_bound_template_ref(&mut parsed, template_ref);
-            }
+        if let Some(binding) = active_routing_binding(ctx.state, ctx.thread_id)
+            && let Some(template_ref) = binding.args.get("template_ref").and_then(|v| v.as_str())
+        {
+            merge_bound_template_ref(&mut parsed, template_ref);
         }
         let brief = parsed
             .get("brief")
@@ -26451,11 +26464,10 @@ an uncertain date.",
                 discovered_entries.push(entry);
             }
         }
-        if ctx.tool_trace.len() < 20 {
-            if let Some(trace_line) = capability_discovery_trace_line(&intent, &discovered_entries)
-            {
-                effects.trace.push(trace_line);
-            }
+        if ctx.tool_trace.len() < 20
+            && let Some(trace_line) = capability_discovery_trace_line(&intent, &discovered_entries)
+        {
+            effects.trace.push(trace_line);
         }
         if lines.is_empty() {
             if withheld > 0 {
@@ -27353,24 +27365,24 @@ fn tool_effect_class(
     } else if matches!(
         name,
         "create_artifact"
-                | "generate_image"
-                | "render_deck"
-                | "make_deck"
-                | "make_document"
-                | "save_artifact"
+            | "generate_image"
+            | "render_deck"
+            | "make_deck"
+            | "make_document"
+            | "save_artifact"
     ) {
         EffectClass::ArtifactCreation
     } else if matches!(
         name,
         "write_file"
-                | "edit_file"
-                | "apply_patch"
-                | "run_in_project"
-                | "run_in_sandbox"
-                | "customize_addon"
-                | "create_skill"
-                | "record_decision"
-                | "forget_memory"
+            | "edit_file"
+            | "apply_patch"
+            | "run_in_project"
+            | "run_in_sandbox"
+            | "customize_addon"
+            | "create_skill"
+            | "record_decision"
+            | "forget_memory"
     ) {
         EffectClass::FilesystemWrite
     } else if effectful_tool_name(name, composio_writes) {
@@ -27647,17 +27659,16 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             turn_trace: self.turn_trace,
             active_sensitive,
         };
-        let (result, effects) = execute_chat_tool(&ctx, name, &args_raw, call_id).await;
+        let (result, effects) = execute_chat_tool(&ctx, name, args_raw, call_id).await;
         // S2 T4: `effects.clear_routing_binding` is a gateway-side signal the engine-safe
         // `LoopState::apply_effects` can't act on (it has no `ChatStore` access) — this is
         // the gateway seam that DOES, right after the call that set it, before the flag
         // travels any further. Fail-open: no thread_id → nothing to clear.
-        if effects.clear_routing_binding {
-            if let Some(thread_id) = self.thread_id {
-                if let Ok(store) = lock_store(self.state) {
-                    let _ = store.clear_thread_routing_binding(thread_id);
-                }
-            }
+        if effects.clear_routing_binding
+            && let Some(thread_id) = self.thread_id
+            && let Ok(store) = lock_store(self.state)
+        {
+            let _ = store.clear_thread_routing_binding(thread_id);
         }
         if let Some((turn_id, idempotency_key)) = receipt {
             let result_json =
@@ -27778,37 +27789,35 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
         // threaded separately (its Cell/RefCell would make the ctx non-`Sync`). ADR 0025 folds this
         // whole ctx into a recursive `browse(goal)` and the seam goes away.
         let mut outcome_hint: Option<local_first_engine::contract::ToolOutcomeHint> = None;
-        let mut bctx = BrowserToolCtx {
-            browser_used: &mut ls.browser_used,
-            last_snapshot: &mut self.last_snapshot,
-            payment_floor_refs: &mut self.last_payment_floor_refs,
-            payment_context_by_target: &mut self.payment_context_by_target,
-            pending_browser_image: &mut ls.pending_browser_image,
-            browser_tool_call_ids: &mut ls.browser_tool_call_ids,
-            current_target: &mut self.current_target,
-            opened_targets: &mut self.opened_targets,
-            nav_failures: &mut self.nav_failures,
-            state: self.state,
-            tx: self.tx,
-            thread_id: self.thread_id,
-            prompt: self.prompt,
-            read_only: self.read_only,
-            channel_owner: self.channel_owner,
-            journal: &self.journal,
-            outcome_hint: &mut outcome_hint,
+        let text = {
+            let mut bctx = BrowserToolCtx {
+                browser_used: &mut ls.browser_used,
+                last_snapshot: &mut self.last_snapshot,
+                payment_floor_refs: &mut self.last_payment_floor_refs,
+                payment_context_by_target: &mut self.payment_context_by_target,
+                pending_browser_image: &mut ls.pending_browser_image,
+                browser_tool_call_ids: &mut ls.browser_tool_call_ids,
+                current_target: &mut self.current_target,
+                opened_targets: &mut self.opened_targets,
+                nav_failures: &mut self.nav_failures,
+                state: self.state,
+                tx: self.tx,
+                thread_id: self.thread_id,
+                prompt: self.prompt,
+                read_only: self.read_only,
+                channel_owner: self.channel_owner,
+                journal: &self.journal,
+                outcome_hint: &mut outcome_hint,
+            };
+            execute_browser_tool(
+                &mut bctx,
+                &mut self.browser_session,
+                name,
+                args_raw,
+                call_id,
+            )
+            .await
         };
-        // D1/D2: the act/navigate arms write the machine progress hint into `outcome_hint` (via
-        // ctx), computed from the sidecar's signals — never re-derived from the result prose. The
-        // neutral read-only tools leave it None → Success (they don't stall a browse).
-        let text = execute_browser_tool(
-            &mut bctx,
-            &mut self.browser_session,
-            name,
-            args_raw,
-            call_id,
-        )
-        .await;
-        drop(bctx);
         (
             text,
             outcome_hint.unwrap_or(local_first_engine::contract::ToolOutcomeHint::Success),
@@ -28697,10 +28706,10 @@ async fn stream_chat_via_openai(
     // recall, extractor). Uses a dedicated memory scope — NOT the global active
     // workspace — so Composio's entity and the user's selected workspace are untouched.
     if let Some(tid) = request.thread_id.as_deref() {
-        if let Ok(store) = lock_store(state) {
-            if let Ok(ws) = store.workspace_for_thread(tid) {
-                set_memory_workspace(&ws);
-            }
+        if let Ok(store) = lock_store(state)
+            && let Ok(ws) = store.workspace_for_thread(tid)
+        {
+            set_memory_workspace(&ws);
         }
     } else {
         set_memory_workspace("");
@@ -28969,12 +28978,12 @@ files for questions the map or history already answer."
     };
     composio_writes.extend(mcp_catalog.writes.iter().cloned());
     for schema in &mcp_catalog.schemas {
-        if let Some(f) = schema.get("function") {
-            if let Some(name) = f.get("name").and_then(|n| n.as_str()) {
-                let desc = f.get("description").and_then(|d| d.as_str()).unwrap_or("");
-                let haystack = format!("{name} {desc}").to_lowercase();
-                catalog_index.push((name.to_string(), haystack, schema.clone()));
-            }
+        if let Some(f) = schema.get("function")
+            && let Some(name) = f.get("name").and_then(|n| n.as_str())
+        {
+            let desc = f.get("description").and_then(|d| d.as_str()).unwrap_or("");
+            let haystack = format!("{name} {desc}").to_lowercase();
+            catalog_index.push((name.to_string(), haystack, schema.clone()));
         }
     }
     // `send_message` is a side-effecting action → route it through the same write-confirm
@@ -29209,7 +29218,7 @@ save/export a file to a folder, call save_artifact(file, destination)."
         let episodes = {
             let facade = memory_facade(state);
             let user = gateway_memory_user_id();
-            episode_texts_by_handles(&facade, &user, &cx.handles)
+            episode_texts_by_handles(facade, &user, &cx.handles)
         };
         if episodes.is_empty() {
             system
@@ -29263,10 +29272,8 @@ save/export a file to a folder, call save_artifact(file, destination)."
             // ordered_blocks() = [profile, objective, brief, recent_work] — stesso
             // ordine dell'assemblaggio inline qui sotto. Mantiene la parità.
             let mut system = system;
-            for block in pack.ordered_blocks() {
-                if let Some(block) = block {
-                    system = format!("{system}\n\n{block}");
-                }
+            for block in pack.ordered_blocks().into_iter().flatten() {
+                system = format!("{system}\n\n{block}");
             }
             system
         } else {
@@ -29312,11 +29319,11 @@ save/export a file to a folder, call save_artifact(file, destination)."
             };
             // Recent work (always-on): the last commits, so a new conversation resumes the
             // thread of what was just being done instead of starting cold.
-            let system = match recent_work_block(state) {
+
+            match recent_work_block(state) {
                 Some(block) => format!("{system}\n\n{block}"),
                 None => system,
-            };
-            system
+            }
         };
         let thread_memory = request
             .thread_id
@@ -29377,24 +29384,15 @@ normal answers."
                     local_first_memory::embed_query(embedding.as_ref(), &request.prompt).await;
                 let block = {
                     let facade = memory_facade(state);
-                    let graph_context: Option<
-                        &(
-                             dyn Fn(
-                            &local_first_memory::MemoryFacade,
-                            &MemoryUserId,
-                            &MemoryWorkspaceId,
-                            &str,
-                        ) -> Option<String>
-                                 + Sync
-                         ),
-                    > = Some(&|facade, user, workspace, q| {
-                        if let Some(workflow) =
-                            workflow_status_context_for_query(facade, user, workspace, q)
-                        {
-                            return Some(workflow);
-                        }
-                        artifact_provenance_context_for_query(facade, user, workspace, q)
-                    });
+                    let graph_context: Option<&local_first_memory::GraphContextHook<'_>> =
+                        Some(&|facade, user, workspace, q| {
+                            if let Some(workflow) =
+                                workflow_status_context_for_query(facade, user, workspace, q)
+                            {
+                                return Some(workflow);
+                            }
+                            artifact_provenance_context_for_query(facade, user, workspace, q)
+                        });
                     recall_pack_on_facade(
                         facade,
                         &user,
@@ -29754,10 +29752,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             .thread_id
             .as_deref()
             .is_some_and(|tid| thread_has_browser_continuation(state, tid));
-        hitl_resume::prune_cold_discovery_tools(
-            &mut base_tools,
-            !browser_continuation_available,
-        );
+        hitl_resume::prune_cold_discovery_tools(&mut base_tools, !browser_continuation_available);
     }
     // MCP servers are installed deliberately and are few, so their tools go STRAIGHT
     // into the live tool set (not deferred behind find_capability) when the count is
@@ -29811,39 +29806,19 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         }
     }
     if !read_only && objective_effect_policy.allows_mutation() {
-        capability_corpus.extend(
-            native_workflow_capability_entries()
-                .into_iter()
-                .filter(|entry| {
-                    !objective_blocks_tool(
-                        &objective_effect_policy,
-                        &entry.key,
-                        &composio_writes,
-                    )
-                }),
-        );
+        capability_corpus.extend(native_workflow_capability_entries().into_iter().filter(
+            |entry| !objective_blocks_tool(&objective_effect_policy, &entry.key, &composio_writes),
+        ));
         capability_corpus.extend(
             native_atomic_capability_entries()
                 .into_iter()
                 .filter(|entry| {
-                    !objective_blocks_tool(
-                        &objective_effect_policy,
-                        &entry.key,
-                        &composio_writes,
-                    )
+                    !objective_blocks_tool(&objective_effect_policy, &entry.key, &composio_writes)
                 }),
         );
-        capability_corpus.extend(
-            template_catalog_capability_entries()
-                .into_iter()
-                .filter(|entry| {
-                    !objective_blocks_tool(
-                        &objective_effect_policy,
-                        &entry.key,
-                        &composio_writes,
-                    )
-                }),
-        );
+        capability_corpus.extend(template_catalog_capability_entries().into_iter().filter(
+            |entry| !objective_blocks_tool(&objective_effect_policy, &entry.key, &composio_writes),
+        ));
     }
     capability_corpus.extend(
         mcp_capability_entries(&mcp_catalog.schemas)
@@ -30178,14 +30153,12 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // live; the bookkeeping is a no-op when off.
     if !resume_plan.is_empty() && plan_stall_abort_enabled() {
         let stalled = plan_stall_check_and_bump(state, thread_id.as_deref(), &resume_plan);
-        if stalled {
-            if let Some(title) = block_stalled_step(&mut resume_plan) {
-                upsert_runtime_plan_memory_from_state(state, thread_id.as_deref(), &resume_plan);
-                if verbose_debug() {
-                    eprintln!(
-                        "[plan] F4: blocked stalled step after {MAX_PLAN_STALL_RESUMES} no-progress resumes: «{title}»"
-                    );
-                }
+        if stalled && let Some(title) = block_stalled_step(&mut resume_plan) {
+            upsert_runtime_plan_memory_from_state(state, thread_id.as_deref(), &resume_plan);
+            if verbose_debug() {
+                eprintln!(
+                    "[plan] F4: blocked stalled step after {MAX_PLAN_STALL_RESUMES} no-progress resumes: «{title}»"
+                );
             }
         }
     }
@@ -30455,13 +30428,13 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         .await;
         if !canonical_broker_turn
             && let (Some(thread_id), Some(assistant_message_id)) = (
-            tail_thread.as_deref(),
-            tx.entry
-                .assistant_message_id
-                .lock()
-                .ok()
-                .and_then(|id| id.clone()),
-        )
+                tail_thread.as_deref(),
+                tx.entry
+                    .assistant_message_id
+                    .lock()
+                    .ok()
+                    .and_then(|id| id.clone()),
+            )
         {
             persist_hitl_wait_from_outcome(&tail_state, thread_id, &assistant_message_id, &outcome);
         }
@@ -30523,8 +30496,8 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         // spawn_project_graph_refresh re-extracts only if the git fingerprint changed since the last
         // build, so it catches the AGENT's writes AND the user's own editor edits (and checkout/pull),
         // while being a cheap no-op when nothing changed. Only refreshes already-mapped projects.
-        if !read_only {
-            if let Some(ws) = tail_thread
+        if !read_only
+            && let Some(ws) = tail_thread
                 .as_deref()
                 .and_then(|tid| {
                     lock_store(&tail_state)
@@ -30532,9 +30505,8 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
                         .and_then(|s| s.workspace_for_thread(tid).ok())
                 })
                 .filter(|w| !w.trim().is_empty())
-            {
-                spawn_project_graph_refresh(&tail_state, &ws);
-            }
+        {
+            spawn_project_graph_refresh(&tail_state, &ws);
         }
         // INVARIANT — nothing transient outlives its turn. This runs on EVERY exit of the turn task
         // (delivered, parked, error, abort), because the failure it prevents is not tied to any one
@@ -30587,6 +30559,7 @@ fn delivered_image_rejection_outcome(
 // ADR 0024 inc 5 (5.D1a): the agent turn's round loop + forced synthesis + post-turn
 // learn, extracted VERBATIM from the tokio::spawn body of stream_chat_via_openai. The
 // signature (the captured turn state) is what becomes engine::run_turn's interface at 5.D1c.
+#[allow(clippy::too_many_arguments)]
 async fn run_agent_rounds(
     ls: local_first_engine::LoopState,
     tx: &StreamSink,
@@ -30663,7 +30636,7 @@ async fn run_agent_rounds(
     usage_context.run_id = effect_run_id.clone();
     let capability_executor = GatewayCapabilityExecutor {
         state: &state_owned,
-        tx: &tx,
+        tx,
         thread_id: thread_id.as_deref(),
         read_only,
         contact_only,
@@ -30697,7 +30670,7 @@ async fn run_agent_rounds(
         opened_targets: Vec::new(),
         nav_failures: std::collections::HashMap::new(),
         state: &state_owned,
-        tx: &tx,
+        tx,
         thread_id: thread_id.as_deref(),
         prompt: &prompt,
         read_only,
@@ -30954,10 +30927,10 @@ fn save_user_prefs(prefs: &UserPrefs) -> Result<(), String> {
 /// container, via `HOMUN_TZ`). User preference wins; else the host's system zone;
 /// else "UTC" as a last resort so the value is always concrete.
 fn effective_user_tz_name() -> String {
-    if let Some(name) = load_user_prefs().timezone.filter(|s| !s.trim().is_empty()) {
-        if jiff::tz::TimeZone::get(&name).is_ok() {
-            return name;
-        }
+    if let Some(name) = load_user_prefs().timezone.filter(|s| !s.trim().is_empty())
+        && jiff::tz::TimeZone::get(&name).is_ok()
+    {
+        return name;
     }
     jiff::tz::TimeZone::system()
         .iana_name()
@@ -31043,13 +31016,13 @@ fn past_date_hint(typed: &str) -> Option<String> {
                 None
             }
         };
-        if let Some(d) = parsed {
-            if d < today {
-                return Some(format!(
-                    "\n[⚠️ warning: «{tok}» looks like a PAST date (today is {today}). If you meant \
+        if let Some(d) = parsed
+            && d < today
+        {
+            return Some(format!(
+                "\n[⚠️ warning: «{tok}» looks like a PAST date (today is {today}). If you meant \
 a future date, do NOT submit: call resolve_datetime to get the right date and re-enter it.]"
-                ));
-            }
+            ));
         }
     }
     None
@@ -31089,14 +31062,14 @@ async fn set_user_timezone(
         .filter(|s| !s.is_empty());
     // Validate the IANA name before persisting: a bad zone would silently fall
     // back to system and confuse the user.
-    if let Some(name) = trimmed {
-        if jiff::tz::TimeZone::get(name).is_err() {
-            return Err(GatewayError {
-                status: StatusCode::BAD_REQUEST,
-                code: "invalid_timezone",
-                message: format!("Invalid IANA timezone: «{name}»"),
-            });
-        }
+    if let Some(name) = trimmed
+        && jiff::tz::TimeZone::get(name).is_err()
+    {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "invalid_timezone",
+            message: format!("Invalid IANA timezone: «{name}»"),
+        });
     }
     // Preserve other prefs (approval routing) — only update the timezone field.
     let mut prefs = load_user_prefs();
@@ -31172,14 +31145,14 @@ async fn set_user_language(
         .map(str::trim)
         .map(str::to_lowercase)
         .filter(|s| !s.is_empty());
-    if let Some(ref c) = code {
-        if !is_supported_language(c) {
-            return Err(GatewayError {
-                status: StatusCode::BAD_REQUEST,
-                code: "invalid_language",
-                message: format!("Unsupported language code: «{c}»"),
-            });
-        }
+    if let Some(ref c) = code
+        && !is_supported_language(c)
+    {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "invalid_language",
+            message: format!("Unsupported language code: «{c}»"),
+        });
     }
     let mut prefs = load_user_prefs();
     prefs.language = code;
@@ -31642,21 +31615,21 @@ async fn channel_identities(
         _ => "Canale",
     };
     let mut out = Vec::new();
-    if let Ok(store) = lock_store(&state) {
-        if let Ok(snap) = store.threads(&base_workspace_id()) {
-            for t in snap.threads {
-                if let Some(id) = t.thread_id.strip_prefix(&prefix) {
-                    // Prefer the curated contact's name; never expose a thread title
-                    // (which may be the text of a message) as the chip label.
-                    let name = store
-                        .contact_name_for_identity(&ch, id)
-                        .ok()
-                        .flatten()
-                        .unwrap_or_else(|| channel_label.to_string());
-                    out.push(serde_json::json!({ "id": id, "name": name }));
-                    if out.len() >= 8 {
-                        break;
-                    }
+    if let Ok(store) = lock_store(&state)
+        && let Ok(snap) = store.threads(&base_workspace_id())
+    {
+        for t in snap.threads {
+            if let Some(id) = t.thread_id.strip_prefix(&prefix) {
+                // Prefer the curated contact's name; never expose a thread title
+                // (which may be the text of a message) as the chip label.
+                let name = store
+                    .contact_name_for_identity(&ch, id)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| channel_label.to_string());
+                out.push(serde_json::json!({ "id": id, "name": name }));
+                if out.len() >= 8 {
+                    break;
                 }
             }
         }
@@ -31782,10 +31755,8 @@ async fn suggestion_act(
                 .ok()
         })
         .is_some();
-    if ok {
-        if let Some(row) = row {
-            write_proactive_action_memory(&state, &row, status, feedback, req.note.as_deref());
-        }
+    if ok && let Some(row) = row {
+        write_proactive_action_memory(&state, &row, status, feedback, req.note.as_deref());
     }
     Json(serde_json::json!({ "ok": ok }))
 }
@@ -32798,11 +32769,9 @@ async fn persist_browser_checkpoint(
         let Ok(store) = state.task_store.lock() else {
             return client_back;
         };
-        let Ok(Some(objective)) = store.load_objective_contract(
-            gateway_user_id().as_str(),
-            &workspace_id,
-            thread_id,
-        ) else {
+        let Ok(Some(objective)) =
+            store.load_objective_contract(gateway_user_id().as_str(), &workspace_id, thread_id)
+        else {
             return client_back;
         };
         if objective.status != "active" {
@@ -32879,9 +32848,9 @@ async fn persist_browser_checkpoint(
                 "omitted_bounded_count": record.omitted_bounded_count,
             }),
         ));
-        if let Some(previous) = previous_secret_ref.filter(|previous| {
-            draft_secret_ref.as_deref() != Some(previous.as_str())
-        }) {
+        if let Some(previous) = previous_secret_ref
+            .filter(|previous| draft_secret_ref.as_deref() != Some(previous.as_str()))
+        {
             let _ = state.browser_checkpoint_secret_store.delete(&previous);
         }
     } else if let Some(reference) = draft_secret_ref {
@@ -32926,21 +32895,17 @@ async fn restore_browser_checkpoint(
     let Some(workspace_id) = browser_thread_workspace_id(state, thread_id) else {
         return (Some(client), None);
     };
-    let checkpoint = state
-        .task_store
-        .lock()
-        .ok()
-        .and_then(|store| {
-            store
-                .load_active_browser_checkpoint(
-                    gateway_user_id().as_str(),
-                    &workspace_id,
-                    thread_id,
-                    target_id,
-                )
-                .ok()
-                .flatten()
-        });
+    let checkpoint = state.task_store.lock().ok().and_then(|store| {
+        store
+            .load_active_browser_checkpoint(
+                gateway_user_id().as_str(),
+                &workspace_id,
+                thread_id,
+                target_id,
+            )
+            .ok()
+            .flatten()
+    });
     let Some(checkpoint) = checkpoint else {
         return (Some(client), None);
     };
@@ -32950,11 +32915,7 @@ async fn restore_browser_checkpoint(
         .and_then(|reference| {
             state
                 .browser_checkpoint_secret_store
-                .get(
-                    reference,
-                    gateway_user_id().as_str(),
-                    &workspace_id,
-                )
+                .get(reference, gateway_user_id().as_str(), &workspace_id)
                 .ok()
                 .flatten()
         })
@@ -33036,7 +32997,8 @@ async fn restore_browser_checkpoint(
         }
     };
     let draft_available = draft_payload.is_some() && tier != "adopted_live_page";
-    let draft_notice = if let Some(payload) = draft_payload.filter(|_| tier != "adopted_live_page") {
+    let draft_notice = if let Some(payload) = draft_payload.filter(|_| tier != "adopted_live_page")
+    {
         format!(
             " A safe form draft is available as draft_ref `{}`. Rehydrate only explicitly selected empty fields with browser_rehydrate. Available draft controls: {}.",
             checkpoint.checkpoint_id,
@@ -34022,15 +33984,15 @@ fn browser_contract_fingerprint(
 fn push_browser_step(label: String, status: &str) {
     eprintln!("browser-step[{status}]: {label}");
     touch_cc_activity();
-    if let Ok(mut guard) = browser_activity_cell().write() {
-        if let Some(state) = guard.as_mut() {
-            // Cap the visible log so a long run can't grow unbounded.
-            if state.steps.len() < 60 {
-                state.steps.push(BrowserStepView {
-                    label,
-                    status: status.to_string(),
-                });
-            }
+    if let Ok(mut guard) = browser_activity_cell().write()
+        && let Some(state) = guard.as_mut()
+    {
+        // Cap the visible log so a long run can't grow unbounded.
+        if state.steps.len() < 60 {
+            state.steps.push(BrowserStepView {
+                label,
+                status: status.to_string(),
+            });
         }
     }
 }
@@ -34103,11 +34065,11 @@ fn sandbox_begin(command: String, thread_id: Option<String>) {
 
 /// Attaches the output to the most recent running command and marks it done.
 fn sandbox_end(output: String) {
-    if let Ok(mut guard) = sandbox_activity_cell().write() {
-        if let Some(entry) = guard.iter_mut().rev().find(|entry| entry.running) {
-            entry.output = output.chars().take(4000).collect();
-            entry.running = false;
-        }
+    if let Ok(mut guard) = sandbox_activity_cell().write()
+        && let Some(entry) = guard.iter_mut().rev().find(|entry| entry.running)
+    {
+        entry.output = output.chars().take(4000).collect();
+        entry.running = false;
     }
 }
 
@@ -34713,12 +34675,12 @@ fn whatsapp_child() -> &'static std::sync::Mutex<Option<std::process::Child>> {
 /// restart). Port-awareness prevents double-spawning onto the same WhatsApp
 /// session (which invalidates it).
 fn whatsapp_running() -> bool {
-    if let Ok(mut guard) = whatsapp_child().lock() {
-        if let Some(child) = guard.as_mut() {
-            match child.try_wait() {
-                Ok(None) => return true,
-                _ => *guard = None,
-            }
+    if let Ok(mut guard) = whatsapp_child().lock()
+        && let Some(child) = guard.as_mut()
+    {
+        match child.try_wait() {
+            Ok(None) => return true,
+            _ => *guard = None,
         }
     }
     whatsapp_port_open()
@@ -34777,24 +34739,25 @@ async fn reconnect_channels_on_startup(state: AppState) {
         .unwrap_or_default()
         .join(".homun")
         .join("whatsapp-session.db");
-    if !whatsapp_running() && wa_session.exists() {
-        if let Some(bin) = whatsapp_bin() {
-            let mut command = std::process::Command::new(bin);
-            if let Some(path) = whatsapp_status_path() {
-                command.env("WA_STATUS_FILE", path);
-            }
-            command.env("WA_HTTP_PORT", WHATSAPP_HTTP_PORT.to_string());
-            command.env("WA_GATEWAY_URL", format!("http://127.0.0.1:{gw_port}"));
-            command.env("WA_GATEWAY_TOKEN", gw_token);
-            match command.spawn() {
-                Ok(child) => {
-                    if let Ok(mut guard) = whatsapp_child().lock() {
-                        *guard = Some(child);
-                    }
-                    eprintln!("channel/whatsapp: auto-reconnect at startup (session present)");
+    if !whatsapp_running()
+        && wa_session.exists()
+        && let Some(bin) = whatsapp_bin()
+    {
+        let mut command = std::process::Command::new(bin);
+        if let Some(path) = whatsapp_status_path() {
+            command.env("WA_STATUS_FILE", path);
+        }
+        command.env("WA_HTTP_PORT", WHATSAPP_HTTP_PORT.to_string());
+        command.env("WA_GATEWAY_URL", format!("http://127.0.0.1:{gw_port}"));
+        command.env("WA_GATEWAY_TOKEN", gw_token);
+        match command.spawn() {
+            Ok(child) => {
+                if let Ok(mut guard) = whatsapp_child().lock() {
+                    *guard = Some(child);
                 }
-                Err(error) => eprintln!("channel/whatsapp: auto-reconnect failed: {error}"),
+                eprintln!("channel/whatsapp: auto-reconnect at startup (session present)");
             }
+            Err(error) => eprintln!("channel/whatsapp: auto-reconnect failed: {error}"),
         }
     }
 
@@ -34803,10 +34766,10 @@ async fn reconnect_channels_on_startup(state: AppState) {
         .and_then(|p| fs::read_to_string(p).ok())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    if let Some(token) = tg_token {
-        if let Err(error) = ensure_telegram_sidecar(&state, &token).await {
-            eprintln!("channel/telegram: auto-reconnect failed: {error:?}");
-        }
+    if let Some(token) = tg_token
+        && let Err(error) = ensure_telegram_sidecar(&state, &token).await
+    {
+        eprintln!("channel/telegram: auto-reconnect failed: {error:?}");
     }
 }
 
@@ -34855,11 +34818,11 @@ async fn whatsapp_connect(
 }
 
 async fn whatsapp_disconnect() -> Json<serde_json::Value> {
-    if let Ok(mut guard) = whatsapp_child().lock() {
-        if let Some(mut child) = guard.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+    if let Ok(mut guard) = whatsapp_child().lock()
+        && let Some(mut child) = guard.take()
+    {
+        let _ = child.kill();
+        let _ = child.wait();
     }
     // Also kill any sidecar orphaned by a gateway restart (still on the port).
     let _ = std::process::Command::new("sh")
@@ -34949,12 +34912,12 @@ fn telegram_port_open() -> bool {
 }
 
 fn tracked_telegram_child_running() -> bool {
-    if let Ok(mut guard) = telegram_child().lock() {
-        if let Some(child) = guard.as_mut() {
-            match child.try_wait() {
-                Ok(None) => return true,
-                _ => *guard = None,
-            }
+    if let Ok(mut guard) = telegram_child().lock()
+        && let Some(child) = guard.as_mut()
+    {
+        match child.try_wait() {
+            Ok(None) => return true,
+            _ => *guard = None,
         }
     }
     false
@@ -35021,11 +34984,11 @@ async fn rebind_telegram_sidecar(state: &AppState, bot_token: &str) -> RebindRes
 }
 
 fn stop_telegram_sidecar() {
-    if let Ok(mut guard) = telegram_child().lock() {
-        if let Some(mut child) = guard.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+    if let Ok(mut guard) = telegram_child().lock()
+        && let Some(mut child) = guard.take()
+    {
+        let _ = child.kill();
+        let _ = child.wait();
     }
     let _ = std::process::Command::new("sh")
         .arg("-c")
@@ -35502,46 +35465,44 @@ async fn handle_channel_inbound(
                 && (id_matches(Some(message.sender.as_str()))
                     || id_matches(message.chat.as_deref())
                     || id_matches(message.sender_pn.as_deref())));
-        if is_self {
-            if let Some((approve, code)) = parse_approval_reply(&message.content) {
-                // Only a REAL pending code is a control reply. Otherwise this is a
-                // normal message that merely starts with No/Ok/Sì (e.g. "No, that's
-                // wrong…") and must flow to the conversation — not be answered with
-                // "Code … not valid or expired."
-                if pending_approval_exists(state, &code) {
-                    let reply = if approve {
-                        if channel == "telegram" {
-                            let _ = telegram_send_with_rebind(
-                                state,
-                                &message.sender,
-                                &approval_progress_reply(&code),
-                            )
-                            .await;
-                        } else {
-                            let _ = channel_send(
-                                state,
-                                port,
-                                &message.sender,
-                                &approval_progress_reply(&code),
-                            )
-                            .await;
-                        }
-                        execute_pending_approval(state, &code).await
-                    } else {
-                        match cancel_pending_remote_approval(state, &code) {
-                            true => format!("❌ Cancelled ({code})."),
-                            _ => format!("Code {code} not valid or expired."),
-                        }
-                    };
+        if is_self && let Some((approve, code)) = parse_approval_reply(&message.content) {
+            // Only a REAL pending code is a control reply. Otherwise this is a
+            // normal message that merely starts with No/Ok/Sì (e.g. "No, that's
+            // wrong…") and must flow to the conversation — not be answered with
+            // "Code … not valid or expired."
+            if pending_approval_exists(state, &code) {
+                let reply = if approve {
                     if channel == "telegram" {
-                        let _ = telegram_send_with_rebind(state, &message.sender, &reply).await;
+                        let _ = telegram_send_with_rebind(
+                            state,
+                            &message.sender,
+                            &approval_progress_reply(&code),
+                        )
+                        .await;
                     } else {
-                        let _ = channel_send(state, port, &message.sender, &reply).await;
+                        let _ = channel_send(
+                            state,
+                            port,
+                            &message.sender,
+                            &approval_progress_reply(&code),
+                        )
+                        .await;
                     }
-                    return Json(serde_json::json!({
-                        "action": "approval", "code": code, "approved": approve
-                    }));
+                    execute_pending_approval(state, &code).await
+                } else {
+                    match cancel_pending_remote_approval(state, &code) {
+                        true => format!("❌ Cancelled ({code})."),
+                        _ => format!("Code {code} not valid or expired."),
+                    }
+                };
+                if channel == "telegram" {
+                    let _ = telegram_send_with_rebind(state, &message.sender, &reply).await;
+                } else {
+                    let _ = channel_send(state, port, &message.sender, &reply).await;
                 }
+                return Json(serde_json::json!({
+                    "action": "approval", "code": code, "approved": approve
+                }));
             }
         }
     }
@@ -35615,18 +35576,17 @@ async fn handle_channel_inbound(
         // genuinely newer than our last thread activity are missed-while-offline.
         // Live messages carry no `ts`, so they always process.
         let watermark_thread = format!("channel_{channel}_{}", message.sender);
-        if let Ok(store) = lock_store(state) {
-            if let Ok(Some(latest)) = store.latest_message_timestamp(&watermark_thread) {
-                if ts <= latest {
-                    if let Some(message_id) = message.message_id.as_deref() {
-                        let _ = store.mark_inbound_seen(&format!("{channel}:{message_id}"));
-                    }
-                    eprintln!(
-                        "channel/{channel}: skip already-handled inbound (ts={ts} <= watermark={latest})"
-                    );
-                    return Json(serde_json::json!({ "action": "already_handled" }));
-                }
+        if let Ok(store) = lock_store(state)
+            && let Ok(Some(latest)) = store.latest_message_timestamp(&watermark_thread)
+            && ts <= latest
+        {
+            if let Some(message_id) = message.message_id.as_deref() {
+                let _ = store.mark_inbound_seen(&format!("{channel}:{message_id}"));
             }
+            eprintln!(
+                "channel/{channel}: skip already-handled inbound (ts={ts} <= watermark={latest})"
+            );
+            return Json(serde_json::json!({ "action": "already_handled" }));
         }
     }
 
@@ -36067,10 +36027,10 @@ fn contact_turn_context(
     };
     let persona_instructions = {
         let mut parts: Vec<String> = Vec::new();
-        if let Some(p) = &profile {
-            if !p.instructions.trim().is_empty() {
-                parts.push(p.instructions.trim().to_string());
-            }
+        if let Some(p) = &profile
+            && !p.instructions.trim().is_empty()
+        {
+            parts.push(p.instructions.trim().to_string());
         }
         if !contact.persona_instructions.trim().is_empty() {
             parts.push(contact.persona_instructions.trim().to_string());
@@ -36156,7 +36116,7 @@ fn backfill_mentions(state: &AppState) {
         if items.is_empty() {
             continue;
         }
-        link_memory_mentions(&facade, &user, &workspace, &items);
+        link_memory_mentions(facade, &user, &workspace, &items);
         linked_scopes += 1;
     }
     eprintln!("mentions-backfill: completed on {linked_scopes} scopes");
@@ -36193,14 +36153,14 @@ fn unify_owner_identity(state: &AppState) {
     // be unified too — collect its id so we can re-point it to person:self after.
     let mut other_contact_refs: std::collections::HashSet<String> = Default::default();
     let mut self_contact_ids: Vec<i64> = Vec::new();
-    if let Ok(store) = lock_store(state) {
-        if let Ok(contacts) = store.list_contacts() {
-            for c in contacts {
-                if c.is_self {
-                    self_contact_ids.push(c.id);
-                } else if let Some(r) = c.entity_ref {
-                    other_contact_refs.insert(r);
-                }
+    if let Ok(store) = lock_store(state)
+        && let Ok(contacts) = store.list_contacts()
+    {
+        for c in contacts {
+            if c.is_self {
+                self_contact_ids.push(c.id);
+            } else if let Some(r) = c.entity_ref {
+                other_contact_refs.insert(r);
             }
         }
     }
@@ -36473,7 +36433,7 @@ fn record_channel_message(
     let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
     let handle = contact_handle(channel, &message.sender);
     let owner_ref = if is_owner {
-        ensure_owner_self_entity(&facade, &user, &workspace, &handle, &display)
+        ensure_owner_self_entity(facade, &user, &workspace, &handle, &display)
     } else {
         None
     };
@@ -36524,7 +36484,7 @@ fn record_channel_message(
             }
             None => {
                 persist_graph(
-                    &facade,
+                    facade,
                     &user,
                     &workspace,
                     vec![ExtractedEntity {
@@ -36544,7 +36504,7 @@ fn record_channel_message(
     }
 
     store_episode(
-        &facade,
+        facade,
         &user,
         &handle,
         &format!("{label} da {display}: {}", message.content),
@@ -36626,6 +36586,7 @@ fn is_transient_store_error(error: &rusqlite::Error) -> bool {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn start_visible_conversation_turn(
     state: &AppState,
     thread_id: &str,
@@ -36978,6 +36939,7 @@ fn finalize_streamed_assistant_message(
     text: &str,
     collector: &StreamMemoryReuseCollector,
     requested_delivery_state: local_first_desktop_gateway::MessageDeliveryState,
+    persist_legacy_hitl_wait: bool,
 ) -> Result<(), String> {
     // Hold the bubble as WaitingUser only for approval-style cards (confirm/authorize).
     // CHOICES stays Delivered so it remains in model context and the thread can accept
@@ -37004,15 +36966,15 @@ fn finalize_streamed_assistant_message(
             delivery_state,
         )
         .map_err(|error| error.to_string())?;
-    // Turn Contract: Choice/Clarify free the thread but MUST leave a durable wait so the next
-    // user message resumes OpenWork (not a fresh semantic objective).
-    persist_hitl_wait_from_parts(
-        &store,
-        state,
-        thread_id,
-        message_id,
-        collector.event_parts(),
-    );
+    if persist_legacy_hitl_wait {
+        persist_legacy_hitl_wait_from_parts(
+            &store,
+            state,
+            thread_id,
+            message_id,
+            collector.event_parts(),
+        );
+    }
     publish_app_event(serde_json::json!({
         "type": "thread.updated",
         "thread_id": thread_id,
@@ -37023,7 +36985,7 @@ fn finalize_streamed_assistant_message(
 
 /// Write/replace the thread's open HITL Free wait from actionable_card event parts.
 /// Accepts CHOICES, CLARIFY, and canonical AWAIT_USER (kind=choice|clarify).
-fn persist_hitl_wait_from_parts(
+fn persist_legacy_hitl_wait_from_parts(
     store: &chat_store::ChatStore,
     state: &AppState,
     thread_id: &str,
@@ -37344,6 +37306,7 @@ async fn drain_agent_stream_into_message(
         &raw_final_text,
         &memory_reuse,
         requested_delivery_state,
+        true,
     )?;
     Ok(Some(AgentTurnResult {
         text: final_text,
@@ -37356,10 +37319,7 @@ async fn drain_agent_stream_into_message(
 fn turn_event_from_stream_value(
     value: &serde_json::Value,
 ) -> Option<(local_first_task_runtime::TurnEventKind, serde_json::Value)> {
-    let kind_str = match value.get("type").and_then(|t| t.as_str()) {
-        Some(t) => t,
-        None => return None,
-    };
+    let kind_str = value.get("type").and_then(|t| t.as_str())?;
     let (kind, payload) = match kind_str {
         "delta" => (
             local_first_task_runtime::TurnEventKind::Delta,
@@ -37594,6 +37554,7 @@ async fn drain_agent_stream_into_message_with_fanout(
             &raw_final_text,
             &memory_reuse,
             requested_delivery_state,
+            false,
         )?;
     }
     Ok(BrokerAgentTurnResult { outcome })
@@ -37672,6 +37633,7 @@ async fn run_agent_turn_into_message(
 /// Like `run_agent_turn_into_message` but additionally mirrors each stream
 /// event into turn_events (durable) + the per-turn broadcast (live) via the
 /// fan-out drain. Used by the broker executor path.
+#[allow(clippy::too_many_arguments)]
 async fn run_agent_turn_into_message_with_fanout(
     state: &AppState,
     thread_id: &str,
@@ -38569,7 +38531,7 @@ async fn artifacts_usage(State(state): State<AppState>) -> Json<ArtifactsUsage> 
             });
         }
     }
-    threads.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    threads.sort_by_key(|thread| std::cmp::Reverse(thread.bytes));
     Json(ArtifactsUsage {
         base_path: base.to_string_lossy().to_string(),
         total_bytes: total,
@@ -38922,14 +38884,12 @@ fn materialize_brand_kit(thread_slug: &str) {
             let _ = write_artifact_bytes(thread_slug, "brand.json", &bytes);
         }
     }
-    if has_logo {
-        if let Some(comma) = kit.logo_data_url.find(',') {
-            if let Ok(bytes) = base64::engine::general_purpose::STANDARD
-                .decode(kit.logo_data_url[comma + 1..].as_bytes())
-            {
-                let _ = write_artifact_bytes(thread_slug, "logo.png", &bytes);
-            }
-        }
+    if has_logo
+        && let Some(comma) = kit.logo_data_url.find(',')
+        && let Ok(bytes) = base64::engine::general_purpose::STANDARD
+            .decode(&kit.logo_data_url.as_bytes()[comma + 1..])
+    {
+        let _ = write_artifact_bytes(thread_slug, "logo.png", &bytes);
     }
 }
 
@@ -39870,14 +39830,12 @@ fn cancel_chat_turn_and_finalize_bubble(
         task_id,
         &crate::turn_executor::GatewayCancelNotify,
     )?;
-    if ok {
-        if let Some(task) = task_before_cancel {
-            set_chat_turn_message_delivery_state(
-                state,
-                task,
-                local_first_desktop_gateway::MessageDeliveryState::Cancelled,
-            );
-        }
+    if ok && let Some(task) = task_before_cancel {
+        set_chat_turn_message_delivery_state(
+            state,
+            task,
+            local_first_desktop_gateway::MessageDeliveryState::Cancelled,
+        );
     }
     Ok(ok)
 }
@@ -40407,7 +40365,7 @@ async fn send_steering_now(
         &workspace_id,
         steering_id,
         request.expected_revision,
-        |tx, input| insert_broker_turn_messages(tx, input),
+        insert_broker_turn_messages,
     );
     match result {
         Ok(promoted) => {
@@ -41241,6 +41199,7 @@ fn run_next_task_once(
         now,
     )? {
         TaskAcquireResult::Acquired(task) => {
+            let task = *task;
             if task.kind == "chat_turn" {
                 tracing::info!(
                     target: "broker::worker",
@@ -41255,17 +41214,17 @@ fn run_next_task_once(
             // Surface the wait as a turn_event so a live subscriber (or one that
             // reconnects) can show "in attesa del browser slot…". Best-effort:
             // a store error here must not block the waiting task itself.
-            if task_kind == "chat_turn" {
-                if let Ok(store) = lock_task_store(state) {
-                    let _ = store.insert_turn_event(
-                        &task_id,
-                        local_first_task_runtime::TurnEventKind::Queued,
-                        serde_json::json!({
-                            "detail": reason,
-                            "phase": "waiting_resource",
-                        }),
-                    );
-                }
+            if task_kind == "chat_turn"
+                && let Ok(store) = lock_task_store(state)
+            {
+                let _ = store.insert_turn_event(
+                    &task_id,
+                    local_first_task_runtime::TurnEventKind::Queued,
+                    serde_json::json!({
+                        "detail": reason,
+                        "phase": "waiting_resource",
+                    }),
+                );
             }
             return Ok(TaskRunBatchResponse {
                 status: "waiting_resource".to_string(),
@@ -41353,57 +41312,55 @@ fn run_next_task_once(
         worker_id.to_string(),
     );
 
-    let execution_contract = contract_for_acquired_task(&execution_task)
-        .map_err(|error| GatewayError {
+    let execution_contract =
+        contract_for_acquired_task(&execution_task).map_err(|error| GatewayError {
             status: StatusCode::BAD_GATEWAY,
             code: "execution_contract_invalid",
             message: error.message,
         })?;
     let execution_runtime = ExecutionRuntime::new(state.task_executor_registry.clone());
-    let runtime_result = match block_on_execution_runtime(execution_runtime.execute(
-        state,
-        execution_contract,
-    )) {
-        Ok(outcome) => outcome,
-        Err(error) if execution_runtime::is_lease_lost_error(&error) => {
-            if let Some(handle) = &watchdog {
-                handle.abort();
-            }
-            return Ok(lease_stolen_task_response(task_id));
-        }
-        Err(error) => {
-            if let Some(handle) = &watchdog {
-                handle.abort();
-            }
-            if !is_lease_still_ours(state, &task, worker_id)? {
+    let runtime_result =
+        match block_on_execution_runtime(execution_runtime.execute(state, execution_contract)) {
+            Ok(outcome) => outcome,
+            Err(error) if execution_runtime::is_lease_lost_error(&error) => {
+                if let Some(handle) = &watchdog {
+                    handle.abort();
+                }
                 return Ok(lease_stolen_task_response(task_id));
             }
-            handle_failed_task_run(state, &mut task, true, &error.message)?;
-            let retried = matches!(task.status, TaskStatus::Queued);
-            sync_session_for_task_run(
-                state,
-                &task,
-                if retried {
-                    SessionStatus::Paused
-                } else {
-                    SessionStatus::Failed
-                },
-                1,
-                Some(error.message.clone()),
-            )?;
-            let label = if retried { "retry_scheduled" } else { "failed" };
-            return Ok(TaskRunBatchResponse {
-                status: label.to_string(),
-                completed: 0,
-                stopped_reason: Some(error.message.clone()),
-                results: vec![TaskRunStepResponse {
+            Err(error) => {
+                if let Some(handle) = &watchdog {
+                    handle.abort();
+                }
+                if !is_lease_still_ours(state, &task, worker_id)? {
+                    return Ok(lease_stolen_task_response(task_id));
+                }
+                handle_failed_task_run(state, &mut task, true, &error.message)?;
+                let retried = matches!(task.status, TaskStatus::Queued);
+                sync_session_for_task_run(
+                    state,
+                    &task,
+                    if retried {
+                        SessionStatus::Paused
+                    } else {
+                        SessionStatus::Failed
+                    },
+                    1,
+                    Some(error.message.clone()),
+                )?;
+                let label = if retried { "retry_scheduled" } else { "failed" };
+                return Ok(TaskRunBatchResponse {
                     status: label.to_string(),
-                    task_id: Some(task_id),
-                    message: error.message,
-                }],
-            });
-        }
-    };
+                    completed: 0,
+                    stopped_reason: Some(error.message.clone()),
+                    results: vec![TaskRunStepResponse {
+                        status: label.to_string(),
+                        task_id: Some(task_id),
+                        message: error.message,
+                    }],
+                });
+            }
+        };
     // Execution no longer needs heartbeats once the canonical outcome is committed or recovered.
     if let Some(handle) = &watchdog {
         handle.abort();
@@ -41420,11 +41377,9 @@ fn run_next_task_once(
     let compatibility = runtime_result.into_compatibility();
     if task.kind == "chat_turn" {
         let (status, message, stopped_reason) = match &canonical_outcome {
-            local_first_execution_protocol::ExecutionOutcome::Completed { .. } => (
-                "completed",
-                "Chat turn completed.".to_string(),
-                None,
-            ),
+            local_first_execution_protocol::ExecutionOutcome::Completed { .. } => {
+                ("completed", "Chat turn completed.".to_string(), None)
+            }
             local_first_execution_protocol::ExecutionOutcome::Suspended { wake, .. } => (
                 "suspended",
                 format!("Chat turn suspended for {wake:?}."),
@@ -41455,8 +41410,7 @@ fn run_next_task_once(
     let outcome = compatibility.ok_or_else(|| GatewayError {
         status: StatusCode::BAD_GATEWAY,
         code: "execution_compatibility_missing",
-        message: "Legacy execution adapter returned no compatibility result."
-            .to_string(),
+        message: "Legacy execution adapter returned no compatibility result.".to_string(),
     })?;
 
     // Guard: if the lease was stolen during execution (recovery + re-acquire by
@@ -41489,11 +41443,6 @@ fn run_next_task_once(
         if let Ok(store) = lock_task_store(state) {
             let _ = store.release_resources(&task);
         }
-        set_chat_turn_message_delivery_state(
-            state,
-            &task,
-            local_first_desktop_gateway::MessageDeliveryState::Cancelled,
-        );
         surface_task_execution_outcome(state, &task_id, &outcome)?;
         return Ok(TaskRunBatchResponse {
             status: "cancelled".to_string(),
@@ -41501,30 +41450,6 @@ fn run_next_task_once(
             stopped_reason: Some("cancelled by user".to_string()),
             results: vec![TaskRunStepResponse {
                 status: "cancelled".to_string(),
-                task_id: Some(task_id),
-                message: outcome.summary,
-            }],
-        });
-    }
-    // Guard: the executor itself may have PARKED this chat turn at its finalization boundary
-    // (steering pending, model unavailable — `run_agent_rounds`'s outcome consumer already
-    // called `park_chat_turn`, which aborted the running agent_run with
-    // `parked_waiting_for_model`, released the browser-session resource, flipped the task to
-    // `Parked`, and left steering rows `pending`). `outcome.completed` is false here with no
-    // `pending_approval` — exactly the shape a genuine "no reply" also has — so without this
-    // guard the `else` branch below would run `handle_failed_task_run` with `hard_error = true`
-    // for a chat_turn, clobbering `Parked` back to `Failed` AND marking the assistant bubble
-    // `Failed` (`set_chat_turn_message_delivery_state(..., Failed)`), regressing both "the bubble
-    // stays open" and "the SAME turn resumes" invariants. Mirrors the `externally_cancelled`
-    // guard above, but now uses the canonical projection instead of another task-status read.
-    if canonical_projection.task_status == TaskStatus::Parked {
-        surface_task_execution_outcome(state, &task_id, &outcome)?;
-        return Ok(TaskRunBatchResponse {
-            status: "parked".to_string(),
-            completed: 0,
-            stopped_reason: Some("parked_waiting_for_model".to_string()),
-            results: vec![TaskRunStepResponse {
-                status: "parked".to_string(),
                 task_id: Some(task_id),
                 message: outcome.summary,
             }],
@@ -41541,12 +41466,15 @@ fn run_next_task_once(
         }
         sync_session_for_task_run(state, &task, SessionStatus::Completed, 3, None)?;
     } else if canonical_projection.task_status == TaskStatus::WaitingUserApproval {
-        let approval = outcome.pending_approval.as_ref().ok_or_else(|| GatewayError {
-            status: StatusCode::BAD_GATEWAY,
-            code: "execution_approval_projection_missing",
-            message: "Canonical approval suspension has no compatibility approval data."
-                .to_string(),
-        })?;
+        let approval = outcome
+            .pending_approval
+            .as_ref()
+            .ok_or_else(|| GatewayError {
+                status: StatusCode::BAD_GATEWAY,
+                code: "execution_approval_projection_missing",
+                message: "Canonical approval suspension has no compatibility approval data."
+                    .to_string(),
+            })?;
         request_task_executor_approval(state, &mut task, approval)?;
         set_chat_turn_message_delivery_state(
             state,
@@ -41587,10 +41515,7 @@ fn run_next_task_once(
         // Blocked = didn't meet success criteria. Retry while attempts remain, else
         // mark terminal AND (if recurring) schedule the next occurrence so a single
         // failure never silently stops the automation; notify + record on terminal.
-        // chat_turn: when attempts are exhausted, FAIL hard (not waiting_external_event,
-        // which would soft-lock the thread forever on a turn the user can't unstick).
-        let hard_error = task.kind == "chat_turn";
-        handle_failed_task_run(state, &mut task, hard_error, &reason)?;
+        handle_failed_task_run(state, &mut task, false, &reason)?;
         let retried = matches!(task.status, TaskStatus::Queued);
         sync_session_for_task_run(
             state,
@@ -41638,9 +41563,7 @@ fn lease_stolen_task_response(task_id: String) -> TaskRunBatchResponse {
     TaskRunBatchResponse {
         status: "lease_stolen".to_string(),
         completed: 0,
-        stopped_reason: Some(
-            "Task lease expired and was re-queued by another worker.".to_string(),
-        ),
+        stopped_reason: Some("Task lease expired and was re-queued by another worker.".to_string()),
         results: vec![TaskRunStepResponse {
             status: "lease_stolen".to_string(),
             task_id: Some(task_id),
@@ -41815,7 +41738,7 @@ fn task_executor_status_response(
 }
 
 enum TaskAcquireResult {
-    Acquired(TaskRecord),
+    Acquired(Box<TaskRecord>),
     WaitingResource(String),
     LeaseBusy,
 }
@@ -41900,6 +41823,7 @@ fn is_lease_still_ours(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn acquire_task_for_execution(
     state: &AppState,
     task: TaskRecord,
@@ -41939,7 +41863,7 @@ fn acquire_task_for_execution(
     governor
         .reserve(&store, &leased, worker_id)
         .map_err(GatewayError::task)?;
-    Ok(TaskAcquireResult::Acquired(leased))
+    Ok(TaskAcquireResult::Acquired(Box::new(leased)))
 }
 
 fn mark_task_completed(state: &AppState, task: &mut TaskRecord) -> Result<(), GatewayError> {
@@ -43031,6 +42955,7 @@ const BROWSER_MANAGED_TARGET: &str = "primary";
 ///   (open creates the tab on first use and re-navigates it afterwards),
 /// - other tab-scoped calls get `target_id` injected,
 /// - tabless calls (health/profiles/tabs/open/start/stop) pass through.
+///
 /// A call that already carries an explicit `target_id` is left untouched.
 fn normalize_browser_call(method: BrowserMethod, mut params: Value) -> (BrowserMethod, Value) {
     let has_target = params
@@ -43410,10 +43335,8 @@ fn execute_capability_generic(
             })?;
             let transport = build_mcp_transport(state, &connection)
                 .map_err(|message| LocalTaskExecutionError { message })?;
-            let mut facade = CapabilityFacade::new(
-                CapabilityPolicy::default(),
-                InMemoryCapabilityAudit::default(),
-            );
+            let mut facade =
+                CapabilityFacade::new(CapabilityPolicy, InMemoryCapabilityAudit::default());
             facade.register_provider(McpCapabilityProvider::new(
                 provider_id.clone(),
                 true,
@@ -43488,7 +43411,7 @@ fn authorize_managed_capability_tool(
         sensitivity: policy.sensitivity.clone(),
         input_schema: serde_json::json!({ "type": "object" }),
     };
-    let decision = CapabilityPolicy::default().tool_access(policy_context, &tool);
+    let decision = CapabilityPolicy.tool_access(policy_context, &tool);
     if decision.executable {
         Ok(())
     } else {
@@ -44546,7 +44469,7 @@ fn composio_tool_is_read(slug: &str) -> bool {
     ];
     let upper = slug.to_ascii_uppercase();
     // Drop the toolkit prefix (first token), classify the action tokens.
-    let action = upper.splitn(2, '_').nth(1).unwrap_or(&upper);
+    let action = upper.split_once('_').map(|x| x.1).unwrap_or(&upper);
     let tokens: Vec<&str> = action.split('_').collect();
     let has_write = tokens.iter().any(|t| WRITE_VERBS.contains(t));
     let has_read = tokens.iter().any(|t| READ_VERBS.contains(t));
@@ -44668,12 +44591,11 @@ fn composio_catalog_invalidate() {
 /// 60s); `composio_catalog_invalidate()` clears it on connect/link/disconnect for immediacy.
 fn composio_chat_tools_cached(state: &AppState, cap: usize) -> ComposioChatTools {
     let now = std::time::Instant::now();
-    if let Ok(cache) = composio_catalog_cache().lock() {
-        if let Some((stamped, tools)) = cache.get(&cap) {
-            if now.duration_since(*stamped) < composio_catalog_ttl() {
-                return tools.clone();
-            }
-        }
+    if let Ok(cache) = composio_catalog_cache().lock()
+        && let Some((stamped, tools)) = cache.get(&cap)
+        && now.duration_since(*stamped) < composio_catalog_ttl()
+    {
+        return tools.clone();
     }
     let fresh = composio_chat_tools(state, cap);
     if let Ok(mut cache) = composio_catalog_cache().lock() {
@@ -44898,10 +44820,7 @@ fn run_mcp_chat_tool(
     provider
         .initialize("2024-11-05")
         .map_err(|error| format!("handshake MCP: {error}"))?;
-    let mut facade = CapabilityFacade::new(
-        CapabilityPolicy::default(),
-        InMemoryCapabilityAudit::default(),
-    );
+    let mut facade = CapabilityFacade::new(CapabilityPolicy, InMemoryCapabilityAudit::default());
     facade.register_provider(provider);
     let call = CapabilityCall {
         provider_id: provider_id.clone(),
@@ -44969,10 +44888,10 @@ async fn suggest_capabilities(state: &AppState, need: &str) -> CapabilitySuggest
         .await
         .unwrap_or_default();
     // Refresh the skills catalog if stale, so the search below has data.
-    if let Some(path) = skills_catalog_path() {
-        if !skills_catalog::load_cache(&path).is_some_and(|c| skills_catalog::cache_is_fresh(&c)) {
-            let _ = skills_catalog::refresh_cache(&state.http, &path).await;
-        }
+    if let Some(path) = skills_catalog_path()
+        && !skills_catalog::load_cache(&path).is_some_and(|c| skills_catalog::cache_is_fresh(&c))
+    {
+        let _ = skills_catalog::refresh_cache(&state.http, &path).await;
     }
     // Skills catalog + Composio toolkits (blocking work off the runtime).
     let need_owned = need.to_string();
@@ -45431,7 +45350,7 @@ where
     {
         let user = gateway_user_id();
         let store = lock_task_store(state)?;
-        return store
+        store
             .with_transaction(|tx| {
                 let row = tx
                     .query_row(
@@ -45512,7 +45431,7 @@ where
                 }
                 Ok(())
             })
-            .map_err(|error| actionable_claim_error(error.to_string()));
+            .map_err(|error| actionable_claim_error(error.to_string()))
     }
 
     #[cfg(test)]
@@ -46071,10 +45990,8 @@ async fn deliver_remote_approval(
         return false;
     };
     let sent = dispatch_remote_approval(state, &approval).await;
-    if sent {
-        if let Ok(store) = lock_store(state) {
-            let _ = store.mark_remote_approval_dispatched(&approval.approval_id);
-        }
+    if sent && let Ok(store) = lock_store(state) {
+        let _ = store.mark_remote_approval_dispatched(&approval.approval_id);
     }
     sent
 }
@@ -46391,10 +46308,10 @@ fn composio_tool_allowed(slug: &str) -> bool {
     }
     // Server-level allow for MCP (policy B): the marker `mcp__<server>__*` waves
     // through every tool of a server the user trusted "always" once.
-    if let Some(rest) = slug.strip_prefix("mcp__") {
-        if let Some((server, _)) = rest.split_once("__") {
-            return set.contains(&format!("mcp__{server}__*"));
-        }
+    if let Some(rest) = slug.strip_prefix("mcp__")
+        && let Some((server, _)) = rest.split_once("__")
+    {
+        return set.contains(&format!("mcp__{server}__*"));
     }
     false
 }
@@ -46983,7 +46900,7 @@ fn apply_vault_pin_setup(
         .local_pin_verifier()
         .map_err(vault_store_error)?;
     let new_verifier =
-        local_pin_setup_verifier(existing.as_ref(), &request).map_err(invalid_vault_pin)?;
+        local_pin_setup_verifier(existing.as_ref(), request).map_err(invalid_vault_pin)?;
     // New security model: the master key is wrapped by the system key, NOT the
     // PIN. The PIN verifier is a reveal-only human-authorization gate stored
     // separately. So setting/changing the PIN never re-wraps the master key; it
@@ -47725,17 +47642,16 @@ fn approve_payment_checkout_request(
     let grant = payment_approval_grant_from_request(&request, &verifier)?;
     let approval_id = grant.snapshot.approval_id.clone();
     approvals.insert(approval_id.clone(), grant);
-    if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
-        if let Ok(Some(message)) = chat_store.message(thread_id, message_id) {
-            if payment_approval_marker_matches(&message.text, &request.snapshot) {
-                let rewritten = rewrite_payment_approval_to_done(
-                    &message.text,
-                    &approval_id,
-                    PAYMENT_APPROVAL_TTL_SECONDS,
-                );
-                let _ = chat_store.set_message_text(thread_id, message_id, &rewritten);
-            }
-        }
+    if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id)
+        && let Ok(Some(message)) = chat_store.message(thread_id, message_id)
+        && payment_approval_marker_matches(&message.text, &request.snapshot)
+    {
+        let rewritten = rewrite_payment_approval_to_done(
+            &message.text,
+            &approval_id,
+            PAYMENT_APPROVAL_TTL_SECONDS,
+        );
+        let _ = chat_store.set_message_text(thread_id, message_id, &rewritten);
     }
     Ok(VaultPaymentApprovalResponse {
         ok: true,
@@ -48361,7 +48277,7 @@ fn mcp_disconnect_blocking(state: &AppState, provider_id: &str) -> Result<usize,
         });
     }
     let (removed, secret_ref) = {
-        let registry = lock_capability_registry(&state)?;
+        let registry = lock_capability_registry(state)?;
         let provider = CapabilityProviderId::new(pid);
         match registry
             .provider_config(&provider)
@@ -48794,10 +48710,8 @@ fn rewrite_connect_suggest_mark(text: &str, kind: &str, item_ref: &str) -> Strin
             } else {
                 item.get("slug").and_then(|v| v.as_str()) == Some(item_ref)
             };
-            if matches {
-                if let Some(obj) = item.as_object_mut() {
-                    obj.insert("connected".to_string(), serde_json::Value::Bool(true));
-                }
+            if matches && let Some(obj) = item.as_object_mut() {
+                obj.insert("connected".to_string(), serde_json::Value::Bool(true));
             }
         }
     }
@@ -48965,14 +48879,13 @@ async fn mcp_execute(
         code: "mcp_confirmation_required",
         message: "Execute MCP writes from their matching confirmation card.".to_string(),
     })?;
-    if request.allow_server {
-        if let Some((server, _)) = request
+    if request.allow_server
+        && let Some((server, _)) = request
             .tool
             .strip_prefix("mcp__")
             .and_then(|rest| rest.split_once("__"))
-        {
-            let _ = add_composio_tool_allow(&format!("mcp__{server}__*"));
-        }
+    {
+        let _ = add_composio_tool_allow(&format!("mcp__{server}__*"));
     }
     let handle = tokio::task::spawn_blocking({
         let state = state.clone();
@@ -49148,7 +49061,7 @@ async fn composio_toolkit_auth(
             let fields = d.get("fields");
             schemes.push(serde_json::json!({
                 "mode": mode,
-                "managed": managed.iter().any(|m| *m == mode),
+                "managed": managed.contains(&mode),
                 "creation_fields": parse_composio_fields(fields, "auth_config_creation"),
                 "initiation_fields": parse_composio_fields(fields, "connected_account_initiation"),
             }));
@@ -49235,17 +49148,14 @@ fn composio_auth_config_resolve(
         // the credentials. Both were missing → 400 "Validation error". Default the redirect URI
         // to Composio's own callback when the user didn't supply one.
         let mut creds = credentials.clone();
-        if scheme == "OAUTH2" {
-            if let Some(obj) = creds.as_object_mut() {
-                if !obj.contains_key("oauth_redirect_uri") {
-                    obj.insert(
-                        "oauth_redirect_uri".to_string(),
-                        serde_json::json!(
-                            "https://backend.composio.dev/api/v3.1/toolkits/auth/callback"
-                        ),
-                    );
-                }
-            }
+        if scheme == "OAUTH2"
+            && let Some(obj) = creds.as_object_mut()
+            && !obj.contains_key("oauth_redirect_uri")
+        {
+            obj.insert(
+                "oauth_redirect_uri".to_string(),
+                serde_json::json!("https://backend.composio.dev/api/v3.1/toolkits/auth/callback"),
+            );
         }
         serde_json::json!({
             "name": format!("{toolkit_slug} (Homun)"),
@@ -49485,9 +49395,8 @@ fn composio_logo_urls() -> &'static std::sync::Mutex<std::collections::HashMap<S
 /// again (and so the icons keep working offline once seen).
 fn composio_logo_cache()
 -> &'static std::sync::Mutex<std::collections::HashMap<String, (String, Vec<u8>)>> {
-    static CELL: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<String, (String, Vec<u8>)>>,
-    > = std::sync::OnceLock::new();
+    type LogoCache = std::sync::Mutex<std::collections::HashMap<String, (String, Vec<u8>)>>;
+    static CELL: std::sync::OnceLock<LogoCache> = std::sync::OnceLock::new();
     CELL.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
@@ -50204,10 +50113,7 @@ fn brain_materialize_tasks(
     // stay out, so no send/pay/write executes without an explicit user gate.
     policy_context.allowed_actions = vec![ActionClass::Read, ActionClass::Draft];
 
-    let mut facade = CapabilityFacade::new(
-        CapabilityPolicy::default(),
-        InMemoryCapabilityAudit::default(),
-    );
+    let mut facade = CapabilityFacade::new(CapabilityPolicy, InMemoryCapabilityAudit::default());
     for (provider_id, tools) in provider_tools {
         let kind = tools
             .first()
@@ -50288,13 +50194,13 @@ fn brain_materialize_tasks(
     // them into the thread's single Local Computer session. Best-effort: a
     // linkage hiccup must not lose the materialized tasks (they just run
     // "headless" as before), so failures are logged, not propagated.
-    if !task_ids.is_empty() {
-        if let Err(error) = link_brain_tasks_to_thread(state, thread_id, goal, &task_ids) {
-            eprintln!(
-                "brain_materialize_tasks: thread linkage failed for {thread_id}: {}",
-                error.message
-            );
-        }
+    if !task_ids.is_empty()
+        && let Err(error) = link_brain_tasks_to_thread(state, thread_id, goal, &task_ids)
+    {
+        eprintln!(
+            "brain_materialize_tasks: thread linkage failed for {thread_id}: {}",
+            error.message
+        );
     }
 
     Ok(task_ids)
@@ -51377,13 +51283,14 @@ fn seed_default_skills() {
             .unwrap_or_default();
     // Migration from the old one-shot marker: treat defaults already on disk as seeded
     // (hash unknown → the migration branch below backs up before any overwrite).
-    if seeded.is_empty() && marker.exists() {
-        if let Ok(entries) = fs::read_dir(&src) {
-            for entry in entries.flatten() {
-                let id = entry.file_name().to_string_lossy().to_string();
-                if entry.path().join("SKILL.md").is_file() && dest.join(&id).exists() {
-                    seeded.entry(id).or_insert(None);
-                }
+    if seeded.is_empty()
+        && marker.exists()
+        && let Ok(entries) = fs::read_dir(&src)
+    {
+        for entry in entries.flatten() {
+            let id = entry.file_name().to_string_lossy().to_string();
+            if entry.path().join("SKILL.md").is_file() && dest.join(&id).exists() {
+                seeded.entry(id).or_insert(None);
             }
         }
     }
@@ -51673,7 +51580,7 @@ fn catalog_response(cache: &skills_catalog::CatalogCache, query: &CatalogQuery) 
         .into_iter()
         .map(|(name, count)| CategoryCount { name, count })
         .collect();
-    categories.sort_by(|a, b| b.count.cmp(&a.count));
+    categories.sort_by_key(|category| std::cmp::Reverse(category.count));
     CatalogResponse {
         total: cache.entries.len(),
         skills,
@@ -51697,10 +51604,8 @@ async fn skill_catalog(
     })?;
     let fresh =
         skills_catalog::load_cache(&path).is_some_and(|c| skills_catalog::cache_is_fresh(&c));
-    if !fresh {
-        if let Err(error) = skills_catalog::refresh_cache(&state.http, &path).await {
-            eprintln!("skill catalog refresh failed: {error}");
-        }
+    if !fresh && let Err(error) = skills_catalog::refresh_cache(&state.http, &path).await {
+        eprintln!("skill catalog refresh failed: {error}");
     }
     let cache = skills_catalog::load_cache(&path).unwrap_or(skills_catalog::CatalogCache {
         fetched_at: 0,
@@ -52250,7 +52155,7 @@ async fn install_registry_skill(
         .collect();
 
     let manifest = format!("{prefix}SKILL.md");
-    if !blobs.iter().any(|p| *p == manifest) {
+    if !blobs.contains(&manifest) {
         return Err(GatewayError {
             status: StatusCode::NOT_FOUND,
             code: "skill_manifest_missing",
@@ -52628,7 +52533,7 @@ fn active_inference_model_info() -> ActiveModelResponse {
             .or_else(|| env::var("HOMUN_INFERENCE_MODEL").ok())
             .filter(|value| !value.is_empty()),
         cloud_flag: env::var("HOMUN_INFERENCE_CLOUD")
-            .map(|value| value == "1" || value.to_ascii_lowercase() == "true")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
             .unwrap_or(false),
         context_window: env::var("HOMUN_INFERENCE_CONTEXT_WINDOW")
             .ok()
@@ -52724,25 +52629,24 @@ async fn runtime_models(
         .to_ascii_lowercase();
     let active = persisted_inference_model().or_else(|| env::var("HOMUN_INFERENCE_MODEL").ok());
     let mut available = Vec::new();
-    if let Ok(base) = env::var("HOMUN_INFERENCE_BASE_URL") {
-        if !base.is_empty() {
-            let url = format!("{}/models", base.trim_end_matches('/'));
-            let mut request = state
-                .http
-                .get(&url)
-                .timeout(std::time::Duration::from_secs(4));
-            if let Some(key) = resolve_inference_api_key() {
-                request = request.bearer_auth(key);
-            }
-            if let Ok(response) = request.send().await {
-                if let Ok(body) = response.json::<serde_json::Value>().await {
-                    if let Some(data) = body.get("data").and_then(Value::as_array) {
-                        for entry in data {
-                            if let Some(id) = entry.get("id").and_then(Value::as_str) {
-                                available.push(id.to_string());
-                            }
-                        }
-                    }
+    if let Ok(base) = env::var("HOMUN_INFERENCE_BASE_URL")
+        && !base.is_empty()
+    {
+        let url = format!("{}/models", base.trim_end_matches('/'));
+        let mut request = state
+            .http
+            .get(&url)
+            .timeout(std::time::Duration::from_secs(4));
+        if let Some(key) = resolve_inference_api_key() {
+            request = request.bearer_auth(key);
+        }
+        if let Ok(response) = request.send().await
+            && let Ok(body) = response.json::<serde_json::Value>().await
+            && let Some(data) = body.get("data").and_then(Value::as_array)
+        {
+            for entry in data {
+                if let Some(id) = entry.get("id").and_then(Value::as_str) {
+                    available.push(id.to_string());
                 }
             }
         }
@@ -54050,7 +53954,7 @@ async fn memory_dashboard(
 ) -> Result<Json<MemoryDashboard>, GatewayError> {
     let request = gateway_memory_access_request();
     let facade = memory_facade(&state);
-    let dashboard = MemoryUiReadModel::new(&facade)
+    let dashboard = MemoryUiReadModel::new(facade)
         .dashboard(&request)
         .map_err(GatewayError::memory)?;
     Ok(Json(dashboard))
@@ -54063,7 +53967,7 @@ async fn memory_export(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let facade = memory_facade(&state);
     let request = gateway_memory_access_request();
-    let dashboard = MemoryUiReadModel::new(&facade)
+    let dashboard = MemoryUiReadModel::new(facade)
         .dashboard(&request)
         .map_err(GatewayError::memory)?;
     let user = gateway_memory_user_id();
@@ -55379,12 +55283,11 @@ fn build_project_graph(
     // from ANY source (agent, the user's editor, git checkout/pull) — the authoritative
     // signal — so the graph stays in lock-step with the code.
     let current_fp = project_change_fingerprint(&root);
-    if graph_path.is_file() {
-        if let Ok(prev) = std::fs::read_to_string(&fp_path) {
-            if prev == current_fp {
-                return Ok(None); // unchanged since last extraction
-            }
-        }
+    if graph_path.is_file()
+        && let Ok(prev) = std::fs::read_to_string(&fp_path)
+        && prev == current_fp
+    {
+        return Ok(None); // unchanged since last extraction
     }
     let user = gateway_memory_user_id();
     let ws = MemoryWorkspaceId::new(workspace_id);
@@ -55444,7 +55347,7 @@ async fn project_graph_ensure(
         {
             let facade = memory_facade(&st);
             rebuild_project_brief(
-                &facade,
+                facade,
                 &gateway_memory_user_id(),
                 &MemoryWorkspaceId::new(&ws),
             );
@@ -55472,18 +55375,18 @@ async fn project_graph_subdirs(
         .and_then(|w| w.folder)
         .filter(|f| !f.trim().is_empty());
     let mut subdirs: Vec<serde_json::Value> = Vec::new();
-    if let Some(folder) = folder {
-        if let Ok(entries) = std::fs::read_dir(&folder) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if is_noise_dir(&name) || name.starts_with('.') {
-                    continue;
-                }
-                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                    let count = project_code_file_count_capped(&entry.path(), 6000);
-                    if count > 0 {
-                        subdirs.push(serde_json::json!({ "name": name, "code_files": count }));
-                    }
+    if let Some(folder) = folder
+        && let Ok(entries) = std::fs::read_dir(&folder)
+    {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if is_noise_dir(&name) || name.starts_with('.') {
+                continue;
+            }
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                let count = project_code_file_count_capped(&entry.path(), 6000);
+                if count > 0 {
+                    subdirs.push(serde_json::json!({ "name": name, "code_files": count }));
                 }
             }
         }
@@ -55676,16 +55579,15 @@ async fn memory_goals_promote(
     let facade = memory_facade(&state);
     let mut promoted = 0usize;
     for raw in &req.refs {
-        if let Ok(reference) = raw.parse::<MemoryRef>() {
-            if facade
+        if let Ok(reference) = raw.parse::<MemoryRef>()
+            && facade
                 .set_memory_type(&reference, &user, &ws, "goal")
                 .is_ok()
-            {
-                promoted += 1;
-            }
+        {
+            promoted += 1;
         }
     }
-    rebuild_project_brief(&facade, &user, &ws);
+    rebuild_project_brief(facade, &user, &ws);
     Ok(Json(serde_json::json!({ "promoted": promoted })))
 }
 
@@ -55737,7 +55639,7 @@ async fn memory_goals_add(
         })
         .map_err(|e| GatewayError::memory(e.to_string()))?;
     let _ = facade.confirm_memory(&lifecycle, &record.reference, "goal added by user");
-    rebuild_project_brief(&facade, &user, &ws);
+    rebuild_project_brief(facade, &user, &ws);
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -55864,10 +55766,10 @@ async fn memory_graph(
             .into_iter()
             .find(|workspace| workspace.id == ws.as_str())
     };
-    if let Some(workspace) = workspace_record.as_ref() {
-        if let Err(error) = upsert_workspace_root_memory_entity(&facade, workspace) {
-            eprintln!("memory graph workspace root sync failed: {error}");
-        }
+    if let Some(workspace) = workspace_record.as_ref()
+        && let Err(error) = upsert_workspace_root_memory_entity(facade, workspace)
+    {
+        eprintln!("memory graph workspace root sync failed: {error}");
     }
 
     // Root label per scope: the personal graph is "Personal", not "Project".
@@ -55969,10 +55871,11 @@ async fn memory_graph(
                 let mut detail = memory.text.clone();
                 // Rationale + rejected alternatives → detail, and a node per alternative.
                 if let Some(decision) = memory.metadata.get("decision") {
-                    if let Some(rationale) = decision.get("rationale").and_then(|r| r.as_str()) {
-                        if !rationale.is_empty() && !detail.contains(rationale) {
-                            detail.push_str(&format!("\n\nWhy: {rationale}"));
-                        }
+                    if let Some(rationale) = decision.get("rationale").and_then(|r| r.as_str())
+                        && !rationale.is_empty()
+                        && !detail.contains(rationale)
+                    {
+                        detail.push_str(&format!("\n\nWhy: {rationale}"));
                     }
                     if let Some(alts) = decision.get("alternatives").and_then(|a| a.as_array()) {
                         for alt in alts {
@@ -56253,7 +56156,7 @@ async fn memory_hygiene_suggestions(
     let ws = resolve_memory_query_scope(&state, &query);
     let facade = memory_facade(&state);
     let suggestions =
-        memory_hygiene_suggestions_for_scope(&facade, &user, &ws).map_err(GatewayError::memory)?;
+        memory_hygiene_suggestions_for_scope(facade, &user, &ws).map_err(GatewayError::memory)?;
     Ok(Json(serde_json::json!({
         "workspace": ws.as_str(),
         "suggestions": suggestions,
@@ -56289,8 +56192,8 @@ async fn memory_wiki(
     };
     // Regenerate the "Decisioni" page from current decisions so existing projects show
     // it without needing a fresh turn (idempotent).
-    rebuild_decisions_wiki(&facade, &user, &ws);
-    rebuild_status_wiki(&facade, &user, &ws);
+    rebuild_decisions_wiki(facade, &user, &ws);
+    rebuild_status_wiki(facade, &user, &ws);
     let pages = facade
         .list_wiki_pages_for_ui(&user, &ws)
         .unwrap_or_default();
@@ -56485,10 +56388,12 @@ fn contact_is_self(entity: &MemoryEntity) -> bool {
 /// before aliases were populated still resolve their channels + history.
 fn contact_handles(entity: &MemoryEntity) -> Vec<String> {
     let mut handles = entity.aliases.clone();
-    if let Some(rest) = entity.canonical_key.strip_prefix("person:") {
-        if rest != "self" && rest.contains(':') && !handles.iter().any(|h| h == rest) {
-            handles.push(rest.to_string());
-        }
+    if let Some(rest) = entity.canonical_key.strip_prefix("person:")
+        && rest != "self"
+        && rest.contains(':')
+        && !handles.iter().any(|h| h == rest)
+    {
+        handles.push(rest.to_string());
     }
     handles
 }
@@ -56704,7 +56609,7 @@ async fn contact_memories(
     let handles = contact_handles_by_ref(&state, &request.reference)?;
     let facade = memory_facade(&state);
     let user = gateway_memory_user_id();
-    Ok(Json(episode_texts_by_handles(&facade, &user, &handles)))
+    Ok(Json(episode_texts_by_handles(facade, &user, &handles)))
 }
 
 #[derive(Deserialize)]
@@ -56874,18 +56779,17 @@ async fn contacts_merge(
                     );
                 }
                 _ => {
-                    if let Ok(entities) = facade.list_entities_for_ui(&user, &workspace) {
-                        if let Some(entity) = entities
+                    if let Ok(entities) = facade.list_entities_for_ui(&user, &workspace)
+                        && let Some(entity) = entities
                             .into_iter()
                             .find(|e| e.reference.to_string() == eref)
-                        {
-                            let _ = facade.tombstone_entity(
-                                &entity.reference,
-                                &user,
-                                &workspace,
-                                "merged into contact",
-                            );
-                        }
+                    {
+                        let _ = facade.tombstone_entity(
+                            &entity.reference,
+                            &user,
+                            &workspace,
+                            "merged into contact",
+                        );
                     }
                 }
             }
@@ -56934,10 +56838,11 @@ async fn contact_create(
             code: "contact_create",
             message: error.to_string(),
         })?;
-    if let (Some(ch), Some(ident)) = (request.channel.as_deref(), request.identifier.as_deref()) {
-        if !ch.trim().is_empty() && !ident.trim().is_empty() {
-            let _ = store.add_identity(id, ch.trim(), ident.trim(), None);
-        }
+    if let (Some(ch), Some(ident)) = (request.channel.as_deref(), request.identifier.as_deref())
+        && !ch.trim().is_empty()
+        && !ident.trim().is_empty()
+    {
+        let _ = store.add_identity(id, ch.trim(), ident.trim(), None);
     }
     let contact = store
         .contact_by_id(id)
@@ -57372,7 +57277,7 @@ async fn contact_relationship_add(
         {
             let facade = memory_facade(&state);
             let _ = mirror_contact_relationship_to_memory_graph(
-                &facade,
+                facade,
                 &from_contact,
                 &to_contact,
                 kind,
@@ -57411,7 +57316,7 @@ async fn contact_relationship_remove(
         {
             let facade = memory_facade(&state);
             let _ = tombstone_contact_relationship_memory_graph_edge(
-                &facade,
+                facade,
                 existing.from_contact_id,
                 existing.to_contact_id,
                 &existing.relationship_type,
@@ -57824,7 +57729,7 @@ fn facts_from_graph(
         .list_embeddings(user, &ws)
         .map(|v| v.into_iter().map(|(r, vec)| (r.to_string(), vec)).collect())
         .unwrap_or_default();
-    out.sort_by(|a, b| b.text.chars().count().cmp(&a.text.chars().count()));
+    out.sort_by_key(|fact| std::cmp::Reverse(fact.text.chars().count()));
     let mut kept: Vec<ContactFact> = Vec::new();
     let mut seen: Vec<(std::collections::HashSet<String>, Option<Vec<f32>>)> = Vec::new();
     for fact in out {
@@ -57869,9 +57774,9 @@ async fn contact_profile(
     };
     let user = gateway_memory_user_id();
     let facade = memory_facade(&state);
-    let episode_count = episode_texts_by_handles(&facade, &user, &handles).len();
-    let entity_refs = contact_entity_refs(&facade, &user, &handles, contact.as_ref());
-    let facts = facts_from_graph(&facade, &user, &entity_refs);
+    let episode_count = episode_texts_by_handles(facade, &user, &handles).len();
+    let entity_refs = contact_entity_refs(facade, &user, &handles, contact.as_ref());
+    let facts = facts_from_graph(facade, &user, &entity_refs);
     Ok(Json(ContactProfile {
         facts,
         episode_count,
@@ -57912,12 +57817,12 @@ async fn contact_profile_refresh(
     // Distillation input + provenance map + forget/dedup context (one lock).
     let (episodes, ep_refs, forgotten, mut seen) = {
         let facade = memory_facade(&state);
-        let episodes = episodes_dated_by_handles(&facade, &user, &handles);
-        let ep_refs = episode_refs_by_date(&facade, &user, &handles);
-        let forgotten = forgotten_token_sets(&facade, &user);
-        let entity_refs = contact_entity_refs(&facade, &user, &handles, Some(&contact));
+        let episodes = episodes_dated_by_handles(facade, &user, &handles);
+        let ep_refs = episode_refs_by_date(facade, &user, &handles);
+        let forgotten = forgotten_token_sets(facade, &user);
+        let entity_refs = contact_entity_refs(facade, &user, &handles, Some(&contact));
         let existing: Vec<std::collections::HashSet<String>> =
-            facts_from_graph(&facade, &user, &entity_refs)
+            facts_from_graph(facade, &user, &entity_refs)
                 .into_iter()
                 .map(|f| dedup_tokens(&f.text))
                 .collect();
@@ -57985,13 +57890,13 @@ async fn contact_profile_refresh(
             }
         }
         // Link new facts to the contact's entity (mentions) so they surface in "Cosa so".
-        link_memory_mentions(&facade, &user, &personal, &new_items);
+        link_memory_mentions(facade, &user, &personal, &new_items);
     }
 
     // Return the LIVE graph view (pre-existing + newly added).
     let facade = memory_facade(&state);
-    let entity_refs = contact_entity_refs(&facade, &user, &handles, Some(&contact));
-    let facts = facts_from_graph(&facade, &user, &entity_refs);
+    let entity_refs = contact_entity_refs(facade, &user, &handles, Some(&contact));
+    let facts = facts_from_graph(facade, &user, &entity_refs);
     Ok(Json(ContactProfile {
         facts,
         episode_count,
@@ -59035,13 +58940,13 @@ async fn build_contained_computer_live(
     // A proxied (relative) URL means server mode → bake a stable ticket so the
     // embed's WebSocket authorizes against the gateway proxy. Desktop uses the
     // direct loopback URL and needs no ticket.
-    if let Some(url) = novnc_url.as_mut() {
-        if url.starts_with('/') {
-            url.push_str(&format!(
-                "?ticket={}",
-                novnc_proxy::current_view_ticket(state)
-            ));
-        }
+    if let Some(url) = novnc_url.as_mut()
+        && url.starts_with('/')
+    {
+        url.push_str(&format!(
+            "?ticket={}",
+            novnc_proxy::current_view_ticket(state)
+        ));
     }
     let activity_state = current_browser_activity();
     let raw_terminal = current_sandbox_activity();
@@ -59384,26 +59289,25 @@ async fn close_all_browsers(State(state): State<AppState>) -> Json<CloseAllBrows
             .timeout(std::time::Duration::from_secs(2))
             .send()
             .await
+            && let Ok(targets) = response.json::<Vec<serde_json::Value>>().await
         {
-            if let Ok(targets) = response.json::<Vec<serde_json::Value>>().await {
-                for target in targets {
-                    if target.get("type").and_then(Value::as_str) != Some("page") {
-                        continue;
-                    }
-                    let Some(id) = target.get("id").and_then(Value::as_str) else {
-                        continue;
-                    };
-                    let closed = state
-                        .http
-                        .get(format!("{base}/json/close/{id}"))
-                        .timeout(std::time::Duration::from_secs(2))
-                        .send()
-                        .await
-                        .map(|response| response.status().is_success())
-                        .unwrap_or(false);
-                    if closed {
-                        closed_tabs += 1;
-                    }
+            for target in targets {
+                if target.get("type").and_then(Value::as_str) != Some("page") {
+                    continue;
+                }
+                let Some(id) = target.get("id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let closed = state
+                    .http
+                    .get(format!("{base}/json/close/{id}"))
+                    .timeout(std::time::Duration::from_secs(2))
+                    .send()
+                    .await
+                    .map(|response| response.status().is_success())
+                    .unwrap_or(false);
+                if closed {
+                    closed_tabs += 1;
                 }
             }
         }
@@ -59495,7 +59399,10 @@ fn contained_browser_epoch(endpoint: &str) -> Option<String> {
         .json::<serde_json::Value>()
         .ok()?;
     let browser_socket = response.get("webSocketDebuggerUrl")?.as_str()?;
-    Some(format!("cdp-{:x}", Sha256::digest(browser_socket.as_bytes())))
+    Some(format!(
+        "cdp-{:x}",
+        Sha256::digest(browser_socket.as_bytes())
+    ))
 }
 
 fn browser_headless_env_value_for_task(state: &AppState, task: &TaskRecord) -> String {
@@ -60240,6 +60147,7 @@ const VAULT_WRAP_KEY_KEYCHAIN_SERVICE: &str = "homun-vault-master-wrap";
 ///   1. `HOMUN_VAULT_WRAP_KEY` (base64) — tests/CI; never touches the keychain.
 ///   2. OS keychain (macOS) — the production home for this key.
 ///   3. A 0600 file under the data dir — Linux/dev, or if the keychain errors.
+///
 /// The key MUST stay stable for the life of the vault: losing it makes the
 /// master key (and every record) unrecoverable, exactly like losing a keychain.
 /// So we only ever GENERATE when the key is definitively absent, never on a
@@ -60294,10 +60202,10 @@ fn keychain_vault_wrap_key() -> Result<[u8; 32], std::io::Error> {
 /// keychain backend (Linux/CI) or when the keychain is unreachable.
 fn file_vault_wrap_key() -> Result<[u8; 32], std::io::Error> {
     let path = gateway_data_dir()?.join("vault-wrap-key");
-    if let Ok(bytes) = fs::read(&path) {
-        if let Some(key) = decode_vault_wrap_key(String::from_utf8_lossy(&bytes).trim()) {
-            return Ok(key);
-        }
+    if let Ok(bytes) = fs::read(&path)
+        && let Some(key) = decode_vault_wrap_key(String::from_utf8_lossy(&bytes).trim())
+    {
+        return Ok(key);
     }
     let key = generate_vault_wrap_key();
     let encoded = base64::engine::general_purpose::STANDARD.encode(key);
@@ -60433,7 +60341,7 @@ fn harden_data_at_rest(base: &std::path::Path) {
         if meta.permissions().mode() & 0o077 == 0 {
             continue;
         }
-        if fs::set_permissions(&entry.path(), fs::Permissions::from_mode(0o600)).is_ok() {
+        if fs::set_permissions(entry.path(), fs::Permissions::from_mode(0o600)).is_ok() {
             fixed += 1;
         }
     }
@@ -60484,10 +60392,10 @@ pub(crate) fn gateway_user_id() -> UserId {
 static ACTIVE_WORKSPACE: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
 
 fn active_workspace_id() -> String {
-    if let Ok(guard) = ACTIVE_WORKSPACE.read() {
-        if let Some(id) = guard.as_ref().filter(|id| !id.trim().is_empty()) {
-            return id.clone();
-        }
+    if let Ok(guard) = ACTIVE_WORKSPACE.read()
+        && let Some(id) = guard.as_ref().filter(|id| !id.trim().is_empty())
+    {
+        return id.clone();
     }
     env::var("HOMUN_WORKSPACE_ID")
         .unwrap_or_else(|_| "local-workspace".to_string())
@@ -61979,12 +61887,12 @@ fn init_active_workspace_from_disk() {
 fn gateway_secret_key_seed() -> Result<[u8; 32], std::io::Error> {
     let base = gateway_data_dir()?;
     let path = base.join("secret-key");
-    if let Ok(bytes) = fs::read(&path) {
-        if bytes.len() == 32 {
-            let mut seed = [0u8; 32];
-            seed.copy_from_slice(&bytes);
-            return Ok(seed);
-        }
+    if let Ok(bytes) = fs::read(&path)
+        && bytes.len() == 32
+    {
+        let mut seed = [0u8; 32];
+        seed.copy_from_slice(&bytes);
+        return Ok(seed);
     }
     let mut seed = [0u8; 32];
     seed[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
@@ -62300,7 +62208,7 @@ async fn create_workspace(
     };
     {
         let facade = memory_facade(&state);
-        upsert_workspace_root_memory_entity(&facade, &workspace).map_err(workspace_memory_error)?;
+        upsert_workspace_root_memory_entity(facade, &workspace).map_err(workspace_memory_error)?;
     }
     reconcile_memory_scope(&state, &MemoryWorkspaceId::new(workspace.id.clone()));
     file.workspaces.push(workspace);
@@ -62350,7 +62258,7 @@ async fn set_workspace_folder(
     let updated_workspace = workspace.clone();
     {
         let facade = memory_facade(&state);
-        upsert_workspace_root_memory_entity(&facade, &updated_workspace)
+        upsert_workspace_root_memory_entity(facade, &updated_workspace)
             .map_err(workspace_memory_error)?;
     }
     reconcile_memory_scope(
@@ -62399,7 +62307,7 @@ async fn rename_workspace(
     let updated_workspace = workspace.clone();
     {
         let facade = memory_facade(&state);
-        upsert_workspace_root_memory_entity(&facade, &updated_workspace)
+        upsert_workspace_root_memory_entity(facade, &updated_workspace)
             .map_err(workspace_memory_error)?;
     }
     reconcile_memory_scope(
@@ -62742,15 +62650,15 @@ where
 /// and periodically (every 24h via the worker loop). Safe but can be slow on
 /// large databases — runs without holding other locks.
 fn vacuum_all_stores(state: &AppState) {
-    if let Ok(store) = state.chat_store.lock() {
-        if let Err(error) = store.vacuum() {
-            eprintln!("VACUUM chat store: {error}");
-        }
+    if let Ok(store) = state.chat_store.lock()
+        && let Err(error) = store.vacuum()
+    {
+        eprintln!("VACUUM chat store: {error}");
     }
-    if let Ok(store) = lock_task_store(state) {
-        if let Err(error) = store.vacuum() {
-            eprintln!("VACUUM task store: {error:?}");
-        }
+    if let Ok(store) = lock_task_store(state)
+        && let Err(error) = store.vacuum()
+    {
+        eprintln!("VACUUM task store: {error:?}");
     }
     {
         let facade = memory_facade(state);
@@ -62758,10 +62666,10 @@ fn vacuum_all_stores(state: &AppState) {
             eprintln!("VACUUM memory store: {error}");
         }
     }
-    if let Ok(store) = state.usage_store.lock() {
-        if let Err(error) = store.vacuum() {
-            eprintln!("VACUUM usage store: {error}");
-        }
+    if let Ok(store) = state.usage_store.lock()
+        && let Err(error) = store.vacuum()
+    {
+        eprintln!("VACUUM usage store: {error}");
     }
 }
 
@@ -62820,10 +62728,10 @@ fn cors_layer() -> CorsLayer {
         HeaderValue::from_static("http://localhost:1421"),
         HeaderValue::from_static("null"),
     ];
-    if let Ok(origin) = env::var("HOMUN_DESKTOP_ALLOWED_ORIGIN") {
-        if let Ok(header) = HeaderValue::from_str(origin.trim()) {
-            origins.push(header);
-        }
+    if let Ok(origin) = env::var("HOMUN_DESKTOP_ALLOWED_ORIGIN")
+        && let Ok(header) = HeaderValue::from_str(origin.trim())
+    {
+        origins.push(header);
     }
 
     CorsLayer::new()
@@ -66321,7 +66229,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(names.contains(&"browse"));
-        assert!(!names.iter().position(|name| *name == "browse").is_none());
+        assert!(names.iter().position(|name| *name == "browse").is_some());
     }
 
     /// The turn's live-vs-deferred partition, both directions. Regression: `browse` is not in
@@ -66426,27 +66334,29 @@ mod tests {
                 "active",
             )
             .unwrap();
-        assert!(store
-            .upsert_browser_checkpoint(&local_first_task_runtime::NewBrowserCheckpoint {
-                checkpoint_id: "checkpoint-1".into(),
-                user_id: user_id.as_str().into(),
-                workspace_id: "checkpoint-workspace".into(),
-                thread_id: thread.thread_id.clone(),
-                target_id: "booking".into(),
-                objective_revision: objective.revision,
-                schema_version: 1,
-                url: "https://example.test/form".into(),
-                origin: "https://example.test".into(),
-                browser_epoch: "epoch-1".into(),
-                cdp_target_id: Some("target-1".into()),
-                generation: 4,
-                draft_secret_ref: None,
-                draft_control_count: 0,
-                omitted_sensitive_count: 0,
-                omitted_bounded_count: 0,
-                expires_at: 2_000_000_000,
-            })
-            .unwrap());
+        assert!(
+            store
+                .upsert_browser_checkpoint(&local_first_task_runtime::NewBrowserCheckpoint {
+                    checkpoint_id: "checkpoint-1".into(),
+                    user_id: user_id.as_str().into(),
+                    workspace_id: "checkpoint-workspace".into(),
+                    thread_id: thread.thread_id.clone(),
+                    target_id: "booking".into(),
+                    objective_revision: objective.revision,
+                    schema_version: 1,
+                    url: "https://example.test/form".into(),
+                    origin: "https://example.test".into(),
+                    browser_epoch: "epoch-1".into(),
+                    cdp_target_id: Some("target-1".into()),
+                    generation: 4,
+                    draft_secret_ref: None,
+                    draft_control_count: 0,
+                    omitted_sensitive_count: 0,
+                    omitted_bounded_count: 0,
+                    expires_at: 2_000_000_000,
+                })
+                .unwrap()
+        );
         drop(store);
 
         assert!(!super::thread_has_live_browser_session(
@@ -67011,6 +66921,7 @@ prs.save(Path({path:?}))
             raw,
             &super::StreamMemoryReuseCollector::default(),
             local_first_desktop_gateway::MessageDeliveryState::Delivered,
+            true,
         )
         .unwrap();
 
@@ -67030,6 +66941,50 @@ prs.save(Path({path:?}))
             !context
                 .iter()
                 .any(|message| message.text.contains("MCP_CONFIRM"))
+        );
+    }
+
+    #[test]
+    fn canonical_stream_finalization_does_not_project_hitl_from_markers() {
+        let state = super::AppState::for_tests();
+        let thread = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .create_thread("ws_canonical_marker")
+            .expect("thread");
+        let assistant =
+            super::channel_chat_message_with_id("assistant", "", "canonical_marker_message");
+        state
+            .chat_store
+            .lock()
+            .unwrap()
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .expect("assistant message");
+        let raw = r#"Pick one. ‹‹CHOICES››{"question":"Which?","options":["A","B"]}‹‹/CHOICES››"#;
+        let cards = super::actionable_cards_from_raw_text(raw);
+        let mut collector = super::StreamMemoryReuseCollector::default();
+        collector.observe_actionable_cards(&cards);
+
+        super::finalize_streamed_assistant_message(
+            &state,
+            &thread.thread_id,
+            &assistant.id,
+            raw,
+            &collector,
+            local_first_desktop_gateway::MessageDeliveryState::Streaming,
+            false,
+        )
+        .expect("finalize canonical stream");
+
+        assert!(
+            state
+                .chat_store
+                .lock()
+                .unwrap()
+                .open_hitl_wait(&thread.thread_id)
+                .unwrap()
+                .is_none()
         );
     }
 
@@ -67875,9 +67830,11 @@ prs.save(Path({path:?}))
                     .map(str::to_string)
             })
             .collect::<Vec<_>>();
-        assert!(writable_names
-            .iter()
-            .any(|name| name == "browser_rehydrate"));
+        assert!(
+            writable_names
+                .iter()
+                .any(|name| name == "browser_rehydrate")
+        );
     }
 
     // Stand-in for the OS-keychain-held vault wrap key; injected so vault tests
@@ -69589,16 +69546,16 @@ prs.save(Path({path:?}))
         // the `blocked_before_claim.is_none()` guard — i.e. reverting to the
         // pre-fix ordering — would make this branch run the claim and burn
         // the grant, flipping the assertion below to RED.
-        if blocked_before_claim.is_none() {
-            if super::should_claim_payment_approval(&click_coords_action, &payment_floor, false) {
-                let _ = super::claim_payment_approval_from_map(
-                    &mut approvals,
-                    &click_coords_action,
-                    &payment_floor,
-                    false,
-                    Some("thread_1"),
-                );
-            }
+        if blocked_before_claim.is_none()
+            && super::should_claim_payment_approval(&click_coords_action, &payment_floor, false)
+        {
+            let _ = super::claim_payment_approval_from_map(
+                &mut approvals,
+                &click_coords_action,
+                &payment_floor,
+                false,
+                Some("thread_1"),
+            );
         }
         assert!(
             !approvals.get("pay_test").unwrap().consumed,
@@ -70185,11 +70142,7 @@ prs.save(Path({path:?}))
             crate::semantic_decision::EffectClass::Read,
             crate::semantic_decision::EffectClass::RequestAuthorization,
         ]);
-        super::prune_tools_for_objective_policy(
-            &mut tools,
-            &policy,
-            &Default::default(),
-        );
+        super::prune_tools_for_objective_policy(&mut tools, &policy, &Default::default());
         let names = tools
             .iter()
             .filter_map(|schema| {
@@ -71503,7 +71456,7 @@ prs.save(Path({path:?}))
             .collect();
 
         let mut facade = super::CapabilityFacade::new(
-            super::CapabilityPolicy::default(),
+            super::CapabilityPolicy,
             super::InMemoryCapabilityAudit::default(),
         );
         facade.register_provider(super::CachedToolProvider::new(
@@ -71515,7 +71468,11 @@ prs.save(Path({path:?}))
         // The browser grant (Read + WriteWithConfirmation, autonomy 3) makes all seven visible
         // and executable, so calls reach argument validation.
         let plan = facade.list_tools(&policy).unwrap();
-        assert_eq!(plan.visible_tools.len(), 7, "all seven browser tools visible");
+        assert_eq!(
+            plan.visible_tools.len(),
+            7,
+            "all seven browser tools visible"
+        );
         assert_eq!(
             plan.executable_tools.len(),
             7,
@@ -71621,7 +71578,7 @@ prs.save(Path({path:?}))
         }
         policy.allowed_actions = vec![super::ActionClass::Read, super::ActionClass::Draft];
         let mut facade = super::CapabilityFacade::new(
-            super::CapabilityPolicy::default(),
+            super::CapabilityPolicy,
             super::InMemoryCapabilityAudit::default(),
         );
         for (provider_id, tools) in provider_tools {
@@ -71726,7 +71683,7 @@ prs.save(Path({path:?}))
         //    browser tool schemas (visible to the planner AND runnable by the driver); every
         //    other seeded provider stays planning-only (CachedToolProvider).
         let mut facade = super::CapabilityFacade::new(
-            super::CapabilityPolicy::default(),
+            super::CapabilityPolicy,
             super::InMemoryCapabilityAudit::default(),
         );
         let browser_provider_id = ProviderId::new("browser");
@@ -71873,7 +71830,7 @@ prs.save(Path({path:?}))
             serde_json::json!({"results": ["Frecciarossa 08:00 €29", "Italo 09:10 €25"]}),
         );
         let mut facade = super::CapabilityFacade::new(
-            super::CapabilityPolicy::default(),
+            super::CapabilityPolicy,
             super::InMemoryCapabilityAudit::default(),
         );
         facade.register_provider(provider);
@@ -73219,12 +73176,16 @@ prs.save(Path({path:?}))
         // Any single field diverging from the default must still flip the
         // decision to "materialize" — this is the surgical counterpart to
         // the test above, guarding against an over-broad "always skip".
-        let mut kit = super::BrandKit::default();
-        kit.primary_color = "#ff0000".to_string();
+        let kit = super::BrandKit {
+            primary_color: "#ff0000".to_string(),
+            ..Default::default()
+        };
         assert!(super::should_materialize_brand_kit(&kit));
 
-        let mut only_org = super::BrandKit::default();
-        only_org.organization = "Acme".to_string();
+        let only_org = super::BrandKit {
+            organization: "Acme".to_string(),
+            ..Default::default()
+        };
         assert!(super::should_materialize_brand_kit(&only_org));
     }
 
@@ -75768,7 +75729,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
             // in-root write → ALLOWED by the workspace-write fence
             let mut c = super::build_sandbox_command(
-                &[root.clone()],
+                std::slice::from_ref(&root),
                 &format!("echo ok > '{}'", inside.display()),
             )
             .expect("build_sandbox_command (in-root)");
@@ -75777,7 +75738,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
             // out-of-root write ($HOME) → DENIED by (deny default); the file must NOT appear
             let mut c2 = super::build_sandbox_command(
-                &[root.clone()],
+                std::slice::from_ref(&root),
                 &format!("echo bad > '{}'", outside.display()),
             )
             .expect("build_sandbox_command (out-of-root)");
@@ -77232,9 +77193,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 crate::setup_computer::SetupComputerCoordinator::default(),
             ),
             secret_store: std::sync::Arc::new(secret_store),
-            browser_checkpoint_secret_store: std::sync::Arc::new(
-                browser_checkpoint_secret_store,
-            ),
+            browser_checkpoint_secret_store: std::sync::Arc::new(browser_checkpoint_secret_store),
             auth_token: "test-token".into(),
             novnc_tickets: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),

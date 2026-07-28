@@ -152,13 +152,11 @@ pub fn prune_browser_history(
                     .and_then(|c| c.as_str())
                     .map(|id| browser_tool_call_ids.contains(id))
                     .unwrap_or(false);
-            if is_browser_tool {
-                if let Some(obj) = message.as_object_mut() {
-                    obj.insert(
-                        "content".to_string(),
-                        Value::String(PRUNED_SNAPSHOT_STUB.to_string()),
-                    );
-                }
+            if is_browser_tool && let Some(obj) = message.as_object_mut() {
+                obj.insert(
+                    "content".to_string(),
+                    Value::String(PRUNED_SNAPSHOT_STUB.to_string()),
+                );
             }
         }
     }
@@ -225,9 +223,15 @@ mod tests {
 
     #[test]
     fn resolves_exact_and_near_miss_browser_names() {
-        assert_eq!(resolve_browser_chat_tool_name("browser_navigate"), Some("browser_navigate"));
+        assert_eq!(
+            resolve_browser_chat_tool_name("browser_navigate"),
+            Some("browser_navigate")
+        );
         // one-char typo within distance 2, unambiguous
-        assert_eq!(resolve_browser_chat_tool_name("browser_tavigate"), Some("browser_navigate"));
+        assert_eq!(
+            resolve_browser_chat_tool_name("browser_tavigate"),
+            Some("browser_navigate")
+        );
         assert_eq!(resolve_browser_chat_tool_name("write_file"), None);
         assert!(is_browser_granular_tool("browser_act") && !is_browser_granular_tool("write_file"));
         assert!(is_browser_granular_tool("browser_done"));
@@ -240,7 +244,9 @@ mod tests {
 choose a NEW [ref=...] from this snapshot:\n[ref=e40] Button"
         );
         assert!(is_stale_ref_recovery_result(&recovered));
-        assert!(!is_stale_ref_recovery_result("Page opened (https://example.com). Snapshot: ..."));
+        assert!(!is_stale_ref_recovery_result(
+            "Page opened (https://example.com). Snapshot: ..."
+        ));
         assert!(!is_stale_ref_recovery_result(
             "A page that merely quotes: ⚠ The reference had expired (the page changed) mid-sentence"
         ));
@@ -248,13 +254,17 @@ choose a NEW [ref=...] from this snapshot:\n[ref=e40] Button"
 
     #[test]
     fn prune_stubs_older_snapshots_and_images() {
-        let ids: std::collections::BTreeSet<String> = ["c1", "c2"].iter().map(|s| s.to_string()).collect();
+        let ids: std::collections::BTreeSet<String> =
+            ["c1", "c2"].iter().map(|s| s.to_string()).collect();
         let mut msgs = vec![
             serde_json::json!({"role": "tool", "tool_call_id": "c1", "content": "OLD SNAPSHOT"}),
             serde_json::json!({"role": "tool", "tool_call_id": "c2", "content": "NEW SNAPSHOT"}),
         ];
         prune_browser_history(&mut msgs, &ids);
-        assert_eq!(msgs[0]["content"], PRUNED_SNAPSHOT_STUB, "older snapshot stubbed");
+        assert_eq!(
+            msgs[0]["content"], PRUNED_SNAPSHOT_STUB,
+            "older snapshot stubbed"
+        );
         assert_eq!(msgs[1]["content"], "NEW SNAPSHOT", "latest snapshot kept");
     }
 }

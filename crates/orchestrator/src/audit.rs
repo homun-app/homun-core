@@ -429,7 +429,7 @@ fn ui_tool_card(card: &ToolCard) -> UiToolCard {
 }
 
 fn redact_ui_text(value: &str) -> String {
-    ContextCompressor::default()
+    ContextCompressor
         .compress(
             &ContextItem::new(ContextKind::GenericToolOutput, value),
             &CompressionPolicy::for_kind(ContextKind::GenericToolOutput).with_max_chars(1_000),

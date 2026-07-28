@@ -855,7 +855,8 @@ fn policy_fingerprint_covers_each_encoded_dimension_in_isolation() {
         .unwrap() = MemoryGrantOverrideEffect::Deny;
     assert_changed("override effect", override_effect);
 
-    let ref_mutations: Vec<(&str, Box<dyn FnOnce(&mut MemoryRef)>)> = vec![
+    type RefMutation = (&'static str, Box<dyn FnOnce(&mut MemoryRef)>);
+    let ref_mutations: Vec<RefMutation> = vec![
         (
             "override ref kind",
             Box::new(|reference| reference.kind = MemoryRefKind::Entity),

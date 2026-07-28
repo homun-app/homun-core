@@ -53,7 +53,7 @@ impl MemoryCollectionKey {
             "goal" | "objective" | "open_loop" => Some(Self::Goals),
             "artifact" => Some(Self::Artifacts),
             "episode" => Some(Self::Episodes),
-            "fact" | _ => None,
+            _ => None,
         }
     }
 

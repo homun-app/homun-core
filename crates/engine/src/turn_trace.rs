@@ -13,8 +13,8 @@
 //! influences any control-flow decision, threshold, or answer.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use serde::Serialize;
@@ -142,9 +142,17 @@ pub fn derive_flags(
     let claimed_done_without_artifact = plan_titles.iter().any(|title| {
         let t = title.to_lowercase();
         let wants_table = t.contains("tabella") || t.contains("table");
-        let wants_file = ["file", "deck", "presentazione", "documento", "report", "grafico", "chart"]
-            .iter()
-            .any(|k| t.contains(k));
+        let wants_file = [
+            "file",
+            "deck",
+            "presentazione",
+            "documento",
+            "report",
+            "grafico",
+            "chart",
+        ]
+        .iter()
+        .any(|k| t.contains(k));
         (wants_table && !signals.has_table) || (wants_file && signals.artifact_count == 0)
     });
     DerivedFlags {
@@ -190,7 +198,14 @@ impl TurnTrace {
         };
         let seq = inner.seq.fetch_add(1, Ordering::Relaxed);
         let t_ms = inner.start.elapsed().as_millis();
-        append(&inner.dir, &inner.turn_id, seq, t_ms, &event, inner.max_bytes);
+        append(
+            &inner.dir,
+            &inner.turn_id,
+            seq,
+            t_ms,
+            &event,
+            inner.max_bytes,
+        );
     }
 }
 
@@ -213,10 +228,10 @@ fn append(dir: &Path, turn_id: &str, seq: usize, t_ms: u128, event: &TurnEvent, 
     line.push('\n');
     let path = dir.join("turn-trace.jsonl");
     // Rotate if the existing file is already at/over the cap.
-    if let Ok(meta) = std::fs::metadata(&path) {
-        if meta.len() >= max_bytes {
-            let _ = std::fs::rename(&path, dir.join("turn-trace.jsonl.1"));
-        }
+    if let Ok(meta) = std::fs::metadata(&path)
+        && meta.len() >= max_bytes
+    {
+        let _ = std::fs::rename(&path, dir.join("turn-trace.jsonl.1"));
     }
     use std::io::Write as _;
     if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -286,7 +301,11 @@ mod tests {
             sources_count: 0,
             artifact_count: 0,
         };
-        let flags = derive_flags(&["done".into()], &["Rispondere alla domanda".into()], &signals);
+        let flags = derive_flags(
+            &["done".into()],
+            &["Rispondere alla domanda".into()],
+            &signals,
+        );
         assert!(!flags.claimed_done_without_artifact);
         assert_eq!(flags.incomplete_steps, 0);
     }
@@ -316,7 +335,12 @@ mod tests {
         };
         let v = serde_json::to_value(&ev).unwrap();
         assert_eq!(v["kind"], "turn_received");
-        TurnTrace::new("tid", std::path::PathBuf::from("/nonexistent/xyz"), 5_000_000).record(ev);
+        TurnTrace::new(
+            "tid",
+            std::path::PathBuf::from("/nonexistent/xyz"),
+            5_000_000,
+        )
+        .record(ev);
     }
 
     #[test]

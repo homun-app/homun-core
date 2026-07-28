@@ -233,7 +233,7 @@ impl ExecutionRuntime {
             let checkpoint = persisted_checkpoint
                 .as_ref()
                 .expect("legacy adapter output always persists a checkpoint first");
-            legacy_task_outcome_to_execution_outcome(state, &task, &contract, legacy, checkpoint)?
+            legacy_task_outcome_to_execution_outcome(&task, &contract, legacy, checkpoint)?
         };
         let outcome = normalize_transient_failure(state, &task, &contract, outcome)?;
         align_compatibility_with_canonical_outcome(
@@ -646,9 +646,8 @@ fn execution_policy_for_task(task: &TaskRecord) -> ExecutionPolicy {
     }
 }
 
-// Temporary Task 5 compatibility bridge. Delete with the legacy task runner in Task 8.
+// Non-chat adapters still return the old shape while they migrate to canonical outcomes.
 fn legacy_task_outcome_to_execution_outcome(
-    state: &AppState,
     task: &TaskRecord,
     contract: &ValidatedExecutionContract,
     legacy: &TaskExecutionOutcome,
@@ -661,20 +660,7 @@ fn legacy_task_outcome_to_execution_outcome(
         })));
     }
 
-    // Task 5 compatibility only: the chat executor still parks the task without returning a
-    // typed stop. Task 6 removes this reread when chat returns a canonical stop directly.
-    let persisted_task_status = state
-        .task_store
-        .lock()
-        .map_err(runtime_lock_error)?
-        .get_task(&task.task_id, &task.user_id, &task.workspace_id)
-        .map_err(runtime_store_error)?
-        .map(|task| task.status);
-    let wake = if persisted_task_status == Some(TaskStatus::Parked) {
-        WakeCondition::ModelAvailable {
-            role: "primary".to_string(),
-        }
-    } else if let Some(approval) = legacy.pending_approval.as_ref() {
+    let wake = if let Some(approval) = legacy.pending_approval.as_ref() {
         WakeCondition::Approval {
             approval_ref: format!(
                 "{}:{}:approval:{}",
@@ -823,8 +809,10 @@ mod tests {
         execution_ids: Arc<Mutex<Vec<String>>>,
     }
 
+    type RecordedRevision = (String, u64, u64, bool);
+
     struct RevisionRecordingAdapter {
-        revisions: Arc<Mutex<Vec<(String, u64, u64, bool)>>>,
+        revisions: Arc<Mutex<Vec<RecordedRevision>>>,
     }
 
     impl GatewayExecutionAdapter for RevisionRecordingAdapter {

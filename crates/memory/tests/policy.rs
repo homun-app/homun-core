@@ -9,7 +9,7 @@ fn policy_denies_domains_outside_request() {
     let request = request(vec!["work"], DataSensitivity::Private, false, false);
     let record = memory("personal", DataSensitivity::Private);
 
-    let decision = MemoryPolicyEngine::default().decide_memory(&request, &record);
+    let decision = MemoryPolicyEngine.decide_memory(&request, &record);
 
     assert_eq!(decision.kind, AccessDecisionKind::Deny);
     assert_eq!(decision.reasons, vec!["privacy_domain_not_allowed"]);
@@ -20,7 +20,7 @@ fn policy_denies_sensitivity_above_request_limit() {
     let request = request(vec!["work"], DataSensitivity::Private, false, false);
     let record = memory("work", DataSensitivity::Secret);
 
-    let decision = MemoryPolicyEngine::default().decide_memory(&request, &record);
+    let decision = MemoryPolicyEngine.decide_memory(&request, &record);
 
     assert_eq!(decision.kind, AccessDecisionKind::Deny);
     assert_eq!(decision.reasons, vec!["sensitivity_above_request_limit"]);
@@ -31,7 +31,7 @@ fn policy_redacts_when_raw_payload_is_not_allowed() {
     let request = request(vec!["work"], DataSensitivity::Private, false, false);
     let record = memory("work", DataSensitivity::Private);
 
-    let decision = MemoryPolicyEngine::default().decide_memory(&request, &record);
+    let decision = MemoryPolicyEngine.decide_memory(&request, &record);
 
     assert_eq!(decision.kind, AccessDecisionKind::Redact);
     assert_eq!(decision.reasons, vec!["raw_payload_not_allowed"]);
@@ -42,7 +42,7 @@ fn policy_blocks_broad_export_without_permission() {
     let mut request = request(vec!["work"], DataSensitivity::Private, true, false);
     request.broad_query = true;
 
-    let decision = MemoryPolicyEngine::default().decide_export(&request);
+    let decision = MemoryPolicyEngine.decide_export(&request);
 
     assert_eq!(decision.kind, AccessDecisionKind::Deny);
     assert_eq!(decision.reasons, vec!["export_not_allowed"]);
@@ -68,7 +68,7 @@ fn store_audits_access_decisions() {
     let store = SQLiteMemoryStore::open_in_memory().unwrap();
     let request = request(vec!["work"], DataSensitivity::Private, false, false);
     let record = memory("work", DataSensitivity::Private);
-    let decision = MemoryPolicyEngine::default().decide_memory(&request, &record);
+    let decision = MemoryPolicyEngine.decide_memory(&request, &record);
 
     store.record_access_decision(&request, &decision).unwrap();
 

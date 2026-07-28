@@ -108,10 +108,12 @@ fn historical_source_grant_link_permanently_blocks_copy_publication() {
     let fixture = PublicationFixture::new();
     let source = fixture.insert_source_preference("Linked source must remain read only");
     let consumer = WorkspaceId::new("project-b");
-    assert!(!fixture
-        .facade
-        .has_memory_source_grant_link(&fixture.owner, &consumer, &fixture.project)
-        .unwrap());
+    assert!(
+        !fixture
+            .facade
+            .has_memory_source_grant_link(&fixture.owner, &consumer, &fixture.project)
+            .unwrap()
+    );
     fixture
         .facade
         .upsert_memory_source_grant(&MemorySourceGrant {
@@ -131,23 +133,22 @@ fn historical_source_grant_link_permanently_blocks_copy_publication() {
             updated_at: "unix:1".to_string(),
         })
         .unwrap();
-    assert!(fixture
-        .facade
-        .has_memory_source_grant_link(&fixture.owner, &consumer, &fixture.project)
-        .unwrap());
+    assert!(
+        fixture
+            .facade
+            .has_memory_source_grant_link(&fixture.owner, &consumer, &fixture.project)
+            .unwrap()
+    );
     fixture
         .facade
-        .revoke_memory_source_grant(
-            &fixture.owner,
-            &consumer,
-            "grant-publication-firewall",
-            11,
-        )
+        .revoke_memory_source_grant(&fixture.owner, &consumer, "grant-publication-firewall", 11)
         .unwrap();
-    assert!(fixture
-        .facade
-        .has_memory_source_grant_link(&fixture.owner, &consumer, &fixture.project)
-        .unwrap());
+    assert!(
+        fixture
+            .facade
+            .has_memory_source_grant_link(&fixture.owner, &consumer, &fixture.project)
+            .unwrap()
+    );
 
     let error = fixture
         .facade
@@ -899,7 +900,7 @@ fn published_destination_exposes_structural_publication_link_to_recall_dedup() {
         .hits
         .iter()
         .find(|hit| hit.memory_ref == result.destination.reference.to_string())
-        .expect(&format!("missing destination hit: {:?}", pack.hits));
+        .unwrap_or_else(|| panic!("missing destination hit: {:?}", pack.hits));
     assert_eq!(
         hit.publication_link,
         Some(serde_json::to_string(&result.destination.reference).unwrap())
@@ -1586,7 +1587,10 @@ fn concurrent_approvals_are_idempotent_after_a_durable_approval() {
             .into_iter()
             .map(|join| join.join().unwrap())
             .collect::<Vec<_>>();
-        assert!(results.iter().all(Result::is_ok), "round {attempt}: {results:?}");
+        assert!(
+            results.iter().all(Result::is_ok),
+            "round {attempt}: {results:?}"
+        );
         assert_eq!(
             facade
                 .list_memories_for_ui(&owner, &WorkspaceId::new("__personal__"))

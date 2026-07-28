@@ -1501,6 +1501,7 @@ impl SQLiteMemoryStore {
     /// Commits every visible side effect of publication in a single SQLite
     /// transaction. A stale proposal state, duplicate link, or failed statement
     /// rolls back the destination write and source alias together.
+    #[allow(clippy::too_many_arguments)]
     pub fn commit_publication(
         &self,
         proposal: &MemoryPublicationProposal,
@@ -2631,10 +2632,8 @@ impl SQLiteMemoryStore {
             })
             .map_err(|e| e.to_string())?;
         let mut out = Vec::new();
-        for row in rows {
-            if let Ok(triple) = row {
-                out.push(triple);
-            }
+        for triple in rows.flatten() {
+            out.push(triple);
         }
         Ok(out)
     }
@@ -2952,10 +2951,7 @@ impl SQLiteMemoryStore {
         workspace_id: &WorkspaceId,
         limit: usize,
     ) -> Result<Vec<MemoryRelation>, String> {
-        if limit == 0
-            || node_ref.user_id != *user_id
-            || node_ref.workspace_id != *workspace_id
-        {
+        if limit == 0 || node_ref.user_id != *user_id || node_ref.workspace_id != *workspace_id {
             return Ok(Vec::new());
         }
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
@@ -4962,13 +4958,12 @@ fn validate_publication_candidate_and_resolution(
         | Some(MemoryPublicationCandidate::Conflict { destination_ref }) => Some(destination_ref),
         None => None,
     };
-    if let Some(reference) = candidate_ref {
-        if reference.kind != MemoryRefKind::Memory
+    if let Some(reference) = candidate_ref
+        && (reference.kind != MemoryRefKind::Memory
             || reference.user_id != proposal.destination_user_id
-            || reference.workspace_id != proposal.destination_workspace_id
-        {
-            return Err("publication candidate is outside destination".to_string());
-        }
+            || reference.workspace_id != proposal.destination_workspace_id)
+    {
+        return Err("publication candidate is outside destination".to_string());
     }
     match (&proposal.resolution, candidate_ref) {
         (None, _) => {}

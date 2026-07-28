@@ -668,7 +668,7 @@ mod tests {
             PluginInstallOptions {
                 homun_version: "0.1.1046",
                 beta_enabled: false,
-                trusted_public_keys: &[second_public_key.clone()],
+                trusted_public_keys: std::slice::from_ref(&second_public_key),
                 replace_existing: false,
             },
         )

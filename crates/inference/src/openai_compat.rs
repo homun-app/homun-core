@@ -57,10 +57,10 @@ impl OpenAiCompatProvider {
     ) -> Result<(reqwest::blocking::Response, ProviderAttempt<'a>), RuntimeClientError> {
         let attempt = ProviderAttempt::start(&self.usage, request, &self.descriptor, &self.model);
         let mut builder = self.http.post(self.chat_completions_url());
-        if let Some(seconds) = timeout_seconds {
-            if seconds > 0.0 {
-                builder = builder.timeout(std::time::Duration::from_secs_f64(seconds));
-            }
+        if let Some(seconds) = timeout_seconds
+            && seconds > 0.0
+        {
+            builder = builder.timeout(std::time::Duration::from_secs_f64(seconds));
         }
         if let Some(api_key) = self.api_key.as_ref() {
             builder = builder.bearer_auth(api_key);
@@ -146,7 +146,8 @@ impl InferenceProvider for OpenAiCompatProvider {
             self.send(request, &self.request_body(request, enforce), timeout)?;
         if enforce && response.status().as_u16() == 400 {
             attempt.failed("http_status", Some(400));
-            (response, attempt) = self.send(request, &self.request_body(request, false), timeout)?;
+            (response, attempt) =
+                self.send(request, &self.request_body(request, false), timeout)?;
         }
         if !response.status().is_success() {
             let status = response.status().as_u16();
@@ -165,21 +166,35 @@ impl InferenceProvider for OpenAiCompatProvider {
         let usage = if reported {
             local_first_inference_usage::NormalizedUsage {
                 input_tokens: body.pointer("/usage/prompt_tokens").and_then(Value::as_u64),
-                output_tokens: body.pointer("/usage/completion_tokens").and_then(Value::as_u64),
-                reasoning_tokens: body.pointer("/usage/completion_tokens_details/reasoning_tokens").and_then(Value::as_u64),
-                cache_read_tokens: body.pointer("/usage/prompt_tokens_details/cached_tokens").and_then(Value::as_u64),
+                output_tokens: body
+                    .pointer("/usage/completion_tokens")
+                    .and_then(Value::as_u64),
+                reasoning_tokens: body
+                    .pointer("/usage/completion_tokens_details/reasoning_tokens")
+                    .and_then(Value::as_u64),
+                cache_read_tokens: body
+                    .pointer("/usage/prompt_tokens_details/cached_tokens")
+                    .and_then(Value::as_u64),
                 cache_write_tokens: None,
             }
         } else {
             local_first_inference_usage::NormalizedUsage {
                 input_tokens: Some((request.prompt.chars().count() as u64).div_ceil(4).max(1)),
-                output_tokens: Some((parsed.raw_output.chars().count() as u64).div_ceil(4).max(1)),
+                output_tokens: Some(
+                    (parsed.raw_output.chars().count() as u64)
+                        .div_ceil(4)
+                        .max(1),
+                ),
                 ..Default::default()
             }
         };
         attempt.completed(
             usage,
-            if reported { local_first_inference_usage::UsageProvenance::ProviderReported } else { local_first_inference_usage::UsageProvenance::HomunEstimated },
+            if reported {
+                local_first_inference_usage::UsageProvenance::ProviderReported
+            } else {
+                local_first_inference_usage::UsageProvenance::HomunEstimated
+            },
         );
         if !parsed.valid && std::env::var("HOMUN_INFERENCE_DEBUG").is_ok() {
             eprintln!(

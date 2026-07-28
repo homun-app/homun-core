@@ -60,10 +60,10 @@ pub(crate) async fn novnc_ticket(State(state): State<AppState>) -> Json<serde_js
 /// A STABLE view ticket reused across status polls (so the embed URL — and the
 /// iframe — doesn't churn every poll). Re-minted only once the cached one expires.
 pub(crate) fn current_view_ticket(state: &AppState) -> String {
-    if let Some(cached) = state.novnc_view_ticket.lock().unwrap().clone() {
-        if ticket_valid(state, &cached) {
-            return cached;
-        }
+    if let Some(cached) = state.novnc_view_ticket.lock().unwrap().clone()
+        && ticket_valid(state, &cached)
+    {
+        return cached;
     }
     let fresh = mint_ticket(state);
     *state.novnc_view_ticket.lock().unwrap() = Some(fresh.clone());
@@ -94,13 +94,13 @@ pub(crate) async fn viewer_ready(http: &reqwest::Client) -> bool {
 }
 
 fn parse_novnc_origin(raw: Option<&str>) -> String {
-    if let Some(raw) = raw {
-        if let Some(idx) = raw.find("://") {
-            let scheme = &raw[..idx];
-            let host = raw[idx + 3..].split('/').next().unwrap_or_default();
-            if !host.is_empty() {
-                return format!("{scheme}://{host}");
-            }
+    if let Some(raw) = raw
+        && let Some(idx) = raw.find("://")
+    {
+        let scheme = &raw[..idx];
+        let host = raw[idx + 3..].split('/').next().unwrap_or_default();
+        if !host.is_empty() {
+            return format!("{scheme}://{host}");
         }
     }
     "http://127.0.0.1:6080".to_string()

@@ -268,9 +268,7 @@ pub fn recall_single_scope_pack(
     workspace: &WorkspaceId,
     query: &str,
     query_vec: &[f32],
-    graph_context: Option<
-        &(dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync),
-    >,
+    graph_context: Option<&crate::recall::GraphContextHook<'_>>,
 ) -> RecallPack {
     let block =
         crate::recall_search_on_facade(facade, user, workspace, query, query_vec, graph_context);
@@ -581,10 +579,11 @@ impl BriefingCache {
             // Eviction: se pieni, rimuovi una entry arbitraria (HashMap non
             // ordina; per Tappa 1.5 basta bounded — il vero LRU è overkill dato
             // l'alto hit rate). Iteratore + next() = O(1) ammortizzato.
-            if entries.len() >= self.max_entries && !entries.contains_key(&scope_key) {
-                if let Some(stale_key) = entries.keys().next().cloned() {
-                    entries.remove(&stale_key);
-                }
+            if entries.len() >= self.max_entries
+                && !entries.contains_key(&scope_key)
+                && let Some(stale_key) = entries.keys().next().cloned()
+            {
+                entries.remove(&stale_key);
             }
             entries.insert(scope_key, entry);
         }

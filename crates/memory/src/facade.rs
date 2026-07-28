@@ -5,9 +5,8 @@ use crate::{
     GraphifyImportSummary, GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult,
     LinkedMemoryReadRef, MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport,
     MemoryCollectionKey, MemoryContextItem, MemoryContextPack, MemoryCreateRequest, MemoryEntity,
-    MemoryError,
-    MemoryEvent, MemoryEvidence, MemoryEvolutionProposal, MemoryEvolutionResult, MemoryExtraction,
-    MemoryExtractionSummary, MemoryHealth, MemoryIntegrityRepairPreview,
+    MemoryError, MemoryEvent, MemoryEvidence, MemoryEvolutionProposal, MemoryEvolutionResult,
+    MemoryExtraction, MemoryExtractionSummary, MemoryHealth, MemoryIntegrityRepairPreview,
     MemoryIntegrityRepairRequest, MemoryIntegrityRepairResult, MemoryIntegrityReport,
     MemoryLifecycleRequest, MemoryMaintenanceReport, MemoryPolicyEngine,
     MemoryPublicationCandidate, MemoryPublicationDestination, MemoryPublicationEditInput,
@@ -21,8 +20,7 @@ use crate::{
     RoutineStatus, SQLiteMemoryStore, THREADS_WORKSPACE, UserId, VectorHit,
     WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId, WorkspacePurgeReport,
     contains_secret, current_timestamp, ensure_artifacts_inside_root, ensure_transition,
-    memory_evolution_metadata, memory_is_current_at, normalize_graphify_value,
-    parse_wiki_markdown,
+    memory_evolution_metadata, memory_is_current_at, normalize_graphify_value, parse_wiki_markdown,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -421,12 +419,7 @@ impl MemoryFacade {
             .map(|memory| memory.reference)
             .collect::<Vec<_>>();
         for reference in &due {
-            self.transition_memory(
-                request,
-                reference,
-                MemoryStatus::Stale,
-                "temporal_expiry",
-            )?;
+            self.transition_memory(request, reference, MemoryStatus::Stale, "temporal_expiry")?;
         }
         Ok(due.len())
     }
@@ -1167,8 +1160,8 @@ impl MemoryFacade {
             if decision.kind == AccessDecisionKind::Deny {
                 continue;
             }
-            let allow_candidate = request.statuses.is_empty()
-                || request.statuses.contains(&MemoryStatus::Candidate);
+            let allow_candidate =
+                request.statuses.is_empty() || request.statuses.contains(&MemoryStatus::Candidate);
             if !memory_is_current_at(&memory, unix_now(), allow_candidate) {
                 continue;
             }
@@ -1273,8 +1266,8 @@ impl MemoryFacade {
         request: &AuthorizedMemorySearchRequest,
         memory: &MemoryRecord,
     ) -> bool {
-        let allow_candidate = request.statuses.is_empty()
-            || request.statuses.contains(&MemoryStatus::Candidate);
+        let allow_candidate =
+            request.statuses.is_empty() || request.statuses.contains(&MemoryStatus::Candidate);
         memory_is_current_at(memory, unix_now(), allow_candidate)
             && self.policy.decide_memory(&request.access, memory).kind != AccessDecisionKind::Deny
             && request
@@ -1663,17 +1656,16 @@ impl MemoryFacade {
         if let Some(existing_page) =
             self.store
                 .get_wiki_page(&parsed.wiki_ref, &request.user_id, &request.workspace_id)?
+            && existing_page.body.trim() == parsed.body.trim()
         {
-            if existing_page.body.trim() == parsed.body.trim() {
-                self.audit_lifecycle(request, AccessDecisionKind::Allow, vec![])?;
-                return Ok(WikiCorrectionSyncReport {
-                    created_candidates: 0,
-                    unchanged: 1,
-                    conflicted: 0,
-                    rejected: 0,
-                    candidate_refs: vec![],
-                });
-            }
+            self.audit_lifecycle(request, AccessDecisionKind::Allow, vec![])?;
+            return Ok(WikiCorrectionSyncReport {
+                created_candidates: 0,
+                unchanged: 1,
+                conflicted: 0,
+                rejected: 0,
+                candidate_refs: vec![],
+            });
         }
 
         let now = current_timestamp();
@@ -1833,10 +1825,9 @@ impl MemoryFacade {
         consumer_user_id: &UserId,
         consumer_workspace_id: &WorkspaceId,
     ) -> MemoryResult<Vec<MemorySourceGrant>> {
-        Ok(self
-            .store
+        self.store
             .list_memory_source_grants(consumer_user_id, consumer_workspace_id)
-            .map_err(memory_source_grant_error)?)
+            .map_err(memory_source_grant_error)
     }
 
     pub fn resolve_memory_sources(
@@ -1879,11 +1870,8 @@ impl MemoryFacade {
         {
             return Ok(false);
         }
-        let sources = match self.resolve_memory_sources(
-            consumer_user,
-            consumer_workspace,
-            now_unix,
-        ) {
+        let sources = match self.resolve_memory_sources(consumer_user, consumer_workspace, now_unix)
+        {
             Ok(sources) => sources,
             Err(_) => return Ok(false),
         };
@@ -2433,12 +2421,11 @@ impl MemoryFacade {
             // A concurrent approver may have committed between this turn's source
             // reload and validation. Re-read only the durable proposal state: an
             // approved result is safely idempotent; every other state stays closed.
-            if error.as_str() == "publication_already_published" {
-                if let Some(latest) = self.get_publication_proposal(id)? {
-                    if latest.status == MemoryPublicationStatus::Approved {
-                        return self.approved_publication_result(latest);
-                    }
-                }
+            if error.as_str() == "publication_already_published"
+                && let Some(latest) = self.get_publication_proposal(id)?
+                && latest.status == MemoryPublicationStatus::Approved
+            {
+                return self.approved_publication_result(latest);
             }
             self.mark_publication_failed_if_pending(
                 &proposal.id,
@@ -2497,10 +2484,10 @@ impl MemoryFacade {
             // loaded the pending proposal but before candidate revalidation.
             // Only an already durable approval is idempotent; every other
             // candidate change remains a fail-closed conflict.
-            if let Some(latest) = self.get_publication_proposal(id)? {
-                if latest.status == MemoryPublicationStatus::Approved {
-                    return self.approved_publication_result(latest);
-                }
+            if let Some(latest) = self.get_publication_proposal(id)?
+                && latest.status == MemoryPublicationStatus::Approved
+            {
+                return self.approved_publication_result(latest);
             }
             return Err(MemoryError::policy("publication_conflict"));
         }
@@ -3079,10 +3066,9 @@ impl MemoryFacade {
                 "cannot access ref outside user/workspace",
             ));
         }
-        Ok(self
-            .store
+        self.store
             .get_memory(reference, &request.user_id, &request.workspace_id)?
-            .ok_or_else(|| MemoryError::not_found("memory not found"))?)
+            .ok_or_else(|| MemoryError::not_found("memory not found"))
     }
 
     fn audit_lifecycle(
@@ -3579,12 +3565,7 @@ mod tests {
             );
         }
 
-        let overflow = MemoryRef::new(
-            MemoryRefKind::Entity,
-            user,
-            workspace,
-            "overflow",
-        );
+        let overflow = MemoryRef::new(MemoryRefKind::Entity, user, workspace, "overflow");
         assert_eq!(
             reserve_authorized_graph_node(&mut visited, overflow),
             GraphNodeReservation::BudgetExhausted

@@ -189,7 +189,7 @@ fn parse_frontmatter(fm_lines: &[&str]) -> Frontmatter {
                     fm.description = non_empty(text);
                     idx += consumed;
                 } else {
-                    fm.description = non_empty(unquote(value).to_string());
+                    fm.description = non_empty(unquote(value));
                 }
             }
             "allowed-tools" | "allowed_tools" | "tools" => {
@@ -198,10 +198,10 @@ fn parse_frontmatter(fm_lines: &[&str]) -> Frontmatter {
             "sensitive" => {
                 let raw = parse_list_value(value, &fm_lines[idx..], &mut idx);
                 for token in &raw {
-                    if let Some(cat) = SensitiveCategory::parse(token) {
-                        if !fm.sensitive.contains(&cat) {
-                            fm.sensitive.push(cat);
-                        }
+                    if let Some(cat) = SensitiveCategory::parse(token)
+                        && !fm.sensitive.contains(&cat)
+                    {
+                        fm.sensitive.push(cat);
                     }
                 }
             }
@@ -361,7 +361,7 @@ pub fn scan_skills(
             Some(summary_from(&id, fm, disabled, origins))
         })
         .collect();
-    skills.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    skills.sort_by_key(|a| a.name.to_lowercase());
     skills
 }
 

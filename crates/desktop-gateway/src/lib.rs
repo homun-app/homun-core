@@ -1,14 +1,14 @@
 //! Local HTTP gateway contracts for the Electron desktop shell.
 
-pub mod integrity_api;
 pub mod browser_checkpoint;
+pub mod integrity_api;
 pub mod linked_memory_repair;
-pub mod project_graph_commit;
-pub mod usage_store;
-pub mod usage_pricing;
-pub mod usage_suggestions;
 pub mod model_registry;
+pub mod project_graph_commit;
 pub mod provider_usage;
+pub mod usage_pricing;
+pub mod usage_store;
+pub mod usage_suggestions;
 pub mod workspace_delete;
 
 // The single control-marker toolkit (‹‹NAME››…‹‹/NAME›› protocol) moved WHOLE into the engine crate
@@ -411,7 +411,7 @@ pub fn build_chat_runtime_prompt(request: &BuildPromptRequest) -> BuildPromptRes
         MAX_SINGLE_CONTEXT_MESSAGE_CHARS
     };
     let raw_context = render_context_lines(&request.context, max_message_chars);
-    let compression = ContextCompressor::default().compress(
+    let compression = ContextCompressor.compress(
         &ContextItem::new(ContextKind::ChatHistory, raw_context),
         &CompressionPolicy::for_kind(ContextKind::ChatHistory).with_max_chars(max_context_chars),
     );
@@ -666,7 +666,8 @@ mod tests {
             prompt: "continue".to_string(),
             context: vec![ChatContextMessage {
                 role: ChatContextRole::Assistant,
-                text: "‹‹REASONING››I should explain X then Y‹‹/REASONING››\nHere is X.".to_string(),
+                text: "‹‹REASONING››I should explain X then Y‹‹/REASONING››\nHere is X."
+                    .to_string(),
             }],
             max_context_chars: Some(1_000),
         });

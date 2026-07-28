@@ -4,18 +4,10 @@ use crate::provider::Locality;
 /// device, so it is deny-by-default per PROJECT.md (local-first; cloud is an
 /// explicit, opt-in boundary). The Rust Core owns this decision; it is never
 /// delegated to an external tool.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PrivacyPolicy {
     /// Cloud providers are only eligible when the user has explicitly opted in.
     allow_cloud_delegation: bool,
-}
-
-impl Default for PrivacyPolicy {
-    fn default() -> Self {
-        Self {
-            allow_cloud_delegation: false,
-        }
-    }
 }
 
 impl PrivacyPolicy {

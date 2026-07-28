@@ -46,7 +46,11 @@ pub(crate) fn document_block_skeleton(example: &Value) -> Vec<DocBlockSlot> {
             let slot_key = format!("slot_{i}_{block_type}");
             let mut template_block = block.as_object().cloned().unwrap_or_default();
             template_block.remove("type");
-            Some(DocBlockSlot { block_type, slot_key, template_block })
+            Some(DocBlockSlot {
+                block_type,
+                slot_key,
+                template_block,
+            })
         })
         .collect()
 }
@@ -95,19 +99,33 @@ pub(crate) fn document_block_schema(block_type: &str) -> Option<Value> {
             ("subtitle", s("Supporting subtitle; use \"\" if none.")),
         ]),
         "text_section" => obj(&[
-            ("title", s("Section heading; use \"\" for an untitled block.")),
+            (
+                "title",
+                s("Section heading; use \"\" for an untitled block."),
+            ),
             (
                 "paragraphs",
-                arr("Body paragraphs of plain prose, one per item.", s("A single paragraph."), 6),
+                arr(
+                    "Body paragraphs of plain prose, one per item.",
+                    s("A single paragraph."),
+                    6,
+                ),
             ),
             (
                 "bullets",
-                arr("Key facts as short bullet points.", s("A single bullet point."), 8),
+                arr(
+                    "Key facts as short bullet points.",
+                    s("A single bullet point."),
+                    8,
+                ),
             ),
         ]),
         "letterhead" => obj(&[
             ("organization", s("Sender organization name.")),
-            ("contact_line", s("Address / email / phone, one compact line.")),
+            (
+                "contact_line",
+                s("Address / email / phone, one compact line."),
+            ),
             ("date_line", s("Letter date, human-readable.")),
             (
                 "recipient_lines",
@@ -119,10 +137,17 @@ pub(crate) fn document_block_schema(block_type: &str) -> Option<Value> {
             ),
         ]),
         "letter_body" => obj(&[
-            ("salutation", s("Opening salutation, e.g. \"Dear Ms Rossi,\".")),
+            (
+                "salutation",
+                s("Opening salutation, e.g. \"Dear Ms Rossi,\"."),
+            ),
             (
                 "paragraphs",
-                arr("Letter body paragraphs, plain prose.", s("A single paragraph."), 8),
+                arr(
+                    "Letter body paragraphs, plain prose.",
+                    s("A single paragraph."),
+                    8,
+                ),
             ),
         ]),
         "signature_block" => obj(&[
@@ -134,12 +159,19 @@ pub(crate) fn document_block_schema(block_type: &str) -> Option<Value> {
             ("heading", s("Call-to-action heading, e.g. \"Contact us\".")),
             (
                 "lines",
-                arr("Contact/closing lines.", s("A single contact or closing line."), 3),
+                arr(
+                    "Contact/closing lines.",
+                    s("A single contact or closing line."),
+                    3,
+                ),
             ),
         ]),
         "contact_header" => obj(&[
             ("name", s("Person's full name (CV/profile header).")),
-            ("headline", s("Short professional headline; use \"\" if none.")),
+            (
+                "headline",
+                s("Short professional headline; use \"\" if none."),
+            ),
             (
                 "contact_items",
                 arr(
@@ -201,7 +233,11 @@ pub(crate) fn document_block_schema(block_type: &str) -> Option<Value> {
                         ("label", s("Group label, e.g. \"Languages\".")),
                         (
                             "tags",
-                            arr("Individual skill/tag names.", s("A single skill or tag."), 10),
+                            arr(
+                                "Individual skill/tag names.",
+                                s("A single skill or tag."),
+                                10,
+                            ),
                         ),
                     ]),
                     4,
@@ -217,8 +253,14 @@ pub(crate) fn document_block_schema(block_type: &str) -> Option<Value> {
                     obj(&[
                         ("name", s("Product name.")),
                         ("description", s("Short product description.")),
-                        ("price", s("Price string, e.g. \"€49/mo\"; use \"\" if none.")),
-                        ("badge", s("Optional badge text, e.g. \"New\"; use \"\" if none.")),
+                        (
+                            "price",
+                            s("Price string, e.g. \"€49/mo\"; use \"\" if none."),
+                        ),
+                        (
+                            "badge",
+                            s("Optional badge text, e.g. \"New\"; use \"\" if none."),
+                        ),
                     ]),
                     9,
                 ),
@@ -301,20 +343,20 @@ pub(crate) fn document_content_schema(skeleton: &[DocBlockSlot]) -> Result<Value
         // Editorial eyebrow: a REFINABLE slot, pre-seeded with the pack default so the
         // model can adapt it to the brief (e.g. "SEED ROUND" -> "SERIES A · 2026") while a
         // blank answer falls back to the curated default (assemble_doc_json's guard).
-        if let Some(default) = slot.template_block.get("eyebrow").and_then(|v| v.as_str()) {
-            if !default.trim().is_empty() {
-                if let Some(obj) = schema.get_mut("properties").and_then(|p| p.as_object_mut()) {
-                    obj.insert(
+        if let Some(default) = slot.template_block.get("eyebrow").and_then(|v| v.as_str())
+            && !default.trim().is_empty()
+        {
+            if let Some(obj) = schema.get_mut("properties").and_then(|p| p.as_object_mut()) {
+                obj.insert(
                         "eyebrow".to_string(),
                         s(&format!(
                             "Small-caps kicker above the title. Default: «{default}». Keep it unless the \
 brief clearly implies a more specific label; use \"\" to keep the default."
                         )),
                     );
-                }
-                if let Some(req) = schema.get_mut("required").and_then(|r| r.as_array_mut()) {
-                    req.push(Value::String("eyebrow".to_string()));
-                }
+            }
+            if let Some(req) = schema.get_mut("required").and_then(|r| r.as_array_mut()) {
+                req.push(Value::String("eyebrow".to_string()));
             }
         }
         slot_properties.insert(slot.slot_key.clone(), schema);
@@ -366,10 +408,8 @@ pub(crate) fn assemble_doc_json(
             .and_then(|v| v.as_str())
             .map(|v| v.trim().is_empty())
             .unwrap_or(false);
-        if model_eyebrow_blank {
-            if let Some(default) = slot.template_block.get("eyebrow") {
-                block.insert("eyebrow".to_string(), default.clone());
-            }
+        if model_eyebrow_blank && let Some(default) = slot.template_block.get("eyebrow") {
+            block.insert("eyebrow".to_string(), default.clone());
         }
         block.insert("type".to_string(), Value::String(slot.block_type.clone()));
         blocks.push(Value::Object(block));
@@ -388,7 +428,10 @@ pub(crate) fn assemble_doc_json(
 /// on-disk shape as deck packs (`template_packs.rs`): `<pack_root>/example.json`.
 pub(crate) fn load_pack_example(entry: &TemplateCatalogEntry) -> Result<Value, String> {
     let root = entry.template_pack_root.as_ref().ok_or_else(|| {
-        format!("template `{}` has no pack root (not a bundled/imported pack)", entry.id)
+        format!(
+            "template `{}` has no pack root (not a bundled/imported pack)",
+            entry.id
+        )
     })?;
     let path = root.join("example.json");
     let raw = std::fs::read_to_string(&path)
@@ -411,6 +454,7 @@ fn extract_document_object(v: &Value) -> Option<Value> {
 /// first, `json_object` fallback on HTTP 400 (some providers reject
 /// `json_schema`). The caller validates via `assemble_doc_json` — a malformed
 /// answer never reaches the renderer.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn generate_document_content(
     http: &reqwest::Client,
     base_url: &str,
@@ -669,10 +713,25 @@ mod tests {
         // cover slot gained an eyebrow property whose description carries the default
         let cover = &props["slot_0_section_cover"];
         assert!(cover["properties"].get("eyebrow").is_some());
-        assert!(cover["required"].as_array().unwrap().iter().any(|v| v == "eyebrow"));
-        assert!(cover["properties"]["eyebrow"]["description"].as_str().unwrap().contains("CASE STUDY"));
+        assert!(
+            cover["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v == "eyebrow")
+        );
+        assert!(
+            cover["properties"]["eyebrow"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("CASE STUDY")
+        );
         // text_section has no skeleton eyebrow → no eyebrow slot
-        assert!(props["slot_1_text_section"]["properties"].get("eyebrow").is_none());
+        assert!(
+            props["slot_1_text_section"]["properties"]
+                .get("eyebrow")
+                .is_none()
+        );
     }
 
     #[test]
@@ -688,7 +747,7 @@ mod tests {
         }});
         let doc = assemble_doc_json("f", &skeleton, &model_output).unwrap();
         let b = doc["blocks"].as_array().unwrap();
-        assert_eq!(b[0]["eyebrow"], "SERIES A · 2026");  // model refinement kept
-        assert_eq!(b[1]["eyebrow"], "CASE STUDY");        // blank → skeleton default restored
+        assert_eq!(b[0]["eyebrow"], "SERIES A · 2026"); // model refinement kept
+        assert_eq!(b[1]["eyebrow"], "CASE STUDY"); // blank → skeleton default restored
     }
 }

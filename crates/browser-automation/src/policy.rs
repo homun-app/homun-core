@@ -2,7 +2,7 @@ use crate::{BrowserAutomationError, BrowserMethod, BrowserResult};
 use serde_json::Value;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BrowserPolicy {
     allow_private_network: bool,
 }
@@ -16,14 +16,6 @@ pub enum BrowserActionDecision {
         data_boundary: String,
         explanation: String,
     },
-}
-
-impl Default for BrowserPolicy {
-    fn default() -> Self {
-        Self {
-            allow_private_network: false,
-        }
-    }
 }
 
 impl BrowserPolicy {

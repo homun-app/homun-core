@@ -83,13 +83,13 @@ pub fn ingest_each(attachments: &[AttachmentInput]) -> Vec<IngestedFile> {
 pub fn ingest_attachments(attachments: &[AttachmentInput]) -> IngestedAttachments {
     let mut out = IngestedAttachments::default();
     for file in ingest_each(attachments) {
-        if let Some(text) = &file.text {
-            if !text.trim().is_empty() {
-                out.text.push_str(&format!(
-                    "\n\n[Attachment: {}]\n{}",
-                    file.display_name, text
-                ));
-            }
+        if let Some(text) = &file.text
+            && !text.trim().is_empty()
+        {
+            out.text.push_str(&format!(
+                "\n\n[Attachment: {}]\n{}",
+                file.display_name, text
+            ));
         }
         out.images.extend(file.images);
     }
@@ -478,17 +478,17 @@ fn decode_xml_text(raw: &str) -> String {
             "quot" => out.push('"'),
             "apos" => out.push('\''),
             _ if entity.starts_with("#x") => {
-                if let Ok(codepoint) = u32::from_str_radix(&entity[2..], 16) {
-                    if let Some(ch) = char::from_u32(codepoint) {
-                        out.push(ch);
-                    }
+                if let Ok(codepoint) = u32::from_str_radix(&entity[2..], 16)
+                    && let Some(ch) = char::from_u32(codepoint)
+                {
+                    out.push(ch);
                 }
             }
             _ if entity.starts_with('#') => {
-                if let Ok(codepoint) = entity[1..].parse::<u32>() {
-                    if let Some(ch) = char::from_u32(codepoint) {
-                        out.push(ch);
-                    }
+                if let Ok(codepoint) = entity[1..].parse::<u32>()
+                    && let Some(ch) = char::from_u32(codepoint)
+                {
+                    out.push(ch);
                 }
             }
             _ => {

@@ -70,7 +70,7 @@ fn parse(rule: &str) -> Option<Rule> {
     // weekly@<dow>@HH:MM | weekly <dow> HH:MM
     if let Some(rest) = normalized.strip_prefix("weekly") {
         let rest = rest.trim_start_matches(['@', ' ']);
-        let mut parts = rest.splitn(2, |c| c == '@' || c == ' ');
+        let mut parts = rest.splitn(2, ['@', ' ']);
         let weekday = parse_weekday(parts.next()?.trim())?;
         let (hour, minute) = parse_hhmm(parts.next()?)?;
         return Some(Rule::WeeklyAt {

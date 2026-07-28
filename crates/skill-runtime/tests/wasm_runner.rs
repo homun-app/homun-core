@@ -97,7 +97,7 @@ fn wasm_runner_rejects_output_larger_than_limit_before_json_parse() {
         r#"{{"output":{{"blob":"{}"}},"trace":{{"accessed_network":[],"accessed_filesystem":[]}}}}"#,
         "x".repeat(4096)
     );
-    let large_json_len = large_json.as_bytes().len();
+    let large_json_len = large_json.len();
     let fixture = wasm_fixture(&wasm_module_returning_json(&large_json));
     let config = WasmSkillRunnerConfig::new(fixture.module.clone(), vec![fixture.root]).unwrap();
     let runtime = SkillRuntime::new(Arc::new(WasmSkillRunner::new(config)));
@@ -222,7 +222,7 @@ fn wasm_fixture(wat_source: &str) -> WasmFixture {
 fn wasm_module_returning_json(json: &str) -> String {
     let escaped = json.replace('\\', "\\\\").replace('"', "\\\"");
     let output_ptr = 1024u64;
-    let output_len = json.as_bytes().len() as u64;
+    let output_len = json.len() as u64;
     let packed = (output_ptr << 32) | output_len;
     format!(
         r#"

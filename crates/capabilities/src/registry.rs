@@ -182,6 +182,8 @@ pub struct CachedCapabilityTool {
 }
 
 impl CachedCapabilityTool {
+    // The cached tool constructor mirrors the registry record's required fields.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider_id: ProviderId,
         tool_name: impl Into<String>,

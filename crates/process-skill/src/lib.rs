@@ -184,10 +184,10 @@ pub fn validate_overlay(skill: &ProcessSkill, overlay: &Overlay) -> Vec<Violatio
 pub fn apply_overlay(skill: &ProcessSkill, overlay: &Overlay) -> ProcessSkill {
     let mut effective = skill.clone();
     for field in &mut effective.config {
-        if field.editable {
-            if let Some(new_value) = overlay.changes.get(&field.key) {
-                field.value = new_value.clone();
-            }
+        if field.editable
+            && let Some(new_value) = overlay.changes.get(&field.key)
+        {
+            field.value = new_value.clone();
         }
     }
     if effective.allows_custom_fields {

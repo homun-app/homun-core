@@ -80,7 +80,7 @@ fn compress_json_context<T: serde::Serialize + ?Sized>(
     max_chars: usize,
 ) -> OrchestratorResult<(String, ContextBudgetUsage)> {
     let raw = serde_json::to_string(value)?;
-    let result = ContextCompressor::default().compress(
+    let result = ContextCompressor.compress(
         &ContextItem::new(ContextKind::ToolJson, raw),
         &CompressionPolicy::for_kind(ContextKind::ToolJson).with_max_chars(max_chars),
     );
@@ -92,7 +92,7 @@ fn compress_chat_context(
     value: &str,
     max_chars: usize,
 ) -> (String, ContextBudgetUsage) {
-    let result = ContextCompressor::default().compress(
+    let result = ContextCompressor.compress(
         &ContextItem::new(ContextKind::ChatHistory, value),
         &CompressionPolicy::for_kind(ContextKind::ChatHistory).with_max_chars(max_chars),
     );

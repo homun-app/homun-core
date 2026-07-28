@@ -171,7 +171,7 @@ fn audit_tool_result_payload(output: &serde_json::Value) -> serde_json::Value {
         return output.clone();
     }
 
-    let compressed = ContextCompressor::default().compress(
+    let compressed = ContextCompressor.compress(
         &ContextItem::new(ContextKind::ToolJson, raw),
         &CompressionPolicy::for_kind(ContextKind::ToolJson).with_max_chars(MAX_AUDIT_RESULT_CHARS),
     );

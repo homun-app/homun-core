@@ -191,28 +191,20 @@ pub struct SkillManifest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum PluginChannel {
+    #[default]
     Stable,
     Beta,
 }
 
-impl Default for PluginChannel {
-    fn default() -> Self {
-        Self::Stable
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum PluginEntitlement {
+    #[default]
     Free,
     Paid,
-}
-
-impl Default for PluginEntitlement {
-    fn default() -> Self {
-        Self::Free
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -274,7 +266,7 @@ impl PluginRegistryEntry {
         if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err(PluginRegistryValidationError::InvalidPackageDigest);
         }
-        if self.signature.algorithm.to_ascii_lowercase() != "ed25519" {
+        if !self.signature.algorithm.eq_ignore_ascii_case("ed25519") {
             return Err(PluginRegistryValidationError::UnsupportedSignatureAlgorithm);
         }
         Ok(())
@@ -491,7 +483,7 @@ impl PluginLicenseToken {
         {
             return Err(PluginLicenseValidationError::Expired);
         }
-        if self.signature.algorithm.to_ascii_lowercase() != "ed25519" {
+        if !self.signature.algorithm.eq_ignore_ascii_case("ed25519") {
             return Err(PluginLicenseValidationError::UnsupportedSignatureAlgorithm);
         }
         let public_key = decode_fixed_hex::<32>(&self.signature.public_key)

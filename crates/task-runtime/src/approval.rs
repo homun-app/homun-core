@@ -30,6 +30,9 @@ pub struct ApprovalRequest {
 }
 
 impl ApprovalRequest {
+    // Constructor mirrors the persisted approval record; grouping these fields would only move
+    // the same contract into another one-use input type.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         approval_id: impl Into<String>,
         task_id: TaskId,

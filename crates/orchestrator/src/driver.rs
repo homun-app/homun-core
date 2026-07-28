@@ -186,10 +186,12 @@ pub fn drive_plan<E: StepExecutor, V: StepVerifier>(
     for step in &plan.steps {
         // Dependency gate. Topological order means every dependency already has a
         // final status here; a step runs only if ALL of them reached Done.
-        let blocking = step
-            .depends_on
-            .iter()
-            .find(|dep| !status.get(*dep).copied().is_some_and(DriveStepStatus::unblocks_dependents));
+        let blocking = step.depends_on.iter().find(|dep| {
+            !status
+                .get(*dep)
+                .copied()
+                .is_some_and(DriveStepStatus::unblocks_dependents)
+        });
         if let Some(dep) = blocking {
             status.insert(step.step_id.clone(), DriveStepStatus::Skipped);
             results.push(DriveStepResult {
@@ -216,7 +218,10 @@ pub fn drive_plan<E: StepExecutor, V: StepVerifier>(
         };
 
         let (new_status, error) = if !outcome.succeeded {
-            (DriveStepStatus::Failed, Some("executor_reported_failure".to_string()))
+            (
+                DriveStepStatus::Failed,
+                Some("executor_reported_failure".to_string()),
+            )
         } else if verifier.verify(step, &outcome) {
             // The RUNTIME marks done — and only after the verify gate passes. This
             // is the line ADR 0016 draws: the model fills the slot, the harness
@@ -224,7 +229,10 @@ pub fn drive_plan<E: StepExecutor, V: StepVerifier>(
             completed.insert(step.step_id.clone(), outcome.clone());
             (DriveStepStatus::Done, None)
         } else {
-            (DriveStepStatus::Unverified, Some("verify_gate_rejected".to_string()))
+            (
+                DriveStepStatus::Unverified,
+                Some("verify_gate_rejected".to_string()),
+            )
         };
 
         status.insert(step.step_id.clone(), new_status);
@@ -337,7 +345,7 @@ mod tests {
         }
     }
 
-    fn status_of<'a>(outcome: &'a DriveOutcome, id: &str) -> DriveStepStatus {
+    fn status_of(outcome: &DriveOutcome, id: &str) -> DriveStepStatus {
         outcome
             .results
             .iter()
@@ -350,7 +358,11 @@ mod tests {
     fn linear_plan_all_done_in_order_with_data_flow() {
         let mut exec = RecordingExecutor::new();
         let mut ver = FakeVerifier::pass_all();
-        let p = plan(vec![step("s1", &[]), step("s2", &["s1"]), step("s3", &["s2"])]);
+        let p = plan(vec![
+            step("s1", &[]),
+            step("s2", &["s1"]),
+            step("s3", &["s2"]),
+        ]);
 
         let out = drive_plan(&p, &mut exec, &mut ver);
 
@@ -393,11 +405,7 @@ mod tests {
     fn executor_failure_is_isolated_to_the_failed_branch() {
         let mut exec = RecordingExecutor::failing(&["s1"]);
         let mut ver = FakeVerifier::pass_all();
-        let p = plan(vec![
-            step("s1", &[]),
-            step("s2", &["s1"]),
-            step("s3", &[]),
-        ]);
+        let p = plan(vec![step("s1", &[]), step("s2", &["s1"]), step("s3", &[])]);
 
         let out = drive_plan(&p, &mut exec, &mut ver);
 

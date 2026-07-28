@@ -84,8 +84,8 @@ impl MemoryVectorIndexCache {
     {
         #[cfg(feature = "usearch-index")]
         {
-            return UsearchMemoryVectorIndex::from_embeddings(embeddings)
-                .map(|index| index.map(Self::Usearch).unwrap_or(Self::PendingUsearch));
+            UsearchMemoryVectorIndex::from_embeddings(embeddings)
+                .map(|index| index.map(Self::Usearch).unwrap_or(Self::PendingUsearch))
         }
 
         #[cfg(not(feature = "usearch-index"))]

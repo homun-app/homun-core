@@ -1,7 +1,10 @@
 use local_first_inference_usage::{
     AttemptEventKind, CostProvenance, Locality, NormalizedUsage, UsageAttemptEvent, UsageRecorder,
 };
-use std::{collections::HashMap, sync::{Arc, RwLock}};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UsagePrice {
@@ -26,12 +29,19 @@ pub struct PricingSnapshot {
 }
 
 impl PricingSnapshot {
-    pub fn insert(&mut self, provider_id: impl Into<String>, model_id: impl Into<String>, pricing: ModelPricing) {
-        self.prices.insert((provider_id.into(), model_id.into()), pricing);
+    pub fn insert(
+        &mut self,
+        provider_id: impl Into<String>,
+        model_id: impl Into<String>,
+        pricing: ModelPricing,
+    ) {
+        self.prices
+            .insert((provider_id.into(), model_id.into()), pricing);
     }
 
     pub fn get(&self, provider_id: &str, model_id: &str) -> Option<&ModelPricing> {
-        self.prices.get(&(provider_id.to_string(), model_id.to_string()))
+        self.prices
+            .get(&(provider_id.to_string(), model_id.to_string()))
     }
 }
 
@@ -62,15 +72,15 @@ pub fn resolve_cost(
         (manual, CostProvenance::ManualEstimated),
         (catalog, CostProvenance::CatalogEstimated),
     ] {
-        if let Some(price) = price {
-            if let Some(cost) = estimate_cost(usage, price) {
-                return CostResolution {
-                    cost_microusd: Some(cost),
-                    provenance,
-                    pricing_source: Some(price.source.clone()),
-                    pricing_version: Some(price.version.clone()),
-                };
-            }
+        if let Some(price) = price
+            && let Some(cost) = estimate_cost(usage, price)
+        {
+            return CostResolution {
+                cost_microusd: Some(cost),
+                provenance,
+                pricing_source: Some(price.source.clone()),
+                pricing_version: Some(price.version.clone()),
+            };
         }
     }
     if locality == Locality::Local {
@@ -95,13 +105,21 @@ fn estimate_cost(usage: &NormalizedUsage, price: &UsagePrice) -> Option<u64> {
         (usage.input_tokens, price.input_microusd_per_million),
         (usage.output_tokens, price.output_microusd_per_million),
         (usage.reasoning_tokens, price.reasoning_microusd_per_million),
-        (usage.cache_read_tokens, price.cache_read_microusd_per_million),
-        (usage.cache_write_tokens, price.cache_write_microusd_per_million),
+        (
+            usage.cache_read_tokens,
+            price.cache_read_microusd_per_million,
+        ),
+        (
+            usage.cache_write_tokens,
+            price.cache_write_microusd_per_million,
+        ),
     ];
     let mut total = 0u128;
     let mut priced = false;
     for (tokens, rate) in components {
-        let Some(rate) = rate.filter(|rate| *rate > 0) else { continue };
+        let Some(rate) = rate.filter(|rate| *rate > 0) else {
+            continue;
+        };
         priced = true;
         let tokens = u128::from(tokens?);
         total = total.checked_add(tokens.checked_mul(u128::from(rate))? / 1_000_000)?;
@@ -127,7 +145,9 @@ impl UsageRecorder for CostEnrichingUsageRecorder {
                 .provider_id
                 .as_deref()
                 .zip(event.model_id.as_deref())
-                .and_then(|(provider, model)| self.snapshot.read().ok()?.get(provider, model).cloned())
+                .and_then(|(provider, model)| {
+                    self.snapshot.read().ok()?.get(provider, model).cloned()
+                })
                 .unwrap_or_default();
             let usage = NormalizedUsage {
                 input_tokens: event.input_tokens,
@@ -157,7 +177,11 @@ mod tests {
     use super::*;
 
     fn usage(input: u64, output: u64) -> NormalizedUsage {
-        NormalizedUsage { input_tokens: Some(input), output_tokens: Some(output), ..Default::default() }
+        NormalizedUsage {
+            input_tokens: Some(input),
+            output_tokens: Some(output),
+            ..Default::default()
+        }
     }
 
     fn catalog_price() -> UsagePrice {
@@ -182,14 +206,26 @@ mod tests {
 
     #[test]
     fn provider_reported_cost_wins_unchanged() {
-        let result = resolve_cost(Some(1_234), &usage(1_000, 500), Some(&catalog_price()), Some(&manual_price()), Locality::Cloud);
+        let result = resolve_cost(
+            Some(1_234),
+            &usage(1_000, 500),
+            Some(&catalog_price()),
+            Some(&manual_price()),
+            Locality::Cloud,
+        );
         assert_eq!(result.cost_microusd, Some(1_234));
         assert_eq!(result.provenance, CostProvenance::ProviderReported);
     }
 
     #[test]
     fn manual_override_wins_over_catalog_for_estimates() {
-        let result = resolve_cost(None, &usage(1_000_000, 500_000), Some(&catalog_price()), Some(&manual_price()), Locality::Cloud);
+        let result = resolve_cost(
+            None,
+            &usage(1_000_000, 500_000),
+            Some(&catalog_price()),
+            Some(&manual_price()),
+            Locality::Cloud,
+        );
         assert_eq!(result.cost_microusd, Some(2_000_000));
         assert_eq!(result.provenance, CostProvenance::ManualEstimated);
     }
@@ -198,7 +234,10 @@ mod tests {
     fn missing_token_component_does_not_become_zero_cost() {
         let mut value = usage(1_000, 500);
         value.output_tokens = None;
-        assert_eq!(resolve_cost(None, &value, Some(&catalog_price()), None, Locality::Cloud).cost_microusd, None);
+        assert_eq!(
+            resolve_cost(None, &value, Some(&catalog_price()), None, Locality::Cloud).cost_microusd,
+            None
+        );
     }
 
     #[test]

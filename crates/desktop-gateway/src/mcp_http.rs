@@ -79,10 +79,9 @@ impl McpHttpTransport {
             .get("mcp-session-id")
             .and_then(|v| v.to_str().ok())
             .map(str::to_string)
+            && let Ok(mut guard) = self.session_id.lock()
         {
-            if let Ok(mut guard) = self.session_id.lock() {
-                *guard = Some(sid);
-            }
+            *guard = Some(sid);
         }
         let status = resp.status();
         let is_sse = resp

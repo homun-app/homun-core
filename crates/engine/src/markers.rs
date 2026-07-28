@@ -516,6 +516,7 @@ pub fn marker_safe_split(buf: &str) -> (&str, &str) {
 /// "reasoning trace leaked as literal text" whack-a-mole. Handles:
 ///   - single-guillemet `‹REASONING›` / `‹/REASONING›` (one U+2039, vs the canonical double)
 ///   - XML-style `<REASONING>` / `</REASONING>` (+ lowercase)
+///
 /// (`<think>`/`<thinking>` are stripped upstream by `sanitize_model_text`; the STREAM filter strips
 /// them too — see `StreamMarkerFilter`.) The already-canonical double form is protected first (it
 /// CONTAINS the single form as a substring), via NUL placeholders that never occur in model text.

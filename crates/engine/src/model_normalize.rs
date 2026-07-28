@@ -175,6 +175,7 @@ fn parse_xml_parameters(block: &str) -> String {
 /// the one canonical boundary (ADR 0019). Handles the two common leaked formats:
 ///   - Hermes/Qwen JSON:   `<tool_call>{"name":"X","arguments":{...}}</tool_call>`
 ///   - Claude/MiniMax XML: `<invoke name="X"><parameter name="p">v</parameter></invoke>`
+///
 /// Returns `(name, arguments_json)`, filtered to `known` tool names so prose that merely
 /// mentions a tag is not mistaken for a call.
 pub fn parse_text_tool_calls(text: &str, known: &[String]) -> Vec<(String, String)> {
@@ -188,10 +189,10 @@ pub fn parse_text_tool_calls(text: &str, known: &[String]) -> Vec<(String, Strin
             break;
         };
         let block = &after[..close];
-        if let Some(name) = xml_attr_value(block, "name") {
-            if known.iter().any(|k| k == &name) {
-                out.push((name, parse_xml_parameters(block)));
-            }
+        if let Some(name) = xml_attr_value(block, "name")
+            && known.iter().any(|k| k == &name)
+        {
+            out.push((name, parse_xml_parameters(block)));
         }
         rest = &after[close + "</invoke>".len()..];
     }
@@ -204,16 +205,15 @@ pub fn parse_text_tool_calls(text: &str, known: &[String]) -> Vec<(String, Strin
                 break;
             };
             let inner = after[..close].trim();
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(inner) {
-                if let Some(name) = value.get("name").and_then(|n| n.as_str()) {
-                    if known.iter().any(|k| k == name) {
-                        let args = value
-                            .get("arguments")
-                            .map(|a| a.to_string())
-                            .unwrap_or_else(|| "{}".to_string());
-                        out.push((name.to_string(), args));
-                    }
-                }
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(inner)
+                && let Some(name) = value.get("name").and_then(|n| n.as_str())
+                && known.iter().any(|k| k == name)
+            {
+                let args = value
+                    .get("arguments")
+                    .map(|a| a.to_string())
+                    .unwrap_or_else(|| "{}".to_string());
+                out.push((name.to_string(), args));
             }
             rest = &after[close + "</tool_call>".len()..];
         }
@@ -224,7 +224,10 @@ pub fn parse_text_tool_calls(text: &str, known: &[String]) -> Vec<(String, Strin
 /// Synthesize an OpenAI-style `tool_calls` array from text-parsed calls so the existing
 /// dispatch path handles them unchanged. The synthetic `id` is stable within a round via
 /// `round`+`index` (mirrors `ollama_tool_call`'s id strategy).
-pub fn synthesize_tool_calls(round: usize, parsed: Vec<(String, String)>) -> Vec<serde_json::Value> {
+pub fn synthesize_tool_calls(
+    round: usize,
+    parsed: Vec<(String, String)>,
+) -> Vec<serde_json::Value> {
     parsed
         .into_iter()
         .enumerate()
@@ -266,13 +269,12 @@ fn strip_fullwidth_bar_tokens(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut i = 0;
     while i < chars.len() {
-        if chars[i] == '<' {
-            if let Some(rel) = chars[i..].iter().position(|&c| c == '>') {
-                if chars[i..=i + rel].iter().any(|&c| c == '｜') {
-                    i += rel + 1;
-                    continue;
-                }
-            }
+        if chars[i] == '<'
+            && let Some(rel) = chars[i..].iter().position(|&c| c == '>')
+            && chars[i..=i + rel].contains(&'｜')
+        {
+            i += rel + 1;
+            continue;
         }
         out.push(chars[i]);
         i += 1;
@@ -395,7 +397,9 @@ impl TryFrom<RawPlanPropose> for PlanProposed {
 /// model text into a canonical proposal. The single tolerant parser (ADR 0019) —
 /// strings OR objects, both accepted; the frontend regex retires once events are wired.
 pub fn parse_plan_propose(text: &str) -> Result<PlanProposed, NormalizeError> {
-    let open = text.rfind(PLAN_PROPOSE_OPEN).ok_or(NormalizeError::NotFound)?;
+    let open = text
+        .rfind(PLAN_PROPOSE_OPEN)
+        .ok_or(NormalizeError::NotFound)?;
     let after = open + PLAN_PROPOSE_OPEN.len();
     let close_rel = text[after..]
         .find(PLAN_PROPOSE_CLOSE)
@@ -411,7 +415,10 @@ mod tests {
 
     #[test]
     fn sanitize_strips_known_control_tokens() {
-        assert_eq!(sanitize_model_text("<think>reasoning</think>Answer."), "Answer.");
+        assert_eq!(
+            sanitize_model_text("<think>reasoning</think>Answer."),
+            "Answer."
+        );
         assert_eq!(sanitize_model_text("ok<tool_call>{}</tool_call>"), "ok");
         assert_eq!(sanitize_model_text("a]<]minimax[>[b"), "ab");
         assert_eq!(sanitize_model_text("x<｜tool▁calls▁begin｜>y"), "xy");
@@ -435,7 +442,10 @@ mod tests {
             "‹‹REASONING››still thinking‹‹/REASONING››"
         );
         // Other markers pass through untouched.
-        assert_eq!(sanitize_model_text("‹‹PLAN››- [x] a‹‹/PLAN››"), "‹‹PLAN››- [x] a‹‹/PLAN››");
+        assert_eq!(
+            sanitize_model_text("‹‹PLAN››- [x] a‹‹/PLAN››"),
+            "‹‹PLAN››- [x] a‹‹/PLAN››"
+        );
     }
 
     #[test]
@@ -454,7 +464,12 @@ mod tests {
     fn assistant_response_recovers_answer_buried_in_think_tags() {
         // Ollama reasoning model without think:true: whole answer inside <think>, content
         // otherwise empty → sanitizer would delete it → empty. Canonical builder recovers it.
-        let body = assistant_response("<think>the real answer</think>".into(), String::new(), vec![], "stop");
+        let body = assistant_response(
+            "<think>the real answer</think>".into(),
+            String::new(),
+            vec![],
+            "stop",
+        );
         assert_eq!(body["choices"][0]["message"]["content"], "the real answer");
     }
 
@@ -486,7 +501,12 @@ mod tests {
     #[test]
     fn assistant_response_attaches_tool_calls_only_when_present() {
         let call = serde_json::json!({"id":"c1","type":"function","function":{"name":"x","arguments":"{}"}});
-        let body = assistant_response(String::new(), String::new(), vec![call.clone()], "tool_calls");
+        let body = assistant_response(
+            String::new(),
+            String::new(),
+            vec![call.clone()],
+            "tool_calls",
+        );
         assert_eq!(body["choices"][0]["message"]["tool_calls"][0], call);
         // No reasoning, no content → content stays empty (not replaced by an empty reasoning).
         assert_eq!(body["choices"][0]["message"]["content"], "");
@@ -504,13 +524,19 @@ mod tests {
         assert_eq!(norm["function"]["name"], "get_weather");
         // arguments must be a STRING (OpenAI-compat), the JSON-encoded object.
         let args = norm["function"]["arguments"].as_str().unwrap();
-        assert_eq!(serde_json::from_str::<serde_json::Value>(args).unwrap()["city"], "London");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(args).unwrap()["city"],
+            "London"
+        );
     }
 
     #[test]
     fn ollama_tool_call_keeps_string_arguments_and_handles_missing() {
         let with_str = serde_json::json!({"function":{"name":"x","arguments":"{\"a\":1}"}});
-        assert_eq!(ollama_tool_call(&with_str, 2)["function"]["arguments"], "{\"a\":1}");
+        assert_eq!(
+            ollama_tool_call(&with_str, 2)["function"]["arguments"],
+            "{\"a\":1}"
+        );
         assert_eq!(ollama_tool_call(&with_str, 2)["id"], "ollama_call_2");
         let missing = serde_json::json!({"function":{"name":"x"}});
         assert_eq!(ollama_tool_call(&missing, 0)["function"]["arguments"], "{}");
@@ -536,24 +562,32 @@ mod tests {
         let calls = parse_text_tool_calls(text, &known);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "get_weather");
-        assert_eq!(serde_json::from_str::<serde_json::Value>(&calls[0].1).unwrap()["city"], "London");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&calls[0].1).unwrap()["city"],
+            "London"
+        );
     }
 
     #[test]
     fn parse_text_tool_calls_ignores_unknown_and_prose() {
         // A tag for a tool not in `known`, or mere prose mentioning a name, is NOT a call.
         let known = vec!["browse_web".to_string()];
-        assert!(parse_text_tool_calls(
-            r#"<invoke name="rm_rf"><parameter name="p">x</parameter></invoke>"#,
-            &known,
-        )
-        .is_empty());
+        assert!(
+            parse_text_tool_calls(
+                r#"<invoke name="rm_rf"><parameter name="p">x</parameter></invoke>"#,
+                &known,
+            )
+            .is_empty()
+        );
         assert!(parse_text_tool_calls("I could browse_web for you", &known).is_empty());
     }
 
     #[test]
     fn synthesize_tool_calls_builds_openai_shape_with_stable_ids() {
-        let calls = synthesize_tool_calls(3, vec![("a".into(), "{}".into()), ("b".into(), "{\"x\":1}".into())]);
+        let calls = synthesize_tool_calls(
+            3,
+            vec![("a".into(), "{}".into()), ("b".into(), "{\"x\":1}".into())],
+        );
         assert_eq!(calls[0]["id"], "textcall_3_0");
         assert_eq!(calls[0]["type"], "function");
         assert_eq!(calls[0]["function"]["name"], "a");
@@ -563,7 +597,8 @@ mod tests {
 
     #[test]
     fn accepts_string_steps() {
-        let t = r#"prefix ‹‹PLAN_PROPOSE››{"summary":"S","steps":["a","b"]}‹‹/PLAN_PROPOSE›› suffix"#;
+        let t =
+            r#"prefix ‹‹PLAN_PROPOSE››{"summary":"S","steps":["a","b"]}‹‹/PLAN_PROPOSE›› suffix"#;
         let p = parse_plan_propose(t).unwrap();
         assert_eq!(p.summary, "S");
         assert_eq!(p.steps, vec!["a".to_string(), "b".to_string()]);
@@ -579,7 +614,10 @@ mod tests {
 
     #[test]
     fn rejects_missing_and_empty() {
-        assert_eq!(parse_plan_propose("no marker"), Err(NormalizeError::NotFound));
+        assert_eq!(
+            parse_plan_propose("no marker"),
+            Err(NormalizeError::NotFound)
+        );
         let empty = r#"‹‹PLAN_PROPOSE››{"steps":[]}‹‹/PLAN_PROPOSE››"#;
         assert_eq!(parse_plan_propose(empty), Err(NormalizeError::EmptyPlan));
         let blanks = r#"‹‹PLAN_PROPOSE››{"steps":["  ",{"title":""}]}‹‹/PLAN_PROPOSE››"#;

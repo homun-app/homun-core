@@ -1130,7 +1130,7 @@ fn pooled_reads_never_assemble_parent_and_children_from_different_commits() {
             .unwrap();
         let mut iteration = 0usize;
         while !writer_stop.load(Ordering::Acquire) && iteration < 20_000 {
-            let state = if iteration % 2 == 0 {
+            let state = if iteration.is_multiple_of(2) {
                 &writer_b
             } else {
                 &writer_a

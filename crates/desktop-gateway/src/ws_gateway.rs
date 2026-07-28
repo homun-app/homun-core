@@ -38,7 +38,11 @@ pub enum ServerMessage {
     AppEvent { event: Value },
     /// Acknowledges a resume request: events from_seq..=to_seq will follow.
     #[serde(rename = "resume.ack")]
-    ResumeAck { turn_id: String, from_seq: i64, to_seq: i64 },
+    ResumeAck {
+        turn_id: String,
+        from_seq: i64,
+        to_seq: i64,
+    },
     /// The resumed turn has already terminated; no more live events will come.
     #[serde(rename = "resume.done")]
     ResumeDone {
@@ -259,10 +263,10 @@ async fn handle_resume(state: &AppState, turn_id: &str, since: i64) {
     }
 
     let status = get_turn_status(state, turn_id);
-    if let Some(ref s) = status {
-        if is_terminal_status(s) {
-            broadcast_resume_done(state, turn_id, status.clone(), to_seq);
-        }
+    if let Some(ref s) = status
+        && is_terminal_status(s)
+    {
+        broadcast_resume_done(state, turn_id, status.clone(), to_seq);
     }
 }
 
@@ -280,10 +284,7 @@ fn get_turn_status(state: &AppState, turn_id: &str) -> Option<String> {
 }
 
 fn is_terminal_status(status: &str) -> bool {
-    matches!(
-        status,
-        "completed" | "failed" | "cancelled" | "expired"
-    )
+    matches!(status, "completed" | "failed" | "cancelled" | "expired")
 }
 
 fn broadcast_resume_done(state: &AppState, turn_id: &str, status: Option<String>, last_seq: i64) {

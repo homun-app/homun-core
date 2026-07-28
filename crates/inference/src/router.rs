@@ -39,7 +39,7 @@ impl ModelRouter {
     /// privacy gate. Returns the chosen provider, or `None` if nothing is
     /// eligible (e.g. only cloud providers exist but cloud is denied).
     pub fn select(&self, requirements: &Requirements) -> Option<&dyn InferenceProvider> {
-        let eligible = |provider: &&Box<dyn InferenceProvider>| {
+        let eligible = |provider: &dyn InferenceProvider| {
             let descriptor = provider.descriptor();
             self.policy.permits(descriptor.locality) && descriptor.satisfies(requirements)
         };
@@ -47,8 +47,14 @@ impl ModelRouter {
         // an eligible cloud provider. Insertion order breaks ties within a tier.
         self.providers
             .iter()
-            .find(|provider| eligible(provider) && !provider.descriptor().locality.is_cloud())
-            .or_else(|| self.providers.iter().find(eligible))
+            .find(|provider| {
+                eligible(provider.as_ref()) && !provider.descriptor().locality.is_cloud()
+            })
+            .or_else(|| {
+                self.providers
+                    .iter()
+                    .find(|provider| eligible(provider.as_ref()))
+            })
             .map(|provider| provider.as_ref())
     }
 
@@ -120,7 +126,7 @@ mod tests {
     }
 
     impl FakeProvider {
-        fn new(id: &str, locality: Locality, vision: bool) -> Box<dyn InferenceProvider> {
+        fn boxed(id: &str, locality: Locality, vision: bool) -> Box<dyn InferenceProvider> {
             Box::new(Self {
                 descriptor: CapabilityDescriptor {
                     id: id.to_string(),
@@ -175,8 +181,8 @@ mod tests {
     #[test]
     fn prefers_local_provider_over_cloud() {
         let router = ModelRouter::new(PrivacyPolicy::allowing_cloud())
-            .with_provider(FakeProvider::new("cloud", Locality::Cloud, false))
-            .with_provider(FakeProvider::new("local", Locality::Local, false));
+            .with_provider(FakeProvider::boxed("cloud", Locality::Cloud, false))
+            .with_provider(FakeProvider::boxed("local", Locality::Local, false));
 
         let selected = router.select(&Requirements::default()).unwrap();
         assert_eq!(selected.descriptor().id, "local");
@@ -185,7 +191,7 @@ mod tests {
     #[test]
     fn cloud_is_denied_by_default() {
         let router = ModelRouter::new(PrivacyPolicy::local_only())
-            .with_provider(FakeProvider::new("cloud", Locality::Cloud, false));
+            .with_provider(FakeProvider::boxed("cloud", Locality::Cloud, false));
 
         assert!(router.select(&Requirements::default()).is_none());
         let error = router.generate_json(&request()).unwrap_err();
@@ -201,7 +207,7 @@ mod tests {
     #[test]
     fn cloud_is_used_when_explicitly_allowed_and_no_local_exists() {
         let router = ModelRouter::new(PrivacyPolicy::allowing_cloud())
-            .with_provider(FakeProvider::new("cloud", Locality::Cloud, false));
+            .with_provider(FakeProvider::boxed("cloud", Locality::Cloud, false));
 
         let response = router.generate_json(&request()).unwrap();
         assert_eq!(response.json["provider"], "cloud");
@@ -210,8 +216,8 @@ mod tests {
     #[test]
     fn vision_requirement_skips_non_vision_providers() {
         let router = ModelRouter::new(PrivacyPolicy::local_only())
-            .with_provider(FakeProvider::new("text-local", Locality::Local, false))
-            .with_provider(FakeProvider::new("vision-local", Locality::Local, true));
+            .with_provider(FakeProvider::boxed("text-local", Locality::Local, false))
+            .with_provider(FakeProvider::boxed("vision-local", Locality::Local, true));
 
         let requirements = Requirements {
             needs_vision: true,
@@ -224,7 +230,7 @@ mod tests {
     #[test]
     fn active_context_window_reports_selected_provider() {
         let router = ModelRouter::new(PrivacyPolicy::local_only())
-            .with_provider(FakeProvider::new("local", Locality::Local, false));
+            .with_provider(FakeProvider::boxed("local", Locality::Local, false));
         assert_eq!(
             router.active_context_window(&Requirements::default()),
             Some(8_192)
@@ -237,7 +243,7 @@ mod tests {
     #[test]
     fn vision_requirement_with_only_text_providers_has_no_route() {
         let router = ModelRouter::new(PrivacyPolicy::local_only())
-            .with_provider(FakeProvider::new("text-local", Locality::Local, false));
+            .with_provider(FakeProvider::boxed("text-local", Locality::Local, false));
 
         let requirements = Requirements {
             needs_vision: true,

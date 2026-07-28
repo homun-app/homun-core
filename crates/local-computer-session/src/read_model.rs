@@ -131,17 +131,17 @@ fn latest_url(events: &[ComputerEventRecord]) -> Option<String> {
 fn terminal_excerpt(events: &[ComputerEventRecord]) -> Vec<String> {
     let mut lines = Vec::new();
     for event in events {
-        if event.kind == "computer_terminal_output" {
-            if let Some(output) = event.payload.get("output").and_then(Value::as_str) {
-                lines.push(output.to_string());
-            }
+        if event.kind == "computer_terminal_output"
+            && let Some(output) = event.payload.get("output").and_then(Value::as_str)
+        {
+            lines.push(output.to_string());
         }
     }
     if lines.is_empty() {
         return Vec::new();
     }
 
-    let result = ContextCompressor::default().compress(
+    let result = ContextCompressor.compress(
         &ContextItem::new(ContextKind::ShellOutput, lines.join("\n")),
         &CompressionPolicy::for_kind(ContextKind::ShellOutput).with_max_chars(1_800),
     );

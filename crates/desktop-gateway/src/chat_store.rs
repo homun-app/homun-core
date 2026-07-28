@@ -3031,20 +3031,18 @@ impl ChatStore {
             let mut stmt = self
                 .conn
                 .prepare("select distinct thread_id from chat_messages")?;
-            let ids = stmt
-                .query_map([], |row| row.get::<_, String>(0))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            ids
+
+            stmt.query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
         };
         for thread_id in &thread_ids {
             let ids: Vec<String> = {
                 let mut stmt = self.conn.prepare(
                     "select id from chat_messages where thread_id = ?1 order by rowid asc",
                 )?;
-                let ids = stmt
-                    .query_map(params![thread_id], |row| row.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                ids
+
+                stmt.query_map(params![thread_id], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
             };
             let mut prev: Option<String> = None;
             for id in &ids {
@@ -5420,10 +5418,9 @@ mod tests {
         });
 
         assert!(
-            store
+            !store
                 .append_assistant_event_part(&other_thread.thread_id, &assistant.id, &recall)
                 .unwrap()
-                == false
         );
         assert!(
             store

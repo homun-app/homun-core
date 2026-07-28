@@ -352,7 +352,7 @@ pub fn search(
     let mut scored: Vec<(i64, &CatalogEntry)> = cache
         .entries
         .iter()
-        .filter(|e| category.map_or(true, |c| e.category.eq_ignore_ascii_case(c)))
+        .filter(|e| category.is_none_or(|c| e.category.eq_ignore_ascii_case(c)))
         .filter_map(|e| {
             let hay = format!("{} {} {}", e.slug, e.name, e.description).to_lowercase();
             if !terms.is_empty() && !terms.iter().all(|t| hay.contains(t.as_str())) {
@@ -368,7 +368,7 @@ pub fn search(
             Some((score, e))
         })
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|entry| std::cmp::Reverse(entry.0));
     scored
         .into_iter()
         .take(limit)

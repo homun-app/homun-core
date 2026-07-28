@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-28
 
-**Status:** Approved for implementation
+**Status:** Core and `chat_turn` implemented; remaining domains are migrating
 
 ## Purpose
 
@@ -20,6 +20,38 @@ async execute(contract) -> ExecutionOutcome
 Domain implementations may extend the contract payload and implement domain
 behavior. They may not define new status values, terminal rules, wait mechanisms,
 resume APIs, receipt semantics, or projection paths.
+
+## Implementation checkpoint
+
+The code currently guarantees:
+
+- every scheduled task enters `ExecutionRuntime::execute` with one validated
+  `ExecutionContract`;
+- the execution journal is authoritative per `(execution_id, revision)` and
+  outcome commit is fenced;
+- timer and signal wake delivery reopens the same execution identity at revision
+  `N + 1` and is deduplicated;
+- `chat_turn` returns a canonical `ExecutionOutcome` directly from the engine stop;
+- one idempotent projector owns task, agent-run, message, objective, HITL/approval,
+  and terminal-event state for chat;
+- startup scans committed journal outcomes, rebuilds a missing execution read model,
+  and replays incomplete chat projections before workers start;
+- marker parsing remains transport/UI compatibility, but the broker stream cannot
+  create chat lifecycle state from marker event parts;
+- source guard tests reject lifecycle writes in `turn_executor.rs` and direct chat
+  dispatch outside `ExecutionRuntime::execute`.
+
+The migration is not complete yet:
+
+- non-chat adapters still return `TaskExecutionOutcome` internally and are normalized
+  by a bounded compatibility bridge;
+- browser, connector, sandbox, Vault, filesystem, and payment policy remain intact,
+  but their effect records do not yet share one end-to-end receipt state machine;
+- not every specialized checkpoint has moved under the canonical envelope;
+- channel/automation streaming still has a legacy marker-to-HITL compatibility path;
+- an external delivery whose remote result is unknown still needs a durable receipt
+  to prevent a duplicate send after a crash between delivery and projection marker;
+- `continue_as_new` and compensation are specified but not implemented.
 
 ## Non-negotiable invariants
 

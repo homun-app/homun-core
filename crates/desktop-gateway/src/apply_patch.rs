@@ -116,7 +116,7 @@ pub fn parse_patch(text: &str) -> Result<Patch, ParseError> {
     if first != BEGIN {
         return Err(ParseError::NoBegin);
     }
-    if !lines.iter().any(|l| *l == END) {
+    if !lines.contains(&END) {
         return Err(ParseError::NoEnd);
     }
 
@@ -167,11 +167,11 @@ pub fn parse_patch(text: &str) -> Result<Patch, ParseError> {
 
             // Optional `*** Move to:` on the immediately-next line.
             let mut move_to = None;
-            if i < lines.len() {
-                if let Some(newpath) = lines[i].strip_prefix(MOVE) {
-                    move_to = Some(newpath.to_string());
-                    i += 1;
-                }
+            if i < lines.len()
+                && let Some(newpath) = lines[i].strip_prefix(MOVE)
+            {
+                move_to = Some(newpath.to_string());
+                i += 1;
             }
 
             // Parse one-or-more hunks until a new header or End Patch.
@@ -340,6 +340,7 @@ pub enum ApplyError {
 ///     where the model dropped or added trailing spaces;
 ///   * pass 3 — equality ignoring all leading+trailing whitespace (`trim`), which
 ///     also survives indentation changes.
+///
 /// We try each pass across ALL positions before loosening, so a stricter match is
 /// always preferred over a looser one elsewhere in the file.
 ///
@@ -422,10 +423,12 @@ fn apply_hunks(path: &str, current: &str, hunks: &[Hunk]) -> Result<String, Appl
         // unrestricted fallback would misorder edits — e.g. a later hunk re-anchoring
         // a shared context line and inserting ahead of an earlier hunk's insertion —
         // which is why there is no such fallback.
-        let (start, end, replacement) = find_and_apply(&lines, hunk, from_index)
-            .ok_or_else(|| ApplyError::ContextNotFound {
-                path: path.to_string(),
-                hint: hunk.context_hint.clone(),
+        let (start, end, replacement) =
+            find_and_apply(&lines, hunk, from_index).ok_or_else(|| {
+                ApplyError::ContextNotFound {
+                    path: path.to_string(),
+                    hint: hunk.context_hint.clone(),
+                }
             })?;
 
         let replacement_len = replacement.len();
@@ -494,10 +497,10 @@ fn find_and_apply(
     // anywhere beats a looser one). When a hint anchored a floor, search that region
     // first, then fall back to the rest of the ordered region (still `>= from_index`).
     for pass in 0..3 {
-        if let Some(floor) = hint_floor {
-            if let Some(start) = match_window(lines, &window, pass, floor) {
-                return Some((start, start + window.len(), replacement));
-            }
+        if let Some(floor) = hint_floor
+            && let Some(start) = match_window(lines, &window, pass, floor)
+        {
+            return Some((start, start + window.len(), replacement));
         }
         if let Some(start) = match_window(lines, &window, pass, from_index) {
             return Some((start, start + window.len(), replacement));
@@ -625,11 +628,7 @@ pub fn apply_patch_under_root(
                 remove(&abs)?;
                 changed.push(path);
             }
-            FileChange::Rename {
-                from,
-                to,
-                contents,
-            } => {
+            FileChange::Rename { from, to, contents } => {
                 // Both endpoints are jailed: write the destination, then drop the source.
                 let to_abs = jailed(&resolved, &to)?;
                 let from_abs = jailed(&resolved, &from)?;
@@ -767,9 +766,7 @@ mod tests {
         let patch = "*** Begin Patch\n*** Update File: a.py\n@@ first\n-a\n+A\n@@ second\n-b\n+B\n*** End Patch\n";
         let p = parse_patch(patch).unwrap();
         match &p.ops[0] {
-            FileOp::Update {
-                move_to, hunks, ..
-            } => {
+            FileOp::Update { move_to, hunks, .. } => {
                 assert!(move_to.is_none());
                 assert_eq!(hunks.len(), 2);
             }
@@ -814,8 +811,7 @@ mod tests {
 
     #[test]
     fn hunk_ends_with_end_of_file_sentinel() {
-        let patch =
-            "*** Begin Patch\n*** Update File: a.py\n@@\n context\n+added\n*** End of File\n*** End Patch\n";
+        let patch = "*** Begin Patch\n*** Update File: a.py\n@@\n context\n+added\n*** End of File\n*** End Patch\n";
         let p = parse_patch(patch).unwrap();
         if let FileOp::Update { hunks, .. } = &p.ops[0] {
             assert_eq!(hunks.len(), 1);
@@ -915,10 +911,9 @@ mod tests {
 
     #[test]
     fn add_new_file_writes_contents() {
-        let patch = parse_patch(
-            "*** Begin Patch\n*** Add File: n.txt\n+line1\n+line2\n*** End Patch\n",
-        )
-        .unwrap();
+        let patch =
+            parse_patch("*** Begin Patch\n*** Add File: n.txt\n+line1\n+line2\n*** End Patch\n")
+                .unwrap();
         let changes = compute_changes(&patch, &(|_: &str| None)).unwrap();
         assert_eq!(
             changes,
@@ -931,10 +926,9 @@ mod tests {
 
     #[test]
     fn update_missing_file_is_rejected() {
-        let patch = parse_patch(
-            "*** Begin Patch\n*** Update File: nope.txt\n@@\n-a\n+b\n*** End Patch\n",
-        )
-        .unwrap();
+        let patch =
+            parse_patch("*** Begin Patch\n*** Update File: nope.txt\n@@\n-a\n+b\n*** End Patch\n")
+                .unwrap();
         assert_eq!(
             compute_changes(&patch, &(|_: &str| None)).unwrap_err(),
             ApplyError::Missing("nope.txt".into())
@@ -943,10 +937,8 @@ mod tests {
 
     #[test]
     fn delete_missing_file_is_rejected() {
-        let patch = parse_patch(
-            "*** Begin Patch\n*** Delete File: gone.txt\n*** End Patch\n",
-        )
-        .unwrap();
+        let patch =
+            parse_patch("*** Begin Patch\n*** Delete File: gone.txt\n*** End Patch\n").unwrap();
         assert_eq!(
             compute_changes(&patch, &(|_: &str| None)).unwrap_err(),
             ApplyError::Missing("gone.txt".into())
@@ -1000,7 +992,10 @@ mod tests {
     fn repeated_snippet_disambiguated_by_hint() {
         // "x" appears under two functions; the @@ hint selects which.
         let file = "def a():\n    x\ndef b():\n    x\n";
-        let patch = parse_patch("*** Begin Patch\n*** Update File: f.py\n@@ def b():\n-    x\n+    y\n*** End Patch\n").unwrap();
+        let patch = parse_patch(
+            "*** Begin Patch\n*** Update File: f.py\n@@ def b():\n-    x\n+    y\n*** End Patch\n",
+        )
+        .unwrap();
         let files = |p: &str| (p == "f.py").then(|| file.to_string());
         let changes = compute_changes(&patch, &files).unwrap();
         assert_eq!(
@@ -1052,10 +1047,9 @@ mod tests {
     #[test]
     fn update_only_removes_lines() {
         let file = "keep\ndrop\nkeep2\n";
-        let patch = parse_patch(
-            "*** Begin Patch\n*** Update File: a.txt\n@@\n-drop\n*** End Patch\n",
-        )
-        .unwrap();
+        let patch =
+            parse_patch("*** Begin Patch\n*** Update File: a.txt\n@@\n-drop\n*** End Patch\n")
+                .unwrap();
         let files = |p: &str| (p == "a.txt").then(|| file.to_string());
         assert_eq!(
             compute_changes(&patch, &files).unwrap(),
@@ -1070,10 +1064,9 @@ mod tests {
     fn update_preserves_absent_trailing_newline() {
         // File has no trailing newline; result must not gain one.
         let file = "a\nb"; // no trailing \n
-        let patch = parse_patch(
-            "*** Begin Patch\n*** Update File: a.txt\n@@\n-b\n+B\n*** End Patch\n",
-        )
-        .unwrap();
+        let patch =
+            parse_patch("*** Begin Patch\n*** Update File: a.txt\n@@\n-b\n+B\n*** End Patch\n")
+                .unwrap();
         let files = |p: &str| (p == "a.txt").then(|| file.to_string());
         assert_eq!(
             compute_changes(&patch, &files).unwrap(),
@@ -1218,11 +1211,10 @@ mod tests {
         // read/write/remove close over `fs` via a RefCell so the &mut closures compose.
         let cell = std::cell::RefCell::new(fs);
         let read = |p: &Path| cell.borrow().get(&rel_of(p)).cloned();
-        let mut write =
-            |p: &Path, c: &str| -> Result<(), String> {
-                cell.borrow_mut().insert(rel_of(p), c.to_string());
-                Ok(())
-            };
+        let mut write = |p: &Path, c: &str| -> Result<(), String> {
+            cell.borrow_mut().insert(rel_of(p), c.to_string());
+            Ok(())
+        };
         let mut remove = |p: &Path| -> Result<(), String> {
             cell.borrow_mut().remove(&rel_of(p));
             Ok(())
@@ -1262,9 +1254,12 @@ mod tests {
         };
 
         let input = "*** Begin Patch\n*** Add File: ../escape.txt\n+pwn\n*** End Patch\n";
-        let err =
-            apply_patch_under_root(input, &fake_resolve, &read, &mut write, &mut remove).unwrap_err();
-        assert!(err.contains("not allowed"), "expected jail error, got: {err}");
+        let err = apply_patch_under_root(input, &fake_resolve, &read, &mut write, &mut remove)
+            .unwrap_err();
+        assert!(
+            err.contains("not allowed"),
+            "expected jail error, got: {err}"
+        );
         assert!(!wrote, "no write must happen on a jail violation");
         assert!(!removed, "no remove must happen on a jail violation");
         assert!(cell.borrow().is_empty(), "fs must be untouched");
@@ -1286,8 +1281,8 @@ mod tests {
         let mut remove = |_p: &Path| -> Result<(), String> { Ok(()) };
 
         let input = "*** Begin Patch\n*** Update File: a.txt\n*** Move to: ../out.txt\n@@\n-a\n+A\n*** End Patch\n";
-        let err =
-            apply_patch_under_root(input, &fake_resolve, &read, &mut write, &mut remove).unwrap_err();
+        let err = apply_patch_under_root(input, &fake_resolve, &read, &mut write, &mut remove)
+            .unwrap_err();
         assert!(
             err.contains("not allowed"),
             "move destination must be jailed, got: {err}"
@@ -1311,8 +1306,8 @@ mod tests {
 
         let input =
             "*** Begin Patch\n*** Update File: a.txt\n@@\n-does not exist\n+x\n*** End Patch\n";
-        let err =
-            apply_patch_under_root(input, &fake_resolve, &read, &mut write, &mut remove).unwrap_err();
+        let err = apply_patch_under_root(input, &fake_resolve, &read, &mut write, &mut remove)
+            .unwrap_err();
         assert!(
             err.contains("could not locate"),
             "expected context error, got: {err}"

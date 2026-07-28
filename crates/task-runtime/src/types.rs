@@ -166,18 +166,14 @@ mod task_status_tests {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum TaskPriority {
     Background,
     Low,
+    #[default]
     Normal,
     High,
     Critical,
-}
-
-impl Default for TaskPriority {
-    fn default() -> Self {
-        Self::Normal
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -879,15 +875,11 @@ pub enum EventTrigger {
 /// `Confirm` — the safe choice for anything that sends/publishes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ApprovalPolicy {
+    #[default]
     Confirm,
     Autonomous,
-}
-
-impl Default for ApprovalPolicy {
-    fn default() -> Self {
-        ApprovalPolicy::Confirm
-    }
 }
 
 /// How the automation came to exist (for provenance + UI grouping).

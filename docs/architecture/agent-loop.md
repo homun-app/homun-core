@@ -37,6 +37,24 @@ via `run_agent_rounds` (thin seam-builder in `main.rs`) dentro l'outer `stream_c
 a sua volta invocato via `run_agent_turn_into_message` / `run_agent_turn_into_message_with_fanout`,
 condiviso da chat e canali/automazioni.
 
+## Ownership dell'esecuzione (aggiornamento 2026-07-28)
+
+Il loop ReAct non possiede più il lifecycle durevole del turno. Il percorso chat è:
+
+```text
+turn broker -> task acquisito -> ExecutionContract -> ExecutionRuntime::execute
+-> ChatTurnAdapter -> engine run_turn -> ExecutionOutcome
+-> journal commit -> execution_projection
+```
+
+`ExecutionOutcome` è l'unica decisione terminale. Task, agent run, messaggio,
+obiettivo, wait HITL/approval ed evento terminale sono read model derivati dallo
+stesso projector. Al riavvio il gateway rilegge gli outcome committati dal journal,
+ricostruisce l'eventuale proiezione execution mancante e ripete idempotentemente la
+proiezione chat prima di avviare i worker. Il contratto completo, lo stato della
+migrazione e le lacune residue sono in
+[`2026-07-28-unified-execution-protocol-design.md`](../superpowers/specs/2026-07-28-unified-execution-protocol-design.md).
+
 ## Come una richiesta entra e stream-a (TURN BROKER + WS unificato)
 
 Il **percorso della richiesta** oggi passa **sempre** dal **turn broker** (percorso di chat
@@ -54,9 +72,11 @@ incondizionato, rotte montate sempre — il vecchio gate `turn_broker_enabled()`
    diventano testo del prompt. Un fallimento resta invece una diagnostica marcata
    `unavailable`, separata da `Attachment content`: il modello non può più scambiare
    una nota `⚠️` per il documento letto (capisaldi #5 e #11).
-2. **L'executor** (`crates/desktop-gateway/src/turn_executor.rs`) esegue il task:
-   chiama `start_visible_conversation_turn` poi
-   `run_agent_turn_into_message_with_fanout`, cioè fa girare il **loop canonico**.
+2. **Il worker** costruisce un `ExecutionContract` e chiama unicamente
+   `ExecutionRuntime::execute`. L'adapter chat in
+   `crates/desktop-gateway/src/turn_executor.rs` chiama
+   `start_visible_conversation_turn` e `run_agent_turn_into_message_with_fanout`,
+   cioè fa girare il **loop canonico**, quindi restituisce un `ExecutionOutcome`.
    Ogni evento (delta/activity/plan_update/reasoning/tool/done/…) viene fatto **fan-out**
    da `emit_turn_event` su TRE sink: (a) la tabella durabile `turn_events` (per il resume
    dopo reconnect), (b) un canale broadcast per-turno (stream NDJSON `/api/chat/turns/{id}/events`

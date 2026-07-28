@@ -2,13 +2,13 @@
 //! Phase 0: testable synchronous primitives. Phase 1 wraps them in an async executor.
 
 use crate::{
-    ResourceClass, ResourceRequirement, RetryPolicy, TaskId, TaskPriority, TaskRecord,
-    NewTurnSteering, TaskRuntimeError, TaskRuntimeResult, TaskStatus, TaskStore, TurnEventKind,
+    NewTurnSteering, ResourceClass, ResourceRequirement, RetryPolicy, TaskId, TaskPriority,
+    TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, TaskStore, TurnEventKind,
     TurnSteeringRecord, UserId, WorkspaceId,
 };
-use serde_json::{json, Value};
-use time::OffsetDateTime;
 use rusqlite::{Connection, OptionalExtension};
+use serde_json::{Value, json};
+use time::OffsetDateTime;
 
 /// Input for a new chat_turn. Prompt is embedded for atomicity.
 #[derive(Debug, Clone)]
@@ -71,19 +71,28 @@ impl TurnApproval {
 /// Enqueue error. ThreadBusy → 409 in the gateway.
 #[derive(Debug)]
 pub enum EnqueueError {
-    ThreadBusy { thread_id: String, active_turn_id: String },
+    ThreadBusy {
+        thread_id: String,
+        active_turn_id: String,
+    },
     Store(TaskRuntimeError),
 }
 
 impl From<TaskRuntimeError> for EnqueueError {
-    fn from(e: TaskRuntimeError) -> Self { Self::Store(e) }
+    fn from(e: TaskRuntimeError) -> Self {
+        Self::Store(e)
+    }
 }
 
 impl std::fmt::Display for EnqueueError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ThreadBusy { thread_id, active_turn_id } => write!(
-                f, "thread {thread_id} already has an active turn ({active_turn_id})"
+            Self::ThreadBusy {
+                thread_id,
+                active_turn_id,
+            } => write!(
+                f,
+                "thread {thread_id} already has an active turn ({active_turn_id})"
             ),
             Self::Store(e) => write!(f, "store error: {e}"),
         }
@@ -112,7 +121,7 @@ pub enum EnqueueTurnOutcome {
     SteeringQueued {
         thread_id: String,
         active_turn_id: String,
-        steering: TurnSteeringRecord,
+        steering: Box<TurnSteeringRecord>,
     },
 }
 
@@ -132,45 +141,59 @@ pub fn promote_held_turn_steering<F>(
 where
     F: FnOnce(&rusqlite::Transaction<'_>, &ChatTurnInput) -> TaskRuntimeResult<()>,
 {
-    store.with_transaction(|tx| {
-        let steering = TaskStore::load_turn_steering_by_id_on(
-            tx, steering_id, user_id.as_str(), workspace_id.as_str(),
-        )?.ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))?;
-        if steering.status != crate::TurnSteeringStatus::Held || steering.revision != expected_revision {
-            return Err(TaskRuntimeError::Conflict("held steering changed".into()));
-        }
-        if active_chat_turn_on(tx, &steering.thread_id)?.is_some() {
-            return Err(TaskRuntimeError::Conflict("thread already has an active turn".into()));
-        }
-        let request_id = format!("steering_{}_{}", steering.steering_id, steering.revision);
-        let input = ChatTurnInput {
-            thread_id: steering.thread_id.clone(),
-            request_id: request_id.clone(),
-            assistant_message_id: format!("local_assistant_{request_id}"),
-            prompt: steering.prompt.clone(),
-            visible_prompt: Some(steering.visible_prompt.clone()),
-            images: steering.images.clone(),
-            attachments: Some(steering.attachments.clone()),
-            mode: steering.mode.clone(),
-            model: steering.model.clone(),
-            source: ChatTurnSource::Interactive,
-            approval: TurnApproval::Full,
-        };
-        let task = queued_chat_turn_task(user_id, workspace_id, &input);
-        insert_turn_messages(tx, &input)?;
-        insert_chat_turn_on(tx, &task, &input)?;
-        let steering = TaskStore::promote_turn_steering_on(
-            tx, steering_id, user_id.as_str(), workspace_id.as_str(), expected_revision,
-        )?;
-        Ok(PromotedSteering {
-            steering,
-            turn: EnqueuedTurn {
-                task_id: task.task_id,
-                thread_id: input.thread_id,
-                position_in_queue: 0,
-            },
+    store
+        .with_transaction(|tx| {
+            let steering = TaskStore::load_turn_steering_by_id_on(
+                tx,
+                steering_id,
+                user_id.as_str(),
+                workspace_id.as_str(),
+            )?
+            .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))?;
+            if steering.status != crate::TurnSteeringStatus::Held
+                || steering.revision != expected_revision
+            {
+                return Err(TaskRuntimeError::Conflict("held steering changed".into()));
+            }
+            if active_chat_turn_on(tx, &steering.thread_id)?.is_some() {
+                return Err(TaskRuntimeError::Conflict(
+                    "thread already has an active turn".into(),
+                ));
+            }
+            let request_id = format!("steering_{}_{}", steering.steering_id, steering.revision);
+            let input = ChatTurnInput {
+                thread_id: steering.thread_id.clone(),
+                request_id: request_id.clone(),
+                assistant_message_id: format!("local_assistant_{request_id}"),
+                prompt: steering.prompt.clone(),
+                visible_prompt: Some(steering.visible_prompt.clone()),
+                images: steering.images.clone(),
+                attachments: Some(steering.attachments.clone()),
+                mode: steering.mode.clone(),
+                model: steering.model.clone(),
+                source: ChatTurnSource::Interactive,
+                approval: TurnApproval::Full,
+            };
+            let task = queued_chat_turn_task(user_id, workspace_id, &input);
+            insert_turn_messages(tx, &input)?;
+            insert_chat_turn_on(tx, &task, &input)?;
+            let steering = TaskStore::promote_turn_steering_on(
+                tx,
+                steering_id,
+                user_id.as_str(),
+                workspace_id.as_str(),
+                expected_revision,
+            )?;
+            Ok(PromotedSteering {
+                steering,
+                turn: EnqueuedTurn {
+                    task_id: task.task_id,
+                    thread_id: input.thread_id,
+                    position_in_queue: 0,
+                },
+            })
         })
-    }).map_err(EnqueueError::Store)
+        .map_err(EnqueueError::Store)
 }
 
 /// Generates a chat_turn task_id. Stable, debuggable.
@@ -279,24 +302,31 @@ pub fn enqueue_chat_turn(
     // but isn't guaranteed under WAL); the double-check handles the edge case in
     // single-process. (In single-process with an external mutex this never happens; kept
     // as defensive coverage.)
-    if let Some(a) = store.active_chat_turn_for_thread(&input.thread_id)? {
-        if a != task.task_id.as_str() {
-            // race lost: another turn slipped in. Cancel ours and return busy.
-            store.update_task_status(
-                &task.task_id, user_id, workspace_id,
-                TaskStatus::Cancelled, Some("race lost on thread enqueue"),
-            )?;
-            return Err(EnqueueError::ThreadBusy {
-                thread_id: input.thread_id.clone(),
-                active_turn_id: a,
-            });
-        }
+    if let Some(a) = store.active_chat_turn_for_thread(&input.thread_id)?
+        && a != task.task_id.as_str()
+    {
+        // race lost: another turn slipped in. Cancel ours and return busy.
+        store.update_task_status(
+            &task.task_id,
+            user_id,
+            workspace_id,
+            TaskStatus::Cancelled,
+            Some("race lost on thread enqueue"),
+        )?;
+        return Err(EnqueueError::ThreadBusy {
+            thread_id: input.thread_id.clone(),
+            active_turn_id: a,
+        });
     }
 
     let position_in_queue =
         count_queued_chat_turns_for_thread(store, user_id, workspace_id, &input.thread_id)?;
 
-    Ok(EnqueuedTurn { task_id, thread_id: input.thread_id.clone(), position_in_queue })
+    Ok(EnqueuedTurn {
+        task_id,
+        thread_id: input.thread_id.clone(),
+        position_in_queue,
+    })
 }
 
 fn count_queued_chat_turns_for_thread(
@@ -506,9 +536,15 @@ where
     let steering_input = NewTurnSteering {
         source_message_id: source_message_id.clone(),
         prompt: input.prompt.clone(),
-        visible_prompt: input.visible_prompt.clone().unwrap_or_else(|| input.prompt.clone()),
+        visible_prompt: input
+            .visible_prompt
+            .clone()
+            .unwrap_or_else(|| input.prompt.clone()),
         images: input.images.clone(),
-        attachments: input.attachments.clone().unwrap_or_else(|| Value::Array(Vec::new())),
+        attachments: input
+            .attachments
+            .clone()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
         mode: input.mode.clone(),
         model: input.model.clone(),
     };
@@ -548,13 +584,18 @@ where
             ],
         )?;
         let steering = crate::store::load_turn_steering_by_source_message(
-            tx, user_id.as_str(), workspace_id.as_str(), &input.thread_id, &source_message_id,
-        )?.ok_or_else(|| TaskRuntimeError::Store("steering disappeared after append".into()))?;
+            tx,
+            user_id.as_str(),
+            workspace_id.as_str(),
+            &input.thread_id,
+            &source_message_id,
+        )?
+        .ok_or_else(|| TaskRuntimeError::Store("steering disappeared after append".into()))?;
         Ok(EnqueueOrSteerTransactionOutcome::Outcome(
             EnqueueTurnOutcome::SteeringQueued {
                 thread_id: input.thread_id.clone(),
                 active_turn_id,
-                steering,
+                steering: Box::new(steering),
             },
         ))
     })?;
@@ -568,7 +609,6 @@ where
         }
     }
 }
-
 
 ///
 /// Rule: every chat_turn Running whose lease_owner does NOT belong to the current
@@ -665,10 +705,22 @@ pub fn recover_chat_turns_at_boot(
         let task_id = task.task_id.clone();
         store.insert_chat_turn(
             &task,
-            task.input_json.get("thread_id").and_then(|v| v.as_str()).unwrap_or(""),
-            task.input_json.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
-            task.input_json.get("source").and_then(|v| v.as_str()).unwrap_or("interactive"),
-            task.input_json.get("approval").and_then(|v| v.as_str()).unwrap_or("full"),
+            task.input_json
+                .get("thread_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
+            task.input_json
+                .get("request_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
+            task.input_json
+                .get("source")
+                .and_then(|v| v.as_str())
+                .unwrap_or("interactive"),
+            task.input_json
+                .get("approval")
+                .and_then(|v| v.as_str())
+                .unwrap_or("full"),
         )?;
 
         // aborted marker: the reconnecting client discards previous deltas
@@ -713,7 +765,10 @@ pub fn cancel_chat_turn(
     let Some(mut task) = store.get_task(task_id, user_id, workspace_id)? else {
         return Ok(false);
     };
-    if matches!(task.status, TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled) {
+    if matches!(
+        task.status,
+        TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled
+    ) {
         return Ok(false); // idempotent
     }
     let was_running = task.status == TaskStatus::Running;
@@ -727,13 +782,29 @@ pub fn cancel_chat_turn(
         task.lease_expires_at = None;
         task.last_heartbeat_at = None;
     }
-    let thread_id = task.input_json.get("thread_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let request_id = task.input_json.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let source = task.input_json.get("source").and_then(|v| v.as_str()).unwrap_or("interactive");
-    let approval = task.input_json.get("approval").and_then(|v| v.as_str()).unwrap_or("full");
-    store.hold_pending_turn_steering(
-        user_id.as_str(), workspace_id.as_str(), task_id.as_str(),
-    )?;
+    let thread_id = task
+        .input_json
+        .get("thread_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let request_id = task
+        .input_json
+        .get("request_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let source = task
+        .input_json
+        .get("source")
+        .and_then(|v| v.as_str())
+        .unwrap_or("interactive");
+    let approval = task
+        .input_json
+        .get("approval")
+        .and_then(|v| v.as_str())
+        .unwrap_or("full");
+    store.hold_pending_turn_steering(user_id.as_str(), workspace_id.as_str(), task_id.as_str())?;
     store.insert_chat_turn(&task, &thread_id, &request_id, source, approval)?;
     let _ = store.insert_terminal_event_once(
         task_id.as_str(),
@@ -748,9 +819,11 @@ pub fn cancel_chat_turn(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{TaskStore, TaskStatus, UserId, WorkspaceId};
+    use crate::{TaskStatus, TaskStore, UserId, WorkspaceId};
 
-    fn store() -> TaskStore { TaskStore::open_in_memory().unwrap() }
+    fn store() -> TaskStore {
+        TaskStore::open_in_memory().unwrap()
+    }
     fn input(request_id: &str, thread_id: &str) -> ChatTurnInput {
         ChatTurnInput {
             thread_id: thread_id.to_string(),
@@ -770,7 +843,13 @@ mod tests {
     #[test]
     fn enqueue_succeeds_on_idle_thread() {
         let s = store();
-        let r = enqueue_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &input("r1", "t1")).unwrap();
+        let r = enqueue_chat_turn(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &input("r1", "t1"),
+        )
+        .unwrap();
         assert_eq!(r.thread_id, "t1");
         assert_eq!(r.task_id.as_str(), "turn_r1");
     }
@@ -797,10 +876,25 @@ mod tests {
     #[test]
     fn enqueue_returns_thread_busy_on_second_active_turn() {
         let s = store();
-        enqueue_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &input("r1", "t1")).unwrap();
-        let err = enqueue_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &input("r2", "t1")).unwrap_err();
+        enqueue_chat_turn(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &input("r1", "t1"),
+        )
+        .unwrap();
+        let err = enqueue_chat_turn(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &input("r2", "t1"),
+        )
+        .unwrap_err();
         match err {
-            EnqueueError::ThreadBusy { thread_id, active_turn_id } => {
+            EnqueueError::ThreadBusy {
+                thread_id,
+                active_turn_id,
+            } => {
                 assert_eq!(thread_id, "t1");
                 assert_eq!(active_turn_id, "turn_r1");
             }
@@ -811,20 +905,48 @@ mod tests {
     #[test]
     fn enqueue_again_after_completion_succeeds() {
         let s = store();
-        let r = enqueue_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &input("r1", "t1")).unwrap();
-        s.update_task_status(&r.task_id, &UserId::new("u"), &WorkspaceId::new("w"),
-                             TaskStatus::Completed, None).unwrap();
+        let r = enqueue_chat_turn(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &input("r1", "t1"),
+        )
+        .unwrap();
+        s.update_task_status(
+            &r.task_id,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            TaskStatus::Completed,
+            None,
+        )
+        .unwrap();
         // now a new enqueue on the same thread must pass
-        enqueue_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &input("r2", "t1"))
-            .expect("enqueue succeeds after previous turn completed");
+        enqueue_chat_turn(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &input("r2", "t1"),
+        )
+        .expect("enqueue succeeds after previous turn completed");
     }
 
     #[test]
     fn different_threads_do_not_collide() {
         let s = store();
-        enqueue_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &input("r1", "t1")).unwrap();
-        enqueue_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &input("r2", "t2"))
-            .expect("different threads are independent");
+        enqueue_chat_turn(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &input("r1", "t1"),
+        )
+        .unwrap();
+        enqueue_chat_turn(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &input("r2", "t2"),
+        )
+        .expect("different threads are independent");
     }
 }
 
@@ -832,19 +954,24 @@ mod tests {
 mod recovery_tests {
     use super::*;
     use crate::{
-        AgentRunStatus, NewAgentRun, NewAgentToolReceipt, TaskRecord, TaskStore, TaskStatus,
+        AgentRunStatus, NewAgentRun, NewAgentToolReceipt, TaskRecord, TaskStatus, TaskStore,
         ToolReceiptClaim, UserId, WorkspaceId,
     };
     use serde_json::json;
     use time::Duration;
 
-    fn store() -> TaskStore { TaskStore::open_in_memory().unwrap() }
+    fn store() -> TaskStore {
+        TaskStore::open_in_memory().unwrap()
+    }
 
     fn seed_running_with_generation(store: &TaskStore, gen_val: u64) -> TaskId {
         // inserts a chat_turn Running with a lease_owner of the given generation
         let mut t = TaskRecord::new(
-            "turn_stale", UserId::new("u"), WorkspaceId::new("w"),
-            "chat_turn", "prompt",
+            "turn_stale",
+            UserId::new("u"),
+            WorkspaceId::new("w"),
+            "chat_turn",
+            "prompt",
             json!({
                 "thread_id":"t1",
                 "request_id":"r1",
@@ -856,7 +983,9 @@ mod recovery_tests {
         t.status = TaskStatus::Running;
         t.lease_owner = Some(format!("{gen_val}:worker_0"));
         t.lease_expires_at = Some(time::OffsetDateTime::now_utc() + Duration::minutes(5));
-        store.insert_chat_turn(&t, "t1", "r1", "interactive", "full").unwrap();
+        store
+            .insert_chat_turn(&t, "t1", "r1", "interactive", "full")
+            .unwrap();
         TaskId::new("turn_stale")
     }
 
@@ -893,17 +1022,23 @@ mod recovery_tests {
         s.bump_process_generation().unwrap();
         let gen_now = s.bump_process_generation().unwrap();
         assert_eq!(gen_now, 2);
-        let recovered = recover_chat_turns_at_boot(&s, &UserId::new("u"), &WorkspaceId::new("w"), gen_now).unwrap();
+        let recovered =
+            recover_chat_turns_at_boot(&s, &UserId::new("u"), &WorkspaceId::new("w"), gen_now)
+                .unwrap();
         assert_eq!(recovered.len(), 1);
         // now it's Queued
-        let t = s.get_task(&TaskId::new("turn_stale"), &UserId::new("u"), &WorkspaceId::new("w")).unwrap().unwrap();
+        let t = s
+            .get_task(
+                &TaskId::new("turn_stale"),
+                &UserId::new("u"),
+                &WorkspaceId::new("w"),
+            )
+            .unwrap()
+            .unwrap();
         assert_eq!(t.status, TaskStatus::Queued);
         assert!(t.lease_owner.is_none());
         assert_eq!(t.task_id.as_str(), "turn_stale");
-        assert_eq!(
-            t.input_json["assistant_message_id"],
-            "local_assistant_r1"
-        );
+        assert_eq!(t.input_json["assistant_message_id"], "local_assistant_r1");
         // and the aborted event was written
         let events = s.read_turn_events("turn_stale", 0).unwrap();
         assert_eq!(events.len(), 1);
@@ -933,20 +1068,29 @@ mod recovery_tests {
         let s = store();
         let gen_now = s.bump_process_generation().unwrap(); // 1
         seed_running_with_generation(&s, gen_now); // lease of the current generation
-        let recovered = recover_chat_turns_at_boot(&s, &UserId::new("u"), &WorkspaceId::new("w"), gen_now).unwrap();
-        assert!(recovered.is_empty(), "current-generation leases are left alone");
+        let recovered =
+            recover_chat_turns_at_boot(&s, &UserId::new("u"), &WorkspaceId::new("w"), gen_now)
+                .unwrap();
+        assert!(
+            recovered.is_empty(),
+            "current-generation leases are left alone"
+        );
     }
 
     #[test]
     fn recover_ignores_completed_chat_turns() {
         let s = store();
         let mut t = TaskRecord::new(
-            "turn_done", UserId::new("u"), WorkspaceId::new("w"),
-            "chat_turn", "prompt",
+            "turn_done",
+            UserId::new("u"),
+            WorkspaceId::new("w"),
+            "chat_turn",
+            "prompt",
             json!({"thread_id":"t1","request_id":"r2","source":"interactive","approval":"full"}),
         );
         t.status = TaskStatus::Completed;
-        s.insert_chat_turn(&t, "t1", "r2", "interactive", "full").unwrap();
+        s.insert_chat_turn(&t, "t1", "r2", "interactive", "full")
+            .unwrap();
         let generation = s.bump_process_generation().unwrap();
         let recovered =
             recover_chat_turns_at_boot(&s, &UserId::new("u"), &WorkspaceId::new("w"), generation)
@@ -958,8 +1102,12 @@ mod recovery_tests {
     fn recover_ignores_non_chat_turn_running() {
         let s = store();
         let mut other = TaskRecord::new(
-            "bg1", UserId::new("u"), WorkspaceId::new("w"),
-            "background_job", "thing", json!({}),
+            "bg1",
+            UserId::new("u"),
+            WorkspaceId::new("w"),
+            "background_job",
+            "thing",
+            json!({}),
         );
         other.status = TaskStatus::Running;
         s.insert_task(&other).unwrap();
@@ -967,19 +1115,26 @@ mod recovery_tests {
         let recovered =
             recover_chat_turns_at_boot(&s, &UserId::new("u"), &WorkspaceId::new("w"), generation)
                 .unwrap();
-        assert!(recovered.is_empty(), "non-chat_turn tasks are not the broker's business");
+        assert!(
+            recovered.is_empty(),
+            "non-chat_turn tasks are not the broker's business"
+        );
     }
 }
 
 #[cfg(test)]
 mod cancel_tests {
     use super::*;
-    use crate::{ResourceClass, TaskStore, TaskStatus, UserId, WorkspaceId};
+    use crate::{ResourceClass, TaskStatus, TaskStore, UserId, WorkspaceId};
     use std::sync::{Arc, Mutex};
 
-    struct RecordingNotify { turns: Arc<Mutex<Vec<String>>> }
+    struct RecordingNotify {
+        turns: Arc<Mutex<Vec<String>>>,
+    }
     impl CancelNotify for RecordingNotify {
-        fn notify_cancel(&self, turn_id: &str) { self.turns.lock().unwrap().push(turn_id.into()); }
+        fn notify_cancel(&self, turn_id: &str) {
+            self.turns.lock().unwrap().push(turn_id.into());
+        }
     }
 
     fn make_input(request_id: &str, thread_id: &str) -> ChatTurnInput {
@@ -1001,26 +1156,66 @@ mod cancel_tests {
     #[test]
     fn cancel_marks_cancelled_and_writes_event_and_notifies() {
         let s = TaskStore::open_in_memory().unwrap();
-        let r = enqueue_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &make_input("r1", "t1")).unwrap();
+        let r = enqueue_chat_turn(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &make_input("r1", "t1"),
+        )
+        .unwrap();
         let turns = Arc::new(Mutex::new(Vec::new()));
-        let notify = RecordingNotify { turns: turns.clone() };
-        let ok = cancel_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &r.task_id, &notify).unwrap();
+        let notify = RecordingNotify {
+            turns: turns.clone(),
+        };
+        let ok = cancel_chat_turn(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &r.task_id,
+            &notify,
+        )
+        .unwrap();
         assert!(ok);
-        let t = s.get_task(&r.task_id, &UserId::new("u"), &WorkspaceId::new("w")).unwrap().unwrap();
+        let t = s
+            .get_task(&r.task_id, &UserId::new("u"), &WorkspaceId::new("w"))
+            .unwrap()
+            .unwrap();
         assert_eq!(t.status, TaskStatus::Cancelled);
         let events = s.read_turn_events(r.task_id.as_str(), 0).unwrap();
         assert!(events.iter().any(|e| e.kind == TurnEventKind::Cancelled));
-        assert_eq!(turns.lock().unwrap().clone(), vec![r.task_id.as_str().to_string()]);
+        assert_eq!(
+            turns.lock().unwrap().clone(),
+            vec![r.task_id.as_str().to_string()]
+        );
     }
 
     #[test]
     fn cancel_is_idempotent_on_terminal() {
         let s = TaskStore::open_in_memory().unwrap();
-        let r = enqueue_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &make_input("r1", "t1")).unwrap();
-        s.update_task_status(&r.task_id, &UserId::new("u"), &WorkspaceId::new("w"),
-            TaskStatus::Completed, None).unwrap();
+        let r = enqueue_chat_turn(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &make_input("r1", "t1"),
+        )
+        .unwrap();
+        s.update_task_status(
+            &r.task_id,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            TaskStatus::Completed,
+            None,
+        )
+        .unwrap();
         let notify = NoopCancelNotify;
-        let ok = cancel_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &r.task_id, &notify).unwrap();
+        let ok = cancel_chat_turn(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &r.task_id,
+            &notify,
+        )
+        .unwrap();
         assert!(!ok, "no-op on already-terminal turn");
     }
 
@@ -1033,14 +1228,16 @@ mod cancel_tests {
         let task = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
         s.reserve_resources(&task, "stale-worker").unwrap();
         assert_eq!(
-            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession)
+                .unwrap(),
             1
         );
 
         assert!(cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap());
 
         assert_eq!(
-            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession)
+                .unwrap(),
             0
         );
     }
@@ -1054,10 +1251,12 @@ mod cancel_tests {
         let mut task = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
         task.status = TaskStatus::Running;
         task.lease_owner = Some("1:worker-a".into());
-        s.insert_chat_turn(&task, "t1", "r1", "interactive", "full").unwrap();
+        s.insert_chat_turn(&task, "t1", "r1", "interactive", "full")
+            .unwrap();
         s.reserve_resources(&task, "worker-a").unwrap();
         assert_eq!(
-            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession)
+                .unwrap(),
             1
         );
 
@@ -1067,7 +1266,8 @@ mod cancel_tests {
         assert_eq!(cancelled.status, TaskStatus::Cancelled);
         assert_eq!(cancelled.lease_owner.as_deref(), Some("1:worker-a"));
         assert_eq!(
-            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession)
+                .unwrap(),
             0
         );
     }
@@ -1087,14 +1287,20 @@ mod cancel_tests {
         let r = enqueue_chat_turn(&s, &user, &workspace, &make_input("r1", "t1")).unwrap();
         let mut task = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
         task.status = TaskStatus::Running;
-        s.insert_chat_turn(&task, "t1", "r1", "interactive", "full").unwrap();
+        s.insert_chat_turn(&task, "t1", "r1", "interactive", "full")
+            .unwrap();
         s.reserve_resources(&task, "worker-a").unwrap();
 
         s.park_chat_turn(r.task_id.as_str(), "u", "w").unwrap();
         let parked = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
-        assert_eq!(parked.status, TaskStatus::Parked, "precondition: turn is parked");
         assert_eq!(
-            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            parked.status,
+            TaskStatus::Parked,
+            "precondition: turn is parked"
+        );
+        assert_eq!(
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession)
+                .unwrap(),
             0,
             "park already released the browser_session slot"
         );
@@ -1109,7 +1315,10 @@ mod cancel_tests {
 
         let events = s.read_turn_events(r.task_id.as_str(), 0).unwrap();
         assert_eq!(
-            events.iter().filter(|e| e.kind == TurnEventKind::Cancelled).count(),
+            events
+                .iter()
+                .filter(|e| e.kind == TurnEventKind::Cancelled)
+                .count(),
             1,
             "exactly one Cancelled terminal event"
         );
@@ -1118,7 +1327,13 @@ mod cancel_tests {
         // not mint a second terminal event.
         assert!(!cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap());
         let events_after = s.read_turn_events(r.task_id.as_str(), 0).unwrap();
-        assert_eq!(events_after.iter().filter(|e| e.kind == TurnEventKind::Cancelled).count(), 1);
+        assert_eq!(
+            events_after
+                .iter()
+                .filter(|e| e.kind == TurnEventKind::Cancelled)
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -1133,13 +1348,15 @@ mod cancel_tests {
         task.lease_owner = Some("old-generation:dead-worker".into());
         task.lease_expires_at = Some(OffsetDateTime::now_utc());
         task.last_heartbeat_at = Some(OffsetDateTime::now_utc());
-        s.insert_chat_turn(&task, "t1", "r1", "interactive", "full").unwrap();
+        s.insert_chat_turn(&task, "t1", "r1", "interactive", "full")
+            .unwrap();
 
         let recovered = recover_chat_turns_at_boot(&s, &user, &workspace, 7).unwrap();
 
         assert!(recovered.is_empty());
         assert_eq!(
-            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession)
+                .unwrap(),
             0
         );
         let stored = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
@@ -1223,7 +1440,10 @@ mod atomic_tests {
             .get_task(&enqueued.task_id, &user, &workspace)
             .unwrap()
             .unwrap();
-        assert_eq!(task.input_json["assistant_message_id"], "local_assistant_r1");
+        assert_eq!(
+            task.input_json["assistant_message_id"],
+            "local_assistant_r1"
+        );
     }
 
     #[test]
@@ -1232,12 +1452,20 @@ mod atomic_tests {
         let user = UserId::new("u");
         let workspace = WorkspaceId::new("w");
         let input = make_input("r1", "t1");
-        let first = enqueue_chat_turn_atomic(&store, &user, &workspace, &input, |_tx| Ok(())).unwrap();
+        let first =
+            enqueue_chat_turn_atomic(&store, &user, &workspace, &input, |_tx| Ok(())).unwrap();
         store
-            .update_task_status(&first.task_id, &user, &workspace, TaskStatus::Completed, None)
+            .update_task_status(
+                &first.task_id,
+                &user,
+                &workspace,
+                TaskStatus::Completed,
+                None,
+            )
             .unwrap();
 
-        let retried = enqueue_chat_turn_atomic(&store, &user, &workspace, &input, |_tx| Ok(())).unwrap();
+        let retried =
+            enqueue_chat_turn_atomic(&store, &user, &workspace, &input, |_tx| Ok(())).unwrap();
 
         assert_eq!(retried.task_id, first.task_id);
         let task = store
@@ -1322,7 +1550,10 @@ mod atomic_tests {
         assert_eq!(steering.len(), 1);
         assert_eq!(steering[0].source_message_id, "local_user_r2");
         assert_eq!(steering[0].content, "p");
-        assert_eq!(s.active_chat_turn_for_thread("t1").unwrap(), Some("turn_r1".into()));
+        assert_eq!(
+            s.active_chat_turn_for_thread("t1").unwrap(),
+            Some("turn_r1".into())
+        );
     }
 
     #[test]
@@ -1345,7 +1576,11 @@ mod atomic_tests {
                 Ok(())
             },
         );
-        assert!(result.is_ok(), "atomic enqueue should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "atomic enqueue should succeed: {:?}",
+            result.err()
+        );
         assert!(*called.lock().unwrap());
         // The marker row landed in the same DB (atomicity verified) — read it
         // back via a public helper instead of the private `connection` field.

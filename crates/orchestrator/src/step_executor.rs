@@ -179,10 +179,10 @@ pub fn fill_arguments<R: JsonRuntime>(
     completed: &BTreeMap<String, StepOutcome>,
     extra_context: &str,
 ) -> OrchestratorResult<serde_json::Value> {
-    if let Some(object) = step.arguments.as_object() {
-        if !object.is_empty() {
-            return Ok(step.arguments.clone());
-        }
+    if let Some(object) = step.arguments.as_object()
+        && !object.is_empty()
+    {
+        return Ok(step.arguments.clone());
     }
 
     // `extra_context` carries live state the schema alone can't: e.g. the agentic
@@ -224,7 +224,9 @@ pub fn fill_arguments<R: JsonRuntime>(
         max_tokens: step.max_tokens.unwrap_or(ARG_FILL_MAX_TOKENS),
         temperature: 0.0,
         wait_if_busy: true,
-        request_timeout_seconds: Some(step.timeout_seconds.unwrap_or(ARG_FILL_TIMEOUT_SECONDS) as f64),
+        request_timeout_seconds: Some(
+            step.timeout_seconds.unwrap_or(ARG_FILL_TIMEOUT_SECONDS) as f64
+        ),
         // Constrained decoding to the tool's own input schema — the lever that
         // makes even a weak model emit valid arguments.
         json_schema: Some(tool.input_schema.clone()),

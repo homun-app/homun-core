@@ -122,7 +122,8 @@ fn derived_memory_is_always_a_candidate_with_structural_provenance() {
         evolution: metadata(MemoryEvolutionKind::Derives, vec![source.reference.clone()]),
     };
 
-    let prepared = prepare_memory_evolution_record(&proposal, &[source.clone()]).unwrap();
+    let prepared =
+        prepare_memory_evolution_record(&proposal, std::slice::from_ref(&source)).unwrap();
 
     assert_eq!(prepared.status, MemoryStatus::Candidate);
     assert_eq!(

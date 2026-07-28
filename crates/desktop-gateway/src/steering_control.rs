@@ -364,16 +364,14 @@ fn resolve_pending_without_running_run<F>(
                     &pending.user_id,
                     &pending.workspace_id,
                     &pending.active_turn_id,
-                ) {
-                    if held > 0 {
-                        if let Ok(Some(record)) = store.load_turn_steering(
-                            pending.steering_id,
-                            &pending.user_id,
-                            &pending.workspace_id,
-                        ) {
-                            crate::publish_steering_changed(&record);
-                        }
-                    }
+                ) && held > 0
+                    && let Ok(Some(record)) = store.load_turn_steering(
+                        pending.steering_id,
+                        &pending.user_id,
+                        &pending.workspace_id,
+                    )
+                {
+                    crate::publish_steering_changed(&record);
                 }
             } else {
                 let _ = store.defer_pending_turn_steering(

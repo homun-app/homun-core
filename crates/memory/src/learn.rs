@@ -454,13 +454,12 @@ fn retire_contradicted_gaps(
             continue;
         }
         let gap_tokens = dedup_tokens(&m.text);
-        if overlap_coefficient(&new_tokens, &gap_tokens) >= GAP_RETIRE_OVERLAP {
-            if facade
+        if overlap_coefficient(&new_tokens, &gap_tokens) >= GAP_RETIRE_OVERLAP
+            && facade
                 .mark_memory_stale(&request, &m.reference, "superseded by a positive fact")
                 .is_ok()
-            {
-                retired += 1;
-            }
+        {
+            retired += 1;
         }
     }
     retired
@@ -516,13 +515,12 @@ pub fn sweep_gap_facts(facade: &MemoryFacade, user: &UserId, workspace: &Workspa
         let contradicted = positives.iter().any(|(_, pos_tokens)| {
             overlap_coefficient(pos_tokens, &gap_tokens) >= GAP_RETIRE_OVERLAP
         });
-        if contradicted {
-            if facade
+        if contradicted
+            && facade
                 .mark_memory_stale(&request, &gap.reference, "retroactive gap sweep")
                 .is_ok()
-            {
-                retired += 1;
-            }
+        {
+            retired += 1;
         }
     }
     retired
@@ -802,29 +800,30 @@ fn _cosine_link(a: &[f32], b: &[f32]) -> f32 {
 // Orchestrazione learn (Step 2b)
 // ──────────────────────────────────────────────────────────────────────────
 
+pub type PersistGraphHook<'a> = dyn Fn(
+        &MemoryFacade,
+        &UserId,
+        &WorkspaceId,
+        Vec<ExtractedEntity>,
+        Vec<ExtractedRelation>,
+        Option<&WorkspaceId>,
+    ) + Sync
+    + 'a;
+pub type StoreEpisodeHook<'a> = dyn Fn(&MemoryFacade, &UserId, &str, &str, &str) + Sync + 'a;
+pub type BackfillEmbeddingsHook<'a> =
+    dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, usize) + Sync + 'a;
+
 /// Callback iniettate dal gateway per le parti di learn che restano gateway-side
 /// per ora (grafo, episode, backfill embeddings). `None` = skip (test isolation).
 /// Pattern = graph_context del recall.
 pub struct LearnHooks<'a> {
     /// Persiste entità/relazioni nel grafo (personal + project). Firma speculare
     /// a `persist_graph` del gateway.
-    pub persist_graph: Option<
-        &'a (
-                dyn Fn(
-            &MemoryFacade,
-            &UserId,
-            &WorkspaceId,
-            Vec<ExtractedEntity>,
-            Vec<ExtractedRelation>,
-            Option<&WorkspaceId>,
-        ) + Sync
-            ),
-    >,
+    pub persist_graph: Option<&'a PersistGraphHook<'a>>,
     /// Memorizza l'episodio one-line (M4) nel thread scope.
-    pub store_episode: Option<&'a (dyn Fn(&MemoryFacade, &UserId, &str, &str, &str) + Sync)>,
+    pub store_episode: Option<&'a StoreEpisodeHook<'a>>,
     /// Backfill embeddings incrementale (background). Firma: (facade, user, ws, batch).
-    pub backfill_embeddings:
-        Option<&'a (dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, usize) + Sync)>,
+    pub backfill_embeddings: Option<&'a BackfillEmbeddingsHook<'a>>,
 }
 
 /// Orchestrazione learn: gating salience → build prompt (con facade per known
@@ -838,7 +837,7 @@ pub struct LearnHooks<'a> {
 /// sync sotto lock re-acquisito.
 ///
 /// Lo scope è **argomento esplicito**: isolation by construction.
-
+///
 /// Fase 1 (sync, sotto lock): gating + build system prompt + exchange.
 /// Ritorna `Some((system, user_content))` o `None` se skip (no-op).
 pub fn prepare_learn_prompt(
@@ -1252,10 +1251,10 @@ pub fn persist_learn_extraction(
             has_project.then_some(active),
         );
     }
-    if let Some(store_episode) = hooks.store_episode {
-        if let Some(tid) = thread_id {
-            store_episode(facade, user, tid, &episode, active.as_str());
-        }
+    if let Some(store_episode) = hooks.store_episode
+        && let Some(tid) = thread_id
+    {
+        store_episode(facade, user, tid, &episode, active.as_str());
     }
     if let Some(backfill) = hooks.backfill_embeddings {
         backfill(facade, user, &WorkspaceId::new(PERSONAL_WORKSPACE), 12);

@@ -24,10 +24,10 @@ const CONTAINER_SKILLS_DIR: &str = "/home/agent/skills";
 /// Host directory holding generated artifacts (bind-mounted into the container
 /// at `/home/agent/output`). Overridable via `HOMUN_ARTIFACTS_DIR`.
 pub fn artifacts_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("HOMUN_ARTIFACTS_DIR") {
-        if !dir.trim().is_empty() {
-            return PathBuf::from(dir);
-        }
+    if let Ok(dir) = std::env::var("HOMUN_ARTIFACTS_DIR")
+        && !dir.trim().is_empty()
+    {
+        return PathBuf::from(dir);
     }
     host_home_dir().join(".homun").join("artifacts")
 }
@@ -37,10 +37,10 @@ pub fn artifacts_dir() -> PathBuf {
 /// the browser looks like a returning user and hits far fewer captchas. Overridable
 /// via `HOMUN_CC_PROFILE_DIR`.
 pub fn cc_profile_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("HOMUN_CC_PROFILE_DIR") {
-        if !dir.trim().is_empty() {
-            return PathBuf::from(dir);
-        }
+    if let Ok(dir) = std::env::var("HOMUN_CC_PROFILE_DIR")
+        && !dir.trim().is_empty()
+    {
+        return PathBuf::from(dir);
     }
     host_home_dir().join(".homun").join("cc-profile")
 }
@@ -805,7 +805,7 @@ fn run_graphify_with_cli(
         .arg(format!("{}/", project.display()))
         .arg(format!("{}/", work.display()));
     let copied = rsync
-        .env("PATH", &path)
+        .env("PATH", path)
         .output()
         .map_err(|e| format!("rsync failed to start: {e}"))?;
     if !copied.status.success() {

@@ -67,10 +67,10 @@ pub fn validate_memory_evolution_metadata(
             "memory evolution classifier_confidence must be between zero and one".to_string(),
         );
     }
-    if let (Some(valid_from), Some(valid_until)) = (evolution.valid_from, evolution.valid_until) {
-        if valid_until <= valid_from {
-            return Err("memory evolution valid_until must be later than valid_from".to_string());
-        }
+    if let (Some(valid_from), Some(valid_until)) = (evolution.valid_from, evolution.valid_until)
+        && valid_until <= valid_from
+    {
+        return Err("memory evolution valid_until must be later than valid_from".to_string());
     }
     let mut unique = HashSet::new();
     if evolution
