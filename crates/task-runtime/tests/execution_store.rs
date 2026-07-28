@@ -1959,10 +1959,6 @@ fn legacy_v12_wake_foreign_key_is_migrated_to_v13_without_data_loss() {
     let delivery = revision_two.as_ref().wake.as_ref().unwrap();
     let connection = raw_connection(&path);
     let expected_events = raw_event_rows(&connection, "exec-legacy-wake-migration");
-    let expected_projection = store
-        .execution("exec-legacy-wake-migration")
-        .unwrap()
-        .unwrap();
     let suspended_at = connection
         .query_row(
             "SELECT created_at FROM execution_events
@@ -2058,10 +2054,25 @@ fn legacy_v12_wake_foreign_key_is_migrated_to_v13_without_data_loss() {
             ..
         } if stored == *delivery
     ));
-    assert_eq!(
-        migrated.execution("exec-legacy-wake-migration").unwrap(),
-        Some(expected_projection)
-    );
+    assert_eq!(migrated_events[3].1, 2);
+    assert_eq!(migrated_events[3].2, 1);
+    assert_eq!(migrated_events[3].3, "revision_started");
+    assert_eq!(migrated_events[3].5, delivery.delivered_at_unix_seconds);
+    assert!(matches!(
+        serde_json::from_str::<ExecutionJournalEvent>(&migrated_events[3].4).unwrap(),
+        ExecutionJournalEvent::RevisionStarted {
+            previous_revision: 1,
+            contract: stored,
+            ..
+        } if stored == *revision_two.as_ref()
+    ));
+    let migrated_projection = migrated
+        .execution("exec-legacy-wake-migration")
+        .unwrap()
+        .unwrap();
+    assert_eq!(migrated_projection.contract, revision_two);
+    assert_eq!(migrated_projection.state, ExecutionState::Ready);
+    assert!(migrated_projection.outcome.is_none());
     let load_wake = || {
         connection.query_row(
             "SELECT execution_id, revision, dedup_key, condition_json, status,
@@ -2084,7 +2095,10 @@ fn legacy_v12_wake_foreign_key_is_migrated_to_v13_without_data_loss() {
     };
     assert_eq!(load_wake().unwrap(), expected);
 
-    migrated.start_execution_revision(&revision_two).unwrap();
+    assert!(matches!(
+        migrated.start_execution_revision(&revision_two).unwrap(),
+        StartExecutionRevision::Existing(_)
+    ));
     assert_eq!(
         migrated
             .execution("exec-legacy-wake-migration")

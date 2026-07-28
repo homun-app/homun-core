@@ -1098,3 +1098,192 @@ fn v13_upgrade_adds_wake_evidence_to_an_authenticated_legacy_revision_start() {
     drop(migrated);
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn v13_upgrade_reconstructs_a_missing_pending_receipt_from_the_suspended_journal() {
+    let (path, store) = file_store();
+    let original = contract("exec-v13-missing-pending");
+    let condition = WakeCondition::Signal {
+        kind: "connector.message".into(),
+        correlation_id: "missing-pending-1".into(),
+    };
+    store.create_execution(&original).unwrap();
+    store
+        .commit_execution_outcome(&suspended(&original, condition.clone()))
+        .unwrap();
+    drop(store);
+
+    let connection = raw_connection(&path);
+    let suspended_at: i64 = connection
+        .query_row(
+            "SELECT created_at FROM execution_events
+             WHERE execution_id = ?1 AND revision = 1 AND kind = 'outcome_committed'",
+            ["exec-v13-missing-pending"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    connection
+        .execute(
+            "DELETE FROM execution_wakes WHERE execution_id = ?1",
+            ["exec-v13-missing-pending"],
+        )
+        .unwrap();
+    drop(connection);
+
+    let migrated = TaskStore::open(&path).unwrap();
+    let receipt = raw_connection(&path)
+        .query_row(
+            "SELECT dedup_key, condition_json, status, delivery_json, created_at, delivered_at
+             FROM execution_wakes WHERE execution_id = ?1 AND revision = 1",
+            ["exec-v13-missing-pending"],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, Option<i64>>(5)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        receipt,
+        (
+            condition.dedup_key(),
+            serde_json::to_string(&condition).unwrap(),
+            "pending".into(),
+            None,
+            suspended_at,
+            None,
+        )
+    );
+
+    assert_eq!(
+        migrated
+            .deliver_execution_signal(
+                "connector.message",
+                "missing-pending-1",
+                &json!({"recovered": true}),
+            )
+            .unwrap(),
+        1
+    );
+    let ready = migrated
+        .execution("exec-v13-missing-pending")
+        .unwrap()
+        .unwrap();
+    assert_eq!(ready.state, ExecutionState::Ready);
+    assert_eq!(ready.contract.as_ref().revision, 2);
+    assert_eq!(ready.contract.as_ref().fencing_token, 2);
+
+    drop(migrated);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn v13_upgrade_reconstructs_the_next_revision_from_a_delivered_legacy_receipt() {
+    let (path, store) = file_store();
+    let original = contract("exec-v13-delivered-no-start");
+    let condition = WakeCondition::Signal {
+        kind: "connector.message".into(),
+        correlation_id: "delivered-no-start-1".into(),
+    };
+    let outcome = suspended(&original, condition.clone());
+    let checkpoint = match outcome.as_ref() {
+        ExecutionOutcome::Suspended { checkpoint, .. } => checkpoint.clone(),
+        _ => unreachable!(),
+    };
+    store.create_execution(&original).unwrap();
+    store.commit_execution_outcome(&outcome).unwrap();
+    drop(store);
+
+    let connection = raw_connection(&path);
+    let suspended_at: i64 = connection
+        .query_row(
+            "SELECT created_at FROM execution_events
+             WHERE execution_id = ?1 AND revision = 1 AND kind = 'outcome_committed'",
+            ["exec-v13-delivered-no-start"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let delivery = WakeDelivery {
+        condition: condition.clone(),
+        dedup_key: condition.dedup_key(),
+        payload: json!({"legacy": "first-payload", "sequence": 1}),
+        delivered_at_unix_seconds: suspended_at + 1,
+    };
+    connection
+        .execute(
+            "UPDATE execution_wakes
+             SET status = 'delivered', delivery_json = ?1, delivered_at = ?2
+             WHERE execution_id = ?3 AND revision = 1",
+            rusqlite::params![
+                serde_json::to_string(&delivery).unwrap(),
+                delivery.delivered_at_unix_seconds,
+                "exec-v13-delivered-no-start",
+            ],
+        )
+        .unwrap();
+    drop(connection);
+
+    let migrated = TaskStore::open(&path).unwrap();
+    let record = migrated
+        .execution("exec-v13-delivered-no-start")
+        .unwrap()
+        .unwrap();
+    let mut expected_contract = original.as_ref().clone();
+    expected_contract.revision = 2;
+    expected_contract.fencing_token = 2;
+    expected_contract.checkpoint = Some(CheckpointRef {
+        checkpoint_id: checkpoint.checkpoint_id().into(),
+        producer_schema_version: checkpoint.producer_schema_version,
+    });
+    expected_contract.wake = Some(delivery.clone());
+    assert_eq!(record.state, ExecutionState::Ready);
+    assert_eq!(record.contract.as_ref(), &expected_contract);
+    assert!(record.outcome.is_none());
+
+    let revision_one = migrated
+        .execution_events("exec-v13-delivered-no-start", 1)
+        .unwrap();
+    let revision_two = migrated
+        .execution_events("exec-v13-delivered-no-start", 2)
+        .unwrap();
+    assert!(matches!(
+        &revision_one[2].event,
+        ExecutionJournalEvent::WakeDelivered {
+            delivery: stored,
+            next_revision: 2,
+            ..
+        } if stored == &delivery
+    ));
+    assert!(matches!(
+        &revision_two[0].event,
+        ExecutionJournalEvent::RevisionStarted {
+            previous_revision: 1,
+            contract,
+            ..
+        } if contract == &expected_contract
+    ));
+    assert_eq!(
+        revision_two[0].created_at,
+        delivery.delivered_at_unix_seconds
+    );
+
+    drop(migrated);
+    let reopened = TaskStore::open(&path).unwrap();
+    assert_eq!(
+        reopened
+            .execution_events("exec-v13-delivered-no-start", 1)
+            .unwrap()
+            .iter()
+            .filter(|event| matches!(event.event, ExecutionJournalEvent::WakeDelivered { .. }))
+            .count(),
+        1
+    );
+
+    drop(reopened);
+    let _ = std::fs::remove_file(path);
+}
