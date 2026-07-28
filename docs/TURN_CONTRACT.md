@@ -4,6 +4,8 @@
 > Estende i [CAPISALDI](CAPISALDI.md) #2 e #6 al pezzo che oggi crea ambiguità.
 > Inventario converge/kill: [superpowers/2026-07-27-foundations-and-kill-list.md](superpowers/2026-07-27-foundations-and-kill-list.md).
 > Piano di convergenza: [superpowers/plans/2026-07-27-turn-contract-convergence.md](superpowers/plans/2026-07-27-turn-contract-convergence.md).
+> Recovery browser: [design](superpowers/specs/2026-07-28-browser-checkpoint-recovery-design.md)
+> e [checklist operativa/verifiche](superpowers/plans/2026-07-28-browser-checkpoint-recovery.md).
 
 **Ultimo aggiornamento: 2026-07-28 (contratto generale objective/effect/resume/terminal).**
 
@@ -70,7 +72,7 @@ Running
 | `HitlEnvelope` + `AwaitingUser` | Stop: ownership → user. Nessun nudge/synthesis/tool. Free = thread libero; Hold = approval. |
 | `UserResolution` | Click/RPC tipizzato (opzione, approve, clarify text). |
 | `ResumeBinding` | Il turn successivo **deve** riprendere `open_work`, non “nuovo obiettivo” / discovery a freddo; passa dal normale `validate_decision`. |
-| `OpenWork` | Carrier versionato della copia di recovery del contratto, piano residuo, capability e sessione browser (warm). Non è una seconda SoT: il record objective attivo vince quando disponibile. |
+| `OpenWork` | Carrier versionato della copia di recovery del contratto, piano residuo, capability e continuazione browser (warm o checkpoint). Non è una seconda SoT: il record objective attivo vince quando disponibile. |
 
 **Estensioni (dati, non protocolli):**
 
@@ -103,6 +105,12 @@ Selezionare un'opzione o digitare in un form esterno è `external_write` anche s
 submit; vietare conferma/acquisto/pagamento non trasforma le azioni preparatorie in read.
 `read` e `request_authorization` restano sempre disponibili perché non mutano stato.
 
+Il validator confronta ogni deliverable con la sua classe esatta:
+`external_action → external_write`, `artifact → artifact_creation`,
+`code_change → filesystem_write`. Una classe vietata non invalida una classe distinta
+esplicitamente consentita. Sul resume Choice/Clarify la decisione resta `same_objective`,
+mantiene la stessa revisione e non può sostituire l'obiettivo con il testo della risoluzione.
+
 Il preflight semantico ritenta una sola volta un JSON troncato/invalido con budget
 compatibile con modelli reasoning. Una contraddizione tra ricerca memoria e il solo flag
 di ottimizzazione `standalone_choice_request` disattiva il flag, senza perdere l'intero
@@ -117,11 +125,45 @@ Ogni wait Free salva in `open_work_json`:
 - `MemoryIntent`, incluso il solo intento Vault (mai valori segreti);
 - completion contract;
 - al massimo 12 step non conclusi con soli campi noti;
-- stato browser, URL se disponibile e capability hint.
+- sessione browser warm, disponibilità/generazione del checkpoint e capability hint;
+- nessun valore form, selector, target CDP, URL nuovo o riferimento segreto (il campo URL resta solo per compatibilità legacy e non viene più popolato).
 
 Sul resume il record objective attivo ha precedenza; altrimenti vale lo snapshot. Un
 wait legacy senza entrambi usa il fallback read-only. `selected_capability` viene
 azzerata per `execution_shape=agent_loop`, così la ripresa non aggira il validator.
+
+## Browser long-running e recovery
+
+Il browser estende lo stesso objective/effect/resume contract; non possiede un loop o uno stato
+terminale separato. Dopo ogni osservazione confermata (`snapshot` o post-`act`) il gateway salva:
+
+- metadati revision-fenced in `browser_checkpoints`;
+- identità esatta `browser_epoch + cdp_target_id`, URL/origin e generation;
+- valori soltanto per controlli form ammessi, bounded e cifrati nel file dedicato
+  `browser-checkpoint-secrets.json` (mai nel DB, journal, OpenWork o risultato tool).
+
+Alla perdita del sidecar, la pagina CDP condivisa resta viva. Il sidecar successivo prova una sola
+volta, in ordine:
+
+1. `adopted_live_page`: stessa epoch, target CDP e origin;
+2. `draft_available`: target perso, URL riaperto e manifest opaco disponibile;
+3. `degraded_url_only`: URL riaperto senza draft utilizzabile.
+
+Ogni recovery forza uno snapshot nuovo e generation monotona prima di qualsiasi altra azione. La
+RPC incerta che ha perso il client **non viene mai ritentata automaticamente**. Il recovery produce
+`NoProgress`: il modello deve osservare e decidere esplicitamente il passo successivo.
+
+`browser_rehydrate` è `external_write`, non compare nei tool read-only e accetta solo mapping scelti
+esplicitamente tra ref freschi e controlli draft opachi. Il gateway decripta internamente, scrive solo
+campi ancora vuoti e compatibili, poi forza un nuovo snapshot. Non esegue click, submit, booking,
+login, pagamento o replay di bundle. Password, payment/card/CVV, file, hidden, contenteditable,
+cross-origin, ambigui e fuori limite sono esclusi fail-closed.
+
+Checkpoint e ciphertext vengono eliminati idempotentemente su terminal objective, revisione
+sostitutiva, archive/delete thread, delete workspace e scadenza; la pulizia scadenze parte anche a
+startup. Gli eventi del run registrano solo tier, generation, conteggi e reason tipizzata. Le pulizie
+senza un run proprietario usano tracing strutturato `browser_checkpoint_cleared`, evitando di creare
+un secondo owner terminale.
 
 ## Convergenza terminale
 
@@ -146,7 +188,7 @@ conversazione e non il lavoro in corso.
 4. Ripresa **solo** via ResumeBinding (`try_resume_open_wait`). Click Choice/Clarify = nuovo turn + wait consumato.
 5. Prima di aggiungere un meccanismo: **estende** `HitlEnvelope.kind` oppure **non entra**.
 6. `Parked` (macchina) ≠ `AwaitingUser` (persona).
-7. Sul resume: **vietata** discovery a freddo se `OpenWork` vivo.
+7. Sul resume: **vietata** discovery a freddo se esiste sessione warm o checkpoint attivo.
 8. Nessun path può costruire un `ValidatedSemanticDecision` di resume senza validator.
 9. Nessun tool viene esposto o eseguito fuori dalle classi effetto del contratto.
 10. Solo il broker terminale può completare/cancellare l’obiettivo, con revisione attesa.
@@ -180,7 +222,7 @@ conversazione e non il lavoro in corso.
 1. Qualsiasi `HitlEnvelope` → zero tool/nudge/synthesis dopo; wait persistito; UI waiting.
 2. Prosa senza envelope → al più un nudge-to-emit; **non** wait.
 3. Resolution → ResumeBinding; ≠ `new_objective`.
-4. OpenWork.browser caldo → no cold discovery; morto → harness dichiara.
+4. OpenWork.browser warm o checkpoint → `browse` resta live e no cold discovery; davvero morto → harness dichiara.
 5. Confirm Hold invariato.
 6. Messaggio con wait Free aperto **non** crea steering `Applying #n`.
 7. Resume conserva policy effetti e Memory/Vault intent senza escalation.

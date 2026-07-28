@@ -1,6 +1,6 @@
 # Browser Checkpoint and Recovery Design
 
-**Status:** Approved for implementation
+**Status:** Implemented; deterministic verification complete, external train-flow rerun pending
 
 **Date:** 2026-07-28
 
@@ -243,6 +243,9 @@ already-populated, or ambiguous controls and cannot click, submit, press a key, 
    the ordinary effect-policy path.
 10. Restore status is journaled as metadata only: tier, generation, counts, and reason. URLs and values
    are excluded from the agent journal event.
+11. `OpenWork` persists only checkpoint availability and generation. This keeps `browse` live across
+    HITL resume without duplicating target identity, URL, draft refs, or the eventual recovery tier.
+    The tier is unknown until restore actually runs and therefore cannot be wait-open state.
 
 ## Timeout ownership
 
@@ -264,7 +267,7 @@ Checkpoint metadata and draft secrets are deleted when:
 
 - the matching objective completes or is cancelled;
 - the thread is archived or deleted;
-- the user closes the browser or all browsers;
+- the owning thread or workspace is removed;
 - the checkpoint exceeds the same warm-session TTL;
 - a newer objective revision supersedes it.
 
@@ -273,14 +276,17 @@ idempotent. A missing secret is treated as degraded recovery, never as a fatal s
 
 ## Observability
 
-The agent journal records bounded metadata-only events:
+The active run's agent journal records bounded metadata-only events:
 
 - `browser_checkpoint_saved`;
 - `browser_restore_adopted`;
 - `browser_restore_draft_available`;
 - `browser_draft_rehydrated`;
-- `browser_restore_degraded`;
-- `browser_checkpoint_cleared`.
+- `browser_restore_degraded`.
+
+Lifecycle cleanup often has no active run that can own a journal sequence. Those boundaries emit
+structured tracing event `browser_checkpoint_cleared` with typed reason and counts instead of
+inventing a second run/terminal owner.
 
 Events contain schema version, target count, generation, recovery tier, restored/skipped counts,
 and a typed reason. They contain no URL, origin, selector, field name, value, cookie, or page text.

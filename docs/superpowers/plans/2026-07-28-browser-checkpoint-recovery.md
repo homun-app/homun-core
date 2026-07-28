@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Implementation and deterministic verification complete; external train-flow rerun pending.
+
 **Goal:** Preserve a thread's exact live browser page across sidecar/gateway loss and provide bounded, encrypted, policy-governed draft rehydration when the page itself is gone.
 
 **Architecture:** Extend the existing browser sidecar protocol rather than adding another browser service. The TypeScript runtime owns page adoption and safe control capture, task-runtime owns metadata-only checkpoint rows, a dedicated encrypted gateway store owns draft values, and the existing browser executor restores only the active objective revision before forcing a fresh snapshot. Rehydration is an explicit `external_write`; no uncertain browser operation, click, submit, booking, or payment is replayed.
@@ -19,7 +21,7 @@
 - Modify: `runtimes/browser-automation/tests/contracts.test.ts`
 - Modify: `runtimes/browser-automation/tests/browser_fixture.test.ts`
 
-- [ ] **Step 1: Write failing protocol and capture tests**
+- [x] **Step 1: Write failing protocol and capture tests**
 
 Add tests named:
 
@@ -33,7 +35,7 @@ The fixture must include ordinary passenger fields plus password, `autocomplete=
 file, hidden, and contenteditable controls. Assert the excluded test values never occur in
 `JSON.stringify(checkpoint)`.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run:
 
@@ -44,7 +46,7 @@ npx vitest run tests/contracts.test.ts tests/browser_fixture.test.ts --test-time
 Expected: FAIL because `browser.checkpoint`, `browser.restore`, `browser.rehydrate`, and manager
 methods do not exist.
 
-- [ ] **Step 3: Add bounded checkpoint types and capture**
+- [x] **Step 3: Add bounded checkpoint types and capture**
 
 Add browser methods and versioned types equivalent to:
 
@@ -67,12 +69,12 @@ Capture at most 32 visible enabled eligible controls, 2,000 characters each and 
 Return values only in the checkpoint object. Do not append checkpoint values to snapshots, console
 messages, or errors.
 
-- [ ] **Step 4: Wire sidecar dispatch and verify GREEN**
+- [x] **Step 4: Wire sidecar dispatch and verify GREEN**
 
 Dispatch `browser.checkpoint`, `browser.restore`, and `browser.rehydrate` using strict parameter
 parsers. Re-run the focused tests and expect PASS.
 
-- [ ] **Step 5: Commit the browser contract slice**
+- [x] **Step 5: Commit the browser contract slice**
 
 ```bash
 git add runtimes/browser-automation/src runtimes/browser-automation/tests
@@ -87,7 +89,7 @@ git commit -m "feat: add browser checkpoint protocol"
 - Modify: `runtimes/browser-automation/tests/session_manager.test.ts`
 - Modify: `runtimes/browser-automation/tests/integration_stdio.test.ts`
 
-- [ ] **Step 1: Write failing lifecycle tests**
+- [x] **Step 1: Write failing lifecycle tests**
 
 Use one Chromium server plus two managers connected over CDP. The first manager opens a labelled
 page, fills a value without submit, checkpoints generation `N`, then detaches without closing. The
@@ -104,7 +106,7 @@ expect(await firstContext.pages()).toHaveLength(1);
 
 Add a separate explicit-stop test asserting the owned page closes.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```bash
 npx vitest run tests/session_manager.test.ts tests/integration_stdio.test.ts --test-timeout=30000
@@ -112,7 +114,7 @@ npx vitest run tests/session_manager.test.ts tests/integration_stdio.test.ts --t
 
 Expected: FAIL because abnormal detach still follows `stop()` and no exact target adoption exists.
 
-- [ ] **Step 3: Implement CDP identity and lifecycle detach**
+- [x] **Step 3: Implement CDP identity and lifecycle detach**
 
 For shared CDP contexts only:
 
@@ -125,7 +127,7 @@ For shared CDP contexts only:
 
 Host-launched and isolated contexts retain close-on-EOF behavior.
 
-- [ ] **Step 4: Verify GREEN and full browser suite**
+- [x] **Step 4: Verify GREEN and full browser suite**
 
 ```bash
 npm run typecheck
@@ -134,7 +136,7 @@ npm test
 
 Expected: typecheck passes and all browser tests pass.
 
-- [ ] **Step 5: Commit the adoption slice**
+- [x] **Step 5: Commit the adoption slice**
 
 ```bash
 git add runtimes/browser-automation/src runtimes/browser-automation/tests
@@ -148,7 +150,7 @@ git commit -m "feat: preserve shared browser pages across sidecar loss"
 - Modify: `crates/browser-automation/tests/contracts.rs`
 - Modify: `crates/browser-automation/tests/client.rs`
 
-- [ ] **Step 1: Write failing serialization tests**
+- [x] **Step 1: Write failing serialization tests**
 
 Extend the method inventory test to require exact wire names:
 
@@ -158,7 +160,7 @@ Extend the method inventory test to require exact wire names:
 (BrowserMethod::Rehydrate, "browser.rehydrate"),
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```bash
 cargo test -p local-first-browser-automation contracts -- --nocapture
@@ -166,13 +168,13 @@ cargo test -p local-first-browser-automation contracts -- --nocapture
 
 Expected: compile failure for missing enum variants.
 
-- [ ] **Step 3: Add enum variants and strict response types**
+- [x] **Step 3: Add enum variants and strict response types**
 
 Add serde variants and bounded Rust structs mirroring the TypeScript checkpoint, restore result,
 draft manifest, and rehydrate result. Values remain inside a private checkpoint payload type and
 must not implement `Display`.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
 ```bash
 cargo test -p local-first-browser-automation
@@ -186,7 +188,7 @@ git commit -m "feat: add browser recovery wire contracts"
 - Modify: `crates/task-runtime/src/store.rs`
 - Create: `crates/task-runtime/tests/browser_checkpoints.rs`
 
-- [ ] **Step 1: Write failing store tests**
+- [x] **Step 1: Write failing store tests**
 
 Create tests proving:
 
@@ -200,7 +202,7 @@ expired_checkpoints_are_returned_for_secret_cleanup_then_deleted();
 
 Inspect the SQLite file text/rows and assert sentinel draft values never occur.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```bash
 cargo test -p local-first-task-runtime browser_checkpoint -- --nocapture
@@ -208,7 +210,7 @@ cargo test -p local-first-task-runtime browser_checkpoint -- --nocapture
 
 Expected: compile failure for missing record and store methods.
 
-- [ ] **Step 3: Add schema and methods**
+- [x] **Step 3: Add schema and methods**
 
 Add `BrowserCheckpointRecord`, `NewBrowserCheckpoint`, and methods:
 
@@ -223,7 +225,7 @@ take_expired_browser_checkpoint_secret_refs(now) -> Result<Vec<String>>;
 The upsert joins/validates `objective_contracts.status='active'` and exact revision in one
 transaction. Store metadata only.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
 ```bash
 cargo test -p local-first-task-runtime browser_checkpoint -- --nocapture
@@ -238,7 +240,7 @@ git commit -m "feat: persist browser checkpoint metadata"
 - Modify: `crates/desktop-gateway/src/main.rs`
 - Modify: `crates/desktop-gateway/src/lib.rs`
 
-- [ ] **Step 1: Write failing encryption and redaction tests**
+- [x] **Step 1: Write failing encryption and redaction tests**
 
 Tests must save a payload containing sentinel PII, then assert:
 
@@ -248,7 +250,7 @@ Tests must save a payload containing sentinel PII, then assert:
 - delete removes encrypted material while remaining idempotent;
 - payload bounds and schema version are validated fail closed.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```bash
 cargo test -p local-first-desktop-gateway browser_checkpoint -- --nocapture
@@ -256,7 +258,7 @@ cargo test -p local-first-desktop-gateway browser_checkpoint -- --nocapture
 
 Expected: compile failure for missing module/store.
 
-- [ ] **Step 3: Implement the focused module**
+- [x] **Step 3: Implement the focused module**
 
 `browser_checkpoint.rs` owns:
 
@@ -274,7 +276,7 @@ Back it with a distinct `EncryptedFileSecretStore<DevelopmentSecretKeyProvider>`
 `browser-checkpoint-secrets.json` using the existing secret key seed. Use provider id
 `browser-checkpoint` and an opaque hashed connection id.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
 ```bash
 cargo test -p local-first-desktop-gateway browser_checkpoint -- --nocapture
@@ -289,7 +291,7 @@ git commit -m "feat: encrypt browser draft checkpoints separately"
 - Modify: `crates/desktop-gateway/src/browser_checkpoint.rs`
 - Modify: `crates/desktop-gateway/src/hitl_resume.rs`
 
-- [ ] **Step 1: Write failing gateway tests**
+- [x] **Step 1: Write failing gateway tests**
 
 Add tests proving:
 
@@ -302,7 +304,7 @@ epoch_mismatch_degrades_to_url_restore();
 read_only_contract_never_offers_draft_rehydration();
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```bash
 cargo test -p local-first-desktop-gateway browser_checkpoint -- --nocapture
@@ -310,7 +312,7 @@ cargo test -p local-first-desktop-gateway browser_checkpoint -- --nocapture
 
 Expected: failing assertions because a missing warm client currently spawns a blank sidecar.
 
-- [ ] **Step 3: Implement checkpoint extraction and restore**
+- [x] **Step 3: Implement checkpoint extraction and restore**
 
 After each confirmed snapshot/post-action observation:
 
@@ -323,19 +325,19 @@ When no warm client exists, load the matching checkpoint, spawn the sidecar, cal
 force a fresh snapshot. Never retry the operation that lost the client. Derive browser epoch from the
 contained Chromium/container identity and pass it through sidecar env.
 
-- [ ] **Step 4: Extend OpenWork metadata safely**
+- [x] **Step 4: Extend OpenWork metadata safely**
 
 Persist metadata-only recovery status in `OpenWorkSnapshot`:
 
 ```rust
 browser_checkpoint_available: bool,
 browser_checkpoint_generation: Option<u64>,
-browser_recovery_tier: Option<String>,
 ```
 
-No URL, field descriptor, draft ref, or value enters HITL payloads.
+No URL, field descriptor, draft ref, recovery tier, or value enters HITL payloads. The tier is
+known only after restore and belongs to the active run's metadata-only journal event.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 ```bash
 cargo test -p local-first-desktop-gateway browser_checkpoint -- --nocapture
@@ -350,7 +352,7 @@ git commit -m "feat: restore browser checkpoints before continuation"
 - Modify: `crates/desktop-gateway/src/browser_checkpoint.rs`
 - Modify: `crates/desktop-gateway/src/semantic_decision.rs`
 
-- [ ] **Step 1: Write failing authorization tests**
+- [x] **Step 1: Write failing authorization tests**
 
 Tests must prove `browser_rehydrate`:
 
@@ -362,7 +364,7 @@ Tests must prove `browser_rehydrate`:
   batch shapes;
 - never places the decrypted value in a tool result, trace, error, or receipt.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```bash
 cargo test -p local-first-desktop-gateway browser_rehydrate -- --nocapture
@@ -370,14 +372,14 @@ cargo test -p local-first-desktop-gateway browser_rehydrate -- --nocapture
 
 Expected: FAIL because no rehydration tool or policy classification exists.
 
-- [ ] **Step 3: Implement the explicit tool path**
+- [x] **Step 3: Implement the explicit tool path**
 
 Expose `browser_rehydrate` only inside the browser subagent and only when the validated objective
 allows `external_write` and a matching draft manifest exists. Tool arguments contain only current
 snapshot ref plus opaque draft ref. The gateway resolves/decrypts the value, calls the private
 sidecar `browser.rehydrate`, records metadata-only outcome, and zeroizes/drops plaintext promptly.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
 ```bash
 cargo test -p local-first-desktop-gateway browser_rehydrate -- --nocapture
@@ -393,21 +395,21 @@ git commit -m "feat: rehydrate browser drafts through effect policy"
 - Modify: `crates/desktop-gateway/src/browser_checkpoint.rs`
 - Modify: `crates/task-runtime/src/store.rs`
 
-- [ ] **Step 1: Write failing lifecycle tests**
+- [x] **Step 1: Write failing lifecycle tests**
 
 Cover objective complete, objective cancel, thread archive, thread delete, close browser, close all,
 idle expiry, superseding revision, startup expiry cleanup, and missing secret. Each path must remove
 metadata and ciphertext idempotently without changing task/run terminal ownership.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```bash
 cargo test -p local-first-desktop-gateway browser_checkpoint_cleanup -- --nocapture
 ```
 
-- [ ] **Step 3: Wire cleanup and metadata-only events**
+- [x] **Step 3: Wire cleanup and metadata-only events**
 
-Emit only:
+The active run journal emits only:
 
 ```text
 browser_checkpoint_saved
@@ -415,13 +417,14 @@ browser_restore_adopted
 browser_restore_draft_available
 browser_draft_rehydrated
 browser_restore_degraded
-browser_checkpoint_cleared
 ```
 
 Payloads contain tier, generation, counts, and typed reason only. Reuse the existing terminal
-objective projection and revision guard; do not create a second terminal owner.
+objective projection and revision guard; do not create a second terminal owner. Cleanup without an
+active owning run emits structured tracing event `browser_checkpoint_cleared` instead of inventing
+a journal sequence.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
 ```bash
 cargo test -p local-first-desktop-gateway browser_checkpoint_cleanup -- --nocapture
@@ -436,12 +439,12 @@ git commit -m "fix: clear browser checkpoints at terminal boundaries"
 - Modify: `docs/superpowers/specs/2026-07-28-browser-checkpoint-recovery-design.md`
 - Modify: `docs/superpowers/plans/2026-07-28-browser-checkpoint-recovery.md`
 
-- [ ] **Step 1: Update the live contract and mark completed plan items**
+- [x] **Step 1: Update the live contract and mark completed plan items**
 
 Document recovery tiers, explicit rehydration, no uncertain replay, secret separation, generation
 monotonicity, and cleanup ownership.
 
-- [ ] **Step 2: Run formatting and static checks**
+- [x] **Step 2: Run formatting and static checks**
 
 ```bash
 git diff --check
@@ -449,7 +452,7 @@ rustfmt --edition 2024 --check <each changed Rust file that is baseline-clean>
 npm run typecheck --prefix runtimes/browser-automation
 ```
 
-- [ ] **Step 3: Run complete automated verification**
+- [x] **Step 3: Run complete automated verification**
 
 ```bash
 npm test --prefix runtimes/browser-automation
@@ -464,21 +467,46 @@ npm audit --prefix runtimes/browser-automation
 
 Expected: all tests/builds pass; production/browser audits report zero vulnerabilities.
 
-- [ ] **Step 4: Run deterministic loss smoke**
+- [x] **Step 4: Run deterministic loss smoke**
 
 Use a local form fixture through the real sidecar/gateway path. Fill without submit, record `N`,
 terminate the sidecar, continue, and prove exact adoption plus `N+1`. Then close the page, restore URL,
 prove fields stay empty until explicit rehydration, rehydrate safe controls, and prove no submit.
 
-- [ ] **Step 5: Run the development train-flow smoke**
+- [ ] **Step 5: Repeat the complete development train-flow smoke after the resume fix**
 
 Start the dev application from this worktree. Prove the same objective/revision survives Choice HITL,
 force one sidecar loss after selecting a result, reach the passenger-form draft without restarting
 discovery, and verify no invented passenger or Vault values.
 
-- [ ] **Step 6: Commit verification docs**
+- [x] **Step 6: Commit verification docs**
 
 ```bash
 git add docs/TURN_CONTRACT.md docs/superpowers/specs/2026-07-28-browser-checkpoint-recovery-design.md docs/superpowers/plans/2026-07-28-browser-checkpoint-recovery.md
 git commit -m "docs: record browser recovery verification"
 ```
+
+## Verification record — 2026-07-28
+
+Automated and deterministic evidence completed:
+
+- browser runtime: typecheck plus 15 files / 86 tests, including shared-CDP manager replacement,
+  exact target adoption, monotonic generation and explicit-stop closure;
+- Rust workspace: complete `cargo test --workspace` passes, including checkpoint store, effect
+  policy, sandbox, secrets and Vault suites;
+- Rust gateway: 984 passed, 6 ignored live-only tests after the HITL validator correction;
+- workspace compiler gate: `RUSTFLAGS='-D warnings' cargo build --workspace` passes;
+- desktop: production build, UI contract and 61 Electron tests pass;
+- dependency audits: desktop production and browser runtime report 0 vulnerabilities;
+- deterministic recovery: safe form state survives sidecar loss, exact target is adopted and the
+  next observation advances generation; URL-only fallback remains empty until explicit rehydrate;
+- live dev HITL resume: thread `thread_1785240411_1785240411785718000` remained revision 1, retained
+  the full original objective, projected `same_objective`, recorded `hitl_resume`, had no fallback,
+  and terminalized as completed after the selected option.
+
+The earlier live Trenitalia run reached Choice and browser checkpoint generation 4, then exposed a
+general validator defect: `external_action` was rejected because unrelated filesystem/artifact
+classes were forbidden. That produced `new_objective`, revision churn and correct checkpoint cleanup.
+The validator now maps deliverables to exact effect classes and has positive/fail-closed regressions.
+The complete external train-flow rerun remains open because third-party booking sites timed out; it
+is retained as an application smoke, not used as the primary recovery proof.
