@@ -350,15 +350,10 @@ fn compress_text(input: &str, policy: &CompressionPolicy) -> (String, bool) {
 
     let lines = input.lines().collect::<Vec<_>>();
     let mut selected = Vec::new();
-    selected.extend(
-        lines
-            .iter()
-            .take(policy.preserve_head_lines)
-            .map(|line| *line),
-    );
+    selected.extend(lines.iter().take(policy.preserve_head_lines).copied());
     selected.extend(lines.iter().copied().filter(|line| is_important_line(line)));
     let tail_start = lines.len().saturating_sub(policy.preserve_tail_lines);
-    selected.extend(lines.iter().skip(tail_start).map(|line| *line));
+    selected.extend(lines.iter().skip(tail_start).copied());
     selected.dedup();
 
     let marker = compression_marker(input.chars().count(), policy.max_chars);

@@ -12,7 +12,7 @@ fn shell_output_preserves_failures_tail_and_redacts_before_truncation() {
     lines.push("test result: FAILED. 1 failed; 3 passed".to_string());
     let input = lines.join("\n");
 
-    let result = ContextCompressor::default().compress(
+    let result = ContextCompressor.compress(
         &ContextItem::new(ContextKind::ShellOutput, input),
         &CompressionPolicy::for_kind(ContextKind::ShellOutput).with_max_chars(260),
     );
@@ -39,7 +39,7 @@ fn browser_text_preserves_title_and_urls_but_strips_query_secrets() {
     ]
     .join("\n");
 
-    let result = ContextCompressor::default().compress(
+    let result = ContextCompressor.compress(
         &ContextItem::new(ContextKind::BrowserText, input),
         &CompressionPolicy::for_kind(ContextKind::BrowserText).with_max_chars(220),
     );
@@ -63,7 +63,7 @@ fn chat_history_keeps_recent_turns_and_collapses_older_context() {
     ]
     .join("\n");
 
-    let result = ContextCompressor::default().compress(
+    let result = ContextCompressor.compress(
         &ContextItem::new(ContextKind::ChatHistory, input),
         &CompressionPolicy::for_kind(ContextKind::ChatHistory).with_max_chars(170),
     );
@@ -92,7 +92,7 @@ fn json_tool_output_redacts_sensitive_fields_recursively() {
     })
     .to_string();
 
-    let result = ContextCompressor::default().compress(
+    let result = ContextCompressor.compress(
         &ContextItem::new(ContextKind::ToolJson, input),
         &CompressionPolicy::for_kind(ContextKind::ToolJson).with_max_chars(400),
     );
@@ -106,7 +106,7 @@ fn json_tool_output_redacts_sensitive_fields_recursively() {
 
 #[test]
 fn generic_output_reports_token_estimates_and_ratio() {
-    let result = ContextCompressor::default().compress(
+    let result = ContextCompressor.compress(
         &ContextItem::new(ContextKind::GenericToolOutput, "a ".repeat(200)),
         &CompressionPolicy::for_kind(ContextKind::GenericToolOutput).with_max_chars(120),
     );
