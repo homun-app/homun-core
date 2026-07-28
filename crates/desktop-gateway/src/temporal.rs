@@ -84,15 +84,18 @@ impl Default for ResolveOpts {
 
 #[derive(Debug, Clone)]
 pub struct Resolved {
+    #[allow(dead_code)]
     pub start: jiff::Zoned,
     /// Window end for part-of-day ranges (e.g. morning 06:00–12:00); else None.
     pub end: Option<jiff::Zoned>,
     /// True when no time was given → the consumer should treat it as a pure date.
+    #[allow(dead_code)]
     pub date_only: bool,
     /// Canonical machine value: `YYYY-MM-DD` (date-only) or full ISO 8601 w/ offset.
     pub iso: String,
     /// Italian human echo, e.g. "giovedì 11 giugno 2026 alle 07:00".
     pub human: String,
+    #[allow(dead_code)]
     pub is_future: bool,
 }
 

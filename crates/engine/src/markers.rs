@@ -17,6 +17,8 @@ pub mod name {
     pub const ARTIFACT: &str = "ARTIFACT";
     pub const DIFF: &str = "DIFF";
     pub const CHOICES: &str = "CHOICES";
+    pub const CLARIFY: &str = "CLARIFY";
+    pub const AWAIT_USER: &str = "AWAIT_USER";
 }
 
 /// The opening delimiter for a marker name, e.g. `open("PLAN") == "‹‹PLAN››"`.
@@ -83,7 +85,7 @@ pub fn strip_blocks(text: &str, marker: &str) -> String {
 /// reasoning trace, confirmation cards) but they are NOT answer prose. The canonical list for the
 /// whole backend (ADR 0024 inc 5, 5.D1c: relocated here from the gateway — caposaldo #5, "one strip
 /// primitive for the whole backend").
-const DISPLAY_MARKER_TAGS: [&str; 19] = [
+const DISPLAY_MARKER_TAGS: [&str; 21] = [
     "PLAN",
     "ACT",
     "ARTIFACT",
@@ -93,6 +95,8 @@ const DISPLAY_MARKER_TAGS: [&str; 19] = [
     "COMPOSIO_RECONNECT",
     "DIFF",
     "CHOICES",
+    "CLARIFY",
+    "AWAIT_USER",
     "MCP_CONFIRM",
     "FS_AUTHORIZE",
     "SANDBOX_ESCALATE",
@@ -109,13 +113,187 @@ const DISPLAY_MARKER_TAGS: [&str; 19] = [
 /// list adjacent to the canonical display-marker list: lifecycle state must
 /// follow the same protocol the desktop renderer uses, not ad-hoc string tests
 /// in individual executors.
-pub const ACTIONABLE_CARD_MARKER_TAGS: [&str; 5] = [
+///
+/// Free kinds (`CHOICES` / `CLARIFY` / `AWAIT_USER`) and Hold kinds (confirm/…) all
+/// admit through this list; [`crate::hitl::HitlEnvelope`] is the typed protocol.
+pub const ACTIONABLE_CARD_MARKER_TAGS: [&str; 8] = [
     "COMPOSIO_CONFIRM",
     "MCP_CONFIRM",
     "FS_AUTHORIZE",
     "SANDBOX_ESCALATE",
     "CONNECT_SUGGEST",
+    "CHOICES",
+    "CLARIFY",
+    "AWAIT_USER",
 ];
+
+/// True when the assistant text contains at least one validated actionable card
+/// (`ACTIONABLE_CARD_MARKER_TAGS` with a JSON body). That means the harness must
+/// treat the turn as `AwaitingUser`: no plan nudge, no forced synthesis.
+pub fn text_awaits_user(text: &str) -> bool {
+    !validated_actionable_marker_blocks(text).is_empty()
+}
+
+/// Turn Contract: a closed choice must be a CHOICES card, not prose. Detect the common
+/// failure mode (numbered options + "which do you prefer?") so the loop can nudge once
+/// to emit the marker instead of delivering a card-less stop the UI cannot render.
+pub fn prose_asks_closed_choice_without_card(text: &str) -> bool {
+    if text_awaits_user(text) {
+        return false;
+    }
+    let lower = text.to_ascii_lowercase();
+    let asks = [
+        "quale preferisci",
+        "cosa preferisci",
+        "quale scegli",
+        "which do you prefer",
+        "which one do you prefer",
+        "which train",
+        "which option",
+        "scegli tra",
+        "pick one",
+        "choose one",
+        "which would you like",
+        "vuoi che",
+        "do you want me to",
+        "would you like me to",
+        "come preferisci",
+        "come vuoi procedere",
+        "how would you like to proceed",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    if !asks {
+        return false;
+    }
+    numbered_option_line_count(text) >= 2
+}
+
+/// Count markdown/list lines that look like discrete options (`1.` / `1)` / `| 1 |`).
+pub fn numbered_option_line_count(text: &str) -> usize {
+    text.lines()
+        .filter(|line| {
+            let t = line.trim_start();
+            if t.starts_with('|') {
+                let rest = t.trim_start_matches('|').trim_start();
+                rest.chars().next().is_some_and(|c| c.is_ascii_digit())
+            } else {
+                let bytes = t.as_bytes();
+                let mut i = 0;
+                while i < bytes.len() && bytes[i].is_ascii_digit() {
+                    i += 1;
+                }
+                i > 0 && i < bytes.len() && (bytes[i] == b'.' || bytes[i] == b')')
+            }
+        })
+        .count()
+}
+
+/// Labels from numbered option lines (for harness materialization of a CHOICES card).
+pub fn extract_numbered_option_labels(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| {
+            let t = line.trim_start();
+            let body = if t.starts_with('|') {
+                let rest = t.trim_start_matches('|').trim_start();
+                let mut parts = rest.split('|');
+                let first = parts.next()?.trim();
+                if !first.chars().next()?.is_ascii_digit() {
+                    return None;
+                }
+                // Prefer the next cell as the label when present.
+                parts
+                    .next()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(first)
+                    .to_string()
+            } else {
+                let bytes = t.as_bytes();
+                let mut i = 0;
+                while i < bytes.len() && bytes[i].is_ascii_digit() {
+                    i += 1;
+                }
+                if i == 0 || i >= bytes.len() || (bytes[i] != b'.' && bytes[i] != b')') {
+                    return None;
+                }
+                t[i + 1..].trim().to_string()
+            };
+            let cleaned = body
+                .replace("**", "")
+                .trim()
+                .trim_matches('*')
+                .trim()
+                .to_string();
+            if cleaned.is_empty() {
+                None
+            } else {
+                Some(cleaned)
+            }
+        })
+        .collect()
+}
+
+/// Prose that collects free-text fields from the user (name, email, …) without a
+/// structured HITL card. Detector only — never a wait SoT (Turn Contract: emit `CLARIFY`).
+pub fn prose_asks_clarify_without_card(text: &str) -> bool {
+    if text_awaits_user(text) || prose_asks_closed_choice_without_card(text) {
+        return false;
+    }
+    prose_collects_user_fields(text)
+}
+
+/// True when the answer handed (or is about to hand) control to the user: actionable
+/// card, prose closed-choice, or prose field request. Used to suppress plan nudges —
+/// not as an AwaitingUser ingress (that requires a validated marker).
+pub fn text_requests_user_reply(text: &str) -> bool {
+    text_awaits_user(text)
+        || prose_asks_closed_choice_without_card(text)
+        || prose_collects_user_fields(text)
+}
+
+fn prose_collects_user_fields(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let asks = [
+        "mi servono",
+        "mi serve",
+        "i need your",
+        "i need the following",
+        "please provide",
+        "fornisci",
+        "dimmi",
+        "mandami",
+        "send me",
+        "appena me li dai",
+        "once you give me",
+        "i tuoi dati",
+        "your details",
+        "your data",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    let field_cues = [
+        "nome",
+        "cognome",
+        "email",
+        "telefono",
+        "data di nascita",
+        "phone",
+        "date of birth",
+        "passenger",
+        "passeggero",
+        "indirizzo",
+        "address",
+        "otp",
+        "password",
+        "pagamento",
+        "payment",
+    ]
+    .iter()
+    .filter(|needle| lower.contains(*needle))
+    .count();
+    asks && field_cues >= 2
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionableMarkerBlock {
@@ -173,7 +351,10 @@ pub fn validated_actionable_marker_blocks(text: &str) -> Vec<ValidatedActionable
         .filter_map(|block| {
             let open_tag = open(block.marker);
             let close_tag = close(block.marker);
-            let body = block.raw.strip_prefix(&open_tag)?.strip_suffix(&close_tag)?;
+            let body = block
+                .raw
+                .strip_prefix(&open_tag)?
+                .strip_suffix(&close_tag)?;
             let payload = serde_json::from_str(body).ok()?;
             Some(ValidatedActionableMarkerBlock {
                 marker: block.marker,
@@ -222,14 +403,20 @@ pub fn delivery_text(text: &str) -> Result<String, DeliveryTextError> {
         .collect::<Vec<_>>();
     if tokens.len() >= 10 {
         let adjacent_duplicates = tokens.windows(2).filter(|pair| pair[0] == pair[1]).count();
-        let unique = tokens.iter().collect::<std::collections::HashSet<_>>().len();
+        let unique = tokens
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
         let repeated = tokens.len().saturating_sub(unique);
         let repeated_bigrams = tokens
             .windows(2)
-            .fold(std::collections::HashMap::<(&str, &str), usize>::new(), |mut counts, pair| {
-                *counts.entry((&pair[0], &pair[1])).or_default() += 1;
-                counts
-            })
+            .fold(
+                std::collections::HashMap::<(&str, &str), usize>::new(),
+                |mut counts, pair| {
+                    *counts.entry((&pair[0], &pair[1])).or_default() += 1;
+                    counts
+                },
+            )
             .values()
             .copied()
             .max()
@@ -354,9 +541,12 @@ pub fn canonicalize_reasoning_delimiters(s: &str) -> String {
         t = t.replace(o, OPEN_PH);
     }
     // 3) single-guillemet variants (close before open; now safe — doubles are placeholders).
-    t = t.replace("‹/REASONING›", CLOSE_PH).replace("‹REASONING›", OPEN_PH);
+    t = t
+        .replace("‹/REASONING›", CLOSE_PH)
+        .replace("‹REASONING›", OPEN_PH);
     // 4) restore to the canonical double form.
-    t.replace(CLOSE_PH, "‹‹/REASONING››").replace(OPEN_PH, "‹‹REASONING››")
+    t.replace(CLOSE_PH, "‹‹/REASONING››")
+        .replace(OPEN_PH, "‹‹REASONING››")
 }
 
 pub fn balance_reasoning_markers(s: &str, open_state: &mut bool, out: &mut String) {
@@ -491,7 +681,10 @@ mod tests {
     #[test]
     fn strip_display_markers_removes_all_display_blocks() {
         // Every display tag is stripped; real prose survives.
-        assert_eq!(strip_display_markers("‹‹PLAN››- [x] step‹‹/PLAN››").trim(), "");
+        assert_eq!(
+            strip_display_markers("‹‹PLAN››- [x] step‹‹/PLAN››").trim(),
+            ""
+        );
         assert_eq!(
             strip_display_markers("‹‹REASONING››thought‹‹/REASONING››\nHi").trim(),
             "Hi"
@@ -518,6 +711,71 @@ mod tests {
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].marker, "MCP_CONFIRM");
         assert_eq!(blocks[0].payload["approval_id"], "ok");
+    }
+
+    #[test]
+    fn choices_json_is_an_actionable_user_wait_card() {
+        // Turn Contract: CHOICES must share the same admission list as confirm cards so
+        // the turn parks for the person instead of looking like a soft UI-only prompt.
+        let text = concat!(
+            "Pick a train.\n",
+            r#"‹‹CHOICES››{"question":"Which train?","options":["07:30","09:15"]}‹‹/CHOICES››"#,
+        );
+        let blocks = validated_actionable_marker_blocks(text);
+        assert_eq!(blocks.len(), 1, "CHOICES with valid JSON must be admitted");
+        assert_eq!(blocks[0].marker, "CHOICES");
+        assert!(text_awaits_user(text));
+        assert!(!text_awaits_user("Pick a train in prose only."));
+        assert!(
+            !text_awaits_user("‹‹CHOICES››not json‹‹/CHOICES››"),
+            "invalid CHOICES body must not park the turn"
+        );
+    }
+
+    #[test]
+    fn prose_closed_choice_without_card_is_detected() {
+        let prose = r#"Ecco i treni:
+
+| # | Treno | Prezzo |
+|---|-------|--------|
+| 1 | Frecciarossa 9524 | 85,90 € |
+| 2 | Frecciarossa 9310 | 79,90 € |
+
+Per procedere con la prenotazione, quale preferisci?"#;
+        assert!(prose_asks_closed_choice_without_card(prose));
+        assert!(text_requests_user_reply(prose));
+        let with_card = format!(
+            "{prose}\n{}",
+            r#"‹‹CHOICES››{"question":"Quale?","options":["A","B"]}‹‹/CHOICES››"#
+        );
+        assert!(!prose_asks_closed_choice_without_card(&with_card));
+        assert!(!prose_asks_closed_choice_without_card("Ciao, come stai?"));
+    }
+
+    #[test]
+    fn passenger_field_request_suppresses_as_user_reply() {
+        let text = "Mi servono i tuoi dati:\n- Nome e Cognome\n- Email\n- Telefono\nAppena me li dai, compilo il form.";
+        assert!(text_requests_user_reply(text));
+        assert!(prose_asks_clarify_without_card(text));
+        assert!(!prose_asks_closed_choice_without_card(text));
+        let with_card = format!(
+            "{text}\n{}",
+            r#"‹‹CLARIFY››{"question":"Passenger details?","fields":["name","email","phone"]}‹‹/CLARIFY››"#
+        );
+        assert!(text_awaits_user(&with_card));
+        assert!(!prose_asks_clarify_without_card(&with_card));
+    }
+
+    #[test]
+    fn clarify_json_is_an_actionable_user_wait_card() {
+        let text = concat!(
+            "Need your details.\n",
+            r#"‹‹CLARIFY››{"question":"Passenger data?","fields":["name","email"]}‹‹/CLARIFY››"#,
+        );
+        let blocks = validated_actionable_marker_blocks(text);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].marker, "CLARIFY");
+        assert!(text_awaits_user(text));
     }
 
     #[test]
@@ -566,6 +824,8 @@ mod tests {
             "COMPOSIO_RECONNECT",
             "DIFF",
             "CHOICES",
+            "CLARIFY",
+            "AWAIT_USER",
             "MCP_CONFIRM",
             "FS_AUTHORIZE",
             "SANDBOX_ESCALATE",
@@ -640,8 +900,14 @@ mod tests {
         // After display-strip (what the UI renders) only the real prose survives — no raw ‹/REASONING›,
         // no <think>, no guillemet garbage.
         let rendered = strip_display_markers(&live);
-        assert!(!rendered.contains("REASONING"), "raw REASONING leaked: {rendered:?}");
-        assert!(!rendered.contains("<think"), "raw <think leaked: {rendered:?}");
+        assert!(
+            !rendered.contains("REASONING"),
+            "raw REASONING leaked: {rendered:?}"
+        );
+        assert!(
+            !rendered.contains("<think"),
+            "raw <think leaked: {rendered:?}"
+        );
         assert!(rendered.contains("Visible A."));
         assert!(rendered.contains("Visible B."));
     }
@@ -654,11 +920,17 @@ mod tests {
         // A malformed reasoning BLOCK becomes a well-formed one → then display-strip removes it.
         let leaked = "‹REASONING›hidden chain of thought‹/REASONING›Visible.";
         let normalized = normalize_reasoning_markers(leaked);
-        assert_eq!(normalized, "‹‹REASONING››hidden chain of thought‹‹/REASONING››Visible.");
+        assert_eq!(
+            normalized,
+            "‹‹REASONING››hidden chain of thought‹‹/REASONING››Visible."
+        );
         assert_eq!(strip_display_markers(&normalized).trim(), "Visible.");
         // XML flood likewise.
         assert_eq!(
-            strip_display_markers(&normalize_reasoning_markers("</REASONING></REASONING>Done.")).trim(),
+            strip_display_markers(&normalize_reasoning_markers(
+                "</REASONING></REASONING>Done."
+            ))
+            .trim(),
             "Done."
         );
     }
@@ -667,13 +939,18 @@ mod tests {
     fn should_force_synthesis_on_reasoning_only() {
         // Empty / whitespace / marker-only → force synthesis.
         assert!(should_force_synthesis_for_empty_visible_answer("", ""));
-        assert!(should_force_synthesis_for_empty_visible_answer("", "   \n "));
+        assert!(should_force_synthesis_for_empty_visible_answer(
+            "", "   \n "
+        ));
         assert!(should_force_synthesis_for_empty_visible_answer(
             "‹‹PLAN››- [x] done‹‹/PLAN››",
             "‹‹REASONING››hidden answer‹‹/REASONING››"
         ));
         // A real answer body (in either arg) → do NOT force.
-        assert!(!should_force_synthesis_for_empty_visible_answer("", "Here is the answer."));
+        assert!(!should_force_synthesis_for_empty_visible_answer(
+            "",
+            "Here is the answer."
+        ));
         assert!(!should_force_synthesis_for_empty_visible_answer(
             "‹‹PLAN››- [x] done‹‹/PLAN››",
             "\nHere is the answer."
@@ -691,10 +968,19 @@ mod tests {
         let t = "a‹‹ACT››one‹‹/ACT›› b ‹‹ACT››two‹‹/ACT›› c";
         // `body` is whole-text-only (a single-delta marker) — no mid-text match.
         assert_eq!(body(t, "‹‹ACT››", "‹‹/ACT››"), None);
-        assert_eq!(body("‹‹PLAN››only‹‹/PLAN››", "‹‹PLAN››", "‹‹/PLAN››"), Some("only"));
-        assert_eq!(body("  ‹‹ACT››x‹‹/ACT››  ", "‹‹ACT››", "‹‹/ACT››"), Some("x"));
+        assert_eq!(
+            body("‹‹PLAN››only‹‹/PLAN››", "‹‹PLAN››", "‹‹/PLAN››"),
+            Some("only")
+        );
+        assert_eq!(
+            body("  ‹‹ACT››x‹‹/ACT››  ", "‹‹ACT››", "‹‹/ACT››"),
+            Some("x")
+        );
         // `bodies` / `strip_blocks` DO find every block in a full message.
-        assert_eq!(bodies(t, name::ACT), vec!["one".to_string(), "two".to_string()]);
+        assert_eq!(
+            bodies(t, name::ACT),
+            vec!["one".to_string(), "two".to_string()]
+        );
         assert_eq!(strip_blocks(t, name::ACT), "a b  c");
         // Unterminated final block → stripped to end.
         assert_eq!(strip_blocks("x‹‹ACT››oops", name::ACT), "x");
@@ -702,8 +988,14 @@ mod tests {
 
     #[test]
     fn marker_safe_split_never_cuts_a_delimiter() {
-        assert_eq!(marker_safe_split("hello ‹‹PLAN››x"), ("hello ‹‹PLAN››x", ""));
-        assert_eq!(marker_safe_split("done.‹‹REASONING›"), ("done.", "‹‹REASONING›"));
+        assert_eq!(
+            marker_safe_split("hello ‹‹PLAN››x"),
+            ("hello ‹‹PLAN››x", "")
+        );
+        assert_eq!(
+            marker_safe_split("done.‹‹REASONING›"),
+            ("done.", "‹‹REASONING›")
+        );
         assert_eq!(
             marker_safe_split("‹‹REASONING›› thinking ‹‹/REASONING››"),
             ("‹‹REASONING›› thinking ‹‹/REASONING››", "")
@@ -731,7 +1023,10 @@ mod tests {
     #[test]
     fn normalize_collapses_flood_and_closes_dangling() {
         let flood = "‹‹/REASONING›".repeat(200);
-        assert_eq!(normalize_reasoning_markers(&format!("Answer.{flood}")), "Answer.");
+        assert_eq!(
+            normalize_reasoning_markers(&format!("Answer.{flood}")),
+            "Answer."
+        );
         assert_eq!(
             normalize_reasoning_markers("‹‹REASONING››‹‹REASONING››still"),
             "‹‹REASONING››still‹‹/REASONING››"

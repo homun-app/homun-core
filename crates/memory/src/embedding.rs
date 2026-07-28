@@ -5,9 +5,7 @@
 //! (off-lock) e lo persiste; con semantic-dedup on-write (cosine) contro gli
 //! embedding già presenti. Background, bounded per batch.
 
-use crate::{
-    cosine, EmbeddingClient, MemoryFacade, MemoryLifecycleRequest, MemoryRef, UserId, WorkspaceId,
-};
+use crate::{MemoryFacade, MemoryLifecycleRequest, MemoryRef, UserId, WorkspaceId, cosine};
 
 /// Soglia cosine sopra la quale due memorie same-type sono considerate duplicati
 /// semantici (sul write). Spostata fedelmente dal gateway (`main.rs:2838`).
@@ -44,7 +42,9 @@ pub fn backfill_collect_pending(
     Vec<(MemoryRef, String, String)>,
     Vec<(String, String, Vec<f32>)>,
 )> {
-    let refs = facade.refs_without_embeddings(user, workspace, limit).ok()?;
+    let refs = facade
+        .refs_without_embeddings(user, workspace, limit)
+        .ok()?;
     if refs.is_empty() {
         return None;
     }
@@ -106,7 +106,6 @@ pub fn backfill_persist_one(
     seen.push((reference.to_string(), mtype.to_string(), vector.to_vec()));
     false
 }
-
 
 #[cfg(test)]
 mod tests {

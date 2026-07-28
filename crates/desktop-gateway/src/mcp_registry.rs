@@ -166,6 +166,7 @@ struct RawTransport {
 #[serde(rename_all = "camelCase")]
 struct RawArg {
     #[serde(default, rename = "type")]
+    #[allow(dead_code)]
     kind: String,
     #[serde(default)]
     value: Option<String>,

@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-22
 **Branch:** `fabio/fix-channel-lifecycle`
-**Status:** Implemented and verified on `fabio/fix-channel-lifecycle`; integration pending
+**Status:** Integrated on `main` (2026-07-27 cherry-pick). Live smoke (project open + inbound WhatsApp/Telegram) still pending.
 
 ## Problem
 

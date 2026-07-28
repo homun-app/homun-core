@@ -24,15 +24,20 @@ use crate::events::{GenerateStreamEvent, TokenMetrics};
 use crate::execution_journal::{
     AgentExecutionEvent, classify_tool_result, tool_family, tool_result_fingerprint,
 };
+use crate::hitl::{
+    HitlEnvelope, HitlKind, NoToolsClassification, classify_no_tools_stop,
+    ensure_free_hitl_marker_in_text, finalize_terminal_text_for_hitl,
+};
 use crate::markers::{
     append_vault_reveal_marker_if_missing, extract_vault_reveal_marker,
-    preserved_display_marker_blocks, visible_answer,
+    preserved_display_marker_blocks, prose_asks_clarify_without_card,
+    prose_asks_closed_choice_without_card, text_awaits_user, visible_answer,
 };
 use crate::model_normalize;
 use crate::plan::{
-    advance_plan_frontier, answer_concludes_plan, build_plan_markdown, collapse_plan_markers,
-    plan_next_open, plan_step_status, plan_step_title, plan_value_steps,
-    replace_latest_plan_marker,
+    advance_plan_frontier, build_plan_markdown, collapse_plan_markers, plan_next_open,
+    plan_step_status, plan_step_title, plan_value_steps, replace_latest_plan_marker,
+    should_nudge_for_open_plan,
 };
 use crate::text::{extract_source_urls, fonti_section, is_low_value_source_url};
 use crate::tools::{connected_capability_execution_trace_line, summarize_tool_action};
@@ -41,6 +46,10 @@ use std::time::Instant;
 
 /// Max harness "you're not done — plan the rest" nudges per turn before giving up (F1 anti-loop).
 const MAX_PLAN_NUDGES: u32 = 8;
+/// One repair nudge when the model asks a closed choice in prose without a CHOICES card.
+const MAX_CHOICES_CARD_NUDGES: u32 = 1;
+/// One repair nudge when the model asks for free-text fields without a CLARIFY card.
+const MAX_CLARIFY_CARD_NUDGES: u32 = 1;
 
 /// Repeats of an identical round before the loop TELLS the model to change approach. Repetition means
 /// the model is stuck on one step, not that the task is impossible: the useful response is a specific
@@ -58,9 +67,7 @@ const REPEAT_STOP_AT: u32 = 4;
 /// elapse on its own — replaces the old infinite spin, which parks instead of hanging.
 const PARK_WAIT_CYCLES: u32 = 40;
 
-async fn wait_for_interrupting_control<M: ModelClient>(
-    model_client: &M,
-) -> TurnControlDecision {
+async fn wait_for_interrupting_control<M: ModelClient>(model_client: &M) -> TurnControlDecision {
     loop {
         if let Some(control) = model_client.current_turn_control()
             && control.disposition != TurnControlDisposition::ContinueCurrentWork
@@ -251,10 +258,9 @@ where
     E: EventSink,
 {
     let mut delivery = TurnDelivery::NoVisibleAnswer;
-    // Set when a steering control asked to CLARIFY. It does NOT change the loop's control flow (the
-    // turn still leaves the rounds and synthesizes), it only survives to the outcome: without it the
-    // caller cannot distinguish "here is your answer" from "the turn stopped to ask you something".
-    let mut needs_clarification = false;
+    let mut awaiting_envelope: Option<HitlEnvelope> = None;
+    let mut choices_card_nudges: u32 = 0;
+    let mut clarify_card_nudges: u32 = 0;
     let turn_started_at = Instant::now();
     // The per-progress stall clock: reset to `now` on every real browser progress (see the
     // `browser_no_progress = 0` point below). The browser wall-clock budget is measured from THIS,
@@ -287,7 +293,12 @@ where
                     break 'rounds;
                 }
                 TurnControlDisposition::NeedsClarification => {
-                    needs_clarification = true;
+                    awaiting_envelope = Some(HitlEnvelope {
+                        kind: HitlKind::Clarify,
+                        hold_policy: crate::hitl::HoldPolicy::Free,
+                        payload: serde_json::json!({}),
+                        source_marker: "steering_clarify".into(),
+                    });
                     loop_exit = Some("steering_needs_clarification_pre_model");
                     break 'rounds;
                 }
@@ -301,7 +312,8 @@ where
             }
         }
         if ls.browser_used {
-            let elapsed_ms = u64::try_from(turn_started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let elapsed_ms =
+                u64::try_from(turn_started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
             let stall_ms =
                 u64::try_from(last_browser_progress_at.elapsed().as_millis()).unwrap_or(u64::MAX);
             if let Some(reason) = cfg.browser_budget.stop_reason(
@@ -483,7 +495,12 @@ missing, give what you have and note the gap in one short line.",
                     break 'rounds;
                 }
                 TurnControlDisposition::NeedsClarification => {
-                    needs_clarification = true;
+                    awaiting_envelope = Some(HitlEnvelope {
+                        kind: HitlKind::Clarify,
+                        hold_policy: crate::hitl::HoldPolicy::Free,
+                        payload: serde_json::json!({}),
+                        source_marker: "steering_clarify".into(),
+                    });
                     loop_exit = Some("steering_needs_clarification_post_model");
                     break 'rounds;
                 }
@@ -819,9 +836,9 @@ again to find the right control). Keep working on the task — do not stop and d
                         // on a slow model. The sub-turn's own per-progress stall window
                         // (`config.rs` `max_stall_ms`, reset on success) is the real control; this is a
                         // final backstop on a single browse call.
-                        let browser_deadline = tokio::time::sleep(std::time::Duration::from_millis(
-                            cfg.browser_budget.max_elapsed_ms,
-                        ));
+                        let browser_deadline = tokio::time::sleep(
+                            std::time::Duration::from_millis(cfg.browser_budget.max_elapsed_ms),
+                        );
                         tokio::pin!(browser_deadline);
                         tokio::select! {
                             biased;
@@ -1091,7 +1108,12 @@ again to find the right control). Keep working on the task — do not stop and d
                         break 'rounds;
                     }
                     TurnControlDisposition::NeedsClarification => {
-                        needs_clarification = true;
+                        awaiting_envelope = Some(HitlEnvelope {
+                            kind: HitlKind::Clarify,
+                            hold_policy: crate::hitl::HoldPolicy::Free,
+                            payload: serde_json::json!({}),
+                            source_marker: "steering_clarify".into(),
+                        });
                         loop_exit = Some("steering_needs_clarification_after_tools");
                         break 'rounds;
                     }
@@ -1138,12 +1160,24 @@ again to find the right control). Keep working on the task — do not stop and d
             }
             if pending_confirm {
                 // A write is awaiting the user's confirmation card — end the turn
-                // here (no synthesis, no further tool rounds).
+                // here (no synthesis, no further tool rounds). Card-only messages
+                // have no visible prose after strip; still deliver so the gateway
+                // can park on actionable markers (Turn Contract).
                 let final_text = append_vault_reveal_marker_if_missing(
                     collapse_plan_markers(&ls.accumulated),
                     ls.pending_vault_reveal_marker.as_deref(),
                 );
-                if visible_answer(&final_text).is_some() {
+                if awaiting_envelope.is_none() {
+                    awaiting_envelope = crate::hitl::hitl_envelopes_from_text(&final_text)
+                        .into_iter()
+                        .find(|env| !env.is_free())
+                        .or_else(|| {
+                            crate::hitl::hitl_envelopes_from_text(&final_text)
+                                .into_iter()
+                                .next()
+                        });
+                }
+                if visible_answer(&final_text).is_some() || text_awaits_user(&final_text) {
                     let _ = event_sink
                         .emit(GenerateStreamEvent::Done {
                             text: final_text.clone(),
@@ -1184,10 +1218,84 @@ again to find the right control). Keep working on the task — do not stop and d
                 .and_then(|c| c.as_str())
                 .unwrap_or(""),
         );
-        // Plan-completion enforcement: some models stop after one step (kimi/others),
-        // leaving a half-built deliverable. If the plan still has open steps and we
-        // have budget, nudge the model to keep going instead of ending the turn.
-        // Bounded by MAX_PLAN_NUDGES (reset on progress) AND the per-step round budget.
+        // Turn Contract chokepoint: one classifier — Await / NudgeEmit / NotHitl.
+        // Prose never enters AwaitingUser; only a structured HitlEnvelope does.
+        let combined_for_hitl = format!("{}{}", ls.accumulated, content);
+        let hitl_class = match classify_no_tools_stop(&content) {
+            NoToolsClassification::NotHitl => classify_no_tools_stop(&combined_for_hitl),
+            other => other,
+        };
+        match hitl_class {
+            NoToolsClassification::Await(envelope) => {
+                ls.accumulated.push_str(&content);
+                let final_answer = append_vault_reveal_marker_if_missing(
+                    collapse_plan_markers(&ls.accumulated),
+                    ls.pending_vault_reveal_marker.as_deref(),
+                );
+                // Do NOT reconcile open plan steps to done: the person has not answered yet.
+                memory_answer = final_answer.clone();
+                awaiting_envelope = Some(envelope);
+                let _ = event_sink
+                    .emit(GenerateStreamEvent::Done {
+                        text: final_answer,
+                        metrics: TokenMetrics::zero(),
+                        redacted_user_text: None,
+                    })
+                    .await;
+                delivery = TurnDelivery::Delivered;
+                final_done = true;
+                loop_exit = Some("awaiting_user");
+                break;
+            }
+            NoToolsClassification::NudgeEmit(HitlKind::Choice)
+                if !is_final_round && choices_card_nudges < MAX_CHOICES_CARD_NUDGES =>
+            {
+                choices_card_nudges += 1;
+                turn_trace.record(crate::turn_trace::TurnEvent::Nudge {
+                    reason: "prose_closed_choice_needs_choices_card".into(),
+                    next_step: String::new(),
+                });
+                if !content.trim().is_empty() {
+                    ls.messages
+                        .push(serde_json::json!({ "role": "assistant", "content": content }));
+                }
+                ls.messages.push(serde_json::json!({
+                    "role": "user",
+                    "content": "You asked the user to pick among discrete options in prose. \
+Emit a CHOICES card NOW — do not only list them in a table. Use this exact shape on its own line:\n\
+‹‹CHOICES››{\"question\":\"your question\",\"multi\":false,\"options\":[\"Option A\",\"Option B\"]}‹‹/CHOICES››\n\
+(or ‹‹AWAIT_USER››{\"kind\":\"choice\",\"question\":\"…\",\"options\":[…]}‹‹/AWAIT_USER››). \
+Reuse the same options you already listed. No tools, no new search, no plan update — only the card."
+                }));
+                continue;
+            }
+            NoToolsClassification::NudgeEmit(HitlKind::Clarify)
+                if !is_final_round && clarify_card_nudges < MAX_CLARIFY_CARD_NUDGES =>
+            {
+                clarify_card_nudges += 1;
+                turn_trace.record(crate::turn_trace::TurnEvent::Nudge {
+                    reason: "prose_field_request_needs_clarify_card".into(),
+                    next_step: String::new(),
+                });
+                if !content.trim().is_empty() {
+                    ls.messages
+                        .push(serde_json::json!({ "role": "assistant", "content": content }));
+                }
+                ls.messages.push(serde_json::json!({
+                    "role": "user",
+                    "content": "You asked the user for free-text details in prose. \
+Emit a CLARIFY card NOW so the harness can wait and resume correctly. Use this exact shape \
+on its own line:\n\
+‹‹CLARIFY››{\"question\":\"what you need\",\"fields\":[\"field1\",\"field2\"]}‹‹/CLARIFY››\n\
+(or ‹‹AWAIT_USER››{\"kind\":\"clarify\",\"question\":\"…\",\"fields\":[…]}‹‹/AWAIT_USER››). \
+Reuse the same question/fields you already listed. No tools, no new search, no plan update — only the card."
+                }));
+                continue;
+            }
+            NoToolsClassification::NudgeEmit(_) | NoToolsClassification::NotHitl => {
+                // Fall through to plan / deliver paths.
+            }
+        }
         if !is_final_round && plan_nudges < MAX_PLAN_NUDGES {
             let mut plan_steps = plan_value_steps(&ls.plan);
             if let Some(step) = plan_next_open(&plan_steps) {
@@ -1203,7 +1311,7 @@ again to find the right control). Keep working on the task — do not stop and d
                     .iter()
                     .filter(|s| plan_step_status(s) != "done")
                     .count();
-                if !answer_concludes_plan(open_left, content.trim().chars().count()) {
+                if should_nudge_for_open_plan(&content, open_left) {
                     plan_nudges += 1;
                     // Turn trace: the harness nudged the model to keep going on the still-open plan.
                     turn_trace.record(crate::turn_trace::TurnEvent::Nudge {
@@ -1237,12 +1345,13 @@ again to find the right control). Keep working on the task — do not stop and d
                         .await;
                     continue;
                 }
-                // The answer is substantial and the plan is all-but-closed → finalize with
-                // `content` instead of nudging. F2.2 (default-on): reconcile the one still-open
-                // step to `done` + persist, so the runtime plan matches the delivered work
-                // and the NEXT turn doesn't falsely resume it. Reuses the canonical
-                // mark-done→persist path.
-                if cfg.reconcile_on_delivery {
+                // Prose user-ask without a card (nudge already spent): never auto-reconcile
+                // the open "collect data / choose" step to done — that steals ownership.
+                if prose_asks_closed_choice_without_card(&content)
+                    || prose_asks_clarify_without_card(&content)
+                {
+                    // Fall through to deliver without marking plan steps done.
+                } else if cfg.reconcile_on_delivery {
                     if let Some(open_index) = plan_steps
                         .iter()
                         .position(|s| plan_step_status(s) != "done")
@@ -1449,8 +1558,7 @@ again to find the right control). Keep working on the task — do not stop and d
     // cannot resolve — e.g. the semantic model is unavailable), park instead of
     // spinning: exit with a non-delivering Parked outcome for coordinator resume.
     let mut park_wait: u32 = 0;
-    while !final_done
-        && model_client.finalization_fence() == crate::FinalizationFence::PendingInput
+    while !final_done && model_client.finalization_fence() == crate::FinalizationFence::PendingInput
     {
         if let Some(control) = model_client.current_turn_control() {
             apply_turn_control(model_client, &mut ls.messages, &control);
@@ -1502,21 +1610,78 @@ again to find the right control). Keep working on the task — do not stop and d
     }
 
     if !final_done {
-        // Turn trace: the loop exited without a committed answer → the guaranteed post-loop synthesis
-        // fires. No per-round finish_reason applies on this exhaustion path (the loop broke on the
-        // round/nav budget or a transport error); a synthetic marker keeps the event greppable.
-        turn_trace.record(crate::turn_trace::TurnEvent::ForcedSynthesis {
-            finish_reason: "post_loop_exhausted".into(),
-        });
-        execution_journal.record(AgentExecutionEvent::ForcedSynthesis {
-            round: None,
-            reason: "post_loop_exhausted".to_string(),
-        });
-        // Guaranteed synthesis: the model exhausted the tool rounds without a
-        // text answer (it kept calling tools). Force one final NO-TOOLS call so it
-        // synthesizes from what it did, instead of dead-ending on "limite di passi".
-        // GENERIC across domains (coding, documents, web), not travel-specific.
-        ls.messages.push(serde_json::json!({
+        // Turn Contract: never forced-synthesize over a human wait.
+        let awaiting_user = awaiting_envelope.is_some()
+            || matches!(
+                loop_exit,
+                Some("pending_user_confirmation")
+                    | Some("awaiting_user")
+                    | Some("awaiting_user_choice")
+                    | Some("steering_needs_clarification_pre_model")
+                    | Some("steering_needs_clarification_post_model")
+                    | Some("steering_needs_clarification_after_tools")
+            )
+            || text_awaits_user(&ls.accumulated)
+            || text_awaits_user(&memory_answer);
+        if awaiting_user {
+            if let Some(ref envelope) = awaiting_envelope {
+                memory_answer = ensure_free_hitl_marker_in_text(&memory_answer, envelope);
+                if memory_answer.trim().is_empty() && text_awaits_user(&ls.accumulated) {
+                    memory_answer = ensure_free_hitl_marker_in_text(
+                        &append_vault_reveal_marker_if_missing(
+                            collapse_plan_markers(&ls.accumulated),
+                            ls.pending_vault_reveal_marker.as_deref(),
+                        ),
+                        envelope,
+                    );
+                }
+            }
+            if !memory_answer.trim().is_empty() || text_awaits_user(&ls.accumulated) {
+                if memory_answer.trim().is_empty() {
+                    let final_text = append_vault_reveal_marker_if_missing(
+                        collapse_plan_markers(&ls.accumulated),
+                        ls.pending_vault_reveal_marker.as_deref(),
+                    );
+                    memory_answer = final_text.clone();
+                    let _ = event_sink
+                        .emit(GenerateStreamEvent::Done {
+                            text: final_text,
+                            metrics: TokenMetrics::zero(),
+                            redacted_user_text: None,
+                        })
+                        .await;
+                } else if !final_done {
+                    // Steering Clarify (etc.): emit Done with the injected Free marker so
+                    // gateway persist + UI enter AwaitingUser through the typed envelope.
+                    let final_text = memory_answer.clone();
+                    let _ = event_sink
+                        .emit(GenerateStreamEvent::Done {
+                            text: final_text,
+                            metrics: TokenMetrics::zero(),
+                            redacted_user_text: None,
+                        })
+                        .await;
+                }
+                delivery = TurnDelivery::Delivered;
+                final_done = true;
+            }
+            // Skip forced synthesis — fall through to outcome assembly.
+        } else {
+            // Turn trace: the loop exited without a committed answer → the guaranteed post-loop synthesis
+            // fires. No per-round finish_reason applies on this exhaustion path (the loop broke on the
+            // round/nav budget or a transport error); a synthetic marker keeps the event greppable.
+            turn_trace.record(crate::turn_trace::TurnEvent::ForcedSynthesis {
+                finish_reason: "post_loop_exhausted".into(),
+            });
+            execution_journal.record(AgentExecutionEvent::ForcedSynthesis {
+                round: None,
+                reason: "post_loop_exhausted".to_string(),
+            });
+            // Guaranteed synthesis: the model exhausted the tool rounds without a
+            // text answer (it kept calling tools). Force one final NO-TOOLS call so it
+            // synthesizes from what it did, instead of dead-ending on "limite di passi".
+            // GENERIC across domains (coding, documents, web), not travel-specific.
+            ls.messages.push(serde_json::json!({
             "role": "user",
             "content": "No more tools are available. Write the FINAL ANSWER NOW for \
         the user, synthesizing what you did and found in the previous steps: for a coding task \
@@ -1524,115 +1689,139 @@ again to find the right control). Keep working on the task — do not stop and d
         details. Be complete and concrete. If something failed, say so clearly and propose how \
         to proceed."
         }));
-        // ADR 0024 inc 5 (P2b): the forced synthesis now goes through the SAME
-        // engine::ModelClient seam as the per-round call — `is_final_round: true` (no
-        // tools, fresh answer budget) — so it inherits retry/backoff, the mid-turn
-        // provider fallback and the OpenAI/Ollama-native collectors instead of the old
-        // single inline POST (which could dead-end on one transient failure). The impl
-        // streams the answer live via its captured StreamSink, exactly like the loop.
-        // A provider swap here is moot (the turn ends right after), and any error leaves
-        // the turn without a delivery unless already-accumulated text is visibly answer prose.
-        execution_journal.record(AgentExecutionEvent::PromptSnapshot {
-            round: cfg.hard_round_ceiling,
-            snapshot: crate::execution_journal::build_prompt_snapshot_with_packets(
-                &ls.provider.model,
-                &ls.provider.base_url,
-                &ls.messages,
-                &[],
-                true,
-                None,
-                &ls.prompt_packets,
-            ),
-        });
-        let mut synthesis_usage = usage_context.clone();
-        synthesis_usage.call_id = format!("{}:forced_synthesis", usage_context.call_id);
-        synthesis_usage.purpose_detail = Some("forced_synthesis".to_string());
-        synthesis_usage.round = u32::try_from(cfg.hard_round_ceiling).ok();
-        let synth_out = model_client
-            .generate(
-                &crate::ModelCall {
-                    base_url: &ls.provider.base_url,
-                    model: &ls.provider.model,
-                    api_key: ls.provider.api_key.as_deref(),
-                    messages: &ls.messages,
-                    tools: &[],
-                    temperature,
-                    is_final_round: true,
-                    // No tools offered on the forced-synthesis call, so forcing is moot — kept
-                    // `None` for consistency with every other non-main-round call site.
-                    forced_tool: None,
-                    usage: &synthesis_usage,
-                },
-                &|_tok| {},
-            )
-            .await;
-        let synth_text = model_normalize::sanitize_model_text(
-            synth_out
-                .as_ref()
-                .ok()
-                .and_then(|o| o.message.get("content"))
-                .and_then(|c| c.as_str())
-                .unwrap_or(""),
-        );
-        if let Ok(output) = &synth_out {
-            execution_journal.record(AgentExecutionEvent::ModelResponse {
+            // ADR 0024 inc 5 (P2b): the forced synthesis now goes through the SAME
+            // engine::ModelClient seam as the per-round call — `is_final_round: true` (no
+            // tools, fresh answer budget) — so it inherits retry/backoff, the mid-turn
+            // provider fallback and the OpenAI/Ollama-native collectors instead of the old
+            // single inline POST (which could dead-end on one transient failure). The impl
+            // streams the answer live via its captured StreamSink, exactly like the loop.
+            // A provider swap here is moot (the turn ends right after), and any error leaves
+            // the turn without a delivery unless already-accumulated text is visibly answer prose.
+            execution_journal.record(AgentExecutionEvent::PromptSnapshot {
                 round: cfg.hard_round_ceiling,
-                finish_reason: output.finish_reason.clone(),
-                content_chars: synth_text.chars().count(),
-                tool_calls: 0,
+                snapshot: crate::execution_journal::build_prompt_snapshot_with_packets(
+                    &ls.provider.model,
+                    &ls.provider.base_url,
+                    &ls.messages,
+                    &[],
+                    true,
+                    None,
+                    &ls.prompt_packets,
+                ),
             });
-        }
-        // synth_text was already streamed live by the collector; commit it only when it contains
-        // visible prose. If it does not, the accumulated turn text gets the same validation.
-        let candidate = if visible_answer(&synth_text).is_some() {
-            let synthesis_blocks = preserved_display_marker_blocks(&synth_text);
-            let accumulated_prefix = preserved_display_marker_blocks(&ls.accumulated)
-                .into_iter()
-                .filter(|block| !synthesis_blocks.iter().any(|synthesis| synthesis == block))
-                .collect::<Vec<_>>()
-                .join("\n");
-            Some(if accumulated_prefix.is_empty() {
-                synth_text
-            } else {
-                format!("{accumulated_prefix}\n{synth_text}")
-            })
-        } else if visible_answer(&ls.accumulated).is_some() {
-            Some(ls.accumulated.clone())
-        } else {
-            None
-        };
-        if let Some(mut final_text) = candidate {
-            if let Some(fonti) = fonti_section(&browse_sources, &final_text) {
-                final_text.push_str(&fonti);
-            }
-            // Anti-churn safety net for the accumulated fallback (synthesis normally has no plan
-            // blocks). Reconcile + persist only after a visible delivery candidate exists.
-            let delivered = collapse_plan_markers(&final_text);
-            let delivered = match plan_progress.reconcile_on_delivery(&ls.plan, &delivered) {
-                Some(reconciled) => {
-                    plan_progress
-                        .persist_plan(thread_id.as_deref(), &reconciled)
-                        .await;
-                    replace_latest_plan_marker(&delivered, &reconciled)
-                }
-                None => delivered,
-            };
-            let final_text = append_vault_reveal_marker_if_missing(
-                delivered,
-                ls.pending_vault_reveal_marker.as_deref(),
+            let mut synthesis_usage = usage_context.clone();
+            synthesis_usage.call_id = format!("{}:forced_synthesis", usage_context.call_id);
+            synthesis_usage.purpose_detail = Some("forced_synthesis".to_string());
+            synthesis_usage.round = u32::try_from(cfg.hard_round_ceiling).ok();
+            let synth_out = model_client
+                .generate(
+                    &crate::ModelCall {
+                        base_url: &ls.provider.base_url,
+                        model: &ls.provider.model,
+                        api_key: ls.provider.api_key.as_deref(),
+                        messages: &ls.messages,
+                        tools: &[],
+                        temperature,
+                        is_final_round: true,
+                        // No tools offered on the forced-synthesis call, so forcing is moot — kept
+                        // `None` for consistency with every other non-main-round call site.
+                        forced_tool: None,
+                        usage: &synthesis_usage,
+                    },
+                    &|_tok| {},
+                )
+                .await;
+            let synth_text = model_normalize::sanitize_model_text(
+                synth_out
+                    .as_ref()
+                    .ok()
+                    .and_then(|o| o.message.get("content"))
+                    .and_then(|c| c.as_str())
+                    .unwrap_or(""),
             );
-            if visible_answer(&final_text).is_some() {
-                memory_answer = final_text.clone();
-                let _ = event_sink
-                    .emit(GenerateStreamEvent::Done {
-                        text: final_text,
-                        metrics: TokenMetrics::zero(),
-                        redacted_user_text: None,
-                    })
-                    .await;
-                delivery = TurnDelivery::Delivered;
+            if let Ok(output) = &synth_out {
+                execution_journal.record(AgentExecutionEvent::ModelResponse {
+                    round: cfg.hard_round_ceiling,
+                    finish_reason: output.finish_reason.clone(),
+                    content_chars: synth_text.chars().count(),
+                    tool_calls: 0,
+                });
             }
-        }
+            // synth_text was already streamed live by the collector; commit it only when it contains
+            // visible prose. If it does not, the accumulated turn text gets the same validation.
+            let candidate = if visible_answer(&synth_text).is_some() {
+                let synthesis_blocks = preserved_display_marker_blocks(&synth_text);
+                let accumulated_prefix = preserved_display_marker_blocks(&ls.accumulated)
+                    .into_iter()
+                    .filter(|block| !synthesis_blocks.iter().any(|synthesis| synthesis == block))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Some(if accumulated_prefix.is_empty() {
+                    synth_text
+                } else {
+                    format!("{accumulated_prefix}\n{synth_text}")
+                })
+            } else if visible_answer(&ls.accumulated).is_some() {
+                Some(ls.accumulated.clone())
+            } else {
+                None
+            };
+            if let Some(mut final_text) = candidate {
+                if let Some(fonti) = fonti_section(&browse_sources, &final_text) {
+                    final_text.push_str(&fonti);
+                }
+                let (hitl_text, terminal_envelope) = finalize_terminal_text_for_hitl(&final_text);
+                if let Some(envelope) = terminal_envelope {
+                    awaiting_envelope = Some(envelope);
+                    let final_text = append_vault_reveal_marker_if_missing(
+                        collapse_plan_markers(&hitl_text),
+                        ls.pending_vault_reveal_marker.as_deref(),
+                    );
+                    if visible_answer(&final_text).is_some() || text_awaits_user(&final_text) {
+                        memory_answer = final_text.clone();
+                        let _ = event_sink
+                            .emit(GenerateStreamEvent::Done {
+                                text: final_text,
+                                metrics: TokenMetrics::zero(),
+                                redacted_user_text: None,
+                            })
+                            .await;
+                        delivery = TurnDelivery::Delivered;
+                        final_done = true;
+                    }
+                    // Human wait owns the turn boundary; do not reconcile plan steps to done.
+                } else {
+                    // Anti-churn safety net for the accumulated fallback (synthesis normally has no plan
+                    // blocks). Reconcile + persist only after a visible delivery candidate exists.
+                    let delivered = collapse_plan_markers(&hitl_text);
+                    let delivered = match plan_progress.reconcile_on_delivery(&ls.plan, &delivered)
+                    {
+                        Some(reconciled) => {
+                            plan_progress
+                                .persist_plan(thread_id.as_deref(), &reconciled)
+                                .await;
+                            replace_latest_plan_marker(&delivered, &reconciled)
+                        }
+                        None => delivered,
+                    };
+                    let final_text = append_vault_reveal_marker_if_missing(
+                        delivered,
+                        ls.pending_vault_reveal_marker.as_deref(),
+                    );
+                    if visible_answer(&final_text).is_some() {
+                        memory_answer = final_text.clone();
+                        let _ = event_sink
+                            .emit(GenerateStreamEvent::Done {
+                                text: final_text,
+                                metrics: TokenMetrics::zero(),
+                                redacted_user_text: None,
+                            })
+                            .await;
+                        delivery = TurnDelivery::Delivered;
+                    }
+                }
+            }
+        } // end else (!awaiting_user forced synthesis)
     }
     if final_done || delivery == TurnDelivery::Delivered {
         complete_drained_steering(model_client, &mut steering_to_complete);
@@ -1640,6 +1829,9 @@ again to find the right control). Keep working on the task — do not stop and d
     // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern (AppState /
     // stores / spawn), so it runs in the caller after this returns — driven by the outcome below. The
     // engine's turn ends here.
+    if let Some(ref envelope) = awaiting_envelope {
+        memory_answer = ensure_free_hitl_marker_in_text(&memory_answer, envelope);
+    }
     crate::TurnOutcome {
         delivery,
         memory_answer,
@@ -1651,8 +1843,7 @@ again to find the right control). Keep working on the task — do not stop and d
         // Reaching here means the turn ran to completion: any image rejection was either recovered by
         // the caller before this attempt, or downgraded to a fatal error above.
         image_rejection: None,
-        // Carried out so the caller can tell a real answer from a turn that stopped to ask the user.
-        needs_clarification,
+        awaiting_user: awaiting_envelope,
     }
 }
 
@@ -1752,6 +1943,61 @@ mod tests {
                 });
             }
             let content = "‹‹ARTIFACT››report.md‹‹/ARTIFACT››\n‹‹CHOICES››choose a format‹‹/CHOICES››\n‹‹REASONING››synthesis reasoning‹‹/REASONING››\nForced synthesis answer.";
+            on_delta(content);
+            Ok(ModelRoundOutput {
+                message: json!({ "role": "assistant", "content": content }),
+                provider,
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct ToolThenForcedSynthesisProseChoiceModel {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ModelClient for ToolThenForcedSynthesisProseChoiceModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let call_index = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if call_index < 2 {
+                return Ok(ModelRoundOutput {
+                    message: json!({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": format!("tool_{call_index}"),
+                            "type": "function",
+                            "function": { "name": "make_document", "arguments": "{}" },
+                        }],
+                    }),
+                    provider,
+                    finish_reason: Some("tool_calls".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                });
+            }
+            let content = concat!(
+                "Ho trovato queste opzioni:\n\n",
+                "| # | Treno | Prezzo |\n",
+                "|---|-------|--------|\n",
+                "| 1 | Frecciarossa 9524 | 85,90 EUR |\n",
+                "| 2 | Frecciarossa 9310 | 79,90 EUR |\n\n",
+                "Per procedere con la prenotazione, quale preferisci?"
+            );
             on_delta(content);
             Ok(ModelRoundOutput {
                 message: json!({ "role": "assistant", "content": content }),
@@ -1910,7 +2156,10 @@ mod tests {
         ) -> (String, crate::contract::ToolOutcomeHint) {
             assert_eq!(name, "browser_done");
             state.browser_used = true;
-            ("done".to_string(), crate::contract::ToolOutcomeHint::Success)
+            (
+                "done".to_string(),
+                crate::contract::ToolOutcomeHint::Success,
+            )
         }
 
         async fn close_session(&mut self, _browser_used: bool) {}
@@ -2070,7 +2319,8 @@ mod tests {
                 api_key: None,
             };
             if call.is_final_round {
-                let content = "Non sono riuscito ad accedere alle pagine richieste. Puoi riprovare.";
+                let content =
+                    "Non sono riuscito ad accedere alle pagine richieste. Puoi riprovare.";
                 on_delta(content);
                 return Ok(ModelRoundOutput {
                     message: json!({ "role": "assistant", "content": content }),
@@ -2141,7 +2391,8 @@ mod tests {
                 api_key: None,
             };
             if call.is_final_round {
-                let content = "Non sono riuscito ad accedere alla pagina richiesta. Puoi riprovare.";
+                let content =
+                    "Non sono riuscito ad accedere alla pagina richiesta. Puoi riprovare.";
                 on_delta(content);
                 return Ok(ModelRoundOutput {
                     message: json!({ "role": "assistant", "content": content }),
@@ -3117,6 +3368,69 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn forced_synthesis_materializes_prose_choice_as_awaiting_user() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "book a train" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let model = ToolThenForcedSynthesisProseChoiceModel::default();
+        let tool = StructuredOutputTool::default();
+        let composio_writes = std::collections::BTreeSet::new();
+        let catalog_index: Vec<(String, String, Value)> = Vec::new();
+
+        let outcome = run_turn(
+            ls,
+            cfg(),
+            &usage_context(),
+            &model,
+            &tool,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &composio_writes,
+            &catalog_index,
+            "book a train".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let envelope = outcome.awaiting_user.expect("forced synthesis prose wait");
+        assert_eq!(envelope.kind, HitlKind::Choice);
+        assert_eq!(envelope.hold_policy, crate::hitl::HoldPolicy::Free);
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert!(outcome.memory_answer.contains("‹‹CHOICES››"));
+        let done_text = sink
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .find_map(|event| match event {
+                GenerateStreamEvent::Done { text, .. } => Some(text.to_string()),
+                _ => None,
+            })
+            .expect("forced synthesis HITL must emit Done");
+        assert!(done_text.contains("‹‹CHOICES››"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn browser_circuit_breaker_synthesizes_once() {
         let mut ls = LoopState::new();
         ls.messages = vec![
@@ -3526,13 +3840,12 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
 
     impl ModelClient for SteeringFinalizeModel {
         fn current_turn_control(&self) -> Option<crate::TurnControlDecision> {
-            (self.control_ready.load(Ordering::SeqCst)
-                && !self.applied.load(Ordering::SeqCst))
-            .then(|| crate::TurnControlDecision {
-                steering_id: 7,
-                disposition: crate::TurnControlDisposition::FinalizeWithCurrentEvidence,
-                instruction: "Answer now from the evidence already collected".to_string(),
-            })
+            (self.control_ready.load(Ordering::SeqCst) && !self.applied.load(Ordering::SeqCst))
+                .then(|| crate::TurnControlDecision {
+                    steering_id: 7,
+                    disposition: crate::TurnControlDisposition::FinalizeWithCurrentEvidence,
+                    instruction: "Answer now from the evidence already collected".to_string(),
+                })
         }
 
         fn acknowledge_turn_control_applied(&self, steering_id: i64) {
@@ -3680,9 +3993,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
 
     impl ModelClient for ExhaustedTurnSteeringModel {
         fn finalization_fence(&self) -> crate::FinalizationFence {
-            if self.control_ready.load(Ordering::SeqCst)
-                && !self.applied.load(Ordering::SeqCst)
-            {
+            if self.control_ready.load(Ordering::SeqCst) && !self.applied.load(Ordering::SeqCst) {
                 crate::FinalizationFence::PendingInput
             } else {
                 crate::FinalizationFence::Ready
@@ -3690,13 +4001,12 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         }
 
         fn current_turn_control(&self) -> Option<crate::TurnControlDecision> {
-            (self.control_ready.load(Ordering::SeqCst)
-                && !self.applied.load(Ordering::SeqCst))
-            .then(|| crate::TurnControlDecision {
-                steering_id: 9,
-                disposition: crate::TurnControlDisposition::FinalizeWithCurrentEvidence,
-                instruction: "Stop browsing and answer from current evidence".to_string(),
-            })
+            (self.control_ready.load(Ordering::SeqCst) && !self.applied.load(Ordering::SeqCst))
+                .then(|| crate::TurnControlDecision {
+                    steering_id: 9,
+                    disposition: crate::TurnControlDisposition::FinalizeWithCurrentEvidence,
+                    instruction: "Stop browsing and answer from current evidence".to_string(),
+                })
         }
 
         async fn wait_for_turn_control(&self) -> crate::TurnControlDecision {
@@ -3980,7 +4290,10 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
                     "tool_calls",
                 )
             } else {
-                (json!({"role": "assistant", "content": "Answer using the browse result."}), "stop")
+                (
+                    json!({"role": "assistant", "content": "Answer using the browse result."}),
+                    "stop",
+                )
             };
             Ok(ModelRoundOutput {
                 message,
@@ -4054,7 +4367,10 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             .iter()
             .filter(|kind| kind.as_str() == "browser_budget_exceeded")
             .count();
-        assert_eq!(stalls, 0, "a completed browse must not trip the manager stall window on return");
+        assert_eq!(
+            stalls, 0,
+            "a completed browse must not trip the manager stall window on return"
+        );
         assert_eq!(
             model.calls.load(Ordering::SeqCst),
             2,
@@ -4219,13 +4535,12 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         }
 
         fn current_turn_control(&self) -> Option<crate::TurnControlDecision> {
-            (self.control_ready.load(Ordering::SeqCst) && !self.applied.load(Ordering::SeqCst)).then(
-                || crate::TurnControlDecision {
+            (self.control_ready.load(Ordering::SeqCst) && !self.applied.load(Ordering::SeqCst))
+                .then(|| crate::TurnControlDecision {
                     steering_id: 11,
                     disposition: crate::TurnControlDisposition::ContinueCurrentWork,
                     instruction: "Keep going with the current step".to_string(),
-                },
-            )
+                })
         }
 
         async fn wait_for_turn_control(&self) -> crate::TurnControlDecision {
@@ -4267,9 +4582,9 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
                 assert!(call.is_final_round);
                 assert!(self.applied.load(Ordering::SeqCst));
                 assert!(call.messages.iter().any(|message| {
-                    message["content"].as_str().is_some_and(|content| {
-                        content.contains("Keep going with the current step")
-                    })
+                    message["content"]
+                        .as_str()
+                        .is_some_and(|content| content.contains("Keep going with the current step"))
                 }));
                 json!({"role": "assistant", "content": "Answer after the drained continue."})
             };
@@ -4730,17 +5045,6 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         );
     }
 
-    #[test]
-    fn needs_clarification_disposition_is_visible_on_the_outcome() {
-        // The loop must not flatten "ask the user" into "finalize with what you
-        // have": the caller cannot tell a real answer from a swallowed question.
-        let outcome = crate::TurnOutcome {
-            needs_clarification: true,
-            ..crate::TurnOutcome::default()
-        };
-        assert!(outcome.needs_clarification);
-    }
-
     /// A steering control interpreted as CLARIFY, surfacing while a tool is in flight — the same
     /// shape as `SteeringFinalizeModel`, but with the disposition that asks the USER a question.
     #[derive(Default)]
@@ -4752,13 +5056,12 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
 
     impl ModelClient for SteeringClarifyModel {
         fn current_turn_control(&self) -> Option<crate::TurnControlDecision> {
-            (self.control_ready.load(Ordering::SeqCst)
-                && !self.applied.load(Ordering::SeqCst))
-            .then(|| crate::TurnControlDecision {
-                steering_id: 11,
-                disposition: crate::TurnControlDisposition::NeedsClarification,
-                instruction: "Which of the two accounts did you mean?".to_string(),
-            })
+            (self.control_ready.load(Ordering::SeqCst) && !self.applied.load(Ordering::SeqCst))
+                .then(|| crate::TurnControlDecision {
+                    steering_id: 11,
+                    disposition: crate::TurnControlDisposition::NeedsClarification,
+                    instruction: "Which of the two accounts did you mean?".to_string(),
+                })
         }
 
         fn acknowledge_turn_control_applied(&self, steering_id: i64) {
@@ -4828,7 +5131,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn clarify_steering_marks_the_outcome_instead_of_looking_like_a_plain_finalize() {
+    async fn clarify_steering_sets_awaiting_user_instead_of_looking_like_a_plain_finalize() {
         // Regression (triage MINOR 9): CLARIFY used to share the `break 'rounds` arm with
         // FINALIZE, so the caller saw an ordinary answer and could not tell that the turn
         // actually stopped to ask the user something.
@@ -4873,9 +5176,326 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         )
         .await;
 
+        let envelope = outcome
+            .awaiting_user
+            .expect("a CLARIFY steering must reach the caller as a typed wait");
+        assert_eq!(envelope.kind, HitlKind::Clarify);
+        assert_eq!(envelope.hold_policy, crate::hitl::HoldPolicy::Free);
+    }
+
+    /// Model that answers once with a valid CHOICES card while the plan still has open steps.
+    /// If the harness wrongly nudges, a second generate() call happens.
+    #[derive(Default)]
+    struct ChoicesWhilePlanOpenModel {
+        calls: AtomicUsize,
+    }
+
+    impl ModelClient for ChoicesWhilePlanOpenModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let content = if index == 0 {
+                concat!(
+                    "Please pick one.\n",
+                    r#"‹‹CHOICES››{"question":"Which train?","options":["07:30","09:15"]}‹‹/CHOICES››"#,
+                )
+            } else {
+                // Nudge path — must not run under the Turn Contract.
+                "I continued without waiting for you."
+            };
+            on_delta(content);
+            Ok(ModelRoundOutput {
+                message: json!({ "role": "assistant", "content": content }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn choices_card_stops_the_turn_instead_of_nudging_an_open_plan() {
+        // Turn Contract: CHOICES = AwaitingUser. An open plan must not trigger
+        // answer_did_not_conclude_plan or forced_synthesis over the choice.
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "book a train" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        ls.plan = json!({
+            "steps": [
+                {"id":"s1","title":"Search","status":"done","detail":""},
+                {"id":"s2","title":"Let the user choose","status":"doing","detail":""},
+                {"id":"s3","title":"Book","status":"todo","detail":""},
+            ]
+        });
+        let model = ChoicesWhilePlanOpenModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 6;
+        turn_cfg.reconcile_on_delivery = false;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "book a train".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(
+            model.calls.load(Ordering::SeqCst),
+            1,
+            "open-plan nudge must not call the model again after CHOICES"
+        );
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
         assert!(
-            outcome.needs_clarification,
-            "a CLARIFY steering must reach the caller as such, not as a plain finalize"
+            outcome.memory_answer.contains("‹‹CHOICES››"),
+            "choice card must be delivered so the UI/gateway can park: {}",
+            outcome.memory_answer
+        );
+        let events = journal.0.lock().unwrap().clone();
+        assert!(
+            !events.iter().any(|e| e.contains("ForcedSynthesis")),
+            "forced synthesis must not run over AwaitingUser: {events:?}"
+        );
+    }
+
+    /// Model that answers once with a valid CLARIFY card while the plan still has open steps.
+    #[derive(Default)]
+    struct ClarifyWhilePlanOpenModel {
+        calls: AtomicUsize,
+    }
+
+    impl ModelClient for ClarifyWhilePlanOpenModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let content = if index == 0 {
+                concat!(
+                    "Mi servono i tuoi dati.\n",
+                    r#"‹‹CLARIFY››{"question":"Passenger details?","fields":["name","email","phone"]}‹‹/CLARIFY››"#,
+                )
+            } else {
+                "I continued without waiting for you."
+            };
+            on_delta(content);
+            Ok(ModelRoundOutput {
+                message: json!({ "role": "assistant", "content": content }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn clarify_card_stops_the_turn_instead_of_nudging_an_open_plan() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "book a train" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        ls.plan = json!({
+            "steps": [
+                {"id":"s1","title":"Search","status":"done","detail":""},
+                {"id":"s2","title":"Collect passenger data","status":"doing","detail":""},
+                {"id":"s3","title":"Pay","status":"todo","detail":""},
+            ]
+        });
+        let model = ClarifyWhilePlanOpenModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 6;
+        turn_cfg.reconcile_on_delivery = true;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "book a train".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(
+            model.calls.load(Ordering::SeqCst),
+            1,
+            "open-plan nudge must not call the model again after CLARIFY"
+        );
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert!(
+            outcome.memory_answer.contains("‹‹CLARIFY››"),
+            "clarify card must be delivered: {}",
+            outcome.memory_answer
+        );
+        let events = journal.0.lock().unwrap().clone();
+        assert!(
+            !events.iter().any(|e| e.contains("ForcedSynthesis")),
+            "forced synthesis must not run over AwaitingUser(Clarify): {events:?}"
+        );
+    }
+
+    /// Prose field request → one nudge to emit CLARIFY, then stop on the card.
+    #[derive(Default)]
+    struct ProseThenClarifyModel {
+        calls: AtomicUsize,
+    }
+
+    impl ModelClient for ProseThenClarifyModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let content = if index == 0 {
+                "Mi servono i tuoi dati:\n- Nome e Cognome\n- Email\n- Telefono\nAppena me li dai proseguo."
+            } else {
+                concat!(
+                    "Mi servono i tuoi dati.\n",
+                    r#"‹‹CLARIFY››{"question":"Dati passeggero?","fields":["name","email","phone"]}‹‹/CLARIFY››"#,
+                )
+            };
+            on_delta(content);
+            Ok(ModelRoundOutput {
+                message: json!({ "role": "assistant", "content": content }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn prose_field_request_nudges_once_then_awaits_clarify_card() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "continue booking" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = ProseThenClarifyModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 6;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "continue booking".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(
+            model.calls.load(Ordering::SeqCst),
+            2,
+            "exactly one clarify-card nudge then stop"
+        );
+        assert!(
+            outcome.memory_answer.contains("‹‹CLARIFY››"),
+            "final answer must include CLARIFY: {}",
+            outcome.memory_answer
+        );
+        let events = journal.0.lock().unwrap().clone();
+        assert!(
+            !events.iter().any(|e| e.contains("ForcedSynthesis")),
+            "no forced synthesis after CLARIFY: {events:?}"
         );
     }
 }

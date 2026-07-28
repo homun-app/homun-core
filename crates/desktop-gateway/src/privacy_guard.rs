@@ -211,6 +211,7 @@ fn normalize_kind(kind: &str) -> String {
 pub(crate) struct PendingVaultProposal {
     pub(crate) category: String,
     pub(crate) label: String,
+    #[allow(dead_code)]
     pub(crate) redacted_preview: String,
     pub(crate) secret_value: String,
 }

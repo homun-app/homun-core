@@ -65,4 +65,5 @@ pub trait CapabilityExecutor {
 3. Cambiare il contratto `execute_tool(&mut LoopState)` + mock; `GatewayCapabilityExecutor` tiene i read-only
    turn-costanti e costruisce il ctx per-call.
 4. Wire in `run_agent_rounds` (sostituire `execute_chat_tool` col seam), diff `tool_trace_dump` OFF/ON.
-5. → 5.D1c: `run_agent_rounds` → `engine::run_turn` dietro `HOMUN_ENGINE_CRATE`.
+5. → 5.D1c: `run_agent_rounds` → `engine::run_turn`. La fase dietro
+   `HOMUN_ENGINE_CRATE` è storica; il flag e la copia inline sono stati rimossi.

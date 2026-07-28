@@ -24,6 +24,7 @@ struct LinkedTurnMessageRow {
     thread_id: String,
     role: String,
     linked_task_id: Option<String>,
+    #[allow(dead_code)]
     parent_id: Option<String>,
 }
 
@@ -49,6 +50,7 @@ pub struct BranchOption {
 #[derive(Debug, Clone)]
 pub struct StoredAttachment {
     pub display_name: String,
+    #[allow(dead_code)]
     pub mime_type: String,
     pub text: Option<String>,
     pub images: Vec<String>,
@@ -110,6 +112,7 @@ pub struct RemoteApprovalRow {
     pub source_message_id: Option<String>,
     pub requires_source: bool,
     pub status: String,
+    #[allow(dead_code)]
     pub expires_at: i64,
     pub dispatched_at: Option<i64>,
 }
@@ -163,11 +166,14 @@ pub struct SuggestionRow {
 pub struct StoredContact {
     pub id: i64,
     pub name: String,
+    #[allow(dead_code)]
     pub nickname: Option<String>,
     pub notes: String,
     pub contact_type: String,
     pub is_self: bool,
+    #[allow(dead_code)]
     pub preferred_channel: Option<String>,
+    #[allow(dead_code)]
     pub avatar: Option<String>,
     pub entity_ref: Option<String>,
     /// '' = inherit the channel/global default; else automatic|draft|silent.
@@ -212,6 +218,7 @@ pub struct StoredRelationshipEdge {
 pub struct StoredContactIdentity {
     pub channel: String,
     pub identifier: String,
+    #[allow(dead_code)]
     pub label: Option<String>,
 }
 
@@ -228,12 +235,14 @@ pub struct StoredPerimeter {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub struct ChatStoreMemoryBoundaryAudit {
     pub table: &'static str,
     pub graph_like: bool,
     pub canonical_policy: &'static str,
 }
 
+#[allow(dead_code)]
 pub const CHAT_STORE_MEMORY_BOUNDARY_AUDIT: &[ChatStoreMemoryBoundaryAudit] = &[
     ChatStoreMemoryBoundaryAudit {
         table: "channel_inbound_seen",
@@ -314,6 +323,11 @@ pub const CHAT_STORE_MEMORY_BOUNDARY_AUDIT: &[ChatStoreMemoryBoundaryAudit] = &[
         table: "thread_attachments",
         graph_like: false,
         canonical_policy: "conversation attachment cache; produced deliverables are artifacts in MemoryFacade",
+    },
+    ChatStoreMemoryBoundaryAudit {
+        table: "thread_hitl_waits",
+        graph_like: false,
+        canonical_policy: "Turn Contract: open HITL wait (Choice resume binding) + OpenWork snapshot; no semantic memory",
     },
     ChatStoreMemoryBoundaryAudit {
         table: "thread_read_receipts",
@@ -669,6 +683,7 @@ impl ChatStore {
         // stale read of the table) could resurrect a forced tool_choice for a thread the user
         // believes gone. Idempotent (clear_thread_routing_binding no-ops when unbound).
         self.clear_thread_routing_binding(thread_id)?;
+        self.clear_thread_hitl_waits(thread_id)?;
         // Drop any tag assignments on this thread (the entity side has no FK).
         self.remove_entity_assignments(TagEntity::Thread, thread_id)?;
         self.conn.execute(
@@ -1068,6 +1083,7 @@ impl ChatStore {
             .optional()
     }
 
+    #[allow(dead_code)]
     pub fn link_message_task(
         &self,
         thread_id: &str,
@@ -1109,6 +1125,7 @@ impl ChatStore {
     /// Commit a regenerated answer as a SIBLING of the previous one: re-root the
     /// active leaf at the prompting user message, then hang the new assistant
     /// message off it. The earlier answer is preserved as an alternative branch.
+    #[allow(dead_code)]
     pub fn commit_regenerated_answer(
         &self,
         thread_id: &str,
@@ -1280,6 +1297,7 @@ impl ChatStore {
         Ok(out)
     }
 
+    #[allow(dead_code)]
     pub fn commit_continuation_result(
         &self,
         thread_id: &str,
@@ -1376,6 +1394,7 @@ impl ChatStore {
     /// Finalizza una risposta e la relativa provenance con una singola
     /// transazione. Se event parts ed envelope non coincidono, la risposta
     /// resta visibile ma viene attestata come fail-closed.
+    #[allow(dead_code)]
     pub fn finalize_assistant_message(
         &self,
         thread_id: &str,
@@ -1428,8 +1447,7 @@ impl ChatStore {
             })
             .cloned()
             .collect::<Vec<_>>();
-        let event_parts_json =
-            serde_json::to_string(&persisted_event_parts).map_err(json_error)?;
+        let event_parts_json = serde_json::to_string(&persisted_event_parts).map_err(json_error)?;
         let derived = memory_reuse_from_event_parts(&persisted_event_parts);
         let envelope = if &derived == requested_envelope {
             requested_envelope.clone()
@@ -1718,6 +1736,122 @@ impl ChatStore {
     pub fn clear_thread_routing_binding(&self, thread_id: &str) -> rusqlite::Result<()> {
         self.conn.execute(
             "delete from thread_routing_bindings where thread_id = ?1",
+            params![thread_id],
+        )?;
+        Ok(())
+    }
+
+    // ── Turn Contract: HITL wait (Choice ResumeBinding) ─────────────────────────
+    // One OPEN wait per thread. Upsert replaces any prior open wait so a newer
+    // CHOICES card wins. Confirm cards still use remote_approvals / WaitingUser.
+
+    /// Persist (or replace) the open HITL wait for a thread. `payload_json` is the
+    /// CHOICES card JSON; `open_work_json` is the OpenWorkSnapshot.
+    pub fn set_open_hitl_wait(
+        &self,
+        wait_id: &str,
+        thread_id: &str,
+        source_message_id: &str,
+        kind: &str,
+        payload_json: &str,
+        open_work_json: &str,
+    ) -> rusqlite::Result<()> {
+        let now = Self::now_secs();
+        // Close any prior open wait on this thread (single open wait invariant).
+        self.conn.execute(
+            "update thread_hitl_waits set status = 'resolved', resolved_at = ?1
+              where thread_id = ?2 and status = 'open'",
+            params![now, thread_id],
+        )?;
+        self.conn.execute(
+            "insert into thread_hitl_waits
+                (wait_id, thread_id, source_message_id, kind, payload_json, open_work_json, status, created_at, resolved_at)
+             values (?1, ?2, ?3, ?4, ?5, ?6, 'open', ?7, null)
+             on conflict(wait_id) do update set
+                thread_id = excluded.thread_id,
+                source_message_id = excluded.source_message_id,
+                kind = excluded.kind,
+                payload_json = excluded.payload_json,
+                open_work_json = excluded.open_work_json,
+                status = 'open',
+                created_at = excluded.created_at,
+                resolved_at = null",
+            params![
+                wait_id,
+                thread_id,
+                source_message_id,
+                kind,
+                payload_json,
+                open_work_json,
+                now
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The thread's currently open HITL wait, if any.
+    pub fn open_hitl_wait(
+        &self,
+        thread_id: &str,
+    ) -> rusqlite::Result<Option<crate::hitl_resume::OpenHitlWait>> {
+        self.conn
+            .query_row(
+                "select wait_id, thread_id, source_message_id, kind, payload_json, open_work_json, status, created_at
+                   from thread_hitl_waits
+                  where thread_id = ?1 and status = 'open'
+                  order by created_at desc
+                  limit 1",
+                params![thread_id],
+                |row| {
+                    let wait_id: String = row.get(0)?;
+                    let thread_id: String = row.get(1)?;
+                    let source_message_id: String = row.get(2)?;
+                    let kind_raw: String = row.get(3)?;
+                    let payload_json: String = row.get(4)?;
+                    let open_work_json: String = row.get(5)?;
+                    let status_raw: String = row.get(6)?;
+                    let created_at: i64 = row.get(7)?;
+                    let payload = serde_json::from_str(&payload_json).unwrap_or(serde_json::json!({}));
+                    let open_work = serde_json::from_str(&open_work_json)
+                        .unwrap_or_default();
+                    let kind = match kind_raw.as_str() {
+                        "clarify" => crate::hitl_resume::HitlWaitKind::Clarify,
+                        "choice" => crate::hitl_resume::HitlWaitKind::Choice,
+                        _ => crate::hitl_resume::HitlWaitKind::Choice,
+                    };
+                    let status = match status_raw.as_str() {
+                        "resolved" => crate::hitl_resume::HitlWaitStatus::Resolved,
+                        _ => crate::hitl_resume::HitlWaitStatus::Open,
+                    };
+                    Ok(crate::hitl_resume::OpenHitlWait {
+                        wait_id,
+                        thread_id,
+                        source_message_id,
+                        kind,
+                        payload,
+                        open_work,
+                        status,
+                        created_at,
+                    })
+                },
+            )
+            .optional()
+    }
+
+    /// Mark the open wait resolved (idempotent if already gone).
+    pub fn resolve_open_hitl_wait(&self, thread_id: &str, wait_id: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "update thread_hitl_waits set status = 'resolved', resolved_at = ?1
+              where thread_id = ?2 and wait_id = ?3 and status = 'open'",
+            params![Self::now_secs(), thread_id, wait_id],
+        )?;
+        Ok(())
+    }
+
+    /// Drop all HITL waits for a thread (delete_thread cleanup).
+    pub fn clear_thread_hitl_waits(&self, thread_id: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "delete from thread_hitl_waits where thread_id = ?1",
             params![thread_id],
         )?;
         Ok(())
@@ -2707,6 +2841,23 @@ impl ChatStore {
                 created_at integer not null
             );
 
+            -- Turn Contract ResumeBinding: Choice (thread-free) parks an open wait so the
+            -- next user message resumes the SAME open work instead of a fresh semantic
+            -- new_objective. Confirm cards still use WaitingUserApproval / remote_approvals.
+            create table if not exists thread_hitl_waits (
+                wait_id text primary key,
+                thread_id text not null,
+                source_message_id text not null,
+                kind text not null,
+                payload_json text not null,
+                open_work_json text not null,
+                status text not null,
+                created_at integer not null,
+                resolved_at integer
+            );
+            create index if not exists idx_thread_hitl_waits_thread_status
+                on thread_hitl_waits(thread_id, status);
+
             ",
         )?;
 
@@ -3409,12 +3560,8 @@ impl ChatStore {
         // will set `parent_id` to a non-leaf node explicitly; here we always follow
         // the active leaf, so today's behavior is unchanged.
         let parent_id = Self::active_leaf_on(&self.conn, thread_id)?;
-        let inserted = Self::insert_message_on(
-            &self.conn,
-            thread_id,
-            message,
-            parent_id.as_deref(),
-        )?;
+        let inserted =
+            Self::insert_message_on(&self.conn, thread_id, message, parent_id.as_deref())?;
         // Advance the active leaf only when a row was actually inserted —
         // `insert or ignore` is a no-op on a duplicate id and must not move the
         // pointer (which would corrupt the displayed path).
@@ -3528,11 +3675,7 @@ impl ChatStore {
         thread_id: &str,
         steering: &local_first_task_runtime::TurnSteeringRecord,
     ) -> rusqlite::Result<()> {
-        let mut attachments = steering
-            .attachments
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
+        let mut attachments = steering.attachments.as_array().cloned().unwrap_or_default();
         attachments.extend(steering.images.iter().enumerate().map(|(index, image)| {
             serde_json::json!({
                 "artifact_id": format!("steering_image_{}_{}", steering.steering_id, index),
@@ -3548,7 +3691,10 @@ impl ChatStore {
             id: steering.source_message_id.clone(),
             role: "user".to_string(),
             text: steering.visible_prompt.clone(),
-            timestamp: steering.claimed_at.unwrap_or(steering.created_at).to_string(),
+            timestamp: steering
+                .claimed_at
+                .unwrap_or(steering.created_at)
+                .to_string(),
             metadata: None,
             metrics: None,
             feedback: None,
@@ -3591,12 +3737,7 @@ impl ChatStore {
         if let Some((assistant_id, assistant_parent)) = running_assistant
             .filter(|(assistant_id, _)| active_leaf.as_deref() == Some(assistant_id.as_str()))
         {
-            if !Self::insert_message_on(
-                &tx,
-                thread_id,
-                &message,
-                assistant_parent.as_deref(),
-            )? {
+            if !Self::insert_message_on(&tx, thread_id, &message, assistant_parent.as_deref())? {
                 return Err(rusqlite::Error::InvalidParameterName(
                     "steering message id collision".to_string(),
                 ));
@@ -3647,12 +3788,8 @@ impl ChatStore {
                 let user_matches = user_row.thread_id == thread_id
                     && user_row.role == user.role
                     && user_row.linked_task_id == user.linked_task_id;
-                let assistant_descends_from_user = Self::message_descends_from_on(
-                    conn,
-                    thread_id,
-                    &assistant.id,
-                    &user.id,
-                )?;
+                let assistant_descends_from_user =
+                    Self::message_descends_from_on(conn, thread_id, &assistant.id, &user.id)?;
                 let assistant_matches = assistant_row.thread_id == thread_id
                     && assistant_row.role == assistant.role
                     && assistant_row.linked_task_id == assistant.linked_task_id
@@ -3740,6 +3877,7 @@ impl ChatStore {
         .optional()
     }
 
+    #[allow(dead_code)]
     fn upsert_message(
         &self,
         thread_id: &str,
@@ -3938,7 +4076,9 @@ fn remote_approval_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RemoteA
         arguments: serde_json::from_str(&arguments_json).unwrap_or(serde_json::Value::Null),
         label: row.get(4)?,
         thread_id: row.get(5)?,
-        objective_revision: row.get::<_, Option<i64>>(11)?.map(|revision| revision as u64),
+        objective_revision: row
+            .get::<_, Option<i64>>(11)?
+            .map(|revision| revision as u64),
         source_message_id: row.get(6)?,
         requires_source: row.get::<_, i64>(7)? != 0,
         status: row.get(8)?,
@@ -4226,8 +4366,8 @@ fn monotonic_suffix() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use local_first_desktop_gateway::MessageDeliveryState;
     use local_first_desktop_gateway::MemoryWritePolicy;
+    use local_first_desktop_gateway::MessageDeliveryState;
 
     fn linked_read() -> local_first_desktop_gateway::LinkedMemoryReadRef {
         local_first_desktop_gateway::LinkedMemoryReadRef {
@@ -4251,9 +4391,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            store
-                .thread_terminal_seen("thread_active_prompt")
-                .unwrap(),
+            store.thread_terminal_seen("thread_active_prompt").unwrap(),
             9
         );
     }
@@ -4387,6 +4525,61 @@ mod tests {
     }
 
     #[test]
+    fn hitl_wait_persists_and_resolves_per_thread() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("hitl").unwrap();
+        let payload = r#"{"question":"Pick","options":["A","B"],"multi":false}"#;
+        let open_work = r#"{"browser_session_live":true,"capability_hint":"browse"}"#;
+        store
+            .set_open_hitl_wait(
+                "wait_1",
+                &thread.thread_id,
+                "msg_1",
+                "choice",
+                payload,
+                open_work,
+            )
+            .unwrap();
+        let open = store
+            .open_hitl_wait(&thread.thread_id)
+            .unwrap()
+            .expect("open");
+        assert_eq!(open.wait_id, "wait_1");
+        assert!(open.open_work.browser_session_live);
+        assert_eq!(open.choice_options(), vec!["A", "B"]);
+        store
+            .resolve_open_hitl_wait(&thread.thread_id, "wait_1")
+            .unwrap();
+        assert!(store.open_hitl_wait(&thread.thread_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn deleting_thread_clears_hitl_waits() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("hitl_del").unwrap();
+        store
+            .set_open_hitl_wait(
+                "wait_del",
+                &thread.thread_id,
+                "msg",
+                "choice",
+                r#"{"options":["X"]}"#,
+                r#"{}"#,
+            )
+            .unwrap();
+        store.delete_thread(&thread.thread_id).unwrap();
+        let remaining: i64 = store
+            .conn
+            .query_row(
+                "select count(*) from thread_hitl_waits where thread_id = ?1",
+                params![thread.thread_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0);
+    }
+
+    #[test]
     fn finalization_failure_does_not_create_a_delivered_fallback_message() {
         let store = ChatStore::in_memory().unwrap();
         let thread = store.create_thread("default").unwrap();
@@ -4401,10 +4594,12 @@ mod tests {
         );
 
         assert!(result.is_err());
-        assert!(store
-            .message(&thread.thread_id, "missing-assistant")
-            .unwrap()
-            .is_none());
+        assert!(
+            store
+                .message(&thread.thread_id, "missing-assistant")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -5591,20 +5786,24 @@ mod tests {
             .append_assistant_message(&thread.thread_id, &assistant)
             .unwrap();
 
-        assert!(store
-            .set_message_delivery_state(
-                &thread.thread_id,
-                &assistant.id,
-                MessageDeliveryState::Streaming,
-            )
-            .unwrap());
-        assert!(!store
-            .set_message_delivery_state(
-                &other_thread.thread_id,
-                &assistant.id,
-                MessageDeliveryState::Cancelled,
-            )
-            .unwrap());
+        assert!(
+            store
+                .set_message_delivery_state(
+                    &thread.thread_id,
+                    &assistant.id,
+                    MessageDeliveryState::Streaming,
+                )
+                .unwrap()
+        );
+        assert!(
+            !store
+                .set_message_delivery_state(
+                    &other_thread.thread_id,
+                    &assistant.id,
+                    MessageDeliveryState::Cancelled,
+                )
+                .unwrap()
+        );
         assert_eq!(
             store
                 .message(&thread.thread_id, &assistant.id)
@@ -5931,12 +6130,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             ids,
-            vec![
-                seed_id,
-                user.id,
-                steering.source_message_id,
-                assistant.id,
-            ]
+            vec![seed_id, user.id, steering.source_message_id, assistant.id,]
         );
     }
 

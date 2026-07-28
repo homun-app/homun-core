@@ -173,6 +173,7 @@ import {
   VAULT_REVEAL_RE,
   PAYMENT_APPROVAL_RE,
   CHOICES_RE,
+  AWAIT_USER_RE,
   PLAN_PROPOSE_RE,
   GOAL_PROPOSE_RE,
   UNCLOSED_PROPOSE_RE,
@@ -331,6 +332,26 @@ function normalizeChatEventParts(parts: unknown[] | undefined): ChatEventPart[] 
       case "recall":
       case "diff":
         return [{ type: item.type, payload: item.payload } as ChatEventPart];
+      case "actionable_card":
+        // Gateway persists Free HITL as actionable_card; map Choice shapes to choice_prompt
+        // so ChoicesCard still renders when the marker was stripped from message text.
+        // Clarify stays machine-owned (prose is the UI); awaiting-user is detected from
+        // the marker text / raw actionable_card kind, not a second card widget.
+        if (item.kind === "CHOICES" && item.payload !== undefined) {
+          const choices = parseChoicePromptPayload(item.payload);
+          return choices ? [{ type: "choice_prompt", payload: choices }] : [];
+        }
+        if (
+          item.kind === "AWAIT_USER" &&
+          item.payload &&
+          typeof item.payload === "object" &&
+          (item.payload as { kind?: string }).kind === "choice"
+        ) {
+          const { kind: _k, ...choicePayload } = item.payload as Record<string, unknown>;
+          const choices = parseChoicePromptPayload(choicePayload);
+          return choices ? [{ type: "choice_prompt", payload: choices }] : [];
+        }
+        return [];
       default:
         return [];
     }
@@ -367,6 +388,37 @@ function replayStatusFromProjection(status: string): TurnReplayStatus {
   if (status === "cancelled") return "cancelled";
   if (["retrying", "retry_waiting"].includes(status)) return "retrying";
   return "running";
+}
+
+/** True when the chat frontier awaits the user (Free HITL), not a later user reply. */
+function threadTailAwaitsUser(messages: ChatMessage[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role === "user") return false;
+    if (message.role !== "assistant") continue;
+    if (
+      message.text.includes("‹‹CHOICES››") ||
+      message.text.includes("‹‹CLARIFY››") ||
+      message.text.includes("‹‹AWAIT_USER››")
+    ) {
+      return true;
+    }
+    const rawParts = message.eventParts as Array<Record<string, unknown>> | undefined;
+    if (
+      rawParts?.some((part) => {
+        if (part.type !== "actionable_card") return false;
+        if (part.kind === "CHOICES" || part.kind === "CLARIFY") return true;
+        if (part.kind !== "AWAIT_USER") return false;
+        const payload = part.payload as { kind?: string } | undefined;
+        return payload?.kind === "choice" || payload?.kind === "clarify";
+      })
+    ) {
+      return true;
+    }
+    const parts = normalizeChatEventParts(rawParts as unknown[] | undefined);
+    return parts.some((part) => part.type === "choice_prompt");
+  }
+  return false;
 }
 
 interface ChatTurnState {
@@ -689,7 +741,18 @@ export function ChatView({
   const persistedPlan = useMemo(() => latestPlanMarkdown(messages), [messages]);
   const persistedActivity = useMemo(() => latestActivitySteps(messages), [messages]);
   const isStreaming = promptSubmitting || Boolean(streamingAssistantId);
-  const hasActiveTurn = isStreaming || Boolean(projectedActiveTurn);
+  // Free HITL (CHOICES / CLARIFY / AWAIT_USER) does not hold the thread busy (Always Contract),
+  // so the projection often has no waiting_user_approval — detect the open wait from the chat tail.
+  const threadTailAwaitsHitl = useMemo(
+    () => threadTailAwaitsUser(threadMessages),
+    [threadMessages],
+  );
+  const turnAwaitingUser =
+    projectedActiveTurn?.status === "waiting_user_approval" || threadTailAwaitsHitl;
+  // A turn waiting on the person is still "active" for Stop/status, but it is NOT model work —
+  // treating it as streaming hides CHOICES and makes the composer look like steering.
+  const hasActiveTurn = isStreaming || Boolean(projectedActiveTurn) || threadTailAwaitsHitl;
+  const workInProgress = isStreaming || (Boolean(projectedActiveTurn) && !turnAwaitingUser);
   const activeTurnKey = projectedActiveTurn?.turn_id ?? streamStatus?.requestId ?? null;
   useEffect(() => {
     if (!hasActiveTurn) {
@@ -707,6 +770,13 @@ export function ChatView({
     const timer = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(timer);
   }, [activeTurnKey, hasActiveTurn, projectedActiveTurn?.updated_at]);
+  // Durable wait (approval/CHOICES hold) must not keep a live "writing" owner: that hides
+  // choice cards and makes the next composer send look like mid-turn steering.
+  useEffect(() => {
+    if (!turnAwaitingUser || !streamingAssistantId) return;
+    setStreamingAssistantId(null);
+    setStreamStatus(null);
+  }, [turnAwaitingUser, streamingAssistantId]);
   // Island source, converged on the durable projection:
   //  - live: live WS events (current turn) layered over the projection (prior turns);
   //  - at rest: the projection alone, falling back to the lossy text markers only if the
@@ -755,7 +825,11 @@ export function ChatView({
   const chatTurnState = useMemo<ChatTurnState | null>(() => {
     if (!hasActiveTurn) return null;
     return {
-      phase: streamStatus?.title ?? t("chat.stillWorking"),
+      phase: turnAwaitingUser
+        ? projectedActiveTurn?.blocked_reason?.trim() || t("chat.waitingForYou", {
+            defaultValue: "Waiting for you",
+          })
+        : streamStatus?.title ?? t("chat.stillWorking"),
       detail: streamStatus?.detail ?? projectedActiveTurn?.blocked_reason ?? undefined,
       elapsedSeconds: activeTurnElapsedSeconds,
       attempt: projectedActiveTurn?.attempt ?? 1,
@@ -770,6 +844,7 @@ export function ChatView({
     streamStatus?.detail,
     streamStatus?.title,
     t,
+    turnAwaitingUser,
   ]);
   const workspacePlanSteps = useMemo(() => {
     const steps = conversationPlan ? parsePlanSteps(conversationPlan) : [];
@@ -1788,6 +1863,15 @@ export function ChatView({
     }
   }, [seed?.nonce]);
 
+  // HITL Free wait (CHOICES / CLARIFY): clear live "still working" state and force a real
+  // next turn so the answer never becomes steering into a lagging projected active turn.
+  async function submitChoiceAnswer(answer: string): Promise<boolean> {
+    setStreamingAssistantId(null);
+    setStreamStatus(null);
+    setProjectedActiveTurn(null);
+    return submitComposerPrompt(answer, [], { forceNewTurn: true });
+  }
+
   async function submitComposerPrompt(
     prompt: string,
     attachments: ChatAttachmentInput[],
@@ -1797,6 +1881,8 @@ export function ChatView({
       forcedSkillsId?: string;
       contextText?: string;
       images?: string[];
+      /** HITL Free resolutions (Choice/Clarify) must never become mid-turn steering. */
+      forceNewTurn?: boolean;
     },
   ): Promise<boolean> {
     const activeReplyContext = replyContext;
@@ -1814,7 +1900,18 @@ export function ChatView({
     const model = options?.model;
     const augmented = Boolean(skillPrefix || contextPrefix);
 
-    if (hasActiveTurn) {
+    // Open HITL Free wait → always a new turn (ResumeBinding), never steer.
+    const forceNewTurn = Boolean(options?.forceNewTurn || turnAwaitingUser);
+    if (forceNewTurn) {
+      setStreamingAssistantId(null);
+      setStreamStatus(null);
+      setProjectedActiveTurn(null);
+    }
+
+    // A Choice/Clarify answer must start a real next turn even if the UI still thinks work is
+    // in progress (streaming just ended / projected active turn lag) — otherwise the
+    // answer becomes steering and the browser session context is mishandled.
+    if (workInProgress && !forceNewTurn) {
       const promptWithReplyContext = activeReplyContext
         ? [
             skillPrefix,
@@ -2850,7 +2947,7 @@ export function ChatView({
             planSteps={workspacePlanSteps}
             sources={islandSources}
             subagents={projectedSubagents}
-            streaming={hasActiveTurn}
+            streaming={workInProgress}
             status={streamStatus}
             threadHasMessages={threadMessages.length > 0}
             columnMode
@@ -2859,7 +2956,7 @@ export function ChatView({
             onExportChat={() => void exportChatMarkdown()}
             onOpenInspector={openUtilityTab}
           />
-          {browserBudgetMessage && !hasActiveTurn && (
+          {browserBudgetMessage && !workInProgress && (
             <div className="browser-budget-notice" role="status">
               <AlertTriangle size={15} aria-hidden="true" />
               <span>{browserBudgetMessage}</span>
@@ -2933,7 +3030,7 @@ export function ChatView({
                       onChoose={(answer, purpose) =>
                         purpose
                           ? void handleProactiveAnswer(displayMessage.text, answer)
-                          : void submitComposerPrompt(answer, [])
+                          : void submitChoiceAnswer(answer)
                       }
                     />
                   )}
@@ -2984,7 +3081,7 @@ export function ChatView({
                     onOpenArtifact={(artifact) => {
                       openArtifactTab(artifact);
                     }}
-                    onChoose={(answer) => void submitComposerPrompt(answer, [])}
+                    onChoose={(answer) => void submitChoiceAnswer(answer)}
                   />
                 </>
               ) : (
@@ -3297,7 +3394,7 @@ export function ChatView({
           onSendNow={sendPendingSteeringNow}
         />
         <Composer
-          activeWork={hasActiveTurn}
+          activeWork={workInProgress}
           disabled={false}
           error={promptError}
           replyContext={replyContext}
@@ -7075,6 +7172,20 @@ function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
       /* malformed → just hide it */
     }
   }
+  if (!choices) {
+    const awaitMatch = text.match(AWAIT_USER_RE);
+    if (awaitMatch) {
+      try {
+        const parsed = JSON.parse(awaitMatch[1]) as Record<string, unknown>;
+        if (parsed.kind === "choice") {
+          const { kind: _k, ...rest } = parsed;
+          choices = parseChoicePromptPayload(rest);
+        }
+      } catch {
+        /* malformed → just hide it */
+      }
+    }
+  }
   // Plan proposal (plan-mode): steps + Accetta/Edit gate.
   let planPropose: PlanProposal | null = null;
   const ppMatch = text.match(PLAN_PROPOSE_RE);
@@ -7271,7 +7382,7 @@ const AssistantMessageBody = memo(
           threadId={threadId}
         />
       )}
-      {choices && !streaming && onChoose && (
+      {choices && onChoose && (
         <ChoicesCard prompt={choices} onChoose={onChoose} />
       )}
       {planPropose && !streaming && onChoose && (

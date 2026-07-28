@@ -1,7 +1,9 @@
 use local_first_inference_usage::{
     AttemptEventKind, AttemptOutcome, CostProvenance, UsageAttemptEvent, UsageRecorder,
 };
-use rusqlite::{Connection, OptionalExtension, Row, Transaction, named_params, params, types::Type};
+use rusqlite::{
+    Connection, OptionalExtension, Row, Transaction, named_params, params, types::Type,
+};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::BTreeMap,
@@ -48,11 +50,15 @@ impl std::fmt::Display for UsageStoreError {
 impl std::error::Error for UsageStoreError {}
 
 impl From<rusqlite::Error> for UsageStoreError {
-    fn from(value: rusqlite::Error) -> Self { Self::Database(value) }
+    fn from(value: rusqlite::Error) -> Self {
+        Self::Database(value)
+    }
 }
 
 impl From<serde_json::Error> for UsageStoreError {
-    fn from(value: serde_json::Error) -> Self { Self::Json(value) }
+    fn from(value: serde_json::Error) -> Self {
+        Self::Json(value)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,14 +86,20 @@ pub struct ProviderUsagePolicy {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
 pub enum LimitSource {
     ManualBudget,
     None,
 }
 
 impl ProviderUsagePolicy {
+    #[allow(dead_code)]
     pub fn limit_source(&self) -> LimitSource {
-        if self.monthly_budget_microusd.is_some() { LimitSource::ManualBudget } else { LimitSource::None }
+        if self.monthly_budget_microusd.is_some() {
+            LimitSource::ManualBudget
+        } else {
+            LimitSource::None
+        }
     }
 }
 
@@ -310,6 +322,7 @@ impl UsageStore {
         Ok(store)
     }
 
+    #[allow(dead_code)]
     pub fn open_in_memory() -> rusqlite::Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.busy_timeout(Duration::from_secs(5))?;
@@ -455,6 +468,7 @@ impl UsageStore {
         })
     }
 
+    #[allow(dead_code)]
     pub fn events_for_attempt(&self, attempt_id: &str) -> rusqlite::Result<Vec<UsageAttemptEvent>> {
         let sql = format!(
             "SELECT {EVENT_COLUMNS} FROM inference_usage_events
@@ -466,6 +480,7 @@ impl UsageStore {
             .collect()
     }
 
+    #[allow(dead_code)]
     pub fn events_for_scope(
         &self,
         user_id: &str,
@@ -585,14 +600,22 @@ impl UsageStore {
              WHERE user_id = ?1 AND suggestion_key = ?2
                AND action = 'dismissed'
                AND created_at >= ?3 AND created_at <= ?4",
-            params![user_id, suggestion_key, now.saturating_sub(30 * 86_400), now],
+            params![
+                user_id,
+                suggestion_key,
+                now.saturating_sub(30 * 86_400),
+                now
+            ],
             |row| row.get(0),
         )?;
         Ok(count > 0)
     }
 
+    #[allow(dead_code)]
     pub fn suggestion_action_columns(&self) -> rusqlite::Result<Vec<String>> {
-        let mut statement = self.conn.prepare("PRAGMA table_info(usage_suggestion_actions)")?;
+        let mut statement = self
+            .conn
+            .prepare("PRAGMA table_info(usage_suggestion_actions)")?;
         statement
             .query_map([], |row| row.get(1))?
             .collect::<rusqlite::Result<Vec<_>>>()
@@ -650,8 +673,14 @@ impl UsageStore {
                 row.get::<_, String>(5)?,
             ))
         });
-        let Some((monthly_budget_microusd, currency, reset_day, timezone, alert_threshold_percent, overrides)) =
-            row.optional()?
+        let Some((
+            monthly_budget_microusd,
+            currency,
+            reset_day,
+            timezone,
+            alert_threshold_percent,
+            overrides,
+        )) = row.optional()?
         else {
             return Ok(None);
         };
@@ -692,7 +721,11 @@ impl UsageStore {
                 snapshot.error_code,
             ],
         )?;
-        Ok(if inserted == 1 { AppendOutcome::Inserted } else { AppendOutcome::Duplicate })
+        Ok(if inserted == 1 {
+            AppendOutcome::Inserted
+        } else {
+            AppendOutcome::Duplicate
+        })
     }
 
     pub fn latest_provider_snapshots(
@@ -709,11 +742,13 @@ impl UsageStore {
                                 WHERE user_id=?1 AND provider_id=?2)
              ORDER BY metric ASC",
         )?;
-        let rows = statement.query_map(params![user_id, provider_id], snapshot_from_row)?
+        let rows = statement
+            .query_map(params![user_id, provider_id], snapshot_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
 
+    #[allow(dead_code)]
     pub fn provider_snapshot_count(
         &self,
         user_id: &str,
@@ -1007,7 +1042,11 @@ impl UsageStore {
         let cutoff = match window {
             UsageWindow::All => None,
             UsageWindow::SevenDays | UsageWindow::ThirtyDays => {
-                let day_count = if window == UsageWindow::SevenDays { 7 } else { 30 };
+                let day_count = if window == UsageWindow::SevenDays {
+                    7
+                } else {
+                    30
+                };
                 let local_today = (now + offset_seconds).div_euclid(86_400) * 86_400;
                 Some(local_today - (day_count - 1) * 86_400 - offset_seconds)
             }
@@ -1079,8 +1118,11 @@ impl UsageStore {
                 dominant_model: None,
             })
         })?;
-        let mut days = rows.collect::<rusqlite::Result<Vec<_>>>()?
-            .into_iter().map(|day| (day.day_epoch, day)).collect::<BTreeMap<_, _>>();
+        let mut days = rows
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .map(|day| (day.day_epoch, day))
+            .collect::<BTreeMap<_, _>>();
 
         let routes_sql = format!(
             "SELECT {day_expression}, COALESCE(provider_id, 'unknown'),
@@ -1096,14 +1138,21 @@ impl UsageStore {
                       COALESCE(provider_id, 'unknown') ASC, COALESCE(model_id, 'unknown') ASC"
         );
         let mut route_statement = self.conn.prepare(&routes_sql)?;
-        let route_rows = route_statement.query_map(params![user_id, offset_seconds, cutoff], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
-                nonnegative_u64(row.get(3)?, 3)?))
-        })?;
+        let route_rows =
+            route_statement.query_map(params![user_id, offset_seconds, cutoff], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    nonnegative_u64(row.get(3)?, 3)?,
+                ))
+            })?;
         let mut winners = BTreeMap::<i64, (u64, String, String)>::new();
         for route in route_rows {
             let (day_epoch, provider_id, model_id, tokens) = route?;
-            winners.entry(day_epoch).or_insert((tokens, provider_id, model_id));
+            winners
+                .entry(day_epoch)
+                .or_insert((tokens, provider_id, model_id));
         }
         for (day_epoch, (_, provider_id, model_id)) in winners {
             if let Some(day) = days.get_mut(&day_epoch) {
@@ -1196,10 +1245,8 @@ impl UsageStore {
             average_output_tokens: output / terminal,
             average_reasoning_tokens: reasoning / terminal,
             median_latency_ms,
-            success_rate_basis_points: u16::try_from(
-                successful.saturating_mul(10_000) / terminal,
-            )
-            .ok(),
+            success_rate_basis_points: u16::try_from(successful.saturating_mul(10_000) / terminal)
+                .ok(),
             cost_provenance,
         }))
     }
@@ -1281,30 +1328,47 @@ impl UsageStore {
 
 fn validate_policy(policy: &ProviderUsagePolicy) -> Result<(), UsageStoreError> {
     if policy.user_id.trim().is_empty() || policy.provider_id.trim().is_empty() {
-        return Err(UsageStoreError::Invalid("user and provider are required".to_string()));
+        return Err(UsageStoreError::Invalid(
+            "user and provider are required".to_string(),
+        ));
     }
     if policy.currency != "USD" {
         return Err(UsageStoreError::Invalid("currency must be USD".to_string()));
     }
     if policy.reset_day.is_some_and(|day| !(1..=28).contains(&day)) {
-        return Err(UsageStoreError::Invalid("reset day must be between 1 and 28".to_string()));
+        return Err(UsageStoreError::Invalid(
+            "reset day must be between 1 and 28".to_string(),
+        ));
     }
-    if policy.alert_threshold_percent.is_some_and(|value| !(1..=100).contains(&value)) {
-        return Err(UsageStoreError::Invalid("alert threshold must be between 1 and 100".to_string()));
+    if policy
+        .alert_threshold_percent
+        .is_some_and(|value| !(1..=100).contains(&value))
+    {
+        return Err(UsageStoreError::Invalid(
+            "alert threshold must be between 1 and 100".to_string(),
+        ));
     }
-    if policy.timezone.as_ref().is_some_and(|timezone| {
-        timezone.trim().is_empty() || timezone.chars().count() > 80
-    }) {
-        return Err(UsageStoreError::Invalid("timezone must contain 1 to 80 characters".to_string()));
+    if policy
+        .timezone
+        .as_ref()
+        .is_some_and(|timezone| timezone.trim().is_empty() || timezone.chars().count() > 80)
+    {
+        return Err(UsageStoreError::Invalid(
+            "timezone must contain 1 to 80 characters".to_string(),
+        ));
     }
     let mut models = std::collections::HashSet::new();
     for price in &policy.pricing_overrides {
         let model = price.model_id.trim();
         if model.is_empty() || model.chars().count() > 240 {
-            return Err(UsageStoreError::Invalid("model id must contain 1 to 240 characters".to_string()));
+            return Err(UsageStoreError::Invalid(
+                "model id must contain 1 to 240 characters".to_string(),
+            ));
         }
         if !models.insert(model) {
-            return Err(UsageStoreError::Invalid(format!("duplicate model override: {model}")));
+            return Err(UsageStoreError::Invalid(format!(
+                "duplicate model override: {model}"
+            )));
         }
     }
     Ok(())
@@ -1317,7 +1381,9 @@ fn validate_snapshot(snapshot: &ProviderUsageSnapshot) -> Result<(), UsageStoreE
         || snapshot.metric.trim().is_empty()
         || snapshot.source.trim().is_empty()
     {
-        return Err(UsageStoreError::Invalid("snapshot identity fields are required".to_string()));
+        return Err(UsageStoreError::Invalid(
+            "snapshot identity fields are required".to_string(),
+        ));
     }
     Ok(())
 }
@@ -1447,8 +1513,8 @@ fn upsert_daily_event(
     let success = u64::from(event.outcome == Some(AttemptOutcome::Success));
     let failed = u64::from(event.outcome == Some(AttemptOutcome::Failed));
     let aborted = u64::from(event.outcome == Some(AttemptOutcome::Aborted));
-    let known_cost = event.cost_microusd.is_some()
-        || event.cost_provenance == CostProvenance::NotBilled;
+    let known_cost =
+        event.cost_microusd.is_some() || event.cost_provenance == CostProvenance::NotBilled;
     transaction.execute(
         "INSERT INTO inference_usage_daily (
             day_epoch, user_id, workspace_id, provider_id, model_id, locality, purpose,
@@ -1696,10 +1762,12 @@ impl BufferedUsageRecorder {
         })
     }
 
+    #[allow(dead_code)]
     pub fn dropped_events(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
     }
 
+    #[allow(dead_code)]
     pub fn shutdown(&self, timeout: Duration) {
         if let Ok(mut sender) = self.sender.lock() {
             sender.take();
@@ -1851,7 +1919,10 @@ mod tests {
             pricing_overrides: vec![],
         };
         store.upsert_provider_policy(&policy, 100).unwrap();
-        let loaded = store.provider_policy("local", "anthropic").unwrap().unwrap();
+        let loaded = store
+            .provider_policy("local", "anthropic")
+            .unwrap()
+            .unwrap();
         assert_eq!(loaded.monthly_budget_microusd, Some(20_000_000));
         assert_eq!(loaded.limit_source(), LimitSource::ManualBudget);
     }
@@ -1859,11 +1930,22 @@ mod tests {
     #[test]
     fn latest_snapshot_is_provider_scoped_and_append_only() {
         let store = UsageStore::open_in_memory().unwrap();
-        store.append_provider_snapshot(&snapshot("first", "openrouter", 100)).unwrap();
-        store.append_provider_snapshot(&snapshot("second", "openrouter", 200)).unwrap();
-        let latest = store.latest_provider_snapshots("local", "openrouter").unwrap();
+        store
+            .append_provider_snapshot(&snapshot("first", "openrouter", 100))
+            .unwrap();
+        store
+            .append_provider_snapshot(&snapshot("second", "openrouter", 200))
+            .unwrap();
+        let latest = store
+            .latest_provider_snapshots("local", "openrouter")
+            .unwrap();
         assert_eq!(latest[0].snapshot_id, "second");
-        assert_eq!(store.provider_snapshot_count("local", "openrouter").unwrap(), 2);
+        assert_eq!(
+            store
+                .provider_snapshot_count("local", "openrouter")
+                .unwrap(),
+            2
+        );
     }
 
     #[test]
@@ -1880,10 +1962,22 @@ mod tests {
             pricing_overrides: vec![],
         };
         store.upsert_provider_policy(&policy, 100).unwrap();
-        store.append_provider_snapshot(&snapshot("one", "openrouter", 100)).unwrap();
+        store
+            .append_provider_snapshot(&snapshot("one", "openrouter", 100))
+            .unwrap();
         store.purge_workspace("local", "workspace-a").unwrap();
-        assert!(store.provider_policy("local", "openrouter").unwrap().is_some());
-        assert_eq!(store.provider_snapshot_count("local", "openrouter").unwrap(), 1);
+        assert!(
+            store
+                .provider_policy("local", "openrouter")
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            store
+                .provider_snapshot_count("local", "openrouter")
+                .unwrap(),
+            1
+        );
     }
 
     #[test]
@@ -1958,32 +2052,101 @@ mod tests {
     #[test]
     fn model_routes_keep_equal_models_separate_by_provider() {
         let store = UsageStore::open_in_memory().unwrap();
-        store.append(&completed_route_fixture("a", "ollama-local", "qwen", 100, 10, 86_400)).unwrap();
-        store.append(&completed_route_fixture("b", "ollama-cloud", "qwen", 200, 20, 86_400)).unwrap();
-        let routes = store.model_routes("local", UsageWindow::All, 172_800).unwrap();
+        store
+            .append(&completed_route_fixture(
+                "a",
+                "ollama-local",
+                "qwen",
+                100,
+                10,
+                86_400,
+            ))
+            .unwrap();
+        store
+            .append(&completed_route_fixture(
+                "b",
+                "ollama-cloud",
+                "qwen",
+                200,
+                20,
+                86_400,
+            ))
+            .unwrap();
+        let routes = store
+            .model_routes("local", UsageWindow::All, 172_800)
+            .unwrap();
         assert_eq!(routes.len(), 2);
-        assert_eq!((routes[0].provider_id.as_str(), routes[0].model_id.as_str()), ("ollama-cloud", "qwen"));
-        assert_eq!((routes[1].provider_id.as_str(), routes[1].model_id.as_str()), ("ollama-local", "qwen"));
+        assert_eq!(
+            (routes[0].provider_id.as_str(), routes[0].model_id.as_str()),
+            ("ollama-cloud", "qwen")
+        );
+        assert_eq!(
+            (routes[1].provider_id.as_str(), routes[1].model_id.as_str()),
+            ("ollama-local", "qwen")
+        );
     }
 
     #[test]
     fn daily_series_uses_local_day_and_same_pair_for_dominant_route() {
         let store = UsageStore::open_in_memory().unwrap();
-        store.append(&completed_route_fixture("a", "ollama-local", "qwen", 100, 10, 86_100)).unwrap();
-        store.append(&completed_route_fixture("b", "openrouter", "qwen", 300, 20, 86_500)).unwrap();
-        let series = store.daily_series("local", UsageWindow::SevenDays, 172_800, 60).unwrap();
+        store
+            .append(&completed_route_fixture(
+                "a",
+                "ollama-local",
+                "qwen",
+                100,
+                10,
+                86_100,
+            ))
+            .unwrap();
+        store
+            .append(&completed_route_fixture(
+                "b",
+                "openrouter",
+                "qwen",
+                300,
+                20,
+                86_500,
+            ))
+            .unwrap();
+        let series = store
+            .daily_series("local", UsageWindow::SevenDays, 172_800, 60)
+            .unwrap();
         assert_eq!(series.days.len(), 1);
         assert_eq!(series.days[0].day_epoch, 86_400);
-        assert_eq!(series.days[0].dominant_provider.as_deref(), Some("openrouter"));
+        assert_eq!(
+            series.days[0].dominant_provider.as_deref(),
+            Some("openrouter")
+        );
         assert_eq!(series.days[0].dominant_model.as_deref(), Some("qwen"));
     }
 
     #[test]
     fn daily_series_keeps_real_coverage_start_and_sparse_days() {
         let store = UsageStore::open_in_memory().unwrap();
-        store.append(&completed_route_fixture("a", "ollama-local", "qwen", 100, 10, 86_400)).unwrap();
-        store.append(&completed_route_fixture("b", "ollama-local", "qwen", 100, 10, 3 * 86_400)).unwrap();
-        let series = store.daily_series("local", UsageWindow::All, 4 * 86_400, 0).unwrap();
+        store
+            .append(&completed_route_fixture(
+                "a",
+                "ollama-local",
+                "qwen",
+                100,
+                10,
+                86_400,
+            ))
+            .unwrap();
+        store
+            .append(&completed_route_fixture(
+                "b",
+                "ollama-local",
+                "qwen",
+                100,
+                10,
+                3 * 86_400,
+            ))
+            .unwrap();
+        let series = store
+            .daily_series("local", UsageWindow::All, 4 * 86_400, 0)
+            .unwrap();
         assert_eq!(series.coverage_started_at, Some(86_400));
         assert_eq!(series.days.len(), 2);
         assert_eq!(series.days[0].day_epoch, 86_400);
@@ -1993,8 +2156,26 @@ mod tests {
     #[test]
     fn summary_dominant_model_keeps_its_provider() {
         let store = UsageStore::open_in_memory().unwrap();
-        store.append(&completed_route_fixture("a", "ollama-local", "qwen", 100, 10, 86_400)).unwrap();
-        store.append(&completed_route_fixture("b", "openrouter", "qwen", 300, 20, 86_400)).unwrap();
+        store
+            .append(&completed_route_fixture(
+                "a",
+                "ollama-local",
+                "qwen",
+                100,
+                10,
+                86_400,
+            ))
+            .unwrap();
+        store
+            .append(&completed_route_fixture(
+                "b",
+                "openrouter",
+                "qwen",
+                300,
+                20,
+                86_400,
+            ))
+            .unwrap();
         let summary = store.summary("local", UsageWindow::All, 172_800).unwrap();
         assert_eq!(summary.dominant_provider.as_deref(), Some("openrouter"));
         assert_eq!(summary.dominant_model.as_deref(), Some("qwen"));

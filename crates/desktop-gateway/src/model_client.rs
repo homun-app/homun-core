@@ -13,11 +13,10 @@ use local_first_inference_usage::{
 use local_first_subagents::GenerateStreamEvent;
 
 use crate::{
-    StreamSink, auth_fallback_config, build_chat_payload,
-    collect_ollama_native_stream, collect_openai_stream, emit_stream_event, is_ollama_base,
-    model_first_token_timeout_secs, model_headers_timeout_secs, model_idle_timeout_secs,
-    model_request_timeout_secs, should_try_tool_compatibility_fallback,
-    tool_compatibility_fallback_config,
+    StreamSink, auth_fallback_config, build_chat_payload, collect_ollama_native_stream,
+    collect_openai_stream, emit_stream_event, is_ollama_base, model_first_token_timeout_secs,
+    model_headers_timeout_secs, model_idle_timeout_secs, model_request_timeout_secs,
+    should_try_tool_compatibility_fallback, tool_compatibility_fallback_config,
 };
 
 pub(crate) fn chat_endpoint(base_url: &str) -> String {
@@ -68,11 +67,7 @@ pub(crate) fn current_turn_control(
             .into_iter()
             .next()?;
         let objective = store
-            .load_objective_contract(
-                context.user_id,
-                context.workspace_id,
-                context.thread_id,
-            )
+            .load_objective_contract(context.user_id, context.workspace_id, context.thread_id)
             .ok()?;
         (record, objective)
     };
@@ -92,21 +87,21 @@ pub(crate) fn current_turn_control(
         local_first_engine::TurnControlDisposition::NeedsClarification
     } else {
         match semantic_disposition {
-        crate::semantic_decision::SteeringDisposition::ContinueCurrentWork => {
-            local_first_engine::TurnControlDisposition::ContinueCurrentWork
-        }
-        crate::semantic_decision::SteeringDisposition::ReplanCurrentWork => {
-            local_first_engine::TurnControlDisposition::ReplanCurrentWork
-        }
-        crate::semantic_decision::SteeringDisposition::FinalizeWithCurrentEvidence => {
-            local_first_engine::TurnControlDisposition::FinalizeWithCurrentEvidence
-        }
-        crate::semantic_decision::SteeringDisposition::CancelCurrentWork => {
-            local_first_engine::TurnControlDisposition::CancelCurrentWork
-        }
-        crate::semantic_decision::SteeringDisposition::NeedsClarification => {
-            local_first_engine::TurnControlDisposition::NeedsClarification
-        }
+            crate::semantic_decision::SteeringDisposition::ContinueCurrentWork => {
+                local_first_engine::TurnControlDisposition::ContinueCurrentWork
+            }
+            crate::semantic_decision::SteeringDisposition::ReplanCurrentWork => {
+                local_first_engine::TurnControlDisposition::ReplanCurrentWork
+            }
+            crate::semantic_decision::SteeringDisposition::FinalizeWithCurrentEvidence => {
+                local_first_engine::TurnControlDisposition::FinalizeWithCurrentEvidence
+            }
+            crate::semantic_decision::SteeringDisposition::CancelCurrentWork => {
+                local_first_engine::TurnControlDisposition::CancelCurrentWork
+            }
+            crate::semantic_decision::SteeringDisposition::NeedsClarification => {
+                local_first_engine::TurnControlDisposition::NeedsClarification
+            }
         }
     };
     Some(local_first_engine::TurnControlDecision {
@@ -126,11 +121,7 @@ pub(crate) fn acknowledge_turn_control_applied(
             .ok()
             .flatten()?;
         let objective = store
-            .load_objective_contract(
-                context.user_id,
-                context.workspace_id,
-                context.thread_id,
-            )
+            .load_objective_contract(context.user_id, context.workspace_id, context.thread_id)
             .ok()
             .flatten();
         Some((current, objective))
@@ -202,21 +193,6 @@ pub(crate) fn acknowledge_turn_control_completed(
 }
 
 #[cfg(test)]
-pub(crate) fn steering_messages_for_round(
-    context: GatewaySteeringContext<'_>,
-) -> Vec<serde_json::Value> {
-    steering_messages_for_round_number(context, 0)
-}
-
-#[cfg(test)]
-fn steering_messages_for_round_number(
-    context: GatewaySteeringContext<'_>,
-    _round: u32,
-) -> Vec<serde_json::Value> {
-    consume_interpreted_steering(context)
-}
-
-#[cfg(test)]
 pub(crate) fn steering_messages_for_round_with(
     context: GatewaySteeringContext<'_>,
     resolve: impl FnMut(
@@ -272,9 +248,7 @@ fn steering_messages_for_round_number_with(
 }
 
 #[cfg(test)]
-fn consume_interpreted_steering(
-    context: GatewaySteeringContext<'_>,
-) -> Vec<serde_json::Value> {
+fn consume_interpreted_steering(context: GatewaySteeringContext<'_>) -> Vec<serde_json::Value> {
     let (mut objective, messages) = {
         let Ok(store) = context.state.task_store.lock() else {
             return Vec::new();
@@ -651,13 +625,21 @@ impl ModelClient for GatewayModelClient<'_> {
         let Some(context) = self.steering else {
             return local_first_engine::FinalizationFence::Ready;
         };
-        let ready = context.state.task_store.lock().ok().and_then(|store| {
-            store.fence_chat_turn_finalization(
-                context.user_id,
-                context.workspace_id,
-                context.turn_id,
-            ).ok()
-        }).unwrap_or(false);
+        let ready = context
+            .state
+            .task_store
+            .lock()
+            .ok()
+            .and_then(|store| {
+                store
+                    .fence_chat_turn_finalization(
+                        context.user_id,
+                        context.workspace_id,
+                        context.turn_id,
+                    )
+                    .ok()
+            })
+            .unwrap_or(false);
         if ready {
             local_first_engine::FinalizationFence::Ready
         } else {
@@ -1443,7 +1425,10 @@ mod tests {
                 "active",
             )
             .unwrap();
-        assert_eq!(resumed.revision, original.revision, "unchanged objective/mode must not bump across resume");
+        assert_eq!(
+            resumed.revision, original.revision,
+            "unchanged objective/mode must not bump across resume"
+        );
 
         // Claim + interpret the steering under the resumed run, with a decision that
         // is only actionable if the revision genuinely matches.

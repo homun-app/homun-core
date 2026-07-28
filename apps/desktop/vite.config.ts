@@ -6,6 +6,10 @@ export default defineConfig({
   plugins: [react()],
   clearScreen: false,
   build: {
+    // Desktop ships some intentionally isolated data/vendor chunks (font manifest,
+    // Mermaid diagram engines). Keep the warning budget aligned with that shape so
+    // real regressions remain visible instead of repeating the same known warning.
+    chunkSizeWarningLimit: 2048,
     rollupOptions: {
       output: {
         manualChunks(id) {

@@ -4,12 +4,13 @@
 // default 128 macro-recursion depth; 256 is the standard headroom for big inline JSON (compile-time
 // only, no runtime effect).
 #![recursion_limit = "256"]
+mod agent_journal;
 mod apply_patch;
 mod attachments;
-mod agent_journal;
 mod browser_safety;
-mod host_computer_gateway;
 mod chat_store;
+mod hitl_resume;
+mod host_computer_gateway;
 // One-shot fuse of the two legacy SQLite files into the unified homun.sqlite.
 mod db_migrate;
 // Document CONTENT slot-schema (Fase 2 documents, Task 6): strict slot-filling
@@ -18,12 +19,12 @@ mod db_migrate;
 // make_templated_document).
 mod document_content;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
-mod model_client;
 mod inference_transport;
-mod usage_store;
-mod usage_pricing;
-mod usage_suggestions;
+mod model_client;
 mod provider_usage;
+mod usage_pricing;
+mod usage_store;
+mod usage_suggestions;
 // Model-output normalization moved WHOLE into the engine crate (ADR 0024 inc 5e.3, pure serde
 // module); re-exported so `model_normalize::…` call sites are unchanged.
 use local_first_engine::model_normalize;
@@ -64,13 +65,12 @@ mod seatbelt;
 mod semantic_decision;
 mod steering_control;
 mod task_registry;
-mod temporal;
 mod template_packs;
+mod temporal;
+mod turn_executor;
 mod vision;
 mod working_ledger;
-mod turn_executor;
 mod ws_gateway;
-mod tool_exec;
 // Codex-style tool-safety policy vocabulary + pure decision fn (ADR 0023, step 1;
 // not wired yet — seam types only).
 mod tool_safety;
@@ -112,22 +112,15 @@ use local_first_capabilities::{
     CapabilityRegistryStore, CapabilityResult, CapabilityTaskPayload, CapabilityTool,
     InMemoryCapabilityAudit, McpCapabilityProvider, McpStdioConfig, McpStdioTransport,
     McpToolPolicy, McpTransport, PluginRegistryEntry, PluginRegistryIndex, PolicyContext,
-    ProviderId as CapabilityProviderId, UserId as CapabilityUserId,
-    WorkflowRoutingRegistry, WorkspaceId as CapabilityWorkspaceId,
-};
-use local_first_desktop_gateway::{
-    AttachmentInput, BuildPromptRequest, BuildPromptResponse, ChatContextMessage, ChatContextRole,
-    ChatGenerateStreamRequest, ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
-    EnqueueTurnRequest, RoutingBinding, SetActiveLeafRequest, SetBranchLabelRequest,
-    SetThreadPinnedRequest, build_chat_runtime_prompt, compact_thread_title, strip_display_markers,
+    ProviderId as CapabilityProviderId, UserId as CapabilityUserId, WorkflowRoutingRegistry,
+    WorkspaceId as CapabilityWorkspaceId,
 };
 use local_first_desktop_gateway::integrity_api::{
     GraphIntegrityStatus, IntegrityAuditResponse, IntegrityBackupSummary, IntegrityRepairAction,
     IntegrityRepairApplyRequest, IntegrityRepairApplyResponse, IntegrityRepairEstimate,
-    IntegrityRepairPreviewRequest, IntegrityRepairPreviewResponse,
-    LinkedMemoryRepairApplyRequest, LinkedMemoryRepairApplyResponse,
-    canonical_integrity_actions, gateway_approval_token, gateway_audit_checksum,
-    inspect_registered_graph,
+    IntegrityRepairPreviewRequest, IntegrityRepairPreviewResponse, LinkedMemoryRepairApplyRequest,
+    LinkedMemoryRepairApplyResponse, canonical_integrity_actions, gateway_approval_token,
+    gateway_audit_checksum, inspect_registered_graph,
 };
 use local_first_desktop_gateway::linked_memory_repair::{
     LinkedMemoryRepairPreview, LinkedRepairError, LinkedRepairFailureInjection,
@@ -139,16 +132,22 @@ use local_first_desktop_gateway::project_graph_commit::{
 use local_first_desktop_gateway::workspace_delete::{
     GatewayWorkspacePurgeReport, WorkspaceDeleteError, coordinate_workspace_delete,
 };
+use local_first_desktop_gateway::{
+    AttachmentInput, BuildPromptRequest, BuildPromptResponse, ChatContextMessage, ChatContextRole,
+    ChatGenerateStreamRequest, ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
+    EnqueueTurnRequest, RoutingBinding, SetActiveLeafRequest, SetBranchLabelRequest,
+    SetThreadPinnedRequest, build_chat_runtime_prompt, compact_thread_title, strip_display_markers,
+};
 // The pure plan state machine now lives in the engine crate (ADR 0024, increment 3). Imported
 // unqualified so every call site (and the `use super::{…}` in the test module) resolves unchanged.
 // Plan helpers still used by NON-loop gateway code (titling, plan projection, etc.); the loop's own
 // plan helpers moved into the engine with `run_turn` (5.D2).
-use local_first_engine::plan::{
-    build_plan_markdown, enforce_monotonic_plan_progress, parse_plan_marker,
-    plan_done_count, plan_incomplete_reason, plan_is_complete, plan_is_settled, plan_next_open,
-    plan_step_id, plan_step_status, plan_step_title, plan_value_steps,
-};
 use local_first_engine::markers::{VAULT_REVEAL_CLOSE, VAULT_REVEAL_OPEN};
+use local_first_engine::plan::{
+    build_plan_markdown, enforce_monotonic_plan_progress, parse_plan_marker, plan_done_count,
+    plan_incomplete_reason, plan_is_complete, plan_is_settled, plan_next_open, plan_step_id,
+    plan_step_status, plan_step_title, plan_value_steps,
+};
 // Engine helpers exercised ONLY by this crate's tests (their non-test callers moved into
 // `engine::run_turn` at 5.D2). `#[cfg(test)]`-gated so they're in scope for `super::…` in `mod tests`
 // without reading as unused imports in the non-test build.
@@ -174,25 +173,23 @@ use local_first_local_computer_session::{
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
     BriefingPack, CachedBriefing, DataSensitivity as MemoryDataSensitivity, Exchange,
-    ExtractedEntity, ExtractedMemory, ExtractedRelation, MemoryAccessRequest, MemoryCollectionKey,
-    MemoryCreateRequest, MemoryDashboard, MemoryEntity, MemoryError, MemoryExtraction,
-    MemoryEvolutionKind, MemoryEvolutionMetadata, MemoryEvolutionProposal, MemoryFacade,
-    MemoryGrantOverrideEffect, MemoryLifecycleRequest, MemoryRecallService,
-    MemoryIntegrityRepairRequest,
-    MemoryPublicationDestination, MemoryPublicationEditInput, MemoryPublicationProposal,
-    MemoryPublicationResolution, MemoryPublicationResult, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySearchRequest,
-    MemorySourceCandidateProjection, MemorySourceGrant, MemoryStatus, MemoryUiReadModel,
-    MemoryUpdatePatch, MemoryWikiProjection, PERSONAL_WORKSPACE, PrivacyDomain,
-    ProjectGraphImportReport, RecallHit, RecallPack,
-    SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore, WikiPage,
-    WorkspaceId as MemoryWorkspaceId, MEMORY_SOURCE_CANDIDATE_PAGE_MAX, briefing_cache,
-    contains_secret, memory_record_revision, prompt_fingerprint,
-    redact_text as redact_memory_text,
+    ExtractedEntity, ExtractedMemory, ExtractedRelation, MEMORY_SOURCE_CANDIDATE_PAGE_MAX,
+    MemoryAccessRequest, MemoryCollectionKey, MemoryCreateRequest, MemoryDashboard, MemoryEntity,
+    MemoryError, MemoryEvolutionKind, MemoryEvolutionMetadata, MemoryEvolutionProposal,
+    MemoryExtraction, MemoryFacade, MemoryGrantOverrideEffect, MemoryIntegrityRepairRequest,
+    MemoryLifecycleRequest, MemoryPublicationDestination, MemoryPublicationEditInput,
+    MemoryPublicationProposal, MemoryPublicationResolution, MemoryPublicationResult,
+    MemoryRecallService, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope,
+    MemorySearchRequest, MemorySourceCandidateProjection, MemorySourceGrant, MemoryStatus,
+    MemoryUiReadModel, MemoryUpdatePatch, MemoryWikiProjection, PERSONAL_WORKSPACE, PrivacyDomain,
+    ProjectGraphImportReport, RecallHit, RecallPack, SQLiteMemoryStore, UserId as MemoryUserId,
+    WikiFileStore, WikiPage, WorkspaceId as MemoryWorkspaceId, briefing_cache, contains_secret,
+    memory_record_revision, prompt_fingerprint, redact_text as redact_memory_text,
 };
 use local_first_orchestrator::{
     ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
-    OrchestratorBudgets, OrchestratorRequest, OrchestratorResult,
-    OrchestratorRoute, PlanStep, PlanStepKind, StepExecutionPolicy,
+    OrchestratorBudgets, OrchestratorRequest, OrchestratorResult, OrchestratorRoute, PlanStep,
+    PlanStepKind, StepExecutionPolicy,
 };
 use local_first_secrets::{
     DevelopmentSecretKeyProvider, EncryptedFileSecretStore, SecretMaterial, SecretRef, SecretStore,
@@ -211,10 +208,10 @@ use local_first_vault::{
     LocalPinVerifier, PaymentApprovalSnapshot, SQLiteVaultStore, VaultCategory, VaultRecord,
     VaultRecordId, VaultStore,
 };
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 #[cfg(not(test))]
 use rusqlite::OptionalExtension;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
@@ -273,6 +270,9 @@ pub(crate) struct AppState {
     /// tab) instead of spawning a fresh sidecar each time. Reaped on idle and on
     /// thread archive/close/delete.
     browser_thread_sessions: Arc<Mutex<std::collections::HashMap<String, ThreadBrowserSession>>>,
+    /// Per-thread HITL Choice resume stash: set when semantic binds an open wait,
+    /// consumed once when assembling the resume turn's prompt/tools.
+    hitl_resume_by_thread: Arc<Mutex<std::collections::HashMap<String, HitlResumeTurnContext>>>,
     payment_approvals: Arc<Mutex<std::collections::HashMap<String, PaymentApprovalGrant>>>,
     setup_computer: Arc<setup_computer::SetupComputerCoordinator>,
     secret_store: Arc<EncryptedFileSecretStore<DevelopmentSecretKeyProvider>>,
@@ -358,15 +358,15 @@ mod agent_run_api_tests {
         .await
         .unwrap()
         .0;
-        assert_eq!(events.iter().map(|event| event.seq).collect::<Vec<_>>(), vec![2, 3]);
+        assert_eq!(
+            events.iter().map(|event| event.seq).collect::<Vec<_>>(),
+            vec![2, 3]
+        );
 
-        let prompt = get_latest_agent_prompt(
-            Path("run-api".to_string()),
-            State(state.clone()),
-        )
-        .await
-        .unwrap()
-        .0;
+        let prompt = get_latest_agent_prompt(Path("run-api".to_string()), State(state.clone()))
+            .await
+            .unwrap()
+            .0;
         assert_eq!(prompt["fingerprint"], "abc");
         assert_eq!(prompt["redacted"], true);
 
@@ -380,19 +380,21 @@ mod agent_run_api_tests {
         assert_eq!(cursor_error.status, StatusCode::BAD_REQUEST);
 
         seed_run(&state, "foreign-run", "foreign-turn", "other-user");
-        let error = get_latest_agent_prompt(
-            Path("foreign-run".to_string()),
-            State(state),
-        )
-        .await
-        .unwrap_err();
+        let error = get_latest_agent_prompt(Path("foreign-run".to_string()), State(state))
+            .await
+            .unwrap_err();
         assert_eq!(error.status, StatusCode::NOT_FOUND);
     }
 
     #[test]
     fn runtime_plan_control_store_is_authoritative_and_workspace_scoped() {
         let state = AppState::for_tests();
-        let thread = state.chat_store.lock().unwrap().create_thread("workspace-a").unwrap();
+        let thread = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .create_thread("workspace-a")
+            .unwrap();
         let user = gateway_user_id();
         {
             let store = state.task_store.lock().unwrap();
@@ -431,7 +433,12 @@ mod agent_run_api_tests {
     #[test]
     fn runtime_plan_control_store_owns_stall_bookkeeping() {
         let state = AppState::for_tests();
-        let thread = state.chat_store.lock().unwrap().create_thread("workspace-a").unwrap();
+        let thread = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .create_thread("workspace-a")
+            .unwrap();
         let steps = serde_json::json!([{"title": "step", "status": "doing"}]);
         state
             .task_store
@@ -447,8 +454,16 @@ mod agent_run_api_tests {
             )
             .unwrap();
         let steps = steps.as_array().unwrap();
-        assert!(!plan_stall_check_and_bump(&state, Some(&thread.thread_id), steps));
-        assert!(!plan_stall_check_and_bump(&state, Some(&thread.thread_id), steps));
+        assert!(!plan_stall_check_and_bump(
+            &state,
+            Some(&thread.thread_id),
+            steps
+        ));
+        assert!(!plan_stall_check_and_bump(
+            &state,
+            Some(&thread.thread_id),
+            steps
+        ));
         let stored = state
             .task_store
             .lock()
@@ -514,6 +529,7 @@ impl AppState {
             task_executor_registry: TaskExecutorRegistry::with_defaults(),
             browser_capability_client: Arc::new(Mutex::new(None)),
             browser_thread_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            hitl_resume_by_thread: Arc::new(Mutex::new(std::collections::HashMap::new())),
             payment_approvals: Arc::new(Mutex::new(std::collections::HashMap::new())),
             setup_computer: Arc::new(setup_computer::SetupComputerCoordinator::default()),
             secret_store: Arc::new(secret_store),
@@ -683,6 +699,7 @@ struct TaskExecutorStatusResponse {
 struct TaskExecutionOutcome {
     completed: bool,
     blocked_reason: Option<String>,
+    wait_until: Option<OffsetDateTime>,
     pending_approval: Option<PendingExecutorApproval>,
     summary: String,
     checkpoint_payload: Value,
@@ -966,17 +983,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // P0 resilience: verify every personal store BEFORE anything opens it; a
     // corrupt file is quarantined (never deleted) and the fresh open below
     // succeeds. Surfaced to the UI via /api/health `recovered_stores`.
-    let recovered_stores: std::sync::Arc<Vec<String>> = std::sync::Arc::new(
-        store_integrity::ensure_store_integrity(&[
-            store_integrity::StoreCheck { name: "desktop-gateway", path: gateway_database_path()? },
-            store_integrity::StoreCheck { name: "task-runtime", path: gateway_task_database_path()? },
-            store_integrity::StoreCheck { name: "local-computer-session", path: gateway_local_computer_database_path()? },
-            store_integrity::StoreCheck { name: "browser-url-policy", path: gateway_browser_policy_database_path()? },
-            store_integrity::StoreCheck { name: "memory", path: gateway_memory_database_path()? },
-            store_integrity::StoreCheck { name: "vault", path: gateway_vault_database_path()? },
-            store_integrity::StoreCheck { name: "capability-registry", path: gateway_capability_database_path()? },
-        ]),
-    );
+    let recovered_stores: std::sync::Arc<Vec<String>> =
+        std::sync::Arc::new(store_integrity::ensure_store_integrity(&[
+            store_integrity::StoreCheck {
+                name: "desktop-gateway",
+                path: gateway_database_path()?,
+            },
+            store_integrity::StoreCheck {
+                name: "task-runtime",
+                path: gateway_task_database_path()?,
+            },
+            store_integrity::StoreCheck {
+                name: "local-computer-session",
+                path: gateway_local_computer_database_path()?,
+            },
+            store_integrity::StoreCheck {
+                name: "browser-url-policy",
+                path: gateway_browser_policy_database_path()?,
+            },
+            store_integrity::StoreCheck {
+                name: "memory",
+                path: gateway_memory_database_path()?,
+            },
+            store_integrity::StoreCheck {
+                name: "vault",
+                path: gateway_vault_database_path()?,
+            },
+            store_integrity::StoreCheck {
+                name: "capability-registry",
+                path: gateway_capability_database_path()?,
+            },
+        ]));
 
     let port = env::var("HOMUN_DESKTOP_GATEWAY_PORT")
         .ok()
@@ -1028,18 +1065,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     usage_store
         .abort_orphaned_attempts(i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX))
         .map_err(std::io::Error::other)?;
-    usage_store.rebuild_daily_rollups().map_err(std::io::Error::other)?;
+    usage_store
+        .rebuild_daily_rollups()
+        .map_err(std::io::Error::other)?;
     let buffered_usage_recorder: Arc<dyn local_first_inference_usage::UsageRecorder> = Arc::new(
         usage_store::BufferedUsageRecorder::start(&usage_path, 4_096)
             .map_err(std::io::Error::other)?,
     );
-    let usage_pricing = Arc::new(std::sync::RwLock::new(build_usage_pricing_snapshot(&usage_store)));
-    let usage_recorder: Arc<dyn local_first_inference_usage::UsageRecorder> = Arc::new(
-        usage_pricing::CostEnrichingUsageRecorder::new(
+    let usage_pricing = Arc::new(std::sync::RwLock::new(build_usage_pricing_snapshot(
+        &usage_store,
+    )));
+    let usage_recorder: Arc<dyn local_first_inference_usage::UsageRecorder> =
+        Arc::new(usage_pricing::CostEnrichingUsageRecorder::new(
             buffered_usage_recorder,
             usage_pricing.clone(),
-        ),
-    );
+        ));
     let _ = usage_recorder_registry().set(usage_recorder.clone());
     let mut state = AppState {
         http: build_gateway_http_client(),
@@ -1075,6 +1115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         task_executor_registry: TaskExecutorRegistry::with_defaults(),
         browser_capability_client: Arc::new(Mutex::new(None)),
         browser_thread_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        hitl_resume_by_thread: Arc::new(Mutex::new(std::collections::HashMap::new())),
         payment_approvals: Arc::new(Mutex::new(std::collections::HashMap::new())),
         setup_computer: Arc::new(setup_computer::SetupComputerCoordinator::default()),
         secret_store: Arc::new(open_gateway_secret_store()?),
@@ -1090,9 +1131,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // incapsula brief/recall/learn. Costruito dopo il letterale perché
     // `InProcessMemoryRecallService` prende in prestito lo stesso `AppState`.
     let embedding: Arc<dyn local_first_memory::EmbeddingClient> =
-        Arc::new(GatewayEmbeddingClient { http: state.http.clone() });
-    let llm: Arc<dyn local_first_memory::LlmClient> =
-        Arc::new(GatewayLlmClient { http: state.http.clone() });
+        Arc::new(GatewayEmbeddingClient {
+            http: state.http.clone(),
+        });
+    let llm: Arc<dyn local_first_memory::LlmClient> = Arc::new(GatewayLlmClient {
+        http: state.http.clone(),
+    });
     install_memory_service_if_enabled(&mut state, embedding, llm);
     // Fix any pre-existing 0644 data files (created before the umask above was set):
     // the SQLite stores and the WhatsApp session are world-readable on old installs.
@@ -1125,23 +1169,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Bare block scopes the task_store lock guard so it is released before the VACUUM below.
     let recovered_chat_turns = {
         let store = state.task_store.lock().expect("task store lock at boot");
-        let generation = store.bump_process_generation().expect("bump process generation");
+        let generation = store
+            .bump_process_generation()
+            .expect("bump process generation");
         if let Err(error) = store.abort_running_agent_runs("gateway_restart") {
             eprintln!("agent journal: boot recovery error: {error}");
         }
         let journal_cutoff = (OffsetDateTime::now_utc()
             - Duration::days(AGENT_JOURNAL_RETENTION_DAYS))
         .unix_timestamp();
-        if let Err(error) = store.purge_terminal_agent_runs_before(
-            journal_cutoff,
-            AGENT_JOURNAL_RETENTION_BATCH,
-        ) {
+        if let Err(error) =
+            store.purge_terminal_agent_runs_before(journal_cutoff, AGENT_JOURNAL_RETENTION_BATCH)
+        {
             eprintln!("agent journal: retention error: {error}");
         }
         let user_id = gateway_user_id();
         let workspace_id = gateway_workspace_id();
         let recovered = local_first_task_runtime::broker::recover_chat_turns_at_boot(
-            &store, &user_id, &workspace_id, generation,
+            &store,
+            &user_id,
+            &workspace_id,
+            generation,
         )
         .unwrap_or_else(|e| {
             eprintln!("turn broker: recovery error: {e}");
@@ -1153,7 +1201,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         recovered
             .iter()
-            .filter_map(|task_id| store.get_task(task_id, &user_id, &workspace_id).ok().flatten())
+            .filter_map(|task_id| {
+                store
+                    .get_task(task_id, &user_id, &workspace_id)
+                    .ok()
+                    .flatten()
+            })
             .collect::<Vec<_>>()
     };
     // The broker has re-queued these tasks, but their visible placeholders are
@@ -1209,10 +1262,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/chat/threads",
             get(chat_threads).post(create_chat_thread),
         )
-        .route(
-            "/api/chat/threads/attention",
-            get(chat_thread_attentions),
-        )
+        .route("/api/chat/threads/attention", get(chat_thread_attentions))
         .route(
             "/api/chat/threads/{thread_id}/seen",
             post(mark_chat_thread_seen),
@@ -1240,13 +1290,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/chat/threads/{thread_id}", delete(delete_chat_thread))
         .route("/api/chat/threads/{thread_id}/messages", get(chat_messages))
-        .route("/api/chat/threads/{thread_id}/activity", get(thread_activity_projection))
-        .route("/api/chat/threads/{thread_id}/steering", get(list_thread_steering))
+        .route(
+            "/api/chat/threads/{thread_id}/activity",
+            get(thread_activity_projection),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/steering",
+            get(list_thread_steering),
+        )
         .route(
             "/api/chat/steering/{steering_id}",
             axum::routing::patch(update_steering).delete(delete_steering),
         )
-        .route("/api/chat/steering/{steering_id}/send-now", post(send_steering_now))
+        .route(
+            "/api/chat/steering/{steering_id}/send-now",
+            post(send_steering_now),
+        )
         .route("/api/chat/threads/{thread_id}/branches", get(chat_branches))
         .route(
             "/api/chat/threads/{thread_id}/active_leaf",
@@ -1362,14 +1421,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/setup/complete", post(complete_setup))
         .route("/api/setup/ollama", get(get_ollama_setup))
         .route("/api/setup/pull-model", post(pull_model))
-        .route(
-            "/api/setup/computer/prepare",
-            post(prepare_setup_computer),
-        )
-        .route(
-            "/api/setup/computer/status",
-            get(get_setup_computer_status),
-        )
+        .route("/api/setup/computer/prepare", post(prepare_setup_computer))
+        .route("/api/setup/computer/status", get(get_setup_computer_status))
         .route(
             "/api/prefs/approval-routing",
             get(get_approval_routing).post(set_approval_routing),
@@ -1479,16 +1532,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/local-computer/live", get(contained_computer_live))
         .route("/api/local-computer/start", post(local_computer_start))
         .route("/api/local-computer/stop", post(local_computer_stop))
-        .route("/api/host-computer/status", get(host_computer_gateway::status))
+        .route(
+            "/api/host-computer/status",
+            get(host_computer_gateway::status),
+        )
         .route("/api/host-computer/apps", get(host_computer_gateway::apps))
-        .route("/api/host-computer/grants", get(host_computer_gateway::list_grants).post(host_computer_gateway::create_grant))
-        .route("/api/host-computer/grants/{grant_id}", axum::routing::delete(host_computer_gateway::revoke_grant))
-        .route("/api/host-computer/permissions/present", post(host_computer_gateway::present_permission))
-        .route("/api/host-computer/sessions/{session_id}/approve", post(host_computer_gateway::approve_session))
-        .route("/api/host-computer/sessions/{session_id}/deny", post(host_computer_gateway::deny_session))
-        .route("/api/host-computer/sessions/{session_id}/pause", post(host_computer_gateway::pause_session))
-        .route("/api/host-computer/sessions/{session_id}/resume", post(host_computer_gateway::resume_session))
-        .route("/api/host-computer/sessions/{session_id}/cancel", post(host_computer_gateway::cancel_session))
+        .route(
+            "/api/host-computer/grants",
+            get(host_computer_gateway::list_grants).post(host_computer_gateway::create_grant),
+        )
+        .route(
+            "/api/host-computer/grants/{grant_id}",
+            axum::routing::delete(host_computer_gateway::revoke_grant),
+        )
+        .route(
+            "/api/host-computer/permissions/present",
+            post(host_computer_gateway::present_permission),
+        )
+        .route(
+            "/api/host-computer/sessions/{session_id}/approve",
+            post(host_computer_gateway::approve_session),
+        )
+        .route(
+            "/api/host-computer/sessions/{session_id}/deny",
+            post(host_computer_gateway::deny_session),
+        )
+        .route(
+            "/api/host-computer/sessions/{session_id}/pause",
+            post(host_computer_gateway::pause_session),
+        )
+        .route(
+            "/api/host-computer/sessions/{session_id}/resume",
+            post(host_computer_gateway::resume_session),
+        )
+        .route(
+            "/api/host-computer/sessions/{session_id}/cancel",
+            post(host_computer_gateway::cancel_session),
+        )
         // Bearer-authed: mint a short-lived ticket for the noVNC live-view proxy
         // (the iframe + WS that follow can't send the Bearer header).
         .route(
@@ -1679,7 +1759,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(memory_source_candidates),
         )
         .route("/api/memory/publications", post(memory_publication_create))
-        .route("/api/memory/publications/{proposal_id}", get(memory_publication_get))
+        .route(
+            "/api/memory/publications/{proposal_id}",
+            get(memory_publication_get),
+        )
         .route(
             "/api/memory/publications/{proposal_id}/edit",
             post(memory_publication_edit),
@@ -1745,10 +1828,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/integrity/repair/preview",
             post(integrity_repair_preview),
         )
-        .route(
-            "/api/integrity/repair/apply",
-            post(integrity_repair_apply),
-        )
+        .route("/api/integrity/repair/apply", post(integrity_repair_apply))
         .route("/api/chat/turns", post(enqueue_turn))
         .route(
             "/api/chat/turns/{turn_id}",
@@ -1756,13 +1836,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/chat/turns/{turn_id}/events", get(get_turn_events))
         .route("/api/chat/turns/{turn_id}/runs", get(get_agent_runs))
-        .route("/api/chat/threads/{thread_id}/runs", get(get_thread_agent_runs))
-        .route("/api/chat/threads/{thread_id}/runtime-plan", get(get_thread_runtime_plan))
-        .route("/api/chat/threads/{thread_id}/ledger", get(get_thread_working_ledger))
+        .route(
+            "/api/chat/threads/{thread_id}/runs",
+            get(get_thread_agent_runs),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/runtime-plan",
+            get(get_thread_runtime_plan),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/ledger",
+            get(get_thread_working_ledger),
+        )
         .route("/api/chat/runs/{run_id}/events", get(get_agent_run_events))
-        .route("/api/chat/runs/{run_id}/prompt/latest", get(get_latest_agent_prompt))
-        .route("/api/chat/runs/{run_id}/checkpoint/latest", get(get_latest_agent_checkpoint))
-        .route("/api/chat/turns/{turn_id}/stream", get(subscribe_turn_stream));
+        .route(
+            "/api/chat/runs/{run_id}/prompt/latest",
+            get(get_latest_agent_prompt),
+        )
+        .route(
+            "/api/chat/runs/{run_id}/checkpoint/latest",
+            get(get_latest_agent_checkpoint),
+        )
+        .route(
+            "/api/chat/turns/{turn_id}/stream",
+            get(subscribe_turn_stream),
+        );
     let chat_routes = chat_routes.route_layer(middleware::from_fn_with_state(
         state.clone(),
         require_gateway_token,
@@ -2057,7 +2155,9 @@ fn recall_collection_token(collection: MemoryCollectionKey) -> &'static str {
     }
 }
 
-fn memory_access_status_instruction(status: local_first_memory::MemoryAccessStatus) -> &'static str {
+fn memory_access_status_instruction(
+    status: local_first_memory::MemoryAccessStatus,
+) -> &'static str {
     match status {
         local_first_memory::MemoryAccessStatus::Ready => {
             "MEMORY ACCESS STATUS: ready. Matching records were retrieved."
@@ -2077,7 +2177,9 @@ fn memory_access_status_instruction(status: local_first_memory::MemoryAccessStat
     }
 }
 
-fn recall_stream_payload_from_pack(pack: &RecallPack) -> local_first_subagents::RecallStreamPayload {
+fn recall_stream_payload_from_pack(
+    pack: &RecallPack,
+) -> local_first_subagents::RecallStreamPayload {
     let mut payload = recall_stream_payload_from_hits(&pack.query, &pack.scope, &pack.hits);
     payload.status = pack.status.as_str().to_string();
     payload
@@ -2102,10 +2204,7 @@ fn recall_stream_payload_from_hits(
                 collection: recall_collection_token(hit.collection).to_string(),
                 grant_id: hit.grant_id.clone(),
                 policy_version: hit.policy_version,
-                source_revision: hit
-                    .grant_id
-                    .as_ref()
-                    .map(|_| hit.source_revision.clone()),
+                source_revision: hit.grant_id.as_ref().map(|_| hit.source_revision.clone()),
                 conflict: hit.conflict,
                 graph_path: hit.graph_path.clone(),
             })
@@ -2768,8 +2867,7 @@ fn spawn_memory_hygiene_sweep(state: AppState) {
             let facade = memory_facade(&state);
             let ws = MemoryWorkspaceId::new(&scope);
             total_gaps += local_first_memory::sweep_gap_facts(&facade, &user, &ws);
-            total_promoted +=
-                local_first_memory::promote_aged_candidates(&facade, &user, &ws);
+            total_promoted += local_first_memory::promote_aged_candidates(&facade, &user, &ws);
             let lifecycle = MemoryLifecycleRequest {
                 actor_id: "memory-maintenance".to_string(),
                 user_id: user.clone(),
@@ -3068,18 +3166,10 @@ async fn delete_chat_thread(
     {
         let task_store = lock_task_store(&state)?;
         task_store
-            .purge_agent_runs_for_thread(
-                &thread_id,
-                gateway_user_id().as_str(),
-                &workspace_id,
-            )
+            .purge_agent_runs_for_thread(&thread_id, gateway_user_id().as_str(), &workspace_id)
             .map_err(GatewayError::task)?;
         task_store
-            .purge_runtime_plan_for_thread(
-                gateway_user_id().as_str(),
-                &workspace_id,
-                &thread_id,
-            )
+            .purge_runtime_plan_for_thread(gateway_user_id().as_str(), &workspace_id, &thread_id)
             .map_err(GatewayError::task)?;
     }
     let snapshot = lock_store(&state)?
@@ -3246,7 +3336,9 @@ fn remote_approval_intents_from_message(message: &ChatMessage) -> Vec<RemoteAppr
     let structured: Vec<_> = message
         .event_parts
         .iter()
-        .filter(|part| part.get("type").and_then(serde_json::Value::as_str) == Some("remote_approval"))
+        .filter(|part| {
+            part.get("type").and_then(serde_json::Value::as_str) == Some("remote_approval")
+        })
         .filter_map(|part| {
             let protocol = match part.get("protocol").and_then(serde_json::Value::as_str) {
                 Some("mcp") => "mcp",
@@ -3260,7 +3352,10 @@ fn remote_approval_intents_from_message(message: &ChatMessage) -> Vec<RemoteAppr
                     .and_then(serde_json::Value::as_str)
                     .map(ToString::to_string),
                 tool: part.get("tool")?.as_str()?.to_string(),
-                arguments: part.get("arguments").cloned().unwrap_or_else(|| serde_json::json!({})),
+                arguments: part
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({})),
             })
         })
         .collect();
@@ -3273,22 +3368,25 @@ fn remote_approval_intents_from_message(message: &ChatMessage) -> Vec<RemoteAppr
     }
 }
 
+#[cfg(test)]
 fn remote_approval_matches_persisted_message(
     message: &ChatMessage,
     approval_id: &str,
     tool: &str,
     arguments: &serde_json::Value,
 ) -> bool {
-    remote_approval_intents_from_message(message).iter().any(|intent| {
-        intent.approval_id.as_deref() == Some(approval_id)
-            && intent.tool == tool
-            && &intent.arguments == arguments
-            && (if tool.starts_with("mcp__") {
-                intent.protocol == "mcp"
-            } else {
-                intent.protocol == "composio"
-            })
-    })
+    remote_approval_intents_from_message(message)
+        .iter()
+        .any(|intent| {
+            intent.approval_id.as_deref() == Some(approval_id)
+                && intent.tool == tool
+                && &intent.arguments == arguments
+                && (if tool.starts_with("mcp__") {
+                    intent.protocol == "mcp"
+                } else {
+                    intent.protocol == "composio"
+                })
+        })
 }
 
 /// Branch switcher (‹ n/m ›): every branch point on the thread's active path.
@@ -3519,7 +3617,9 @@ fn briefing_authorized_sources(
             source.grant_id.is_none()
                 || (source.source_workspace_id.as_str() == PERSONAL_WORKSPACE
                     && source.policy.as_ref().is_some_and(|policy| {
-                        policy.collections.contains(&MemoryCollectionKey::Preferences)
+                        policy
+                            .collections
+                            .contains(&MemoryCollectionKey::Preferences)
                     }))
         })
         .collect()
@@ -3604,9 +3704,7 @@ fn briefing_items_for_authorized_source(
         // The personal linked tier is deliberately Preferences-only. An
         // individual Allow can authorize on-demand recall, but cannot promote a
         // record from another collection into the always-on briefing.
-        .filter(|memory| {
-            !preferences_only || MemoryCollectionKey::Preferences.matches(memory)
-        })
+        .filter(|memory| !preferences_only || MemoryCollectionKey::Preferences.matches(memory))
         .filter_map(|memory| {
             facade
                 .get_authorized_memory_for_source(source, &memory.reference)
@@ -3882,7 +3980,6 @@ fn memory_injection_policy(intent: &semantic_decision::MemoryIntent) -> MemoryIn
     }
 }
 
-
 /// Auto-confirm policy (M2): only durable, high-confidence knowledge enters memory
 /// without asking. The ceiling is `Private` — NOT `Internal` — on purpose: the
 /// extractor tags ordinary personal facts (possessions, family, city) as `private`
@@ -3891,6 +3988,7 @@ fn memory_injection_policy(intent: &semantic_decision::MemoryIntent) -> MemoryIn
 /// assistant must know what you own / who's in your life without re-asking, so
 /// `private` auto-confirms. Only `Confidential`/`Secret` (real PII — codice fiscale,
 /// health docs, addresses) stays a candidate for the user to confirm explicitly.
+#[cfg(test)]
 fn is_auto_confirmable(
     memory_type: &str,
     sensitivity: MemoryDataSensitivity,
@@ -3921,6 +4019,7 @@ fn strip_json_fences(text: &str) -> &str {
 
 /// Normalize a memory's text for cheap dedup against what's already stored.
 /// Normalizes text for exact-duplicate comparison (used by tests + dedup paths).
+#[cfg(test)]
 fn normalize_for_dedup(text: &str) -> String {
     text.trim()
         .to_lowercase()
@@ -4050,9 +4149,11 @@ fn inference_locality(base_url: &str) -> local_first_inference_usage::Locality {
 
 fn inference_provider_id(base_url: &str) -> String {
     let canonical = canonical_provider_base_url(base_url);
-    if let Some(provider) = load_provider_registry().providers.into_iter().find(|provider| {
-        canonical_provider_base_url(&provider.base_url) == canonical
-    }) {
+    if let Some(provider) = load_provider_registry()
+        .providers
+        .into_iter()
+        .find(|provider| canonical_provider_base_url(&provider.base_url) == canonical)
+    {
         return provider.id;
     }
     let lower = canonical.to_ascii_lowercase();
@@ -4353,14 +4454,18 @@ async fn backfill_embeddings(
     // ADR 0022 (Tappa 4): backfill ORCHESTRATO nel crate via 3 fasi Send-safe
     // (collect lock → embed off-lock → persist lock). Il guard non attraversa await.
     let embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient> =
-        std::sync::Arc::new(GatewayEmbeddingClient { http: state.http.clone() });
+        std::sync::Arc::new(GatewayEmbeddingClient {
+            http: state.http.clone(),
+        });
     let model = embed_model();
     // Fase 1 (lock): collect pending + seen.
     let collected = {
         let facade = memory_facade(state);
         local_first_memory::backfill_collect_pending(&facade, user, workspace, limit)
     };
-    let Some((pending, mut seen)) = collected else { return };
+    let Some((pending, mut seen)) = collected else {
+        return;
+    };
     // Fase 2 + 3: embed off-lock, poi persist sotto lock per ciascuno.
     for (reference, text, mtype) in pending {
         let vector = embedding.embed(&text).await;
@@ -4370,136 +4475,9 @@ async fn backfill_embeddings(
         {
             let facade = memory_facade(state);
             local_first_memory::backfill_persist_one(
-                &facade,
-                user,
-                workspace,
-                &reference,
-                &mtype,
-                &vector,
-                &model,
-                &mut seen,
+                &facade, user, workspace, &reference, &mtype, &vector, &model, &mut seen,
             );
         }
-    }
-}
-
-/// Fills the required `privacy_domain`/`sensitivity` on an extracted item when the
-/// model omitted them, so deserialization (which requires both) doesn't silently
-/// drop otherwise-valid memories/entities/relations. The domain is re-pinned to
-/// "personal" later regardless; this just keeps the item parseable.
-fn fill_extraction_defaults(item: &serde_json::Value) -> serde_json::Value {
-    let mut item = item.clone();
-    if let Some(obj) = item.as_object_mut() {
-        obj.entry("privacy_domain")
-            .or_insert(serde_json::json!("personal"));
-        obj.entry("sensitivity")
-            .or_insert(serde_json::json!("internal"));
-    }
-    item
-}
-
-/// Persists a batch of extracted memories into ONE scope (workspace): dedups
-/// against what's already there, applies them as candidates, then auto-confirms
-/// the low-risk ones. Shared by the personal and project scopes.
-fn persist_scope_memories(
-    facade: &MemoryFacade,
-    user_id: &MemoryUserId,
-    workspace: &MemoryWorkspaceId,
-    mut memories: Vec<ExtractedMemory>,
-) {
-    if memories.is_empty() {
-        return;
-    }
-    let closure_targets: Vec<String> = memories
-        .iter()
-        .filter(|memory| memory.memory_type != "open_loop")
-        .flat_map(open_loop_closure_targets)
-        .collect();
-    // Dedup against the FULL set of existing memories in this scope (not the
-    // budget-limited profile) by content overlap — the extractor re-phrases the same
-    // decision across turns ("Scelto JSON…" / "taskline usa JSON…"), so exact-match
-    // alone let duplicates pile up in the store and the graph.
-    let existing: Vec<(String, std::collections::HashSet<String>)> = facade
-        .list_memories_for_ui(user_id, workspace)
-        .map(|mems| {
-            mems.into_iter()
-                .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
-                .map(|m| (m.memory_type, dedup_tokens(&m.text)))
-                .collect()
-        })
-        .unwrap_or_default();
-    // Permanent forget: drop anything the user has deleted before it re-enters
-    // memory — a still-live source message must not resurrect a forgotten fact.
-    let forgotten = forgotten_token_sets(facade, user_id);
-    // Also fold duplicates WITHIN this batch.
-    let mut batch_seen: Vec<(String, std::collections::HashSet<String>)> = Vec::new();
-    memories.retain(|m| {
-        if is_suppressed(&m.text, &forgotten) {
-            return false;
-        }
-        let tokens = dedup_tokens(&m.text);
-        let duplicate = existing
-            .iter()
-            .chain(batch_seen.iter())
-            .any(|(memory_type, other)| {
-                memory_type == &m.memory_type && jaccard(&tokens, other) >= DEDUP_JACCARD
-            });
-        if !duplicate {
-            batch_seen.push((m.memory_type.clone(), tokens));
-        }
-        !duplicate
-    });
-    if memories.is_empty() {
-        return;
-    }
-    let kept = memories.clone();
-    let extraction = MemoryExtraction {
-        memories,
-        entities: Vec::new(),
-        relations: Vec::new(),
-    };
-    let Ok(summary) = facade.apply_extraction(user_id, workspace, extraction) else {
-        return;
-    };
-    let lifecycle = MemoryLifecycleRequest {
-        actor_id: "memory-extractor".to_string(),
-        user_id: user_id.clone(),
-        workspace_id: workspace.clone(),
-        purpose: "auto_extract".to_string(),
-    };
-    for (memory, reference) in kept.iter().zip(summary.memory_refs.iter()) {
-        if is_auto_confirmable(&memory.memory_type, memory.sensitivity, memory.confidence) {
-            let _ = facade.confirm_memory(&lifecycle, reference, "auto-confirmed (low risk)");
-        }
-    }
-    let closed = close_matching_open_loops(facade, user_id, workspace, &closure_targets);
-    // G2/regeneration invariant: connect memories to the entities they mention.
-    // We re-link the WHOLE live set of this scope (not just the new items) so that
-    // entities created in THIS extraction retroactively pick up older memories that
-    // name them — the forward-only gap that left "Jannik Sinner" unlinked. Idempotent
-    // (link_memory_mentions dedups against existing edges); cheap at personal scale.
-    let mut items: Vec<(MemoryRef, String)> = facade
-        .list_memories_for_ui(user_id, workspace)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
-        .filter(|m| {
-            matches!(
-                m.memory_type.as_str(),
-                "fact" | "preference" | "decision" | "goal"
-            )
-        })
-        .map(|m| (m.reference, m.text))
-        .collect();
-    // include the just-extracted refs even if not yet listable
-    for (memory, reference) in kept.iter().zip(summary.memory_refs.iter()) {
-        if !items.iter().any(|(r, _)| r == reference) {
-            items.push((reference.clone(), memory.text.clone()));
-        }
-    }
-    link_memory_mentions(facade, user_id, workspace, &items);
-    if deduplicate_open_loops(facade, user_id, workspace) > 0 || closed > 0 {
-        rebuild_status_wiki(facade, user_id, workspace);
     }
 }
 
@@ -5721,6 +5699,7 @@ fn active_open_loop_record(memory: &MemoryRecord) -> bool {
         && memory.metadata.get("source").and_then(|v| v.as_str()) != Some("runtime_plan")
 }
 
+#[cfg(test)]
 fn deduplicate_open_loops(
     facade: &MemoryFacade,
     user_id: &MemoryUserId,
@@ -5729,29 +5708,7 @@ fn deduplicate_open_loops(
     local_first_memory::deduplicate_open_loops(facade, user_id, workspace)
 }
 
-fn open_loop_closure_targets(memory: &ExtractedMemory) -> Vec<String> {
-    let Some(value) = memory.metadata.get("closes_open_loop") else {
-        return Vec::new();
-    };
-    match value {
-        serde_json::Value::String(text) => {
-            let trimmed = text.trim();
-            if trimmed.is_empty() {
-                Vec::new()
-            } else {
-                vec![trimmed.to_string()]
-            }
-        }
-        serde_json::Value::Array(items) => items
-            .iter()
-            .filter_map(|item| item.as_str().map(str::trim))
-            .filter(|text| !text.is_empty())
-            .map(ToString::to_string)
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
+#[cfg(test)]
 fn open_loop_matches_target(open_loop_text: &str, target: &str) -> bool {
     let loop_tokens = dedup_tokens(open_loop_text);
     let target_tokens = dedup_tokens(target);
@@ -5765,6 +5722,7 @@ fn open_loop_matches_target(open_loop_text: &str, target: &str) -> bool {
             || loop_tokens.is_subset(&target_tokens))
 }
 
+#[cfg(test)]
 fn close_matching_open_loops(
     facade: &MemoryFacade,
     user_id: &MemoryUserId,
@@ -5809,6 +5767,7 @@ fn close_matching_open_loops(
 }
 
 /// ADR 0022 (Tappa 4, F2): corpo migrato nel crate; thin wrapper (test caller).
+#[cfg(test)]
 fn status_wiki_body_from_open_loops(
     open_loops: &[(MemoryRef, String)],
 ) -> (String, Vec<MemoryRef>) {
@@ -5983,7 +5942,11 @@ impl InProcessMemoryRecallService {
         embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient>,
         llm: std::sync::Arc<dyn local_first_memory::LlmClient>,
     ) -> Self {
-        Self { state, embedding, llm }
+        Self {
+            state,
+            embedding,
+            llm,
+        }
     }
 }
 
@@ -6087,10 +6050,7 @@ struct GatewayEmbeddingClient {
 }
 
 impl local_first_memory::EmbeddingClient for GatewayEmbeddingClient {
-    fn embed<'a>(
-        &'a self,
-        text: &'a str,
-    ) -> local_first_memory::BoxFuture<'a, Vec<f32>> {
+    fn embed<'a>(&'a self, text: &'a str) -> local_first_memory::BoxFuture<'a, Vec<f32>> {
         let http = self.http.clone();
         Box::pin(async move {
             // `embed_query_for_memory_recall` deriva workspace/timing internamente;
@@ -6153,7 +6113,10 @@ impl local_first_memory::LlmClient for GatewayLlmClient {
                 api_key.as_deref(),
                 &payload,
                 Some(std::time::Duration::from_secs(120)),
-                system.chars().count().saturating_add(user_content.chars().count()),
+                system
+                    .chars()
+                    .count()
+                    .saturating_add(user_content.chars().count()),
             )
             .await
             .ok()?;
@@ -6320,7 +6283,15 @@ impl MemoryRecallService for InProcessMemoryRecallService {
                 // Graph-context callback: inietta workflow_status / artifact_provenance.
                 // Le fn libere del gateway sono Sync; il closure è + Sync.
                 let graph_context: Option<
-                    &(dyn Fn(&local_first_memory::MemoryFacade, &MemoryUserId, &MemoryWorkspaceId, &str) -> Option<String> + Sync),
+                    &(
+                         dyn Fn(
+                        &local_first_memory::MemoryFacade,
+                        &MemoryUserId,
+                        &MemoryWorkspaceId,
+                        &str,
+                    ) -> Option<String>
+                             + Sync
+                     ),
                 > = Some(&|facade, user, workspace, q| {
                     if let Some(workflow) =
                         workflow_status_context_for_query(facade, user, workspace, q)
@@ -6329,14 +6300,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
                     }
                     artifact_provenance_context_for_query(facade, user, workspace, q)
                 });
-                recall_pack_on_facade(
-                    &facade,
-                    &user,
-                    &workspace,
-                    query,
-                    &query_vec,
-                    graph_context,
-                )
+                recall_pack_on_facade(&facade, &user, &workspace, query, &query_vec, graph_context)
             };
             let mut pack = block;
             pack.scope = scope_owned;
@@ -6380,27 +6344,28 @@ impl MemoryRecallService for InProcessMemoryRecallService {
                     project_name.as_deref(),
                 )
             };
-            let Some((system, user_content)) = prompt else { return };
+            let Some((system, user_content)) = prompt else {
+                return;
+            };
             // Fase 2 (off-lock): LLM estrattore via capability trait (no guard attiva).
-            let Some(content) = llm.chat(&system, &user_content).await else { return };
+            let Some(content) = llm.chat(&system, &user_content).await else {
+                return;
+            };
             // Fase 3 (sync, lock re-acquisito): parse + routing + persist + hooks.
             let facade = memory_facade(&state);
             let hooks = local_first_memory::LearnHooks {
-                persist_graph: Some(&|facade, user, workspace, entities, relations, project_ws| {
-                    persist_graph(facade, user, workspace, entities, relations, project_ws);
-                }),
+                persist_graph: Some(
+                    &|facade, user, workspace, entities, relations, project_ws| {
+                        persist_graph(facade, user, workspace, entities, relations, project_ws);
+                    },
+                ),
                 store_episode: Some(&|facade, user, thread_id, episode, active| {
                     store_episode(facade, user, thread_id, episode, active);
                 }),
                 backfill_embeddings: None, // backfill async: resta al tick periodico.
             };
             local_first_memory::persist_learn_extraction(
-                &facade,
-                &user,
-                &active,
-                &content,
-                &exchange,
-                hooks,
+                &facade, &user, &active, &content, &exchange, hooks,
             );
         })
     }
@@ -6469,7 +6434,9 @@ fn learn_via_service_or_inline(
                 None
             };
             let llm: std::sync::Arc<dyn local_first_memory::LlmClient> =
-                std::sync::Arc::new(GatewayLlmClient { http: state.http.clone() });
+                std::sync::Arc::new(GatewayLlmClient {
+                    http: state.http.clone(),
+                });
             // Fase 1 (lock): prompt.
             let prompt = {
                 let facade = memory_facade(&state);
@@ -6481,27 +6448,28 @@ fn learn_via_service_or_inline(
                     project_name.as_deref(),
                 )
             };
-            let Some((system, user_content)) = prompt else { return };
+            let Some((system, user_content)) = prompt else {
+                return;
+            };
             // Fase 2 (off-lock): LLM.
-            let Some(content) = llm.chat(&system, &user_content).await else { return };
+            let Some(content) = llm.chat(&system, &user_content).await else {
+                return;
+            };
             // Fase 3 (lock): persist + hooks.
             let facade = memory_facade(&state);
             let hooks = local_first_memory::LearnHooks {
-                persist_graph: Some(&|facade, user, workspace, entities, relations, project_ws| {
-                    persist_graph(facade, user, workspace, entities, relations, project_ws);
-                }),
+                persist_graph: Some(
+                    &|facade, user, workspace, entities, relations, project_ws| {
+                        persist_graph(facade, user, workspace, entities, relations, project_ws);
+                    },
+                ),
                 store_episode: Some(&|facade, user, thread_id, episode, active| {
                     store_episode(facade, user, thread_id, episode, active);
                 }),
                 backfill_embeddings: None,
             };
             local_first_memory::persist_learn_extraction(
-                &facade,
-                &user,
-                &active,
-                &content,
-                &exchange,
-                hooks,
+                &facade, &user, &active, &content, &exchange, hooks,
             );
         })
     }
@@ -6540,7 +6508,10 @@ async fn call_memory_json(
         api_key.as_deref(),
         &payload,
         Some(std::time::Duration::from_secs(150)),
-        system.chars().count().saturating_add(user_content.chars().count()),
+        system
+            .chars()
+            .count()
+            .saturating_add(user_content.chars().count()),
     )
     .await
     .ok()?;
@@ -6583,7 +6554,9 @@ async fn consolidate_scope(
     // Fase 2 (off-lock): LLM curatore. Usa GatewayLlmClient (throwaway), poi parse
     // JSON resiliente (strip_json_fences è nel crate).
     let llm: std::sync::Arc<dyn local_first_memory::LlmClient> =
-        std::sync::Arc::new(GatewayLlmClient { http: state.http.clone() });
+        std::sync::Arc::new(GatewayLlmClient {
+            http: state.http.clone(),
+        });
     let content = llm
         .chat(
             local_first_memory::CURATOR_SYSTEM,
@@ -6624,18 +6597,22 @@ fn persist_graph(
     relations: Vec<ExtractedRelation>,
     project_ws: Option<&MemoryWorkspaceId>,
 ) {
-    let (mut project_entities, personal_entities): (Vec<_>, Vec<_>) = entities
-        .into_iter()
-        .partition(|entity| {
+    let (mut project_entities, personal_entities): (Vec<_>, Vec<_>) =
+        entities.into_iter().partition(|entity| {
             project_ws.is_some()
-                && entity.metadata.get("scope").and_then(serde_json::Value::as_str)
+                && entity
+                    .metadata
+                    .get("scope")
+                    .and_then(serde_json::Value::as_str)
                     == Some("project")
         });
-    let (project_relations, personal_relations): (Vec<_>, Vec<_>) = relations
-        .into_iter()
-        .partition(|relation| {
+    let (project_relations, personal_relations): (Vec<_>, Vec<_>) =
+        relations.into_iter().partition(|relation| {
             project_ws.is_some()
-                && relation.metadata.get("scope").and_then(serde_json::Value::as_str)
+                && relation
+                    .metadata
+                    .get("scope")
+                    .and_then(serde_json::Value::as_str)
                     == Some("project")
         });
     if let Some(project) = project_ws {
@@ -7630,6 +7607,7 @@ const MAX_PLAN_STALL_RESUMES: u32 = 3;
 
 /// New stall count from the prior count and the done-counts at the previous vs the current
 /// resume. ANY progress (more done steps than last resume) resets to 0; otherwise +1. Pure.
+#[cfg(test)]
 fn next_plan_stall(prior_stall: u32, last_resume_done: usize, current_done: usize) -> u32 {
     if current_done > last_resume_done {
         0
@@ -7747,6 +7725,15 @@ budget, passenger count, etc.). If you have a likely default from context, STOP 
 CHOICES marker with one option that confirms the default and one option for free-text correction \
 (for example: Confirm Milan departure / Choose another departure). Continue only after the user \
 chooses or writes the missing value."
+}
+
+/// Legacy prose backup — NOT the source of truth. ResumeBinding + `choice_resume_harness_slot`
+/// own the contract; this string must not be injected on its own from context heuristics.
+#[cfg(test)]
+fn choice_resume_instruction_legacy_backup() -> &'static str {
+    "CHOICE RESUME (legacy backup): the user's latest message answers your prior CHOICES card. \
+Continue the unfinished task from the warm browser session and open plan — do NOT restart \
+discovery/search from scratch."
 }
 
 fn runtime_plan_thread_key(thread_id: Option<&str>) -> String {
@@ -8149,6 +8136,7 @@ struct TemplateCatalogEntry {
 }
 
 trait TemplateCatalogProvider {
+    #[cfg_attr(not(test), allow(dead_code))]
     fn provider_id(&self) -> &str;
     fn entries(&self) -> Vec<TemplateCatalogEntry>;
 
@@ -8159,6 +8147,7 @@ trait TemplateCatalogProvider {
 
 #[derive(Debug, Clone)]
 struct FileTemplateCatalogProvider {
+    #[cfg_attr(not(test), allow(dead_code))]
     provider_id: String,
     entries: Vec<TemplateCatalogEntry>,
 }
@@ -8359,6 +8348,14 @@ fn resolve_semantic_decision_for_context(
     binding: Option<&RoutingBinding>,
     steering_control: bool,
 ) -> semantic_decision::ValidatedSemanticDecision {
+    // Turn Contract ResumeBinding: an open Choice wait + matching resolution skips the
+    // semantic model entirely — disposition is continue_current_work by construction.
+    if !steering_control
+        && let Some(tid) = thread_id
+        && let Some(resume) = try_resume_open_wait(state, tid, prompt, active)
+    {
+        return resume;
+    }
     let capabilities = semantic_capability_registry();
     let recent_thread_context = bounded_thread_context(state, thread_id);
     let input = semantic_decision::SemanticDecisionInput {
@@ -8463,8 +8460,12 @@ fn resolve_semantic_decision_for_context(
             }
         }
     };
-    let provider = effective_resolved.as_ref().map(|value| value.provider_id.as_str());
-    let model = effective_resolved.as_ref().map(|value| value.model.as_str());
+    let provider = effective_resolved
+        .as_ref()
+        .map(|value| value.provider_id.as_str());
+    let model = effective_resolved
+        .as_ref()
+        .map(|value| value.model.as_str());
     if steering_control {
         semantic_decision::resolve_steering_model_value(
             model_value,
@@ -8476,6 +8477,61 @@ fn resolve_semantic_decision_for_context(
     } else {
         semantic_decision::resolve_model_value(model_value, &capabilities, active, provider, model)
     }
+}
+
+/// If the thread has an open HITL wait and `prompt` resolves it, consume the wait and
+/// return the harness resume decision. Otherwise `None` (normal semantic path).
+fn try_resume_open_wait(
+    state: &AppState,
+    thread_id: &str,
+    prompt: &str,
+    active: Option<&local_first_task_runtime::ObjectiveContractRecord>,
+) -> Option<semantic_decision::ValidatedSemanticDecision> {
+    let store = lock_store(state).ok()?;
+    let wait = store.open_hitl_wait(thread_id).ok().flatten()?;
+    if !hitl_resume::prompt_resolves_hitl_wait(prompt, &wait) {
+        return None;
+    }
+    let decision = hitl_resume::hitl_resume_semantic_decision(&wait, prompt, active);
+    if let Err(error) = store.resolve_open_hitl_wait(thread_id, &wait.wait_id) {
+        eprintln!("[hitl] failed to resolve wait {}: {error}", wait.wait_id);
+    }
+    if let Ok(mut map) = state.hitl_resume_by_thread.lock() {
+        map.insert(
+            thread_id.to_string(),
+            HitlResumeTurnContext {
+                wait,
+                resolution: prompt.trim().to_string(),
+            },
+        );
+    }
+    Some(decision)
+}
+
+/// Backward-compatible name used at the semantic short-circuit site.
+#[allow(dead_code)]
+fn try_bind_choice_hitl_resume(
+    state: &AppState,
+    thread_id: &str,
+    prompt: &str,
+    active: Option<&local_first_task_runtime::ObjectiveContractRecord>,
+) -> Option<semantic_decision::ValidatedSemanticDecision> {
+    try_resume_open_wait(state, thread_id, prompt, active)
+}
+
+/// Per-turn stash: open Choice wait just consumed for this thread's next generate.
+#[derive(Debug, Clone)]
+struct HitlResumeTurnContext {
+    wait: hitl_resume::OpenHitlWait,
+    resolution: String,
+}
+
+fn take_hitl_resume_turn_context(
+    state: &AppState,
+    thread_id: Option<&str>,
+) -> Option<HitlResumeTurnContext> {
+    let thread_id = thread_id.filter(|id| !id.trim().is_empty())?;
+    state.hitl_resume_by_thread.lock().ok()?.remove(thread_id)
 }
 
 /// Error classes eligible for the semantic-decision auth/availability fallback:
@@ -9649,7 +9705,8 @@ fn route_capability_from_semantic(
                 }
             } else {
                 CapabilityRouteDecision::AgentLoop {
-                    reason: "Validated atomic capability is unavailable; safe fallback.".to_string(),
+                    reason: "Validated atomic capability is unavailable; safe fallback."
+                        .to_string(),
                 }
             }
         }
@@ -9758,7 +9815,11 @@ fn thread_user_message_count(snapshot: &ChatMessagesSnapshot) -> usize {
 /// shape of `active_routing_binding` just above.
 fn thread_user_message_count_fail_open(state: &AppState, thread_id: Option<&str>) -> usize {
     thread_id
-        .and_then(|tid| lock_store(state).ok().and_then(|store| store.messages(tid).ok()))
+        .and_then(|tid| {
+            lock_store(state)
+                .ok()
+                .and_then(|store| store.messages(tid).ok())
+        })
         .map(|snapshot| thread_user_message_count(&snapshot))
         .unwrap_or(0)
 }
@@ -10447,7 +10508,11 @@ fn upsert_runtime_plan_memory_from_state(
         eprintln!("runtime plan skipped: thread scope could not be resolved");
         return;
     };
-    let status = if plan_is_settled(plan) { "settled" } else { "open" };
+    let status = if plan_is_settled(plan) {
+        "settled"
+    } else {
+        "open"
+    };
     let plan_json = serde_json::Value::Array(plan.to_vec());
     let canonical_write_ok = state
         .task_store
@@ -13515,18 +13580,22 @@ fn apply_patch_in_project(
         }
         std::fs::write(p, c).map_err(|e| format!("could not write a patched file: {e}"))?;
         if let Ok(rel) = p.strip_prefix(&root) {
-            applied
-                .borrow_mut()
-                .push((rel.to_string_lossy().replace('\\', "/"), c.to_string(), false));
+            applied.borrow_mut().push((
+                rel.to_string_lossy().replace('\\', "/"),
+                c.to_string(),
+                false,
+            ));
         }
         Ok(())
     };
     let mut remove = |p: &std::path::Path| -> Result<(), String> {
         std::fs::remove_file(p).map_err(|e| format!("could not delete a patched file: {e}"))?;
         if let Ok(rel) = p.strip_prefix(&root) {
-            applied
-                .borrow_mut()
-                .push((rel.to_string_lossy().replace('\\', "/"), String::new(), true));
+            applied.borrow_mut().push((
+                rel.to_string_lossy().replace('\\', "/"),
+                String::new(),
+                true,
+            ));
         }
         Ok(())
     };
@@ -13630,7 +13699,10 @@ const PROJECT_CMD_MAX_OUTPUT_CHARS: usize = 16_000;
 /// by the profile generator itself. Deliberate, documented deviation from
 /// Codex-pure (project+tmp only): Codex relies on on-failure escalation to stay
 /// usable; until we have that, we widen writable roots to keep build tooling working.
-fn workspace_write_roots(project_root: &std::path::Path, home: Option<&str>) -> Vec<std::path::PathBuf> {
+fn workspace_write_roots(
+    project_root: &std::path::Path,
+    home: Option<&str>,
+) -> Vec<std::path::PathBuf> {
     let mut roots = vec![project_root.to_path_buf()];
     if let Some(home) = home {
         for cache in [".cache", ".config", ".local", ".npm", ".cargo"] {
@@ -13656,7 +13728,10 @@ fn render_project_output(output: &std::process::Output) -> String {
         .code()
         .map(|c| c.to_string())
         .unwrap_or_else(|| "terminated by signal".to_string());
-    let body: String = combined.chars().take(PROJECT_CMD_MAX_OUTPUT_CHARS).collect();
+    let body: String = combined
+        .chars()
+        .take(PROJECT_CMD_MAX_OUTPUT_CHARS)
+        .collect();
     let body = if body.trim().is_empty() {
         "(no output)"
     } else {
@@ -14485,8 +14560,8 @@ do NOT recreate them, EXTEND/reuse the right ones; use query_code_graph for deta
 /// A memory candidate for hybrid ranking: its rank in the lexical (FTS) and/or
 /// semantic (dense) passes, plus importance (0..1) and age. Either rank may be absent
 /// (matched by only one pass).
+#[cfg(test)]
 struct MemoryCandidate {
-    reference: String,
     fts_rank: Option<usize>,
     dense_rank: Option<usize>,
     importance: f32,
@@ -14514,6 +14589,7 @@ fn elapsed_ms(start: std::time::Instant) -> u64 {
     start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
 }
 
+#[cfg(test)]
 fn memory_recall_timing_trace_line(timing: &MemoryRecallTiming) -> String {
     format!(
         "memory recall: total_ms={} lock_wait_ms={} profile_ms={} open_loops_ms={} \
@@ -14675,14 +14751,15 @@ async fn embed_query_for_memory_recall(
         memory_query_embedding_timeout(),
         embed_text(http, query, &usage),
     )
-    .await {
-            Ok(vector) => vector,
-            Err(_) => {
-                timing.query_embedding_timed_out = true;
-                timing.query_embedding_ms = Some(elapsed_ms(embedding_start));
-                return None;
-            }
-        };
+    .await
+    {
+        Ok(vector) => vector,
+        Err(_) => {
+            timing.query_embedding_timed_out = true;
+            timing.query_embedding_ms = Some(elapsed_ms(embedding_start));
+            return None;
+        }
+    };
     timing.query_embedding_ms = Some(elapsed_ms(embedding_start));
     if let Some(vector) = result.as_ref() {
         if let Ok(mut cache) = memory_query_embedding_cache().lock() {
@@ -14701,6 +14778,7 @@ async fn embed_query_for_memory_recall(
 /// importance and recency so relevance still leads but a crucial/fresh memory edges out
 /// an equally-relevant trivial/stale one. Weights are tuned so importance/recency act as
 /// refinements (~one RRF position), not overrides.
+#[cfg(test)]
 fn hybrid_memory_score(c: &MemoryCandidate) -> f32 {
     const K: f32 = 60.0;
     let rrf = c.fts_rank.map(|r| 1.0 / (K + r as f32)).unwrap_or(0.0)
@@ -14711,6 +14789,7 @@ fn hybrid_memory_score(c: &MemoryCandidate) -> f32 {
 }
 
 /// Age of a memory in days from its `created_at` (`unix:<secs>` or `<secs>`).
+#[cfg(test)]
 fn memory_age_days(created_at: &str, now_secs: i64) -> f32 {
     let s = created_at.strip_prefix("unix:").unwrap_or(created_at);
     let secs: i64 = s
@@ -14812,7 +14891,9 @@ fn recall_memory(state: &AppState, query: &str, vault_value_requested: bool) -> 
                             MemoryCollectionKey::Episodes,
                         ]
                         .into_iter()
-                        .find(|collection| collection.matches_candidate(&item.memory_type, &item.metadata))
+                        .find(|collection| {
+                            collection.matches_candidate(&item.memory_type, &item.metadata)
+                        })
                         .unwrap_or(MemoryCollectionKey::Knowledge);
                         local_first_subagents::RecallStreamHit {
                             r#ref: item.reference.to_string(),
@@ -14881,15 +14962,13 @@ fn recall_memory(state: &AppState, query: &str, vault_value_requested: bool) -> 
     let scope = if in_project { "project" } else { "personal" }.to_string();
     let has_hits = !lines.is_empty();
     let response = match lock_vault_store(state) {
-        Ok(vault_store) => {
-            recall_memory_response_with_vault_fallback(
-                &vault_store,
-                query,
-                lines,
-                in_project,
-                vault_value_requested,
-            )
-        }
+        Ok(vault_store) => recall_memory_response_with_vault_fallback(
+            &vault_store,
+            query,
+            lines,
+            in_project,
+            vault_value_requested,
+        ),
         Err(_) if lines.is_empty() => format!("No memories relevant to «{query}»."),
         Err(_) if in_project => format!("Memories relevant to THIS project:\n{}", lines.join("\n")),
         Err(_) => format!("Relevant memories from memory:\n{}", lines.join("\n")),
@@ -14944,7 +15023,10 @@ fn recall_memory_response_with_vault_fallback(
                 record.category, record.label, record.redacted_preview, record.id
             );
             if vault_value_requested {
-                format!("{metadata}\n  reveal_card: {}", vault_reveal_marker(&record))
+                format!(
+                    "{metadata}\n  reveal_card: {}",
+                    vault_reveal_marker(&record)
+                )
             } else {
                 metadata
             }
@@ -15073,17 +15155,17 @@ Return ONLY the rewritten prompt, as plain text, without preamble, quotes or exp
     )
     .await
     .map_err(|error| {
-            tracing::warn!(
-                target: "chat::improve_prompt",
-                %error, model = %model, %base_url,
-                "improve-prompt LLM request errored"
-            );
-            GatewayError {
-                status: StatusCode::BAD_GATEWAY,
-                code: "improve_prompt_failed",
-                message: format!("Provider unreachable: {error}"),
-            }
-        })?;
+        tracing::warn!(
+            target: "chat::improve_prompt",
+            %error, model = %model, %base_url,
+            "improve-prompt LLM request errored"
+        );
+        GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "improve_prompt_failed",
+            message: format!("Provider unreachable: {error}"),
+        }
+    })?;
     if !(200..300).contains(&response.status) {
         let status = response.status;
         let body: String = response.body.to_string().chars().take(300).collect();
@@ -15193,7 +15275,8 @@ without numbering, dashes or quotes. Return ONLY the 3 lines.";
         Some(std::time::Duration::from_secs(25)),
         system.chars().count().saturating_add(user.chars().count()),
     )
-    .await {
+    .await
+    {
         Ok(response) => response,
         Err(error) => {
             tracing::warn!(
@@ -15336,7 +15419,8 @@ language as the user. Only the title, without quotes, final punctuation or prefi
         Some(std::time::Duration::from_secs(30)),
         system.chars().count().saturating_add(user.chars().count()),
     )
-    .await {
+    .await
+    {
         Ok(response) if (200..300).contains(&response.status) => {
             let body = response.body;
             let extracted = Some(&body)
@@ -15358,11 +15442,7 @@ language as the user. Only the title, without quotes, final punctuation or prefi
                 })
                 .unwrap_or_default();
             if extracted.trim().is_empty() {
-                let snippet: String = body
-                    .to_string()
-                    .chars()
-                    .take(300)
-                    .collect();
+                let snippet: String = body.to_string().chars().take(300).collect();
                 tracing::warn!(
                     target: "chat::autotitle",
                     model = %model, %base_url, body = %snippet,
@@ -15895,19 +15975,24 @@ fn build_usage_pricing_snapshot(store: &usage_store::UsageStore) -> usage_pricin
                 source: price.source,
                 version: price.version,
             });
-            let manual_price = manual.get(&model.id).map(|price| usage_pricing::UsagePrice {
-                input_microusd_per_million: price.input_microusd_per_million,
-                output_microusd_per_million: price.output_microusd_per_million,
-                reasoning_microusd_per_million: price.reasoning_microusd_per_million,
-                cache_read_microusd_per_million: price.cache_read_microusd_per_million,
-                cache_write_microusd_per_million: price.cache_write_microusd_per_million,
-                source: "manual_policy".to_string(),
-                version: "manual-policy-v1".to_string(),
-            });
+            let manual_price = manual
+                .get(&model.id)
+                .map(|price| usage_pricing::UsagePrice {
+                    input_microusd_per_million: price.input_microusd_per_million,
+                    output_microusd_per_million: price.output_microusd_per_million,
+                    reasoning_microusd_per_million: price.reasoning_microusd_per_million,
+                    cache_read_microusd_per_million: price.cache_read_microusd_per_million,
+                    cache_write_microusd_per_million: price.cache_write_microusd_per_million,
+                    source: "manual_policy".to_string(),
+                    version: "manual-policy-v1".to_string(),
+                });
             snapshot.insert(
                 provider.id.clone(),
                 model.id,
-                usage_pricing::ModelPricing { catalog, manual: manual_price },
+                usage_pricing::ModelPricing {
+                    catalog,
+                    manual: manual_price,
+                },
             );
         }
         for (model_id, price) in manual {
@@ -15922,7 +16007,8 @@ fn build_usage_pricing_snapshot(store: &usage_store::UsageStore) -> usage_pricin
                             output_microusd_per_million: price.output_microusd_per_million,
                             reasoning_microusd_per_million: price.reasoning_microusd_per_million,
                             cache_read_microusd_per_million: price.cache_read_microusd_per_million,
-                            cache_write_microusd_per_million: price.cache_write_microusd_per_million,
+                            cache_write_microusd_per_million: price
+                                .cache_write_microusd_per_million,
                             source: "manual_policy".to_string(),
                             version: "manual-policy-v1".to_string(),
                         }),
@@ -16026,9 +16112,7 @@ fn privacy_guard_model_qualification_rank(model: &str) -> Option<usize> {
         .position(|qualified| model.eq_ignore_ascii_case(qualified))
 }
 
-fn resolve_privacy_guard_role(
-    registry: &ProviderRegistry,
-) -> Option<model_registry::ResolvedRole> {
+fn resolve_privacy_guard_role(registry: &ProviderRegistry) -> Option<model_registry::ResolvedRole> {
     if let Some(resolved) = registry.resolve_role("privacy_guard")
         && provider_endpoint_is_local(&resolved.base_url)
         && !model_id_is_cloud(&resolved.model)
@@ -16148,7 +16232,8 @@ async fn classify_sensitive_input_with_privacy_guard_model(
             .count()
             .saturating_add(text.chars().count()),
     )
-    .await {
+    .await
+    {
         Some(response) => response,
         None => {
             tracing::warn!(
@@ -16267,7 +16352,8 @@ failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, 
         "step_completion",
         system.chars().count().saturating_add(user.chars().count()),
     )
-    .await {
+    .await
+    {
         Some(response) => response,
         None => {
             tracing::warn!(
@@ -16367,7 +16453,8 @@ request is COMPLETE. Reply with STRICT JSON only, no prose: \
         "completion_judge",
         system.chars().count().saturating_add(user.chars().count()),
     )
-    .await {
+    .await
+    {
         Some(response) => response,
         None => {
             tracing::warn!(
@@ -16548,7 +16635,11 @@ No preamble, no headings.";
         .unwrap_or("")
         .trim()
         .to_string();
-    if summary.is_empty() { None } else { Some(summary) }
+    if summary.is_empty() {
+        None
+    } else {
+        Some(summary)
+    }
 }
 
 /// F3 context compaction: collapse the messages a just-completed plan step produced into
@@ -17566,9 +17657,7 @@ pub(crate) async fn collect_ollama_native_stream(
     // Canonical assembly (F0 / ADR 0019), shared with the OpenAI collector. `reasoning` is the
     // `message.thinking` trace accumulated by `process_ollama_line` (thinking models like
     // deepseek-r1), so the reasoning-fallback recovers an answer when content is empty.
-    let mut response = model_normalize::assistant_response(
-        content, reasoning, tool_calls, "stop",
-    );
+    let mut response = model_normalize::assistant_response(content, reasoning, tool_calls, "stop");
     if let Some(object) = response.as_object_mut() {
         if let Some(count) = prompt_eval_count {
             object.insert("prompt_eval_count".to_string(), count.into());
@@ -17736,7 +17825,9 @@ fn auth_fallback_resolved_role(failing_model: &str) -> Option<ResolvedRole> {
     })
 }
 
-pub(crate) fn auth_fallback_config(failing_model: &str) -> Option<(String, String, Option<String>)> {
+pub(crate) fn auth_fallback_config(
+    failing_model: &str,
+) -> Option<(String, String, Option<String>)> {
     let fallback = auth_fallback_resolved_role(failing_model)?;
     let api_key = provider_api_key(&fallback.provider_id).or_else(env_inference_api_key);
     Some((fallback.base_url, fallback.model, api_key))
@@ -17751,9 +17842,7 @@ fn semantic_decision_auth_fallback_resolved_role_from_registry(
 ) -> Option<ResolvedRole> {
     auth_fallback_resolved_role_from_registry(registry, failing_model, provider_has_key).and_then(
         |fallback| {
-            if fallback.base_url.contains("127.0.0.1")
-                || fallback.base_url.contains("localhost")
-            {
+            if fallback.base_url.contains("127.0.0.1") || fallback.base_url.contains("localhost") {
                 local_semantic_decision_fallback(registry, failing_model).or(Some(fallback))
             } else {
                 Some(fallback)
@@ -17794,6 +17883,7 @@ fn local_semantic_decision_fallback(
     None
 }
 
+#[allow(dead_code)]
 fn semantic_decision_auth_fallback_resolved_role(failing_model: &str) -> Option<ResolvedRole> {
     let registry = load_provider_registry();
     semantic_decision_auth_fallback_resolved_role_from_registry(
@@ -17874,6 +17964,7 @@ fn browser_openai_stream_config() -> Option<(String, String, Option<String>)> {
 /// No fallback to the orchestrator, unlike the other roles: a chat model that cannot see is precisely
 /// the case we are covering, so falling back to it would be a no-op that fails at the provider. `None`
 /// means "nobody here can look at an image" — an answer the caller must handle, not paper over.
+#[allow(dead_code)]
 fn vision_openai_config() -> Option<(String, String, Option<String>)> {
     let resolved = load_provider_registry().resolve_role("vision")?;
     let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
@@ -17893,7 +17984,10 @@ fn vision_model_candidates() -> Vec<vision::VisionModel> {
     let registry = load_provider_registry();
     let mut out: Vec<vision::VisionModel> = Vec::new();
     let mut push = |provider_id: &str, base_url: String, model: String| {
-        if out.iter().any(|c| c.base_url == base_url && c.model == model) {
+        if out
+            .iter()
+            .any(|c| c.base_url == base_url && c.model == model)
+        {
             return;
         }
         let api_key = provider_api_key(provider_id).or_else(env_inference_api_key);
@@ -18120,9 +18214,11 @@ fn chat_manager_browser_budget() -> local_first_engine::BrowserBudget {
 // success) plus the change-approach hint the loop sends when the same call repeats — controls that
 // measure progress rather than elapsed time. This bound only exists so a pathological loop cannot run
 // unbounded; reaching it means ~15 minutes of work that never stalled for 90s.
+#[allow(dead_code)]
 const BROWSE_SUBAGENT_MAX_ELAPSED_MS: u64 = 900_000;
 const BROWSE_SUBAGENT_MAX_NAVS: usize = 8;
 
+#[allow(dead_code)]
 fn browse_subagent_budget() -> local_first_engine::BrowserBudget {
     let mut budget = chat_browser_budget();
     // Upper clamp raised to 1h so a deliberately long autonomous run can be configured; the default
@@ -18290,7 +18386,10 @@ fn browser_done_tool_schema() -> serde_json::Value {
     })
 }
 
-fn initial_manager_tool_schemas_for_test(_read_only: bool, _contact_only: bool) -> Vec<serde_json::Value> {
+fn initial_manager_tool_schemas_for_test(
+    _read_only: bool,
+    _contact_only: bool,
+) -> Vec<serde_json::Value> {
     vec![browse_tool_schema()]
 }
 
@@ -18320,18 +18419,36 @@ mod host_computer_tool_contract_tests {
     #[test]
     fn manager_schema_is_single_bounded_delegate() {
         let schema = use_computer_tool_schema();
-        assert_eq!(schema.pointer("/function/name").and_then(serde_json::Value::as_str), Some("use_computer"));
-        assert_eq!(schema.pointer("/function/parameters/additionalProperties"), Some(&serde_json::Value::Bool(false)));
+        assert_eq!(
+            schema
+                .pointer("/function/name")
+                .and_then(serde_json::Value::as_str),
+            Some("use_computer")
+        );
+        assert_eq!(
+            schema.pointer("/function/parameters/additionalProperties"),
+            Some(&serde_json::Value::Bool(false))
+        );
         let serialized = schema.to_string();
-        for granular in ["computer_list_apps", "computer_get_state", "computer_action"] {
+        for granular in [
+            "computer_list_apps",
+            "computer_get_state",
+            "computer_action",
+        ] {
             assert!(!serialized.contains(granular));
         }
     }
 }
 
-fn computer_list_apps_tool_schema() -> serde_json::Value { serde_json::json!({"type":"function","function":{"name":"computer_list_apps","description":"List only Mac applications granted for this workspace.","parameters":{"type":"object","additionalProperties":false,"properties":{}}}}) }
-fn computer_get_state_tool_schema() -> serde_json::Value { serde_json::json!({"type":"function","function":{"name":"computer_get_state","description":"Read a fresh bounded accessibility snapshot for a granted running app.","parameters":{"type":"object","additionalProperties":false,"required":["pid"],"properties":{"pid":{"type":"integer","minimum":1}}}}}) }
-fn computer_action_tool_schema() -> serde_json::Value { serde_json::json!({"type":"function","function":{"name":"computer_action","description":"Perform one semantic action using an element from the latest snapshot. After success, read a new snapshot. Text entry and consequential actions stop for user approval.","parameters":{"type":"object","additionalProperties":false,"required":["target","action"],"properties":{"target":{"type":"object","additionalProperties":false,"required":["snapshot_id","generation","index"],"properties":{"snapshot_id":{"type":"string"},"generation":{"type":"integer"},"index":{"type":"integer"}}},"action":{"type":"string","enum":["press","set_value","show_menu","increment","decrement","confirm","cancel","raise","scroll_up","scroll_down"]},"value":{"type":["string","null"],"maxLength":20000}}}}}) }
+fn computer_list_apps_tool_schema() -> serde_json::Value {
+    serde_json::json!({"type":"function","function":{"name":"computer_list_apps","description":"List only Mac applications granted for this workspace.","parameters":{"type":"object","additionalProperties":false,"properties":{}}}})
+}
+fn computer_get_state_tool_schema() -> serde_json::Value {
+    serde_json::json!({"type":"function","function":{"name":"computer_get_state","description":"Read a fresh bounded accessibility snapshot for a granted running app.","parameters":{"type":"object","additionalProperties":false,"required":["pid"],"properties":{"pid":{"type":"integer","minimum":1}}}}})
+}
+fn computer_action_tool_schema() -> serde_json::Value {
+    serde_json::json!({"type":"function","function":{"name":"computer_action","description":"Perform one semantic action using an element from the latest snapshot. After success, read a new snapshot. Text entry and consequential actions stop for user approval.","parameters":{"type":"object","additionalProperties":false,"required":["target","action"],"properties":{"target":{"type":"object","additionalProperties":false,"required":["snapshot_id","generation","index"],"properties":{"snapshot_id":{"type":"string"},"generation":{"type":"integer"},"index":{"type":"integer"}}},"action":{"type":"string","enum":["press","set_value","show_menu","increment","decrement","confirm","cancel","raise","scroll_up","scroll_down"]},"value":{"type":["string","null"],"maxLength":20000}}}}})
+}
 
 fn browser_navigate_tool_schema() -> serde_json::Value {
     serde_json::json!({
@@ -18530,7 +18647,9 @@ fn browser_act_error_hint(error: &str) -> &'static str {
         " HINT: you cannot obtain a Payment Approval Card yourself. Stop and report the blocked payment step with the evidence you already have."
     } else if e.contains("browser_unsupported_committing_action") {
         " HINT: use a schema kind (click/type/fill/select/press/hover/hold/scroll/wait) with a [ref=...] from the snapshot — no coordinates and no CSS selector."
-    } else if e.contains("unknown action kind") || e.contains("invalid_request") && e.contains("kind") {
+    } else if e.contains("unknown action kind")
+        || e.contains("invalid_request") && e.contains("kind")
+    {
         " HINT: browser_act needs a 'kind' (one of click/type/fill/select/press/hover/hold/scroll/wait) AND a 'ref' from the snapshot, e.g. {\"kind\":\"click\",\"ref\":\"e5\"}. Retry with both."
     } else if e.contains("tab not found") {
         " HINT: that looks like an element ref, not a tab. Put element refs in 'ref' (e.g. \"ref\":\"e83\"); 'target' is ONLY a tab id from browser_tabs. Retry with kind + ref."
@@ -18546,15 +18665,26 @@ fn browser_act_error_hint(error: &str) -> &'static str {
 // `single_action_rejects_unsupported_execution_before_payment_claim`) so both
 // reject sites emit byte-identical text — one message to keep in sync, not two
 // literals that can silently drift apart.
-const BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR: &str =
-    "BROWSER_UNSUPPORTED_COMMITTING_ACTION: this action is not executable (an unrecognized kind, coordinate clicks, or a selector field bypassing the ref) — use a schema kind with a specific [ref=…] control instead";
+const BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR: &str = "BROWSER_UNSUPPORTED_COMMITTING_ACTION: this action is not executable (an unrecognized kind, coordinate clicks, or a selector field bypassing the ref) — use a schema kind with a specific [ref=…] control instead";
 
 /// The `kind` values the `browser_act` schema exposes (mirrors `browser_act_tool_schema`'s
 /// two `"enum"` literals — kept in sync by hand, same convention as the shared error
 /// text above, since the schema itself must stay a plain JSON literal for the model).
 const BROWSER_ACT_SCHEMA_KINDS: &[&str] = &[
-    "click", "type", "fill", "select", "select_option", "press", "press_key", "hover", "hold",
-    "scroll", "scrollIntoView", "wait", "set_date", "set_time",
+    "click",
+    "type",
+    "fill",
+    "select",
+    "select_option",
+    "press",
+    "press_key",
+    "hover",
+    "hold",
+    "scroll",
+    "scrollIntoView",
+    "wait",
+    "set_date",
+    "set_time",
 ];
 
 /// True when `action` carries only fields the `browser_act` schema exposes for
@@ -18706,7 +18836,9 @@ fn normalize_browser_action_bundle(
     payment_floor_refs: &std::collections::HashSet<String>,
     page_focus_payment_context: bool,
 ) -> Option<String> {
-    let actions = action.get("actions").and_then(serde_json::Value::as_array)?;
+    let actions = action
+        .get("actions")
+        .and_then(serde_json::Value::as_array)?;
     if actions.len() > 4 {
         return Some(
             "Browser action bundle rejected: use at most four actions from the current observation."
@@ -18726,7 +18858,9 @@ fn normalize_browser_action_bundle(
         if nested.get("kind").and_then(serde_json::Value::as_str) == Some("batch")
             || nested.get("actions").is_some()
         {
-            return Some("Browser action bundle rejected: nested bundles are not allowed.".to_string());
+            return Some(
+                "Browser action bundle rejected: nested bundles are not allowed.".to_string(),
+            );
         }
         // Generalizes the former clickCoords-only reject (design 1.3): any kind
         // outside the schema enum, or any item carrying a non-schema `selector`
@@ -18765,10 +18899,16 @@ fn normalize_browser_action_bundle(
         }
     }
     if let Some(obj) = action.as_object_mut() {
-        obj.insert("kind".to_string(), serde_json::Value::String("batch".to_string()));
+        obj.insert(
+            "kind".to_string(),
+            serde_json::Value::String("batch".to_string()),
+        );
         obj.insert("chatBundle".to_string(), serde_json::Value::Bool(true));
     }
-    if let Some(actions) = action.get_mut("actions").and_then(serde_json::Value::as_array_mut) {
+    if let Some(actions) = action
+        .get_mut("actions")
+        .and_then(serde_json::Value::as_array_mut)
+    {
         for nested in actions {
             if let Some(obj) = nested.as_object_mut() {
                 obj.entry("target_id".to_string())
@@ -18789,7 +18929,10 @@ fn normalize_browser_action_bundle(
 /// versions.
 fn is_stale_ref_error(error: &str) -> bool {
     let e = error.to_lowercase();
-    e.contains("stale") || e.contains("detached") || e.contains("not attached") || e.contains("no node found")
+    e.contains("stale")
+        || e.contains("detached")
+        || e.contains("not attached")
+        || e.contains("no node found")
 }
 
 fn stale_ref_recovery_message(old_ref: Option<&str>, snapshot: &str) -> String {
@@ -18952,6 +19095,7 @@ fn homuncoder_skill_ids() -> std::collections::HashSet<String> {
 }
 
 /// Loads an installed skill's SKILL.md body (instructions) by id.
+#[allow(dead_code)]
 fn load_skill_body(id: &str) -> Option<String> {
     load_skill_body_and_sensitive(id).map(|(body, _)| body)
 }
@@ -18959,9 +19103,7 @@ fn load_skill_body(id: &str) -> Option<String> {
 /// Loads a skill's adapted body PLUS its declared sensitive categories in one pass
 /// (ADR 0023 Step 5 / Fase 0.3). `use_skill` uses the body to show instructions and
 /// the categories to arm the turn's force-confirm (`ctx.active_sensitive`).
-fn load_skill_body_and_sensitive(
-    id: &str,
-) -> Option<(String, Vec<skills::SensitiveCategory>)> {
+fn load_skill_body_and_sensitive(id: &str) -> Option<(String, Vec<skills::SensitiveCategory>)> {
     let dir = skills_dir().ok()?;
     let disabled = load_skills_disabled();
     let origins = load_skills_origins();
@@ -19336,6 +19478,7 @@ fn deliverable_design_components(parsed: &serde_json::Value) -> Vec<String> {
     deliverable_design_components_from_value(parsed.get("design_components"))
 }
 
+#[cfg(test)]
 fn resolved_deliverable_design_components(
     parsed: &serde_json::Value,
     template: Option<&str>,
@@ -19376,6 +19519,7 @@ fn deliverable_design_profile(parsed: &serde_json::Value) -> Option<String> {
         .filter(|value| DELIVERABLE_DESIGN_PROFILES.contains(&value.as_str()))
 }
 
+#[cfg(test)]
 fn resolved_deliverable_design_profile(
     parsed: &serde_json::Value,
     template: Option<&str>,
@@ -20170,13 +20314,19 @@ fn deck_template_pack(entry: Option<&TemplateCatalogEntry>) -> Option<&TemplateC
 /// a missing slides array or absent chrome leaves the deck untouched.
 fn apply_deck_template_chrome(deck: &mut serde_json::Value, example: &serde_json::Value) {
     let pack_slides = example.get("slides").and_then(|s| s.as_array());
-    let Some(pack_slides) = pack_slides else { return };
+    let Some(pack_slides) = pack_slides else {
+        return;
+    };
     let pack_for = |layout: &str| -> Option<&serde_json::Value> {
-        pack_slides.iter().find(|s| s.get("layout").and_then(|l| l.as_str()) == Some(layout))
+        pack_slides
+            .iter()
+            .find(|s| s.get("layout").and_then(|l| l.as_str()) == Some(layout))
     };
     let pack_cover = pack_for("cover");
     let pack_section = pack_for("section");
-    let Some(slides) = deck.get_mut("slides").and_then(|s| s.as_array_mut()) else { return };
+    let Some(slides) = deck.get_mut("slides").and_then(|s| s.as_array_mut()) else {
+        return;
+    };
     for slide in slides.iter_mut() {
         let layout = slide.get("layout").and_then(|l| l.as_str()).unwrap_or("");
         let pack = match layout {
@@ -20682,8 +20832,8 @@ an AI. The output must be ready to save as a deliverable artifact.{directives}"
         "document_markdown",
         system.chars().count().saturating_add(brief.chars().count()),
     )
-        .await
-        .ok_or_else(|| "document provider unreachable".to_string())?;
+    .await
+    .ok_or_else(|| "document provider unreachable".to_string())?;
     let code = resp.status;
     if !(200..300).contains(&code) {
         return Err(format!(
@@ -20749,7 +20899,14 @@ async fn generate_templated_document_json(
                  Return the COMPLETE JSON again with EVERY slot key filled; never omit one."
             );
             let retry_output = document_content::generate_document_content(
-                http, base_url, model, api_key, brief, language, skeleton, &corrective,
+                http,
+                base_url,
+                model,
+                api_key,
+                brief,
+                language,
+                skeleton,
+                &corrective,
             )
             .await?;
             document_content::assemble_doc_json(title_fallback, skeleton, &retry_output).map_err(
@@ -21625,7 +21782,10 @@ fn doc_block_to_docx_xml(block: &serde_json::Value) -> String {
                     (false, false) => format!("{label} — {subheading}"),
                 };
                 if !meta.is_empty() {
-                    out.push_str(&docx_paragraph_xml(None, &docx_text_run(&meta, false, true)));
+                    out.push_str(&docx_paragraph_xml(
+                        None,
+                        &docx_text_run(&meta, false, true),
+                    ));
                 }
                 for point in entry
                     .get("points")
@@ -21773,7 +21933,10 @@ fn doc_block_to_docx_xml(block: &serde_json::Value) -> String {
                     (true, false) => tags,
                     (false, false) => format!("{label}: {tags}"),
                 };
-                out.push_str(&docx_paragraph_xml(None, &docx_text_run(&line, false, false)));
+                out.push_str(&docx_paragraph_xml(
+                    None,
+                    &docx_text_run(&line, false, false),
+                ));
             }
             out
         }
@@ -21782,7 +21945,10 @@ fn doc_block_to_docx_xml(block: &serde_json::Value) -> String {
         // fidelity (the designed HTML/PDF is the fidelity path).
         "letterhead" => {
             let mut out = docx_eyebrow_paragraph(&doc_block_field(block, "eyebrow"));
-            out.push_str(&docx_normal_paragraph(&doc_block_field(block, "organization")));
+            out.push_str(&docx_normal_paragraph(&doc_block_field(
+                block,
+                "organization",
+            )));
             out.push_str(&docx_normal_paragraph(&doc_block_field(
                 block,
                 "contact_line",
@@ -21860,7 +22026,10 @@ fn doc_block_to_docx_xml(block: &serde_json::Value) -> String {
 /// `make_templated_document`), which produces the DOCX gateway-side from the
 /// same doc.json the container renders to HTML/PDF.
 fn doc_json_to_docx(doc: &serde_json::Value) -> Result<Vec<u8>, String> {
-    let title = doc.get("title").and_then(|t| t.as_str()).unwrap_or("Document");
+    let title = doc
+        .get("title")
+        .and_then(|t| t.as_str())
+        .unwrap_or("Document");
     let blocks = doc.get("blocks").and_then(|b| b.as_array());
     let mut document_body = String::new();
     match blocks {
@@ -22484,7 +22653,8 @@ struct BrowserToolCtx<'a> {
     // (Build1 Fix 3 — mirrors `payment_context_by_target` below; a single global
     // set let observing tab A clobber tab B's floor). Raises (never lowers) the
     // effective action class; see `browser_safety::effective_action_class`.
-    payment_floor_refs: &'a mut std::collections::HashMap<String, std::collections::HashSet<String>>,
+    payment_floor_refs:
+        &'a mut std::collections::HashMap<String, std::collections::HashSet<String>>,
     // Per-target_id payment context (focus flag + robust last-acted-floored flag;
     // fixes IMPORTANT D — a single global flag let a snapshot of tab A clear tab B's
     // payment context). Floors a ref-less committing action (Enter/Return) the same
@@ -22504,6 +22674,7 @@ struct BrowserToolCtx<'a> {
     thread_id: Option<&'a str>,
     prompt: &'a str,
     read_only: bool,
+    #[allow(dead_code)]
     channel_owner: bool,
     // Durable sink for redacted browser-protocol boundary metrics (C2). Borrowed from the owning
     // `GatewayBrowserExecutor` so every boundary this ctx crosses persists the same handle — a real
@@ -22557,7 +22728,6 @@ struct ChatToolCtx<'a> {
     active_sensitive: Vec<crate::skills::SensitiveCategory>,
 }
 
-
 /// Emit an approval confirmation card and return the model-facing "AWAITING" string.
 /// Verbatim unification of the MCP and Composio confirmation blocks — the only
 /// per-family differences are the marker delimiters and the human label. The `card`
@@ -22576,8 +22746,7 @@ async fn emit_approval_card(
     label: &str,
     args_val: &serde_json::Value,
 ) -> String {
-    let approval =
-        create_pending_approval(ctx.state, name, args_val, label, ctx.thread_id, true);
+    let approval = create_pending_approval(ctx.state, name, args_val, label, ctx.thread_id, true);
     let marker = match approval.as_ref() {
         Some(approval) => serde_json::json!({
             "approval_id": approval.approval_id,
@@ -22760,10 +22929,7 @@ fn resolved_skill_confirmations(
     thread_id: Option<&str>,
 ) -> Vec<crate::skills::SensitiveCategory> {
     let ws = workspace_record_for_thread(state, thread_id).and_then(|w| w.skill_confirmations);
-    resolve_skill_confirmations_core(
-        ws.as_deref(),
-        &load_runtime_settings().skill_confirmations,
-    )
+    resolve_skill_confirmations_core(ws.as_deref(), &load_runtime_settings().skill_confirmations)
 }
 
 /// The approval axis: env `HOMUN_APPROVAL_POLICY` > per-workspace override > persisted
@@ -22974,333 +23140,230 @@ async fn execute_browser_tool(
     args_raw: &str,
     call_id: &str,
 ) -> String {
-        // Granular browser tools: driven one micro-action at a time inside
-        // the isolated browse(goal) sub-agent (ADR 0025) — never by the
-        // manager — against a per-turn session.
-        let args: serde_json::Value = serde_json::from_str(args_raw)
-            .unwrap_or_else(|_| serde_json::json!({}));
-        // First browser tool this turn: mark used (raises round
-        // budget), publish live activity, acquire the session
-        // (reuse the thread's warm one, else spawn a chat sidecar).
-        if !*ctx.browser_used {
-            *ctx.browser_used = true;
-            begin_browser_activity(
-                ctx.prompt.to_string(),
-                ctx.thread_id.map(|s| s.to_string()),
-            );
-            // ADR 0025 slice 4b — the mid-turn driver model-switch was RETIRED here. It swapped the
-            // whole turn to the weak browser model on the first browser tool (the root cause of the
-            // context pollution ADR 0025 cures). `execute_browser_tool` is now called ONLY from the
-            // isolated browse sub-loop, which is ALREADY seeded on the browser model/provider — so the
-            // switch is redundant. The manager stays on its own model for the whole turn and delegates
-            // browsing via `browse(goal)`. (The browser role is applied by the sub-loop's seam, not here.)
-        }
-        if browser_session.is_none() {
-            let reused = match ctx.thread_id {
-                Some(t) => {
-                    let st = ctx.state.clone();
-                    let t = t.to_string();
-                    tokio::task::spawn_blocking(move || {
-                        take_thread_browser_session(&st, &t)
-                    })
+    // Granular browser tools: driven one micro-action at a time inside
+    // the isolated browse(goal) sub-agent (ADR 0025) — never by the
+    // manager — against a per-turn session.
+    let args: serde_json::Value =
+        serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+    // First browser tool this turn: mark used (raises round
+    // budget), publish live activity, acquire the session
+    // (reuse the thread's warm one, else spawn a chat sidecar).
+    if !*ctx.browser_used {
+        *ctx.browser_used = true;
+        begin_browser_activity(ctx.prompt.to_string(), ctx.thread_id.map(|s| s.to_string()));
+        // ADR 0025 slice 4b — the mid-turn driver model-switch was RETIRED here. It swapped the
+        // whole turn to the weak browser model on the first browser tool (the root cause of the
+        // context pollution ADR 0025 cures). `execute_browser_tool` is now called ONLY from the
+        // isolated browse sub-loop, which is ALREADY seeded on the browser model/provider — so the
+        // switch is redundant. The manager stays on its own model for the whole turn and delegates
+        // browsing via `browse(goal)`. (The browser role is applied by the sub-loop's seam, not here.)
+    }
+    if browser_session.is_none() {
+        let reused = match ctx.thread_id {
+            Some(t) => {
+                let st = ctx.state.clone();
+                let t = t.to_string();
+                tokio::task::spawn_blocking(move || take_thread_browser_session(&st, &t))
                     .await
                     .ok()
                     .flatten()
-                }
-                None => None,
-            };
-            // A reused session already has the "chat_0" tab open;
-            // mark it opened so navigate reuses it (Navigate, not
-            // Open). A fresh session has no tabs yet.
-            if reused.is_some() && !ctx.opened_targets.iter().any(|t| t == "chat_0") {
-                ctx.opened_targets.push("chat_0".to_string());
             }
-            match reused {
-                Some(existing) => *browser_session = Some(existing),
-                None => {
-                    // Isolation policy: PREFER the sandbox browser. If its CDP isn't up, try to
-                    // START the contained computer and wait; only fall back to the on-host browser
-                    // after a real attempt + timeout (surfaced, never silent). This closes the
-                    // sandbox escape where a mis-detected "container down" launched a host Chromium
-                    // immediately. On success `contained_computer_cdp_endpoint()` now resolves, so
-                    // the sidecar spawned below attaches via connectOverCDP instead of launching.
-                    ensure_contained_browser_or_host_fallback(ctx.state, ctx.tx).await;
-                    for attempt in 0u8..2 {
-                        let st = ctx.state.clone();
-                        let spawned = tokio::task::spawn_blocking(move || {
-                            spawn_browser_sidecar_for_chat(&st)
-                        })
-                        .await;
-                        match spawned {
-                            Ok(Ok(session)) => {
-                                *browser_session =
-                                    Some(BrowserAutomationClient::new(session));
-                                break;
-                            }
-                            // First failure → recycle the container + retry.
-                            _ if attempt == 0 => {
-                                let _ = emit_stream_event(
+            None => None,
+        };
+        // A reused session already has the "chat_0" tab open;
+        // mark it opened so navigate reuses it (Navigate, not
+        // Open). A fresh session has no tabs yet.
+        if reused.is_some() && !ctx.opened_targets.iter().any(|t| t == "chat_0") {
+            ctx.opened_targets.push("chat_0".to_string());
+        }
+        match reused {
+            Some(existing) => *browser_session = Some(existing),
+            None => {
+                // Isolation policy: PREFER the sandbox browser. If its CDP isn't up, try to
+                // START the contained computer and wait; only fall back to the on-host browser
+                // after a real attempt + timeout (surfaced, never silent). This closes the
+                // sandbox escape where a mis-detected "container down" launched a host Chromium
+                // immediately. On success `contained_computer_cdp_endpoint()` now resolves, so
+                // the sidecar spawned below attaches via connectOverCDP instead of launching.
+                ensure_contained_browser_or_host_fallback(ctx.state, ctx.tx).await;
+                for attempt in 0u8..2 {
+                    let st = ctx.state.clone();
+                    let spawned =
+                        tokio::task::spawn_blocking(move || spawn_browser_sidecar_for_chat(&st))
+                            .await;
+                    match spawned {
+                        Ok(Ok(session)) => {
+                            *browser_session = Some(BrowserAutomationClient::new(session));
+                            break;
+                        }
+                        // First failure → recycle the container + retry.
+                        _ if attempt == 0 => {
+                            let _ = emit_stream_event(
                                     ctx.tx,
                                     GenerateStreamEvent::Delta {
                                         text: "‹‹ACT››🔧 Browser unreachable: restarting and retrying…‹‹/ACT››".to_string(),
                                     },
                                 )
                                 .await;
-                                ensure_browser_cdp_healthy(ctx.state).await;
-                            }
-                            // Second failure → give up; reported below.
-                            _ => {}
+                            ensure_browser_cdp_healthy(ctx.state).await;
                         }
+                        // Second failure → give up; reported below.
+                        _ => {}
                     }
                 }
             }
         }
-        // Mark this tool result as carrying a (potentially large)
-        // snapshot so the pruner stubs older ones.
-        ctx.browser_tool_call_ids.insert(call_id.to_string());
-        // We hold the session for the duration of this branch; the
-        // GLOBAL lock is acquired only around each single call.
-        let outcome: Result<String, String> = match browser_session.take() {
-            None => {
-                push_browser_step(
-                    "browser: session unavailable".to_string(),
-                    "error",
-                );
-                Err("Browser unavailable: the contained-computer browser (a headless \
+    }
+    // Mark this tool result as carrying a (potentially large)
+    // snapshot so the pruner stubs older ones.
+    ctx.browser_tool_call_ids.insert(call_id.to_string());
+    // We hold the session for the duration of this branch; the
+    // GLOBAL lock is acquired only around each single call.
+    let outcome: Result<String, String> = match browser_session.take() {
+        None => {
+            push_browser_step("browser: session unavailable".to_string(), "error");
+            Err(
+                "Browser unavailable: the contained-computer browser (a headless \
 Chromium in a Docker container, driven over CDP — there is NO local browser binary) did not start. \
 Usually transient, or the contained computer isn't running yet. Do NOT look for a local \
 chromium/firefox install and do NOT conclude Chromium is missing or that it's a known bug. Retry, \
 or tell the user to start the contained computer (Settings → Local computer)."
-                    .to_string())
-            }
-            Some(client) => match name {
-                "browser_navigate" => {
-                    // Multi-tab: an explicit `target` switches the current
-                    // tab; `new_tab` allocates a fresh chat_N id (so the
-                    // logic below treats it as not-yet-opened → Open).
-                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                        if !t.trim().is_empty() {
-                            *ctx.current_target = t.to_string();
-                        }
+                    .to_string(),
+            )
+        }
+        Some(client) => match name {
+            "browser_navigate" => {
+                // Multi-tab: an explicit `target` switches the current
+                // tab; `new_tab` allocates a fresh chat_N id (so the
+                // logic below treats it as not-yet-opened → Open).
+                if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                    if !t.trim().is_empty() {
+                        *ctx.current_target = t.to_string();
                     }
-                    if args
-                        .get("new_tab")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                    {
-                        *ctx.current_target = format!("chat_{}", ctx.opened_targets.len());
-                    }
-                    let url = args
-                        .get("url")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    if url.trim().is_empty() {
-                        *browser_session = Some(client);
-                        Err("Missing URL for browser_navigate.".to_string())
-                    } else {
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››🌐 Opening {url}‹‹/ACT››"),
-                            },
+                }
+                if args
+                    .get("new_tab")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
+                    *ctx.current_target = format!("chat_{}", ctx.opened_targets.len());
+                }
+                let url = args
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if url.trim().is_empty() {
+                    *browser_session = Some(client);
+                    Err("Missing URL for browser_navigate.".to_string())
+                } else {
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: format!("‹‹ACT››🌐 Opening {url}‹‹/ACT››"),
+                        },
+                    )
+                    .await;
+                    let guard = browse_web_lock().lock().await;
+                    // Open the current tab the first time, then Navigate.
+                    let already_open = ctx
+                        .opened_targets
+                        .iter()
+                        .any(|t| t.as_str() == ctx.current_target.as_str());
+                    let (open_method, open_params) = if already_open {
+                        (
+                            BrowserMethod::Navigate,
+                            serde_json::json!({
+                                "target_id": ctx.current_target.as_str(),
+                                "url": url,
+                            }),
                         )
-                        .await;
-                        let guard = browse_web_lock().lock().await;
-                        // Open the current tab the first time, then Navigate.
-                        let already_open =
-                            ctx.opened_targets.iter().any(|t| t.as_str() == ctx.current_target.as_str());
-                        let (open_method, open_params) = if already_open {
-                            (
-                                BrowserMethod::Navigate,
-                                serde_json::json!({
-                                    "target_id": ctx.current_target.as_str(),
-                                    "url": url,
-                                }),
+                    } else {
+                        (
+                            BrowserMethod::Open,
+                            serde_json::json!({
+                                "url": url,
+                                "label": ctx.current_target.as_str(),
+                            }),
+                        )
+                    };
+                    let (client_back, nav_res) =
+                        chat_browser_call_bounded(client, open_method, open_params).await;
+                    let nav_err = nav_res.err();
+                    // Navigate/Open return no snapshot → snapshot now. ACTING view (small,
+                    // interactive-only): the model has just landed and needs the controls to act
+                    // on, not the whole page — reading content is a later explicit browser_snapshot.
+                    let mut client_now = client_back;
+                    let snap_result = if nav_err.is_none() {
+                        if let Some(c) = client_now.take() {
+                            let (c2, snap) = chat_browser_call_bounded(
+                                c,
+                                BrowserMethod::Snapshot,
+                                browser_chat_act_snapshot_params(ctx.current_target.as_str()),
                             )
+                            .await;
+                            client_now = c2;
+                            snap
                         } else {
-                            (
-                                BrowserMethod::Open,
-                                serde_json::json!({
-                                    "url": url,
-                                    "label": ctx.current_target.as_str(),
-                                }),
-                            )
-                        };
-                        let (client_back, nav_res) =
-                            chat_browser_call_bounded(client, open_method, open_params)
-                                .await;
-                        let nav_err = nav_res.err();
-                        // Navigate/Open return no snapshot → snapshot now. ACTING view (small,
-                        // interactive-only): the model has just landed and needs the controls to act
-                        // on, not the whole page — reading content is a later explicit browser_snapshot.
-                        let mut client_now = client_back;
-                        let snap_result = if nav_err.is_none() {
-                            if let Some(c) = client_now.take() {
-                                let (c2, snap) = chat_browser_call_bounded(
-                                    c,
-                                    BrowserMethod::Snapshot,
-                                    browser_chat_act_snapshot_params(
-                                        ctx.current_target.as_str(),
-                                    ),
-                                )
-                                .await;
-                                client_now = c2;
-                                snap
-                            } else {
-                                Err("session lost after navigation".to_string())
-                            }
-                        } else {
-                            Err(nav_err.clone().unwrap_or_default())
-                        };
-                        drop(guard);
-                        *browser_session = client_now;
-                        // Mark this tab opened once the Open/Navigate succeeds.
-                        if nav_err.is_none()
-                            && !ctx.opened_targets.iter().any(|t| t.as_str() == ctx.current_target.as_str())
-                        {
-                            ctx.opened_targets.push(ctx.current_target.clone());
+                            Err("session lost after navigation".to_string())
                         }
-                        match (nav_err, snap_result) {
-                            (Some(error), _) => {
-                                if verbose_debug() {
-                                    eprintln!(
-                                        "[browser] navigate {url} FAILED: {error}"
-                                    );
-                                }
-                                push_browser_step(
-                                    format!("navigate {url}"),
-                                    "error",
-                                );
-                                // CDP wedge (connectOverCDP timeout despite an
-                                // HTTP-OK /json/version): recycle the contained
-                                // computer once per window and DROP the session so
-                                // the next call respawns against fresh CDP. motore
-                                // #1's pre-spawn `browser_cdp_ok` can't see this
-                                // ws-level wedge, so heal it on the failure (same
-                                // self-heal the drive's shared path already has).
-                                if cdp_wedge_signature(&error) {
-                                    let _ = emit_stream_event(
+                    } else {
+                        Err(nav_err.clone().unwrap_or_default())
+                    };
+                    drop(guard);
+                    *browser_session = client_now;
+                    // Mark this tab opened once the Open/Navigate succeeds.
+                    if nav_err.is_none()
+                        && !ctx
+                            .opened_targets
+                            .iter()
+                            .any(|t| t.as_str() == ctx.current_target.as_str())
+                    {
+                        ctx.opened_targets.push(ctx.current_target.clone());
+                    }
+                    match (nav_err, snap_result) {
+                        (Some(error), _) => {
+                            if verbose_debug() {
+                                eprintln!("[browser] navigate {url} FAILED: {error}");
+                            }
+                            push_browser_step(format!("navigate {url}"), "error");
+                            // CDP wedge (connectOverCDP timeout despite an
+                            // HTTP-OK /json/version): recycle the contained
+                            // computer once per window and DROP the session so
+                            // the next call respawns against fresh CDP. motore
+                            // #1's pre-spawn `browser_cdp_ok` can't see this
+                            // ws-level wedge, so heal it on the failure (same
+                            // self-heal the drive's shared path already has).
+                            if cdp_wedge_signature(&error) {
+                                let _ = emit_stream_event(
                                         ctx.tx,
                                         GenerateStreamEvent::Delta {
                                             text: "‹‹ACT››🔧 Browser bloccato: riavvio il computer…‹‹/ACT››".to_string(),
                                         },
                                     )
                                     .await;
-                                    let healed = force_recycle_contained_computer(
-                                        ctx.state,
-                                    )
-                                    .await;
-                                    *browser_session = None;
-                                    ctx.opened_targets.clear();
-                                    if healed {
-                                        Err("The browser was wedged; I recycled the contained computer. Retry the SAME navigation now.".to_string())
-                                    } else {
-                                        Err("The browser is unavailable (the contained computer did not recover). Tell the user to check Settings → Local computer.".to_string())
-                                    }
+                                let healed = force_recycle_contained_computer(ctx.state).await;
+                                *browser_session = None;
+                                ctx.opened_targets.clear();
+                                if healed {
+                                    Err("The browser was wedged; I recycled the contained computer. Retry the SAME navigation now.".to_string())
                                 } else {
-                                    let fails = {
-                                        let entry = ctx.nav_failures
-                                            .entry(url.to_string())
-                                            .or_insert(0);
-                                        *entry += 1;
-                                        *entry
-                                    };
-                                    Err(format!(
-                                        "Navigation failed: {error}{}",
-                                        browser_navigate_failure_hint(&url, fails)
-                                    ))
+                                    Err("The browser is unavailable (the contained computer did not recover). Tell the user to check Settings → Local computer.".to_string())
                                 }
-                            }
-                            (None, Ok(value)) => {
-                                let snap = browser_snapshot_text(&value);
-                                if !snap.is_empty() {
-                                    *ctx.last_snapshot = snap.clone();
-                                    browser_set_target_floor(
-                                        ctx.payment_floor_refs,
-                                        ctx.current_target.as_str(),
-                                        browser_floor_refs(&value),
-                                    );
-                                    // A navigate is an explicit fresh observation of THIS target's
-                                    // page: update the best-effort focus flag AND clear the robust
-                                    // last-acted-floored flag (the page just changed under us).
-                                    browser_set_target_focus(
-                                        ctx.payment_context_by_target,
-                                        ctx.current_target.as_str(),
-                                        browser_focus_payment_context(&value),
-                                    );
-                                    browser_clear_target_acted_floored(
-                                        ctx.payment_context_by_target,
-                                        ctx.current_target.as_str(),
-                                    );
-                                }
-                                push_browser_step(
-                                    format!("navigate {url}"),
-                                    "done",
-                                );
-                                let metrics = browser_observation_metrics(
-                                    &value,
-                                    vec!["navigate".to_string()],
-                                    "completed",
-                                );
-                                ctx.journal.record(browser_protocol_journal_event(
-                                    call_id,
-                                    "navigation_observation",
-                                    &metrics,
-                                ));
-                                push_browser_step(
-                                    browser_protocol_event_summary(
-                                        call_id,
-                                        "navigation_observation",
-                                        metrics,
-                                    ),
-                                    "done",
-                                );
-                                let page_url = value
-                                    .get("url")
-                                    .and_then(|u| u.as_str())
-                                    .unwrap_or(url.as_str());
-                                Ok(format!(
-                                    "Page opened ({page_url}). Snapshot:\n{snap}"
-                                ))
-                            }
-                            (None, Err(error)) => {
-                                push_browser_step(
-                                    format!("navigate {url}"),
-                                    "error",
-                                );
+                            } else {
+                                let fails = {
+                                    let entry =
+                                        ctx.nav_failures.entry(url.to_string()).or_insert(0);
+                                    *entry += 1;
+                                    *entry
+                                };
                                 Err(format!(
-                                    "Page opened but snapshot failed: {error}"
+                                    "Navigation failed: {error}{}",
+                                    browser_navigate_failure_hint(&url, fails)
                                 ))
                             }
                         }
-                    }
-                }
-                "browser_snapshot" => {
-                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                        if !t.trim().is_empty() {
-                            *ctx.current_target = t.to_string();
-                        }
-                    }
-                    let _ = emit_stream_event(
-                        ctx.tx,
-                        GenerateStreamEvent::Delta {
-                            text: "‹‹ACT››👁️ Re-reading the page‹‹/ACT››"
-                                .to_string(),
-                        },
-                    )
-                    .await;
-                    let guard = browse_web_lock().lock().await;
-                    let (client_back, snap) = chat_browser_call_bounded(
-                        client,
-                        BrowserMethod::Snapshot,
-                        browser_chat_snapshot_params(ctx.current_target.as_str()),
-                    )
-                    .await;
-                    drop(guard);
-                    *browser_session = client_back;
-                    match snap {
-                        Ok(value) => {
+                        (None, Ok(value)) => {
                             let snap = browser_snapshot_text(&value);
                             if !snap.is_empty() {
                                 *ctx.last_snapshot = snap.clone();
@@ -23309,9 +23372,9 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                     ctx.current_target.as_str(),
                                     browser_floor_refs(&value),
                                 );
-                                // Explicit re-observation of THIS target: refresh the focus flag
-                                // and clear the robust flag (a model-requested snapshot is the
-                                // canonical "re-orient on this page" moment).
+                                // A navigate is an explicit fresh observation of THIS target's
+                                // page: update the best-effort focus flag AND clear the robust
+                                // last-acted-floored flag (the page just changed under us).
                                 browser_set_target_focus(
                                     ctx.payment_context_by_target,
                                     ctx.current_target.as_str(),
@@ -23322,103 +23385,177 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                     ctx.current_target.as_str(),
                                 );
                             }
-                            push_browser_step("snapshot".to_string(), "done");
+                            push_browser_step(format!("navigate {url}"), "done");
                             let metrics = browser_observation_metrics(
                                 &value,
-                                vec!["snapshot".to_string()],
+                                vec!["navigate".to_string()],
                                 "completed",
                             );
                             ctx.journal.record(browser_protocol_journal_event(
                                 call_id,
-                                "observation",
+                                "navigation_observation",
                                 &metrics,
                             ));
                             push_browser_step(
-                                browser_protocol_event_summary(call_id, "observation", metrics),
+                                browser_protocol_event_summary(
+                                    call_id,
+                                    "navigation_observation",
+                                    metrics,
+                                ),
                                 "done",
                             );
-                            Ok(format!("Page snapshot:\n{snap}"))
+                            let page_url = value
+                                .get("url")
+                                .and_then(|u| u.as_str())
+                                .unwrap_or(url.as_str());
+                            Ok(format!("Page opened ({page_url}). Snapshot:\n{snap}"))
                         }
-                        Err(error) => {
-                            push_browser_step("snapshot".to_string(), "error");
-                            Err(format!("Snapshot failed: {error}"))
+                        (None, Err(error)) => {
+                            push_browser_step(format!("navigate {url}"), "error");
+                            Err(format!("Page opened but snapshot failed: {error}"))
                         }
                     }
                 }
-                "browser_act" => {
-                    // Build the action the sidecar runs (and the safety gate
-                    // inspects), coercing a common model mistake that otherwise
-                    // dead-ends in a retry loop: an element ref (e83) passed as
-                    // `target` — which is a TAB id, so the sidecar errors "tab
-                    // not found: e83". Re-route a ref-shaped target into `ref`
-                    // (when none was given) instead of switching to a missing tab.
-                    let mut action = args.clone();
-                    let target_arg = args
-                        .get("target")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string);
-                    let has_ref = action
-                        .get("ref")
-                        .and_then(|v| v.as_str())
-                        .is_some_and(|r| !r.trim().is_empty());
-                    let target_is_ref = target_arg.as_deref().is_some_and(|t| {
-                        t.len() >= 2
-                            && t.starts_with('e')
-                            && t[1..].chars().all(|c| c.is_ascii_digit())
-                    });
-                    if let Some(obj) = action.as_object_mut() {
-                        if target_is_ref && !has_ref {
-                            if let Some(t) = target_arg.clone() {
-                                obj.insert(
-                                    "ref".to_string(),
-                                    serde_json::Value::String(t),
-                                );
-                            }
-                            obj.remove("target");
-                        } else if let Some(t) = target_arg.as_deref() {
-                            if !t.trim().is_empty() {
-                                *ctx.current_target = t.to_string();
-                            }
-                        }
-                        obj.insert(
-                            "target_id".to_string(),
-                            serde_json::Value::String(ctx.current_target.clone()),
-                        );
+            }
+            "browser_snapshot" => {
+                if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                    if !t.trim().is_empty() {
+                        *ctx.current_target = t.to_string();
                     }
-                    // Single-action payment context for the CURRENT target: the best-effort
-                    // focus flag OR'd with the robust last-acted-floored flag (IMPORTANT C —
-                    // a cross-origin PSP OOPIF fails the focus check whenever the app isn't
-                    // OS-frontmost, but `last_acted_floored` is frame-aware for free via the
-                    // per-ref floor). No "prior nested item" concept outside a bundle.
-                    let focus_ctx = browser_payment_context_for(
-                        ctx.payment_context_by_target,
-                        ctx.current_target.as_str(),
-                    );
-                    // Build1 Fix 3: resolve THIS target's floor set once, up front — every
-                    // read below in this arm is against the PRE-act observation of the SAME
-                    // target the action is about to run on, so a single owned snapshot is
-                    // correct (and sidesteps holding an immutable borrow of the map across
-                    // the later mutable `browser_set_target_floor` post-act refresh).
-                    let current_floor_refs =
-                        browser_floor_refs_for_target(ctx.payment_floor_refs, ctx.current_target.as_str());
-                    if let Some(error) = normalize_browser_action_bundle(
-                        &mut action,
-                        ctx.current_target.as_str(),
-                        &current_floor_refs,
-                        focus_ctx,
-                    ) {
-                        *browser_session = Some(client);
-                        // Log WHY (same gap as the act-error line): "bundle blocked" alone cannot
-                        // distinguish a payment gate from a schema-illegal item or a missing
-                        // action_class, and the browse sub-turn keeps no other record.
-                        push_browser_step(
-                            format!("browser action bundle blocked: {}", clip_chars(&error, 200)),
-                            "error",
+                }
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta {
+                        text: "‹‹ACT››👁️ Re-reading the page‹‹/ACT››".to_string(),
+                    },
+                )
+                .await;
+                let guard = browse_web_lock().lock().await;
+                let (client_back, snap) = chat_browser_call_bounded(
+                    client,
+                    BrowserMethod::Snapshot,
+                    browser_chat_snapshot_params(ctx.current_target.as_str()),
+                )
+                .await;
+                drop(guard);
+                *browser_session = client_back;
+                match snap {
+                    Ok(value) => {
+                        let snap = browser_snapshot_text(&value);
+                        if !snap.is_empty() {
+                            *ctx.last_snapshot = snap.clone();
+                            browser_set_target_floor(
+                                ctx.payment_floor_refs,
+                                ctx.current_target.as_str(),
+                                browser_floor_refs(&value),
+                            );
+                            // Explicit re-observation of THIS target: refresh the focus flag
+                            // and clear the robust flag (a model-requested snapshot is the
+                            // canonical "re-orient on this page" moment).
+                            browser_set_target_focus(
+                                ctx.payment_context_by_target,
+                                ctx.current_target.as_str(),
+                                browser_focus_payment_context(&value),
+                            );
+                            browser_clear_target_acted_floored(
+                                ctx.payment_context_by_target,
+                                ctx.current_target.as_str(),
+                            );
+                        }
+                        push_browser_step("snapshot".to_string(), "done");
+                        let metrics = browser_observation_metrics(
+                            &value,
+                            vec!["snapshot".to_string()],
+                            "completed",
                         );
-                        *ctx.outcome_hint =
-                            Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
-                        Err(error)
-                    } else {
+                        ctx.journal.record(browser_protocol_journal_event(
+                            call_id,
+                            "observation",
+                            &metrics,
+                        ));
+                        push_browser_step(
+                            browser_protocol_event_summary(call_id, "observation", metrics),
+                            "done",
+                        );
+                        Ok(format!("Page snapshot:\n{snap}"))
+                    }
+                    Err(error) => {
+                        push_browser_step("snapshot".to_string(), "error");
+                        Err(format!("Snapshot failed: {error}"))
+                    }
+                }
+            }
+            "browser_act" => {
+                // Build the action the sidecar runs (and the safety gate
+                // inspects), coercing a common model mistake that otherwise
+                // dead-ends in a retry loop: an element ref (e83) passed as
+                // `target` — which is a TAB id, so the sidecar errors "tab
+                // not found: e83". Re-route a ref-shaped target into `ref`
+                // (when none was given) instead of switching to a missing tab.
+                let mut action = args.clone();
+                let target_arg = args
+                    .get("target")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+                let has_ref = action
+                    .get("ref")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|r| !r.trim().is_empty());
+                let target_is_ref = target_arg.as_deref().is_some_and(|t| {
+                    t.len() >= 2 && t.starts_with('e') && t[1..].chars().all(|c| c.is_ascii_digit())
+                });
+                if let Some(obj) = action.as_object_mut() {
+                    if target_is_ref && !has_ref {
+                        if let Some(t) = target_arg.clone() {
+                            obj.insert("ref".to_string(), serde_json::Value::String(t));
+                        }
+                        obj.remove("target");
+                    } else if let Some(t) = target_arg.as_deref() {
+                        if !t.trim().is_empty() {
+                            *ctx.current_target = t.to_string();
+                        }
+                    }
+                    obj.insert(
+                        "target_id".to_string(),
+                        serde_json::Value::String(ctx.current_target.clone()),
+                    );
+                }
+                // Single-action payment context for the CURRENT target: the best-effort
+                // focus flag OR'd with the robust last-acted-floored flag (IMPORTANT C —
+                // a cross-origin PSP OOPIF fails the focus check whenever the app isn't
+                // OS-frontmost, but `last_acted_floored` is frame-aware for free via the
+                // per-ref floor). No "prior nested item" concept outside a bundle.
+                let focus_ctx = browser_payment_context_for(
+                    ctx.payment_context_by_target,
+                    ctx.current_target.as_str(),
+                );
+                // Build1 Fix 3: resolve THIS target's floor set once, up front — every
+                // read below in this arm is against the PRE-act observation of the SAME
+                // target the action is about to run on, so a single owned snapshot is
+                // correct (and sidesteps holding an immutable borrow of the map across
+                // the later mutable `browser_set_target_floor` post-act refresh).
+                let current_floor_refs = browser_floor_refs_for_target(
+                    ctx.payment_floor_refs,
+                    ctx.current_target.as_str(),
+                );
+                if let Some(error) = normalize_browser_action_bundle(
+                    &mut action,
+                    ctx.current_target.as_str(),
+                    &current_floor_refs,
+                    focus_ctx,
+                ) {
+                    *browser_session = Some(client);
+                    // Log WHY (same gap as the act-error line): "bundle blocked" alone cannot
+                    // distinguish a payment gate from a schema-illegal item or a missing
+                    // action_class, and the browse sub-turn keeps no other record.
+                    push_browser_step(
+                        format!("browser action bundle blocked: {}", clip_chars(&error, 200)),
+                        "error",
+                    );
+                    *ctx.outcome_hint =
+                        Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
+                    Err(error)
+                } else {
                     // A non-schema action (clickCoords, any other unrecognized kind, or a
                     // selector-bearing action) must be rejected before ANY payment-approval
                     // side effect: none of it is ref-based (the ref floor can't cover a
@@ -23442,10 +23579,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     let vault_secret_used = if blocked_before_claim.is_some() {
                         false
                     } else {
-                        match apply_payment_approval_secret_for_action(
-                            ctx.state,
-                            &mut action,
-                        ) {
+                        match apply_payment_approval_secret_for_action(ctx.state, &mut action) {
                             Ok(used) => used,
                             Err(error) => {
                                 push_browser_step(
@@ -23481,11 +23615,8 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     // grant unconsumed so the re-declared retry can use it.
                     let approved_payment_id = if blocked_before_claim.is_some() {
                         None
-                    } else if should_claim_payment_approval(
-                        &action,
-                        &current_floor_refs,
-                        focus_ctx,
-                    ) {
+                    } else if should_claim_payment_approval(&action, &current_floor_refs, focus_ctx)
+                    {
                         match claim_payment_approval_for_action(
                             ctx.state,
                             &action,
@@ -23570,9 +23701,7 @@ navigate elsewhere to work around it.",
                         let _ = emit_stream_event(
                             ctx.tx,
                             GenerateStreamEvent::Delta {
-                                text: format!(
-                                    "‹‹ACT››✋ {kind} on the page‹‹/ACT››"
-                                ),
+                                text: format!("‹‹ACT››✋ {kind} on the page‹‹/ACT››"),
                             },
                         )
                         .await;
@@ -23585,8 +23714,7 @@ navigate elsewhere to work around it.",
                             browser_action_targeted_a_floored_ref(&action, &current_floor_refs);
                         let guard = browse_web_lock().lock().await;
                         let (client_back, act_res) =
-                            chat_browser_call_bounded(client, BrowserMethod::Act, action)
-                                .await;
+                            chat_browser_call_bounded(client, BrowserMethod::Act, action).await;
                         drop(guard);
                         *browser_session = client_back;
                         match act_res {
@@ -23596,8 +23724,7 @@ navigate elsewhere to work around it.",
                                 // the page identical, nudge the model to try
                                 // a different element/approach instead of
                                 // repeating the same move.
-                                let no_change =
-                                    !snap.is_empty() && snap == *ctx.last_snapshot;
+                                let no_change = !snap.is_empty() && snap == *ctx.last_snapshot;
                                 if targeted_floored_ref {
                                     browser_mark_target_acted_floored(
                                         ctx.payment_context_by_target,
@@ -23644,27 +23771,23 @@ navigate elsewhere to work around it.",
                                 let mut out = if snap.is_empty() {
                                     "Action performed.".to_string()
                                 } else {
-                                    format!(
-                                        "Action performed. Updated snapshot:\n{snap}"
-                                    )
+                                    format!("Action performed. Updated snapshot:\n{snap}")
                                 };
                                 if no_change {
                                     out.push_str(
-                                    "\n[note: the page did NOT change from before — \
-don't repeat the same action; try a different element, scroll, or wait (kind=wait).]",
-                                );
+                                        "\n[note: the page did NOT change from before — \
+don't repeat the same action/ref. On a results list, labeled CTAs next to a solution \
+(e.g. \"Vedi i dettagli…\") are often screen-reader duplicates: click instead the \
+unnamed button/card or price control that CONTAINS that solution's times/train number. \
+\"Continua\"/\"Avanti\" usually appears only after the solution is opened and a fare is \
+chosen. Otherwise try a different element, scroll, or wait (kind=wait).]",
+                                    );
                                 }
-                                if let Some(committed) =
-                                    value.get("committedOption")
-                                {
-                                    out.push_str(&format!(
-                                        "\n[automatic selection: {committed}]"
-                                    ));
+                                if let Some(committed) = value.get("committedOption") {
+                                    out.push_str(&format!("\n[automatic selection: {committed}]"));
                                 }
                                 if let Some(sugg) = value.get("suggestions") {
-                                    out.push_str(&format!(
-                                        "\n[suggestions: {sugg}]"
-                                    ));
+                                    out.push_str(&format!("\n[suggestions: {sugg}]"));
                                 }
                                 // Guardrail (advisory, Layer C.3): if the model just
                                 // typed/filled a date that is in the PAST, nudge it to
@@ -23675,9 +23798,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                     args.get("kind").and_then(|k| k.as_str()),
                                     Some("type") | Some("fill")
                                 ) {
-                                    if let Some(typed) =
-                                        args.get("text").and_then(|t| t.as_str())
-                                    {
+                                    if let Some(typed) = args.get("text").and_then(|t| t.as_str()) {
                                         if let Some(hint) = past_date_hint(typed) {
                                             out.push_str(&hint);
                                         }
@@ -23723,13 +23844,11 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                     eprintln!(
                                         "[browser_act] kind={kind} ref={:?} selector={:?} text={:?} → ERROR: {}",
                                         args.get("ref").and_then(|v| v.as_str()),
-                                        args.get("selector")
-                                            .and_then(|v| v.as_str()),
+                                        args.get("selector").and_then(|v| v.as_str()),
                                         if vault_secret_used {
                                             Some("[vault-secret]")
                                         } else {
-                                            args.get("text")
-                                                .and_then(|v| v.as_str())
+                                            args.get("text").and_then(|v| v.as_str())
                                         },
                                         error.chars().take(220).collect::<String>()
                                     );
@@ -23777,7 +23896,9 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                             browser_set_target_focus(
                                                 ctx.payment_context_by_target,
                                                 ctx.current_target.as_str(),
-                                                browser_focus_payment_context(snap_res.as_ref().unwrap()),
+                                                browser_focus_payment_context(
+                                                    snap_res.as_ref().unwrap(),
+                                                ),
                                             );
                                             browser_clear_target_acted_floored(
                                                 ctx.payment_context_by_target,
@@ -23802,8 +23923,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                                 "done",
                                             );
                                             Ok(stale_ref_recovery_message(
-                                                args.get("ref")
-                                                    .and_then(|v| v.as_str()),
+                                                args.get("ref").and_then(|v| v.as_str()),
                                                 &snap,
                                             ))
                                         }
@@ -23819,57 +23939,52 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                             }
                         }
                     }
+                }
+            }
+            "browser_screenshot" => {
+                if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                    if !t.trim().is_empty() {
+                        *ctx.current_target = t.to_string();
                     }
                 }
-                "browser_screenshot" => {
-                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                        if !t.trim().is_empty() {
-                            *ctx.current_target = t.to_string();
-                        }
-                    }
-                    let full_page = args
-                        .get("full_page")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    let marks = args
-                        .get("marks")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    let _ = emit_stream_event(
-                        ctx.tx,
-                        GenerateStreamEvent::Delta {
-                            text: "‹‹ACT››📸 Capturing a screenshot‹‹/ACT››"
-                                .to_string(),
-                        },
-                    )
-                    .await;
-                    let file_name =
-                        format!("chat_shot_{}.png", uuid::Uuid::new_v4().simple());
-                    let guard = browse_web_lock().lock().await;
-                    let (client_back, shot_res) = chat_browser_call_bounded(
-                        client,
-                        BrowserMethod::Screenshot,
-                        serde_json::json!({
-                            "target_id": ctx.current_target.as_str(),
-                            "file_name": file_name,
-                            "full_page": full_page,
-                            "labels": marks,
-                        }),
-                    )
-                    .await;
-                    drop(guard);
-                    *browser_session = client_back;
-                    match shot_res {
-                        Ok(value) => {
-                            let path = value
-                                .get("path")
-                                .and_then(|p| p.as_str())
-                                .unwrap_or("")
-                                .to_string();
-                            // Set-of-marks legend: map each numbered badge
-                            // in the image back to the element's ref so the
-                            // model can act precisely (browser_act ref=eN).
-                            let legend = value
+                let full_page = args
+                    .get("full_page")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let marks = args.get("marks").and_then(|v| v.as_bool()).unwrap_or(false);
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta {
+                        text: "‹‹ACT››📸 Capturing a screenshot‹‹/ACT››".to_string(),
+                    },
+                )
+                .await;
+                let file_name = format!("chat_shot_{}.png", uuid::Uuid::new_v4().simple());
+                let guard = browse_web_lock().lock().await;
+                let (client_back, shot_res) = chat_browser_call_bounded(
+                    client,
+                    BrowserMethod::Screenshot,
+                    serde_json::json!({
+                        "target_id": ctx.current_target.as_str(),
+                        "file_name": file_name,
+                        "full_page": full_page,
+                        "labels": marks,
+                    }),
+                )
+                .await;
+                drop(guard);
+                *browser_session = client_back;
+                match shot_res {
+                    Ok(value) => {
+                        let path = value
+                            .get("path")
+                            .and_then(|p| p.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        // Set-of-marks legend: map each numbered badge
+                        // in the image back to the element's ref so the
+                        // model can act precisely (browser_act ref=eN).
+                        let legend = value
                             .get("marks")
                             .and_then(|m| m.as_array())
                             .map(|entries| {
@@ -23882,18 +23997,12 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                         .get("mark")
                                         .and_then(|v| v.as_i64())
                                         .unwrap_or_default();
-                                    let role = entry
-                                        .get("role")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
-                                    let name = entry
-                                        .get("name")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
-                                    let ref_id = entry
-                                        .get("ref")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
+                                    let role =
+                                        entry.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                                    let name =
+                                        entry.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                                    let ref_id =
+                                        entry.get("ref").and_then(|v| v.as_str()).unwrap_or("");
                                     text.push_str(&format!(
                                         "\n{mark} = {role} \"{name}\" [ref={ref_id}]"
                                     ));
@@ -23901,197 +24010,177 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                 text
                             })
                             .unwrap_or_default();
-                            // Read + base64 the PNG. Skip the image (text
-                            // note only) if missing or too large (~1.5MB
-                            // encoded ≈ 1.1MB raw).
-                            match std::fs::read(&path) {
-                                Ok(bytes) if bytes.len() <= 1_100_000 => {
-                                    let encoded =
-                                        base64::engine::general_purpose::STANDARD
-                                            .encode(&bytes);
-                                    let dataurl =
-                                        format!("data:image/png;base64,{encoded}");
-                                    *ctx.pending_browser_image = Some(dataurl);
-                                    push_browser_step(
-                                        "screenshot".to_string(),
-                                        "done",
-                                    );
-                                    Ok(format!(
-                                        "Screenshot captured (see the image attached \
+                        // Read + base64 the PNG. Skip the image (text
+                        // note only) if missing or too large (~1.5MB
+                        // encoded ≈ 1.1MB raw).
+                        match std::fs::read(&path) {
+                            Ok(bytes) if bytes.len() <= 1_100_000 => {
+                                let encoded =
+                                    base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                let dataurl = format!("data:image/png;base64,{encoded}");
+                                *ctx.pending_browser_image = Some(dataurl);
+                                push_browser_step("screenshot".to_string(), "done");
+                                Ok(format!(
+                                    "Screenshot captured (see the image attached \
 below).{legend}"
-                                    ))
-                                }
-                                Ok(bytes) => {
-                                    push_browser_step(
-                                        "screenshot".to_string(),
-                                        "done",
-                                    );
-                                    Ok(format!(
-                                        "Screenshot captured but too large for \
+                                ))
+                            }
+                            Ok(bytes) => {
+                                push_browser_step("screenshot".to_string(), "done");
+                                Ok(format!(
+                                    "Screenshot captured but too large for \
 the preview ({} bytes). Proceed with the text snapshot.",
-                                        bytes.len()
-                                    ))
-                                }
-                                Err(error) => {
-                                    push_browser_step(
-                                        "screenshot".to_string(),
-                                        "error",
-                                    );
-                                    Ok(format!(
-                                        "Screenshot not readable from disk: {error}. \
+                                    bytes.len()
+                                ))
+                            }
+                            Err(error) => {
+                                push_browser_step("screenshot".to_string(), "error");
+                                Ok(format!(
+                                    "Screenshot not readable from disk: {error}. \
 Use the text snapshot."
-                                    ))
-                                }
+                                ))
                             }
-                        }
-                        Err(error) => {
-                            push_browser_step("screenshot".to_string(), "error");
-                            Err(format!("Screenshot failed: {error}"))
                         }
                     }
-                }
-                "browser_tabs" => {
-                    let _ = emit_stream_event(
-                        ctx.tx,
-                        GenerateStreamEvent::Delta {
-                            text: "‹‹ACT››🗂️ Listing tabs‹‹/ACT››".to_string(),
-                        },
-                    )
-                    .await;
-                    let guard = browse_web_lock().lock().await;
-                    let (client_back, tabs_res) = chat_browser_call_bounded(
-                        client,
-                        BrowserMethod::Tabs,
-                        serde_json::json!({}),
-                    )
-                    .await;
-                    drop(guard);
-                    *browser_session = client_back;
-                    match tabs_res {
-                        Ok(value) => {
-                            // Sidecar shape: { tabs: [ { targetId, url,
-                            // label?, title? } ] }. Parse defensively in
-                            // case it's a bare array or uses target_id/id.
-                            let list = value
-                                .get("tabs")
-                                .and_then(|t| t.as_array())
-                                .or_else(|| value.as_array())
-                                .cloned()
-                                .unwrap_or_default();
-                            let mut lines: Vec<String> = Vec::new();
-                            for tab in &list {
-                                let id = tab
-                                    .get("targetId")
-                                    .or_else(|| tab.get("target_id"))
-                                    .or_else(|| tab.get("id"))
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("?");
-                                let url = tab
-                                    .get("url")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("");
-                                let title = tab
-                                    .get("title")
-                                    .or_else(|| tab.get("label"))
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("");
-                                let mut line = format!("- {id}");
-                                if !url.is_empty() {
-                                    line.push_str(&format!(" | {url}"));
-                                }
-                                if !title.is_empty() {
-                                    line.push_str(&format!(" | {title}"));
-                                }
-                                lines.push(line);
-                            }
-                            push_browser_step("tabs".to_string(), "done");
-                            if lines.is_empty() {
-                                Ok("No tabs open.".to_string())
-                            } else {
-                                Ok(format!("Open tabs:\n{}", lines.join("\n")))
-                            }
-                        }
-                        Err(error) => {
-                            push_browser_step("tabs".to_string(), "error");
-                            Err(format!("Listing tabs failed: {error}"))
-                        }
+                    Err(error) => {
+                        push_browser_step("screenshot".to_string(), "error");
+                        Err(format!("Screenshot failed: {error}"))
                     }
                 }
-                "browser_dialog" => {
-                    // Native alert/confirm/prompt blocks the page until
-                    // answered. In read-only (channel) turns we only allow
-                    // DISMISS, never accept (an accept could confirm an
-                    // action). The dialog message is returned so the model
-                    // sees what it answered.
-                    let accept = !ctx.read_only
-                        && args
-                            .get("accept")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                    let prompt_text = args
-                        .get("prompt_text")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    let _ = emit_stream_event(
-                        ctx.tx,
-                        GenerateStreamEvent::Delta {
-                            text: format!(
-                                "‹‹ACT››💬 Dialog: {}‹‹/ACT››",
-                                if accept { "confirming" } else { "cancelling" }
-                            ),
-                        },
-                    )
-                    .await;
-                    let guard = browse_web_lock().lock().await;
-                    let (client_back, dialog_res) = chat_browser_call_bounded(
-                        client,
-                        BrowserMethod::RespondDialog,
-                        serde_json::json!({
-                            "target_id": ctx.current_target.as_str(),
-                            "accept": accept,
-                            "promptText": prompt_text,
-                            "timeoutMs": 5_000,
-                        }),
-                    )
-                    .await;
-                    drop(guard);
-                    *browser_session = client_back;
-                    match dialog_res {
-                        Ok(value) => {
-                            let msg = value
-                                .get("message")
-                                .and_then(|m| m.as_str())
+            }
+            "browser_tabs" => {
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta {
+                        text: "‹‹ACT››🗂️ Listing tabs‹‹/ACT››".to_string(),
+                    },
+                )
+                .await;
+                let guard = browse_web_lock().lock().await;
+                let (client_back, tabs_res) =
+                    chat_browser_call_bounded(client, BrowserMethod::Tabs, serde_json::json!({}))
+                        .await;
+                drop(guard);
+                *browser_session = client_back;
+                match tabs_res {
+                    Ok(value) => {
+                        // Sidecar shape: { tabs: [ { targetId, url,
+                        // label?, title? } ] }. Parse defensively in
+                        // case it's a bare array or uses target_id/id.
+                        let list = value
+                            .get("tabs")
+                            .and_then(|t| t.as_array())
+                            .or_else(|| value.as_array())
+                            .cloned()
+                            .unwrap_or_default();
+                        let mut lines: Vec<String> = Vec::new();
+                        for tab in &list {
+                            let id = tab
+                                .get("targetId")
+                                .or_else(|| tab.get("target_id"))
+                                .or_else(|| tab.get("id"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("?");
+                            let url = tab.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                            let title = tab
+                                .get("title")
+                                .or_else(|| tab.get("label"))
+                                .and_then(|v| v.as_str())
                                 .unwrap_or("");
-                            push_browser_step("dialog".to_string(), "done");
-                            Ok(format!(
-                                "Dialog {} (message: \"{msg}\"). Re-read the page with browser_snapshot.",
-                                if accept { "confirmed" } else { "cancelled" }
-                            ))
+                            let mut line = format!("- {id}");
+                            if !url.is_empty() {
+                                line.push_str(&format!(" | {url}"));
+                            }
+                            if !title.is_empty() {
+                                line.push_str(&format!(" | {title}"));
+                            }
+                            lines.push(line);
                         }
-                        Err(error) => {
-                            push_browser_step("dialog".to_string(), "error");
-                            Err(format!("No dialog to handle or error: {error}"))
+                        push_browser_step("tabs".to_string(), "done");
+                        if lines.is_empty() {
+                            Ok("No tabs open.".to_string())
+                        } else {
+                            Ok(format!("Open tabs:\n{}", lines.join("\n")))
                         }
                     }
+                    Err(error) => {
+                        push_browser_step("tabs".to_string(), "error");
+                        Err(format!("Listing tabs failed: {error}"))
+                    }
                 }
-                _ => Err(format!("Unknown browser tool: {name}")),
-            },
-        };
-        // D2 fallback for arms that set no explicit hint (navigate / snapshot / tabs / dialog /
-        // screenshot): the `Result` VARIANT is itself a machine signal — an errored action is no
-        // progress, an ok one is. The `browser_act` arm sets a nuanced hint above (a successful
-        // `type` that selected no suggestion is `Ok` yet NoProgress), which takes precedence here.
-        if ctx.outcome_hint.is_none() {
-            *ctx.outcome_hint = Some(if outcome.is_err() {
-                local_first_engine::contract::ToolOutcomeHint::NoProgress
-            } else {
-                local_first_engine::contract::ToolOutcomeHint::Success
-            });
-        }
-        match outcome {
-            Ok(text) => text,
-            Err(text) => text,
-        }
+            }
+            "browser_dialog" => {
+                // Native alert/confirm/prompt blocks the page until
+                // answered. In read-only (channel) turns we only allow
+                // DISMISS, never accept (an accept could confirm an
+                // action). The dialog message is returned so the model
+                // sees what it answered.
+                let accept = !ctx.read_only
+                    && args
+                        .get("accept")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                let prompt_text = args
+                    .get("prompt_text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta {
+                        text: format!(
+                            "‹‹ACT››💬 Dialog: {}‹‹/ACT››",
+                            if accept { "confirming" } else { "cancelling" }
+                        ),
+                    },
+                )
+                .await;
+                let guard = browse_web_lock().lock().await;
+                let (client_back, dialog_res) = chat_browser_call_bounded(
+                    client,
+                    BrowserMethod::RespondDialog,
+                    serde_json::json!({
+                        "target_id": ctx.current_target.as_str(),
+                        "accept": accept,
+                        "promptText": prompt_text,
+                        "timeoutMs": 5_000,
+                    }),
+                )
+                .await;
+                drop(guard);
+                *browser_session = client_back;
+                match dialog_res {
+                    Ok(value) => {
+                        let msg = value.get("message").and_then(|m| m.as_str()).unwrap_or("");
+                        push_browser_step("dialog".to_string(), "done");
+                        Ok(format!(
+                            "Dialog {} (message: \"{msg}\"). Re-read the page with browser_snapshot.",
+                            if accept { "confirmed" } else { "cancelled" }
+                        ))
+                    }
+                    Err(error) => {
+                        push_browser_step("dialog".to_string(), "error");
+                        Err(format!("No dialog to handle or error: {error}"))
+                    }
+                }
+            }
+            _ => Err(format!("Unknown browser tool: {name}")),
+        },
+    };
+    // D2 fallback for arms that set no explicit hint (navigate / snapshot / tabs / dialog /
+    // screenshot): the `Result` VARIANT is itself a machine signal — an errored action is no
+    // progress, an ok one is. The `browser_act` arm sets a nuanced hint above (a successful
+    // `type` that selected no suggestion is `Ok` yet NoProgress), which takes precedence here.
+    if ctx.outcome_hint.is_none() {
+        *ctx.outcome_hint = Some(if outcome.is_err() {
+            local_first_engine::contract::ToolOutcomeHint::NoProgress
+        } else {
+            local_first_engine::contract::ToolOutcomeHint::Success
+        });
+    }
+    match outcome {
+        Ok(text) => text,
+        Err(text) => text,
+    }
 }
 
 /// S2 T4 (retry-safety): did the templated render GENUINELY deliver? True ONLY on the exact
@@ -24476,9 +24565,7 @@ require your confirmation in the app. Propose it and stop."
             .map(|w| {
                 let mut chars = w.chars();
                 match chars.next() {
-                    Some(first) => {
-                        first.to_uppercase().collect::<String>() + chars.as_str()
-                    }
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
                     None => String::new(),
                 }
             })
@@ -24492,8 +24579,7 @@ require your confirmation in the app. Propose it and stop."
         )
         .await;
         let id_for_load = id.clone();
-        match tokio::task::spawn_blocking(move || load_skill_body_and_sensitive(&id_for_load))
-            .await
+        match tokio::task::spawn_blocking(move || load_skill_body_and_sensitive(&id_for_load)).await
         {
             Ok(Some((body, sensitive))) => {
                 // ADR 0023 Step 5: arm the turn's force-confirm for a skill that declares a
@@ -24527,10 +24613,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
         if command.trim().is_empty() {
             "Empty command.".to_string()
         } else {
-            let scan = skill_security::scan_blobs(&[(
-                "command".to_string(),
-                command.clone(),
-            )]);
+            let scan = skill_security::scan_blobs(&[("command".to_string(), command.clone())]);
             if scan.blocked {
                 let reasons = security_scan_block_reasons(&scan);
                 tracing::warn!(target: "security::scan", risk = scan.risk_score, %reasons, "sandboxed command blocked");
@@ -24553,10 +24636,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                 // If Docker is down we auto-start Docker Desktop (cold
                 // start ~1 min) before running — tell the user so the
                 // wait doesn't look like a hang.
-                let docker_up =
-                    tokio::task::spawn_blocking(sandbox::docker_running)
-                        .await
-                        .unwrap_or(false);
+                let docker_up = tokio::task::spawn_blocking(sandbox::docker_running)
+                    .await
+                    .unwrap_or(false);
                 if !docker_up {
                     let _ = emit_stream_event(
                         ctx.tx,
@@ -24581,8 +24663,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                 // The model may omit skill_id; derive it from the
                 // command's `/home/agent/skills/<id>/…` path so the
                 // skill's files are always synced before running.
-                let sid =
-                    skill_id.clone().or_else(|| skill_id_from_command(&command));
+                let sid = skill_id.clone().or_else(|| skill_id_from_command(&command));
                 let outcome = tokio::task::spawn_blocking(move || {
                     if let Some(id) = sid.as_deref() {
                         if let Ok(dir) = skills_dir() {
@@ -24615,9 +24696,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                 // active, also copy them there — it's the project's
                 // default folder for generated files.
                 let project_folder = active_workspace_folder();
-                for (file_name, size) in
-                    detect_new_artifacts(&host_out, run_started)
-                {
+                for (file_name, size) in detect_new_artifacts(&host_out, run_started) {
                     let mut delivered_to: Option<String> = None;
                     if let Some(folder) = project_folder.as_ref() {
                         let dest = std::path::Path::new(folder).join(&file_name);
@@ -24630,8 +24709,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                         "thread": thread_slug,
                         "size": size,
                     });
-                    let artifact_mark =
-                        format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                    let artifact_mark = format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
                     // Persist in the committed answer so the UI can
                     // render the download card + Artefatti panel (the
                     // Done payload is authoritative).
@@ -24655,12 +24733,10 @@ available tools (for data from the web use the browser: browser_navigate on the 
                     )
                     .await;
                     match delivered_to {
-                        Some(path) => model_output.push_str(&format!(
-                            "\n[file generated and saved to {path}]"
-                        )),
-                        None => model_output.push_str(&format!(
-                            "\n[file generated: {file_name} in $OUTPUT_DIR]"
-                        )),
+                        Some(path) => model_output
+                            .push_str(&format!("\n[file generated and saved to {path}]")),
+                        None => model_output
+                            .push_str(&format!("\n[file generated: {file_name} in $OUTPUT_DIR]")),
                     }
                 }
                 model_output
@@ -24696,8 +24772,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
         let is_pdf = fname.to_ascii_lowercase().ends_with(".pdf");
         let result = tokio::task::spawn_blocking(move || {
             if is_pdf {
-                let title =
-                    fname_w.trim_end_matches(".pdf").trim_end_matches(".PDF");
+                let title = fname_w.trim_end_matches(".pdf").trim_end_matches(".PDF");
                 let bytes = pdf_render::markdown_to_pdf(title, &content)
                     .map_err(|e| format!("PDF render failed: {e}"))?;
                 write_artifact_bytes(&slug_w, &fname_w, &bytes)
@@ -24801,8 +24876,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 "size": size_b,
                                 "updated": updated,
                             });
-                            let artifact_mark =
-                                format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                            let artifact_mark = format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
                             effects.append_output.push(artifact_mark.clone());
                             let _ = emit_stream_event(
                                 ctx.tx,
@@ -24842,10 +24916,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
         // model can't paste a 13KB blob into a shell-written deck.json.
         let slug = artifact_thread_slug(ctx.thread_id);
         let slug2 = slug.clone();
-        let _ = tokio::task::spawn_blocking(move || materialize_brand_kit(&slug2))
-            .await;
-        let mut kit = serde_json::to_value(load_brand_kit())
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let _ = tokio::task::spawn_blocking(move || materialize_brand_kit(&slug2)).await;
+        let mut kit =
+            serde_json::to_value(load_brand_kit()).unwrap_or_else(|_| serde_json::json!({}));
         if let Some(obj) = kit.as_object_mut() {
             let has_logo = obj
                 .get("logo_data_url")
@@ -24879,24 +24952,20 @@ available tools (for data from the web use the browser: browser_navigate on the 
             .map(|a| !a.is_empty())
             .unwrap_or(false);
         if !has_slides {
-            "render_deck needs a non-empty 'slides' array (content only)."
-                .to_string()
+            "render_deck needs a non-empty 'slides' array (content only).".to_string()
         } else {
             let thread_slug = artifact_thread_slug(ctx.thread_id);
             let _ = emit_stream_event(
                 ctx.tx,
                 GenerateStreamEvent::Delta {
-                    text: "‹‹ACT››🎬 Rendering the deck (PPTX + preview)‹‹/ACT››"
-                        .to_string(),
+                    text: "‹‹ACT››🎬 Rendering the deck (PPTX + preview)‹‹/ACT››".to_string(),
                 },
             )
             .await;
             // 1) brand.json + logo.png + deck.json into the output dir
             //    (host side = bind-mounted into the sandbox).
             let slug_b = thread_slug.clone();
-            let _ =
-                tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b))
-                    .await;
+            let _ = tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b)).await;
             let deck_bytes = serde_json::to_vec_pretty(&deck).unwrap_or_default();
             let slug_w = thread_slug.clone();
             let write_res = tokio::task::spawn_blocking(move || {
@@ -24919,11 +24988,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                      ls -la deck.pptx deck.html deck.pdf 2>&1"
                 );
                 sandbox_begin(cmd.clone(), ctx.thread_id.map(|s| s.to_string()));
-                let render = tokio::task::spawn_blocking(move || {
-                    sandbox::run_command(&cmd, None)
-                })
-                .await
-                .unwrap_or_else(|e| Err(format!("join error: {e}")));
+                let render = tokio::task::spawn_blocking(move || sandbox::run_command(&cmd, None))
+                    .await
+                    .unwrap_or_else(|e| Err(format!("join error: {e}")));
                 let render_out = match render {
                     Ok(o) => o,
                     Err(e) => e,
@@ -24933,8 +25000,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                 // QA flags issues: the files exist and the user needs access to
                 // inspect/fix them.
                 let qa_result = rendered_deck_qa_result(&render_out);
-                let quality_metadata =
-                    deck_quality_metadata_from_qa_result(qa_result.as_ref());
+                let quality_metadata = deck_quality_metadata_from_qa_result(qa_result.as_ref());
                 // 5d.1b: the helper appends artifact markers to a local buffer; flushed to `effects`
                 // (→ ctx.accumulated) after the call, preserving the inline order.
                 let mut deck_out = String::new();
@@ -25008,8 +25074,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
             .unwrap_or(6)
             .clamp(3, 12) as usize;
         let requested_template_ref = deliverable_template_ref(&parsed);
-        let catalog_template =
-            template_catalog_by_id(requested_template_ref.as_deref());
+        let catalog_template = template_catalog_by_id(requested_template_ref.as_deref());
         let template_ref = catalog_template.as_ref().map(|entry| entry.id.clone());
         let design_template = deliverable_design_template(&parsed).or_else(|| {
             catalog_template
@@ -25028,8 +25093,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                     .and_then(|entry| entry.design_profile.clone())
             })
             .or_else(|| {
-                let (profile, _) =
-                    deliverable_template_defaults(design_template.as_deref());
+                let (profile, _) = deliverable_template_defaults(design_template.as_deref());
                 profile.map(String::from)
             });
         let design_components = resolved_deliverable_design_components_with_catalog(
@@ -25056,45 +25120,40 @@ available tools (for data from the web use the browser: browser_navigate on the 
                     "design_components": design_components.clone(),
                 }),
             );
-            let workflow_plan = match run_static_workflow_plan_through_brain_async(
-                brief.clone(),
-                workflow_plan,
-            )
-            .await
-            {
-                Ok(plan) => plan,
-                Err(error) => {
-                    eprintln!(
-                        "make_deck: static workflow plan validation failed: {error}"
-                    );
-                    workflow_execution_plan(
-                        &make_deck_workflow_definition(),
-                        serde_json::json!({
-                            "brief": brief.clone(),
-                            "language": language.clone(),
-                            "slides": slides,
-                            "template_ref": template_ref.clone(),
-                            "design_template": design_template.clone(),
-                            "design_theme": design_theme.clone(),
-                            "design_profile": design_profile.clone(),
-                            "design_components": design_components.clone(),
-                        }),
-                    )
-                }
-            };
+            let workflow_plan =
+                match run_static_workflow_plan_through_brain_async(brief.clone(), workflow_plan)
+                    .await
+                {
+                    Ok(plan) => plan,
+                    Err(error) => {
+                        eprintln!("make_deck: static workflow plan validation failed: {error}");
+                        workflow_execution_plan(
+                            &make_deck_workflow_definition(),
+                            serde_json::json!({
+                                "brief": brief.clone(),
+                                "language": language.clone(),
+                                "slides": slides,
+                                "template_ref": template_ref.clone(),
+                                "design_template": design_template.clone(),
+                                "design_theme": design_theme.clone(),
+                                "design_profile": design_profile.clone(),
+                                "design_components": design_components.clone(),
+                            }),
+                        )
+                    }
+                };
             let thread_slug = artifact_thread_slug(ctx.thread_id);
             let _ = emit_stream_event(
                 ctx.tx,
                 GenerateStreamEvent::Delta {
-                    text: "‹‹ACT››🎬 Building the deck (brand · content · images · render)‹‹/ACT››".to_string(),
+                    text: "‹‹ACT››🎬 Building the deck (brand · content · images · render)‹‹/ACT››"
+                        .to_string(),
                 },
             )
             .await;
             // 1) brand into the output dir + load colours for prompts.
             let slug_b = thread_slug.clone();
-            let _ =
-                tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b))
-                    .await;
+            let _ = tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b)).await;
             let brand = tokio::task::spawn_blocking(load_brand_kit)
                 .await
                 .unwrap_or_default();
@@ -25108,7 +25167,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                     ex["slides"].as_array().and_then(|sl| {
                         sl.iter()
                             .find(|s| s.get("layout").and_then(|l| l.as_str()) == Some("cover"))
-                            .and_then(|c| c.get("eyebrow").and_then(|e| e.as_str()).map(String::from))
+                            .and_then(|c| {
+                                c.get("eyebrow").and_then(|e| e.as_str()).map(String::from)
+                            })
                     })
                 });
             // 2) slide content — schema-enforced model call (the floor).
@@ -25138,11 +25199,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                 ),
                 Ok(mut deck) => {
                     apply_deck_design_components(&mut deck, &design_components);
-                    apply_deck_design_theme(
-                        &mut deck,
-                        design_theme.as_deref(),
-                        &brand,
-                    );
+                    apply_deck_design_theme(&mut deck, design_theme.as_deref(), &brand);
                     // Carry the pack's curated editorial chrome (hero_art deterministic,
                     // eyebrow refinable) so the generated deck matches the preview.
                     // Fail-open when the template is not a bundled presentation pack or
@@ -25168,9 +25225,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                     // 3) images for want_image slides (cap 3, cover first).
                     let accent = brand.accent_color.clone();
                     let mut made = 0usize;
-                    if let Some(arr) =
-                        deck.get_mut("slides").and_then(|s| s.as_array_mut())
-                    {
+                    if let Some(arr) = deck.get_mut("slides").and_then(|s| s.as_array_mut()) {
                         for (idx, slide) in arr.iter_mut().enumerate() {
                             if made >= 3 {
                                 break;
@@ -25208,12 +25263,8 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 },
                             )
                             .await;
-                            if let Ok(bytes) = generate_image_png(
-                                &ctx.state.http,
-                                &prompt,
-                                "1280x720",
-                            )
-                            .await
+                            if let Ok(bytes) =
+                                generate_image_png(&ctx.state.http, &prompt, "1280x720").await
                             {
                                 let fname = format!("{iname}.png");
                                 let slug_w = thread_slug.clone();
@@ -25226,8 +25277,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 if w.is_ok() {
                                     slide["image"] = serde_json::json!(fname);
                                     if layout == "bullets" {
-                                        slide["layout"] =
-                                            serde_json::json!("image_right");
+                                        slide["layout"] = serde_json::json!("image_right");
                                     }
                                     made += 1;
                                 }
@@ -25240,8 +25290,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                         .and_then(|s| s.as_array())
                         .map(|a| a.len())
                         .unwrap_or(0);
-                    let deck_bytes =
-                        serde_json::to_vec_pretty(&deck).unwrap_or_default();
+                    let deck_bytes = serde_json::to_vec_pretty(&deck).unwrap_or_default();
                     let slug_w = thread_slug.clone();
                     let write_res = tokio::task::spawn_blocking(move || {
                         write_artifact_bytes(&slug_w, "deck.json", &deck_bytes)
@@ -25251,38 +25300,37 @@ available tools (for data from the web use the browser: browser_navigate on the 
                     if let Err(e) = write_res {
                         format!("Could not write deck.json: {e}")
                     } else {
-                        let template_render_arg =
-                            match materialize_deck_template_source(
-                                &thread_slug,
-                                catalog_template.as_ref(),
-                            ) {
-                                Ok(Some(filename)) => {
-                                    let _ = emit_stream_event(
-                                        ctx.tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: "‹‹ACT››📐 Using imported PPTX template‹‹/ACT››".to_string(),
-                                        },
-                                    )
-                                    .await;
-                                    format!(" --template-pptx {filename}")
-                                }
-                                Ok(None) => String::new(),
-                                Err(error) => {
-                                    let _ = emit_stream_event(
-                                        ctx.tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: format!(
-                                                "‹‹ACT››⚠ Template source unavailable: {error}‹‹/ACT››"
-                                            ),
-                                        },
-                                    )
-                                    .await;
-                                    String::new()
-                                }
-                            };
+                        let template_render_arg = match materialize_deck_template_source(
+                            &thread_slug,
+                            catalog_template.as_ref(),
+                        ) {
+                            Ok(Some(filename)) => {
+                                let _ = emit_stream_event(
+                                    ctx.tx,
+                                    GenerateStreamEvent::Delta {
+                                        text: "‹‹ACT››📐 Using imported PPTX template‹‹/ACT››"
+                                            .to_string(),
+                                    },
+                                )
+                                .await;
+                                format!(" --template-pptx {filename}")
+                            }
+                            Ok(None) => String::new(),
+                            Err(error) => {
+                                let _ = emit_stream_event(
+                                    ctx.tx,
+                                    GenerateStreamEvent::Delta {
+                                        text: format!(
+                                            "‹‹ACT››⚠ Template source unavailable: {error}‹‹/ACT››"
+                                        ),
+                                    },
+                                )
+                                .await;
+                                String::new()
+                            }
+                        };
                         // 5) render in the sandbox (no model shell).
-                        let container_out =
-                            sandbox::container_output_dir(&thread_slug);
+                        let container_out = sandbox::container_output_dir(&thread_slug);
                         let cmd = format!(
                             "cd '{container_out}' && deck-render deck.json --prefix deck{template_render_arg} && \
                              chromium --headless --no-sandbox --disable-gpu \
@@ -25293,11 +25341,10 @@ available tools (for data from the web use the browser: browser_navigate on the 
                              ls -la deck.pptx deck.html deck.pdf 2>&1"
                         );
                         sandbox_begin(cmd.clone(), ctx.thread_id.map(|s| s.to_string()));
-                        let render = tokio::task::spawn_blocking(move || {
-                            sandbox::run_command(&cmd, None)
-                        })
-                        .await
-                        .unwrap_or_else(|e| Err(format!("join error: {e}")));
+                        let render =
+                            tokio::task::spawn_blocking(move || sandbox::run_command(&cmd, None))
+                                .await
+                                .unwrap_or_else(|e| Err(format!("join error: {e}")));
                         let render_out = match render {
                             Ok(o) => o,
                             Err(e) => e,
@@ -25307,15 +25354,11 @@ available tools (for data from the web use the browser: browser_navigate on the 
                         // when QA flags issues: the generated files still need
                         // to be visible for review and iteration.
                         let qa_result = rendered_deck_qa_result(&render_out);
-                        let quality_metadata = deck_quality_metadata_from_qa_result(
-                            qa_result.as_ref(),
-                        );
+                        let quality_metadata =
+                            deck_quality_metadata_from_qa_result(qa_result.as_ref());
                         let mut artifact_metadata =
                             deck_template_metadata(catalog_template.as_ref());
-                        merge_object_metadata(
-                            &mut artifact_metadata,
-                            quality_metadata.as_ref(),
-                        );
+                        merge_object_metadata(&mut artifact_metadata, quality_metadata.as_ref());
                         let artifact_metadata_ref = artifact_metadata
                             .as_object()
                             .filter(|metadata| !metadata.is_empty())
@@ -25340,9 +25383,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 workflow_plan
                                     .steps
                                     .first()
-                                    .and_then(|step| step
-                                        .arguments
-                                        .get("workflow_id"))
+                                    .and_then(|step| step.arguments.get("workflow_id"))
                                     .and_then(|value| value.as_str())
                                     .unwrap_or("make_deck"),
                                 if produced.is_empty() {
@@ -25362,9 +25403,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     workflow_plan
                                         .steps
                                         .first()
-                                        .and_then(|step| step
-                                            .arguments
-                                            .get("workflow_id"))
+                                        .and_then(|step| step.arguments.get("workflow_id"))
                                         .and_then(|value| value.as_str())
                                         .unwrap_or("make_deck"),
                                     produced.join(", ")
@@ -25372,10 +25411,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             } else {
                                 format!(
                                     "Deck render did NOT produce a .pptx. Renderer output:\n{}",
-                                    render_out
-                                        .chars()
-                                        .take(800)
-                                        .collect::<String>()
+                                    render_out.chars().take(800).collect::<String>()
                                 )
                             }
                         }
@@ -25437,64 +25473,56 @@ available tools (for data from the web use the browser: browser_navigate on the 
                 &make_document_workflow_definition(),
                 workflow_args.clone(),
             );
-            let workflow_plan = match run_static_workflow_plan_through_brain_async(
-                brief.clone(),
-                workflow_plan,
-            )
-            .await
-            {
-                Ok(plan) => plan,
-                Err(error) => {
-                    eprintln!(
-                        "make_document: static workflow plan validation failed: {error}"
-                    );
-                    workflow_execution_plan(
-                        &make_document_workflow_definition(),
-                        workflow_args,
-                    )
-                }
-            };
+            let workflow_plan =
+                match run_static_workflow_plan_through_brain_async(brief.clone(), workflow_plan)
+                    .await
+                {
+                    Ok(plan) => plan,
+                    Err(error) => {
+                        eprintln!("make_document: static workflow plan validation failed: {error}");
+                        workflow_execution_plan(&make_document_workflow_definition(), workflow_args)
+                    }
+                };
             let thread_slug = artifact_thread_slug(ctx.thread_id);
             // F2-T8: a template_ref resolving to a BUNDLED document pack gets the
             // templated pipeline (slot-filled doc.json -> container render ->
             // designed html/pdf/docx); everything else — no template, an imported
             // pack, or a presentation pack — keeps the Markdown path below
             // byte-identical to before this task.
-            let catalog_template =
-                template_catalog_by_id(document_options.template_ref.as_deref());
+            let catalog_template = template_catalog_by_id(document_options.template_ref.as_deref());
             match document_template_pack(catalog_template.as_ref()).cloned() {
                 None => {
-                let _ = emit_stream_event(
+                    let _ = emit_stream_event(
                     ctx.tx,
                     GenerateStreamEvent::Delta {
                         text: "‹‹ACT››📝 Building the document (brief · draft · artifact · memory)‹‹/ACT››".to_string(),
                     },
                 )
                 .await;
-                match generate_document_markdown(
-                    &ctx.state.http,
-                    ctx.base_url,
-                    ctx.model,
-                    ctx.api_key.as_deref(),
-                    &brief,
-                    &language,
-                    &document_options,
-                )
-                .await
-                {
-                    Err(error) => {
-                        format!("Could not generate document content: {error}")
-                    }
-                    Ok(markdown) => {
-                        let markdown = apply_document_design_components(
-                            &markdown,
-                            &document_options.design_components,
-                        );
-                        let (markdown, repaired_issues) =
-                            apply_document_quality_guardrails(&markdown);
-                        let quality_issues = document_quality_issues(&markdown);
-                        if !repaired_issues.is_empty() && quality_issues.is_empty() {
-                            let _ = emit_stream_event(
+                    match generate_document_markdown(
+                        &ctx.state.http,
+                        ctx.base_url,
+                        ctx.model,
+                        ctx.api_key.as_deref(),
+                        &brief,
+                        &language,
+                        &document_options,
+                    )
+                    .await
+                    {
+                        Err(error) => {
+                            format!("Could not generate document content: {error}")
+                        }
+                        Ok(markdown) => {
+                            let markdown = apply_document_design_components(
+                                &markdown,
+                                &document_options.design_components,
+                            );
+                            let (markdown, repaired_issues) =
+                                apply_document_quality_guardrails(&markdown);
+                            let quality_issues = document_quality_issues(&markdown);
+                            if !repaired_issues.is_empty() && quality_issues.is_empty() {
+                                let _ = emit_stream_event(
                                 ctx.tx,
                                 GenerateStreamEvent::Delta {
                                     text: format!(
@@ -25504,132 +25532,119 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 },
                             )
                             .await;
-                        }
-                        if !quality_issues.is_empty() {
-                            let summary = quality_issues
-                                .iter()
-                                .take(5)
-                                .cloned()
-                                .collect::<Vec<_>>()
-                                .join("; ");
-                            format!(
-                                "Could not generate document artifact: document QA failed: {summary}"
-                            )
-                        } else {
-                            let mut produced = Vec::new();
-                            let mut artifact_error: Option<String> = None;
-                            for format in formats {
-                                let artifact_name =
-                                    document_artifact_name_with_extension(
+                            }
+                            if !quality_issues.is_empty() {
+                                let summary = quality_issues
+                                    .iter()
+                                    .take(5)
+                                    .cloned()
+                                    .collect::<Vec<_>>()
+                                    .join("; ");
+                                format!(
+                                    "Could not generate document artifact: document QA failed: {summary}"
+                                )
+                            } else {
+                                let mut produced = Vec::new();
+                                let mut artifact_error: Option<String> = None;
+                                for format in formats {
+                                    let artifact_name = document_artifact_name_with_extension(
                                         Some(&fname),
                                         &format,
                                     );
-                                let slug_w = thread_slug.clone();
-                                let fname_w = artifact_name.clone();
-                                let markdown_w = markdown.clone();
-                                let result = tokio::task::spawn_blocking(move || {
-                                    if format == "pdf" {
-                                        let title = fname_w
-                                            .trim_end_matches(".pdf")
-                                            .trim_end_matches(".PDF");
-                                        let bytes = pdf_render::markdown_to_pdf(
-                                            title,
-                                            &markdown_w,
-                                        )
-                                        .map_err(|e| {
-                                            format!("PDF render failed: {e}")
-                                        })?;
-                                        write_artifact_bytes(&slug_w, &fname_w, &bytes)
-                                    } else if format == "docx" {
-                                        let title = fname_w
-                                            .trim_end_matches(".docx")
-                                            .trim_end_matches(".DOCX");
-                                        let bytes =
-                                            markdown_to_docx(title, &markdown_w)
-                                                .map_err(|e| {
-                                                    format!("DOCX render failed: {e}")
-                                                })?;
-                                        write_artifact_bytes(&slug_w, &fname_w, &bytes)
-                                    } else {
-                                        write_text_artifact(
-                                            &slug_w,
-                                            &fname_w,
-                                            &markdown_w,
-                                        )
-                                    }
-                                })
-                                .await
-                                .unwrap_or_else(|error| Err(format!("Error: {error}")));
-                                match result {
-                                    Ok((size, updated)) => {
-                                        let marker = serde_json::json!({
-                                            "name": artifact_name,
-                                            "thread": thread_slug,
-                                            "size": size,
-                                            "updated": updated,
-                                            "source": "managed",
-                                            "managed_path": sandbox::artifacts_dir()
-                                                .join(&thread_slug)
-                                                .join(&artifact_name)
-                                                .to_string_lossy()
-                                                .to_string(),
-                                        });
-                                        let artifact_mark = format!(
-                                            "‹‹ARTIFACT››{marker}‹‹/ARTIFACT››"
-                                        );
-                                        effects.append_output.push(artifact_mark.clone());
-                                        let _ = emit_stream_event(
-                                            ctx.tx,
-                                            GenerateStreamEvent::Delta {
-                                                text: artifact_mark,
-                                            },
-                                        )
-                                        .await;
-                                        let artifact_name = marker
-                                            .get("name")
-                                            .and_then(|value| value.as_str())
-                                            .unwrap_or("document.md")
-                                            .to_string();
-                                        register_artifact_memory(
-                                            ctx.state,
-                                            ctx.thread_id,
-                                            &thread_slug,
-                                            &artifact_name,
-                                            size,
-                                            updated,
-                                            "make_document",
-                                            None,
-                                        )
-                                        .await;
-                                        produced.push(artifact_name);
-                                    }
-                                    Err(error) => {
-                                        artifact_error = Some(error);
-                                        break;
+                                    let slug_w = thread_slug.clone();
+                                    let fname_w = artifact_name.clone();
+                                    let markdown_w = markdown.clone();
+                                    let result = tokio::task::spawn_blocking(move || {
+                                        if format == "pdf" {
+                                            let title = fname_w
+                                                .trim_end_matches(".pdf")
+                                                .trim_end_matches(".PDF");
+                                            let bytes =
+                                                pdf_render::markdown_to_pdf(title, &markdown_w)
+                                                    .map_err(|e| {
+                                                        format!("PDF render failed: {e}")
+                                                    })?;
+                                            write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                                        } else if format == "docx" {
+                                            let title = fname_w
+                                                .trim_end_matches(".docx")
+                                                .trim_end_matches(".DOCX");
+                                            let bytes = markdown_to_docx(title, &markdown_w)
+                                                .map_err(|e| format!("DOCX render failed: {e}"))?;
+                                            write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                                        } else {
+                                            write_text_artifact(&slug_w, &fname_w, &markdown_w)
+                                        }
+                                    })
+                                    .await
+                                    .unwrap_or_else(|error| Err(format!("Error: {error}")));
+                                    match result {
+                                        Ok((size, updated)) => {
+                                            let marker = serde_json::json!({
+                                                "name": artifact_name,
+                                                "thread": thread_slug,
+                                                "size": size,
+                                                "updated": updated,
+                                                "source": "managed",
+                                                "managed_path": sandbox::artifacts_dir()
+                                                    .join(&thread_slug)
+                                                    .join(&artifact_name)
+                                                    .to_string_lossy()
+                                                    .to_string(),
+                                            });
+                                            let artifact_mark =
+                                                format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                                            effects.append_output.push(artifact_mark.clone());
+                                            let _ = emit_stream_event(
+                                                ctx.tx,
+                                                GenerateStreamEvent::Delta {
+                                                    text: artifact_mark,
+                                                },
+                                            )
+                                            .await;
+                                            let artifact_name = marker
+                                                .get("name")
+                                                .and_then(|value| value.as_str())
+                                                .unwrap_or("document.md")
+                                                .to_string();
+                                            register_artifact_memory(
+                                                ctx.state,
+                                                ctx.thread_id,
+                                                &thread_slug,
+                                                &artifact_name,
+                                                size,
+                                                updated,
+                                                "make_document",
+                                                None,
+                                            )
+                                            .await;
+                                            produced.push(artifact_name);
+                                        }
+                                        Err(error) => {
+                                            artifact_error = Some(error);
+                                            break;
+                                        }
                                     }
                                 }
-                            }
-                            if let Some(error) = artifact_error {
-                                error
-                            } else {
-                                // S2 T4: the document was DELIVERED — clear the thread's
-                                // routing binding (mirrors the make_deck success arm).
-                                effects.clear_routing_binding = true;
-                                format!(
-                                    "Document created via workflow {}: {}. The document is DONE — give the user a one-line summary.",
-                                    workflow_plan
-                                        .steps
-                                        .first()
-                                        .and_then(|step| step
-                                            .arguments
-                                            .get("workflow_id"))
-                                        .and_then(|value| value.as_str())
-                                        .unwrap_or("make_document"),
-                                    produced.join(", "),
-                                )
+                                if let Some(error) = artifact_error {
+                                    error
+                                } else {
+                                    // S2 T4: the document was DELIVERED — clear the thread's
+                                    // routing binding (mirrors the make_deck success arm).
+                                    effects.clear_routing_binding = true;
+                                    format!(
+                                        "Document created via workflow {}: {}. The document is DONE — give the user a one-line summary.",
+                                        workflow_plan
+                                            .steps
+                                            .first()
+                                            .and_then(|step| step.arguments.get("workflow_id"))
+                                            .and_then(|value| value.as_str())
+                                            .unwrap_or("make_document"),
+                                        produced.join(", "),
+                                    )
+                                }
                             }
                         }
-                    }
                     }
                 }
                 Some(entry) => {
@@ -25711,9 +25726,7 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
         } else {
             let query = serde_json::from_str::<serde_json::Value>(args_raw)
                 .ok()
-                .and_then(|a| {
-                    a.get("query").and_then(|q| q.as_str()).map(String::from)
-                })
+                .and_then(|a| a.get("query").and_then(|q| q.as_str()).map(String::from))
                 .unwrap_or_default();
             // ADR 0022 (Piano UI A2/A3): emetti l'evento strutturato
             // `Recall` con i hits richiamati (visibile in UI: fase
@@ -25724,34 +25737,26 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
             let outcome = tokio::task::spawn_blocking(move || {
                 recall_memory(&st, &recall_query, vault_value_requested)
             })
-                .await
-                .unwrap_or_else(|e| RecallOutcome {
-                    response: format!("Execution error: {e}"),
-                    payload: local_first_subagents::RecallStreamPayload {
-                        query: "(query)".to_string(),
-                        hits: Vec::new(),
-                        scope: "personal".to_string(),
-                        status: "unavailable".to_string(),
-                    },
-                });
+            .await
+            .unwrap_or_else(|e| RecallOutcome {
+                response: format!("Execution error: {e}"),
+                payload: local_first_subagents::RecallStreamPayload {
+                    query: "(query)".to_string(),
+                    hits: Vec::new(),
+                    scope: "personal".to_string(),
+                    status: "unavailable".to_string(),
+                },
+            });
             let payload = recall_stream_payload_from_outcome(&outcome, &query);
             let recall_effects = memory_read_effects_from_recall_payload(&payload);
             effects.memory_reads.extend(recall_effects.memory_reads);
-            let _ = emit_stream_event(
-                ctx.tx,
-                GenerateStreamEvent::Recall {
-                    payload,
-                },
-            )
-            .await;
+            let _ = emit_stream_event(ctx.tx, GenerateStreamEvent::Recall { payload }).await;
             outcome.response
         }
     } else if name == "query_code_graph" {
         let symbol = serde_json::from_str::<serde_json::Value>(args_raw)
             .ok()
-            .and_then(|a| {
-                a.get("symbol").and_then(|s| s.as_str()).map(String::from)
-            })
+            .and_then(|a| a.get("symbol").and_then(|s| s.as_str()).map(String::from))
             .unwrap_or_default();
         let _ = emit_stream_event(
             ctx.tx,
@@ -25792,20 +25797,13 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
             .unwrap_or(true);
         let anchor = now_local();
         match temporal::intent_from_json(&args_val).and_then(|intent| {
-            temporal::resolve(
-                &intent,
-                &anchor,
-                temporal::ResolveOpts { must_be_future },
-            )
+            temporal::resolve(&intent, &anchor, temporal::ResolveOpts { must_be_future })
         }) {
             Ok(res) => {
                 let _ = emit_stream_event(
                     ctx.tx,
                     GenerateStreamEvent::Delta {
-                        text: format!(
-                            "‹‹ACT››🗓 Date resolved: {}‹‹/ACT››",
-                            res.human
-                        ),
+                        text: format!("‹‹ACT››🗓 Date resolved: {}‹‹/ACT››", res.human),
                     },
                 )
                 .await;
@@ -25835,13 +25833,12 @@ an uncertain date.",
             ),
         }
     } else if name == "record_decision" {
-        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
         let _ = emit_stream_event(
             ctx.tx,
             GenerateStreamEvent::Delta {
-                text: "‹‹ACT››🧠 Recording the decision in memory‹‹/ACT››"
-                    .to_string(),
+                text: "‹‹ACT››🧠 Recording the decision in memory‹‹/ACT››".to_string(),
             },
         )
         .await;
@@ -25850,8 +25847,8 @@ an uncertain date.",
             .await
             .unwrap_or_else(|e| format!("Execution error: {e}"))
     } else if name == "forget_memory" {
-        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
         let _ = emit_stream_event(
             ctx.tx,
             GenerateStreamEvent::Delta {
@@ -25864,8 +25861,8 @@ an uncertain date.",
             .await
             .unwrap_or_else(|e| format!("Execution error: {e}"))
     } else if name == "update_plan" || name == "step_advance" {
-        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
         // `step_advance` reports progress on a SINGLE step by id (no need to
         // re-send the whole plan → weak-model-proof, no ballooning). It maps to
         // a one-element `sent` and rides the exact same merge + F2-verify path.
@@ -25938,13 +25935,7 @@ an uncertain date.",
                     .unwrap_or("")
                     .to_string();
                 let (ok, reason) = if verify && has_evidence {
-                    verify_step_complete(
-                        &ctx.state.http,
-                        &title,
-                        &criterion,
-                        &batch_evidence,
-                    )
-                    .await
+                    verify_step_complete(&ctx.state.http, &title, &criterion, &batch_evidence).await
                 } else {
                     // Verification off, or nothing to verify against → trust the claim.
                     (true, String::new())
@@ -26007,32 +25998,24 @@ an uncertain date.",
             // The whole merged/verified plan is the effect the caller applies to `ctx.plan` — in the
             // CANONICAL shape, so the loop's own plan-driven controls can read the frontier back.
             effects.plan = Some(canonical_plan_value(&plan_steps));
-            let plan_mark =
-                format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
+            let plan_mark = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
             effects.append_output.push(plan_mark.clone());
-            let _ = emit_stream_event(
-                ctx.tx,
-                GenerateStreamEvent::Delta { text: plan_mark },
-            )
-            .await;
-            upsert_runtime_plan_memory_from_state(
-                ctx.state,
-                ctx.thread_id,
-                &plan_steps,
-            );
+            let _ = emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: plan_mark }).await;
+            upsert_runtime_plan_memory_from_state(ctx.state, ctx.thread_id, &plan_steps);
             // Turn trace: record the plan op with the model's SENT step statuses vs the CANONICAL
             // (merged/verified) ones — observability only, never influences the merge.
-            ctx.turn_trace.record(local_first_engine::turn_trace::TurnEvent::Plan {
-                op: name.to_string(),
-                sent: sent
-                    .iter()
-                    .map(|s| plan_step_status(s).to_string())
-                    .collect(),
-                canonical: plan_steps
-                    .iter()
-                    .map(|s| plan_step_status(s).to_string())
-                    .collect(),
-            });
+            ctx.turn_trace
+                .record(local_first_engine::turn_trace::TurnEvent::Plan {
+                    op: name.to_string(),
+                    sent: sent
+                        .iter()
+                        .map(|s| plan_step_status(s).to_string())
+                        .collect(),
+                    canonical: plan_steps
+                        .iter()
+                        .map(|s| plan_step_status(s).to_string())
+                        .collect(),
+                });
             let done = plan_done_count(&plan_steps);
             match rejection {
                 Some(msg) => format!("⚠️ {msg} (done {done}/{})", plan_steps.len()),
@@ -26161,8 +26144,7 @@ an uncertain date.",
             }
         }
         if ctx.tool_trace.len() < 20 {
-            if let Some(trace_line) =
-                capability_discovery_trace_line(&intent, &discovered_entries)
+            if let Some(trace_line) = capability_discovery_trace_line(&intent, &discovered_entries)
             {
                 effects.trace.push(trace_line);
             }
@@ -26187,8 +26169,8 @@ loaded with use_skill):\n{}",
             )
         }
     } else if name == "schedule_task" {
-        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
         let goal = args_val
             .get("goal")
             .and_then(|v| v.as_str())
@@ -26233,19 +26215,14 @@ loaded with use_skill):\n{}",
             })
             .to_string();
             tokio::task::spawn_blocking(move || {
-                create_automation_from_chat(
-                    &st,
-                    &auto_args,
-                    &user_id,
-                    &workspace_id,
-                )
+                create_automation_from_chat(&st, &auto_args, &user_id, &workspace_id)
             })
             .await
             .unwrap_or_else(|e| format!("Scheduling error: {e}"))
         }
     } else if name == "read_file" {
-        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
         let path = args_val
             .get("path")
             .and_then(|v| v.as_str())
@@ -26261,28 +26238,26 @@ loaded with use_skill):\n{}",
         let st = ctx.state.clone();
         let tid = ctx.thread_id.map(|s| s.to_string());
         let recall_path = path.clone();
-        let mut out = tokio::task::spawn_blocking(move || {
-            read_project_file(&st, tid.as_deref(), &path)
-        })
-        .await
-        .unwrap_or_else(|e| format!("Error: {e}"));
+        let mut out =
+            tokio::task::spawn_blocking(move || read_project_file(&st, tid.as_deref(), &path))
+                .await
+                .unwrap_or_else(|e| format!("Error: {e}"));
         // Per-file recall: surface past DECISIONS about this file so the
         // agent remembers WHY it's like this instead of re-deriving it.
         let st2 = ctx.state.clone();
-        if let Some(note) = tokio::task::spawn_blocking(move || {
-            decisions_for_path(&st2, &recall_path)
-        })
-        .await
-        .ok()
-        .flatten()
+        if let Some(note) =
+            tokio::task::spawn_blocking(move || decisions_for_path(&st2, &recall_path))
+                .await
+                .ok()
+                .flatten()
         {
             out.push_str("\n\n");
             out.push_str(&note);
         }
         out
     } else if name == "write_file" {
-        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
         let path = args_val
             .get("path")
             .and_then(|v| v.as_str())
@@ -26322,8 +26297,8 @@ loaded with use_skill):\n{}",
         emit_read_only_block_if_needed(ctx, &mut effects, &result).await;
         result
     } else if name == "edit_file" {
-        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
         let path = args_val
             .get("path")
             .and_then(|v| v.as_str())
@@ -26440,8 +26415,8 @@ loaded with use_skill):\n{}",
             .unwrap_or_else(|e| format!("Error: {e}"))
     } else if name == "list_directory" || name == "read_text_file" {
         let is_read = name == "read_text_file";
-        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
         let p = args_val
             .get("path")
             .and_then(|v| v.as_str())
@@ -26450,13 +26425,10 @@ loaded with use_skill):\n{}",
         let st = ctx.state.clone();
         let tid = ctx.thread_id.map(|s| s.to_string());
         let pr = p.clone();
-        let resolved = tokio::task::spawn_blocking(move || {
-            fs_resolve_authorized(&st, tid.as_deref(), &pr)
-        })
-        .await
-        .unwrap_or_else(|_| {
-            Err(FsAuthIssue::Invalid("internal error".to_string()))
-        });
+        let resolved =
+            tokio::task::spawn_blocking(move || fs_resolve_authorized(&st, tid.as_deref(), &pr))
+                .await
+                .unwrap_or_else(|_| Err(FsAuthIssue::Invalid("internal error".to_string())));
         match resolved {
             Ok(path) => {
                 let icon = if is_read {
@@ -26494,11 +26466,7 @@ loaded with use_skill):\n{}",
 ‹‹FS_AUTHORIZE››{marker}‹‹/FS_AUTHORIZE››\n"
                 );
                 effects.append_output.push(card.clone());
-                let _ = emit_stream_event(
-                    ctx.tx,
-                    GenerateStreamEvent::Delta { text: card },
-                )
-                .await;
+                let _ = emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card }).await;
                 effects.request_confirm = true;
                 "AWAITING AUTHORIZATION: I showed the user a card with the \
 button to authorize access to the folder. Do NOT say you have read/listed it."
@@ -26506,8 +26474,8 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
             }
         }
     } else if name == "run_in_project" {
-        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
         let command = args_val
             .get("command")
             .and_then(|v| v.as_str())
@@ -26546,21 +26514,19 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
             .await
             .unwrap_or_else(|e| format!("Error: {e}"))
     } else if name == "show_addon" {
-        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
         let addon_id = args_val
             .get("addon_id")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        tokio::task::spawn_blocking(move || {
-            process_skills::addon_show_text(&addon_id)
-        })
-        .await
-        .unwrap_or_else(|e| format!("Error: {e}"))
+        tokio::task::spawn_blocking(move || process_skills::addon_show_text(&addon_id))
+            .await
+            .unwrap_or_else(|e| format!("Error: {e}"))
     } else if name == "customize_addon" {
-        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
         let addon_id = args_val
             .get("addon_id")
             .and_then(|v| v.as_str())
@@ -26583,8 +26549,8 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
         .await
         .unwrap_or_else(|e| format!("Error: {e}"))
     } else if name == "create_skill" {
-        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
         let skill_name = args_val
             .get("name")
             .and_then(|v| v.as_str())
@@ -26607,14 +26573,12 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
             },
         )
         .await;
-        tokio::task::spawn_blocking(move || {
-            create_skill(&skill_name, &skill_desc, &skill_instr)
-        })
-        .await
-        .unwrap_or_else(|e| format!("Error: {e}"))
+        tokio::task::spawn_blocking(move || create_skill(&skill_name, &skill_desc, &skill_instr))
+            .await
+            .unwrap_or_else(|e| format!("Error: {e}"))
     } else if name == "suggest_capabilities" {
-        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
         let need = args_val
             .get("need")
             .and_then(|v| v.as_str())
@@ -26640,11 +26604,8 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
 ‹‹CONNECT_SUGGEST››{marker}‹‹/CONNECT_SUGGEST››\n"
                 );
                 effects.append_output.push(card_text.clone());
-                let _ = emit_stream_event(
-                    ctx.tx,
-                    GenerateStreamEvent::Delta { text: card_text },
-                )
-                .await;
+                let _ =
+                    emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card_text }).await;
                 effects.request_confirm = true;
                 "AWAITING: I showed the user clickable cards to \
 connect the suggested connectors (skill/MCP/Composio). Do NOT say you have already connected anything."
@@ -26658,8 +26619,8 @@ connect the suggested connectors (skill/MCP/Composio). Do NOT say you have alrea
             .await
             .unwrap_or_else(|e| format!("Error: {e}"))
     } else if name == "cancel_scheduled_task" {
-        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
         let task_id = args_val
             .get("task_id")
             .and_then(|v| v.as_str())
@@ -26715,8 +26676,8 @@ require your confirmation in the app. Propose it and stop."
         // read_only channel + write was already rejected just above
         // (composio_writes now includes MCP writes). `autonomous` runs skip
         // the card and execute (explicit per-automation opt-in).
-        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
         let workspace_scoped = workspace_scoped_mcp_write(
             ctx.state,
             ctx.thread_id,
@@ -26738,113 +26699,112 @@ require your confirmation in the app. Propose it and stop."
             emit_read_only_block_if_needed(ctx, &mut effects, &blocked).await;
             blocked
         } else {
-        // ADR 0023: route the decision through the pure policy fn. The approval axis is
-        // now RESOLVED (env > persisted Settings > default `on-request`); autonomous still
-        // forces `Never`, so at the default this yields the same verdict as before. The
-        // sandbox arg is the resolved app-level policy (naming-only in `assess_tool_safety`
-        // — it does not change the Ask/Auto verdict, but keeps the label honest).
-        let approval =
-            effective_approval(ctx.autonomous, resolved_approval_policy(ctx.state, ctx.thread_id));
-        let needs_confirm = matches!(
-            assess_tool_safety(
-                approval,
-                &resolved_sandbox_policy(ctx.state, ctx.thread_id),
-                is_write,
-                workspace_scoped,
-            ),
-            SafetyDecision::AskUser
-        );
-        // ADR 0023 Step 5: an active sensitive skill forces a confirm on effectful
-        // actions even when the policy alone wouldn't (e.g. under `never`).
-        let needs_confirm = needs_confirm
-            || skill_policy_forces_confirm(ctx.active_sensitive.as_slice(), is_write);
-        if needs_confirm {
-            emit_approval_card(
-                ctx,
-                &mut effects,
-                MCP_CONFIRM_OPEN,
-                MCP_CONFIRM_CLOSE,
-                name,
-                &mcp_tool,
-                &args_val,
-            )
-            .await
-        } else {
-            let _ = emit_stream_event(
-                ctx.tx,
-                GenerateStreamEvent::Delta {
-                    text: format!("‹‹ACT››🔌 Using {mcp_tool}‹‹/ACT››"),
-                },
-            )
-            .await;
-            let st = ctx.state.clone();
-            let prov = mcp_provider.clone();
-            let tool = mcp_tool.clone();
-            let args_for_artifact = args_val.clone();
-            let args = args_val;
-            let mcp_started = std::time::Instant::now();
-            let exec = tokio::task::spawn_blocking(move || {
-                run_mcp_chat_tool(&st, &prov, &tool, args)
-            });
-            let mut run_ok = false;
-            let mut run_err: Option<&'static str> = None;
-            let mcp_result = match tokio::time::timeout(mcp_call_timeout(), exec)
-                .await
-            {
-                Ok(Ok(Ok(value))) => {
-                    run_ok = true;
-                    value
-                        .to_string()
-                        .chars()
-                        .take(COMPOSIO_RESULT_CHARS)
-                        .collect()
-                }
-                Ok(Ok(Err(error))) => {
-                    // Classify the failure so a broken MCP server tells the user
-                    // what to do (reconnect / wait) instead of a raw error.
-                    run_err = classify_connector_error(&error.to_string())
-                        .map(connector_error_kind_str)
-                        .or(Some("other"));
-                    let hint = mcp_error_hint(&error.to_string())
-                        .map(|h| format!(" {h}"))
-                        .unwrap_or_default();
-                    format!("MCP tool error: {error}.{hint}")
-                }
-                Ok(Err(_join)) => {
-                    run_err = Some("other");
-                    "Error: MCP execution interrupted.".to_string()
-                }
-                Err(_elapsed) => {
-                    run_err = Some("unavailable");
-                    format!(
-                        "The MCP tool didn't respond within {}s (timeout): the server \
-may be stuck or offline. Tell the user to check/reconnect it from Settings → \
-Connectors → MCP; do NOT claim it's done.",
-                        mcp_call_timeout().as_secs()
-                    )
-                }
-            };
-            record_connector_run(
-                ctx.state,
-                ctx.thread_id,
-                name,
-                "mcp",
-                run_ok,
-                run_err,
-                mcp_started.elapsed(),
+            // ADR 0023: route the decision through the pure policy fn. The approval axis is
+            // now RESOLVED (env > persisted Settings > default `on-request`); autonomous still
+            // forces `Never`, so at the default this yields the same verdict as before. The
+            // sandbox arg is the resolved app-level policy (naming-only in `assess_tool_safety`
+            // — it does not change the Ask/Auto verdict, but keeps the label honest).
+            let approval = effective_approval(
+                ctx.autonomous,
+                resolved_approval_policy(ctx.state, ctx.thread_id),
             );
-            if run_ok {
-                register_mcp_filesystem_artifact_memory(
-                    ctx.state,
-                    ctx.thread_id,
-                    mcp_provider.as_str(),
+            let needs_confirm = matches!(
+                assess_tool_safety(
+                    approval,
+                    &resolved_sandbox_policy(ctx.state, ctx.thread_id),
+                    is_write,
+                    workspace_scoped,
+                ),
+                SafetyDecision::AskUser
+            );
+            // ADR 0023 Step 5: an active sensitive skill forces a confirm on effectful
+            // actions even when the policy alone wouldn't (e.g. under `never`).
+            let needs_confirm = needs_confirm
+                || skill_policy_forces_confirm(ctx.active_sensitive.as_slice(), is_write);
+            if needs_confirm {
+                emit_approval_card(
+                    ctx,
+                    &mut effects,
+                    MCP_CONFIRM_OPEN,
+                    MCP_CONFIRM_CLOSE,
+                    name,
                     &mcp_tool,
-                    &args_for_artifact,
+                    &args_val,
+                )
+                .await
+            } else {
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta {
+                        text: format!("‹‹ACT››🔌 Using {mcp_tool}‹‹/ACT››"),
+                    },
                 )
                 .await;
+                let st = ctx.state.clone();
+                let prov = mcp_provider.clone();
+                let tool = mcp_tool.clone();
+                let args_for_artifact = args_val.clone();
+                let args = args_val;
+                let mcp_started = std::time::Instant::now();
+                let exec =
+                    tokio::task::spawn_blocking(move || run_mcp_chat_tool(&st, &prov, &tool, args));
+                let mut run_ok = false;
+                let mut run_err: Option<&'static str> = None;
+                let mcp_result = match tokio::time::timeout(mcp_call_timeout(), exec).await {
+                    Ok(Ok(Ok(value))) => {
+                        run_ok = true;
+                        value
+                            .to_string()
+                            .chars()
+                            .take(COMPOSIO_RESULT_CHARS)
+                            .collect()
+                    }
+                    Ok(Ok(Err(error))) => {
+                        // Classify the failure so a broken MCP server tells the user
+                        // what to do (reconnect / wait) instead of a raw error.
+                        run_err = classify_connector_error(&error.to_string())
+                            .map(connector_error_kind_str)
+                            .or(Some("other"));
+                        let hint = mcp_error_hint(&error.to_string())
+                            .map(|h| format!(" {h}"))
+                            .unwrap_or_default();
+                        format!("MCP tool error: {error}.{hint}")
+                    }
+                    Ok(Err(_join)) => {
+                        run_err = Some("other");
+                        "Error: MCP execution interrupted.".to_string()
+                    }
+                    Err(_elapsed) => {
+                        run_err = Some("unavailable");
+                        format!(
+                            "The MCP tool didn't respond within {}s (timeout): the server \
+may be stuck or offline. Tell the user to check/reconnect it from Settings → \
+Connectors → MCP; do NOT claim it's done.",
+                            mcp_call_timeout().as_secs()
+                        )
+                    }
+                };
+                record_connector_run(
+                    ctx.state,
+                    ctx.thread_id,
+                    name,
+                    "mcp",
+                    run_ok,
+                    run_err,
+                    mcp_started.elapsed(),
+                );
+                if run_ok {
+                    register_mcp_filesystem_artifact_memory(
+                        ctx.state,
+                        ctx.thread_id,
+                        mcp_provider.as_str(),
+                        &mcp_tool,
+                        &args_for_artifact,
+                    )
+                    .await;
+                }
+                mcp_result
             }
-            mcp_result
-        }
         }
     } else if !name.is_empty() {
         // A connected-service (Composio) tool. Writes need explicit
@@ -26855,8 +26815,10 @@ Connectors → MCP; do NOT claim it's done.",
         // ADR 0023: same routing as the MCP branch. `pre_authorized` = the user's
         // always-allow list; the approval axis is RESOLVED, autonomous forced to `Never`.
         // At the default `on-request` this equals the legacy verdict.
-        let approval =
-            effective_approval(ctx.autonomous, resolved_approval_policy(ctx.state, ctx.thread_id));
+        let approval = effective_approval(
+            ctx.autonomous,
+            resolved_approval_policy(ctx.state, ctx.thread_id),
+        );
         let needs_confirm = matches!(
             assess_tool_safety(
                 approval,
@@ -26868,14 +26830,14 @@ Connectors → MCP; do NOT claim it's done.",
         );
         // ADR 0023 Step 5: an active sensitive skill forces a confirm on effectful
         // actions even when the policy alone wouldn't (e.g. under `never`).
-        let needs_confirm = needs_confirm
-            || skill_policy_forces_confirm(ctx.active_sensitive.as_slice(), is_write);
+        let needs_confirm =
+            needs_confirm || skill_policy_forces_confirm(ctx.active_sensitive.as_slice(), is_write);
         if needs_confirm {
             // Do NOT execute. Emit a confirmation card carrying the exact
             // action; the user runs it (once/always) via the card. The model
             // must never claim it's done — the real outcome comes from the card.
-            let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                .unwrap_or_else(|_| serde_json::json!({}));
+            let args_val: serde_json::Value =
+                serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
             emit_approval_card(
                 ctx,
                 &mut effects,
@@ -26890,22 +26852,17 @@ Connectors → MCP; do NOT claim it's done.",
             let _ = emit_stream_event(
                 ctx.tx,
                 GenerateStreamEvent::Delta {
-                    text: format!(
-                        "‹‹ACT››🔧 Using {}‹‹/ACT››",
-                        humanize_composio_tool(name)
-                    ),
+                    text: format!("‹‹ACT››🔧 Using {}‹‹/ACT››", humanize_composio_tool(name)),
                 },
             )
             .await;
             let st = ctx.state.clone();
             let tool = name.to_string();
-            let args: serde_json::Value = serde_json::from_str(args_raw)
-                .unwrap_or_else(|_| serde_json::json!({}));
+            let args: serde_json::Value =
+                serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
             let composio_started = std::time::Instant::now();
-            let outcome = tokio::task::spawn_blocking(move || {
-                composio_execute_tool(&st, &tool, &args)
-            })
-            .await;
+            let outcome =
+                tokio::task::spawn_blocking(move || composio_execute_tool(&st, &tool, &args)).await;
             let mut run_ok = false;
             let mut run_err: Option<&'static str> = None;
             let composio_result = match outcome {
@@ -27036,8 +26993,21 @@ fn effectful_tool_name(name: &str, composio_writes: &std::collections::BTreeSet<
     let lower = name.to_ascii_lowercase();
     let segments: Vec<&str> = lower.split(|c: char| !c.is_ascii_alphanumeric()).collect();
     [
-        "write", "edit", "apply", "create", "update", "delete", "remove", "send",
-        "save", "make_", "book", "purchase", "forget", "cancel", "record_decision",
+        "write",
+        "edit",
+        "apply",
+        "create",
+        "update",
+        "delete",
+        "remove",
+        "send",
+        "save",
+        "make_",
+        "book",
+        "purchase",
+        "forget",
+        "cancel",
+        "record_decision",
     ]
     .iter()
     .any(|token| {
@@ -27178,8 +27148,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                     effects: Default::default(),
                 });
             }
-            let value: serde_json::Value =
-                serde_json::from_str(args_raw).unwrap_or_default();
+            let value: serde_json::Value = serde_json::from_str(args_raw).unwrap_or_default();
             let goal = value
                 .get("goal")
                 .and_then(|value| value.as_str())
@@ -27245,8 +27214,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 thread_id: self.thread_id,
                 prompt: self.prompt,
                 read_only: self.read_only
-                    || objective_mode
-                        == local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
+                    || objective_mode == local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
                 channel_owner: self.channel_owner,
                 agent_run_id: self.run_id.map(str::to_string),
             };
@@ -27361,7 +27329,8 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             }
         }
         if let Some((turn_id, idempotency_key)) = receipt {
-            let result_json = agent_journal::redact_json_value(serde_json::Value::String(result.clone()));
+            let result_json =
+                agent_journal::redact_json_value(serde_json::Value::String(result.clone()));
             let effects_json = agent_journal::redact_json_value(
                 serde_json::to_value(&effects).unwrap_or_else(|_| serde_json::json!({})),
             );
@@ -27438,14 +27407,15 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
         args_raw: &str,
         call_id: &str,
         ls: &mut local_first_engine::LoopState,
-) -> (String, local_first_engine::contract::ToolOutcomeHint) {
+    ) -> (String, local_first_engine::contract::ToolOutcomeHint) {
         if name == "browser_done" {
-            let payload = serde_json::from_str::<local_first_engine::browse::BrowserDonePayload>(args_raw)
-                .unwrap_or_else(|_| local_first_engine::browse::BrowserDonePayload {
-                    status: local_first_engine::browse::BrowserDoneStatus::Partial,
-                    answer: "Browser stopped with an invalid terminal payload.".to_string(),
-                    ..Default::default()
-                });
+            let payload =
+                serde_json::from_str::<local_first_engine::browse::BrowserDonePayload>(args_raw)
+                    .unwrap_or_else(|_| local_first_engine::browse::BrowserDonePayload {
+                        status: local_first_engine::browse::BrowserDoneStatus::Partial,
+                        answer: "Browser stopped with an invalid terminal payload.".to_string(),
+                        ..Default::default()
+                    });
             let stop_reason = serde_json::to_string(&payload.status)
                 .unwrap_or_else(|_| "\"partial\"".to_string())
                 .trim_matches('"')
@@ -27499,8 +27469,14 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
         // D1/D2: the act/navigate arms write the machine progress hint into `outcome_hint` (via
         // ctx), computed from the sidecar's signals — never re-derived from the result prose. The
         // neutral read-only tools leave it None → Success (they don't stall a browse).
-        let text =
-            execute_browser_tool(&mut bctx, &mut self.browser_session, name, args_raw, call_id).await;
+        let text = execute_browser_tool(
+            &mut bctx,
+            &mut self.browser_session,
+            name,
+            args_raw,
+            call_id,
+        )
+        .await;
         drop(bctx);
         (
             text,
@@ -27600,6 +27576,14 @@ one by one. Resolve a relative/partial date against today's date shown above (e.
 2026-08-18). When every field is set, click the search button. Do NOT bundle a station 'type' together \
 with other actions — after typing a station you must stop and select its suggestion first. (You MAY bundle \
 independent, non-autocomplete actions, e.g. set_date + set_time, in one browser_act `actions` array.)\n\
+2b. SELECTING A RESULT / CONTINUING A BOOKING — result pages (trains, flights, hotels) often expose BOTH \
+a visible solution CARD and duplicate screen-reader buttons beside it (e.g. \"Vedi i dettagli…\", \
+\"Torna alla pagina precedente\"). Prefer the control that CONTAINS the concrete option you want \
+(train number, departure time, price): usually an unnamed `button [ref=…]` wrapping that row, or the \
+price/buy control inside the same card. If a labeled CTA click comes back with \"page did NOT change\" \
+(or the breadcrumb stays on the same step, e.g. still \"SCELTA VIAGGIO\"), do NOT repeat that ref — \
+click the card/price control for that same solution instead. \"Continua\" / \"Avanti\" often appears ONLY \
+AFTER you open the solution and pick a fare; if you do not see it yet, you are still on the results step.\n\
 3. Prefer a login-free, text-rich source (Wikipedia, an official page) over login-walled or \
 JavaScript-heavy SPAs. Keep 2-3 candidate sources; if one is blocked or has no data, try the next — \
 do not repeat the same failing search.\n\
@@ -27637,8 +27621,12 @@ fn drain_stream_sink() -> StreamSink {
         finished: std::sync::atomic::AtomicBool::new(false),
         last_event_at: std::sync::atomic::AtomicU64::new(now_epoch_secs()),
         thread_id: None,
+        assistant_message_id: std::sync::Mutex::new(None),
     });
-    StreamSink { mpsc: mpsc_tx, entry }
+    StreamSink {
+        mpsc: mpsc_tx,
+        entry,
+    }
 }
 
 /// Build the effective sub-turn goal from the manager's `browse` tool args (ADR 0025 slice 2). Parses
@@ -27653,7 +27641,8 @@ struct ParsedBrowseRequest {
 }
 
 fn parse_browse_request(args_raw: &str) -> ParsedBrowseRequest {
-    let value: serde_json::Value = serde_json::from_str(args_raw).unwrap_or(serde_json::Value::Null);
+    let value: serde_json::Value =
+        serde_json::from_str(args_raw).unwrap_or(serde_json::Value::Null);
     let goal = value
         .get("goal")
         .and_then(|v| v.as_str())
@@ -27666,13 +27655,17 @@ fn parse_browse_request(args_raw: &str) -> ParsedBrowseRequest {
         .map(str::trim)
         .filter(|v| v.starts_with("https://") || v.starts_with("http://"))
         .map(str::to_string);
-    let contract = value
-        .get("result_contract")
-        .cloned()
-        .and_then(|v| serde_json::from_value::<local_first_engine::browse::BrowseResultContract>(v).ok());
-    ParsedBrowseRequest { goal, hint_url, contract }
+    let contract = value.get("result_contract").cloned().and_then(|v| {
+        serde_json::from_value::<local_first_engine::browse::BrowseResultContract>(v).ok()
+    });
+    ParsedBrowseRequest {
+        goal,
+        hint_url,
+        contract,
+    }
 }
 
+#[cfg(test)]
 fn build_browse_goal(args_raw: &str) -> String {
     let parsed = parse_browse_request(args_raw);
     let goal = parsed.goal.trim();
@@ -27685,7 +27678,10 @@ fn build_browse_goal(args_raw: &str) -> String {
     if let Some(url) = parsed.hint_url.as_deref() {
         out.push_str(&format!(" (start at {url})"));
     }
-    if let Some(container) = hints.and_then(|h| h.get("container")).and_then(|c| c.as_str()) {
+    if let Some(container) = hints
+        .and_then(|h| h.get("container"))
+        .and_then(|c| c.as_str())
+    {
         let container = container.trim();
         if !container.is_empty() {
             out.push_str(&format!(" (prefer {container})"));
@@ -27704,12 +27700,16 @@ fn earlier_browse_call_in_current_round(
     current_call_id: &str,
 ) -> bool {
     for message in messages.iter().rev() {
-        let Some(calls) = message.get("tool_calls").and_then(serde_json::Value::as_array) else {
+        let Some(calls) = message
+            .get("tool_calls")
+            .and_then(serde_json::Value::as_array)
+        else {
             continue;
         };
-        if !calls.iter().any(|call| {
-            call.get("id").and_then(serde_json::Value::as_str) == Some(current_call_id)
-        }) {
+        if !calls
+            .iter()
+            .any(|call| call.get("id").and_then(serde_json::Value::as_str) == Some(current_call_id))
+        {
             continue;
         }
         for call in calls {
@@ -27765,7 +27765,11 @@ fn browse_round_budget(contract: &local_first_engine::browse::BrowseResultContra
     const BASE: usize = 5;
     const CAP: usize = 10;
     let required = contract.fields.iter().filter(|f| f.required).count();
-    let items_bonus = if contract.minimum_items.unwrap_or(0) > 3 { 1 } else { 0 };
+    let items_bonus = if contract.minimum_items.unwrap_or(0) > 3 {
+        1
+    } else {
+        0
+    };
     (BASE + required.div_ceil(2) + items_bonus).clamp(BASE, CAP)
 }
 
@@ -27896,14 +27900,15 @@ impl GatewayBrowseExecutor<'_> {
                 "target": "chat_0"
             })
             .to_string();
-            let _ = <GatewayBrowserExecutor as local_first_engine::BrowserExecutor>::execute_browser(
-                &mut browser_executor,
-                "browser_navigate",
-                &nav_args,
-                "pre_nav",
-                &mut ls,
-            )
-            .await;
+            let _ =
+                <GatewayBrowserExecutor as local_first_engine::BrowserExecutor>::execute_browser(
+                    &mut browser_executor,
+                    "browser_navigate",
+                    &nav_args,
+                    "pre_nav",
+                    &mut ls,
+                )
+                .await;
             let pre_nav_metrics = serde_json::json!({
                 "stop_reason": "completed",
                 "action_kinds": ["navigate"],
@@ -28009,7 +28014,9 @@ impl GatewayBrowseExecutor<'_> {
         )
         .await;
 
-        if let Some(result) = local_first_engine::browse::browse_result_from_manager_text(&outcome.memory_answer) {
+        if let Some(result) =
+            local_first_engine::browse::browse_result_from_manager_text(&outcome.memory_answer)
+        {
             let stop_reason = serde_json::to_string(&result.status)
                 .unwrap_or_else(|_| "\"partial\"".to_string())
                 .trim_matches('"')
@@ -28085,11 +28092,22 @@ impl GatewayComputerExecutor<'_> {
             return local_first_engine::BrowseResult::not_found(error);
         }
         let (base_url, model, api_key) = chat_openai_stream_config().unwrap_or_default();
-        let system = format!("You control explicitly approved Mac applications for ONE bounded goal. {now}\nUse only computer_list_apps, computer_get_state, and computer_action. Start by listing apps. Use only element indices from the latest snapshot; after every action fetch a fresh snapshot. Never guess a target. If a tool reports approval_required, paused_by_user, hard_denied, control_grant_required, session_terminated, or unavailable, stop and report it plainly — those are permissions or session states you cannot change by retrying, so never repeat the action; say what the user needs to grant or restart. Never attempt Terminal, password managers, secure fields, authorization UI, credentials, purchases, sends, deletion, or settings changes. Finish with a concise factual result.", now=now_block());
+        let system = format!(
+            "You control explicitly approved Mac applications for ONE bounded goal. {now}\nUse only computer_list_apps, computer_get_state, and computer_action. Start by listing apps. Use only element indices from the latest snapshot; after every action fetch a fresh snapshot. Never guess a target. If a tool reports approval_required, paused_by_user, hard_denied, control_grant_required, session_terminated, or unavailable, stop and report it plainly — those are permissions or session states you cannot change by retrying, so never repeat the action; say what the user needs to grant or restart. Never attempt Terminal, password managers, secure fields, authorization UI, credentials, purchases, sends, deletion, or settings changes. Finish with a concise factual result.",
+            now = now_block()
+        );
         let mut ls = local_first_engine::LoopState::new();
         ls.messages = local_first_engine::browse::seed_browse_messages(&system, goal);
-        ls.tool_schemas = vec![computer_list_apps_tool_schema(), computer_get_state_tool_schema(), computer_action_tool_schema()];
-        ls.provider = local_first_engine::ProviderBinding { model, base_url, api_key };
+        ls.tool_schemas = vec![
+            computer_list_apps_tool_schema(),
+            computer_get_state_tool_schema(),
+            computer_action_tool_schema(),
+        ];
+        ls.provider = local_first_engine::ProviderBinding {
+            model,
+            base_url,
+            api_key,
+        };
         let drain = drain_stream_sink();
         let model_client = crate::model_client::GatewayModelClient {
             http: self.http,
@@ -28098,28 +28116,59 @@ impl GatewayComputerExecutor<'_> {
             steering: None,
         };
         let mut usage_context = local_first_inference_usage::UsageContext::new(
-            uuid::Uuid::new_v4().to_string(), local_first_inference_usage::InferencePurpose::Subagent, "local");
+            uuid::Uuid::new_v4().to_string(),
+            local_first_inference_usage::InferencePurpose::Subagent,
+            "local",
+        );
         usage_context.purpose_detail = Some("host_computer".into());
         usage_context.thread_id = self.thread_id.map(str::to_string);
-        let capability_executor = ComputerOnlyCapabilityExecutor { session_id: session_id.clone() };
+        let capability_executor = ComputerOnlyCapabilityExecutor {
+            session_id: session_id.clone(),
+        };
         let mut browser_executor = ComputerNoBrowserExecutor;
         let outcome = local_first_engine::agent_loop::run_turn(
             ls,
             local_first_engine::TurnConfig {
-                hard_round_ceiling: 24, max_rounds: 16, browser_max_rounds: 0, browser_nav_cap: 0,
+                hard_round_ceiling: 24,
+                max_rounds: 16,
+                browser_max_rounds: 0,
+                browser_nav_cap: 0,
                 browser_budget: chat_browser_budget(),
-                context_window: None, reconcile_on_delivery: false, autoadvance_from_evidence: false,
-                step_verification: false, verbose: verbose_debug(), forced_tool: None,
+                context_window: None,
+                reconcile_on_delivery: false,
+                autoadvance_from_evidence: false,
+                step_verification: false,
+                verbose: verbose_debug(),
+                forced_tool: None,
                 // E2: this is the host-computer sub-turn, NOT the browse sub-turn — it never offers
                 // `browser_done` as a real tool, so the terminal must stay disarmed here.
                 browser_subturn: false,
             },
-            &usage_context, &model_client, &capability_executor, &mut browser_executor,
-            &NoPlanProgress, &NeverIncompleteJudge, &NoContextCompactor, &OpenTurnPolicy,
-            &local_first_engine::NoopExecutionJournal, &drain, 0.1, self.thread_id,
-            &std::collections::BTreeSet::new(), &[], goal.to_string(), String::new(), None,
-            false, 0, false, Vec::new(), None, &local_first_engine::turn_trace::TurnTrace::disabled(),
-        ).await;
+            &usage_context,
+            &model_client,
+            &capability_executor,
+            &mut browser_executor,
+            &NoPlanProgress,
+            &NeverIncompleteJudge,
+            &NoContextCompactor,
+            &OpenTurnPolicy,
+            &local_first_engine::NoopExecutionJournal,
+            &drain,
+            0.1,
+            self.thread_id,
+            &std::collections::BTreeSet::new(),
+            &[],
+            goal.to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &local_first_engine::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
         let result = local_first_engine::browse::browse_result_from_outcome(&outcome);
         host_computer_gateway::finish_worker_session(&session_id, result.found);
         result
@@ -28130,25 +28179,41 @@ struct ComputerOnlyCapabilityExecutor {
     session_id: String,
 }
 impl local_first_engine::CapabilityExecutor for ComputerOnlyCapabilityExecutor {
-    async fn execute_tool(&self, name: &str, args_raw: &str, _call_id: &str,
-        _state: &mut local_first_engine::LoopState) -> Result<local_first_engine::ToolOutcome, String> {
+    async fn execute_tool(
+        &self,
+        name: &str,
+        args_raw: &str,
+        _call_id: &str,
+        _state: &mut local_first_engine::LoopState,
+    ) -> Result<local_first_engine::ToolOutcome, String> {
         let result = match name {
             "computer_list_apps" => host_computer_gateway::worker_list_apps(&self.session_id).await,
             "computer_get_state" => {
                 let value: serde_json::Value = serde_json::from_str(args_raw).unwrap_or_default();
-                match value.get("pid").and_then(|value| value.as_u64()).and_then(|pid| u32::try_from(pid).ok()) {
-                    Some(pid) => host_computer_gateway::worker_get_state(&self.session_id, pid).await,
+                match value
+                    .get("pid")
+                    .and_then(|value| value.as_u64())
+                    .and_then(|pid| u32::try_from(pid).ok())
+                {
+                    Some(pid) => {
+                        host_computer_gateway::worker_get_state(&self.session_id, pid).await
+                    }
                     None => Err("invalid_pid".into()),
                 }
             }
             "computer_action" => match serde_json::from_str(args_raw) {
-                Ok(request) => host_computer_gateway::worker_execute_action(&self.session_id, request).await,
+                Ok(request) => {
+                    host_computer_gateway::worker_execute_action(&self.session_id, request).await
+                }
                 Err(error) => Err(format!("invalid_action:{error}")),
             },
             _ => Err(format!("tool_not_available:{name}")),
         };
         Ok(local_first_engine::ToolOutcome {
-            result: match result { Ok(value) => value.to_string(), Err(error) => serde_json::json!({"error":error}).to_string() },
+            result: match result {
+                Ok(value) => value.to_string(),
+                Err(error) => serde_json::json!({"error":error}).to_string(),
+            },
             effects: Default::default(),
         })
     }
@@ -28156,9 +28221,17 @@ impl local_first_engine::CapabilityExecutor for ComputerOnlyCapabilityExecutor {
 
 struct ComputerNoBrowserExecutor;
 impl local_first_engine::BrowserExecutor for ComputerNoBrowserExecutor {
-    async fn execute_browser(&mut self, name: &str, _args_raw: &str, _call_id: &str,
-        _state: &mut local_first_engine::LoopState) -> (String, local_first_engine::contract::ToolOutcomeHint) {
-        (format!("browser tool unavailable: {name}"), local_first_engine::contract::ToolOutcomeHint::Success)
+    async fn execute_browser(
+        &mut self,
+        name: &str,
+        _args_raw: &str,
+        _call_id: &str,
+        _state: &mut local_first_engine::LoopState,
+    ) -> (String, local_first_engine::contract::ToolOutcomeHint) {
+        (
+            format!("browser tool unavailable: {name}"),
+            local_first_engine::contract::ToolOutcomeHint::Success,
+        )
     }
     async fn close_session(&mut self, _browser_used: bool) {}
 }
@@ -28324,13 +28397,10 @@ async fn stream_chat_via_openai(
         .and_then(|caps| caps.context_length)
         .map(|tokens| usize::try_from(tokens).unwrap_or(usize::MAX));
     let effective_context = match request.thread_id.as_deref() {
-        Some(thread_id) => thread_context_for_model(
-            state,
-            thread_id,
-            &[],
-            Some(request.prompt.as_str()),
-        )
-        .unwrap_or_default(),
+        Some(thread_id) => {
+            thread_context_for_model(state, thread_id, &[], Some(request.prompt.as_str()))
+                .unwrap_or_default()
+        }
         None => request.context.clone(),
     };
     let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
@@ -28341,6 +28411,16 @@ async fn stream_chat_via_openai(
     .runtime_prompt;
     let browser_discovery = browser_open_research_discovery_instruction();
     let booking_choices = booking_assumption_choice_instruction();
+    // ResumeBinding: consume the per-turn stash set by semantic short-circuit (not
+    // prompt-heuristic on ‹‹CHOICES›› in prior assistant text).
+    let hitl_choice_resume = take_hitl_resume_turn_context(state, request.thread_id.as_deref());
+    let choice_resume_slot = hitl_choice_resume.as_ref().map(|ctx| {
+        let browser_still_live = request
+            .thread_id
+            .as_deref()
+            .is_some_and(|tid| thread_has_live_browser_session(state, tid));
+        hitl_resume::hitl_resume_harness_slot(&ctx.wait, &ctx.resolution, browser_still_live)
+    });
 
     let system = format!(
         "You are the local assistant acting as ORCHESTRATOR. Right now {now}: ALWAYS \
@@ -28474,10 +28554,7 @@ when the answer is long. {language_instruction} Clear and well-structured.",
         let st = state.clone();
         tokio::task::spawn_blocking(move || {
             memory_facade(&st)
-                .list_entities_for_ui(
-                    &gateway_memory_user_id(),
-                    &gateway_memory_workspace_id(),
-                )
+                .list_entities_for_ui(&gateway_memory_user_id(), &gateway_memory_workspace_id())
                 .ok()
                 .map(|ents| ents.iter().any(|e| e.entity_type.starts_with("code_")))
                 .unwrap_or(false)
@@ -28702,12 +28779,23 @@ automatically become artifacts downloadable by the user.{methodology}\n{lines}"
     // single/multi-select buttons, instead of listing the options in prose.
     let system = format!(
         "{system}\n\nCHOICES: when you ask the user to choose among discrete OPTIONS \
-(roughly 2-6 alternatives), do NOT list them in prose — emit on its own line the marker \
+(roughly 2-6 alternatives), you MUST emit on its own line the marker \
 `‹‹CHOICES››{{\"question\":\"the question\",\"multi\":false,\"options\":[\"Option A\",\"Option B\"]}}‹‹/CHOICES››` \
-(valid JSON; \"multi\":true if more than one can be chosen). The user will see clickable buttons and their \
-choice will come back as a message. Use it ONLY for closed choices, not for open questions."
+(valid JSON; \"multi\":true if more than one can be chosen). Do NOT only list options in a markdown \
+table or ask \"which do you prefer?\" in prose — without the marker the UI has no clickable buttons. \
+The user will see clickable buttons and their choice will come back as a message. Use it ONLY for \
+closed choices, not for open questions (name/email/free text).\n\
+CLARIFY: when you need FREE-TEXT details from the user (name, email, phone, dates, payment prefs, …), \
+you MUST emit on its own line \
+`‹‹CLARIFY››{{\"question\":\"what you need\",\"fields\":[\"name\",\"email\"]}}‹‹/CLARIFY››` \
+(valid JSON; \"fields\" optional). Do NOT only ask in prose — without the marker the harness cannot \
+wait/resume correctly and will keep nudging the plan."
     );
     let system = format!("{system}\n{booking_choices}");
+    let system = match choice_resume_slot {
+        Some(resume) => format!("{system}\n\n{resume}"),
+        None => system,
+    };
     // Authorized write destinations: when present, the model can deliver
     // generated files to user-granted folders via `save_artifact`.
     let artifact_destinations = load_artifact_destinations();
@@ -28817,11 +28905,7 @@ save/export a file to a folder, call save_artifact(file, destination)."
             if !pack.linked_hits.is_empty() {
                 merge_automatic_recall_payload(
                     &mut automatic_recall_payload,
-                    recall_stream_payload_from_hits(
-                        &request.prompt,
-                        &scope,
-                        &pack.linked_hits,
-                    ),
+                    recall_stream_payload_from_hits(&request.prompt, &scope, &pack.linked_hits),
                 );
             }
             // ordered_blocks() = [profile, objective, brief, recent_work] — stesso
@@ -28934,13 +29018,23 @@ normal answers."
                 let user = gateway_memory_user_id();
                 let workspace = gateway_memory_workspace_id();
                 let embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient> =
-                    std::sync::Arc::new(GatewayEmbeddingClient { http: state.http.clone() });
+                    std::sync::Arc::new(GatewayEmbeddingClient {
+                        http: state.http.clone(),
+                    });
                 let query_vec =
                     local_first_memory::embed_query(embedding.as_ref(), &request.prompt).await;
                 let block = {
                     let facade = memory_facade(state);
                     let graph_context: Option<
-                        &(dyn Fn(&local_first_memory::MemoryFacade, &MemoryUserId, &MemoryWorkspaceId, &str) -> Option<String> + Sync),
+                        &(
+                             dyn Fn(
+                            &local_first_memory::MemoryFacade,
+                            &MemoryUserId,
+                            &MemoryWorkspaceId,
+                            &str,
+                        ) -> Option<String>
+                                 + Sync
+                         ),
                     > = Some(&|facade, user, workspace, q| {
                         if let Some(workflow) =
                             workflow_status_context_for_query(facade, user, workspace, q)
@@ -29060,10 +29154,8 @@ switch language on your own. (Tool arguments, code, file paths and URLs stay as-
         .as_ref()
         .map(|semantic| semantic.decision.mode)
         .unwrap_or(local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis);
-    let capability_route = route_capability_with_binding(
-        semantic_contract.as_ref(),
-        routing_binding.as_ref(),
-    );
+    let capability_route =
+        route_capability_with_binding(semantic_contract.as_ref(), routing_binding.as_ref());
     let workflow_route = workflow_route_from_capability(&capability_route);
     // S2 T4/T5: resolve the binding's WorkflowRouting ONCE — when it survived plan-precedence
     // AND still resolves to a registered routing — so the hard-prune's `deny_tools` (T4) and the
@@ -29157,9 +29249,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     let system = match objective_contract_for_execution(state, request.thread_id.as_deref()) {
         Some(objective) => format!(
             "{system}\n\nOBJECTIVE CONTRACT (canonical, harness-enforced): revision {}; mode={:?}; objective={}. Stay inside its scope and allowed actions. Replan autonomously only when the objective, scope and mutation level stay unchanged. A new objective, wider scope or newly mutating action requires explicit user confirmation. Plan completion requires recorded evidence; response length is never completion evidence.",
-            objective.revision,
-            objective.mode,
-            objective.objective
+            objective.revision, objective.mode, objective.objective
         ),
         // No contract does NOT mean "no rules": execution defaults to read-only analysis, so the
         // effectful tools are gated. Saying nothing here was the worst combination — the gate was armed
@@ -29308,6 +29398,16 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         CapabilityRouteDecision::AgentLoop { .. } => {
             base_tools.push(find_capability_tool_schema());
         }
+    }
+    // HITL Choice resume: strip cold discovery so the model cannot derail to
+    // suggest_capabilities / CONNECT_SUGGEST. Warm OpenWork.browser keeps browse live
+    // via tool_stays_live_this_turn; dead session keeps find_capability for rediscovery.
+    if hitl_choice_resume.is_some() {
+        let browser_live_now = request
+            .thread_id
+            .as_deref()
+            .is_some_and(|tid| thread_has_live_browser_session(state, tid));
+        hitl_resume::prune_cold_discovery_tools(&mut base_tools, !browser_live_now);
     }
     // MCP servers are installed deliberately and are few, so their tools go STRAIGHT
     // into the live tool set (not deferred behind find_capability) when the count is
@@ -29462,6 +29562,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         finished: std::sync::atomic::AtomicBool::new(false),
         last_event_at: std::sync::atomic::AtomicU64::new(now_epoch_secs()),
         thread_id: request.thread_id.clone(),
+        assistant_message_id: std::sync::Mutex::new(None),
     });
     let resume_id = request.request_id.clone();
     if let Ok(mut map) = stream_registry().lock() {
@@ -29474,22 +29575,19 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     let orchestrator_is_local = provider_endpoint_is_local(&base_url) && !model_id_is_cloud(&model);
     let deterministic_privacy_decision =
         privacy_guard::classify_sensitive_input_deterministic(&request.prompt);
-    let guarded_decision = match classify_sensitive_input_with_privacy_guard_model(
-        &state.http,
-        &request.prompt,
-    )
-    .await
-    {
-        privacy_guard::PrivacyGuardModelOutcome::Classified(model_decision) => Ok(
-            privacy_guard::merge_guard_decisions(
-                &request.prompt,
-                model_decision,
-                deterministic_privacy_decision.clone(),
-            ),
-        ),
-        privacy_guard::PrivacyGuardModelOutcome::Unavailable(reason) => Err(reason),
-        privacy_guard::PrivacyGuardModelOutcome::InvalidOutput => Err("invalid_output"),
-    };
+    let guarded_decision =
+        match classify_sensitive_input_with_privacy_guard_model(&state.http, &request.prompt).await
+        {
+            privacy_guard::PrivacyGuardModelOutcome::Classified(model_decision) => {
+                Ok(privacy_guard::merge_guard_decisions(
+                    &request.prompt,
+                    model_decision,
+                    deterministic_privacy_decision.clone(),
+                ))
+            }
+            privacy_guard::PrivacyGuardModelOutcome::Unavailable(reason) => Err(reason),
+            privacy_guard::PrivacyGuardModelOutcome::InvalidOutput => Err("invalid_output"),
+        };
     let privacy_decision = match guarded_decision {
         Ok(decision) => decision,
         Err(reason) => match privacy_guard::failure_policy(orchestrator_is_local) {
@@ -29517,9 +29615,10 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
                 )
                 .await;
                 schedule_stream_registry_cleanup(resume_id.clone());
-                let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
-                    rx.recv().await.map(|item| (item, rx))
-                }));
+                let body =
+                    Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
+                        rx.recv().await.map(|item| (item, rx))
+                    }));
                 return Ok(Response::builder()
                     .status(StatusCode::OK)
                     .header("content-type", "application/x-ndjson")
@@ -29577,7 +29676,8 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // starts — the manager itself, a vision model standing in for it, or nobody. The manager's model
     // never changes (ADR 0025 retired the mid-turn model switch); what changes is what reaches it.
     let vision_fallback_armed = if vision::messages_have_image(&messages) {
-        match vision::plan_attachments(model_vision_support(&base_url, &model), has_vision_model()) {
+        match vision::plan_attachments(model_vision_support(&base_url, &model), has_vision_model())
+        {
             // Known-blind manager and nobody to read for it. Say so — shipping the image to a provider
             // that will reject it, and calling the rejection an answer, is what we're here to stop.
             vision::AttachmentPlan::Refuse => {
@@ -29591,9 +29691,10 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
                 )
                 .await;
                 schedule_stream_registry_cleanup(resume_id.clone());
-                let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
-                    rx.recv().await.map(|item| (item, rx))
-                }));
+                let body =
+                    Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
+                        rx.recv().await.map(|item| (item, rx))
+                    }));
                 return Ok(Response::builder()
                     .status(StatusCode::OK)
                     .header("content-type", "application/x-ndjson")
@@ -29636,10 +29737,12 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     let execution_journal = agent_journal::for_run(request.agent_run_id.as_deref());
     let recovery_checkpoint = request.agent_checkpoint.clone();
     let effect_run_id = request.agent_run_id.clone();
-    let effect_turn_id = request
-        .agent_run_id
-        .as_ref()
-        .and_then(|_| request.request_id.strip_prefix("broker-").map(str::to_string));
+    let effect_turn_id = request.agent_run_id.as_ref().and_then(|_| {
+        request
+            .request_id
+            .strip_prefix("broker-")
+            .map(str::to_string)
+    });
     // Thread this chat belongs to: lets browser work reuse a persistent
     // per-thread browser session (search → then book on the same tab).
     let thread_id = request.thread_id.clone();
@@ -29724,7 +29827,8 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
                 .iter()
                 .filter_map(|t| crate::skills::SensitiveCategory::parse(t))
                 .collect();
-            let project_sensitive = resolved_skill_confirmations(&state_owned, thread_id.as_deref());
+            let project_sensitive =
+                resolved_skill_confirmations(&state_owned, thread_id.as_deref());
             ls.active_sensitive = merged_sensitive(&existing, &project_sensitive)
                 .iter()
                 .map(|cat| cat.as_token().to_string())
@@ -29871,10 +29975,14 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         // (the normal 5 rounds until a browser tool is actually used, then the
         // larger browser budget). This keeps non-browser turns identical to today.
         // ADR 0026: provider binding travels with LoopState (per-round swap), not as separate args.
-        ls.provider = local_first_engine::ProviderBinding { model, base_url, api_key };
-        if let Some(checkpoint) = recovery_checkpoint
-            .and_then(|value| serde_json::from_value::<local_first_engine::LoopCheckpoint>(value).ok())
-        {
+        ls.provider = local_first_engine::ProviderBinding {
+            model,
+            base_url,
+            api_key,
+        };
+        if let Some(checkpoint) = recovery_checkpoint.and_then(|value| {
+            serde_json::from_value::<local_first_engine::LoopCheckpoint>(value).ok()
+        }) {
             checkpoint.apply_to(&mut ls);
         }
         // 5.D1c.1: resolve the loop's turn-constant config ONCE (env-stable for the turn) so the moved
@@ -29920,7 +30028,54 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         let trace_dir = local_first_engine::trace::dump_enabled()
             .then(gateway_logs_dir)
             .and_then(Result::ok);
-        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, can_use_project_memory, memory_intent.vault_value_requested, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, browse_sources, cfg, trace_dir, execution_journal, effect_turn_id, effect_run_id, &turn_trace, vision_fallback_armed).await;
+        let outcome = run_agent_rounds(
+            ls,
+            &tx,
+            http,
+            state_owned,
+            temperature,
+            prompt,
+            thread_id,
+            read_only,
+            autonomous,
+            channel_owner,
+            contact_only,
+            can_see_contacts,
+            can_see_calendar,
+            can_use_project_memory,
+            memory_intent.vault_value_requested,
+            memory_user_message,
+            memory_answer,
+            last_model_error,
+            final_done,
+            plan_nudges,
+            turn_used_tools,
+            composio_writes,
+            catalog_index,
+            capability_corpus,
+            capability_route_for_runtime,
+            automation_user_id,
+            automation_workspace_id,
+            browse_sources,
+            cfg,
+            trace_dir,
+            execution_journal,
+            effect_turn_id,
+            effect_run_id,
+            &turn_trace,
+            vision_fallback_armed,
+        )
+        .await;
+        if let (Some(thread_id), Some(assistant_message_id)) = (
+            tail_thread.as_deref(),
+            tx.entry
+                .assistant_message_id
+                .lock()
+                .ok()
+                .and_then(|id| id.clone()),
+        ) {
+            persist_hitl_wait_from_outcome(&tail_state, thread_id, &assistant_message_id, &outcome);
+        }
         // Turn trace: the final record. `outcome.memory_answer` is the committed answer; `final_plan` is
         // the turn's last runtime plan (carried out for exactly this). The derived flags (incomplete
         // steps, artifact claimed-but-absent) are the high-value signal. Observability only.
@@ -29935,8 +30090,12 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
                 .map(|s| plan_step_title(s).to_string())
                 .collect();
             let artifact_count = outcome.memory_answer.matches("‹‹ARTIFACT››").count();
-            let signals = local_first_engine::turn_trace::answer_signals(&outcome.memory_answer, artifact_count);
-            let derived = local_first_engine::turn_trace::derive_flags(&plan_final, &plan_titles, &signals);
+            let signals = local_first_engine::turn_trace::answer_signals(
+                &outcome.memory_answer,
+                artifact_count,
+            );
+            let derived =
+                local_first_engine::turn_trace::derive_flags(&plan_final, &plan_titles, &signals);
             turn_trace.record(local_first_engine::turn_trace::TurnEvent::TurnEnd {
                 final_len: outcome.memory_answer.chars().count(),
                 plan_final,
@@ -29996,7 +30155,13 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         // the thread. Resources with their own lifetime (the thread's warm browser session, reused for
         // "search → then book") are deliberately NOT touched here; they are owned per thread and reaped
         // on idle/close.
-        finalize_turn_steering(&tail_state, tail_thread.as_deref(), &fence_turn_id, &fence_user_id, &fence_workspace_id);
+        finalize_turn_steering(
+            &tail_state,
+            tail_thread.as_deref(),
+            &fence_turn_id,
+            &fence_user_id,
+            &fence_workspace_id,
+        );
         // Mark the resume entry finished and evict it after a grace window so a
         // client that reloaded right at the end can still reattach and read it.
         tx.entry
@@ -30109,10 +30274,7 @@ async fn run_agent_rounds(
     // stores, constructed ONCE per turn from this turn's context (ADR 0024/0026). model_client borrows
     // http+tx locally; the tool chokepoints hold the turn-constant read-only context and get `&mut ls`
     // per call from the engine.
-    let steering_context = match (
-        thread_id.as_deref(),
-        effect_turn_id.as_deref(),
-    ) {
+    let steering_context = match (thread_id.as_deref(), effect_turn_id.as_deref()) {
         (Some(thread_id), Some(turn_id)) => Some(crate::model_client::GatewaySteeringContext {
             state: &state_owned,
             user_id: automation_user_id.as_str(),
@@ -30184,13 +30346,19 @@ async fn run_agent_rounds(
         // run as everything else this turn records.
         journal: execution_journal.clone(),
     };
-    let plan_progress = GatewayPlanProgress { state: state_owned.clone() };
+    let plan_progress = GatewayPlanProgress {
+        state: state_owned.clone(),
+    };
     let compactor = GatewayContextCompactor {
         state: state_owned.clone(),
         thread_id: thread_id.clone(),
     };
-    let turn_policy = GatewayTurnPolicy { route: capability_route_for_runtime };
-    let completion_judge = GatewayTurnCompletionJudge { state: state_owned.clone() };
+    let turn_policy = GatewayTurnPolicy {
+        route: capability_route_for_runtime,
+    };
+    let completion_judge = GatewayTurnCompletionJudge {
+        state: state_owned.clone(),
+    };
 
     // Vision fallback (`AttachmentPlan::InlineWithFallback`): this turn's images ride the manager's
     // first call on nothing better than a catalog's opinion. Keep the turn's PRISTINE seed so we can
@@ -30281,8 +30449,15 @@ async fn run_agent_rounds(
         return outcome;
     };
 
-    let Some((mut seed_ls, seed_cfg, seed_user_msg, seed_answer, seed_error, seed_sources, seed_trace)) =
-        vision_seed
+    let Some((
+        mut seed_ls,
+        seed_cfg,
+        seed_user_msg,
+        seed_answer,
+        seed_error,
+        seed_sources,
+        seed_trace,
+    )) = vision_seed
     else {
         // The model can't read the image and we have nobody to read it for us. The turn emitted
         // nothing, so this is its answer — the one case where the provider's refusal is the honest
@@ -30348,7 +30523,6 @@ async fn run_agent_rounds(
     )
     .await
 }
-
 
 /// Persisted IANA timezone chosen by the user (e.g. "Europe/Rome"). A tiny JSON
 /// file like the other prefs; absent → fall back to the host's system timezone.
@@ -30786,10 +30960,8 @@ async fn begin_setup_computer(state: AppState) -> setup_computer::SetupComputerS
             let progress_coordinator = coordinator.clone();
             let bootstrap = tokio::task::spawn_blocking(move || {
                 sandbox::ensure_contained_computer_with_progress(|phase| {
-                    progress_coordinator.advance(
-                        generation,
-                        setup_computer::phase_from_sandbox(phase),
-                    );
+                    progress_coordinator
+                        .advance(generation, setup_computer::phase_from_sandbox(phase));
                 })
             })
             .await;
@@ -32161,7 +32333,9 @@ fn browse_web_lock() -> &'static tokio::sync::Mutex<()> {
 /// Per-call gateway deadline for a sidecar RPC. Bounds a wedged CDP call that
 /// the sub-turn's between-rounds budget would otherwise miss until the 300s
 /// manager deadline. All within the 90s sub-turn ceiling.
-fn browser_call_deadline(method: local_first_browser_automation::BrowserMethod) -> std::time::Duration {
+fn browser_call_deadline(
+    method: local_first_browser_automation::BrowserMethod,
+) -> std::time::Duration {
     use local_first_browser_automation::BrowserMethod::*;
     match method {
         // `Open` creates the managed tab AND does the first navigation (a superset
@@ -32841,7 +33015,10 @@ fn browser_protocol_event_summary(
             out.push_str(&format!(" {key}={value}"));
         }
     }
-    if let Some(value) = metrics.get("contract_fp").and_then(serde_json::Value::as_str) {
+    if let Some(value) = metrics
+        .get("contract_fp")
+        .and_then(serde_json::Value::as_str)
+    {
         out.push_str(&format!(" contract_fp={value}"));
     }
     out
@@ -33491,12 +33668,16 @@ struct RuntimeSettings {
 /// Default persisted sandbox mode = `workspace-write` (see `resolved_sandbox_mode`:
 /// behavior-preserving on this line; NOT `danger`).
 fn default_sandbox_mode() -> String {
-    crate::tool_safety::SandboxMode::WorkspaceWrite.as_str().to_string()
+    crate::tool_safety::SandboxMode::WorkspaceWrite
+        .as_str()
+        .to_string()
 }
 
 /// Default persisted approval policy = `on-request` (behavior-preserving).
 fn default_approval_policy() -> String {
-    crate::tool_safety::AskForApproval::OnRequest.as_str().to_string()
+    crate::tool_safety::AskForApproval::OnRequest
+        .as_str()
+        .to_string()
 }
 
 /// Default = ON: warm up the local computer at boot (opening Docker if needed).
@@ -33556,10 +33737,12 @@ fn merge_runtime_settings(current: &RuntimeSettings, patch: &serde_json::Value) 
     let mut merged: RuntimeSettings =
         serde_json::from_value(base).unwrap_or_else(|_| current.clone());
     // Normalize each axis to a token the resolvers accept (unknown → safe default).
-    merged.sandbox_mode =
-        crate::tool_safety::SandboxMode::parse(&merged.sandbox_mode).as_str().to_string();
-    merged.approval_policy =
-        crate::tool_safety::AskForApproval::parse(&merged.approval_policy).as_str().to_string();
+    merged.sandbox_mode = crate::tool_safety::SandboxMode::parse(&merged.sandbox_mode)
+        .as_str()
+        .to_string();
+    merged.approval_policy = crate::tool_safety::AskForApproval::parse(&merged.approval_policy)
+        .as_str()
+        .to_string();
     merged
 }
 
@@ -34131,12 +34314,18 @@ async fn telegram_send_with_rebind(
 /// channel-as-adapter convergence — the canonical turn runs through the broker/engine (island /
 /// turn_events / persistence for free) and its reply is ADDITIONALLY sent to the contact.
 /// No-op for non-channel threads and empty answers. Called from `execute_chat_turn_task`.
-pub(crate) async fn mirror_reply_to_channel_if_any(state: &AppState, thread_id: &str, answer: &str) {
+pub(crate) async fn mirror_reply_to_channel_if_any(
+    state: &AppState,
+    thread_id: &str,
+    answer: &str,
+) {
     let answer = answer.trim();
     if answer.is_empty() {
         return;
     }
-    let Some(thread) = lock_store(state).ok().and_then(|s| s.thread(thread_id).ok().flatten())
+    let Some(thread) = lock_store(state)
+        .ok()
+        .and_then(|s| s.thread(thread_id).ok().flatten())
     else {
         return;
     };
@@ -34179,7 +34368,9 @@ pub(crate) async fn mirror_reply_to_channel_if_any(state: &AppState, thread_id: 
 /// Resolve a thread's outbound channel endpoint (sidecar port + recipient), or `None` when the
 /// thread isn't a sendable channel conversation. Shared by the typing-indicator helpers.
 fn channel_endpoint(state: &AppState, thread_id: &str) -> Option<(u16, String)> {
-    let thread = lock_store(state).ok().and_then(|s| s.thread(thread_id).ok().flatten())?;
+    let thread = lock_store(state)
+        .ok()
+        .and_then(|s| s.thread(thread_id).ok().flatten())?;
     let recipient = thread
         .channel_recipient
         .as_deref()
@@ -34735,7 +34926,9 @@ async fn handle_channel_inbound(
                             );
                         }
                     } else {
-                        eprintln!("channel/{channel}: no thread — dropping inbound from {reply_to}");
+                        eprintln!(
+                            "channel/{channel}: no thread — dropping inbound from {reply_to}"
+                        );
                     }
                     return;
                 }
@@ -35590,13 +35783,16 @@ fn start_visible_conversation_turn(
     };
     assistant_message.memory_reuse =
         Some(local_first_memory::MemoryReuseEnvelope::blocked_unknown());
-    assistant_message.delivery_state =
-        local_first_desktop_gateway::MessageDeliveryState::Streaming;
+    assistant_message.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
     assistant_message.linked_task_id = linked_task_id.map(str::to_string);
     let turn = VisibleConversationTurn {
         turn_id: match turn_id_override {
             Some(id) => id.to_string(),
-            None => format!("turn_{}_{}", now_epoch_secs(), uuid::Uuid::new_v4().simple()),
+            None => format!(
+                "turn_{}_{}",
+                now_epoch_secs(),
+                uuid::Uuid::new_v4().simple()
+            ),
         },
         user_message_id: user_message.id.clone(),
         assistant_message_id: assistant_message.id.clone(),
@@ -35900,11 +36096,15 @@ fn finalize_streamed_assistant_message(
     collector: &StreamMemoryReuseCollector,
     requested_delivery_state: local_first_desktop_gateway::MessageDeliveryState,
 ) -> Result<(), String> {
+    // Hold the bubble as WaitingUser only for approval-style cards (confirm/authorize).
+    // CHOICES stays Delivered so it remains in model context and the thread can accept
+    // the next user message as a real turn (Turn Contract).
     let delivery_state = if collector.event_parts().iter().any(|part| {
-        matches!(
-            part.get("type").and_then(serde_json::Value::as_str),
-            Some("remote_approval") | Some("actionable_card")
-        )
+        match part.get("type").and_then(serde_json::Value::as_str) {
+            Some("remote_approval") => true,
+            Some("actionable_card") => actionable_part_holds_thread(part),
+            _ => false,
+        }
     }) {
         local_first_desktop_gateway::MessageDeliveryState::WaitingUser
     } else {
@@ -35921,6 +36121,15 @@ fn finalize_streamed_assistant_message(
             delivery_state,
         )
         .map_err(|error| error.to_string())?;
+    // Turn Contract: Choice/Clarify free the thread but MUST leave a durable wait so the next
+    // user message resumes OpenWork (not a fresh semantic objective).
+    persist_hitl_wait_from_parts(
+        &store,
+        state,
+        thread_id,
+        message_id,
+        collector.event_parts(),
+    );
     publish_app_event(serde_json::json!({
         "type": "thread.updated",
         "thread_id": thread_id,
@@ -35929,15 +36138,189 @@ fn finalize_streamed_assistant_message(
     Ok(())
 }
 
+/// Write/replace the thread's open HITL Free wait from actionable_card event parts.
+/// Accepts CHOICES, CLARIFY, and canonical AWAIT_USER (kind=choice|clarify).
+fn persist_hitl_wait_from_parts(
+    store: &chat_store::ChatStore,
+    state: &AppState,
+    thread_id: &str,
+    message_id: &str,
+    event_parts: &[serde_json::Value],
+) {
+    let Some((wait_kind, payload)) = event_parts.iter().find_map(|part| {
+        if part.get("type").and_then(serde_json::Value::as_str) != Some("actionable_card") {
+            return None;
+        }
+        let marker = part.get("kind").and_then(serde_json::Value::as_str)?;
+        let payload = part
+            .get("payload")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        match marker {
+            "CHOICES" => Some(("choice".to_string(), payload)),
+            "CLARIFY" => Some(("clarify".to_string(), payload)),
+            "AWAIT_USER" => {
+                let kind = payload
+                    .get("kind")
+                    .and_then(serde_json::Value::as_str)?
+                    .to_string();
+                match kind.as_str() {
+                    "choice" | "clarify" => {
+                        let mut cleaned = payload.clone();
+                        if let Some(obj) = cleaned.as_object_mut() {
+                            obj.remove("kind");
+                        }
+                        Some((kind, cleaned))
+                    }
+                    _ => None, // Hold kinds resume via approval API
+                }
+            }
+            _ => None,
+        }
+    }) else {
+        return;
+    };
+    persist_hitl_wait_payload(store, state, thread_id, message_id, &wait_kind, payload);
+}
+
+/// Typed TurnOutcome projection: this is the gateway's source of truth for opening
+/// Free HITL waits. Marker/event-part persistence remains only as stream compatibility.
+fn persist_hitl_wait_from_outcome(
+    state: &AppState,
+    thread_id: &str,
+    message_id: &str,
+    outcome: &local_first_engine::TurnOutcome,
+) {
+    let Some(envelope) = outcome.awaiting_user.as_ref() else {
+        return;
+    };
+    if !envelope.is_free() {
+        return;
+    }
+    let wait_kind = match envelope.kind {
+        local_first_engine::hitl::HitlKind::Choice
+        | local_first_engine::hitl::HitlKind::Clarify
+        | local_first_engine::hitl::HitlKind::PlanPropose => envelope.wait_kind_key(),
+        local_first_engine::hitl::HitlKind::Confirm
+        | local_first_engine::hitl::HitlKind::Vault
+        | local_first_engine::hitl::HitlKind::Payment => return,
+    };
+    let Ok(store) = lock_store(state) else {
+        return;
+    };
+    persist_hitl_wait_payload(
+        &store,
+        state,
+        thread_id,
+        message_id,
+        wait_kind,
+        envelope.payload.clone(),
+    );
+}
+
+fn persist_hitl_wait_payload(
+    store: &chat_store::ChatStore,
+    state: &AppState,
+    thread_id: &str,
+    message_id: &str,
+    wait_kind: &str,
+    payload: serde_json::Value,
+) {
+    let browser_live = thread_has_live_browser_session(state, thread_id);
+    let open_work = hitl_resume::OpenWorkSnapshot {
+        browser_session_live: browser_live,
+        last_url: None,
+        capability_hint: browser_live.then(|| "browse".to_string()),
+    };
+    let wait_id = format!("hitl_{wait_kind}_{message_id}");
+    let Ok(payload_json) = serde_json::to_string(&payload) else {
+        return;
+    };
+    let Ok(open_work_json) = serde_json::to_string(&open_work) else {
+        return;
+    };
+    if let Err(error) = store.set_open_hitl_wait(
+        &wait_id,
+        thread_id,
+        message_id,
+        wait_kind,
+        &payload_json,
+        &open_work_json,
+    ) {
+        eprintln!("[hitl] failed to persist {wait_kind} wait: {error}");
+    }
+}
+
 #[derive(Debug, Clone)]
-struct AgentTurnResult {
+pub(crate) struct AgentTurnResult {
     text: String,
     remote_approval: Option<RemoteApprovalIntent>,
     actionable_cards: Vec<ActionableCard>,
 }
 
 pub(crate) fn agent_turn_waits_for_user(result: Option<&AgentTurnResult>) -> bool {
-    result.is_some_and(|result| result.actionable_cards.iter().any(|card| card.requires_user))
+    // Always Contract: only Hold-policy cards keep WaitingUserApproval.
+    // Free HITL (Choice/Clarify / AWAIT_USER kind=choice|clarify) frees the thread so
+    // the next user message is a real turn + ResumeBinding — not steering.
+    result.is_some_and(|result| {
+        result.actionable_cards.iter().any(|card| {
+            card.requires_user && actionable_card_holds_thread(card.kind, &card.payload)
+        })
+    })
+}
+
+/// Confirm/authorize cards resume via approval API on the SAME turn.
+/// Free HITL must free the thread so the person's answer starts a new turn.
+#[cfg(test)]
+fn actionable_kind_holds_thread(kind: &str) -> bool {
+    // Kind-only view (tests / legacy). Prefer `actionable_card_holds_thread` when payload is known.
+    !matches!(kind, "CHOICES" | "CLARIFY")
+}
+
+fn actionable_card_holds_thread(kind: &str, payload: &serde_json::Value) -> bool {
+    match kind {
+        "CHOICES" | "CLARIFY" => false,
+        "AWAIT_USER" => !matches!(
+            payload.get("kind").and_then(serde_json::Value::as_str),
+            Some("choice" | "clarify" | "plan_propose")
+        ),
+        _ => true,
+    }
+}
+
+fn actionable_part_holds_thread(part: &serde_json::Value) -> bool {
+    let kind = part
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let payload = part.get("payload").unwrap_or(&serde_json::Value::Null);
+    actionable_card_holds_thread(kind, payload)
+}
+
+/// Re-attach Free HITL markers onto a stripped answer.
+/// The completed-turn executor rewrites the bubble with `strip_chat_markers` text; without
+/// this, freeing the thread for Choice/Clarify erased the card the UI needs.
+pub(crate) fn answer_text_with_actionable_markers(
+    stripped_answer: &str,
+    result: Option<&AgentTurnResult>,
+) -> String {
+    let mut body = stripped_answer.to_string();
+    let Some(result) = result else {
+        return body;
+    };
+    for card in &result.actionable_cards {
+        if actionable_card_holds_thread(card.kind, &card.payload) {
+            continue;
+        }
+        if body.contains(&card.raw) {
+            continue;
+        }
+        if !body.is_empty() {
+            body.push('\n');
+        }
+        body.push_str(&card.raw);
+    }
+    body
 }
 
 async fn drain_agent_stream_into_message(
@@ -35947,6 +36330,9 @@ async fn drain_agent_stream_into_message(
     entry: std::sync::Arc<StreamEntry>,
     requested_delivery_state: local_first_desktop_gateway::MessageDeliveryState,
 ) -> Result<Option<AgentTurnResult>, String> {
+    if let Ok(mut stored_id) = entry.assistant_message_id.lock() {
+        *stored_id = Some(assistant_message_id.to_string());
+    }
     let mut streamed_text = String::new();
     let mut final_text: Option<String> = None;
     let mut last_flush = std::time::Instant::now();
@@ -36059,13 +36445,13 @@ fn turn_event_from_stream_value(
             local_first_task_runtime::TurnEventKind::PlanUpdate,
             serde_json::json!({ "markdown": value.get("markdown").and_then(|t| t.as_str()).unwrap_or("") }),
         ),
-        "tool_result" => (
-            local_first_task_runtime::TurnEventKind::Tool,
-            value.clone(),
-        ),
+        "tool_result" => (local_first_task_runtime::TurnEventKind::Tool, value.clone()),
         "recall" => (
             local_first_task_runtime::TurnEventKind::Recall,
-            value.get("payload").cloned().unwrap_or(serde_json::Value::Null),
+            value
+                .get("payload")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
         ),
         "error" => (
             local_first_task_runtime::TurnEventKind::Error,
@@ -36139,7 +36525,10 @@ fn fanout_turn_event(state: &AppState, turn_id: &str, line: &str) {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
         return;
     };
-    let kind_str = value.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
+    let kind_str = value
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or("unknown");
     tracing::debug!(target: "broker::fanout", turn_id = %turn_id, kind = %kind_str, "stream event");
     let Some((kind, payload)) = turn_event_from_stream_value(&value) else {
         return;
@@ -36162,6 +36551,9 @@ async fn drain_agent_stream_into_message_with_fanout(
     turn_id: &str,
     requested_delivery_state: local_first_desktop_gateway::MessageDeliveryState,
 ) -> Result<Option<AgentTurnResult>, String> {
+    if let Ok(mut stored_id) = entry.assistant_message_id.lock() {
+        *stored_id = Some(assistant_message_id.to_string());
+    }
     let mut streamed_text = String::new();
     let mut final_text: Option<String> = None;
     let mut last_flush = std::time::Instant::now();
@@ -36524,7 +36916,9 @@ async fn channel_reply_once(
         api_key,
         payload,
         Some(std::time::Duration::from_secs(120)),
-        serde_json::to_string(payload).map(|body| body.chars().count()).unwrap_or(0),
+        serde_json::to_string(payload)
+            .map(|body| body.chars().count())
+            .unwrap_or(0),
     )
     .await
     .map_err(|error| format!("network: {error}"))?;
@@ -37730,6 +38124,9 @@ struct StreamEntry {
     /// "working" dots on EVERY thread with an in-flight answer (not just the one
     /// currently on screen). `None` for a first-message thread without an id yet.
     thread_id: Option<String>,
+    /// The assistant bubble this stream is being drained into. The engine outcome
+    /// arrives outside the drain, so this records the durable message id once known.
+    assistant_message_id: std::sync::Mutex<Option<String>>,
 }
 
 /// Sink the generation emits to: tees every event to the ORIGINAL live response
@@ -37918,7 +38315,9 @@ fn stream_event_is_terminal(line: &str) -> bool {
 
 // The whole-text marker parsers now live in the single `markers` module; aliased so the
 // per-delta expander below reads unchanged.
-use local_first_desktop_gateway::markers::{body as legacy_marker_body, json_body as legacy_marker_json};
+use local_first_desktop_gateway::markers::{
+    body as legacy_marker_body, json_body as legacy_marker_json,
+};
 
 fn expand_legacy_delta_to_chat_events_with_mode(
     text: &str,
@@ -37952,11 +38351,11 @@ fn expand_legacy_delta_to_chat_events_with_mode(
         legacy_marker_json(text, "‹‹PAYMENT_APPROVAL››", "‹‹/PAYMENT_APPROVAL››")
     {
         events.push(GenerateStreamEvent::PaymentApproval { payload });
-    } else if let Some(payload) =
-        legacy_marker_json(text, "‹‹DIFF››", "‹‹/DIFF››")
+    } else if let Some(payload) = legacy_marker_json(text, "‹‹DIFF››", "‹‹/DIFF››")
     {
         // Piano UI D3: marker diff → evento strutturato Diff.
-        if let Ok(diff) = serde_json::from_value::<local_first_subagents::DiffStreamPayload>(payload)
+        if let Ok(diff) =
+            serde_json::from_value::<local_first_subagents::DiffStreamPayload>(payload)
         {
             events.push(GenerateStreamEvent::Diff { payload: diff });
         }
@@ -38211,7 +38610,7 @@ fn insert_broker_turn_messages(
     assistant.memory_reuse = Some(local_first_memory::MemoryReuseEnvelope::blocked_unknown());
     assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
     ChatStore::insert_linked_turn_messages(tx, &input.thread_id, &user, &assistant)
-    .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))
+        .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))
 }
 
 fn insert_broker_steering_user_message(
@@ -38389,16 +38788,19 @@ async fn enqueue_turn(
                 "steering_id": steering.steering_id,
                 "revision": steering.revision,
             }));
-            Ok((StatusCode::ACCEPTED, Json(serde_json::json!({
-                "thread_id": thread_id,
-                "active_turn_id": active_turn_id,
-                "request_id": request_id,
-                "source_message_id": steering.source_message_id,
-                "objective_revision": steering.objective_revision,
-                "status": "steering_queued",
-                "steering": steering,
-            }))))
-        },
+            Ok((
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({
+                    "thread_id": thread_id,
+                    "active_turn_id": active_turn_id,
+                    "request_id": request_id,
+                    "source_message_id": steering.source_message_id,
+                    "objective_revision": steering.objective_revision,
+                    "status": "steering_queued",
+                    "steering": steering,
+                })),
+            ))
+        }
         Err(local_first_task_runtime::broker::EnqueueError::ThreadBusy {
             thread_id,
             active_turn_id,
@@ -38540,12 +38942,20 @@ async fn cancel_turn(
         code: "broker_cancel",
         message: format!("{e}"),
     })?;
-    let held_steering = delivery_task.as_ref()
+    let held_steering = delivery_task
+        .as_ref()
         .and_then(|task| task.input_json.get("thread_id").and_then(Value::as_str))
-        .and_then(|thread_id| store.list_turn_steering(user_id.as_str(), workspace_id.as_str(), thread_id).ok())
+        .and_then(|thread_id| {
+            store
+                .list_turn_steering(user_id.as_str(), workspace_id.as_str(), thread_id)
+                .ok()
+        })
         .unwrap_or_default()
         .into_iter()
-        .filter(|row| row.active_turn_id == turn_id && row.status == local_first_task_runtime::TurnSteeringStatus::Held)
+        .filter(|row| {
+            row.active_turn_id == turn_id
+                && row.status == local_first_task_runtime::TurnSteeringStatus::Held
+        })
         .collect::<Vec<_>>();
     drop(store);
     for steering in &held_steering {
@@ -38583,7 +38993,11 @@ fn set_chat_turn_message_delivery_state(
     if task.kind != "chat_turn" {
         return;
     }
-    let Some(thread_id) = task.input_json.get("thread_id").and_then(|value| value.as_str()) else {
+    let Some(thread_id) = task
+        .input_json
+        .get("thread_id")
+        .and_then(|value| value.as_str())
+    else {
         return;
     };
     let Some(message_id) = task
@@ -38626,18 +39040,16 @@ async fn get_thread_working_ledger(
 ) -> Result<Json<Value>, GatewayError> {
     let workspace = execution_thread_workspace(&state, &thread_id)?;
     let store = lock_task_store(&state)?;
-    let markdown = working_ledger::render(
-        &store,
-        gateway_user_id().as_str(),
-        &workspace,
-        &thread_id,
-    )
-    .map_err(|message| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "working_ledger_render",
-        message,
-    })?;
-    Ok(Json(serde_json::json!({"thread_id": thread_id, "markdown": markdown})))
+    let markdown =
+        working_ledger::render(&store, gateway_user_id().as_str(), &workspace, &thread_id)
+            .map_err(|message| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "working_ledger_render",
+                message,
+            })?;
+    Ok(Json(
+        serde_json::json!({"thread_id": thread_id, "markdown": markdown}),
+    ))
 }
 
 async fn get_latest_agent_checkpoint(
@@ -38655,11 +39067,7 @@ async fn get_latest_agent_checkpoint(
             message: "checkpoint not found".to_string(),
         })?;
     let checkpoint = store
-        .latest_agent_checkpoint(
-            &run_id,
-            user.as_str(),
-            &workspace,
-        )
+        .latest_agent_checkpoint(&run_id, user.as_str(), &workspace)
         .map_err(GatewayError::task)?
         .ok_or_else(|| GatewayError {
             status: StatusCode::NOT_FOUND,
@@ -38728,12 +39136,7 @@ async fn get_agent_run_events(
             message: "agent run not found".to_string(),
         })?;
     let runs = store
-        .list_agent_run_events(
-            &run_id,
-            user_id.as_str(),
-            &workspace_id,
-            query.since,
-        )
+        .list_agent_run_events(&run_id, user_id.as_str(), &workspace_id, query.since)
         .map_err(|error| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "agent_run_events",
@@ -38790,11 +39193,7 @@ async fn get_latest_agent_prompt(
             message: "agent run not found".to_string(),
         })?;
     let event = store
-        .latest_agent_prompt_snapshot(
-            &run_id,
-            user.as_str(),
-            &workspace,
-        )
+        .latest_agent_prompt_snapshot(&run_id, user.as_str(), &workspace)
         .map_err(|error| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "agent_prompt_latest",
@@ -38809,7 +39208,10 @@ async fn get_latest_agent_prompt(
     if let Value::Object(object) = &mut payload {
         object.insert("run_id".to_string(), Value::String(event.run_id));
         object.insert("seq".to_string(), Value::from(event.seq));
-        object.insert("round".to_string(), serde_json::to_value(event.round).unwrap_or(Value::Null));
+        object.insert(
+            "round".to_string(),
+            serde_json::to_value(event.round).unwrap_or(Value::Null),
+        );
         object.insert("created_at".to_string(), Value::from(event.created_at));
     }
     Ok(Json(payload))
@@ -38889,7 +39291,9 @@ struct SteeringRevisionRequest {
     expected_revision: u64,
 }
 
-fn empty_json_array() -> Value { Value::Array(Vec::new()) }
+fn empty_json_array() -> Value {
+    Value::Array(Vec::new())
+}
 
 fn publish_steering_changed(record: &local_first_task_runtime::TurnSteeringRecord) {
     publish_app_event(serde_json::json!({
@@ -38901,7 +39305,9 @@ fn publish_steering_changed(record: &local_first_task_runtime::TurnSteeringRecor
 }
 
 fn steering_mutation_result(
-    result: local_first_task_runtime::TaskRuntimeResult<local_first_task_runtime::TurnSteeringRecord>,
+    result: local_first_task_runtime::TaskRuntimeResult<
+        local_first_task_runtime::TurnSteeringRecord,
+    >,
     store: &TaskStore,
     steering_id: i64,
     user_id: &str,
@@ -38910,15 +39316,22 @@ fn steering_mutation_result(
     match result {
         Ok(record) => {
             publish_steering_changed(&record);
-            Ok((StatusCode::OK, Json(serde_json::to_value(record).unwrap_or(Value::Null))))
+            Ok((
+                StatusCode::OK,
+                Json(serde_json::to_value(record).unwrap_or(Value::Null)),
+            ))
         }
         Err(local_first_task_runtime::TaskRuntimeError::Conflict(_)) => {
-            let current = store.load_turn_steering(steering_id, user_id, workspace_id)
+            let current = store
+                .load_turn_steering(steering_id, user_id, workspace_id)
                 .map_err(GatewayError::task)?;
-            Ok((StatusCode::CONFLICT, Json(serde_json::json!({
-                "code": "steering_revision_conflict",
-                "steering": current,
-            }))))
+            Ok((
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "code": "steering_revision_conflict",
+                    "steering": current,
+                })),
+            ))
         }
         Err(error) => Err(GatewayError::task(error)),
     }
@@ -38942,12 +39355,22 @@ async fn update_steering(
 ) -> Result<(StatusCode, Json<Value>), GatewayError> {
     let user = gateway_user_id();
     let store = lock_task_store(&state)?;
-    let workspace = store.workspace_for_turn_steering(steering_id, user.as_str())
+    let workspace = store
+        .workspace_for_turn_steering(steering_id, user.as_str())
         .map_err(GatewayError::task)?
-        .ok_or_else(|| GatewayError { status: StatusCode::NOT_FOUND, code: "steering_not_found", message: "steering not found".into() })?;
-    let current = store.load_turn_steering(steering_id, user.as_str(), &workspace)
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "steering_not_found",
+            message: "steering not found".into(),
+        })?;
+    let current = store
+        .load_turn_steering(steering_id, user.as_str(), &workspace)
         .map_err(GatewayError::task)?
-        .ok_or_else(|| GatewayError { status: StatusCode::NOT_FOUND, code: "steering_not_found", message: "steering not found".into() })?;
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "steering_not_found",
+            message: "steering not found".into(),
+        })?;
     let input = local_first_task_runtime::NewTurnSteering {
         source_message_id: current.source_message_id,
         prompt: request.prompt,
@@ -38958,7 +39381,11 @@ async fn update_steering(
         model: request.model,
     };
     let result = store.update_turn_steering(
-        steering_id, user.as_str(), &workspace, request.expected_revision, &input,
+        steering_id,
+        user.as_str(),
+        &workspace,
+        request.expected_revision,
+        &input,
     );
     steering_mutation_result(result, &store, steering_id, user.as_str(), &workspace)
 }
@@ -38970,11 +39397,19 @@ async fn delete_steering(
 ) -> Result<(StatusCode, Json<Value>), GatewayError> {
     let user = gateway_user_id();
     let store = lock_task_store(&state)?;
-    let workspace = store.workspace_for_turn_steering(steering_id, user.as_str())
+    let workspace = store
+        .workspace_for_turn_steering(steering_id, user.as_str())
         .map_err(GatewayError::task)?
-        .ok_or_else(|| GatewayError { status: StatusCode::NOT_FOUND, code: "steering_not_found", message: "steering not found".into() })?;
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "steering_not_found",
+            message: "steering not found".into(),
+        })?;
     let result = store.cancel_turn_steering(
-        steering_id, user.as_str(), &workspace, request.expected_revision,
+        steering_id,
+        user.as_str(),
+        &workspace,
+        request.expected_revision,
     );
     steering_mutation_result(result, &store, steering_id, user.as_str(), &workspace)
 }
@@ -38986,34 +39421,56 @@ async fn send_steering_now(
 ) -> Result<(StatusCode, Json<Value>), GatewayError> {
     let user = gateway_user_id();
     let store = lock_task_store(&state)?;
-    let workspace = store.workspace_for_turn_steering(steering_id, user.as_str())
+    let workspace = store
+        .workspace_for_turn_steering(steering_id, user.as_str())
         .map_err(GatewayError::task)?
-        .ok_or_else(|| GatewayError { status: StatusCode::NOT_FOUND, code: "steering_not_found", message: "steering not found".into() })?;
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "steering_not_found",
+            message: "steering not found".into(),
+        })?;
     let workspace_id = WorkspaceId::new(&workspace);
     let result = local_first_task_runtime::broker::promote_held_turn_steering(
-        &store, &user, &workspace_id, steering_id, request.expected_revision,
+        &store,
+        &user,
+        &workspace_id,
+        steering_id,
+        request.expected_revision,
         |tx, input| insert_broker_turn_messages(tx, input),
     );
     match result {
         Ok(promoted) => {
             publish_steering_changed(&promoted.steering);
-            Ok((StatusCode::CREATED, Json(serde_json::json!({
-                "turn_id": promoted.turn.task_id.as_str(),
-                "thread_id": promoted.turn.thread_id,
-                "status": "queued",
-                "position_in_queue": promoted.turn.position_in_queue,
-                "steering": promoted.steering,
-            }))))
+            Ok((
+                StatusCode::CREATED,
+                Json(serde_json::json!({
+                    "turn_id": promoted.turn.task_id.as_str(),
+                    "thread_id": promoted.turn.thread_id,
+                    "status": "queued",
+                    "position_in_queue": promoted.turn.position_in_queue,
+                    "steering": promoted.steering,
+                })),
+            ))
         }
-        Err(local_first_task_runtime::broker::EnqueueError::Store(local_first_task_runtime::TaskRuntimeError::Conflict(_))) => {
-            let current = store.load_turn_steering(steering_id, user.as_str(), &workspace)
+        Err(local_first_task_runtime::broker::EnqueueError::Store(
+            local_first_task_runtime::TaskRuntimeError::Conflict(_),
+        )) => {
+            let current = store
+                .load_turn_steering(steering_id, user.as_str(), &workspace)
                 .map_err(GatewayError::task)?;
-            Ok((StatusCode::CONFLICT, Json(serde_json::json!({
-                "code": "steering_revision_conflict",
-                "steering": current,
-            }))))
+            Ok((
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "code": "steering_revision_conflict",
+                    "steering": current,
+                })),
+            ))
         }
-        Err(error) => Err(GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "steering_send_now", message: error.to_string() }),
+        Err(error) => Err(GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "steering_send_now",
+            message: error.to_string(),
+        }),
     }
 }
 
@@ -39078,11 +39535,7 @@ async fn subscribe_turn_stream(
     tokio::spawn(async move {
         // Replay.
         for line in &replay {
-            if tx
-                .send(Ok(Bytes::from(format!("{line}\n"))))
-                .await
-                .is_err()
-            {
+            if tx.send(Ok(Bytes::from(format!("{line}\n")))).await.is_err() {
                 return;
             }
         }
@@ -39105,11 +39558,7 @@ async fn subscribe_turn_stream(
                             Ok(s) => s,
                             Err(_) => continue,
                         };
-                        if tx
-                            .send(Ok(Bytes::from(format!("{line}\n"))))
-                            .await
-                            .is_err()
-                        {
+                        if tx.send(Ok(Bytes::from(format!("{line}\n")))).await.is_err() {
                             return;
                         }
                     }
@@ -39149,9 +39598,8 @@ fn ws_registry() -> &'static std::sync::OnceLock<std::sync::Arc<ws_gateway::WsRe
     &CELL
 }
 
-fn usage_recorder_registry() -> &'static std::sync::OnceLock<
-    std::sync::Arc<dyn local_first_inference_usage::UsageRecorder>,
-> {
+fn usage_recorder_registry()
+-> &'static std::sync::OnceLock<std::sync::Arc<dyn local_first_inference_usage::UsageRecorder>> {
     static CELL: std::sync::OnceLock<
         std::sync::Arc<dyn local_first_inference_usage::UsageRecorder>,
     > = std::sync::OnceLock::new();
@@ -39232,7 +39680,10 @@ async fn emit_single_stream_event(sink: &StreamSink, event: GenerateStreamEvent)
     Ok(())
 }
 
-pub(crate) async fn emit_stream_event(sink: &StreamSink, event: GenerateStreamEvent) -> Result<(), ()> {
+pub(crate) async fn emit_stream_event(
+    sink: &StreamSink,
+    event: GenerateStreamEvent,
+) -> Result<(), ()> {
     match event {
         GenerateStreamEvent::Delta { text } => {
             for expanded in expand_legacy_delta_to_chat_events_with_mode(
@@ -39349,8 +39800,7 @@ async fn cancel_task(
                     )
                     .map_err(GatewayError::task)?;
                 } else {
-                    let was_running =
-                        task.status == local_first_task_runtime::TaskStatus::Running;
+                    let was_running = task.status == local_first_task_runtime::TaskStatus::Running;
                     task.status = local_first_task_runtime::TaskStatus::Cancelled;
                     task.blocked_reason = Some("cancelled by the user".to_string());
                     task.updated_at = OffsetDateTime::now_utc();
@@ -39405,12 +39855,17 @@ mod cancel_of_parked_turn_tests {
             }),
         );
         task.status = TaskStatus::Running;
-        task.resource_requirements = vec![ResourceRequirement::new(ResourceClass::BrowserSession, 1)];
+        task.resource_requirements =
+            vec![ResourceRequirement::new(ResourceClass::BrowserSession, 1)];
         task_store
             .insert_chat_turn(&task, &thread_id, "req-1", "interactive", "full")
             .unwrap();
         task_store
-            .park_chat_turn(turn_id, gateway_user_id().as_str(), gateway_workspace_id().as_str())
+            .park_chat_turn(
+                turn_id,
+                gateway_user_id().as_str(),
+                gateway_workspace_id().as_str(),
+            )
             .unwrap();
         thread_id
     }
@@ -39436,7 +39891,11 @@ mod cancel_of_parked_turn_tests {
             .get_task(&task_id, &user_id, &workspace_id)
             .unwrap()
             .unwrap();
-        assert_eq!(task_before_cancel.status, TaskStatus::Parked, "precondition: turn is parked");
+        assert_eq!(
+            task_before_cancel.status,
+            TaskStatus::Parked,
+            "precondition: turn is parked"
+        );
 
         let ok = cancel_chat_turn_and_finalize_bubble(
             &state,
@@ -39449,7 +39908,10 @@ mod cancel_of_parked_turn_tests {
         .unwrap();
         assert!(ok, "a parked turn is still cancellable");
 
-        let cancelled = store.get_task(&task_id, &user_id, &workspace_id).unwrap().unwrap();
+        let cancelled = store
+            .get_task(&task_id, &user_id, &workspace_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(cancelled.status, TaskStatus::Cancelled);
 
         let events = store.read_turn_events(turn_id, 0).unwrap();
@@ -39497,7 +39959,11 @@ mod cancel_of_parked_turn_tests {
             .task_store
             .lock()
             .unwrap()
-            .get_task(&TaskId::new(turn_id), &gateway_user_id(), &gateway_workspace_id())
+            .get_task(
+                &TaskId::new(turn_id),
+                &gateway_user_id(),
+                &gateway_workspace_id(),
+            )
             .unwrap()
             .unwrap();
         assert_eq!(cancelled.status, TaskStatus::Cancelled);
@@ -39756,7 +40222,12 @@ fn chat_turn_task_is_parked(
 ) -> bool {
     lock_task_store(state)
         .ok()
-        .and_then(|store| store.get_task(&task.task_id, user, workspace).ok().flatten())
+        .and_then(|store| {
+            store
+                .get_task(&task.task_id, user, workspace)
+                .ok()
+                .flatten()
+        })
         .is_some_and(|persisted| persisted.status == TaskStatus::Parked)
 }
 
@@ -40014,7 +40485,12 @@ fn run_next_task_once(
     // and leave the thread stuck (the "thread is busy" symptom).
     let externally_cancelled = lock_task_store(state)
         .ok()
-        .and_then(|store| store.get_task(&task.task_id, &user, &workspace).ok().flatten())
+        .and_then(|store| {
+            store
+                .get_task(&task.task_id, &user, &workspace)
+                .ok()
+                .flatten()
+        })
         .is_some_and(|t| t.status == TaskStatus::Cancelled);
     if externally_cancelled {
         if let Ok(store) = lock_task_store(state) {
@@ -40085,6 +40561,19 @@ fn run_next_task_once(
             2,
             Some(approval.explanation.clone()),
         )?;
+    } else if let Some(wait_until) = outcome.wait_until {
+        let reason = outcome
+            .blocked_reason
+            .as_deref()
+            .unwrap_or("Task is waiting for its scheduled resume time.");
+        mark_task_waiting_time(state, &mut task, wait_until, reason)?;
+        sync_session_for_task_run(
+            state,
+            &task,
+            SessionStatus::Paused,
+            2,
+            Some(format!("Riprendo dopo {}: {reason}", wait_until)),
+        )?;
     } else {
         let reason = outcome
             .blocked_reason
@@ -40118,6 +40607,8 @@ fn run_next_task_once(
             "completed".to_string()
         } else if outcome.pending_approval.is_some() {
             "waiting_user_approval".to_string()
+        } else if outcome.wait_until.is_some() {
+            "waiting_time".to_string()
         } else {
             "blocked".to_string()
         },
@@ -40128,6 +40619,8 @@ fn run_next_task_once(
                 "completed".to_string()
             } else if outcome.pending_approval.is_some() {
                 "waiting_user_approval".to_string()
+            } else if outcome.wait_until.is_some() {
+                "waiting_time".to_string()
             } else {
                 "blocked".to_string()
             },
@@ -40450,6 +40943,24 @@ fn mark_task_waiting_external(
     reason: &str,
 ) -> Result<(), GatewayError> {
     task.status = TaskStatus::WaitingExternalEvent;
+    task.blocked_reason = Some(reason.to_string());
+    task.lease_owner = None;
+    task.lease_expires_at = None;
+    task.last_heartbeat_at = None;
+    task.updated_at = OffsetDateTime::now_utc();
+    let store = lock_task_store(state)?;
+    store.release_resources(task).map_err(GatewayError::task)?;
+    store.insert_task(task).map_err(GatewayError::task)
+}
+
+fn mark_task_waiting_time(
+    state: &AppState,
+    task: &mut TaskRecord,
+    not_before: OffsetDateTime,
+    reason: &str,
+) -> Result<(), GatewayError> {
+    task.status = TaskStatus::WaitingTime;
+    task.not_before = Some(not_before);
     task.blocked_reason = Some(reason.to_string());
     task.lease_owner = None;
     task.lease_expires_at = None;
@@ -41107,7 +41618,9 @@ fn execute_read_only_task(
         GatewayTaskExecutorKind::CapabilityGeneric => execute_capability_generic(state, task),
         GatewayTaskExecutorKind::Subagent => execute_subagent_task(task),
         GatewayTaskExecutorKind::ProactivePrompt => execute_proactive_prompt_task(state, task),
-        GatewayTaskExecutorKind::ChatTurn => crate::turn_executor::execute_chat_turn_task(state, task),
+        GatewayTaskExecutorKind::ChatTurn => {
+            crate::turn_executor::execute_chat_turn_task(state, task)
+        }
         GatewayTaskExecutorKind::LegacyShell => execute_shell_read_only_task(task),
         GatewayTaskExecutorKind::LegacyLocal => execute_local_read_only_task(task),
     }
@@ -41214,8 +41727,15 @@ fn start_proactive_visible_turn(
         .ok_or_else(|| LocalTaskExecutionError {
             message: "owning proactive task disappeared before execution".to_string(),
         })?;
-    let mut input = persisted.input_json.as_object().cloned().unwrap_or_default();
-    input.insert("thread_id".to_string(), Value::String(thread_id.to_string()));
+    let mut input = persisted
+        .input_json
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    input.insert(
+        "thread_id".to_string(),
+        Value::String(thread_id.to_string()),
+    );
     input.insert(
         "assistant_message_id".to_string(),
         Value::String(visible_turn.assistant_message_id.clone()),
@@ -41293,24 +41813,17 @@ fn execute_proactive_prompt_task(
     // Safety boundary: scheduled/automation work must be visible in its owning
     // chat before any model/tool/browser work starts. If the durable turn cannot
     // be persisted, fail closed instead of running invisible background work.
-    let visible_turn = start_proactive_visible_turn(
-        state,
-        task,
-        &thread_id,
-        &thread_plan,
-        &goal,
-    )?;
+    let visible_turn = start_proactive_visible_turn(state, task, &thread_id, &thread_plan, &goal)?;
 
-    let result = tokio::runtime::Handle::current()
-        .block_on(run_agent_turn_into_message(
-            state,
-            &thread_id,
-            &goal,
-            policy,
-            &visible_turn.user_message_id,
-            &visible_turn.assistant_message_id,
-            local_first_desktop_gateway::MessageDeliveryState::Delivered,
-        ));
+    let result = tokio::runtime::Handle::current().block_on(run_agent_turn_into_message(
+        state,
+        &thread_id,
+        &goal,
+        policy,
+        &visible_turn.user_message_id,
+        &visible_turn.assistant_message_id,
+        local_first_desktop_gateway::MessageDeliveryState::Delivered,
+    ));
     let agent_result = result.ok().flatten();
     let waiting_for_user = agent_turn_waits_for_user(agent_result.as_ref());
     let waiting_action = agent_result
@@ -41325,7 +41838,11 @@ fn execute_proactive_prompt_task(
     let incomplete_reason = answer
         .as_deref()
         .and_then(agent_output_incomplete_reason)
-        .or_else(|| answer.is_none().then(|| "scheduled task produced no final reply".to_string()));
+        .or_else(|| {
+            answer
+                .is_none()
+                .then(|| "scheduled task produced no final reply".to_string())
+        });
 
     if answer.is_none() {
         mark_visible_assistant_message_failed(
@@ -41335,18 +41852,16 @@ fn execute_proactive_prompt_task(
         );
     }
     if has_dispatchable_remote_approval {
-        let persisted_card = lock_store(state)
-            .ok()
-            .and_then(|store| {
-                store
-                    .message(&thread_id, &visible_turn.assistant_message_id)
-                    .ok()
-                    .flatten()
-            });
+        let persisted_card = lock_store(state).ok().and_then(|store| {
+            store
+                .message(&thread_id, &visible_turn.assistant_message_id)
+                .ok()
+                .flatten()
+        });
         if let Some(message) = persisted_card {
-            tokio::runtime::Handle::current().block_on(
-                activate_remote_approvals_from_message(state, &thread_id, &message),
-            );
+            tokio::runtime::Handle::current().block_on(activate_remote_approvals_from_message(
+                state, &thread_id, &message,
+            ));
         }
     }
     publish_app_event(serde_json::json!({
@@ -41362,20 +41877,21 @@ fn execute_proactive_prompt_task(
     } else {
         incomplete_reason.clone()
     };
-    let summary = blocked_reason
-        .clone()
-        .unwrap_or_else(|| {
-            if waiting_for_user {
-                "Scheduled task is waiting for a user action.".to_string()
-            } else {
-                "Scheduled task executed.".to_string()
-            }
-        });
+    let summary = blocked_reason.clone().unwrap_or_else(|| {
+        if waiting_for_user {
+            "Scheduled task is waiting for a user action.".to_string()
+        } else {
+            "Scheduled task executed.".to_string()
+        }
+    });
     Ok(TaskExecutionOutcome {
         completed,
         blocked_reason,
+        wait_until: None,
         pending_approval: waiting_for_user.then(|| PendingExecutorApproval {
-            action: waiting_action.clone().unwrap_or_else(|| "action card".to_string()),
+            action: waiting_action
+                .clone()
+                .unwrap_or_else(|| "action card".to_string()),
             risk_level: "high".to_string(),
             data_boundary: "in-chat action card".to_string(),
             explanation: "The scheduled task is waiting for its persisted action card.".to_string(),
@@ -42539,6 +43055,7 @@ fn capability_call_completed_outcome(
     TaskExecutionOutcome {
         completed: true,
         blocked_reason: None,
+        wait_until: None,
         pending_approval: None,
         summary: summary.clone(),
         // Raw output stays in the (audited, non-UI) checkpoint; the redacted
@@ -42576,6 +43093,7 @@ fn capability_call_failed_outcome(task: &TaskRecord, reason: &str) -> TaskExecut
     TaskExecutionOutcome {
         completed: false,
         blocked_reason: Some(reason.to_string()),
+        wait_until: None,
         pending_approval: None,
         summary: reason.to_string(),
         checkpoint_payload: serde_json::json!({
@@ -43937,10 +44455,7 @@ where
                         state.task_executor_registry.resolve(task.kind.as_str()),
                         Some(GatewayTaskExecutorKind::ProactivePrompt)
                     );
-                let exact_source = task
-                    .input_json
-                    .get("thread_id")
-                    .and_then(Value::as_str)
+                let exact_source = task.input_json.get("thread_id").and_then(Value::as_str)
                     == Some(thread_id)
                     && task
                         .input_json
@@ -44081,7 +44596,9 @@ where
                 "actionable source message is not an assistant reply",
             ));
         }
-        let workspace_id = store.workspace_for_thread(thread_id).map_err(GatewayError::store)?;
+        let workspace_id = store
+            .workspace_for_thread(thread_id)
+            .map_err(GatewayError::store)?;
         (message, workspace_id)
     };
     let user = gateway_user_id();
@@ -44097,10 +44614,7 @@ where
                 .into_iter()
                 .find(|task| {
                     task.kind == "chat_turn"
-                        && task
-                            .input_json
-                            .get("thread_id")
-                            .and_then(Value::as_str)
+                        && task.input_json.get("thread_id").and_then(Value::as_str)
                             == Some(thread_id)
                         && task
                             .input_json
@@ -44143,11 +44657,7 @@ where
         };
         let matches_source = supported_persisted_bubble
             && lifecycle_matches
-            && task
-                .input_json
-                .get("thread_id")
-                .and_then(Value::as_str)
-                == Some(thread_id)
+            && task.input_json.get("thread_id").and_then(Value::as_str) == Some(thread_id)
             && task
                 .input_json
                 .get("assistant_message_id")
@@ -44162,7 +44672,9 @@ where
         task.blocked_reason = match resolution {
             ActionableSourceResolution::Succeeded => None,
             ActionableSourceResolution::Cancelled => Some("actionable card cancelled".to_string()),
-            ActionableSourceResolution::Failed => Some("actionable card execution failed".to_string()),
+            ActionableSourceResolution::Failed => {
+                Some("actionable card execution failed".to_string())
+            }
         };
         task.lease_owner = None;
         task.lease_expires_at = None;
@@ -44173,8 +44685,8 @@ where
     }
 
     let rewritten = rewrite(&message.text);
-    let remote_approval_id = remote_approval_intent_from_raw_text(&message.text)
-        .and_then(|intent| intent.approval_id);
+    let remote_approval_id =
+        remote_approval_intent_from_raw_text(&message.text).and_then(|intent| intent.approval_id);
     let store = lock_store(state)?;
     if resolution != ActionableSourceResolution::Cancelled
         && let Some(approval_id) = remote_approval_id.as_deref()
@@ -44237,9 +44749,10 @@ fn cancel_pending_remote_approval(state: &AppState, code: &str) -> bool {
         None => return false,
     };
     if pending.requires_source {
-        let (Some(thread_id), Some(message_id)) =
-            (pending.thread_id.as_deref(), pending.source_message_id.as_deref())
-        else {
+        let (Some(thread_id), Some(message_id)) = (
+            pending.thread_id.as_deref(),
+            pending.source_message_id.as_deref(),
+        ) else {
             return false;
         };
         if resolve_actionable_source(
@@ -44298,30 +44811,25 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
                         "Approval {code} is missing its exact source card; no action was executed."
                     );
                 };
-                let source_claim = claim_actionable_source(
-                    state,
-                    thread_id,
-                    message_id,
-                    |text| {
-                        if claimed.tool.starts_with("mcp__") {
-                            mcp_confirm_matches_approval(
-                                text,
-                                &claimed.approval_id,
-                                &claimed.tool,
-                                &claimed.arguments,
-                            )
-                        } else {
-                            confirm_marker_matches_approval(
-                                text,
-                                COMPOSIO_CONFIRM_OPEN,
-                                COMPOSIO_CONFIRM_CLOSE,
-                                &claimed.approval_id,
-                                &claimed.tool,
-                                &claimed.arguments,
-                            )
-                        }
-                    },
-                );
+                let source_claim = claim_actionable_source(state, thread_id, message_id, |text| {
+                    if claimed.tool.starts_with("mcp__") {
+                        mcp_confirm_matches_approval(
+                            text,
+                            &claimed.approval_id,
+                            &claimed.tool,
+                            &claimed.arguments,
+                        )
+                    } else {
+                        confirm_marker_matches_approval(
+                            text,
+                            COMPOSIO_CONFIRM_OPEN,
+                            COMPOSIO_CONFIRM_CLOSE,
+                            &claimed.approval_id,
+                            &claimed.tool,
+                            &claimed.arguments,
+                        )
+                    }
+                });
                 if let Err(error) = source_claim {
                     if let Ok(store) = lock_store(state) {
                         let _ = store.complete_remote_approval(&claimed.approval_id, "failed");
@@ -44332,7 +44840,10 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
                         "failed",
                         Some("Source card was stale, cancelled, or already claimed."),
                     );
-                    return format!("Approval {code} rejected before execution: {}", error.message);
+                    return format!(
+                        "Approval {code} rejected before execution: {}",
+                        error.message
+                    );
                 }
             }
             append_remote_approval_thread_status(state, &claimed, "running", None);
@@ -44377,7 +44888,8 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
                             _ => Ok(()),
                         };
                         if let Ok(store) = lock_store(state) {
-                            let _ = store.complete_remote_approval(&claimed.approval_id, "executed");
+                            let _ =
+                                store.complete_remote_approval(&claimed.approval_id, "executed");
                         }
                         if let Err(error) = source_resolved {
                             append_remote_approval_thread_status(
@@ -44386,7 +44898,10 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
                                 "executed",
                                 Some("Tool completed, but its source turn could not be resolved."),
                             );
-                            return format!("⚠️ Done ({code}), but the source turn needs recovery: {}", error.message);
+                            return format!(
+                                "⚠️ Done ({code}), but the source turn needs recovery: {}",
+                                error.message
+                            );
                         }
                         append_remote_approval_thread_status(
                             state,
@@ -44407,9 +44922,10 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
                         format!("✅ Done ({code}).")
                     }
                     Some(err) => {
-                        if let (Some(thread_id), Some(message_id)) =
-                            (claimed.thread_id.as_deref(), claimed.source_message_id.as_deref())
-                        {
+                        if let (Some(thread_id), Some(message_id)) = (
+                            claimed.thread_id.as_deref(),
+                            claimed.source_message_id.as_deref(),
+                        ) {
                             let _ = resolve_actionable_source(
                                 state,
                                 thread_id,
@@ -44426,9 +44942,10 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
                     }
                 },
                 Err(e) => {
-                    if let (Some(thread_id), Some(message_id)) =
-                        (claimed.thread_id.as_deref(), claimed.source_message_id.as_deref())
-                    {
+                    if let (Some(thread_id), Some(message_id)) = (
+                        claimed.thread_id.as_deref(),
+                        claimed.source_message_id.as_deref(),
+                    ) {
                         let _ = resolve_actionable_source(
                             state,
                             thread_id,
@@ -45201,6 +45718,7 @@ const PAYMENT_APPROVAL_CLOSE: &str = "‹‹/PAYMENT_APPROVAL››";
 const PAYMENT_APPROVAL_TTL_SECONDS: u64 = 300;
 // VAULT_REVEAL_OPEN/CLOSE moved to engine::markers (ADR 0024 inc 5e.3); imported below.
 
+#[cfg(test)]
 fn payment_approval_marker(snapshot: &PaymentApprovalSnapshot) -> String {
     let marker = serde_json::json!({ "snapshot": snapshot });
     format!("{PAYMENT_APPROVAL_OPEN}{marker}{PAYMENT_APPROVAL_CLOSE}")
@@ -46004,7 +46522,8 @@ fn accept_vault_proposal(
     wrap_key: &[u8; 32],
     request: &VaultProposalActionRequest,
 ) -> Result<VaultProposalAcceptResponse, GatewayError> {
-    let (incoming_value, pending_to_consume) = resolve_incoming_vault_value(pending_store, request)?;
+    let (incoming_value, pending_to_consume) =
+        resolve_incoming_vault_value(pending_store, request)?;
     let master_key = obtain_system_master_key(vault_store, wrap_key, request.pin.as_deref())?;
 
     let consume_pending = |pending_to_consume: &Option<String>| {
@@ -46426,8 +46945,8 @@ fn should_claim_payment_approval(
     // and validated), it just does not CONSUME the grant. Anything that actually commits — a click, a
     // submit, `type` with submit=true, Enter — is still a claim, so the money-moving action remains
     // one-shot and fail-closed.
-    let is_vault_field_fill = action.get("vault_secret").is_some()
-        && !browser_safety::is_committing_action(action);
+    let is_vault_field_fill =
+        action.get("vault_secret").is_some() && !browser_safety::is_committing_action(action);
     if is_vault_field_fill {
         return false;
     }
@@ -46445,7 +46964,13 @@ fn claim_payment_approval_for_action(
     thread_id: Option<&str>,
 ) -> Result<String, String> {
     let mut approvals = lock_payment_approvals(state).map_err(|error| error.message)?;
-    claim_payment_approval_from_map(&mut approvals, action, payment_floor_refs, focus_payment_context, thread_id)
+    claim_payment_approval_from_map(
+        &mut approvals,
+        action,
+        payment_floor_refs,
+        focus_payment_context,
+        thread_id,
+    )
 }
 
 fn claim_payment_approval_from_map(
@@ -46455,7 +46980,8 @@ fn claim_payment_approval_from_map(
     focus_payment_context: bool,
     thread_id: Option<&str>,
 ) -> Result<String, String> {
-    if !browser_safety::action_is_payment_commit(action, payment_floor_refs, focus_payment_context) {
+    if !browser_safety::action_is_payment_commit(action, payment_floor_refs, focus_payment_context)
+    {
         return Err("payment approval can only be used on the final payment control".to_string());
     }
     let approval_id = action
@@ -46840,7 +47366,10 @@ fn mcp_disconnect_blocking(state: &AppState, provider_id: &str) -> Result<usize,
             None => return Ok(0),
         }
         let secret_ref = registry
-            .connection_configs(&gateway_capability_user_id(), &gateway_capability_workspace_id())
+            .connection_configs(
+                &gateway_capability_user_id(),
+                &gateway_capability_workspace_id(),
+            )
             .map_err(|error| GatewayError {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 code: "mcp_disconnect",
@@ -46884,15 +47413,14 @@ async fn mcp_disconnect(
     State(state): State<AppState>,
     Json(request): Json<McpDisconnectRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    let removed = tokio::task::spawn_blocking(move || {
-        mcp_disconnect_blocking(&state, &request.provider_id)
-    })
-    .await
-    .map_err(|e| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "mcp_disconnect_join",
-        message: e.to_string(),
-    })??;
+    let removed =
+        tokio::task::spawn_blocking(move || mcp_disconnect_blocking(&state, &request.provider_id))
+            .await
+            .map_err(|e| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "mcp_disconnect_join",
+                message: e.to_string(),
+            })??;
     Ok(Json(serde_json::json!({ "removed": removed > 0 })))
 }
 
@@ -47933,9 +48461,8 @@ async fn composio_toolkits(
 /// that fetches whatever URL it is handed is an open proxy (SSRF) sitting inside the user's network.
 /// Here the only reachable URLs are the ones Composio itself gave us.
 fn composio_logo_urls() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
-    static CELL: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<String, String>>,
-    > = std::sync::OnceLock::new();
+    static CELL: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+        std::sync::OnceLock::new();
     CELL.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
@@ -48103,6 +48630,7 @@ fn task_execution_outcome_from_executor_result(
         } => Ok(TaskExecutionOutcome {
             completed: false,
             blocked_reason: Some(explanation.clone()),
+            wait_until: None,
             pending_approval: Some(PendingExecutorApproval {
                 action: action.clone(),
                 risk_level: risk_level.clone(),
@@ -48148,41 +48676,80 @@ fn task_execution_outcome_from_executor_result(
             }),
             artifacts: vec![],
         }),
-        ExecutorResult::WaitUntil { reason, .. } | ExecutorResult::RetryableFailure { reason } => {
-            Ok(TaskExecutionOutcome {
-                completed: false,
-                blocked_reason: Some(reason.clone()),
-                pending_approval: None,
-                summary: reason.clone(),
-                checkpoint_payload: serde_json::json!({
-                    "kind": "executor_blocked",
-                    "executor_id": executor_id,
-                    "tool": tool_name,
-                    "output": {
-                        "blocked_reason": reason,
-                    },
-                }),
-                checkpoint_redacted: serde_json::json!({
-                    "kind": "executor_blocked",
-                    "executor_id": executor_id,
-                    "tool": tool_name,
-                    "output": {
-                        "blocked_reason": reason,
-                    },
-                }),
-                chat_message: format!("The task `{}` is blocked: {}", task.kind, reason),
-                result_surfacing: TaskResultSurfacing::AppendToChat,
-                surface: SurfaceKind::Logs,
-                event_kind: "computer_executor_blocked".to_string(),
-                event_title: "Task blocked".to_string(),
-                event_subtitle: reason,
-                event_payload: serde_json::json!({
-                    "executor_id": executor_id,
-                    "tool": tool_name,
-                }),
-                artifacts: vec![],
-            })
-        }
+        ExecutorResult::WaitUntil { not_before, reason } => Ok(TaskExecutionOutcome {
+            completed: false,
+            blocked_reason: Some(reason.clone()),
+            wait_until: Some(not_before),
+            pending_approval: None,
+            summary: reason.clone(),
+            checkpoint_payload: serde_json::json!({
+                "kind": "executor_waiting_time",
+                "executor_id": executor_id,
+                "tool": tool_name,
+                "output": {
+                    "blocked_reason": reason,
+                    "not_before": not_before.unix_timestamp(),
+                },
+            }),
+            checkpoint_redacted: serde_json::json!({
+                "kind": "executor_waiting_time",
+                "executor_id": executor_id,
+                "tool": tool_name,
+                "output": {
+                    "blocked_reason": reason,
+                    "not_before": not_before.unix_timestamp(),
+                },
+            }),
+            chat_message: format!(
+                "The task `{}` is waiting until {}: {}",
+                task.kind, not_before, reason
+            ),
+            result_surfacing: TaskResultSurfacing::AppendToChat,
+            surface: SurfaceKind::Logs,
+            event_kind: "computer_executor_waiting_time".to_string(),
+            event_title: "Task waiting".to_string(),
+            event_subtitle: reason,
+            event_payload: serde_json::json!({
+                "executor_id": executor_id,
+                "tool": tool_name,
+                "not_before": not_before.unix_timestamp(),
+            }),
+            artifacts: vec![],
+        }),
+        ExecutorResult::RetryableFailure { reason } => Ok(TaskExecutionOutcome {
+            completed: false,
+            blocked_reason: Some(reason.clone()),
+            wait_until: None,
+            pending_approval: None,
+            summary: reason.clone(),
+            checkpoint_payload: serde_json::json!({
+                "kind": "executor_blocked",
+                "executor_id": executor_id,
+                "tool": tool_name,
+                "output": {
+                    "blocked_reason": reason,
+                },
+            }),
+            checkpoint_redacted: serde_json::json!({
+                "kind": "executor_blocked",
+                "executor_id": executor_id,
+                "tool": tool_name,
+                "output": {
+                    "blocked_reason": reason,
+                },
+            }),
+            chat_message: format!("The task `{}` is blocked: {}", task.kind, reason),
+            result_surfacing: TaskResultSurfacing::AppendToChat,
+            surface: SurfaceKind::Logs,
+            event_kind: "computer_executor_blocked".to_string(),
+            event_title: "Task blocked".to_string(),
+            event_subtitle: reason,
+            event_payload: serde_json::json!({
+                "executor_id": executor_id,
+                "tool": tool_name,
+            }),
+            artifacts: vec![],
+        }),
     }
 }
 
@@ -48195,6 +48762,7 @@ fn completed_executor_outcome(
     TaskExecutionOutcome {
         completed: true,
         blocked_reason: None,
+        wait_until: None,
         pending_approval: None,
         summary: format!("Executor `{executor_id}` completed."),
         checkpoint_payload: serde_json::json!({
@@ -48320,6 +48888,7 @@ fn execute_local_read_only_task(
         return Ok(TaskExecutionOutcome {
             completed: true,
             blocked_reason: None,
+            wait_until: None,
             pending_approval: None,
             summary: format!("Calculation completed: {answer}"),
             checkpoint_payload: serde_json::json!({ "kind": "calculation", "answer": answer }),
@@ -48337,6 +48906,7 @@ fn execute_local_read_only_task(
     Ok(TaskExecutionOutcome {
         completed: true,
         blocked_reason: None,
+        wait_until: None,
         pending_approval: None,
         summary: "Local task read and completed without external actions.".to_string(),
         checkpoint_payload: serde_json::json!({ "kind": "local_read_only", "goal": task.goal }),
@@ -48370,6 +48940,7 @@ fn execute_shell_read_only_task(
     Ok(TaskExecutionOutcome {
         completed: true,
         blocked_reason: None,
+        wait_until: None,
         pending_approval: None,
         summary: "Read-only shell command completed.".to_string(),
         checkpoint_payload: serde_json::json!({ "kind": "shell_read_only", "command": "date", "output": output }),
@@ -49076,7 +49647,12 @@ async fn usage_breakdown(
         message: "usage store unavailable".to_string(),
     })?;
     let rows = store
-        .breakdown(gateway_user_id().as_str(), window, usage_now_i64(), dimension)
+        .breakdown(
+            gateway_user_id().as_str(),
+            window,
+            usage_now_i64(),
+            dimension,
+        )
         .map_err(|error| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "usage_breakdown_failed",
@@ -49218,14 +49794,23 @@ fn build_usage_suggestions(
     let now = usage_now_i64();
     let registry = load_provider_registry();
     let mut suggestions = Vec::new();
-    for role in ["orchestrator", "coding", "browser", "memory", "privacy_guard"] {
+    for role in [
+        "orchestrator",
+        "coding",
+        "browser",
+        "memory",
+        "privacy_guard",
+    ] {
         let Some(resolved) = registry.resolve_role(role) else {
             continue;
         };
         let Some(current_provider) = registry.get(&resolved.provider_id) else {
             continue;
         };
-        let Some(current_model) = current_provider.models.iter().find(|m| m.id == resolved.model)
+        let Some(current_model) = current_provider
+            .models
+            .iter()
+            .find(|m| m.id == resolved.model)
         else {
             continue;
         };
@@ -49252,7 +49837,11 @@ fn build_usage_suggestions(
             context_window: current_model.context_window.unwrap_or(0),
             tier: registry.tier_for(&resolved.provider_id, &resolved.model),
             predicted_cost_microusd: current_observed.average_cost_microusd,
-            headroom_percent: provider_headroom_percent(store, user_id.as_str(), &resolved.provider_id)?,
+            headroom_percent: provider_headroom_percent(
+                store,
+                user_id.as_str(),
+                &resolved.provider_id,
+            )?,
             median_latency_ms: current_observed.median_latency_ms,
             success_rate_basis_points: current_observed.success_rate_basis_points,
             successful_sample_count: current_observed.successful_sample_count,
@@ -49268,8 +49857,16 @@ fn build_usage_suggestions(
             minimum_tier: current.tier,
         };
         let mut candidates = Vec::new();
-        for provider in registry.providers.iter().filter(|provider| provider.enabled) {
-            for model in provider.models.iter().filter(|model| model.modality == role_req.modality) {
+        for provider in registry
+            .providers
+            .iter()
+            .filter(|provider| provider.enabled)
+        {
+            for model in provider
+                .models
+                .iter()
+                .filter(|model| model.modality == role_req.modality)
+            {
                 let observed = store
                     .model_usage_facts(user_id.as_str(), &provider.id, &model.id, window, now)
                     .map_err(usage_suggestion_read_error)?;
@@ -49292,7 +49889,11 @@ fn build_usage_suggestions(
                         .as_ref()
                         .and_then(|facts| facts.average_cost_microusd)
                         .or(predicted_cost_microusd),
-                    headroom_percent: provider_headroom_percent(store, user_id.as_str(), &provider.id)?,
+                    headroom_percent: provider_headroom_percent(
+                        store,
+                        user_id.as_str(),
+                        &provider.id,
+                    )?,
                     median_latency_ms: observed.as_ref().and_then(|facts| facts.median_latency_ms),
                     success_rate_basis_points: observed
                         .as_ref()
@@ -49349,8 +49950,14 @@ fn predicted_candidate_cost(
         return (None, CostProvenance::Unavailable);
     };
     let components = [
-        (current.average_input_tokens, price.input_microusd_per_million),
-        (current.average_output_tokens, price.output_microusd_per_million),
+        (
+            current.average_input_tokens,
+            price.input_microusd_per_million,
+        ),
+        (
+            current.average_output_tokens,
+            price.output_microusd_per_million,
+        ),
         (
             current.average_reasoning_tokens,
             price.reasoning_microusd_per_million,
@@ -49433,11 +50040,12 @@ async fn apply_usage_suggestion(
         code: "usage_store_unavailable",
         message: "usage store unavailable".to_string(),
     })?;
-    let suggestion = find_usage_suggestion(&store, &suggestion_key)?.ok_or_else(|| GatewayError {
-        status: StatusCode::CONFLICT,
-        code: "usage_suggestion_stale",
-        message: "the suggestion is no longer available".to_string(),
-    })?;
+    let suggestion =
+        find_usage_suggestion(&store, &suggestion_key)?.ok_or_else(|| GatewayError {
+            status: StatusCode::CONFLICT,
+            code: "usage_suggestion_stale",
+            message: "the suggestion is no longer available".to_string(),
+        })?;
     let instruction = usage_suggestions::validate_apply_request(
         &request,
         &suggestion.action_scopes,
@@ -49483,11 +50091,12 @@ async fn dismiss_usage_suggestion(
         code: "usage_store_unavailable",
         message: "usage store unavailable".to_string(),
     })?;
-    let suggestion = find_usage_suggestion(&store, &suggestion_key)?.ok_or_else(|| GatewayError {
-        status: StatusCode::CONFLICT,
-        code: "usage_suggestion_stale",
-        message: "the suggestion is no longer available".to_string(),
-    })?;
+    let suggestion =
+        find_usage_suggestion(&store, &suggestion_key)?.ok_or_else(|| GatewayError {
+            status: StatusCode::CONFLICT,
+            code: "usage_suggestion_stale",
+            message: "the suggestion is no longer available".to_string(),
+        })?;
     store
         .append_suggestion_action(&usage_store::SuggestionAction {
             action_id: uuid::Uuid::new_v4().to_string(),
@@ -49520,7 +50129,9 @@ struct SetProviderUsagePolicyRequest {
     pricing_overrides: Vec<usage_store::ModelPriceOverride>,
 }
 
-fn default_usage_currency() -> String { "USD".to_string() }
+fn default_usage_currency() -> String {
+    "USD".to_string()
+}
 
 async fn get_usage_provider_policy(
     State(state): State<AppState>,
@@ -49568,11 +50179,13 @@ async fn set_usage_provider_policy(
         code: "usage_store_unavailable",
         message: "usage store unavailable".to_string(),
     })?;
-    store.upsert_provider_policy(&policy, usage_now_i64()).map_err(|error| GatewayError {
-        status: StatusCode::BAD_REQUEST,
-        code: "usage_policy_invalid",
-        message: error.to_string(),
-    })?;
+    store
+        .upsert_provider_policy(&policy, usage_now_i64())
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "usage_policy_invalid",
+            message: error.to_string(),
+        })?;
     if let Ok(mut pricing) = state.usage_pricing.write() {
         *pricing = build_usage_pricing_snapshot(&store);
     }
@@ -49583,11 +50196,14 @@ async fn refresh_usage_provider(
     State(state): State<AppState>,
     Path(provider_id): Path<String>,
 ) -> Result<Json<Vec<usage_store::ProviderUsageSnapshot>>, GatewayError> {
-    let provider = load_provider_registry().get(&provider_id).cloned().ok_or_else(|| GatewayError {
-        status: StatusCode::NOT_FOUND,
-        code: "provider_not_found",
-        message: format!("provider {provider_id} not configured"),
-    })?;
+    let provider = load_provider_registry()
+        .get(&provider_id)
+        .cloned()
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "provider_not_found",
+            message: format!("provider {provider_id} not configured"),
+        })?;
     let snapshots = provider_usage::refresh_provider_usage(
         &state.http,
         gateway_user_id().as_str(),
@@ -49604,11 +50220,13 @@ async fn refresh_usage_provider(
         message: "usage store unavailable".to_string(),
     })?;
     for snapshot in &snapshots {
-        store.append_provider_snapshot(snapshot).map_err(|error| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "usage_snapshot_write_failed",
-            message: error.to_string(),
-        })?;
+        store
+            .append_provider_snapshot(snapshot)
+            .map_err(|error| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "usage_snapshot_write_failed",
+                message: error.to_string(),
+            })?;
     }
     let latest = store
         .latest_provider_snapshots(gateway_user_id().as_str(), &provider_id)
@@ -50085,9 +50703,10 @@ async fn skill_catalog(
                 entries
                     .into_iter()
                     .filter(|entry| {
-                        query.category.as_deref().is_none_or(|category| {
-                            entry.category.eq_ignore_ascii_case(category)
-                        })
+                        query
+                            .category
+                            .as_deref()
+                            .is_none_or(|category| entry.category.eq_ignore_ascii_case(category))
                     })
                     .take(limit)
                     .collect(),
@@ -50096,12 +50715,7 @@ async fn skill_catalog(
             Err(error) => {
                 eprintln!("skill catalog search failed: {error}");
                 (
-                    skills_catalog::search(
-                        &cache,
-                        text,
-                        query.category.as_deref(),
-                        limit,
-                    ),
+                    skills_catalog::search(&cache, text, query.category.as_deref(), limit),
                     true,
                 )
             }
@@ -50239,10 +50853,7 @@ async fn install_catalog_skill(
             }
         })?;
     let mut origins = load_skills_origins();
-    origins.insert(
-        slug.clone(),
-        clawhub_origin(&slug, owner_handle.as_deref()),
-    );
+    origins.insert(slug.clone(), clawhub_origin(&slug, owner_handle.as_deref()));
     let _ = save_skills_origins(&origins);
     Ok(Json(current_skills_response()))
 }
@@ -51479,14 +52090,18 @@ async fn refresh_provider_models(
             code: "provider_models_decode_failed",
             message: error.to_string(),
         })?;
-    let mut catalog_models = model_registry::parse_model_entries(entry.kind, &body, Some(&entry.id));
+    let mut catalog_models =
+        model_registry::parse_model_entries(entry.kind, &body, Some(&entry.id));
     let fetched_at = i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX);
     for model in &mut catalog_models {
         if let Some(price) = model.price.as_mut() {
             price.effective_at = fetched_at;
         }
     }
-    let ids = catalog_models.iter().map(|model| model.id.clone()).collect::<Vec<_>>();
+    let ids = catalog_models
+        .iter()
+        .map(|model| model.id.clone())
+        .collect::<Vec<_>>();
     let catalog_by_id = catalog_models
         .into_iter()
         .map(|model| (model.id.clone(), model))
@@ -51555,13 +52170,8 @@ async fn refresh_provider_models(
             .iter()
             .filter_map(|model| model.price.clone().map(|price| (model.id.clone(), price)))
             .collect::<std::collections::HashMap<_, _>>();
-        stored.models = refreshed_catalog_models(
-            &ids,
-            &catalog_by_id,
-            &reported,
-            &user_profiles,
-            &old_prices,
-        );
+        stored.models =
+            refreshed_catalog_models(&ids, &catalog_by_id, &reported, &user_profiles, &old_prices);
         stored.models_fetched_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .ok()
@@ -52084,7 +52694,11 @@ fn require_memorybench_enabled() -> Result<(), GatewayError> {
 fn ensure_memorybench_workspace(container_tag: &str) -> Result<String, GatewayError> {
     let workspace_id = memorybench_workspace_id(container_tag);
     let mut file = load_workspaces_file();
-    if file.workspaces.iter().any(|workspace| workspace.id == workspace_id) {
+    if file
+        .workspaces
+        .iter()
+        .any(|workspace| workspace.id == workspace_id)
+    {
         return Ok(workspace_id);
     }
     let folder = gateway_data_dir()
@@ -52132,11 +52746,16 @@ fn memorybench_session_text(session: &MemoryBenchSession) -> Result<String, Gate
         ));
     }
     let mut lines = Vec::with_capacity(session.messages.len() + 1);
-    if let Some(date) = session.metadata.get("formattedDate").and_then(|value| value.as_str()) {
+    if let Some(date) = session
+        .metadata
+        .get("formattedDate")
+        .and_then(|value| value.as_str())
+    {
         lines.push(format!("Session date: {date}"));
     }
     for message in &session.messages {
-        if !matches!(message.role.as_str(), "user" | "assistant") || message.content.trim().is_empty()
+        if !matches!(message.role.as_str(), "user" | "assistant")
+            || message.content.trim().is_empty()
         {
             return Err(memorybench_error(
                 StatusCode::BAD_REQUEST,
@@ -53409,11 +54028,13 @@ async fn integrity_repair_preview(
 
 fn linked_repair_gateway_error(error: LinkedRepairError) -> GatewayError {
     match error {
-        LinkedRepairError::StalePreview | LinkedRepairError::ApprovalTokenMismatch => GatewayError {
-            status: StatusCode::CONFLICT,
-            code: "linked_memory_repair_preview_stale",
-            message: "linked-memory repair preview is stale".to_string(),
-        },
+        LinkedRepairError::StalePreview | LinkedRepairError::ApprovalTokenMismatch => {
+            GatewayError {
+                status: StatusCode::CONFLICT,
+                code: "linked_memory_repair_preview_stale",
+                message: "linked-memory repair preview is stale".to_string(),
+            }
+        }
         LinkedRepairError::BackupPathInvalid => {
             integrity_bad_request("linked_memory_repair_backup_invalid")
         }
@@ -53443,13 +54064,9 @@ fn next_linked_memory_repair_backup_directory() -> Result<PathBuf, GatewayError>
         .map_err(|error| integrity_internal_error("linked_memory_repair_backup_failed", error))?
         .join("backups")
         .join("linked-memory");
-    fs::create_dir_all(&parent).map_err(|error| {
-        integrity_internal_error("linked_memory_repair_backup_failed", error)
-    })?;
-    Ok(parent.join(format!(
-        "{timestamp}-{}",
-        uuid::Uuid::new_v4().simple()
-    )))
+    fs::create_dir_all(&parent)
+        .map_err(|error| integrity_internal_error("linked_memory_repair_backup_failed", error))?;
+    Ok(parent.join(format!("{timestamp}-{}", uuid::Uuid::new_v4().simple())))
 }
 
 async fn linked_memory_repair_apply(
@@ -53589,8 +54206,9 @@ async fn integrity_repair_apply(
     let latest_gateway_checksum =
         gateway_audit_checksum(&memory_preview.audit_checksum, &current.actions, &[])
             .map_err(|error| integrity_internal_error("integrity_preview_failed", error))?;
-    let latest_gateway_token = gateway_approval_token(&latest_gateway_checksum, &current.actions)
-        .map_err(|error| integrity_internal_error("integrity_preview_failed", error))?;
+    let latest_gateway_token =
+        gateway_approval_token(&latest_gateway_checksum, &current.actions)
+            .map_err(|error| integrity_internal_error("integrity_preview_failed", error))?;
     if request.audit_checksum != latest_gateway_checksum
         || request.approval_token != latest_gateway_token
     {
@@ -53979,7 +54597,12 @@ async fn memory_project_briefing(
             m.memory_type == t
                 && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
         }) {
-            let key: String = m.text.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+            let key: String = m
+                .text
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase();
             if !seen.insert(key) {
                 continue; // near-identical to one already picked
             }
@@ -55077,8 +55700,10 @@ struct ContactUpdateRequest {
     #[serde(default)]
     contact_type: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     notes: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     soul_md: Option<String>,
     #[serde(default)]
     tone_of_voice: Option<String>,
@@ -56018,7 +56643,10 @@ language of the messages. If nothing important, {\"facts\":[]}.";
         api_key.as_deref(),
         &payload,
         Some(std::time::Duration::from_secs(120)),
-        system.chars().count().saturating_add(joined.chars().count()),
+        system
+            .chars()
+            .count()
+            .saturating_add(joined.chars().count()),
     )
     .await
     else {
@@ -57093,9 +57721,15 @@ fn contained_cdp_port_open() -> bool {
     static CACHE: OnceLock<Mutex<Probe>> = OnceLock::new();
     const TTL: Duration = Duration::from_secs(5);
     // Well-known host-mapped CDP port of the contained computer (matches the resolver default).
-    const CDP_ADDR: SocketAddr = SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 9222);
+    const CDP_ADDR: SocketAddr =
+        SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 9222);
 
-    let cache = CACHE.get_or_init(|| Mutex::new(Probe { open: false, at: None }));
+    let cache = CACHE.get_or_init(|| {
+        Mutex::new(Probe {
+            open: false,
+            at: None,
+        })
+    });
     let mut guard = cache.lock().unwrap_or_else(|p| p.into_inner());
     if guard.at.map(|t| t.elapsed() < TTL).unwrap_or(false) {
         return guard.open;
@@ -57902,6 +58536,7 @@ fn browser_visibility_label(value: BrowserVisibilityMode) -> &'static str {
 
 #[derive(Debug, Clone)]
 struct BrowserTarget {
+    #[allow(dead_code)]
     label: String,
     url: String,
 }
@@ -58596,7 +59231,9 @@ fn keychain_vault_wrap_key() -> Result<[u8; 32], std::io::Error> {
     if let Some(material) = store.get(&reference).map_err(std::io::Error::other)? {
         let encoded = material.expose_utf8().map_err(std::io::Error::other)?;
         return decode_vault_wrap_key(encoded.trim()).ok_or_else(|| {
-            std::io::Error::other("vault wrap key in keychain is corrupt (expected 32 base64 bytes)")
+            std::io::Error::other(
+                "vault wrap key in keychain is corrupt (expected 32 base64 bytes)",
+            )
         });
     }
     let key = generate_vault_wrap_key();
@@ -59056,36 +59693,36 @@ fn memory_publication_facade_error(error: MemoryError) -> GatewayError {
             "vault_payload_never_shareable" => {
                 (StatusCode::CONFLICT, "vault_payload_never_shareable")
             }
-            "publication_actor_mismatch" => {
-                (StatusCode::CONFLICT, "publication_actor_mismatch")
-            }
+            "publication_actor_mismatch" => (StatusCode::CONFLICT, "publication_actor_mismatch"),
             "publication_decision_required" => {
                 (StatusCode::CONFLICT, "publication_decision_required")
             }
-            "publication_source_changed" => {
-                (StatusCode::CONFLICT, "publication_source_changed")
-            }
-            "publication_preview_stale" => {
-                (StatusCode::CONFLICT, "publication_preview_stale")
-            }
-            "linked_memory_read_only" => {
-                (StatusCode::CONFLICT, "linked_memory_read_only")
-            }
-            "publication_conflict" | "publication_already_pending" | "publication_not_pending"
+            "publication_source_changed" => (StatusCode::CONFLICT, "publication_source_changed"),
+            "publication_preview_stale" => (StatusCode::CONFLICT, "publication_preview_stale"),
+            "linked_memory_read_only" => (StatusCode::CONFLICT, "linked_memory_read_only"),
+            "publication_conflict"
+            | "publication_already_pending"
+            | "publication_not_pending"
             | "publication_already_published"
-            | "publication_source_inactive" | "publication_sensitivity_not_allowed" => {
+            | "publication_source_inactive"
+            | "publication_sensitivity_not_allowed" => {
                 (StatusCode::CONFLICT, "publication_conflict")
             }
             _ => (StatusCode::CONFLICT, "publication_conflict"),
         },
         MemoryError::Validation(message) => match message.as_str() {
-            "publication_text_invalid" | "publication_memory_type_invalid"
-            | "publication_privacy_domain_invalid" | "publication_collection_unknown" => {
+            "publication_text_invalid"
+            | "publication_memory_type_invalid"
+            | "publication_privacy_domain_invalid"
+            | "publication_collection_unknown" => {
                 (StatusCode::BAD_REQUEST, "publication_edit_invalid")
             }
             _ => (StatusCode::BAD_REQUEST, "memory_publication_invalid"),
         },
-        MemoryError::Store(_) => (StatusCode::INTERNAL_SERVER_ERROR, "memory_publication_store_error"),
+        MemoryError::Store(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "memory_publication_store_error",
+        ),
     };
     memory_publication_error(status, code)
 }
@@ -59171,31 +59808,25 @@ async fn memory_publication_create(
 ) -> Result<Json<MemoryPublicationProposal>, GatewayError> {
     let body = axum::body::to_bytes(request.into_body(), MEMORY_PUBLICATION_BODY_MAX)
         .await
-        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
-    let request = serde_json::from_slice::<MemoryPublicationCreateRequest>(&body)
-        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+        .map_err(|_| {
+            memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid")
+        })?;
+    let request =
+        serde_json::from_slice::<MemoryPublicationCreateRequest>(&body).map_err(|_| {
+            memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid")
+        })?;
     let snapshot = load_workspaces_file();
-    let source_workspace_id = publication_workspace_from_snapshot(
-        &snapshot,
-        &request.source_workspace_id,
-        false,
-    )
-    .map_err(|code| memory_publication_error(StatusCode::BAD_REQUEST, code))?;
-    let destination_workspace_id = publication_workspace_from_snapshot(
-        &snapshot,
-        &request.destination_workspace_id,
-        true,
-    )
-    .map_err(|code| memory_publication_error(StatusCode::BAD_REQUEST, code))?;
+    let source_workspace_id =
+        publication_workspace_from_snapshot(&snapshot, &request.source_workspace_id, false)
+            .map_err(|code| memory_publication_error(StatusCode::BAD_REQUEST, code))?;
+    let destination_workspace_id =
+        publication_workspace_from_snapshot(&snapshot, &request.destination_workspace_id, true)
+            .map_err(|code| memory_publication_error(StatusCode::BAD_REQUEST, code))?;
     let owner = gateway_memory_user_id();
     let reference = parse_publication_reference(&request.source_ref, &owner, &source_workspace_id)?;
     let facade = memory_facade(&state);
     if facade
-        .has_memory_source_grant_link(
-            &owner,
-            &destination_workspace_id,
-            &source_workspace_id,
-        )
+        .has_memory_source_grant_link(&owner, &destination_workspace_id, &source_workspace_id)
         .map_err(|_| {
             memory_publication_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -59211,9 +59842,14 @@ async fn memory_publication_create(
     let source = facade
         .get_memory_for_ui(&reference, &owner, &source_workspace_id)
         .map_err(|_| {
-            memory_publication_error(StatusCode::INTERNAL_SERVER_ERROR, "memory_publication_store_error")
+            memory_publication_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "memory_publication_store_error",
+            )
         })?
-        .ok_or_else(|| memory_publication_error(StatusCode::NOT_FOUND, "publication_source_not_found"))?;
+        .ok_or_else(|| {
+            memory_publication_error(StatusCode::NOT_FOUND, "publication_source_not_found")
+        })?;
     let proposal = facade
         .create_publication_proposal(
             &source,
@@ -59244,9 +59880,12 @@ async fn memory_publication_edit(
 ) -> Result<Json<MemoryPublicationProposal>, GatewayError> {
     let body = axum::body::to_bytes(request.into_body(), MEMORY_PUBLICATION_BODY_MAX)
         .await
-        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
-    let request = serde_json::from_slice::<MemoryPublicationEditRequest>(&body)
-        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+        .map_err(|_| {
+            memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid")
+        })?;
+    let request = serde_json::from_slice::<MemoryPublicationEditRequest>(&body).map_err(|_| {
+        memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid")
+    })?;
     let owner = gateway_memory_user_id();
     let facade = memory_facade(&state);
     let proposal = facade
@@ -59272,9 +59911,13 @@ async fn memory_publication_approve(
 ) -> Result<Json<MemoryPublicationResult>, GatewayError> {
     let body = axum::body::to_bytes(request.into_body(), MEMORY_PUBLICATION_BODY_MAX)
         .await
-        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
-    let request = serde_json::from_slice::<MemoryPublicationApproveRequest>(&body)
-        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+        .map_err(|_| {
+            memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid")
+        })?;
+    let request =
+        serde_json::from_slice::<MemoryPublicationApproveRequest>(&body).map_err(|_| {
+            memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid")
+        })?;
     let owner = gateway_memory_user_id();
     let facade = memory_facade(&state);
     let proposal = facade
@@ -59291,11 +59934,7 @@ async fn memory_publication_approve(
         )
         .map_err(memory_publication_facade_error)?;
     let result = facade
-        .approve_publication_at_version(
-            &proposal_id,
-            owner.as_str(),
-            resolved.proposal_version,
-        )
+        .approve_publication_at_version(&proposal_id, owner.as_str(), resolved.proposal_version)
         .map_err(memory_publication_facade_error)?;
     Ok(Json(result))
 }
@@ -59307,9 +59946,13 @@ async fn memory_publication_reject(
 ) -> Result<Json<MemoryPublicationProposal>, GatewayError> {
     let body = axum::body::to_bytes(request.into_body(), MEMORY_PUBLICATION_BODY_MAX)
         .await
-        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
-    let request = serde_json::from_slice::<MemoryPublicationRejectRequest>(&body)
-        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+        .map_err(|_| {
+            memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid")
+        })?;
+    let request =
+        serde_json::from_slice::<MemoryPublicationRejectRequest>(&body).map_err(|_| {
+            memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid")
+        })?;
     let owner = gateway_memory_user_id();
     let facade = memory_facade(&state);
     let proposal = facade
@@ -59759,11 +60402,9 @@ fn memory_source_candidates_from_records(
                 }))
         })
         .filter_map(|record| {
-            let collection = all_memory_collections()
-                .into_iter()
-                .find(|collection| {
-                    collection.matches_candidate(&record.memory_type, &record.metadata)
-                })?;
+            let collection = all_memory_collections().into_iter().find(|collection| {
+                collection.matches_candidate(&record.memory_type, &record.metadata)
+            })?;
             let normalized = redact_memory_text(&record.text)
                 .split_whitespace()
                 .collect::<Vec<_>>()
@@ -60077,9 +60718,18 @@ fn normalize_sandbox_override(raw: &str) -> Option<String> {
     let token = raw.trim().to_ascii_lowercase();
     matches!(
         token.as_str(),
-        "read-only" | "readonly" | "workspace-write" | "danger" | "danger-full-access" | "full-access"
+        "read-only"
+            | "readonly"
+            | "workspace-write"
+            | "danger"
+            | "danger-full-access"
+            | "full-access"
     )
-    .then(|| crate::tool_safety::SandboxMode::parse(&token).as_str().to_string())
+    .then(|| {
+        crate::tool_safety::SandboxMode::parse(&token)
+            .as_str()
+            .to_string()
+    })
 }
 
 /// Canonicalize a per-workspace `approval_policy` override token (mirrors
@@ -60090,7 +60740,11 @@ fn normalize_approval_override(raw: &str) -> Option<String> {
         token.as_str(),
         "untrusted" | "unless-trusted" | "on-failure" | "on-request" | "never"
     )
-    .then(|| crate::tool_safety::AskForApproval::parse(&token).as_str().to_string())
+    .then(|| {
+        crate::tool_safety::AskForApproval::parse(&token)
+            .as_str()
+            .to_string()
+    })
 }
 
 /// Read one policy axis out of a JSON patch: `null` → clear to `None`; a recognized string
@@ -60519,8 +61173,8 @@ async fn memory_source_candidates(
     if !memory_sources_enabled() {
         return Err(memory_source_disabled_error());
     }
-    let raw_query = raw_query
-        .ok_or_else(|| memory_source_bad_request("memory_source_query_invalid"))?;
+    let raw_query =
+        raw_query.ok_or_else(|| memory_source_bad_request("memory_source_query_invalid"))?;
     let uri = format!("/?{raw_query}")
         .parse::<axum::http::Uri>()
         .map_err(|_| memory_source_bad_request("memory_source_query_invalid"))?;
@@ -60537,12 +61191,7 @@ async fn memory_source_candidates(
     }
     let owner = gateway_memory_user_id();
     let records = memory_facade(&state)
-        .list_memory_source_candidates(
-            &owner,
-            &source_context.source_workspace_id,
-            offset,
-            limit,
-        )
+        .list_memory_source_candidates(&owner, &source_context.source_workspace_id, offset, limit)
         .map_err(|_| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "memory_source_store_error",
@@ -60835,7 +61484,9 @@ fn parse_tag_entity(value: &str) -> Result<TagEntity, GatewayError> {
 }
 
 async fn tags_list(State(state): State<AppState>) -> Result<Json<Vec<Tag>>, GatewayError> {
-    let tags = lock_store(&state)?.list_tags().map_err(GatewayError::store)?;
+    let tags = lock_store(&state)?
+        .list_tags()
+        .map_err(GatewayError::store)?;
     Ok(Json(tags))
 }
 
@@ -61009,10 +61660,7 @@ where
                 return Ok(false);
             }
             std::fs::remove_dir_all(&graph_cache).map_err(|error| {
-                WorkspaceDeleteError::GraphCache(format!(
-                    "{}: {error}",
-                    graph_cache.display()
-                ))
+                WorkspaceDeleteError::GraphCache(format!("{}: {error}", graph_cache.display()))
             })?;
             Ok(true)
         },
@@ -61142,58 +61790,53 @@ impl IntoResponse for GatewayError {
 mod tests {
     // collapse_plan_markers moved to the engine (5.D2); the gateway no longer uses it in prod,
     // only these unit tests do — import it here rather than re-exporting it at the crate root.
-    use local_first_engine::plan::collapse_plan_markers;
     use super::{
         ActiveModelInputs, AppState, ChannelSettings, ConnectorErrorKind, InboundAction,
         LegacyDirAction, MAX_PLAN_STALL_RESUMES, MemoryBenchIngestRequest, MemoryBenchMessage,
         MemoryBenchSearchRequest, MemoryBenchSession, MemoryBenchStatusRequest, MemoryCandidate,
-        MemoryDataSensitivity,
-        MemorySourceOverrideInput, MemorySourceUpsertRequest, TASK_EXECUTOR_DEFAULT_WORKER_COUNT,
-        ValidatedMemorySourceInput, WorkspaceRecord, WorkspacesFile, active_llm_concurrency,
-        adapt_skill_body, aggregate_session_state_from_counts,
-        authorize_managed_capability_tool, block_stalled_step, brain_budgets_for_context_window,
-        browser_capability_action_refusal, browser_error_indicates_dead_sidecar,
-        browser_method_for_capability_tool, browser_snapshot_text, browser_targets_for_goal,
-        browser_url_for_goal, build_browse_goal, delegated_browse_tool_outcome,
-        earlier_browse_call_in_current_round,
-        build_memory_source_grant, build_plan_markdown, clawhub_origin,
-        capability_call_completed_outcome, classify_connector_error,
-        collect_member_counts, composio_tool_is_read, connector_error_hint,
-        default_browser_headless_value, evaluate_simple_arithmetic, extract_source_urls,
-        fonti_section, format_memory_block, humanize_task_kind, hybrid_memory_score,
-        inbound_action, is_auto_confirmable, is_internal_task_kind,
-        is_low_value_source_url, is_semantic_duplicate, jail_in_root,
-        enforce_monotonic_plan_progress, legacy_dir_action,
-        llm_concurrency_view, mcp_error_hint,
-        mcp_provider_slug, mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata,
-        delete_workspace, gateway_memory_user_id, memory_age_days, memory_bench_ingest,
-        memory_bench_search, memory_bench_status, memory_facade,
-        memory_source_candidates_from_records, memory_source_grant_views,
-        memory_source_facade_error, memory_sources_flag, memorybench_workspace_id, merge_plan,
+        MemoryDataSensitivity, MemorySourceOverrideInput, MemorySourceUpsertRequest,
+        TASK_EXECUTOR_DEFAULT_WORKER_COUNT, ValidatedMemorySourceInput, WorkspaceRecord,
+        WorkspacesFile, active_llm_concurrency, adapt_skill_body,
+        aggregate_session_state_from_counts, authorize_managed_capability_tool, block_stalled_step,
+        brain_budgets_for_context_window, browser_capability_action_refusal,
+        browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
+        browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_browse_goal,
+        build_memory_source_grant, build_plan_markdown, capability_call_completed_outcome,
+        classify_connector_error, clawhub_origin, collect_member_counts, composio_tool_is_read,
+        connector_error_hint, default_browser_headless_value, delegated_browse_tool_outcome,
+        delete_workspace, earlier_browse_call_in_current_round, enforce_monotonic_plan_progress,
+        evaluate_simple_arithmetic, extract_source_urls, fonti_section, format_memory_block,
+        gateway_memory_user_id, humanize_task_kind, hybrid_memory_score, inbound_action,
+        is_auto_confirmable, is_internal_task_kind, is_low_value_source_url, is_semantic_duplicate,
+        jail_in_root, legacy_dir_action, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
+        mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days,
+        memory_bench_ingest, memory_bench_search, memory_bench_status, memory_facade,
+        memory_source_candidates_from_records, memory_source_facade_error,
+        memory_source_grant_views, memory_sources_flag, memorybench_workspace_id, merge_plan,
         next_plan_stall, next_ready_task_across_workspaces, normalize_for_dedup, parse_plan_marker,
         parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
         plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
         proactive_answer_memory_request, proactive_memory_request_for_suggestion_action,
-        project_filesystem_mcp_instruction,
-        prune_browser_history, redact_sensitive_text, requeue_waiting_resource_tasks,
-        resolve_active_model, resolve_contained_computer_cdp, resolve_contained_computer_novnc,
-        response_language_instruction, rewrite_confirm_to_done, sanitize_dedup_key,
-        sanitize_wiki_filename, scheduled_thread_sender_for_task_id, scheduled_thread_title,
-        search_composio_catalog, should_try_tool_compatibility_fallback, skill_id_from_command,
-        strip_json_fences, suggestion_choices_json, task_effective_goal,
+        project_filesystem_mcp_instruction, prune_browser_history, redact_sensitive_text,
+        requeue_waiting_resource_tasks, resolve_active_model, resolve_contained_computer_cdp,
+        resolve_contained_computer_novnc, response_language_instruction, rewrite_confirm_to_done,
+        sanitize_dedup_key, sanitize_wiki_filename, scheduled_thread_sender_for_task_id,
+        scheduled_thread_title, search_composio_catalog, should_try_tool_compatibility_fallback,
+        skill_id_from_command, strip_json_fences, suggestion_choices_json, task_effective_goal,
         task_execution_outcome_from_executor_result, task_executor_worker_count,
         task_executor_worker_id, task_goal_summary, task_queue_response, tool_touches_calendar,
         tool_touches_contacts, valid_catalog_owner, validate_memory_source_input,
-        validate_memory_source_overrides,
-        validate_memory_source_workspaces, wiki_title_from_text, workspace_write_roots,
+        validate_memory_source_overrides, validate_memory_source_workspaces, wiki_title_from_text,
+        workspace_write_roots,
     };
-    use axum::extract::{Path, State};
-    use axum::Json;
     use crate::browser_safety;
     use crate::chat_store::{self, ChatStore};
+    use axum::Json;
+    use axum::extract::{Path, State};
+    use local_first_engine::plan::collapse_plan_markers;
     // 5.D1c.2: test-only engine helpers (not used by non-test gateway code, so imported here, not at
     // the crate top where they'd read as unused).
-    use local_first_engine::browser::{message_has_image_url, PRUNED_SNAPSHOT_STUB};
+    use local_first_engine::browser::{PRUNED_SNAPSHOT_STUB, message_has_image_url};
 
     #[test]
     fn delivered_image_rejection_marks_outcome_delivered() {
@@ -61269,10 +61912,10 @@ mod tests {
         assert_eq!(images, vec!["data:image/jpeg;base64,AA=="]);
     }
     // engine plan fn tested here directly (no longer re-used in gateway non-test code post-5.D2).
-    use local_first_engine::plan::advance_plan_frontier;
     use local_first_browser_automation::BrowserAutomationError;
     use local_first_browser_automation::BrowserMethod;
     use local_first_capabilities::{CapabilityCallResult, ProviderId as CapProviderId};
+    use local_first_engine::plan::advance_plan_frontier;
     use local_first_local_computer_session::SessionStatus;
     use local_first_memory::WorkspaceId as MemoryWorkspaceId;
     use local_first_task_runtime::{
@@ -61283,28 +61926,27 @@ mod tests {
     };
     use local_first_vault::VaultStore;
     use std::collections::{BTreeSet, HashMap};
-    use std::sync::{Mutex, MutexGuard};
-
+    use std::sync::MutexGuard;
 
     // Serializes tests that mutate PROCESS-GLOBAL state (`MEMORY_WORKSPACE`, `HOMUN_USER_ID`).
     // Without this they race under the parallel test runner and flake. Poison-tolerant:
     // if a holder panics we still hand out the guard (the global is restored per-test anyway).
     static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    /// THE guard for tests that touch process-global env vars. Environment variables are shared by
-    /// the whole test binary while cargo runs tests on parallel threads, so without one shared lock
-    /// tests read each other's values.
-    ///
-    /// Two defects made the suite an unreliable gate before this existed as a single type. There
-    /// were three near-identical guards holding TWO different locks, so a test serialized against
-    /// some env users and raced the rest — `resolved_sandbox_mode_precedence…` even carried the
-    /// comment "env-mutation under TEST_ENV_LOCK" while actually holding the data-dir lock. And
-    /// tests restored their variables by hand AFTER their assertions, so the first real failure
-    /// skipped its own cleanup and poisoned everything scheduled after it (observed: one genuine
-    /// failure reported as eight). Restoring in `Drop` runs during unwind too, so a failing test
-    /// now fails alone.
-    ///
-    /// Take it ONCE per test (the lock is not reentrant) and add variables with [`TestEnv::set`].
+    // THE guard for tests that touch process-global env vars. Environment variables are shared by
+    // the whole test binary while cargo runs tests on parallel threads, so without one shared lock
+    // tests read each other's values.
+    //
+    // Two defects made the suite an unreliable gate before this existed as a single type. There
+    // were three near-identical guards holding TWO different locks, so a test serialized against
+    // some env users and raced the rest — `resolved_sandbox_mode_precedence…` even carried the
+    // comment "env-mutation under TEST_ENV_LOCK" while actually holding the data-dir lock. And
+    // tests restored their variables by hand AFTER their assertions, so the first real failure
+    // skipped its own cleanup and poisoned everything scheduled after it (observed: one genuine
+    // failure reported as eight). Restoring in `Drop` runs during unwind too, so a failing test
+    // now fails alone.
+    //
+    // Take it ONCE per test (the lock is not reentrant) and add variables with `TestEnv::set`.
     thread_local! {
         /// How many `TestEnv` guards this thread holds. Tests legitimately COMPOSE guards (a data
         /// dir plus a feature flag), and `std::sync::Mutex` is not reentrant — taking it twice on
@@ -61425,13 +62067,10 @@ mod tests {
             }],
             metadata: serde_json::json!({}),
         };
-        let ingest = memory_bench_ingest(
-            State(state.clone()),
-            Json(ingest_request()),
-        )
-        .await
-        .unwrap()
-        .0;
+        let ingest = memory_bench_ingest(State(state.clone()), Json(ingest_request()))
+            .await
+            .unwrap()
+            .0;
         assert_eq!(ingest.workspace_id, workspace_id);
         assert_eq!(ingest.document_ids.len(), 1);
         let repeated = memory_bench_ingest(State(state.clone()), Json(ingest_request()))
@@ -61497,10 +62136,7 @@ mod tests {
         .unwrap()
         .0;
         assert_eq!(search["results"].as_array().unwrap().len(), 1);
-        assert_eq!(
-            search["results"][0]["source_workspace_id"],
-            workspace_id
-        );
+        assert_eq!(search["results"][0]["source_workspace_id"], workspace_id);
 
         let _ = delete_workspace(State(state.clone()), Path(workspace_id.clone()))
             .await
@@ -61563,7 +62199,13 @@ mod tests {
                 "expected enabled: {enabled:?}"
             );
         }
-        for disabled in [Some("0"), Some(" 0 "), Some("off"), Some("OFF"), Some("Off")] {
+        for disabled in [
+            Some("0"),
+            Some(" 0 "),
+            Some("off"),
+            Some("OFF"),
+            Some("Off"),
+        ] {
             assert!(
                 !memory_sources_flag(disabled),
                 "expected disabled: {disabled:?}"
@@ -61646,8 +62288,8 @@ mod tests {
 
     #[test]
     fn memory_source_input_requires_exact_collection_sensitivity_and_effect_tokens() {
-        let request_for = |collection: &str, sensitivity: &str, effect: &str| {
-            MemorySourceUpsertRequest {
+        let request_for =
+            |collection: &str, sensitivity: &str, effect: &str| MemorySourceUpsertRequest {
                 source_workspace_id: "project-b".to_string(),
                 collections: vec![collection.to_string()],
                 max_sensitivity: sensitivity.to_string(),
@@ -61656,8 +62298,7 @@ mod tests {
                     memory_ref: "memory:local:owner:project-b:item".to_string(),
                     effect: effect.to_string(),
                 }],
-            }
-        };
+            };
 
         for collection in [" knowledge", "knowledge ", "Knowledge"] {
             assert_eq!(
@@ -61988,12 +62629,10 @@ mod tests {
 
         consumer.name = "  Alpha  ".to_string();
         source.name = "  Beta  ".to_string();
-        let views = memory_source_grant_views(
-            &consumer,
-            &[consumer.clone(), source],
-            vec![grant],
-            |_| None,
-        );
+        let views =
+            memory_source_grant_views(&consumer, &[consumer.clone(), source], vec![grant], |_| {
+                None
+            });
         assert_eq!(views[0].source_label, "Alpha");
         assert_eq!(views[1].source_label, "Beta");
     }
@@ -62343,7 +62982,8 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn memory_publication_routes_reload_local_source_require_decision_and_reject_foreign_actor() {
+    async fn memory_publication_routes_reload_local_source_require_decision_and_reject_foreign_actor()
+     {
         use axum::{body::Body, http::Request};
         use tower::ServiceExt;
 
@@ -62474,9 +63114,15 @@ mod tests {
         assert_eq!(reopened["proposed_text"], "Prefer concise Italian");
 
         for (suffix, body) in [
-            ("edit", serde_json::json!({ "expected_version": 1, "edit": { "proposed_text": "stale" } })),
+            (
+                "edit",
+                serde_json::json!({ "expected_version": 1, "edit": { "proposed_text": "stale" } }),
+            ),
             ("reject", serde_json::json!({ "expected_version": 1 })),
-            ("approve", serde_json::json!({ "expected_version": 1, "resolution": { "kind": "create_new" } })),
+            (
+                "approve",
+                serde_json::json!({ "expected_version": 1, "resolution": { "kind": "create_new" } }),
+            ),
         ] {
             let stale = app
                 .clone()
@@ -62509,7 +63155,10 @@ mod tests {
             .unwrap();
         let (status, missing_decision) = memory_source_response_json(missing_decision).await;
         assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
-        assert_eq!(missing_decision["error"]["code"], "memory_publication_invalid");
+        assert_eq!(
+            missing_decision["error"]["code"],
+            "memory_publication_invalid"
+        );
 
         let approved = app
             .clone()
@@ -62518,7 +63167,9 @@ mod tests {
                     .method("POST")
                     .uri(format!("/api/memory/publications/{proposal_id}/approve"))
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"expected_version":2,"resolution":{"kind":"create_new"}}"#))
+                    .body(Body::from(
+                        r#"{"expected_version":2,"resolution":{"kind":"create_new"}}"#,
+                    ))
                     .unwrap(),
             )
             .await
@@ -62572,10 +63223,12 @@ mod tests {
         let (status, rejected) = memory_source_response_json(rejected).await;
         assert_eq!(status, axum::http::StatusCode::OK);
         assert_eq!(rejected["status"], "rejected");
-        assert!(facade
-            .get_publication_link(&rejected_source.reference)
-            .unwrap()
-            .is_none());
+        assert!(
+            facade
+                .get_publication_link(&rejected_source.reference)
+                .unwrap()
+                .is_none()
+        );
 
         let foreign_owner = local_first_memory::UserId::new("other-owner");
         let foreign_source = create_publication_route_memory(
@@ -62826,7 +63479,10 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(malformed_query.status(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(
+            malformed_query.status(),
+            axum::http::StatusCode::BAD_REQUEST
+        );
         assert_eq!(
             memory_source_response_code(malformed_query)
                 .await
@@ -62937,17 +63593,24 @@ mod tests {
             .iter()
             .find(|view| view["id"] == "typed-overrides")
             .unwrap();
-        assert_eq!(linked["overrides"], serde_json::json!([
-            {
-                "memory_ref": format!("memory:local:{}:project-b:allow-record", owner.as_str()),
-                "effect": "allow"
-            },
-            {
-                "memory_ref": format!("memory:local:{}:project-b:deny-record", owner.as_str()),
-                "effect": "deny"
-            }
-        ]));
-        assert!(serde_json::to_string(linked).unwrap().contains("memory_ref"));
+        assert_eq!(
+            linked["overrides"],
+            serde_json::json!([
+                {
+                    "memory_ref": format!("memory:local:{}:project-b:allow-record", owner.as_str()),
+                    "effect": "allow"
+                },
+                {
+                    "memory_ref": format!("memory:local:{}:project-b:deny-record", owner.as_str()),
+                    "effect": "deny"
+                }
+            ])
+        );
+        assert!(
+            serde_json::to_string(linked)
+                .unwrap()
+                .contains("memory_ref")
+        );
         assert!(!serde_json::to_string(linked).unwrap().contains("metadata"));
         std::fs::remove_dir_all(dir).ok();
     }
@@ -63000,8 +63663,12 @@ mod tests {
             .unwrap();
         let (_, listed_before) = memory_source_response_json(listed_before).await;
         assert_eq!(
-            listed_before.as_array().unwrap().iter()
-                .find(|view| view["id"] == "last-access-grant").unwrap()["last_used_at"],
+            listed_before
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|view| view["id"] == "last-access-grant")
+                .unwrap()["last_used_at"],
             serde_json::Value::Null,
         );
 
@@ -63032,8 +63699,12 @@ mod tests {
             .unwrap();
         let (_, listed_after) = memory_source_response_json(listed_after).await;
         assert_eq!(
-            listed_after.as_array().unwrap().iter()
-                .find(|view| view["id"] == "last-access-grant").unwrap()["last_used_at"],
+            listed_after
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|view| view["id"] == "last-access-grant")
+                .unwrap()["last_used_at"],
             serde_json::json!(1_700_000_001),
         );
         std::fs::remove_dir_all(dir).ok();
@@ -63319,8 +63990,7 @@ mod tests {
             let (status, body) = memory_source_response_json(response).await;
             assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "query {query}");
             assert_eq!(
-                body["error"]["code"],
-                "memory_source_query_invalid",
+                body["error"]["code"], "memory_source_query_invalid",
                 "query {query}"
             );
         }
@@ -63408,7 +64078,10 @@ mod tests {
             .iter()
             .find(|view| !view["local"].as_bool().unwrap())
             .unwrap();
-        assert_eq!(linked["source_workspace_id"], local_first_memory::PERSONAL_WORKSPACE);
+        assert_eq!(
+            linked["source_workspace_id"],
+            local_first_memory::PERSONAL_WORKSPACE
+        );
         assert_eq!(linked["source_label"], "Personal");
 
         let persisted = super::memory_facade(&state)
@@ -63560,7 +64233,10 @@ mod tests {
         _data.env().set("HOMUN_SANDBOX_MODE", None);
 
         // No env + no persisted file → the DEFAULT is workspace-write (NOT danger).
-        assert_eq!(super::resolved_sandbox_mode(&state, None), SandboxMode::WorkspaceWrite);
+        assert_eq!(
+            super::resolved_sandbox_mode(&state, None),
+            SandboxMode::WorkspaceWrite
+        );
 
         // Persist read-only → persisted beats default.
         std::fs::write(
@@ -63568,14 +64244,23 @@ mod tests {
             r#"{"sandbox_mode":"read-only","approval_policy":"on-request"}"#,
         )
         .expect("write runtime settings");
-        assert_eq!(super::resolved_sandbox_mode(&state, None), SandboxMode::ReadOnly);
+        assert_eq!(
+            super::resolved_sandbox_mode(&state, None),
+            SandboxMode::ReadOnly
+        );
 
         // Env override beats the persisted value.
         _data.env().set("HOMUN_SANDBOX_MODE", Some("danger"));
-        assert_eq!(super::resolved_sandbox_mode(&state, None), SandboxMode::Danger);
+        assert_eq!(
+            super::resolved_sandbox_mode(&state, None),
+            SandboxMode::Danger
+        );
         // A blank env var is ignored (falls through to persisted), not parsed as unknown.
         _data.env().set("HOMUN_SANDBOX_MODE", Some("  "));
-        assert_eq!(super::resolved_sandbox_mode(&state, None), SandboxMode::ReadOnly);
+        assert_eq!(
+            super::resolved_sandbox_mode(&state, None),
+            SandboxMode::ReadOnly
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -63594,7 +64279,10 @@ mod tests {
         _data.env().set("HOMUN_APPROVAL_POLICY", None);
 
         // No env + no persisted file → the DEFAULT is on-request.
-        assert_eq!(super::resolved_approval_policy(&state, None), AskForApproval::OnRequest);
+        assert_eq!(
+            super::resolved_approval_policy(&state, None),
+            AskForApproval::OnRequest
+        );
 
         // Persist `never` → persisted beats default.
         std::fs::write(
@@ -63602,11 +64290,17 @@ mod tests {
             r#"{"sandbox_mode":"workspace-write","approval_policy":"never"}"#,
         )
         .expect("write runtime settings");
-        assert_eq!(super::resolved_approval_policy(&state, None), AskForApproval::Never);
+        assert_eq!(
+            super::resolved_approval_policy(&state, None),
+            AskForApproval::Never
+        );
 
         // Env override beats the persisted value.
         _data.env().set("HOMUN_APPROVAL_POLICY", Some("on-failure"));
-        assert_eq!(super::resolved_approval_policy(&state, None), AskForApproval::OnFailure);
+        assert_eq!(
+            super::resolved_approval_policy(&state, None),
+            AskForApproval::OnFailure
+        );
 
         _data.env().set("HOMUN_APPROVAL_POLICY", None);
         std::fs::remove_dir_all(&dir).ok();
@@ -63652,8 +64346,14 @@ mod tests {
         let (t_ro, t_rw) = {
             let store = state.chat_store.lock().expect("lock chat store");
             (
-                store.create_thread("ro").expect("create ro thread").thread_id,
-                store.create_thread("rw").expect("create rw thread").thread_id,
+                store
+                    .create_thread("ro")
+                    .expect("create ro thread")
+                    .thread_id,
+                store
+                    .create_thread("rw")
+                    .expect("create rw thread")
+                    .thread_id,
             )
         };
 
@@ -63686,8 +64386,8 @@ mod tests {
     #[test]
     fn read_only_card_marker_wraps_target_for_a_block() {
         let blocked = super::read_only_write_blocked_msg("appunti.txt");
-        let card = super::read_only_card_marker(&blocked)
-            .expect("a read-only block must produce a card");
+        let card =
+            super::read_only_card_marker(&blocked).expect("a read-only block must produce a card");
         assert!(
             card.contains(super::SANDBOX_READONLY_OPEN)
                 && card.contains(super::SANDBOX_READONLY_CLOSE),
@@ -63721,8 +64421,10 @@ mod tests {
             skill_confirmations: None,
         };
         // Partial: only approval changes; sandbox override is preserved.
-        let merged =
-            super::merge_workspace_policy(&cur, &serde_json::json!({"approval_policy":"on-request"}));
+        let merged = super::merge_workspace_policy(
+            &cur,
+            &serde_json::json!({"approval_policy":"on-request"}),
+        );
         assert_eq!(merged.sandbox_mode.as_deref(), Some("read-only"));
         assert_eq!(merged.approval_policy.as_deref(), Some("on-request"));
         // `null` clears back to inherit (None).
@@ -63751,19 +64453,28 @@ mod tests {
         // Legacy files (no field) → empty / None.
         let rs0: super::RuntimeSettings = serde_json::from_str("{}").unwrap();
         assert!(rs0.skill_confirmations.is_empty());
-        let wr0: super::WorkspaceRecord =
-            serde_json::from_str(r#"{"id":"w","name":"W"}"#).unwrap();
+        let wr0: super::WorkspaceRecord = serde_json::from_str(r#"{"id":"w","name":"W"}"#).unwrap();
         assert_eq!(wr0.skill_confirmations, None);
         // Present fields round-trip.
         let rs: super::RuntimeSettings =
             serde_json::from_str(r#"{"skill_confirmations":["delete","financial"]}"#).unwrap();
-        assert_eq!(rs.skill_confirmations, vec!["delete".to_string(), "financial".to_string()]);
+        assert_eq!(
+            rs.skill_confirmations,
+            vec!["delete".to_string(), "financial".to_string()]
+        );
         let wr: super::WorkspaceRecord =
-            serde_json::from_str(r#"{"id":"w","name":"W","skill_confirmations":["medical"]}"#).unwrap();
-        assert_eq!(wr.skill_confirmations.as_deref(), Some(&["medical".to_string()][..]));
+            serde_json::from_str(r#"{"id":"w","name":"W","skill_confirmations":["medical"]}"#)
+                .unwrap();
+        assert_eq!(
+            wr.skill_confirmations.as_deref(),
+            Some(&["medical".to_string()][..])
+        );
         // Pure precedence core: ws override REPLACES global; None inherits; unknown dropped; deduped.
         assert_eq!(
-            super::resolve_skill_confirmations_core(Some(&["medical".to_string()]), &["delete".to_string()]),
+            super::resolve_skill_confirmations_core(
+                Some(&["medical".to_string()]),
+                &["delete".to_string()]
+            ),
             vec![SensitiveCategory::Medical]
         );
         assert_eq!(
@@ -63772,7 +64483,11 @@ mod tests {
         );
         assert_eq!(
             super::resolve_skill_confirmations_core(
-                Some(&["bogus".to_string(), "delete".to_string(), "delete".to_string()]),
+                Some(&[
+                    "bogus".to_string(),
+                    "delete".to_string(),
+                    "delete".to_string()
+                ]),
                 &[]
             ),
             vec![SensitiveCategory::Delete]
@@ -63788,8 +64503,12 @@ mod tests {
         let rs: super::RuntimeSettings = serde_json::from_str("{}").unwrap();
         assert!(rs.writable_roots.is_empty());
         let wr: super::WorkspaceRecord =
-            serde_json::from_str(r#"{"id":"w","name":"W","writable_roots":["/tmp/extra"]}"#).unwrap();
-        assert_eq!(wr.writable_roots.as_deref(), Some(&["/tmp/extra".to_string()][..]));
+            serde_json::from_str(r#"{"id":"w","name":"W","writable_roots":["/tmp/extra"]}"#)
+                .unwrap();
+        assert_eq!(
+            wr.writable_roots.as_deref(),
+            Some(&["/tmp/extra".to_string()][..])
+        );
     }
 
     // Phase 2 precedence core: a per-workspace override REPLACES the global default (a
@@ -63846,7 +64565,10 @@ mod tests {
         // An absent writable_roots key leaves the existing override untouched.
         let noop =
             super::merge_workspace_policy(&cur2, &serde_json::json!({"sandbox_mode": "danger"}));
-        assert_eq!(noop.writable_roots.as_deref(), Some(&["/x".to_string()][..]));
+        assert_eq!(
+            noop.writable_roots.as_deref(),
+            Some(&["/x".to_string()][..])
+        );
     }
 
     // Phase 3 endpoint: `merge_workspace_policy` also carries the per-project
@@ -63884,8 +64606,12 @@ mod tests {
         assert_eq!(cleared.skill_confirmations, None);
         assert_eq!(cleared.approval_policy.as_deref(), Some("never"));
         // An absent key leaves the existing override untouched.
-        let noop = super::merge_workspace_policy(&cur2, &serde_json::json!({"sandbox_mode": "danger"}));
-        assert_eq!(noop.skill_confirmations.as_deref(), Some(&["medical".to_string()][..]));
+        let noop =
+            super::merge_workspace_policy(&cur2, &serde_json::json!({"sandbox_mode": "danger"}));
+        assert_eq!(
+            noop.skill_confirmations.as_deref(),
+            Some(&["medical".to_string()][..])
+        );
     }
 
     // ADR 0023 UI: each Settings control (sandbox / approval) POSTs only
@@ -63914,7 +64640,10 @@ mod tests {
         // local_computer_autostart: defaults ON for legacy files, toggles via a partial patch,
         // and a patch to another field must NOT reset it.
         let legacy: super::RuntimeSettings = serde_json::from_str("{}").unwrap();
-        assert!(legacy.local_computer_autostart, "default ON on legacy files");
+        assert!(
+            legacy.local_computer_autostart,
+            "default ON on legacy files"
+        );
         let toggled = super::merge_runtime_settings(
             &current,
             &serde_json::json!({ "local_computer_autostart": false }),
@@ -63924,14 +64653,20 @@ mod tests {
             &toggled,
             &serde_json::json!({ "approval_policy": "on-request" }),
         );
-        assert!(!after.local_computer_autostart, "autostart preserved through other patch");
+        assert!(
+            !after.local_computer_autostart,
+            "autostart preserved through other patch"
+        );
 
         // Unknown tokens normalize to the safe default; extra keys are ignored.
         let merged3 = super::merge_runtime_settings(
             &current,
             &serde_json::json!({ "sandbox_mode": "bogus", "unrelated": 1 }),
         );
-        assert_eq!(merged3.sandbox_mode, "workspace-write", "unknown → safe default");
+        assert_eq!(
+            merged3.sandbox_mode, "workspace-write",
+            "unknown → safe default"
+        );
     }
 
     #[test]
@@ -64011,16 +64746,28 @@ mod tests {
         use crate::skills::SensitiveCategory;
         // No skill active, project requires `delete` → effectful action is gated.
         let merged = merged_sensitive(&[], &[SensitiveCategory::Delete]);
-        assert!(skill_policy_forces_confirm(&merged, true), "project category forces confirm");
-        assert!(!skill_policy_forces_confirm(&merged, false), "still never gates reads");
+        assert!(
+            skill_policy_forces_confirm(&merged, true),
+            "project category forces confirm"
+        );
+        assert!(
+            !skill_policy_forces_confirm(&merged, false),
+            "still never gates reads"
+        );
         // Neither skill nor project → nothing is forced.
-        assert!(!skill_policy_forces_confirm(&merged_sensitive(&[], &[]), true));
+        assert!(!skill_policy_forces_confirm(
+            &merged_sensitive(&[], &[]),
+            true
+        ));
         // Union dedups; skill category is preserved and not duplicated.
         let both = merged_sensitive(
             &[SensitiveCategory::Financial],
             &[SensitiveCategory::Financial, SensitiveCategory::Delete],
         );
-        assert_eq!(both, vec![SensitiveCategory::Financial, SensitiveCategory::Delete]);
+        assert_eq!(
+            both,
+            vec![SensitiveCategory::Financial, SensitiveCategory::Delete]
+        );
     }
 
     #[test]
@@ -64057,7 +64804,9 @@ mod tests {
         assert_eq!(context_compaction_span(&roles, 2, 2), Some((2, 6)));
         // Tail boundary lands on a `tool` result → move earlier so a kept tool
         // result is never orphaned from its assistant tool_calls.
-        let roles2 = ["system", "user", "a", "tool", "a", "tool", "a", "tool", "a", "user"];
+        let roles2 = [
+            "system", "user", "a", "tool", "a", "tool", "a", "tool", "a", "user",
+        ];
         assert_eq!(context_compaction_span(&roles2, 2, 3), Some((2, 6)));
     }
 
@@ -64117,9 +64866,14 @@ mod tests {
 
         // workspace-write (same inputs) → the write succeeds, proving the block above was
         // the sandbox mode and not the test setup.
-        _data.env().set("HOMUN_SANDBOX_MODE", Some("workspace-write"));
+        _data
+            .env()
+            .set("HOMUN_SANDBOX_MODE", Some("workspace-write"));
         let ok = super::write_project_file(&state, None, "probe.txt", "data");
-        assert!(ok.starts_with("✅ Wrote "), "workspace-write should write: {ok}");
+        assert!(
+            ok.starts_with("✅ Wrote "),
+            "workspace-write should write: {ok}"
+        );
         assert_eq!(std::fs::read_to_string(&probe).unwrap(), "data");
 
         std::fs::remove_dir_all(&dir).ok();
@@ -64131,7 +64885,9 @@ mod tests {
         // hints (url/container) fold into the text since the browser sub-prompt has no separate hint slot.
         assert_eq!(build_browse_goal(r#"{"goal":"BTC price"}"#), "BTC price");
         assert_eq!(
-            build_browse_goal(r#"{"goal":"Serie A standings","hints":{"url":"https://x.com","container":"wikipedia"}}"#),
+            build_browse_goal(
+                r#"{"goal":"Serie A standings","hints":{"url":"https://x.com","container":"wikipedia"}}"#
+            ),
             "Serie A standings (start at https://x.com) (prefer wikipedia)"
         );
         // Missing/blank goal → empty (the caller refuses the call); malformed JSON is safe.
@@ -64229,16 +64985,26 @@ mod tests {
     fn browser_act_bundle_items_have_a_real_schema() {
         let schema = super::browser_act_tool_schema();
         let items = &schema["function"]["parameters"]["properties"]["actions"]["items"];
-        let kinds = items["properties"]["kind"]["enum"].as_array().expect("kind enum");
+        let kinds = items["properties"]["kind"]["enum"]
+            .as_array()
+            .expect("kind enum");
         assert!(kinds.iter().any(|k| k == "click"));
-        assert!(items["required"].as_array().expect("required").iter().any(|r| r == "kind"));
+        assert!(
+            items["required"]
+                .as_array()
+                .expect("required")
+                .iter()
+                .any(|r| r == "kind")
+        );
     }
 
     #[test]
     fn browser_done_schema_is_structured_terminal() {
         let schema = super::browser_done_tool_schema();
         assert_eq!(
-            schema.pointer("/function/name").and_then(serde_json::Value::as_str),
+            schema
+                .pointer("/function/name")
+                .and_then(serde_json::Value::as_str),
             Some("browser_done")
         );
         assert!(schema.to_string().contains("completed"));
@@ -64276,12 +65042,16 @@ mod tests {
         let (_kind, _round, value) = event.into_parts();
         assert_eq!(value["boundary"], "action_bundle");
         assert_eq!(value["stop_reason"], "completed");
-        assert!(value.get("page_text").is_none(), "raw page text must not be journaled");
+        assert!(
+            value.get("page_text").is_none(),
+            "raw page text must not be journaled"
+        );
     }
 
     #[test]
     fn parse_browse_request_keeps_model_contract_without_keyword_inference() {
-        let parsed = super::parse_browse_request(r#"{
+        let parsed = super::parse_browse_request(
+            r#"{
             "goal":"Search the requested journey",
             "hints":{"url":"https://www.trenitalia.com/it.html"},
             "result_contract":{
@@ -64295,10 +65065,14 @@ mod tests {
                 ],
                 "boundary":"Stop before booking or payment"
             }
-        }"#);
+        }"#,
+        );
 
         assert_eq!(parsed.goal, "Search the requested journey");
-        assert_eq!(parsed.hint_url.as_deref(), Some("https://www.trenitalia.com/it.html"));
+        assert_eq!(
+            parsed.hint_url.as_deref(),
+            Some("https://www.trenitalia.com/it.html")
+        );
         let contract = parsed.contract.unwrap();
         assert_eq!(contract.minimum_items, Some(3));
         assert_eq!(contract.fields[0].name, "departure");
@@ -64306,18 +65080,37 @@ mod tests {
 
     #[test]
     fn browse_round_budget_scales_with_contract_shape() {
-        use local_first_engine::browse::{BrowseResultContract, BrowseResultField, BrowseResultKind};
-        let simple = BrowseResultContract { kind: BrowseResultKind::Fact, minimum_items: None, fields: vec![], boundary: None };
+        use local_first_engine::browse::{
+            BrowseResultContract, BrowseResultField, BrowseResultKind,
+        };
+        let simple = BrowseResultContract {
+            kind: BrowseResultKind::Fact,
+            minimum_items: None,
+            fields: vec![],
+            boundary: None,
+        };
         assert_eq!(super::browse_round_budget(&simple), 5);
 
         let list = BrowseResultContract {
             kind: BrowseResultKind::List,
             minimum_items: Some(5),
             fields: vec![
-                BrowseResultField { name: "departure".into(), required: true },
-                BrowseResultField { name: "arrival".into(), required: true },
-                BrowseResultField { name: "duration".into(), required: true },
-                BrowseResultField { name: "price".into(), required: false },
+                BrowseResultField {
+                    name: "departure".into(),
+                    required: true,
+                },
+                BrowseResultField {
+                    name: "arrival".into(),
+                    required: true,
+                },
+                BrowseResultField {
+                    name: "duration".into(),
+                    required: true,
+                },
+                BrowseResultField {
+                    name: "price".into(),
+                    required: false,
+                },
             ],
             boundary: None,
         };
@@ -64361,7 +65154,10 @@ mod tests {
         // The authoritative connector set always wins, whatever the name looks like.
         let mut composio = std::collections::BTreeSet::new();
         composio.insert("SOME_CONNECTOR_ACTION".to_string());
-        assert!(super::effectful_tool_name("SOME_CONNECTOR_ACTION", &composio));
+        assert!(super::effectful_tool_name(
+            "SOME_CONNECTOR_ACTION",
+            &composio
+        ));
     }
 
     #[test]
@@ -64376,7 +65172,10 @@ mod tests {
                 ceiling > rounds,
                 "hard ceiling ({ceiling}) must leave room above the round budget ({rounds})"
             );
-            assert!(ceiling >= 24, "the backstop must stay generous, got {ceiling}");
+            assert!(
+                ceiling >= 24,
+                "the backstop must stay generous, got {ceiling}"
+            );
         }
     }
 
@@ -64417,11 +65216,18 @@ mod tests {
 
     #[test]
     fn browse_round_budget_never_exceeds_cap() {
-        use local_first_engine::browse::{BrowseResultContract, BrowseResultField, BrowseResultKind};
+        use local_first_engine::browse::{
+            BrowseResultContract, BrowseResultField, BrowseResultKind,
+        };
         let huge = BrowseResultContract {
             kind: BrowseResultKind::List,
             minimum_items: Some(10),
-            fields: (0..12).map(|i| BrowseResultField { name: format!("f{i}"), required: true }).collect(),
+            fields: (0..12)
+                .map(|i| BrowseResultField {
+                    name: format!("f{i}"),
+                    required: true,
+                })
+                .collect(),
             boundary: None,
         };
         assert_eq!(super::browse_round_budget(&huge), 10);
@@ -64432,7 +65238,11 @@ mod tests {
         let base_tools = super::initial_manager_tool_schemas_for_test(false, false);
         let names = base_tools
             .iter()
-            .filter_map(|schema| schema.pointer("/function/name").and_then(serde_json::Value::as_str))
+            .filter_map(|schema| {
+                schema
+                    .pointer("/function/name")
+                    .and_then(serde_json::Value::as_str)
+            })
             .collect::<Vec<_>>();
 
         assert!(names.contains(&"browse"));
@@ -64488,7 +65298,11 @@ mod tests {
         // Probing twice must still see it: the session was not taken.
         assert!(super::thread_has_live_browser_session(&state, "thread-1"));
         assert_eq!(
-            state.browser_thread_sessions.lock().expect("session map").len(),
+            state
+                .browser_thread_sessions
+                .lock()
+                .expect("session map")
+                .len(),
             1
         );
         // Another thread's session is not this thread's.
@@ -65032,9 +65846,11 @@ prs.save(Path({path:?}))
         let native_cards = super::actionable_cards_from_raw_text(native);
 
         assert!(mcp_cards.iter().any(|card| card.kind == "MCP_CONFIRM"));
-        assert!(composio_cards
-            .iter()
-            .any(|card| card.kind == "COMPOSIO_CONFIRM"));
+        assert!(
+            composio_cards
+                .iter()
+                .any(|card| card.kind == "COMPOSIO_CONFIRM")
+        );
         assert_eq!(native_cards.len(), 3);
         assert!(native_cards.iter().all(|card| card.requires_user));
     }
@@ -65046,11 +65862,8 @@ prs.save(Path({path:?}))
             .unwrap()
             .find_or_create_channel_thread("project-a", "test", "malformed", "Malformed card")
             .unwrap();
-        let assistant = super::channel_chat_message_with_id(
-            "assistant",
-            "",
-            "malformed_actionable_marker",
-        );
+        let assistant =
+            super::channel_chat_message_with_id("assistant", "", "malformed_actionable_marker");
         super::lock_store(&state)
             .unwrap()
             .append_assistant_message(&thread.thread_id, &assistant)
@@ -65079,9 +65892,11 @@ prs.save(Path({path:?}))
         assert!(!saved.text.contains("MCP_CONFIRM"));
         let context = super::thread_context_for_model(&state, &thread.thread_id, &[], None)
             .expect("thread context");
-        assert!(!context
-            .iter()
-            .any(|message| message.text.contains("MCP_CONFIRM")));
+        assert!(
+            !context
+                .iter()
+                .any(|message| message.text.contains("MCP_CONFIRM"))
+        );
     }
 
     #[test]
@@ -65097,6 +65912,33 @@ prs.save(Path({path:?}))
 
         assert!(super::agent_turn_waits_for_user(Some(&result)));
         assert!(!super::agent_turn_waits_for_user(None));
+    }
+
+    #[test]
+    fn choices_card_is_actionable_but_does_not_hold_the_thread() {
+        // Turn Contract: CHOICES parks the MODEL loop, but the chat_turn must COMPLETE
+        // so the person's click becomes a new turn — not steering into a busy wait.
+        let cards = super::actionable_cards_from_raw_text(concat!(
+            "Pick one.\n",
+            r#"‹‹CHOICES››{"question":"Which?","options":["A","B"]}‹‹/CHOICES››"#,
+        ));
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].kind, "CHOICES");
+        assert!(cards[0].requires_user);
+        let result = super::AgentTurnResult {
+            text: "Pick one.".to_string(),
+            remote_approval: None,
+            actionable_cards: cards,
+        };
+        assert!(
+            !super::agent_turn_waits_for_user(Some(&result)),
+            "CHOICES must not leave WaitingUserApproval / ThreadBusy"
+        );
+        let restored = super::answer_text_with_actionable_markers("Pick one.", Some(&result));
+        assert!(
+            restored.contains("‹‹CHOICES››"),
+            "completed-turn rewrite must re-attach CHOICES onto the stripped answer: {restored}"
+        );
     }
 
     #[test]
@@ -65669,6 +66511,213 @@ prs.save(Path({path:?}))
         assert!(guidance.contains("Continue only after the user"));
     }
 
+    #[test]
+    fn choice_resume_legacy_backup_is_not_contract_sot() {
+        let guidance = super::choice_resume_instruction_legacy_backup();
+        assert!(guidance.contains("legacy backup"));
+        assert!(guidance.contains("do NOT restart"));
+    }
+
+    #[test]
+    fn hitl_choice_resume_binds_semantic_without_new_objective() {
+        let state = super::AppState::for_tests();
+        let thread = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .create_thread("ws_hitl")
+            .expect("thread");
+        let thread_id = thread.thread_id.clone();
+        {
+            let store = state.chat_store.lock().unwrap();
+            let payload = serde_json::json!({
+                "question": "Which?",
+                "multi": false,
+                "options": ["Alpha", "Beta"]
+            });
+            let open_work = serde_json::json!({
+                "browser_session_live": true,
+                "capability_hint": "browse"
+            });
+            store
+                .set_open_hitl_wait(
+                    "wait_test",
+                    &thread_id,
+                    "msg_src",
+                    "choice",
+                    &payload.to_string(),
+                    &open_work.to_string(),
+                )
+                .expect("persist wait");
+        }
+
+        let decision =
+            super::resolve_semantic_decision(&state, Some(&thread_id), "Alpha", None, None);
+        assert_eq!(
+            decision.decision.steering_disposition,
+            super::semantic_decision::SteeringDisposition::ContinueCurrentWork
+        );
+        assert_eq!(
+            decision.decision.relationship_to_active_objective,
+            super::semantic_decision::ObjectiveRelationship::SameObjective
+        );
+        assert_eq!(
+            decision.provenance.validator_rejection_code.as_deref(),
+            Some(super::hitl_resume::HITL_RESUME_CODE)
+        );
+        assert!(
+            state
+                .hitl_resume_by_thread
+                .lock()
+                .unwrap()
+                .contains_key(&thread_id)
+        );
+        assert!(
+            state
+                .chat_store
+                .lock()
+                .unwrap()
+                .open_hitl_wait(&thread_id)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn turn_outcome_awaiting_user_persists_free_wait_without_marker_parts() {
+        let state = super::AppState::for_tests();
+        let thread = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .create_thread("ws_hitl_outcome")
+            .expect("thread");
+        let thread_id = thread.thread_id.clone();
+        let assistant =
+            super::channel_chat_message_with_id("assistant", "", "assistant_hitl_outcome");
+        state
+            .chat_store
+            .lock()
+            .unwrap()
+            .append_assistant_message(&thread_id, &assistant)
+            .expect("assistant message");
+
+        let outcome = local_first_engine::TurnOutcome {
+            delivery: local_first_engine::TurnDelivery::Delivered,
+            memory_answer: "Pick one.".to_string(),
+            awaiting_user: Some(local_first_engine::hitl::HitlEnvelope {
+                kind: local_first_engine::hitl::HitlKind::Choice,
+                hold_policy: local_first_engine::hitl::HoldPolicy::Free,
+                payload: serde_json::json!({
+                    "question": "Which option?",
+                    "multi": false,
+                    "options": ["Alpha", "Beta"]
+                }),
+                source_marker: "CHOICES".to_string(),
+            }),
+            ..local_first_engine::TurnOutcome::default()
+        };
+
+        super::persist_hitl_wait_from_outcome(&state, &thread_id, &assistant.id, &outcome);
+
+        let wait = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .open_hitl_wait(&thread_id)
+            .unwrap()
+            .expect("open wait");
+        assert_eq!(wait.kind, super::hitl_resume::HitlWaitKind::Choice);
+        assert_eq!(wait.source_message_id, assistant.id);
+        assert_eq!(wait.payload["options"][0], "Alpha");
+    }
+
+    #[test]
+    fn hitl_clarify_resume_binds_any_non_empty_reply() {
+        let state = super::AppState::for_tests();
+        let thread = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .create_thread("ws_hitl_clarify")
+            .expect("thread");
+        let thread_id = thread.thread_id.clone();
+        {
+            let store = state.chat_store.lock().unwrap();
+            let payload = serde_json::json!({
+                "question": "Passenger details?",
+                "fields": ["name", "email"]
+            });
+            let open_work = serde_json::json!({
+                "browser_session_live": true,
+                "capability_hint": "browse"
+            });
+            store
+                .set_open_hitl_wait(
+                    "wait_clarify",
+                    &thread_id,
+                    "msg_src",
+                    "clarify",
+                    &payload.to_string(),
+                    &open_work.to_string(),
+                )
+                .expect("persist wait");
+        }
+
+        let decision = super::resolve_semantic_decision(
+            &state,
+            Some(&thread_id),
+            "Mario Rossi, mario@example.com",
+            None,
+            None,
+        );
+        assert_eq!(
+            decision.decision.steering_disposition,
+            super::semantic_decision::SteeringDisposition::ContinueCurrentWork
+        );
+        assert_eq!(
+            decision.provenance.validator_rejection_code.as_deref(),
+            Some(super::hitl_resume::HITL_RESUME_CODE)
+        );
+        assert!(
+            state
+                .hitl_resume_by_thread
+                .lock()
+                .unwrap()
+                .contains_key(&thread_id)
+        );
+    }
+
+    #[test]
+    fn choices_do_not_hold_thread_confirm_still_does() {
+        assert!(!super::actionable_kind_holds_thread("CHOICES"));
+        assert!(!super::actionable_kind_holds_thread("CLARIFY"));
+        assert!(super::actionable_kind_holds_thread("APPROVAL"));
+        assert!(super::actionable_kind_holds_thread("MCP_CONFIRM"));
+        // Canonical AWAIT_USER: Free kinds free the thread; confirm Holds.
+        assert!(!super::actionable_card_holds_thread(
+            "AWAIT_USER",
+            &serde_json::json!({ "kind": "choice", "options": ["A"] }),
+        ));
+        assert!(!super::actionable_card_holds_thread(
+            "AWAIT_USER",
+            &serde_json::json!({ "kind": "clarify", "question": "Q?" }),
+        ));
+        assert!(super::actionable_card_holds_thread(
+            "AWAIT_USER",
+            &serde_json::json!({ "kind": "confirm", "approval_id": "a1" }),
+        ));
+    }
+
+    #[test]
+    fn browse_subagent_prompt_prefers_result_card_over_duplicate_cta_labels() {
+        let prompt = super::browse_subagent_system_prompt();
+        assert!(prompt.contains("SELECTING A RESULT"));
+        assert!(prompt.contains("unnamed `button [ref=…]`"));
+        assert!(prompt.contains("Continua"));
+        assert!(prompt.contains("SCELTA VIAGGIO"));
+    }
+
     // Stand-in for the OS-keychain-held vault wrap key; injected so vault tests
     // exercise the syskey crypto without touching the real keychain.
     const TEST_VAULT_WRAP_KEY: [u8; 32] = [7u8; 32];
@@ -65722,7 +66771,8 @@ prs.save(Path({path:?}))
             record_id: None,
         };
 
-        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request).expect("accept");
+        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request)
+            .expect("accept");
         let record_id = response.record_id.parse().unwrap();
         let key = vault
             .unlock_local_master_key_system(&TEST_VAULT_WRAP_KEY)
@@ -65761,7 +66811,8 @@ prs.save(Path({path:?}))
             record_id: None,
         };
 
-        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request).expect("accept");
+        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request)
+            .expect("accept");
 
         let record_id = response.record_id.parse().unwrap();
         let key = vault
@@ -65789,7 +66840,8 @@ prs.save(Path({path:?}))
             resolution: None,
             record_id: None,
         };
-        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request).expect("accept");
+        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request)
+            .expect("accept");
         let summaries = vault
             .list()
             .expect("list")
@@ -66084,7 +67136,8 @@ prs.save(Path({path:?}))
             resolution: None,
             record_id: None,
         };
-        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request).expect("accept");
+        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request)
+            .expect("accept");
         let record_id = response.record_id.parse().unwrap();
         let update = super::VaultRecordUpdateRequest {
             category: "private_notes".to_string(),
@@ -66093,8 +67146,8 @@ prs.save(Path({path:?}))
             pin: None,
         };
 
-        let updated =
-            super::update_vault_record(&vault, &TEST_VAULT_WRAP_KEY, &record_id, &update).expect("update metadata");
+        let updated = super::update_vault_record(&vault, &TEST_VAULT_WRAP_KEY, &record_id, &update)
+            .expect("update metadata");
 
         assert!(updated.ok);
         assert_eq!(updated.record.id, response.record_id);
@@ -66143,7 +67196,8 @@ prs.save(Path({path:?}))
             resolution: None,
             record_id: None,
         };
-        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request).expect("accept");
+        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request)
+            .expect("accept");
         let record_id = response.record_id.parse().unwrap();
 
         let revealed = super::reveal_vault_record_secret(
@@ -66176,7 +67230,8 @@ prs.save(Path({path:?}))
             secret_value: Some("CNTFBA76L16F839Z".to_string()),
             pin: Some("123456".to_string()),
         };
-        let updated = super::update_vault_record(&vault, &TEST_VAULT_WRAP_KEY, &record_id, &update).expect("update");
+        let updated = super::update_vault_record(&vault, &TEST_VAULT_WRAP_KEY, &record_id, &update)
+            .expect("update");
 
         assert_eq!(updated.record.label, "Codice Fiscale corretto");
         let revealed = super::reveal_vault_record_secret(
@@ -66564,7 +67619,12 @@ prs.save(Path({path:?}))
             &vault,
             None,
             &TEST_VAULT_WRAP_KEY,
-            &vault_action_request("identity", "CF", "[VAULT:identity:fiscal_code]", Some("VALUE-1")),
+            &vault_action_request(
+                "identity",
+                "CF",
+                "[VAULT:identity:fiscal_code]",
+                Some("VALUE-1"),
+            ),
         )
         .expect("save without pin");
         assert_eq!(read_secret_no_pin(&vault, &saved.record_id), "VALUE-1");
@@ -66582,7 +67642,8 @@ prs.save(Path({path:?}))
             .ensure_local_master_key(&verifier, "123456")
             .expect("legacy master key");
 
-        let no_pin = vault_action_request("identity", "CF", "[VAULT:identity:fiscal_code]", Some("X"));
+        let no_pin =
+            vault_action_request("identity", "CF", "[VAULT:identity:fiscal_code]", Some("X"));
         let err = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &no_pin)
             .expect_err("blocked before migration");
         assert_eq!(err.code, "invalid_vault_pin");
@@ -66680,7 +67741,9 @@ prs.save(Path({path:?}))
             std::thread::sleep(std::time::Duration::from_secs(3));
         });
         // Only probe once the lock is genuinely held, so the guard is meaningful.
-        acquired_rx.recv().expect("background thread acquired the lock");
+        acquired_rx
+            .recv()
+            .expect("background thread acquired the lock");
 
         let app = Router::new()
             .route("/api/health", get(super::health))
@@ -67012,14 +68075,23 @@ prs.save(Path({path:?}))
         // Machine floor marks e20 as the payment control — never a label match.
         let payment_floor: std::collections::HashSet<String> =
             std::collections::HashSet::from(["e20".to_string()]);
-        let blocked_click = serde_json::json!({"kind":"click","ref":"e20","action_class":"payment_commit"});
-        assert!(browser_safety::evaluate_browser_action(&blocked_click, &payment_floor, false, None).is_some());
+        let blocked_click =
+            serde_json::json!({"kind":"click","ref":"e20","action_class":"payment_commit"});
+        assert!(
+            browser_safety::evaluate_browser_action(&blocked_click, &payment_floor, false, None)
+                .is_some()
+        );
         let approved_click = serde_json::json!({
             "kind":"click","ref":"e20","action_class":"payment_commit","payment_approval_id":"pay_test"
         });
         assert!(
-            browser_safety::evaluate_browser_action(&approved_click, &payment_floor, false, Some("pay_test"))
-                .is_none()
+            browser_safety::evaluate_browser_action(
+                &approved_click,
+                &payment_floor,
+                false,
+                Some("pay_test")
+            )
+            .is_none()
         );
 
         let mut fill_cvv = serde_json::json!({
@@ -67066,14 +68138,16 @@ prs.save(Path({path:?}))
         });
         let payment_floor: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        assert!(super::claim_payment_approval_from_map(
-            &mut approvals,
-            &action,
-            &payment_floor,
-            false,
-            Some("thread_2")
-        )
-        .is_err());
+        assert!(
+            super::claim_payment_approval_from_map(
+                &mut approvals,
+                &action,
+                &payment_floor,
+                false,
+                Some("thread_2")
+            )
+            .is_err()
+        );
         assert_eq!(
             super::claim_payment_approval_from_map(
                 &mut approvals,
@@ -67085,14 +68159,16 @@ prs.save(Path({path:?}))
             .unwrap(),
             "pay_test"
         );
-        assert!(super::claim_payment_approval_from_map(
-            &mut approvals,
-            &action,
-            &payment_floor,
-            false,
-            Some("thread_1")
-        )
-        .is_err());
+        assert!(
+            super::claim_payment_approval_from_map(
+                &mut approvals,
+                &action,
+                &payment_floor,
+                false,
+                Some("thread_1")
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -67177,8 +68253,12 @@ prs.save(Path({path:?}))
 
         // The gate still fail-closed rejects the action on the class error —
         // no approved id was ever produced, so nothing unauthorized executes.
-        let blocked =
-            browser_safety::evaluate_browser_action(&missing_class_action, &payment_floor, false, None);
+        let blocked = browser_safety::evaluate_browser_action(
+            &missing_class_action,
+            &payment_floor,
+            false,
+            None,
+        );
         assert!(
             blocked
                 .as_deref()
@@ -67230,19 +68310,21 @@ prs.save(Path({path:?}))
         );
 
         // One-shot: the grant is now burned, a second attempt fails.
-        assert!(super::claim_payment_approval_from_map(
-            &mut approvals,
-            &declared_payment_action,
-            &payment_floor,
-            false,
-            Some("thread_1")
-        )
-        .is_err());
+        assert!(
+            super::claim_payment_approval_from_map(
+                &mut approvals,
+                &declared_payment_action,
+                &payment_floor,
+                false,
+                Some("thread_1")
+            )
+            .is_err()
+        );
     }
 
     #[test]
-    fn clickcoords_with_payment_class_is_rejected_before_the_claim_and_leaves_the_grant_unconsumed(
-    ) {
+    fn clickcoords_with_payment_class_is_rejected_before_the_claim_and_leaves_the_grant_unconsumed()
+    {
         // Regression for the Important review finding on Task 1 (commit
         // eb9d877d): the single-action `browser_act` enforcement branch in
         // `execute_browser_tool` used to compute `approved_payment_id` — via
@@ -67327,7 +68409,9 @@ prs.save(Path({path:?}))
         // (a) The fix: the single-action branch now checks this FIRST and
         // rejects with the typed BROWSER_UNSUPPORTED_COMMITTING_ACTION error.
         let blocked_before_claim =
-            super::single_action_rejects_unsupported_execution_before_payment_claim(&click_coords_action);
+            super::single_action_rejects_unsupported_execution_before_payment_claim(
+                &click_coords_action,
+            );
         assert_eq!(
             blocked_before_claim,
             Some(super::BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR),
@@ -67387,7 +68471,9 @@ prs.save(Path({path:?}))
         // to appear in the request at all), so it must be rejected regardless of an
         // otherwise-legal `kind`.
         let action = serde_json::json!({"kind": "click", "selector": "#pay-now"});
-        assert!(!super::browser_action_execution_fields_are_schema_legal(&action));
+        assert!(!super::browser_action_execution_fields_are_schema_legal(
+            &action
+        ));
     }
 
     #[test]
@@ -67395,7 +68481,9 @@ prs.save(Path({path:?}))
         let hallucinated_kind =
             serde_json::json!({"kind": "wat", "ref": "e1", "action_class": "payment_commit"});
         assert_eq!(
-            super::single_action_rejects_unsupported_execution_before_payment_claim(&hallucinated_kind),
+            super::single_action_rejects_unsupported_execution_before_payment_claim(
+                &hallucinated_kind
+            ),
             Some(super::BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR)
         );
 
@@ -67403,7 +68491,9 @@ prs.save(Path({path:?}))
             "kind": "click", "selector": "#pay-now", "action_class": "payment_commit"
         });
         assert_eq!(
-            super::single_action_rejects_unsupported_execution_before_payment_claim(&selector_action),
+            super::single_action_rejects_unsupported_execution_before_payment_claim(
+                &selector_action
+            ),
             Some(super::BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR)
         );
 
@@ -67428,7 +68518,9 @@ prs.save(Path({path:?}))
             "actions": [{"kind": "click", "ref": "e1", "action_class": "ordinary"}]
         });
         assert_eq!(
-            super::single_action_rejects_unsupported_execution_before_payment_claim(&normalized_bundle),
+            super::single_action_rejects_unsupported_execution_before_payment_claim(
+                &normalized_bundle
+            ),
             None
         );
     }
@@ -67485,7 +68577,9 @@ prs.save(Path({path:?}))
             &payment_floor,
             false,
         );
-        assert!(rejected.is_some_and(|reason| reason.contains("BROWSER_UNSUPPORTED_COMMITTING_ACTION")));
+        assert!(
+            rejected.is_some_and(|reason| reason.contains("BROWSER_UNSUPPORTED_COMMITTING_ACTION"))
+        );
 
         let mut bad_kind_bundle = serde_json::json!({
             "actions": [{"kind": "clickCoords", "x": 1, "y": 2, "action_class": "ordinary"}]
@@ -67496,19 +68590,23 @@ prs.save(Path({path:?}))
             &payment_floor,
             false,
         );
-        assert!(rejected.is_some_and(|reason| reason.contains("BROWSER_UNSUPPORTED_COMMITTING_ACTION")));
+        assert!(
+            rejected.is_some_and(|reason| reason.contains("BROWSER_UNSUPPORTED_COMMITTING_ACTION"))
+        );
 
         // A schema-legal bundle is normalized (not rejected) and gets tagged "batch".
         let mut legal_bundle = serde_json::json!({
             "actions": [{"kind": "click", "ref": "e1", "action_class": "ordinary"}]
         });
-        assert!(super::normalize_browser_action_bundle(
-            &mut legal_bundle,
-            "chat_0",
-            &payment_floor,
-            false,
-        )
-        .is_none());
+        assert!(
+            super::normalize_browser_action_bundle(
+                &mut legal_bundle,
+                "chat_0",
+                &payment_floor,
+                false,
+            )
+            .is_none()
+        );
         assert_eq!(legal_bundle["kind"], "batch");
     }
 
@@ -67521,8 +68619,7 @@ prs.save(Path({path:?}))
         // against a FUTURE (or hallucinated) kind acting on a floored control.
         let floor: std::collections::HashSet<String> =
             std::collections::HashSet::from(["e9".to_string()]);
-        let action =
-            serde_json::json!({ "kind": "scroll", "ref": "e9", "target_id": "chat_0" });
+        let action = serde_json::json!({ "kind": "scroll", "ref": "e9", "target_id": "chat_0" });
         assert!(browser_safety::evaluate_browser_action(&action, &floor, false, None).is_some());
     }
 
@@ -67575,15 +68672,23 @@ prs.save(Path({path:?}))
         // The prior act targeted e12 (a floored ref) — mirrors what the enforcement
         // site does via `browser_action_targeted_a_floored_ref`.
         let cvv_fill = serde_json::json!({"kind": "fill", "ref": "e12", "text": "123"});
-        assert!(super::browser_action_targeted_a_floored_ref(&cvv_fill, &payment_floor));
+        assert!(super::browser_action_targeted_a_floored_ref(
+            &cvv_fill,
+            &payment_floor
+        ));
         super::browser_mark_target_acted_floored(&mut map, "chat_0");
 
         let combined = super::browser_payment_context_for(&map, "chat_0");
-        assert!(combined, "last_acted_floored alone must floor, with NO focus signal");
+        assert!(
+            combined,
+            "last_acted_floored alone must floor, with NO focus signal"
+        );
 
-        let enter = serde_json::json!({"kind": "press", "key": "Enter", "action_class": "ordinary"});
-        let reason = browser_safety::evaluate_browser_action(&enter, &payment_floor, combined, None)
-            .unwrap();
+        let enter =
+            serde_json::json!({"kind": "press", "key": "Enter", "action_class": "ordinary"});
+        let reason =
+            browser_safety::evaluate_browser_action(&enter, &payment_floor, combined, None)
+                .unwrap();
         assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
     }
 
@@ -67606,17 +68711,24 @@ prs.save(Path({path:?}))
                 {"kind": "fill", "ref": "e12"}
             ]
         });
-        assert!(super::browser_action_targeted_a_floored_ref(&bundle, &payment_floor));
+        assert!(super::browser_action_targeted_a_floored_ref(
+            &bundle,
+            &payment_floor
+        ));
         let bundle_no_hit = serde_json::json!({
             "actions": [{"kind": "click", "ref": "e1"}]
         });
-        assert!(!super::browser_action_targeted_a_floored_ref(&bundle_no_hit, &payment_floor));
+        assert!(!super::browser_action_targeted_a_floored_ref(
+            &bundle_no_hit,
+            &payment_floor
+        ));
     }
 
     // --- Build1 fill-fields fail-open: `fields[].ref` must floor too ---
 
     #[test]
-    fn fill_fields_array_targeting_floored_ref_sets_last_acted_floored_for_a_following_refless_enter() {
+    fn fill_fields_array_targeting_floored_ref_sets_last_acted_floored_for_a_following_refless_enter()
+     {
         // {kind:"fill", fields:[{ref:<floored>, value:"x"}]} carries no top-level
         // `ref` — the sidecar's canonical multi-field contract puts the ref inside
         // `fields[]` (see `resolveFillFields` in
@@ -67631,15 +68743,22 @@ prs.save(Path({path:?}))
             "kind": "fill",
             "fields": [{"ref": "e12", "type": "text", "value": "4242 4242 4242 4242"}]
         });
-        assert!(super::browser_action_targeted_a_floored_ref(&cc_fields_fill, &payment_floor));
+        assert!(super::browser_action_targeted_a_floored_ref(
+            &cc_fields_fill,
+            &payment_floor
+        ));
 
         let mut ctx_by_target: std::collections::HashMap<String, super::BrowserPaymentContext> =
             std::collections::HashMap::new();
         super::browser_mark_target_acted_floored(&mut ctx_by_target, "chat_0");
         let combined = super::browser_payment_context_for(&ctx_by_target, "chat_0");
-        assert!(combined, "last_acted_floored alone must floor, with NO focus signal");
+        assert!(
+            combined,
+            "last_acted_floored alone must floor, with NO focus signal"
+        );
 
-        let enter = serde_json::json!({"kind": "press", "key": "Enter", "action_class": "ordinary"});
+        let enter =
+            serde_json::json!({"kind": "press", "key": "Enter", "action_class": "ordinary"});
         let reason = browser_safety::evaluate_browser_action(&enter, &payment_floor, combined, None)
             .expect("a ref-less Enter following a floored fields[] fill must be rejected as under-declared payment_commit");
         assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
@@ -67649,7 +68768,10 @@ prs.save(Path({path:?}))
             "kind": "fill",
             "fields": [{"ref": "e1", "value": "Napoli"}, {"ref": "e2", "value": "Milano"}]
         });
-        assert!(!super::browser_action_targeted_a_floored_ref(&ordinary_fields_fill, &payment_floor));
+        assert!(!super::browser_action_targeted_a_floored_ref(
+            &ordinary_fields_fill,
+            &payment_floor
+        ));
 
         // A bundle whose item uses fields[] to hit a floored ref counts too.
         let bundle = serde_json::json!({
@@ -67658,7 +68780,10 @@ prs.save(Path({path:?}))
                 {"kind": "fill", "fields": [{"ref": "e12", "value": "4242"}]}
             ]
         });
-        assert!(super::browser_action_targeted_a_floored_ref(&bundle, &payment_floor));
+        assert!(super::browser_action_targeted_a_floored_ref(
+            &bundle,
+            &payment_floor
+        ));
     }
 
     // --- Build1 Fix 3: per-target floor set (cross-tab fail-open) ---
@@ -67685,13 +68810,16 @@ prs.save(Path({path:?}))
     }
 
     #[test]
-    fn browser_per_target_floor_set_survives_a_different_targets_observation_cross_tab_regression() {
+    fn browser_per_target_floor_set_survives_a_different_targets_observation_cross_tab_regression()
+    {
         // Build1 Fix 3 regression: a single global floor set let observing tab A
         // clobber tab B's floor out from under it. Scenario from the review:
         // observe tab B (floors e5), observe tab A (empties A only), act on tab
         // B's e5 → last_acted_floored[B] set → a ref-less Enter on tab B floors.
-        let mut floor_by_target: std::collections::HashMap<String, std::collections::HashSet<String>> =
-            std::collections::HashMap::new();
+        let mut floor_by_target: std::collections::HashMap<
+            String,
+            std::collections::HashSet<String>,
+        > = std::collections::HashMap::new();
         super::browser_set_target_floor(
             &mut floor_by_target,
             "chat_1", // tab B
@@ -67713,17 +68841,23 @@ prs.save(Path({path:?}))
         // from chat_1's OWN entry rather than a single shared set.
         let cvv_fill =
             serde_json::json!({"kind": "type", "ref": "e5", "text": "123", "target_id": "chat_1"});
-        assert!(super::browser_action_targeted_a_floored_ref(&cvv_fill, &b_floor));
+        assert!(super::browser_action_targeted_a_floored_ref(
+            &cvv_fill, &b_floor
+        ));
 
         let mut ctx_by_target: std::collections::HashMap<String, super::BrowserPaymentContext> =
             std::collections::HashMap::new();
         super::browser_mark_target_acted_floored(&mut ctx_by_target, "chat_1");
         assert!(super::browser_payment_context_for(&ctx_by_target, "chat_1"));
-        assert!(!super::browser_payment_context_for(&ctx_by_target, "chat_0"));
+        assert!(!super::browser_payment_context_for(
+            &ctx_by_target,
+            "chat_0"
+        ));
 
         // A ref-less Enter on tab B must floor via last_acted_floored, using
         // chat_1's own (still-intact) floor set.
-        let enter = serde_json::json!({"kind": "press", "key": "Enter", "action_class": "ordinary"});
+        let enter =
+            serde_json::json!({"kind": "press", "key": "Enter", "action_class": "ordinary"});
         let combined = super::browser_payment_context_for(&ctx_by_target, "chat_1");
         let reason = browser_safety::evaluate_browser_action(&enter, &b_floor, combined, None)
             .expect("ref-less Enter on tab B must be rejected as under-declared payment_commit");
@@ -67738,7 +68872,9 @@ prs.save(Path({path:?}))
         assert!(msg.contains("[ref=e200] Article"));
         // The message is built off the shared engine marker so
         // `local_first_engine::browser::is_stale_ref_recovery_result` recognizes it (MINOR 8).
-        assert!(local_first_engine::browser::is_stale_ref_recovery_result(&msg));
+        assert!(local_first_engine::browser::is_stale_ref_recovery_result(
+            &msg
+        ));
     }
 
     #[test]
@@ -67746,11 +68882,19 @@ prs.save(Path({path:?}))
         // MINOR 8: broadened beyond the original stale/detached pair to the phrasings Playwright
         // actually throws, case-insensitively.
         assert!(super::is_stale_ref_error("Error: stale element reference"));
-        assert!(super::is_stale_ref_error("element is DETACHED from document"));
-        assert!(super::is_stale_ref_error("Error: element is not attached to the DOM"));
-        assert!(super::is_stale_ref_error("Error: no node found for selector [ref=e12]"));
+        assert!(super::is_stale_ref_error(
+            "element is DETACHED from document"
+        ));
+        assert!(super::is_stale_ref_error(
+            "Error: element is not attached to the DOM"
+        ));
+        assert!(super::is_stale_ref_error(
+            "Error: no node found for selector [ref=e12]"
+        ));
         assert!(super::is_stale_ref_error("NO NODE FOUND for selector"));
-        assert!(!super::is_stale_ref_error("Error: timeout waiting for selector"));
+        assert!(!super::is_stale_ref_error(
+            "Error: timeout waiting for selector"
+        ));
     }
 
     #[test]
@@ -67938,8 +69082,7 @@ prs.save(Path({path:?}))
             run_id: "run-1",
         };
 
-        let fixture = |_: &str,
-                       _: Option<&local_first_task_runtime::ObjectiveContractRecord>| {
+        let fixture = |_: &str, _: Option<&local_first_task_runtime::ObjectiveContractRecord>| {
             let mut decision = super::semantic_decision::safe_fallback(None, "test_fixture");
             decision.decision.relationship_to_active_objective =
                 super::semantic_decision::ObjectiveRelationship::CompatibleExtension;
@@ -67950,10 +69093,12 @@ prs.save(Path({path:?}))
         let second = crate::model_client::steering_messages_for_round_with(context, fixture);
 
         assert_eq!(first.len(), 1);
-        assert!(first[0]["content"]
-            .as_str()
-            .unwrap()
-            .contains("APPLY TO THE CURRENT RUN"));
+        assert!(
+            first[0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("APPLY TO THE CURRENT RUN")
+        );
         assert!(second.is_empty());
     }
 
@@ -67961,49 +69106,75 @@ prs.save(Path({path:?}))
     fn gateway_projects_and_acknowledges_structured_turn_control() {
         let state = super::AppState::for_tests();
         let user_id = super::gateway_user_id();
-        let objective = state.task_store.lock().unwrap().upsert_objective_contract(
-            user_id.as_str(),
-            "workspace-a",
-            "thread-1",
-            "message-objective",
-            "Find train results",
-            local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
-            &serde_json::json!({}),
-            &serde_json::json!(["read"]),
-            &serde_json::json!({"deliverable": "results"}),
-            "active",
-        ).unwrap();
-        let pending = state.task_store.lock().unwrap().append_turn_steering(
-            user_id.as_str(),
-            "workspace-a",
-            "thread-1",
-            "turn-1",
-            &local_first_task_runtime::NewTurnSteering {
-                source_message_id: "message-control".into(),
-                prompt: "answer with current evidence".into(),
-                visible_prompt: "answer with current evidence".into(),
-                images: Vec::new(),
-                attachments: serde_json::json!([]),
-                mode: None,
-                model: None,
-            },
-            objective.revision,
-        ).unwrap();
-        let claimed = state.task_store.lock().unwrap().claim_pending_turn_steering(
-            user_id.as_str(), "workspace-a", "thread-1", "turn-1", "run-1", 1,
-        ).unwrap().remove(0);
+        let objective = state
+            .task_store
+            .lock()
+            .unwrap()
+            .upsert_objective_contract(
+                user_id.as_str(),
+                "workspace-a",
+                "thread-1",
+                "message-objective",
+                "Find train results",
+                local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
+                &serde_json::json!({}),
+                &serde_json::json!(["read"]),
+                &serde_json::json!({"deliverable": "results"}),
+                "active",
+            )
+            .unwrap();
+        let pending = state
+            .task_store
+            .lock()
+            .unwrap()
+            .append_turn_steering(
+                user_id.as_str(),
+                "workspace-a",
+                "thread-1",
+                "turn-1",
+                &local_first_task_runtime::NewTurnSteering {
+                    source_message_id: "message-control".into(),
+                    prompt: "answer with current evidence".into(),
+                    visible_prompt: "answer with current evidence".into(),
+                    images: Vec::new(),
+                    attachments: serde_json::json!([]),
+                    mode: None,
+                    model: None,
+                },
+                objective.revision,
+            )
+            .unwrap();
+        let claimed = state
+            .task_store
+            .lock()
+            .unwrap()
+            .claim_pending_turn_steering(
+                user_id.as_str(),
+                "workspace-a",
+                "thread-1",
+                "turn-1",
+                "run-1",
+                1,
+            )
+            .unwrap()
+            .remove(0);
         let mut decision = super::semantic_decision::safe_fallback(None, "fixture");
         decision.provenance.fallback_reason = None;
         decision.decision.relationship_to_active_objective =
             super::semantic_decision::ObjectiveRelationship::CompatibleExtension;
         decision.decision.steering_disposition =
             super::semantic_decision::SteeringDisposition::FinalizeWithCurrentEvidence;
-        let interpreted = state.task_store.lock().unwrap().mark_turn_steering_interpreted(
-            claimed.steering_id,
-            claimed.revision,
-            &serde_json::to_value(decision).unwrap(),
-            "run-1",
-        ).unwrap();
+        let interpreted = state
+            .task_store
+            .lock()
+            .unwrap()
+            .mark_turn_steering_interpreted(
+                claimed.steering_id,
+                claimed.revision,
+                &serde_json::to_value(decision).unwrap(),
+                "run-1",
+            )
+            .unwrap();
         let context = crate::model_client::GatewaySteeringContext {
             state: &state,
             user_id: user_id.as_str(),
@@ -68021,16 +69192,28 @@ prs.save(Path({path:?}))
         );
         crate::model_client::acknowledge_turn_control_applied(context, control.steering_id);
         assert_eq!(
-            state.task_store.lock().unwrap().load_turn_steering(
-                control.steering_id, user_id.as_str(), "workspace-a",
-            ).unwrap().unwrap().status,
+            state
+                .task_store
+                .lock()
+                .unwrap()
+                .load_turn_steering(control.steering_id, user_id.as_str(), "workspace-a",)
+                .unwrap()
+                .unwrap()
+                .status,
             local_first_task_runtime::TurnSteeringStatus::Applied
         );
         crate::model_client::acknowledge_turn_control_completed(context, control.steering_id);
-        let completed = state.task_store.lock().unwrap().load_turn_steering(
-            control.steering_id, user_id.as_str(), "workspace-a",
-        ).unwrap().unwrap();
-        assert_eq!(completed.status, local_first_task_runtime::TurnSteeringStatus::Completed);
+        let completed = state
+            .task_store
+            .lock()
+            .unwrap()
+            .load_turn_steering(control.steering_id, user_id.as_str(), "workspace-a")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            completed.status,
+            local_first_task_runtime::TurnSteeringStatus::Completed
+        );
         assert!(completed.revision > interpreted.revision);
     }
 
@@ -68038,37 +69221,58 @@ prs.save(Path({path:?}))
     fn gateway_confirmation_requirement_overrides_the_requested_disposition() {
         let state = super::AppState::for_tests();
         let user_id = super::gateway_user_id();
-        let objective = state.task_store.lock().unwrap().upsert_objective_contract(
-            user_id.as_str(),
-            "workspace-a",
-            "thread-1",
-            "message-objective",
-            "Find train results",
-            local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
-            &serde_json::json!({}),
-            &serde_json::json!(["read"]),
-            &serde_json::json!({"deliverable": "results"}),
-            "active",
-        ).unwrap();
-        state.task_store.lock().unwrap().append_turn_steering(
-            user_id.as_str(),
-            "workspace-a",
-            "thread-1",
-            "turn-1",
-            &local_first_task_runtime::NewTurnSteering {
-                source_message_id: "message-confirm".into(),
-                prompt: "change the active objective".into(),
-                visible_prompt: "change the active objective".into(),
-                images: Vec::new(),
-                attachments: serde_json::json!([]),
-                mode: None,
-                model: None,
-            },
-            objective.revision,
-        ).unwrap();
-        let claimed = state.task_store.lock().unwrap().claim_pending_turn_steering(
-            user_id.as_str(), "workspace-a", "thread-1", "turn-1", "run-1", 1,
-        ).unwrap().remove(0);
+        let objective = state
+            .task_store
+            .lock()
+            .unwrap()
+            .upsert_objective_contract(
+                user_id.as_str(),
+                "workspace-a",
+                "thread-1",
+                "message-objective",
+                "Find train results",
+                local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
+                &serde_json::json!({}),
+                &serde_json::json!(["read"]),
+                &serde_json::json!({"deliverable": "results"}),
+                "active",
+            )
+            .unwrap();
+        state
+            .task_store
+            .lock()
+            .unwrap()
+            .append_turn_steering(
+                user_id.as_str(),
+                "workspace-a",
+                "thread-1",
+                "turn-1",
+                &local_first_task_runtime::NewTurnSteering {
+                    source_message_id: "message-confirm".into(),
+                    prompt: "change the active objective".into(),
+                    visible_prompt: "change the active objective".into(),
+                    images: Vec::new(),
+                    attachments: serde_json::json!([]),
+                    mode: None,
+                    model: None,
+                },
+                objective.revision,
+            )
+            .unwrap();
+        let claimed = state
+            .task_store
+            .lock()
+            .unwrap()
+            .claim_pending_turn_steering(
+                user_id.as_str(),
+                "workspace-a",
+                "thread-1",
+                "turn-1",
+                "run-1",
+                1,
+            )
+            .unwrap()
+            .remove(0);
         let mut decision = super::semantic_decision::safe_fallback(None, "fixture");
         decision.provenance.fallback_reason = None;
         decision.decision.relationship_to_active_objective =
@@ -68076,12 +69280,17 @@ prs.save(Path({path:?}))
         decision.decision.steering_disposition =
             super::semantic_decision::SteeringDisposition::ReplanCurrentWork;
         decision.decision.requires_user_confirmation = true;
-        state.task_store.lock().unwrap().mark_turn_steering_interpreted(
-            claimed.steering_id,
-            claimed.revision,
-            &serde_json::to_value(decision).unwrap(),
-            "run-1",
-        ).unwrap();
+        state
+            .task_store
+            .lock()
+            .unwrap()
+            .mark_turn_steering_interpreted(
+                claimed.steering_id,
+                claimed.revision,
+                &serde_json::to_value(decision).unwrap(),
+                "run-1",
+            )
+            .unwrap();
         let context = crate::model_client::GatewaySteeringContext {
             state: &state,
             user_id: user_id.as_str(),
@@ -68161,10 +69370,22 @@ prs.save(Path({path:?}))
             serde_json::json!({ "id": "s4", "title": "D", "status": "todo", "detail": "" }),
         ];
         enforce_monotonic_plan_progress(&mut steps);
-        assert_eq!(plan_step_status(&steps[0]), "done", "before frontier → done");
-        assert_eq!(plan_step_status(&steps[1]), "done", "before frontier → done");
+        assert_eq!(
+            plan_step_status(&steps[0]),
+            "done",
+            "before frontier → done"
+        );
+        assert_eq!(
+            plan_step_status(&steps[1]),
+            "done",
+            "before frontier → done"
+        );
         assert_eq!(plan_step_status(&steps[2]), "doing", "frontier stays doing");
-        assert_eq!(plan_step_status(&steps[3]), "todo", "after frontier stays todo");
+        assert_eq!(
+            plan_step_status(&steps[3]),
+            "todo",
+            "after frontier stays todo"
+        );
     }
 
     /// The plan the ENGINE reads (`LoopState::plan`) must expose the SAME canonical step shape
@@ -68186,10 +69407,15 @@ prs.save(Path({path:?}))
         assert_eq!(steps.len(), 2, "the engine sees both steps");
         assert_eq!(plan_step_title(&steps[0]), "Cerca il treno");
         assert_eq!(plan_step_status(&steps[0]), "done");
-        assert_eq!(plan_step_status(&steps[1]), "doing", "the frontier must be visible to the loop");
+        assert_eq!(
+            plan_step_status(&steps[1]),
+            "doing",
+            "the frontier must be visible to the loop"
+        );
         // And the merge path reads the SAME state back out of it (no status lost round-tripping
         // through the typed `ExecutionPlan` that `update_plan` still merges on).
-        let round_tripped = super::execution_plan_steps(&super::plan_value_from(&as_engine_sees_it));
+        let round_tripped =
+            super::execution_plan_steps(&super::plan_value_from(&as_engine_sees_it));
         assert_eq!(plan_step_status(&round_tripped[0]), "done");
         assert_eq!(plan_step_status(&round_tripped[1]), "doing");
         assert_eq!(plan_step_title(&round_tripped[1]), "Apri la prenotazione");
@@ -68213,7 +69439,10 @@ prs.save(Path({path:?}))
             "todo",
             "the raw shape buries status in `arguments` — this is the trap, keep it documented"
         );
-        assert_eq!(plan_step_status(&plan_value_steps(&super::canonical_plan_value(&canonical))[0]), "done");
+        assert_eq!(
+            plan_step_status(&plan_value_steps(&super::canonical_plan_value(&canonical))[0]),
+            "done"
+        );
     }
 
     #[test]
@@ -68244,11 +69473,31 @@ prs.save(Path({path:?}))
             serde_json::json!({ "id": "s3", "title": "Finale", "status": "todo", "detail": "" }),
         ];
         enforce_monotonic_plan_progress(&mut steps);
-        assert_eq!(plan_step_status(&steps[0]), "done", "stale earlier doing → done");
-        assert_eq!(plan_step_status(&steps[1]), "doing", "frontier (last doing) stays doing");
-        assert_eq!(plan_step_status(&steps[2]), "todo", "after frontier stays todo");
-        assert_eq!(plan_next_open(&steps).as_deref(), Some("Girone"), "next open is the frontier, not step 1");
-        assert_eq!(plan_done_count(&steps), 1, "progress reflects the closed step");
+        assert_eq!(
+            plan_step_status(&steps[0]),
+            "done",
+            "stale earlier doing → done"
+        );
+        assert_eq!(
+            plan_step_status(&steps[1]),
+            "doing",
+            "frontier (last doing) stays doing"
+        );
+        assert_eq!(
+            plan_step_status(&steps[2]),
+            "todo",
+            "after frontier stays todo"
+        );
+        assert_eq!(
+            plan_next_open(&steps).as_deref(),
+            Some("Girone"),
+            "next open is the frontier, not step 1"
+        );
+        assert_eq!(
+            plan_done_count(&steps),
+            1,
+            "progress reflects the closed step"
+        );
     }
 
     #[test]
@@ -68259,14 +69508,22 @@ prs.save(Path({path:?}))
             serde_json::json!({ "id": "s2", "title": "B", "status": "doing", "detail": "" }),
         ];
         enforce_monotonic_plan_progress(&mut steps);
-        assert_eq!(plan_step_status(&steps[0]), "blocked", "blocked stays blocked");
+        assert_eq!(
+            plan_step_status(&steps[0]),
+            "blocked",
+            "blocked stays blocked"
+        );
         // No doing/done anywhere → nothing to derive → unchanged.
         let mut all_todo = vec![
             serde_json::json!({ "id": "s1", "title": "A", "status": "todo", "detail": "" }),
             serde_json::json!({ "id": "s2", "title": "B", "status": "todo", "detail": "" }),
         ];
         enforce_monotonic_plan_progress(&mut all_todo);
-        assert_eq!(plan_step_status(&all_todo[0]), "todo", "no frontier → unchanged");
+        assert_eq!(
+            plan_step_status(&all_todo[0]),
+            "todo",
+            "no frontier → unchanged"
+        );
     }
 
     #[test]
@@ -68828,13 +70085,14 @@ prs.save(Path({path:?}))
 
     #[test]
     fn agent_loop_route_does_not_depend_on_prompt_retrieval_rank() {
-        let semantic = semantic_route_fixture(
-            super::semantic_decision::ExecutionShape::AgentLoop,
-            None,
-        );
+        let semantic =
+            semantic_route_fixture(super::semantic_decision::ExecutionShape::AgentLoop, None);
         let decision = super::route_capability_from_semantic(Some(&semantic));
 
-        assert!(matches!(decision, super::CapabilityRouteDecision::AgentLoop { .. }));
+        assert!(matches!(
+            decision,
+            super::CapabilityRouteDecision::AgentLoop { .. }
+        ));
     }
 
     #[test]
@@ -69610,9 +70868,8 @@ prs.save(Path({path:?}))
         let imported = super::ImportedTemplatePackProvider::from_root(&root).expect("provider");
         let bundled_root =
             super::template_packs::bundled_template_pack_root().expect("repo templates dir");
-        let bundled =
-            super::template_packs::BundledTemplatePackProvider::from_root(&bundled_root)
-                .expect("bundled provider");
+        let bundled = super::template_packs::BundledTemplatePackProvider::from_root(&bundled_root)
+            .expect("bundled provider");
         let catalog = super::collect_template_catalog_entries(&[&bundled, &imported]);
         let bundled_position = catalog
             .iter()
@@ -69955,9 +71212,8 @@ prs.save(Path({path:?}))
 
         let bundled_root =
             super::template_packs::bundled_template_pack_root().expect("repo templates dir");
-        let bundled =
-            super::template_packs::BundledTemplatePackProvider::from_root(&bundled_root)
-                .expect("bundled provider");
+        let bundled = super::template_packs::BundledTemplatePackProvider::from_root(&bundled_root)
+            .expect("bundled provider");
         let catalog = super::collect_template_catalog_entries(&[&bundled, &ExtraProvider]);
 
         assert_eq!(
@@ -70099,7 +71355,8 @@ prs.save(Path({path:?}))
              "design_template": "sales_proposal", "route_text": "r", "category": "bogus"},
             {"id": "acme/c", "kind": "document", "name": "C", "description": "d",
              "design_template": "sales_proposal", "route_text": "r"}]});
-        let p = super::FileTemplateCatalogProvider::from_json_str(manifest.to_string().as_str()).unwrap();
+        let p = super::FileTemplateCatalogProvider::from_json_str(manifest.to_string().as_str())
+            .unwrap();
         assert_eq!(p.entries[0].category, "cv_career");
         assert_eq!(p.entries[1].category, "other"); // bogus → fallback
         assert_eq!(p.entries[2].category, "other"); // absent → fallback
@@ -70212,18 +71469,23 @@ prs.save(Path({path:?}))
             super::template_preview_content_type("preview.html"),
             Some("text/html; charset=utf-8")
         );
-        assert_eq!(super::template_preview_content_type("thumbnails/evil.svg"), None);
+        assert_eq!(
+            super::template_preview_content_type("thumbnails/evil.svg"),
+            None
+        );
         assert_eq!(super::template_preview_content_type("source.pptx"), None);
-        assert_eq!(super::template_preview_content_type("nested/preview.html"), None);
+        assert_eq!(
+            super::template_preview_content_type("nested/preview.html"),
+            None
+        );
     }
 
     #[test]
     fn template_catalog_response_exposes_selection_notes_for_gallery() {
         let bundled_root =
             super::template_packs::bundled_template_pack_root().expect("repo templates dir");
-        let bundled =
-            super::template_packs::BundledTemplatePackProvider::from_root(&bundled_root)
-                .expect("bundled provider");
+        let bundled = super::template_packs::BundledTemplatePackProvider::from_root(&bundled_root)
+            .expect("bundled provider");
         let response = super::template_catalog_response_from_entries(
             super::TemplateCatalogProvider::entries(&bundled),
         );
@@ -70706,7 +71968,9 @@ prs.save(Path({path:?}))
         // shows the correct curated look. Mirrors the UI's own guard
         // (BrandKitPanel.tsx's brandPreviewOverride returns null for the
         // default kit).
-        assert!(!super::should_materialize_brand_kit(&super::BrandKit::default()));
+        assert!(!super::should_materialize_brand_kit(
+            &super::BrandKit::default()
+        ));
     }
 
     #[test]
@@ -70793,7 +72057,10 @@ prs.save(Path({path:?}))
 
         let parsed_light = serde_json::json!({ "design_theme": "editorial_ivory" });
         let options_light = super::document_generation_options(&parsed_light);
-        assert_eq!(options_light.design_theme.as_deref(), Some("editorial_ivory"));
+        assert_eq!(
+            options_light.design_theme.as_deref(),
+            Some("editorial_ivory")
+        );
     }
 
     #[test]
@@ -71148,7 +72415,13 @@ prs.save(Path({path:?}))
         // which silently swapped the intended editorial look. Pin every editorial theme to
         // a bundled serif so the declared token and the rendered output actually match.
         let brand = super::BrandKit::default();
-        for theme in ["editorial_noir", "editorial_bold", "editorial_warm", "editorial_ivory", "editorial_slate"] {
+        for theme in [
+            "editorial_noir",
+            "editorial_bold",
+            "editorial_warm",
+            "editorial_ivory",
+            "editorial_slate",
+        ] {
             let tokens = super::design_theme_tokens(Some(theme), &brand);
             let head = tokens["heading_font"].as_str().unwrap_or("");
             assert_ne!(head, "Georgia", "{theme} still uses non-bundled Georgia");
@@ -71329,7 +72602,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             "{message}"
         );
         assert!(!message.contains("The document is DONE"), "{message}");
-        assert!(message.contains("renderer crashed: some diagnostic tail"), "{message}");
+        assert!(
+            message.contains("renderer crashed: some diagnostic tail"),
+            "{message}"
+        );
     }
 
     #[test]
@@ -71342,7 +72618,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let message =
             super::templated_document_outcome(&produced, "cv-elena", "wf_1", None, "ok output");
         assert!(message.contains("The document is DONE"), "{message}");
-        assert!(message.contains("cv-elena.html, cv-elena.pdf, cv-elena.docx"), "{message}");
+        assert!(
+            message.contains("cv-elena.html, cv-elena.pdf, cv-elena.docx"),
+            "{message}"
+        );
     }
 
     #[test]
@@ -71522,7 +72801,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             {"layout": "cover", "title": "Kite", "eyebrow": "PITCH", "hero_art": "rings"}]});
         let mut deck = serde_json::json!({"slides": [{"layout": "cover", "title": "Real"}]});
         super::apply_deck_template_chrome(&mut deck, &example);
-        assert_eq!(deck["slides"][0]["eyebrow"], "PITCH");   // pack default when model blank
+        assert_eq!(deck["slides"][0]["eyebrow"], "PITCH"); // pack default when model blank
         // fail-open: example with no slides / no cover chrome does nothing, no panic
         let mut deck2 = serde_json::json!({"slides": [{"layout": "cover", "title": "R"}]});
         super::apply_deck_template_chrome(&mut deck2, &serde_json::json!({}));
@@ -71537,7 +72816,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         // eyebrow IS required (OpenAI strict structured-outputs demands every
         // property be listed in `required`); refinable/blankable is expressed
         // by the model emitting "" on non-cover slides, not by omission.
-        let req = schema["properties"]["slides"]["items"]["required"].as_array().unwrap();
+        let req = schema["properties"]["slides"]["items"]["required"]
+            .as_array()
+            .unwrap();
         assert!(req.iter().any(|v| v == "eyebrow"));
     }
 
@@ -71845,7 +73126,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let doc_fallback = super::document_generation_options(&serde_json::json!({
             "template_ref": "homun/cv-professional-01",
         }));
-        assert_eq!(doc_fallback.design_theme.as_deref(), Some("editorial_ivory"));
+        assert_eq!(
+            doc_fallback.design_theme.as_deref(),
+            Some("editorial_ivory")
+        );
     }
 
     #[test]
@@ -72102,15 +73386,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn artifact_memories_do_not_participate_in_semantic_dedup() {
-        assert!(!local_first_memory::memory_type_participates_in_semantic_dedup(
-            "artifact"
-        ));
-        assert!(local_first_memory::memory_type_participates_in_semantic_dedup(
-            "decision"
-        ));
-        assert!(local_first_memory::memory_type_participates_in_semantic_dedup(
-            "open_loop"
-        ));
+        assert!(!local_first_memory::memory_type_participates_in_semantic_dedup("artifact"));
+        assert!(local_first_memory::memory_type_participates_in_semantic_dedup("decision"));
+        assert!(local_first_memory::memory_type_participates_in_semantic_dedup("open_loop"));
     }
 
     #[test]
@@ -72182,10 +73460,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             route_id: "presentations.template_document".into(),
             args: serde_json::json!({"template_ref":"homun/cv-professional-01"}),
         };
-        let semantic = semantic_route_fixture(
-            super::semantic_decision::ExecutionShape::AgentLoop,
-            None,
-        );
+        let semantic =
+            semantic_route_fixture(super::semantic_decision::ExecutionShape::AgentLoop, None);
         let routed = super::route_capability_with_binding(Some(&semantic), Some(&binding));
         match routed {
             super::CapabilityRouteDecision::Workflow { tool_name, .. } => {
@@ -72217,10 +73493,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(blocked.contains("WORKFLOW_ROUTE_BLOCKED_TOOL"), "{blocked}");
         assert!(blocked.contains("make_deck"), "{blocked}");
 
-        let agent_semantic = semantic_route_fixture(
-            super::semantic_decision::ExecutionShape::AgentLoop,
-            None,
-        );
+        let agent_semantic =
+            semantic_route_fixture(super::semantic_decision::ExecutionShape::AgentLoop, None);
         let generic = super::route_capability_from_semantic(Some(&agent_semantic));
         assert!(
             super::workflow_route_blocked_tool_message(&generic, "mcp__filesystem__create")
@@ -72341,7 +73615,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
         let state = test_app_state_for_brief(facade);
-        let thread = super::lock_store(&state).unwrap().create_thread("ws").unwrap();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .create_thread("ws")
+            .unwrap();
 
         // No thread_id at all → fail open to 0 (treated as "still turn 1").
         assert_eq!(super::thread_user_message_count_fail_open(&state, None), 0);
@@ -72394,6 +73671,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             finished: std::sync::atomic::AtomicBool::new(false),
             last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
             thread_id: Some("thread-a".to_string()),
+            assistant_message_id: std::sync::Mutex::new(None),
         };
 
         assert!(super::stream_entry_has_terminal_event(&entry));
@@ -72496,6 +73774,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 now.saturating_sub(super::STREAM_ACTIVITY_IDLE_STALE_SECS + 1),
             ),
             thread_id: Some("thread-a".to_string()),
+            assistant_message_id: std::sync::Mutex::new(None),
         };
 
         assert!(super::stream_entry_is_activity_stale(&entry, now));
@@ -72513,6 +73792,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 now.saturating_sub(super::STREAM_SILENT_IDLE_STALE_SECS + 1),
             ),
             thread_id: Some("thread-a".to_string()),
+            assistant_message_id: std::sync::Mutex::new(None),
         };
 
         assert!(super::stream_entry_is_activity_stale(&entry, now));
@@ -72529,6 +73809,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             finished: std::sync::atomic::AtomicBool::new(false),
             last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
             thread_id: Some("thread-a".to_string()),
+            assistant_message_id: std::sync::Mutex::new(None),
         });
         let sink = super::StreamSink {
             mpsc,
@@ -72563,10 +73844,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             super::redacted_user_text_from_stream_line(&line).as_deref(),
             Some("Il codice è [VAULT:credentials:password]")
         );
-        assert!(super::redacted_user_text_from_stream_line(
-            r#"{"type":"delta","text":"hello"}"#
-        )
-        .is_none());
+        assert!(
+            super::redacted_user_text_from_stream_line(r#"{"type":"delta","text":"hello"}"#)
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -72580,6 +73861,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             finished: std::sync::atomic::AtomicBool::new(false),
             last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
             thread_id: Some("thread-a".to_string()),
+            assistant_message_id: std::sync::Mutex::new(None),
         });
         let sink = super::StreamSink {
             mpsc,
@@ -72668,14 +73950,16 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn memory_status_distinguishes_empty_from_unavailable() {
-        assert!(super::memory_access_status_instruction(
-            local_first_memory::MemoryAccessStatus::Empty
-        )
-        .contains("connected"));
-        assert!(super::memory_access_status_instruction(
-            local_first_memory::MemoryAccessStatus::Unavailable
-        )
-        .contains("could not be queried"));
+        assert!(
+            super::memory_access_status_instruction(local_first_memory::MemoryAccessStatus::Empty)
+                .contains("connected")
+        );
+        assert!(
+            super::memory_access_status_instruction(
+                local_first_memory::MemoryAccessStatus::Unavailable
+            )
+            .contains("could not be queried")
+        );
     }
 
     #[test]
@@ -72772,9 +74056,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     #[test]
     fn briefing_and_recall_hits_share_one_deduplicated_turn_attestation() {
         let briefing_hit = test_linked_briefing_hit("briefing", "Linked preference");
-        let scope = local_first_memory::MemoryScope::Project(
-            local_first_memory::WorkspaceId::new("project-a"),
-        );
+        let scope = local_first_memory::MemoryScope::Project(local_first_memory::WorkspaceId::new(
+            "project-a",
+        ));
         let mut payload = None;
 
         super::merge_automatic_recall_payload(
@@ -72898,17 +74182,15 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
         let mut message = super::channel_chat_message("assistant", "NEBULA-7429");
-        message.memory_reuse = Some(
-            local_first_memory::MemoryReuseEnvelope::user_input_only(vec![
-                local_first_memory::LinkedMemoryReadRef {
-                    source_workspace_id: "source-a".to_string(),
-                    grant_id: "revoked-grant".to_string(),
-                    policy_version: 2,
-                    memory_ref: "memory:owner:source-a:fact-a".to_string(),
-                    source_revision: "sha256:rev-a".to_string(),
-                },
-            ]),
-        );
+        message.memory_reuse = Some(local_first_memory::MemoryReuseEnvelope::user_input_only(
+            vec![local_first_memory::LinkedMemoryReadRef {
+                source_workspace_id: "source-a".to_string(),
+                grant_id: "revoked-grant".to_string(),
+                policy_version: 2,
+                memory_ref: "memory:owner:source-a:fact-a".to_string(),
+                source_revision: "sha256:rev-a".to_string(),
+            }],
+        ));
 
         assert!(message.text.contains("NEBULA-7429"));
         let context = super::context_message_for_model(
@@ -72931,8 +74213,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
         let mut message = super::channel_chat_message("assistant", "MULTI-GRANT-SENTINEL");
-        message.memory_reuse = Some(
-            local_first_memory::MemoryReuseEnvelope::user_input_only(vec![
+        message.memory_reuse = Some(local_first_memory::MemoryReuseEnvelope::user_input_only(
+            vec![
                 local_first_memory::LinkedMemoryReadRef {
                     source_workspace_id: "source-a".to_string(),
                     grant_id: "grant-a".to_string(),
@@ -72947,8 +74229,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                     memory_ref: "memory:owner:source-b:fact-b".to_string(),
                     source_revision: "sha256:rev-b".to_string(),
                 },
-            ]),
-        );
+            ],
+        ));
 
         let context = super::context_message_for_model(
             &facade,
@@ -72994,9 +74276,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             let store = state.chat_store.lock().unwrap();
             let thread = store.create_thread("project-a").unwrap();
             let mut blocked = super::channel_chat_message("assistant", "SERVER-ONLY-SENTINEL");
-            blocked.memory_reuse = Some(
-                local_first_memory::MemoryReuseEnvelope::blocked_unknown(),
-            );
+            blocked.memory_reuse = Some(local_first_memory::MemoryReuseEnvelope::blocked_unknown());
             let blocked_id = blocked.id.clone();
             store
                 .append_assistant_message(&thread.thread_id, &blocked)
@@ -73006,23 +74286,25 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
         let context = super::thread_context_for_model(&state, &thread_id, &[], None).unwrap();
 
-        assert!(state
-            .chat_store
-            .lock()
-            .unwrap()
-            .message(&thread_id, &blocked_id)
-            .unwrap()
-            .unwrap()
-            .text
-            .contains("SERVER-ONLY-SENTINEL"));
-        assert!(!context
-            .iter()
-            .any(|message| message.text.contains("SERVER-ONLY-SENTINEL")));
-        assert!(context
-            .iter()
-            .any(|message| {
-                message.text == local_first_desktop_gateway::LINKED_MEMORY_CONTEXT_OMITTED
-            }));
+        assert!(
+            state
+                .chat_store
+                .lock()
+                .unwrap()
+                .message(&thread_id, &blocked_id)
+                .unwrap()
+                .unwrap()
+                .text
+                .contains("SERVER-ONLY-SENTINEL")
+        );
+        assert!(
+            !context
+                .iter()
+                .any(|message| message.text.contains("SERVER-ONLY-SENTINEL"))
+        );
+        assert!(context.iter().any(|message| {
+            message.text == local_first_desktop_gateway::LINKED_MEMORY_CONTEXT_OMITTED
+        }));
     }
 
     #[test]
@@ -73139,7 +74421,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 &format!("echo ok > '{}'", in_project.display()),
             )
             .expect("build_sandbox_command (project root)");
-            let project_ok = c.status().await.expect("run (project)").success() && in_project.exists();
+            let project_ok =
+                c.status().await.expect("run (project)").success() && in_project.exists();
 
             let mut c2 = super::build_sandbox_command(
                 &roots,
@@ -73163,8 +74446,14 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             let _ = std::fs::remove_dir_all(&extra);
 
             assert!(project_ok, "write under the project root should be ALLOWED");
-            assert!(extra_ok, "write under the per-project EXTRA root should be ALLOWED");
-            assert!(!leaked, "write outside BOTH roots LEAKED — the fence is not confining");
+            assert!(
+                extra_ok,
+                "write under the per-project EXTRA root should be ALLOWED"
+            );
+            assert!(
+                !leaked,
+                "write outside BOTH roots LEAKED — the fence is not confining"
+            );
         });
     }
 
@@ -73191,14 +74480,20 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             let _ = std::fs::remove_file(&outside);
 
             // in-root write → ALLOWED by the workspace-write fence
-            let mut c = super::build_sandbox_command(&[root.clone()], &format!("echo ok > '{}'", inside.display()))
-                .expect("build_sandbox_command (in-root)");
+            let mut c = super::build_sandbox_command(
+                &[root.clone()],
+                &format!("echo ok > '{}'", inside.display()),
+            )
+            .expect("build_sandbox_command (in-root)");
             let st = c.status().await.expect("run sandbox-exec (in-root)");
             let in_ok = st.success() && inside.exists();
 
             // out-of-root write ($HOME) → DENIED by (deny default); the file must NOT appear
-            let mut c2 = super::build_sandbox_command(&[root.clone()], &format!("echo bad > '{}'", outside.display()))
-                .expect("build_sandbox_command (out-of-root)");
+            let mut c2 = super::build_sandbox_command(
+                &[root.clone()],
+                &format!("echo bad > '{}'", outside.display()),
+            )
+            .expect("build_sandbox_command (out-of-root)");
             let _ = c2.status().await; // exit code irrelevant; what matters is the file is absent
             let leaked = outside.exists();
 
@@ -73206,8 +74501,14 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             let _ = std::fs::remove_file(&outside);
             let _ = std::fs::remove_dir_all(&root);
 
-            assert!(in_ok, "in-root write should be ALLOWED under the workspace-write fence");
-            assert!(!leaked, "out-of-root write to $HOME LEAKED — the sandbox fence is NOT active");
+            assert!(
+                in_ok,
+                "in-root write should be ALLOWED under the workspace-write fence"
+            );
+            assert!(
+                !leaked,
+                "out-of-root write to $HOME LEAKED — the sandbox fence is NOT active"
+            );
         });
     }
 
@@ -73275,7 +74576,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         // `gemma4` has none of the magic substrings, yet Ollama reports vision — the name heuristic
         // called it blind and hid it from the vision role. The report must win.
         let mut seeing = super::model_registry::ModelEntry::inferred("gemma4:12b");
-        assert!(!seeing.vision, "the heuristic guesses wrong here — that's the point");
+        assert!(
+            !seeing.vision,
+            "the heuristic guesses wrong here — that's the point"
+        );
         super::apply_reported_capabilities(
             &mut seeing,
             &["completion".into(), "vision".into(), "tools".into()],
@@ -73296,7 +74600,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     #[test]
     fn retired_models_are_removed_from_the_refreshed_catalog() {
         use super::ModelReport;
-        let ids = vec!["deepseek-v4-pro:cloud".to_string(), "ministral-3:14b-cloud".to_string()];
+        let ids = vec![
+            "deepseek-v4-pro:cloud".to_string(),
+            "ministral-3:14b-cloud".to_string(),
+        ];
         let catalog = ids
             .iter()
             .map(|id| (id.clone(), super::model_registry::ModelEntry::inferred(id)))
@@ -73380,7 +74687,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             "https://api.example.test/v1".into(),
         );
         cloud.active_model = Some("deepseek-v4-pro".into());
-        cloud.models = vec![super::model_registry::ModelEntry::inferred("deepseek-v4-pro")];
+        cloud.models = vec![super::model_registry::ModelEntry::inferred(
+            "deepseek-v4-pro",
+        )];
         registry.upsert(cloud);
 
         let mut local = super::model_registry::ProviderEntry::new(
@@ -73416,7 +74725,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             "https://api.example.test/v1".into(),
         );
         cloud.active_model = Some("deepseek-v4-pro".into());
-        cloud.models = vec![super::model_registry::ModelEntry::inferred("deepseek-v4-pro")];
+        cloud.models = vec![super::model_registry::ModelEntry::inferred(
+            "deepseek-v4-pro",
+        )];
         registry.upsert(cloud);
 
         let mut local = super::model_registry::ProviderEntry::new(
@@ -73453,7 +74764,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             .expect_err("malformed URL should fail to build a request")
     }
 
-    fn semantic_decision_auth_fallback_test_resolved(model: &str) -> super::model_registry::ResolvedRole {
+    fn semantic_decision_auth_fallback_test_resolved(
+        model: &str,
+    ) -> super::model_registry::ResolvedRole {
         super::model_registry::ResolvedRole {
             role: "orchestrator".to_string(),
             provider_id: "cloud".to_string(),
@@ -73467,8 +74780,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     // Registry with a distinct, usable local fallback model (mirrors the fixture in
     // `semantic_decision_auth_fallback_prefers_qualified_local_json_model`).
-    fn semantic_decision_auth_fallback_registry_with_fallback() -> super::model_registry::ProviderRegistry
-    {
+    fn semantic_decision_auth_fallback_registry_with_fallback()
+    -> super::model_registry::ProviderRegistry {
         let mut registry = super::model_registry::ProviderRegistry::default();
         let mut cloud = super::model_registry::ProviderEntry::new(
             "cloud".into(),
@@ -73477,7 +74790,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             "https://api.example.test/v1".into(),
         );
         cloud.active_model = Some("deepseek-v4-pro".into());
-        cloud.models = vec![super::model_registry::ModelEntry::inferred("deepseek-v4-pro")];
+        cloud.models = vec![super::model_registry::ModelEntry::inferred(
+            "deepseek-v4-pro",
+        )];
         registry.upsert(cloud);
 
         let mut local = super::model_registry::ProviderEntry::new(
@@ -73493,8 +74808,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     // Registry with no other provider and no local model at all: there is nothing
     // distinct to fall back to.
-    fn semantic_decision_auth_fallback_registry_without_fallback(
-    ) -> super::model_registry::ProviderRegistry {
+    fn semantic_decision_auth_fallback_registry_without_fallback()
+    -> super::model_registry::ProviderRegistry {
         let mut registry = super::model_registry::ProviderRegistry::default();
         let mut cloud = super::model_registry::ProviderEntry::new(
             "cloud".into(),
@@ -73503,7 +74818,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             "https://api.example.test/v1".into(),
         );
         cloud.active_model = Some("deepseek-v4-pro".into());
-        cloud.models = vec![super::model_registry::ModelEntry::inferred("deepseek-v4-pro")];
+        cloud.models = vec![super::model_registry::ModelEntry::inferred(
+            "deepseek-v4-pro",
+        )];
         registry.upsert(cloud);
         registry
     }
@@ -73745,7 +75062,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         ));
         // A real answer — with or without a reasoning trace above it — is NOT empty.
         assert!(!empty("Here is the answer."));
-        assert!(!empty("‹‹REASONING››thought‹‹/REASONING››\nHere is the answer."));
+        assert!(!empty(
+            "‹‹REASONING››thought‹‹/REASONING››\nHere is the answer."
+        ));
         assert!(!super::should_force_synthesis_for_empty_visible_answer(
             "‹‹PLAN››- [x] **Step** (`s1`): done‹‹/PLAN››",
             "\nHere is the answer."
@@ -74296,6 +75615,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let outcome = super::TaskExecutionOutcome {
             completed: true,
             blocked_reason: None,
+            wait_until: None,
             pending_approval: None,
             summary: "Review complete".to_string(),
             checkpoint_payload: serde_json::json!({"raw": "hidden"}),
@@ -74428,14 +75748,20 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         ];
         let budget = format!("- {first_text}\n").len();
 
-        let formatted =
-            super::format_memory_block_with_provenance(&[], &personal, &[], budget);
+        let formatted = super::format_memory_block_with_provenance(&[], &personal, &[], budget);
 
-        assert!(formatted.block.as_deref().is_some_and(|block| block.contains(first_text)));
-        assert!(formatted
-            .block
-            .as_deref()
-            .is_some_and(|block| !block.contains(second_text)));
+        assert!(
+            formatted
+                .block
+                .as_deref()
+                .is_some_and(|block| block.contains(first_text))
+        );
+        assert!(
+            formatted
+                .block
+                .as_deref()
+                .is_some_and(|block| !block.contains(second_text))
+        );
         assert_eq!(formatted.linked_hits.len(), 1);
         assert!(formatted.linked_hits[0].memory_ref.ends_with(":first"));
     }
@@ -74456,7 +75782,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         // Salvaguarda e ripristina lo scope memory globale (test condiviso).
         let prev = std::env::var("HOMUN_USER_ID").ok();
         // SAFETY: test isolato; ripristinato sotto.
-        unsafe { std::env::set_var("HOMUN_USER_ID", "local-user"); }
+        unsafe {
+            std::env::set_var("HOMUN_USER_ID", "local-user");
+        }
 
         super::set_memory_workspace(super::PERSONAL_WORKSPACE);
         let personal = super::scope_from_active_workspace();
@@ -74477,12 +75805,12 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         // Ripristino.
         super::set_memory_workspace(super::PERSONAL_WORKSPACE);
         match prev {
-            Some(value) => {
-                unsafe { std::env::set_var("HOMUN_USER_ID", value); }
-            }
-            None => {
-                unsafe { std::env::remove_var("HOMUN_USER_ID"); }
-            }
+            Some(value) => unsafe {
+                std::env::set_var("HOMUN_USER_ID", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOMUN_USER_ID");
+            },
         }
     }
 
@@ -74524,9 +75852,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             usage_store: std::sync::Arc::new(std::sync::Mutex::new(
                 super::usage_store::UsageStore::open_in_memory().expect("usage store"),
             )),
-            usage_recorder: std::sync::Arc::new(
-                local_first_inference_usage::NoopUsageRecorder,
-            ),
+            usage_recorder: std::sync::Arc::new(local_first_inference_usage::NoopUsageRecorder),
             usage_pricing: std::sync::Arc::new(std::sync::RwLock::new(
                 super::usage_pricing::PricingSnapshot::default(),
             )),
@@ -74562,6 +75888,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             browser_thread_sessions: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
+            hitl_resume_by_thread: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             payment_approvals: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
@@ -74583,10 +75912,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     /// `stream_chat_via_openai`, `main.rs:19610+`) chiamando le stesse funzioni del
     /// gateway. Serve da riferimento per il test di parità: l'impl delegante di
     /// `brief()` DEVE produrre gli stessi blocchi, nello stesso ordine.
-    fn inline_briefing_blocks(
-        state: &super::AppState,
-        _user_message: &str,
-    ) -> Vec<Option<String>> {
+    fn inline_briefing_blocks(state: &super::AppState, _user_message: &str) -> Vec<Option<String>> {
         let intent = super::semantic_decision::MemoryIntent {
             use_current_thread: true,
             search_personal: true,
@@ -74803,7 +76129,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert_eq!(after, vec!["Prefers Italian".to_string()]);
         let (structured, structured_project) =
             super::gather_profile_memory_with_provenance(&state, true, true);
-        let hit = structured[0].linked_hit.as_ref().expect("linked provenance");
+        let hit = structured[0]
+            .linked_hit
+            .as_ref()
+            .expect("linked provenance");
         assert_eq!(hit.source_workspace_id, personal);
         assert_eq!(hit.grant_id.as_deref(), Some("prefs-grant"));
         assert_eq!(hit.policy_version, Some(1));
@@ -74841,7 +76170,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     fn project_briefing_enforces_compiled_personal_source_policy() {
         let _flag = TestMemorySourcesFlag::set(Some("on"));
         let previous_user = std::env::var("HOMUN_USER_ID").ok();
-        unsafe { std::env::set_var("HOMUN_USER_ID", "briefing-policy-user"); }
+        unsafe {
+            std::env::set_var("HOMUN_USER_ID", "briefing-policy-user");
+        }
         super::set_memory_workspace("project-a");
 
         let facade = super::MemoryFacade::new(
@@ -74877,9 +76208,12 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                     .into_iter()
                     .collect(),
                 max_sensitivity: local_first_memory::DataSensitivity::Public,
-                overrides: [(denied_ref, local_first_memory::MemoryGrantOverrideEffect::Deny)]
-                    .into_iter()
-                    .collect(),
+                overrides: [(
+                    denied_ref,
+                    local_first_memory::MemoryGrantOverrideEffect::Deny,
+                )]
+                .into_iter()
+                .collect(),
                 expires_at: None,
                 revoked_at: None,
                 policy_version: 1,
@@ -74889,14 +76223,17 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             })
             .unwrap();
         let state = test_app_state_for_brief(facade);
-        let (personal_items, _) =
-            super::gather_profile_memory_with_options(&state, true, true);
+        let (personal_items, _) = super::gather_profile_memory_with_options(&state, true, true);
         assert!(personal_items.is_empty());
 
         super::set_memory_workspace(super::PERSONAL_WORKSPACE);
         match previous_user {
-            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
-            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+            Some(value) => unsafe {
+                std::env::set_var("HOMUN_USER_ID", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOMUN_USER_ID");
+            },
         }
     }
 
@@ -74904,7 +76241,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     fn project_briefing_does_not_promote_individual_allow_outside_preferences_collection() {
         let _flag = TestMemorySourcesFlag::set(Some("on"));
         let previous_user = std::env::var("HOMUN_USER_ID").ok();
-        unsafe { std::env::set_var("HOMUN_USER_ID", "briefing-allow-user"); }
+        unsafe {
+            std::env::set_var("HOMUN_USER_ID", "briefing-allow-user");
+        }
         super::set_memory_workspace("project-a");
         let facade = super::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
@@ -74931,9 +76270,12 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                     .into_iter()
                     .collect(),
                 max_sensitivity: local_first_memory::DataSensitivity::Public,
-                overrides: [(preference_ref, local_first_memory::MemoryGrantOverrideEffect::Allow)]
-                    .into_iter()
-                    .collect(),
+                overrides: [(
+                    preference_ref,
+                    local_first_memory::MemoryGrantOverrideEffect::Allow,
+                )]
+                .into_iter()
+                .collect(),
                 expires_at: None,
                 revoked_at: None,
                 policy_version: 1,
@@ -74943,14 +76285,17 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             })
             .unwrap();
         let state = test_app_state_for_brief(facade);
-        let (personal_items, _) =
-            super::gather_profile_memory_with_options(&state, true, true);
+        let (personal_items, _) = super::gather_profile_memory_with_options(&state, true, true);
         assert!(personal_items.is_empty());
 
         super::set_memory_workspace(super::PERSONAL_WORKSPACE);
         match previous_user {
-            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
-            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+            Some(value) => unsafe {
+                std::env::set_var("HOMUN_USER_ID", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOMUN_USER_ID");
+            },
         }
     }
 
@@ -75061,7 +76406,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     fn cached_briefing_is_rejected_when_grant_is_revoked_after_lookup() {
         let _flag = TestMemorySourcesFlag::set(Some("on"));
         let previous_user = std::env::var("HOMUN_USER_ID").ok();
-        unsafe { std::env::set_var("HOMUN_USER_ID", "briefing-toctou-user"); }
+        unsafe {
+            std::env::set_var("HOMUN_USER_ID", "briefing-toctou-user");
+        }
         super::set_memory_workspace("project-a");
         let facade = super::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
@@ -75113,8 +76460,12 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
         super::set_memory_workspace(super::PERSONAL_WORKSPACE);
         match previous_user {
-            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
-            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+            Some(value) => unsafe {
+                std::env::set_var("HOMUN_USER_ID", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOMUN_USER_ID");
+            },
         }
     }
 
@@ -75211,7 +76562,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 &local_first_memory::MemoryScope::Project(consumer.clone()),
             )
             .await;
-        unsafe { std::env::set_var("HOMUN_MEMORY_SERVICE", "off"); }
+        unsafe {
+            std::env::set_var("HOMUN_MEMORY_SERVICE", "off");
+        }
         let mut inline_state = state.clone();
         super::install_memory_service_if_enabled(
             &mut inline_state,
@@ -75240,15 +76593,25 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 .map(|hit| hit.memory_ref.as_str())
                 .collect::<Vec<_>>()
         );
-        assert!(service_pack
-            .block
-            .as_deref()
-            .is_some_and(|block| block.contains("Launch in September")));
+        assert!(
+            service_pack
+                .block
+                .as_deref()
+                .is_some_and(|block| block.contains("Launch in September"))
+        );
         assert!(removed_service_pack.hits.is_empty());
-        assert!(removed_service_pack.degraded_sources.iter().any(|(workspace, reason)| {
-            workspace.as_str() == "project-b" && reason == "source_unavailable"
-        }));
-        assert_eq!(removed_service_pack.degraded_sources, inline_pack.degraded_sources);
+        assert!(
+            removed_service_pack
+                .degraded_sources
+                .iter()
+                .any(|(workspace, reason)| {
+                    workspace.as_str() == "project-b" && reason == "source_unavailable"
+                })
+        );
+        assert_eq!(
+            removed_service_pack.degraded_sources,
+            inline_pack.degraded_sources
+        );
         assert_eq!(
             super::memory_facade(&state)
                 .last_memory_source_access("decision-grant")
@@ -75268,8 +76631,12 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             },
         }
         match previous_service {
-            Some(value) => unsafe { std::env::set_var("HOMUN_MEMORY_SERVICE", value); },
-            None => unsafe { std::env::remove_var("HOMUN_MEMORY_SERVICE"); },
+            Some(value) => unsafe {
+                std::env::set_var("HOMUN_MEMORY_SERVICE", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOMUN_MEMORY_SERVICE");
+            },
         }
     }
 
@@ -75357,14 +76724,18 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             &[],
             None,
         );
-        assert!(available
-            .hits
-            .iter()
-            .any(|hit| hit.text.contains("Local launch in September")));
-        assert!(available
-            .hits
-            .iter()
-            .any(|hit| hit.text.contains("Removed project launch in June")));
+        assert!(
+            available
+                .hits
+                .iter()
+                .any(|hit| hit.text.contains("Local launch in September"))
+        );
+        assert!(
+            available
+                .hits
+                .iter()
+                .any(|hit| hit.text.contains("Removed project launch in June"))
+        );
 
         std::fs::write(
             dir.join("workspaces.json"),
@@ -75384,18 +76755,24 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             &[],
             None,
         );
-        assert!(removed
-            .hits
-            .iter()
-            .any(|hit| hit.text.contains("Local launch in September")));
-        assert!(!removed
-            .hits
-            .iter()
-            .any(|hit| hit.text.contains("Removed project launch in June")));
-        assert!(!removed
-            .block
-            .as_deref()
-            .is_some_and(|block| block.contains("Removed project launch in June")));
+        assert!(
+            removed
+                .hits
+                .iter()
+                .any(|hit| hit.text.contains("Local launch in September"))
+        );
+        assert!(
+            !removed
+                .hits
+                .iter()
+                .any(|hit| hit.text.contains("Removed project launch in June"))
+        );
+        assert!(
+            !removed
+                .block
+                .as_deref()
+                .is_some_and(|block| block.contains("Removed project launch in June"))
+        );
         assert!(removed.degraded_sources.iter().any(|(workspace, reason)| {
             workspace.as_str() == "project-b" && reason == "source_unavailable"
         }));
@@ -75445,10 +76822,12 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(pack.degraded_sources.iter().any(|(workspace, reason)| {
             workspace.as_str() == "project-b" && reason == "source_unavailable"
         }));
-        assert!(facade
-            .last_memory_source_access("removed-source-empty-grant")
-            .unwrap()
-            .is_none());
+        assert!(
+            facade
+                .last_memory_source_access("removed-source-empty-grant")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -75456,7 +76835,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let _flag = TestMemorySourcesFlag::set(Some("on"));
         let previous_workspace = std::env::var("HOMUN_WORKSPACE_ID").ok();
         // SAFETY: TestMemorySourcesFlag holds TEST_ENV_LOCK for this test.
-        unsafe { std::env::set_var("HOMUN_WORKSPACE_ID", "project-b"); }
+        unsafe {
+            std::env::set_var("HOMUN_WORKSPACE_ID", "project-b");
+        }
         let dir = isolated_gateway_test_dir("recall-missing-workspace-registry");
         std::fs::create_dir_all(&dir).unwrap();
         let _data = TestGatewayDataDir::new(&dir);
@@ -75496,10 +76877,12 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(pack.degraded_sources.iter().any(|(workspace, reason)| {
             workspace.as_str() == "project-b" && reason == "source_unavailable"
         }));
-        assert!(facade
-            .last_memory_source_access("missing-registry-grant")
-            .unwrap()
-            .is_none());
+        assert!(
+            facade
+                .last_memory_source_access("missing-registry-grant")
+                .unwrap()
+                .is_none()
+        );
         // SAFETY: restore process-global test state before TestMemorySourcesFlag releases its lock.
         unsafe {
             match previous_workspace {
@@ -75538,8 +76921,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             .unwrap(),
         )
         .unwrap();
-        assert!(super::load_persisted_memory_source_workspace_ids()
-            .is_some_and(|workspaces| workspaces.contains("project-b")));
+        assert!(
+            super::load_persisted_memory_source_workspace_ids()
+                .is_some_and(|workspaces| workspaces.contains("project-b"))
+        );
         std::fs::remove_file(&path).unwrap();
         std::fs::create_dir(&path).unwrap();
         assert!(super::load_persisted_memory_source_workspace_ids().is_none());
@@ -75584,7 +76969,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let project = super::recall_memory(&state, "When do we launch?", false);
         assert!(project.response.contains("Launch in September"));
         let payload = super::recall_stream_payload_from_outcome(&project, "When do we launch?");
-        let hit = payload.hits.first().expect("linked source hit is surfaced to UI");
+        let hit = payload
+            .hits
+            .first()
+            .expect("linked source hit is surfaced to UI");
         assert_eq!(hit.source_workspace_id, "project-b");
         assert_eq!(hit.source_label, "Beta");
         assert_eq!(hit.collection, "decisions");
@@ -75654,7 +77042,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         use super::MemoryRecallService;
         // User id stabile per entrambi gli scope (le funzioni leggono la globale).
         let prev_user = std::env::var("HOMUN_USER_ID").ok();
-        unsafe { std::env::set_var("HOMUN_USER_ID", "parity-user"); }
+        unsafe {
+            std::env::set_var("HOMUN_USER_ID", "parity-user");
+        }
 
         // Messaggio "normale" (non-breve): attiva sia il profile-memory completo
         // sia gli open-loops. È il caso in cui i due gating prompt-dipendenti
@@ -75669,7 +77059,11 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             let state = test_app_state_for_brief(facade);
             super::set_memory_workspace(super::PERSONAL_WORKSPACE);
             let scope = super::scope_from_active_workspace();
-            let service = super::InProcessMemoryRecallService::new(state.clone(), std::sync::Arc::new(NoopEmbeddingClient), std::sync::Arc::new(NoopLlmClient));
+            let service = super::InProcessMemoryRecallService::new(
+                state.clone(),
+                std::sync::Arc::new(NoopEmbeddingClient),
+                std::sync::Arc::new(NoopLlmClient),
+            );
             let service_blocks = service.brief(&scope, message).ordered_blocks();
             let inline_blocks = inline_briefing_blocks(&state, message);
             assert_eq!(
@@ -75678,7 +77072,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             );
             // Invariant P1: per Personal, i blocchi project_* sono None.
             assert!(
-                service_blocks[1].is_none() && service_blocks[2].is_none()
+                service_blocks[1].is_none()
+                    && service_blocks[2].is_none()
                     && service_blocks[3].is_none(),
                 "Personal briefing deve avere shape snella (objective/brief/recent_work = None)"
             );
@@ -75692,7 +77087,11 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             let state = test_app_state_for_brief(facade);
             super::set_memory_workspace("proj-parity");
             let scope = super::scope_from_active_workspace();
-            let service = super::InProcessMemoryRecallService::new(state.clone(), std::sync::Arc::new(NoopEmbeddingClient), std::sync::Arc::new(NoopLlmClient));
+            let service = super::InProcessMemoryRecallService::new(
+                state.clone(),
+                std::sync::Arc::new(NoopEmbeddingClient),
+                std::sync::Arc::new(NoopLlmClient),
+            );
             let service_blocks = service.brief(&scope, message).ordered_blocks();
             let inline_blocks = inline_briefing_blocks(&state, message);
             assert_eq!(
@@ -75704,8 +77103,12 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         // Ripristino.
         super::set_memory_workspace(super::PERSONAL_WORKSPACE);
         match prev_user {
-            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
-            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+            Some(value) => unsafe {
+                std::env::set_var("HOMUN_USER_ID", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOMUN_USER_ID");
+            },
         }
     }
 
@@ -75717,7 +77120,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     fn briefing_cache_invalidates_after_memory_write() {
         let _env_guard = TestEnv::acquire();
         let prev_user = std::env::var("HOMUN_USER_ID").ok();
-        unsafe { std::env::set_var("HOMUN_USER_ID", "invalidate-user"); }
+        unsafe {
+            std::env::set_var("HOMUN_USER_ID", "invalidate-user");
+        }
 
         let facade = super::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
@@ -75768,8 +77173,12 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
         // Ripristino.
         match prev_user {
-            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
-            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+            Some(value) => unsafe {
+                std::env::set_var("HOMUN_USER_ID", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOMUN_USER_ID");
+            },
         }
     }
 
@@ -75782,7 +77191,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     async fn project_context_exposes_objective_from_goal_memory() {
         let _env_guard = TestEnv::acquire();
         let prev_user = std::env::var("HOMUN_USER_ID").ok();
-        unsafe { std::env::set_var("HOMUN_USER_ID", "objective-user"); }
+        unsafe {
+            std::env::set_var("HOMUN_USER_ID", "objective-user");
+        }
 
         let facade = super::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
@@ -75865,8 +77276,12 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
         // Ripristino.
         super::set_memory_workspace(super::PERSONAL_WORKSPACE);
         match prev_user {
-            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
-            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+            Some(value) => unsafe {
+                std::env::set_var("HOMUN_USER_ID", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOMUN_USER_ID");
+            },
         }
     }
 
@@ -75879,7 +77294,9 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
     async fn project_context_objective_follows_request_workspace_not_global() {
         let _env_guard = TestEnv::acquire();
         let prev_user = std::env::var("HOMUN_USER_ID").ok();
-        unsafe { std::env::set_var("HOMUN_USER_ID", "objective-scope-user"); }
+        unsafe {
+            std::env::set_var("HOMUN_USER_ID", "objective-scope-user");
+        }
 
         let facade = super::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
@@ -75953,8 +77370,12 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
         // Ripristino.
         super::set_memory_workspace(super::PERSONAL_WORKSPACE);
         match prev_user {
-            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
-            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+            Some(value) => unsafe {
+                std::env::set_var("HOMUN_USER_ID", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOMUN_USER_ID");
+            },
         }
     }
 
@@ -76368,11 +77789,7 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
                 .task_store
                 .lock()
                 .unwrap()
-                .list_agent_runs_for_turn(
-                    "delete-thread-turn",
-                    user.as_str(),
-                    "journal-workspace",
-                )
+                .list_agent_runs_for_turn("delete-thread-turn", user.as_str(), "journal-workspace",)
                 .unwrap()
                 .is_empty()
         );
@@ -76851,10 +78268,7 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
         let user = super::gateway_memory_user_id();
         assert!(
             facade
-                .list_entities_for_ui(
-                    &user,
-                    &local_first_memory::WorkspaceId::new(base_workspace)
-                )
+                .list_entities_for_ui(&user, &local_first_memory::WorkspaceId::new(base_workspace))
                 .unwrap()
                 .is_empty()
         );
@@ -76862,9 +78276,7 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
             facade
                 .list_entities_for_ui(
                     &user,
-                    &local_first_memory::WorkspaceId::new(
-                        local_first_memory::PERSONAL_WORKSPACE
-                    )
+                    &local_first_memory::WorkspaceId::new(local_first_memory::PERSONAL_WORKSPACE)
                 )
                 .unwrap()
                 .is_empty()
@@ -76910,8 +78322,7 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
         let user = local_first_memory::UserId::new("local");
-        let personal =
-            local_first_memory::WorkspaceId::new(local_first_memory::PERSONAL_WORKSPACE);
+        let personal = local_first_memory::WorkspaceId::new(local_first_memory::PERSONAL_WORKSPACE);
         let project = local_first_memory::WorkspaceId::new("workspace_homun");
         let evidence = local_first_memory::MemoryRef::generated(
             local_first_memory::MemoryRefKind::Event,
@@ -76979,9 +78390,22 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
             Some(&project),
         );
 
-        assert!(facade.list_entities_for_ui(&user, &personal).unwrap().is_empty());
-        assert!(facade.list_relations_for_ui(&user, &personal).unwrap().is_empty());
-        assert_eq!(facade.list_entities_for_ui(&user, &project).unwrap().len(), 2);
+        assert!(
+            facade
+                .list_entities_for_ui(&user, &personal)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            facade
+                .list_relations_for_ui(&user, &personal)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            facade.list_entities_for_ui(&user, &project).unwrap().len(),
+            2
+        );
         let project_relations = facade.list_relations_for_ui(&user, &project).unwrap();
         assert_eq!(project_relations.len(), 1);
         assert_eq!(project_relations[0].evidence, vec![evidence]);
@@ -77824,7 +79248,10 @@ data: [DONE]\n";
                 payload.len(),
                 payload,
             );
-            socket.write_all(response.as_bytes()).await.expect("write test stream");
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("write test stream");
             socket.flush().await.expect("flush test stream");
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         });
@@ -77843,6 +79270,7 @@ data: [DONE]\n";
                 finished: std::sync::atomic::AtomicBool::new(false),
                 last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
                 thread_id: None,
+                assistant_message_id: std::sync::Mutex::new(None),
             }),
         };
 
@@ -78545,11 +79973,13 @@ data: [DONE]\n";
     #[test]
     fn capability_browser_executor_refuses_committing_act() {
         // A plain click is a committing action — refused in a non-interactive task.
-        assert!(browser_capability_action_refusal(
-            BrowserMethod::Act,
-            &serde_json::json!({ "kind": "click", "ref": "e9" }),
-        )
-        .is_some());
+        assert!(
+            browser_capability_action_refusal(
+                BrowserMethod::Act,
+                &serde_json::json!({ "kind": "click", "ref": "e9" }),
+            )
+            .is_some()
+        );
     }
 
     #[test]
@@ -78557,20 +79987,24 @@ data: [DONE]\n";
         // A payment click carrying an approval id / vault secret that this context
         // could never legitimately have issued must still be refused (fail-closed:
         // presence of a payment field is a rejection, never an implicit unlock).
-        assert!(browser_capability_action_refusal(
-            BrowserMethod::Act,
-            &serde_json::json!({
-                "kind": "click",
-                "ref": "e10",
-                "payment_approval_id": "pay_123",
-            }),
-        )
-        .is_some());
-        assert!(browser_capability_action_refusal(
-            BrowserMethod::Act,
-            &serde_json::json!({ "kind": "fill", "ref": "e2", "vault_secret": "cvv_one_shot" }),
-        )
-        .is_some());
+        assert!(
+            browser_capability_action_refusal(
+                BrowserMethod::Act,
+                &serde_json::json!({
+                    "kind": "click",
+                    "ref": "e10",
+                    "payment_approval_id": "pay_123",
+                }),
+            )
+            .is_some()
+        );
+        assert!(
+            browser_capability_action_refusal(
+                BrowserMethod::Act,
+                &serde_json::json!({ "kind": "fill", "ref": "e2", "vault_secret": "cvv_one_shot" }),
+            )
+            .is_some()
+        );
     }
 
     #[test]
@@ -78593,13 +80027,16 @@ data: [DONE]\n";
                 .is_none()
         );
         assert!(
-            browser_capability_action_refusal(BrowserMethod::Tabs, &serde_json::json!({})).is_none()
+            browser_capability_action_refusal(BrowserMethod::Tabs, &serde_json::json!({}))
+                .is_none()
         );
-        assert!(browser_capability_action_refusal(
-            BrowserMethod::Navigate,
-            &serde_json::json!({ "url": "https://example.com" }),
-        )
-        .is_none());
+        assert!(
+            browser_capability_action_refusal(
+                BrowserMethod::Navigate,
+                &serde_json::json!({ "url": "https://example.com" }),
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -78753,9 +80190,17 @@ data: [DONE]\n";
 ‹‹SANDBOX_ESCALATE››{\"approval_id\":\"abc\",\"tool\":\"run_in_project\",\
 \"arguments\":{\"command\":\"npm ci\",\"cwd\":\"/proj\"}}‹‹/SANDBOX_ESCALATE››\n";
         // Matches the exact command carried by the card.
-        assert!(crate::sandbox_escalate_matches(text, "npm ci", Some("/proj")));
+        assert!(crate::sandbox_escalate_matches(
+            text,
+            "npm ci",
+            Some("/proj")
+        ));
         // Rejects any other command (the provenance gate).
-        assert!(!crate::sandbox_escalate_matches(text, "rm -rf /", Some("/proj")));
+        assert!(!crate::sandbox_escalate_matches(
+            text,
+            "rm -rf /",
+            Some("/proj")
+        ));
         // Rejects when the marker is missing entirely.
         assert!(!crate::sandbox_escalate_matches(
             "no card here",
@@ -78777,7 +80222,10 @@ data: [DONE]\n";
         );
         assert!(out.contains("✓ Ran unsandboxed: npm ci"));
         // No-op when the marker is absent (idempotent on already-rewritten text).
-        assert_eq!(crate::rewrite_sandbox_escalate_to_done("hi", "npm ci"), "hi");
+        assert_eq!(
+            crate::rewrite_sandbox_escalate_to_done("hi", "npm ci"),
+            "hi"
+        );
     }
 
     #[test]
@@ -78941,8 +80389,8 @@ data: [DONE]\n";
         use local_first_secrets::{InMemorySecretStore, SecretRef, SecretStore};
 
         let secrets = InMemorySecretStore::default();
-        let secret_ref = SecretRef::new("user", "workspace", "mcp-orion-moon", "default")
-            .expect("secret ref");
+        let secret_ref =
+            SecretRef::new("user", "workspace", "mcp-orion-moon", "default").expect("secret ref");
         let headers = std::collections::HashMap::from([(
             "Authorization".to_string(),
             "Bearer orion-secret".to_string(),
@@ -78967,10 +80415,13 @@ data: [DONE]\n";
             .expect("restore HTTP config");
 
         assert_eq!(config.url, "https://example.com/mcp");
-        assert_eq!(config.headers, vec![(
-            "Authorization".to_string(),
-            "Bearer orion-secret".to_string(),
-        )]);
+        assert_eq!(
+            config.headers,
+            vec![(
+                "Authorization".to_string(),
+                "Bearer orion-secret".to_string(),
+            )]
+        );
     }
 
     #[test]
@@ -78997,13 +80448,9 @@ data: [DONE]\n";
     #[test]
     fn mcp_http_connection_fails_closed_when_secret_is_missing() {
         let secrets = local_first_secrets::InMemorySecretStore::default();
-        let secret_ref = local_first_secrets::SecretRef::new(
-            "user",
-            "workspace",
-            "mcp-orion-moon",
-            "default",
-        )
-        .expect("secret ref");
+        let secret_ref =
+            local_first_secrets::SecretRef::new("user", "workspace", "mcp-orion-moon", "default")
+                .expect("secret ref");
         let connection = local_first_capabilities::CapabilityConnectionConfig::new(
             "mcp-orion-moon",
             local_first_capabilities::ProviderId::new("mcp:orion-moon"),
@@ -79176,14 +80623,12 @@ data: [DONE]\n";
         {
             let registry = state.capability_registry.lock().expect("registry lock");
             registry
-                .upsert_provider_config(
-                    &local_first_capabilities::CapabilityProviderConfig::new(
-                        provider.clone(),
-                        local_first_capabilities::CapabilityProviderKind::Mcp,
-                        "Legacy MCP".to_string(),
-                        true,
-                    ),
-                )
+                .upsert_provider_config(&local_first_capabilities::CapabilityProviderConfig::new(
+                    provider.clone(),
+                    local_first_capabilities::CapabilityProviderKind::Mcp,
+                    "Legacy MCP".to_string(),
+                    true,
+                ))
                 .expect("provider config");
             registry
                 .upsert_connection_config(&legacy)
@@ -79440,8 +80885,13 @@ data: [DONE]\n";
             "kind": "click", "ref": "e9", "target_id": "chat_0", "action_class": "ordinary"
         });
         assert!(
-            browser_safety::evaluate_browser_action(&action, &std::collections::HashSet::new(), false, None)
-                .is_none()
+            browser_safety::evaluate_browser_action(
+                &action,
+                &std::collections::HashSet::new(),
+                false,
+                None
+            )
+            .is_none()
         );
     }
 
@@ -79449,8 +80899,13 @@ data: [DONE]\n";
     fn act_gate_allows_typing_into_field() {
         let action = serde_json::json!({ "kind": "type", "ref": "e1", "text": "Napoli", "target_id": "chat_0" });
         assert!(
-            browser_safety::evaluate_browser_action(&action, &std::collections::HashSet::new(), false, None)
-                .is_none()
+            browser_safety::evaluate_browser_action(
+                &action,
+                &std::collections::HashSet::new(),
+                false,
+                None
+            )
+            .is_none()
         );
     }
 
@@ -79486,11 +80941,23 @@ data: [DONE]\n";
     #[test]
     fn sidecar_deadlines_match_the_budget() {
         use std::time::Duration;
-        assert_eq!(super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Navigate), Duration::from_secs(25));
+        assert_eq!(
+            super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Navigate),
+            Duration::from_secs(25)
+        );
         // Open creates+navigates a fresh tab (heavier than Navigate) → same 25s, not the 10s catch-all.
-        assert_eq!(super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Open), Duration::from_secs(25));
-        assert_eq!(super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Act), Duration::from_secs(15));
-        assert_eq!(super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Snapshot), Duration::from_secs(10));
+        assert_eq!(
+            super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Open),
+            Duration::from_secs(25)
+        );
+        assert_eq!(
+            super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Act),
+            Duration::from_secs(15)
+        );
+        assert_eq!(
+            super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Snapshot),
+            Duration::from_secs(10)
+        );
     }
 
     #[test]
@@ -79994,27 +81461,6 @@ data: [DONE]\n";
         assert_eq!(second.source.as_deref(), Some("scheduled"));
     }
 
-    fn test_thread(
-        thread_id: &str,
-        source: Option<&str>,
-        channel_recipient: Option<&str>,
-    ) -> super::ChatThread {
-        super::ChatThread {
-            thread_id: thread_id.to_string(),
-            workspace_id: Some("workspace_test".to_string()),
-            title: "Thread".to_string(),
-            subtitle: String::new(),
-            status: "active".to_string(),
-            pinned: false,
-            computer_session_id: "computer".to_string(),
-            task_id: "task".to_string(),
-            updated_at: "2026-06-26T00:00:00Z".to_string(),
-            message_count: 0,
-            source: source.map(str::to_string),
-            channel_recipient: channel_recipient.map(str::to_string),
-        }
-    }
-
     #[test]
     fn thread_turn_started_event_carries_visible_message_ids() {
         let turn = super::VisibleConversationTurn {
@@ -80054,8 +81500,7 @@ data: [DONE]\n";
         let mut assistant =
             super::channel_chat_message_with_id("assistant", "", "local_assistant_r1");
         assistant.text.clear();
-        assistant.delivery_state =
-            local_first_desktop_gateway::MessageDeliveryState::Streaming;
+        assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
         super::lock_store(&state)
             .unwrap()
             .commit_prompt_result(&thread.thread_id, &user, &assistant, None)
@@ -80164,9 +81609,7 @@ data: [DONE]\n";
             1
         );
         assert_eq!(
-            messages
-                .last()
-                .map(|message| message.id.as_str()),
+            messages.last().map(|message| message.id.as_str()),
             Some("local_assistant_r1")
         );
         assert_eq!(
@@ -80184,10 +81627,7 @@ data: [DONE]\n";
                 .unwrap()
                 .linked_task_id
                 .as_deref(),
-            Some(
-                local_first_task_runtime::broker::chat_turn_task_id(&input.request_id)
-                    .as_str()
-            )
+            Some(local_first_task_runtime::broker::chat_turn_task_id(&input.request_id).as_str())
         );
         assert_eq!(
             chat.message(&thread.thread_id, "local_assistant_r1")
@@ -80278,7 +81718,9 @@ data: [DONE]\n";
         unrelated.delivery_state = local_first_desktop_gateway::MessageDeliveryState::WaitingUser;
         {
             let store = super::lock_store(&state).unwrap();
-            store.append_assistant_message(&thread.thread_id, &source).unwrap();
+            store
+                .append_assistant_message(&thread.thread_id, &source)
+                .unwrap();
             store
                 .append_assistant_message(&other_thread.thread_id, &unrelated)
                 .unwrap();
@@ -80286,7 +81728,11 @@ data: [DONE]\n";
         let user = super::gateway_user_id();
         let workspace = local_first_task_runtime::WorkspaceId::new("workspace_test");
         for (task_id, thread_id, message_id) in [
-            (source_task_id, thread.thread_id.as_str(), source.id.as_str()),
+            (
+                source_task_id,
+                thread.thread_id.as_str(),
+                source.id.as_str(),
+            ),
             (
                 other_task_id,
                 other_thread.thread_id.as_str(),
@@ -80314,11 +81760,7 @@ data: [DONE]\n";
         }
 
         super::claim_actionable_source(&state, &thread.thread_id, &source.id, |text| {
-            super::mcp_confirm_matches(
-                text,
-                "mcp__filesystem__create",
-                &serde_json::json!({}),
-            )
+            super::mcp_confirm_matches(text, "mcp__filesystem__create", &serde_json::json!({}))
         })
         .unwrap();
 
@@ -80344,20 +81786,30 @@ data: [DONE]\n";
         let task_store = state.task_store.lock().unwrap();
         assert_eq!(
             task_store
-                .get_task(&local_first_task_runtime::TaskId::new(source_task_id), &user, &workspace)
+                .get_task(
+                    &local_first_task_runtime::TaskId::new(source_task_id),
+                    &user,
+                    &workspace
+                )
                 .unwrap()
                 .unwrap()
                 .status,
             TaskStatus::Completed
         );
         assert_eq!(
-            task_store.active_chat_turn_for_thread(&thread.thread_id).unwrap(),
+            task_store
+                .active_chat_turn_for_thread(&thread.thread_id)
+                .unwrap(),
             None,
             "the continuation must not hit ThreadBusy"
         );
         assert_eq!(
             task_store
-                .get_task(&local_first_task_runtime::TaskId::new(other_task_id), &user, &workspace)
+                .get_task(
+                    &local_first_task_runtime::TaskId::new(other_task_id),
+                    &user,
+                    &workspace
+                )
                 .unwrap()
                 .unwrap()
                 .status,
@@ -80427,14 +81879,20 @@ data: [DONE]\n";
         let task_store = state.task_store.lock().unwrap();
         assert_eq!(
             task_store
-                .get_task(&local_first_task_runtime::TaskId::new(task_id), &user, &workspace)
+                .get_task(
+                    &local_first_task_runtime::TaskId::new(task_id),
+                    &user,
+                    &workspace
+                )
                 .unwrap()
                 .unwrap()
                 .status,
             TaskStatus::Cancelled
         );
         assert_eq!(
-            task_store.active_chat_turn_for_thread(&thread.thread_id).unwrap(),
+            task_store
+                .active_chat_turn_for_thread(&thread.thread_id)
+                .unwrap(),
             None
         );
     }
@@ -80510,9 +81968,11 @@ data: [DONE]\n";
         .unwrap_err();
 
         assert_eq!(error.code, "fs_authorize_confirmation_required");
-        assert!(!super::load_artifact_destinations()
-            .iter()
-            .any(|destination| destination.path == target.display().to_string()));
+        assert!(
+            !super::load_artifact_destinations()
+                .iter()
+                .any(|destination| destination.path == target.display().to_string())
+        );
         assert_eq!(
             super::lock_store(&state)
                 .unwrap()
@@ -80527,7 +81987,11 @@ data: [DONE]\n";
                 .task_store
                 .lock()
                 .unwrap()
-                .get_task(&local_first_task_runtime::TaskId::new(task_id), &user, &workspace)
+                .get_task(
+                    &local_first_task_runtime::TaskId::new(task_id),
+                    &user,
+                    &workspace
+                )
                 .unwrap()
                 .unwrap()
                 .status,
@@ -80574,11 +82038,7 @@ data: [DONE]\n";
         state.task_store.lock().unwrap().insert_task(&task).unwrap();
 
         super::claim_actionable_source(&state, &thread.thread_id, &message.id, |text| {
-            super::mcp_confirm_matches(
-                text,
-                "mcp__filesystem__create",
-                &serde_json::json!({}),
-            )
+            super::mcp_confirm_matches(text, "mcp__filesystem__create", &serde_json::json!({}))
         })
         .unwrap();
         super::resolve_actionable_source(
@@ -80604,7 +82064,11 @@ data: [DONE]\n";
                 .task_store
                 .lock()
                 .unwrap()
-                .get_task(&local_first_task_runtime::TaskId::new(task_id), &user, &workspace)
+                .get_task(
+                    &local_first_task_runtime::TaskId::new(task_id),
+                    &user,
+                    &workspace
+                )
                 .unwrap()
                 .unwrap()
                 .status,
@@ -80617,7 +82081,12 @@ data: [DONE]\n";
         let state = AppState::for_tests();
         let thread = super::lock_store(&state)
             .unwrap()
-            .find_or_create_channel_thread("workspace_test", "test", "proactive-cancel", "Proactive")
+            .find_or_create_channel_thread(
+                "workspace_test",
+                "test",
+                "proactive-cancel",
+                "Proactive",
+            )
             .unwrap();
         let task_id = "proactive_cancelled_source";
         let mut message = super::channel_chat_message_with_id(
@@ -80671,7 +82140,11 @@ data: [DONE]\n";
                 .task_store
                 .lock()
                 .unwrap()
-                .get_task(&local_first_task_runtime::TaskId::new(task_id), &user, &workspace)
+                .get_task(
+                    &local_first_task_runtime::TaskId::new(task_id),
+                    &user,
+                    &workspace
+                )
                 .unwrap()
                 .unwrap()
                 .status,
@@ -80720,11 +82193,7 @@ data: [DONE]\n";
             .unwrap();
 
         super::claim_actionable_source(&state, &thread.thread_id, &message.id, |text| {
-            super::mcp_confirm_matches(
-                text,
-                "mcp__filesystem__create",
-                &serde_json::json!({}),
-            )
+            super::mcp_confirm_matches(text, "mcp__filesystem__create", &serde_json::json!({}))
         })
         .unwrap();
 
@@ -80752,7 +82221,11 @@ data: [DONE]\n";
                 .task_store
                 .lock()
                 .unwrap()
-                .get_task(&local_first_task_runtime::TaskId::new(task_id), &user, &workspace)
+                .get_task(
+                    &local_first_task_runtime::TaskId::new(task_id),
+                    &user,
+                    &workspace
+                )
                 .unwrap()
                 .unwrap()
                 .status,
@@ -80830,7 +82303,13 @@ data: [DONE]\n";
         state: &AppState,
         command: &str,
         cwd: Option<&str>,
-    ) -> (String, String, String, local_first_task_runtime::UserId, local_first_task_runtime::WorkspaceId) {
+    ) -> (
+        String,
+        String,
+        String,
+        local_first_task_runtime::UserId,
+        local_first_task_runtime::WorkspaceId,
+    ) {
         let thread = super::lock_store(state)
             .unwrap()
             .create_thread("workspace_test")
@@ -80913,7 +82392,11 @@ data: [DONE]\n";
                 .task_store
                 .lock()
                 .unwrap()
-                .get_task(&local_first_task_runtime::TaskId::new(task_id), &user, &workspace)
+                .get_task(
+                    &local_first_task_runtime::TaskId::new(task_id),
+                    &user,
+                    &workspace
+                )
                 .unwrap()
                 .unwrap()
                 .status,
@@ -80928,11 +82411,7 @@ data: [DONE]\n";
         std::fs::create_dir_all(&root).unwrap();
         let state = AppState::for_tests();
         let (thread_id, message_id, task_id, user, workspace) =
-            seed_sandbox_escalation_source(
-                &state,
-                "exit 7",
-                Some(root.to_string_lossy().as_ref()),
-            );
+            seed_sandbox_escalation_source(&state, "exit 7", Some(root.to_string_lossy().as_ref()));
 
         let response = super::run_escalate(
             axum::extract::State(state.clone()),
@@ -80962,7 +82441,11 @@ data: [DONE]\n";
                 .task_store
                 .lock()
                 .unwrap()
-                .get_task(&local_first_task_runtime::TaskId::new(task_id), &user, &workspace)
+                .get_task(
+                    &local_first_task_runtime::TaskId::new(task_id),
+                    &user,
+                    &workspace
+                )
                 .unwrap()
                 .unwrap()
                 .status,
@@ -80983,7 +82466,10 @@ data: [DONE]\n";
 
     #[test]
     fn concurrent_actionable_claim_allows_exactly_one_execution() {
-        use std::sync::{Arc, Barrier, atomic::{AtomicUsize, Ordering}};
+        use std::sync::{
+            Arc, Barrier,
+            atomic::{AtomicUsize, Ordering},
+        };
 
         let state = AppState::for_tests();
         let (thread_id, message_id, _task_id, _user, _workspace) =
@@ -81097,19 +82583,21 @@ data: [DONE]\n";
             "proactive_approval_card",
         );
         approval.linked_task_id = Some(task_id.to_string());
-        approval.delivery_state =
-            local_first_desktop_gateway::MessageDeliveryState::WaitingUser;
+        approval.delivery_state = local_first_desktop_gateway::MessageDeliveryState::WaitingUser;
         {
             let store = super::lock_store(&state).unwrap();
             store
                 .append_assistant_message(&thread.thread_id, &approval)
                 .unwrap();
-            store.link_task_to_thread(task_id, &thread.thread_id).unwrap();
+            store
+                .link_task_to_thread(task_id, &thread.thread_id)
+                .unwrap();
         }
 
         let outcome = super::TaskExecutionOutcome {
             completed: false,
             blocked_reason: Some("scheduled task is waiting for a user action".to_string()),
+            wait_until: None,
             pending_approval: None,
             summary: "Scheduled task is waiting for a user action.".to_string(),
             checkpoint_payload: serde_json::json!({}),
@@ -81147,9 +82635,11 @@ data: [DONE]\n";
 
         let context = super::thread_context_for_model(&state, &thread.thread_id, &[], None)
             .expect("thread context");
-        assert!(!context
-            .iter()
-            .any(|message| message.text.contains("MCP_CONFIRM")));
+        assert!(
+            !context
+                .iter()
+                .any(|message| message.text.contains("MCP_CONFIRM"))
+        );
     }
 
     #[test]
@@ -81159,11 +82649,8 @@ data: [DONE]\n";
             .unwrap()
             .create_thread("workspace_test")
             .unwrap();
-        let mut assistant = super::channel_chat_message_with_id(
-            "assistant",
-            "",
-            "local_assistant_retry_failure",
-        );
+        let mut assistant =
+            super::channel_chat_message_with_id("assistant", "", "local_assistant_retry_failure");
         assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
         super::lock_store(&state)
             .unwrap()
@@ -81243,17 +82730,105 @@ data: [DONE]\n";
     }
 
     #[test]
+    fn executor_wait_until_outcome_preserves_scheduled_resume() {
+        let task = TaskRecord::new(
+            "wait-until-task",
+            UserId::new("user_test"),
+            WorkspaceId::new("workspace_test"),
+            "capability.browser",
+            "wait for scheduled availability",
+            serde_json::json!({}),
+        );
+        let not_before = super::OffsetDateTime::from_unix_timestamp(1_800_000_000).unwrap();
+
+        let outcome = super::task_execution_outcome_from_executor_result(
+            &task,
+            "executor-test",
+            "wait_tool",
+            ExecutorResult::WaitUntil {
+                not_before,
+                reason: "remote system asked us to retry later".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(!outcome.completed);
+        assert_eq!(
+            outcome.blocked_reason.as_deref(),
+            Some("remote system asked us to retry later")
+        );
+        assert_eq!(
+            outcome
+                .checkpoint_payload
+                .get("kind")
+                .and_then(|v| v.as_str()),
+            Some("executor_waiting_time")
+        );
+        assert_eq!(
+            outcome
+                .checkpoint_payload
+                .pointer("/output/not_before")
+                .and_then(|v| v.as_i64()),
+            Some(not_before.unix_timestamp())
+        );
+        assert_eq!(outcome.event_kind, "computer_executor_waiting_time");
+    }
+
+    #[test]
+    fn mark_task_waiting_time_persists_resume_time_and_releases_lease() {
+        let state = AppState::for_tests();
+        let user = UserId::new("user_test");
+        let workspace = WorkspaceId::new("workspace_test");
+        let not_before = super::OffsetDateTime::from_unix_timestamp(1_800_000_000).unwrap();
+        let mut task = TaskRecord::new(
+            "wait-time-task",
+            user.clone(),
+            workspace.clone(),
+            "capability.browser",
+            "wait for scheduled availability",
+            serde_json::json!({}),
+        );
+        task.status = TaskStatus::Running;
+        task.lease_owner = Some("worker-test".to_string());
+        task.lease_expires_at = Some(super::OffsetDateTime::now_utc());
+        task.last_heartbeat_at = Some(super::OffsetDateTime::now_utc());
+
+        super::mark_task_waiting_time(
+            &state,
+            &mut task,
+            not_before,
+            "remote system asked us to retry later",
+        )
+        .unwrap();
+
+        assert_eq!(task.status, TaskStatus::WaitingTime);
+        assert_eq!(task.not_before, Some(not_before));
+        assert_eq!(
+            task.blocked_reason.as_deref(),
+            Some("remote system asked us to retry later")
+        );
+        assert!(task.lease_owner.is_none());
+        assert!(task.lease_expires_at.is_none());
+        assert!(task.last_heartbeat_at.is_none());
+
+        let persisted = super::lock_task_store(&state)
+            .unwrap()
+            .get_task(&task.task_id, &user, &workspace)
+            .unwrap()
+            .expect("waiting task persisted");
+        assert_eq!(persisted.status, TaskStatus::WaitingTime);
+        assert_eq!(persisted.not_before, Some(not_before));
+    }
+
+    #[test]
     fn recovery_reuses_the_existing_assistant_message() {
         let state = AppState::for_tests();
         let thread = super::lock_store(&state)
             .unwrap()
             .create_thread("workspace_test")
             .unwrap();
-        let mut assistant = super::channel_chat_message_with_id(
-            "assistant",
-            "",
-            "local_assistant_recovery",
-        );
+        let mut assistant =
+            super::channel_chat_message_with_id("assistant", "", "local_assistant_recovery");
         assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
         super::lock_store(&state)
             .unwrap()
@@ -81285,13 +82860,7 @@ data: [DONE]\n";
         {
             let store = super::lock_task_store(&state).unwrap();
             store
-                .insert_chat_turn(
-                    &task,
-                    &thread.thread_id,
-                    "recovery",
-                    "interactive",
-                    "full",
-                )
+                .insert_chat_turn(&task, &thread.thread_id, "recovery", "interactive", "full")
                 .unwrap();
             store.bump_process_generation().unwrap();
             let generation = store.bump_process_generation().unwrap();
@@ -81405,11 +82974,8 @@ data: [DONE]\n";
             .unwrap()
             .create_thread("workspace_test")
             .unwrap();
-        let mut assistant = super::channel_chat_message_with_id(
-            "assistant",
-            "",
-            "local_assistant_park_guard",
-        );
+        let mut assistant =
+            super::channel_chat_message_with_id("assistant", "", "local_assistant_park_guard");
         assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
         super::lock_store(&state)
             .unwrap()
@@ -81704,7 +83270,10 @@ data: [DONE]\n";
             .map(|message| (message.id, message.text))
             .collect();
         assert_eq!(messages_after, messages_before);
-        assert_eq!(messages_after.last().map(|message| message.0.as_str()), Some(leaf_before.as_str()));
+        assert_eq!(
+            messages_after.last().map(|message| message.0.as_str()),
+            Some(leaf_before.as_str())
+        );
     }
 
     #[test]
@@ -81855,7 +83424,10 @@ data: [DONE]\n";
                 .is_none()
         );
         let messages = chat.messages(&thread.thread_id).unwrap().messages;
-        assert_eq!(messages.last().map(|message| message.id.as_str()), Some(leaf_before.as_str()));
+        assert_eq!(
+            messages.last().map(|message| message.id.as_str()),
+            Some(leaf_before.as_str())
+        );
         assert!(
             tasks
                 .get_task(
@@ -81948,7 +83520,6 @@ Sky Sport ha solo il menu. Vado direttamente alla pagina dei Mondiali.";
     #[test]
     fn hybrid_memory_ranking_fuses_then_refines_by_importance_and_recency() {
         let mk = |fts: Option<usize>, dense: Option<usize>, imp: f32, age: f32| MemoryCandidate {
-            reference: String::new(),
             fts_rank: fts,
             dense_rank: dense,
             importance: imp,
@@ -82198,23 +83769,22 @@ Sky Sport ha solo il menu. Vado direttamente alla pagina dei Mondiali.";
         let published_graph = std::fs::read(published.join("graph.json")).unwrap();
         let published_fingerprint =
             std::fs::read_to_string(published.join(".fingerprint")).unwrap();
-        let failed =
-            local_first_desktop_gateway::project_graph_commit::stage_project_graph_build(
-                &published,
-                "fingerprint-4",
-                |staging| {
-                    std::fs::write(
-                        staging.join("graph.json"),
-                        serde_json::json!({"nodes":[{"id":"z"}],"links":[]}).to_string(),
-                    )
-                    .map_err(|error| error.to_string())
-                },
-                |_| {
-                    Err(local_first_desktop_gateway::project_graph_commit::ProjectGraphCommitError::Import(
+        let failed = local_first_desktop_gateway::project_graph_commit::stage_project_graph_build(
+            &published,
+            "fingerprint-4",
+            |staging| {
+                std::fs::write(
+                    staging.join("graph.json"),
+                    serde_json::json!({"nodes":[{"id":"z"}],"links":[]}).to_string(),
+                )
+                .map_err(|error| error.to_string())
+            },
+            |_| {
+                Err(local_first_desktop_gateway::project_graph_commit::ProjectGraphCommitError::Import(
                         "forced import failure".to_string(),
                     ))
-                },
-            );
+            },
+        );
         assert!(failed.is_err());
         assert_eq!(
             std::fs::read(published.join("graph.json")).unwrap(),
@@ -82269,21 +83839,11 @@ Sky Sport ha solo il menu. Vado direttamente alla pagina dei Mondiali.";
             "[VAULT:identity:fiscal_code]",
             Some("VAULT_SECRET_SENTINEL"),
         );
-        let saved = super::accept_vault_proposal(
-            &vault,
-            None,
-            &TEST_VAULT_WRAP_KEY,
-            &request,
-        )
-        .expect("vault proposal save");
+        let saved = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request)
+            .expect("vault proposal save");
         assert_eq!(saved.status, "created");
-        let duplicate = super::accept_vault_proposal(
-            &vault,
-            None,
-            &TEST_VAULT_WRAP_KEY,
-            &request,
-        )
-        .expect("vault duplicate");
+        let duplicate = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request)
+            .expect("vault duplicate");
         assert_eq!(duplicate.status, "ignored");
         assert_eq!(duplicate.record_id, saved.record_id);
         let conflict = super::accept_vault_proposal(
@@ -82424,7 +83984,11 @@ Sky Sport ha solo il menu. Vado direttamente alla pagina dei Mondiali.";
         assert_eq!(body["vault"]["integrity_ok"], true);
         assert_eq!(body["graphs"][0]["status"], "missing");
         assert!(!body.to_string().contains("PRIVATE_SENTINEL"));
-        assert!(!body.to_string().contains(project.to_string_lossy().as_ref()));
+        assert!(
+            !body
+                .to_string()
+                .contains(project.to_string_lossy().as_ref())
+        );
 
         drop(_data_dir);
         let _ = std::fs::remove_dir_all(dir);

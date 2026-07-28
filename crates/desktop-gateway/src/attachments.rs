@@ -28,6 +28,7 @@ const MIN_PDF_TEXT_CHARS: usize = 80;
 
 /// The result of ingesting all attachments for one chat turn.
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 pub struct IngestedAttachments {
     /// Combined text blocks to append to the model-facing prompt.
     pub text: String,
@@ -78,6 +79,7 @@ pub fn ingest_each(attachments: &[AttachmentInput]) -> Vec<IngestedFile> {
 
 /// Reads every attachment and merges their extracted text + images. Per-attachment
 /// failures degrade to a short note in the text (never panic, never abort the turn).
+#[allow(dead_code)]
 pub fn ingest_attachments(attachments: &[AttachmentInput]) -> IngestedAttachments {
     let mut out = IngestedAttachments::default();
     for file in ingest_each(attachments) {
@@ -796,9 +798,10 @@ mod tests {
         assert!(out.text.contains("PowerPoint template/deck extracted"));
         assert!(out.text.contains("Slides: 2"));
         assert!(out.text.contains("Slide 1:\nSales Kickoff\nFY 2026"));
-        assert!(out
-            .text
-            .contains("Slide 2:\nQuarterly goals\nPipeline & team focus"));
+        assert!(
+            out.text
+                .contains("Slide 2:\nQuarterly goals\nPipeline & team focus")
+        );
         assert!(out.images.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }

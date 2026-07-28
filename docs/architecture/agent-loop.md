@@ -6,7 +6,10 @@
 > avvolto dall'outer `stream_chat_via_openai` → `run_agent_turn_into_message` /
 > `run_agent_turn_into_message_with_fanout`) e da `crates/orchestrator` (planner deliverable dormiente).
 > Questa pagina descrive la **realtà attuale**, incluse le **divergenze dai
-> [capisaldi](../CAPISALDI.md)**. È un punto fermo: ogni modifica al loop aggiorna questa
+> [capisaldi](../CAPISALDI.md)**. Ownership del turno / HITL: contratto vivo in
+> [TURN_CONTRACT.md](../TURN_CONTRACT.md) (2026-07-27) — oggi solo
+> `pending_confirm`+`ACTIONABLE_CARD_MARKER_TAGS` fermano davvero; `CHOICES` è ancora
+> UI-only (convergenza in corso). È un punto fermo: ogni modifica al loop aggiorna questa
 > pagina + il diagramma. Decisione di fondo: [ADR 0016](../decisions/0016-harness-owned-task-engine-cross-model.md),
 > [0018](../decisions/0018-adaptive-harness-subagents-triggers.md),
 > [0020](../decisions/0020-converge-chat-loop-onto-orchestrator.md),

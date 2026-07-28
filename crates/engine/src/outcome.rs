@@ -53,11 +53,8 @@ pub struct TurnOutcome {
     /// effects, so a rejection arriving after the model has already acted takes the ordinary (fatal,
     /// user-visible) error path instead.
     pub image_rejection: Option<String>,
-    /// True when the turn stopped because a steering decision asked to CLARIFY with the user, not
-    /// because it had a deliverable answer. The loop must not flatten this into an ordinary finalize:
-    /// the caller decides whether to park with the question instead of treating the synthesized prose
-    /// as a real answer (triage MINOR 9).
-    ///
-    /// Defaults to `false`, so every existing `..Default::default()` construction stays valid.
-    pub needs_clarification: bool,
+    /// Structured HITL wait the harness entered (Turn Contract). When `Some`, the gateway MUST
+    /// persist a Free wait / hold Confirm and MUST NOT treat the next user message as a fresh
+    /// objective without ResumeBinding. Prose-only asks never set this.
+    pub awaiting_user: Option<crate::hitl::HitlEnvelope>,
 }

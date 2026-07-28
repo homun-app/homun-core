@@ -9,6 +9,10 @@
 
 use serde_json::Value;
 
+use crate::markers::{
+    prose_asks_closed_choice_without_card, text_awaits_user, text_requests_user_reply,
+};
+
 /// The checkbox marker for a step status: `x` done, `-` doing, `!` blocked, space todo.
 pub fn plan_status_marker(status: &str) -> char {
     match status {
@@ -34,7 +38,8 @@ pub fn plan_value_steps(plan: &Value) -> Vec<Value> {
 /// RESUMES an interrupted task on the SAME authoritative state. A `done` step in the
 /// marker is genuinely done (the canonical marker only shows done once verified).
 pub fn parse_plan_marker(text: &str) -> Vec<Value> {
-    let (Some(s), Some(e)) = (text.rfind("‹‹PLAN››"), text.rfind("‹‹/PLAN››")) else {
+    let (Some(s), Some(e)) = (text.rfind("‹‹PLAN››"), text.rfind("‹‹/PLAN››"))
+    else {
         return Vec::new();
     };
     if e <= s {
@@ -74,7 +79,11 @@ pub fn parse_plan_marker(text: &str) -> Vec<Value> {
         }
         let id = t
             .find("(`")
-            .and_then(|a| t[a + 2..].find("`)").map(|b| t[a + 2..a + 2 + b].to_string()))
+            .and_then(|a| {
+                t[a + 2..]
+                    .find("`)")
+                    .map(|b| t[a + 2..a + 2 + b].to_string())
+            })
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| format!("s{}", out.len() + 1));
         let detail = t
@@ -92,7 +101,9 @@ pub fn parse_plan_marker(text: &str) -> Vec<Value> {
 }
 
 pub fn plan_step_status(step: &Value) -> &str {
-    step.get("status").and_then(|s| s.as_str()).unwrap_or("todo")
+    step.get("status")
+        .and_then(|s| s.as_str())
+        .unwrap_or("todo")
 }
 
 pub fn plan_step_title(step: &Value) -> &str {
@@ -108,7 +119,9 @@ pub fn plan_step_id(step: &Value) -> Option<&str> {
 
 /// Count of canonically-DONE steps (the single source of truth for progress).
 pub fn plan_done_count(plan: &[Value]) -> usize {
-    plan.iter().filter(|s| plan_step_status(s) == "done").count()
+    plan.iter()
+        .filter(|s| plan_step_status(s) == "done")
+        .count()
 }
 
 /// Title of the first step that isn't done and isn't blocked — the next action. None
@@ -131,7 +144,9 @@ pub fn plan_incomplete_reason(plan: &[Value]) -> Option<String> {
     let done = plan_done_count(plan);
     let total = plan.len();
     let next = plan_next_open(plan).unwrap_or_else(|| "blocked or unfinished step".to_string());
-    Some(format!("plan is incomplete ({done}/{total}); next step: {next}"))
+    Some(format!(
+        "plan is incomplete ({done}/{total}); next step: {next}"
+    ))
 }
 
 /// A plan is SETTLED when every step is terminal (`done` or `blocked`) — nothing runnable
@@ -139,7 +154,10 @@ pub fn plan_incomplete_reason(plan: &[Value]) -> Option<String> {
 /// step is finished, not in-progress, so it must STOP auto-resuming. This is what lets a
 /// blocked step actually terminate the plan instead of keeping it forever "active".
 pub fn plan_is_settled(plan: &[Value]) -> bool {
-    !plan.is_empty() && plan.iter().all(|s| matches!(plan_step_status(s), "done" | "blocked"))
+    !plan.is_empty()
+        && plan
+            .iter()
+            .all(|s| matches!(plan_step_status(s), "done" | "blocked"))
 }
 
 /// Harness-owned MONOTONIC progress: a plan runs in order, so once a step is `doing`
@@ -190,11 +208,18 @@ pub fn advance_plan_frontier(steps: &mut [Value]) -> Option<usize> {
 pub fn build_plan_markdown(steps: &[Value]) -> String {
     let mut lines = Vec::new();
     for (index, step) in steps.iter().enumerate() {
-        let title = step.get("title").and_then(|t| t.as_str()).unwrap_or("").trim();
+        let title = step
+            .get("title")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .trim();
         if title.is_empty() {
             continue;
         }
-        let status = step.get("status").and_then(|s| s.as_str()).unwrap_or("todo");
+        let status = step
+            .get("status")
+            .and_then(|s| s.as_str())
+            .unwrap_or("todo");
         let detail = step
             .get("detail")
             .and_then(|d| d.as_str())
@@ -286,6 +311,19 @@ pub fn answer_concludes_plan(open_steps: usize, delivered_chars: usize) -> bool 
     open_steps <= 1 && delivered_chars >= MIN_DELIVERED_CHARS_TO_CONCLUDE
 }
 
+/// Whether the harness may push the model past a no-tools stop because the plan is still open.
+/// Turn Contract: never nudge when the answer already handed control to the user (CHOICES /
+/// confirm cards, or a prose closed-choice / field request the person must answer first).
+pub fn should_nudge_for_open_plan(content: &str, open_steps: usize) -> bool {
+    if text_awaits_user(content)
+        || prose_asks_closed_choice_without_card(content)
+        || text_requests_user_reply(content)
+    {
+        return false;
+    }
+    !answer_concludes_plan(open_steps, content.trim().chars().count())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,6 +358,44 @@ mod tests {
     }
 
     #[test]
+    fn open_plan_nudge_is_suppressed_when_choices_await_the_user() {
+        let choices = concat!(
+            "Which train?\n",
+            r#"‹‹CHOICES››{"question":"Which?","options":["A","B"]}‹‹/CHOICES››"#,
+        );
+        assert!(
+            !should_nudge_for_open_plan(choices, 3),
+            "CHOICES must suppress the open-plan nudge even with several open steps"
+        );
+        assert!(
+            should_nudge_for_open_plan("short stop", 3),
+            "a short answer with open steps still nudges when the user is not waiting"
+        );
+        let long = "x".repeat(MIN_DELIVERED_CHARS_TO_CONCLUDE);
+        assert!(
+            !should_nudge_for_open_plan(&long, 1),
+            "substantial answer with one open step still concludes without nudge"
+        );
+        let prose_choice = r#"Opzioni:
+
+| # | Treno |
+|---|-------|
+| 1 | A |
+| 2 | B |
+
+quale preferisci?"#;
+        assert!(
+            !should_nudge_for_open_plan(prose_choice, 3),
+            "prose closed choice must not fight a plan nudge"
+        );
+        let passenger = "Mi servono Nome e Cognome, email e telefono. Appena me li dai proseguo.";
+        assert!(
+            !should_nudge_for_open_plan(passenger, 3),
+            "passenger-field requests must end the turn for the user to reply"
+        );
+    }
+
+    #[test]
     fn monotonic_and_frontier_and_queries() {
         let mut steps = vec![
             serde_json::json!({"id":"s1","title":"A","status":"doing","detail":""}),
@@ -327,7 +403,11 @@ mod tests {
             serde_json::json!({"id":"s3","title":"C","status":"todo","detail":""}),
         ];
         enforce_monotonic_plan_progress(&mut steps);
-        assert_eq!(plan_step_status(&steps[0]), "done", "stale doing before frontier closes");
+        assert_eq!(
+            plan_step_status(&steps[0]),
+            "done",
+            "stale doing before frontier closes"
+        );
         assert_eq!(plan_next_open(&steps).as_deref(), Some("B"));
         assert_eq!(plan_done_count(&steps), 1);
         assert!(!plan_is_complete(&steps));
@@ -345,6 +425,9 @@ mod tests {
             serde_json::json!({"id":"s2","status":"blocked"}),
         ];
         assert!(plan_is_settled(&blocked), "done+blocked is settled");
-        assert!(!plan_is_complete(&blocked), "but not complete (a blocked step)");
+        assert!(
+            !plan_is_complete(&blocked),
+            "but not complete (a blocked step)"
+        );
     }
 }

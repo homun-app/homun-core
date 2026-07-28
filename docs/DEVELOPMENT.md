@@ -41,6 +41,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 | Domanda | Dove |
 |---|---|
 | **Principi** (cosa non si viola) | [CAPISALDI.md](CAPISALDI.md) |
+| **Ownership del turno / HITL** (chi possiede il control-flow) | [TURN_CONTRACT.md](TURN_CONTRACT.md) · kill list [superpowers/2026-07-27-foundations-and-kill-list.md](superpowers/2026-07-27-foundations-and-kill-list.md) |
 | **Metodo** (come si lavora) | [METHODOLOGY.md](METHODOLOGY.md) |
 | **Stato vivo** (dove siamo / ripartenza) | [STATO.md](STATO.md) |
 | **Scelte precise** (perché abbiamo deciso X) | [decisions/](decisions/) — ADR **0001-0024** (immutabili; 0021 = motore corrente, 0022/0024 = *Proposed*) |

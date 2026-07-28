@@ -163,7 +163,11 @@ fn any_ref_in_floor(action: &Value, payment_floor_refs: &HashSet<String>) -> boo
 /// `ref` AND any `fields[].ref` (see `any_ref_in_floor`) so a `fill` action
 /// hiding its floored ref inside `fields[]` still floors correctly.
 fn payment_floor_for(action: &Value, payment_floor_refs: &HashSet<String>) -> ActionClass {
-    if any_ref_in_floor(action, payment_floor_refs) { ActionClass::PaymentCommit } else { ActionClass::Ordinary }
+    if any_ref_in_floor(action, payment_floor_refs) {
+        ActionClass::PaymentCommit
+    } else {
+        ActionClass::Ordinary
+    }
 }
 
 /// True when the action is committing, `hold`, OR targets a ref (top-level, OR
@@ -225,8 +229,10 @@ pub fn is_submitting_action(action: &Value) -> bool {
     if is_refless_committing(action) {
         return true;
     }
-    matches!(action.get("kind").and_then(Value::as_str), Some("type") | Some("fill"))
-        && type_or_fill_submits(action)
+    matches!(
+        action.get("kind").and_then(Value::as_str),
+        Some("type") | Some("fill")
+    ) && type_or_fill_submits(action)
 }
 
 /// Effective class for a committing action: `max(declared, machine_floor)`, where
@@ -297,12 +303,16 @@ pub fn evaluate_browser_action(
             "BROWSER_HAZARDOUS_ACTION: arbitrary page script (evaluate) is not allowed".to_string(),
         );
     }
-    let effective = match effective_action_class(action, payment_floor_refs, focus_payment_context) {
+    let effective = match effective_action_class(action, payment_floor_refs, focus_payment_context)
+    {
         Ok(class) => class,
         Err(reason) => return Some(reason),
     };
     if effective == ActionClass::PaymentCommit {
-        let action_id = action.get("payment_approval_id").and_then(Value::as_str).unwrap_or("");
+        let action_id = action
+            .get("payment_approval_id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
         if approved_payment_id.is_some_and(|approved| approved == action_id) {
             return None;
         }
@@ -317,6 +327,7 @@ pub fn evaluate_browser_action(
 
 /// Extracts the accessible name of a ref from an AI snapshot line such as
 /// `- button "Acquista" [ref=e5]`.
+#[allow(dead_code)]
 pub fn snapshot_label_for_ref(snapshot: &str, ref_id: &str) -> Option<String> {
     let marker = format!("[ref={ref_id}]");
     let line = snapshot.lines().find(|line| line.contains(&marker))?;
@@ -337,10 +348,22 @@ mod tests {
 
     #[test]
     fn declared_class_parses_the_four_names_and_rejects_unknown() {
-        assert_eq!(declared_action_class(&json!({"action_class":"ordinary"})), Some(ActionClass::Ordinary));
-        assert_eq!(declared_action_class(&json!({"action_class":"account"})), Some(ActionClass::Account));
-        assert_eq!(declared_action_class(&json!({"action_class":"booking"})), Some(ActionClass::Booking));
-        assert_eq!(declared_action_class(&json!({"action_class":"payment_commit"})), Some(ActionClass::PaymentCommit));
+        assert_eq!(
+            declared_action_class(&json!({"action_class":"ordinary"})),
+            Some(ActionClass::Ordinary)
+        );
+        assert_eq!(
+            declared_action_class(&json!({"action_class":"account"})),
+            Some(ActionClass::Account)
+        );
+        assert_eq!(
+            declared_action_class(&json!({"action_class":"booking"})),
+            Some(ActionClass::Booking)
+        );
+        assert_eq!(
+            declared_action_class(&json!({"action_class":"payment_commit"})),
+            Some(ActionClass::PaymentCommit)
+        );
         assert_eq!(declared_action_class(&json!({"action_class":"wat"})), None);
         assert_eq!(declared_action_class(&json!({"kind":"click"})), None);
     }
@@ -350,7 +373,10 @@ mod tests {
         assert!(ActionClass::PaymentCommit > ActionClass::Booking);
         assert!(ActionClass::Booking > ActionClass::Account);
         assert!(ActionClass::Account > ActionClass::Ordinary);
-        assert_eq!(ActionClass::Ordinary.max(ActionClass::PaymentCommit), ActionClass::PaymentCommit);
+        assert_eq!(
+            ActionClass::Ordinary.max(ActionClass::PaymentCommit),
+            ActionClass::PaymentCommit
+        );
     }
 
     #[test]
@@ -371,7 +397,13 @@ mod tests {
     #[test]
     fn committing_action_without_class_is_rejected_fail_closed() {
         use serde_json::json;
-        let reason = evaluate_browser_action(&json!({"kind":"click","ref":"e5"}), &floor(&[]), false, None).unwrap();
+        let reason = evaluate_browser_action(
+            &json!({"kind":"click","ref":"e5"}),
+            &floor(&[]),
+            false,
+            None,
+        )
+        .unwrap();
         assert!(reason.contains("BROWSER_ACTION_CLASS_MISSING"));
     }
 
@@ -403,8 +435,18 @@ mod tests {
     #[test]
     fn non_committing_action_needs_no_class() {
         use serde_json::json;
-        assert!(evaluate_browser_action(&json!({"kind":"type","ref":"e1","text":"Napoli"}), &floor(&[]), false, None).is_none());
-        assert!(evaluate_browser_action(&json!({"kind":"scroll"}), &floor(&[]), false, None).is_none());
+        assert!(
+            evaluate_browser_action(
+                &json!({"kind":"type","ref":"e1","text":"Napoli"}),
+                &floor(&[]),
+                false,
+                None
+            )
+            .is_none()
+        );
+        assert!(
+            evaluate_browser_action(&json!({"kind":"scroll"}), &floor(&[]), false, None).is_none()
+        );
     }
 
     #[test]
@@ -420,7 +462,11 @@ mod tests {
     fn refless_enter_declared_payment_needs_approval_then_allowed() {
         use serde_json::json;
         let enter = json!({"kind":"press","key":"Enter","action_class":"payment_commit"});
-        assert!(evaluate_browser_action(&enter, &floor(&[]), true, None).unwrap().contains("BROWSER_PAYMENT_APPROVAL_REQUIRED"));
+        assert!(
+            evaluate_browser_action(&enter, &floor(&[]), true, None)
+                .unwrap()
+                .contains("BROWSER_PAYMENT_APPROVAL_REQUIRED")
+        );
         let approved = json!({"kind":"press","key":"Enter","action_class":"payment_commit","payment_approval_id":"p1"});
         assert!(evaluate_browser_action(&approved, &floor(&[]), true, Some("p1")).is_none());
     }
@@ -435,25 +481,46 @@ mod tests {
     #[test]
     fn is_refless_committing_only_matches_enter_press() {
         use serde_json::json;
-        assert!(is_refless_committing(&json!({"kind":"press","key":"Enter"})));
-        assert!(is_refless_committing(&json!({"kind":"press_key","text":"Return"})));
-        assert!(!is_refless_committing(&json!({"kind":"click","ref":"e5"})));       // has a ref
-        assert!(!is_refless_committing(&json!({"kind":"type","ref":"e1","submit":true}))); // ref-bearing
+        assert!(is_refless_committing(
+            &json!({"kind":"press","key":"Enter"})
+        ));
+        assert!(is_refless_committing(
+            &json!({"kind":"press_key","text":"Return"})
+        ));
+        assert!(!is_refless_committing(&json!({"kind":"click","ref":"e5"}))); // has a ref
+        assert!(!is_refless_committing(
+            &json!({"kind":"type","ref":"e1","submit":true})
+        )); // ref-bearing
         assert!(!is_refless_committing(&json!({"kind":"scroll"})));
     }
 
     #[test]
     fn evaluate_kind_is_always_hazardous() {
         use serde_json::json;
-        assert!(evaluate_browser_action(&json!({"kind":"evaluate"}), &floor(&[]), false, None).is_some());
+        assert!(
+            evaluate_browser_action(&json!({"kind":"evaluate"}), &floor(&[]), false, None)
+                .is_some()
+        );
     }
 
     #[test]
     fn payment_floor_marks_effective_payment() {
         use serde_json::json;
-        assert!(action_is_payment_commit(&json!({"kind":"click","ref":"e9","action_class":"payment_commit"}), &floor(&[]), false));
-        assert!(action_is_payment_commit(&json!({"kind":"click","ref":"e9","action_class":"ordinary"}), &floor(&["e9"]), false));
-        assert!(!action_is_payment_commit(&json!({"kind":"click","ref":"e7","action_class":"ordinary"}), &floor(&[]), false));
+        assert!(action_is_payment_commit(
+            &json!({"kind":"click","ref":"e9","action_class":"payment_commit"}),
+            &floor(&[]),
+            false
+        ));
+        assert!(action_is_payment_commit(
+            &json!({"kind":"click","ref":"e9","action_class":"ordinary"}),
+            &floor(&["e9"]),
+            false
+        ));
+        assert!(!action_is_payment_commit(
+            &json!({"kind":"click","ref":"e7","action_class":"ordinary"}),
+            &floor(&[]),
+            false
+        ));
     }
 
     // --- 1.1 canonical committing predicate: every schema-legal Enter spelling ---
@@ -464,39 +531,71 @@ mod tests {
         // be recognized, case-insensitively.
         assert!(is_committing_action(&json!({"kind":"press","key":"Enter"})));
         assert!(is_committing_action(&json!({"kind":"press","key":"ENTER"})));
-        assert!(is_committing_action(&json!({"kind":"press","key":"Return"})));
-        assert!(is_committing_action(&json!({"kind":"press","key":"NumpadEnter"})));
-        assert!(is_committing_action(&json!({"kind":"press","key":"numpadenter"})));
+        assert!(is_committing_action(
+            &json!({"kind":"press","key":"Return"})
+        ));
+        assert!(is_committing_action(
+            &json!({"kind":"press","key":"NumpadEnter"})
+        ));
+        assert!(is_committing_action(
+            &json!({"kind":"press","key":"numpadenter"})
+        ));
         assert!(is_committing_action(&json!({"kind":"press","key":"\n"})));
         assert!(is_committing_action(&json!({"kind":"press","key":"\r"})));
-        assert!(!is_committing_action(&json!({"kind":"press","key":"ArrowDown"})));
+        assert!(!is_committing_action(
+            &json!({"kind":"press","key":"ArrowDown"})
+        ));
     }
 
     #[test]
     fn committing_detects_every_enter_spelling_on_press_key() {
         // `press_key` reads a DIFFERENT field: `text`, not `key`.
-        assert!(is_committing_action(&json!({"kind":"press_key","text":"Enter"})));
-        assert!(is_committing_action(&json!({"kind":"press_key","text":"Return"})));
-        assert!(is_committing_action(&json!({"kind":"press_key","text":"NumpadEnter"})));
-        assert!(is_committing_action(&json!({"kind":"press_key","text":"\n"})));
-        assert!(is_committing_action(&json!({"kind":"press_key","text":"\r"})));
-        assert!(!is_committing_action(&json!({"kind":"press_key","text":"Tab"})));
+        assert!(is_committing_action(
+            &json!({"kind":"press_key","text":"Enter"})
+        ));
+        assert!(is_committing_action(
+            &json!({"kind":"press_key","text":"Return"})
+        ));
+        assert!(is_committing_action(
+            &json!({"kind":"press_key","text":"NumpadEnter"})
+        ));
+        assert!(is_committing_action(
+            &json!({"kind":"press_key","text":"\n"})
+        ));
+        assert!(is_committing_action(
+            &json!({"kind":"press_key","text":"\r"})
+        ));
+        assert!(!is_committing_action(
+            &json!({"kind":"press_key","text":"Tab"})
+        ));
         // press_key does NOT fall back to reading `key` — the sidecar only reads `text`.
-        assert!(!is_committing_action(&json!({"kind":"press_key","key":"Enter"})));
+        assert!(!is_committing_action(
+            &json!({"kind":"press_key","key":"Enter"})
+        ));
     }
 
     #[test]
     fn committing_type_text_ending_in_newline_is_committing() {
         // Playwright presses Enter for a trailing newline in typed text.
-        assert!(is_committing_action(&json!({"kind":"type","ref":"e1","text":"Napoli\n"})));
-        assert!(is_committing_action(&json!({"kind":"fill","ref":"e1","text":"Napoli\r"})));
-        assert!(is_committing_action(&json!({"kind":"type","ref":"e1","commit":"enter"})));
-        assert!(is_committing_action(&json!({"kind":"type","ref":"e1","commit":"Return"})));
+        assert!(is_committing_action(
+            &json!({"kind":"type","ref":"e1","text":"Napoli\n"})
+        ));
+        assert!(is_committing_action(
+            &json!({"kind":"fill","ref":"e1","text":"Napoli\r"})
+        ));
+        assert!(is_committing_action(
+            &json!({"kind":"type","ref":"e1","commit":"enter"})
+        ));
+        assert!(is_committing_action(
+            &json!({"kind":"type","ref":"e1","commit":"Return"})
+        ));
         // Build1 Fix 2(b): "arrow_enter" is NOT itself an Enter keypress, but it DOES
         // press ArrowDown then UNCONDITIONALLY Enter in the sidecar — it commits, so
         // it must be treated as committing too (previously only an Enter-spelling
         // `commit` qualified, missing this schema-legal submit path).
-        assert!(is_committing_action(&json!({"kind":"type","ref":"e1","commit":"arrow_enter"})));
+        assert!(is_committing_action(
+            &json!({"kind":"type","ref":"e1","commit":"arrow_enter"})
+        ));
     }
 
     #[test]
@@ -513,14 +612,24 @@ mod tests {
 
     #[test]
     fn refless_committing_matches_every_enter_spelling_and_only_press_kinds() {
-        assert!(is_refless_committing(&json!({"kind":"press","key":"NumpadEnter"})));
+        assert!(is_refless_committing(
+            &json!({"kind":"press","key":"NumpadEnter"})
+        ));
         assert!(is_refless_committing(&json!({"kind":"press","key":"\n"})));
-        assert!(is_refless_committing(&json!({"kind":"press_key","text":"\r"})));
-        assert!(is_refless_committing(&json!({"kind":"press_key","text":"Enter"})));
+        assert!(is_refless_committing(
+            &json!({"kind":"press_key","text":"\r"})
+        ));
+        assert!(is_refless_committing(
+            &json!({"kind":"press_key","text":"Enter"})
+        ));
         // A committing type/fill (submit or trailing newline) carries its own field
         // ref and is handled by the REF floor, not the page floor.
-        assert!(!is_refless_committing(&json!({"kind":"type","ref":"e1","text":"x\n"})));
-        assert!(!is_refless_committing(&json!({"kind":"fill","ref":"e1","submit":true})));
+        assert!(!is_refless_committing(
+            &json!({"kind":"type","ref":"e1","text":"x\n"})
+        ));
+        assert!(!is_refless_committing(
+            &json!({"kind":"fill","ref":"e1","submit":true})
+        ));
         assert!(!is_refless_committing(&json!({"kind":"click","ref":"e5"})));
     }
 
@@ -566,27 +675,40 @@ mod tests {
         // "Meta+Enter" string — the idiomatic modifier-Enter submit spelling. A
         // whole-string membership check misses it entirely; `is_enter_spelling`
         // must split on '+' and match any token.
-        assert!(is_committing_action(&json!({"kind":"press","key":"Control+Enter"})));
-        assert!(is_committing_action(&json!({"kind":"press_key","text":"Meta+Enter"})));
+        assert!(is_committing_action(
+            &json!({"kind":"press","key":"Control+Enter"})
+        ));
+        assert!(is_committing_action(
+            &json!({"kind":"press_key","text":"Meta+Enter"})
+        ));
         // Case-insensitive and order-agnostic on the modifier token.
-        assert!(is_committing_action(&json!({"kind":"press","key":"meta+enter"})));
-        assert!(is_committing_action(&json!({"kind":"press","key":"Shift+Control+Enter"})));
+        assert!(is_committing_action(
+            &json!({"kind":"press","key":"meta+enter"})
+        ));
+        assert!(is_committing_action(
+            &json!({"kind":"press","key":"Shift+Control+Enter"})
+        ));
         // A chord whose key token is NOT an Enter spelling stays non-committing.
-        assert!(!is_committing_action(&json!({"kind":"press","key":"Control+ArrowDown"})));
+        assert!(!is_committing_action(
+            &json!({"kind":"press","key":"Control+ArrowDown"})
+        ));
     }
 
     #[test]
     fn modifier_enter_chord_is_refless_committing_and_floors_in_payment_context() {
-        assert!(is_refless_committing(&json!({"kind":"press","key":"Control+Enter"})));
-        assert!(is_refless_committing(&json!({"kind":"press_key","text":"Meta+Enter"})));
+        assert!(is_refless_committing(
+            &json!({"kind":"press","key":"Control+Enter"})
+        ));
+        assert!(is_refless_committing(
+            &json!({"kind":"press_key","text":"Meta+Enter"})
+        ));
 
         let ctrl_enter = json!({"kind":"press","key":"Control+Enter","action_class":"ordinary"});
         let reason = evaluate_browser_action(&ctrl_enter, &floor(&[]), true, None)
             .expect("Control+Enter in payment context must be rejected when under-declared");
         assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
 
-        let meta_enter =
-            json!({"kind":"press_key","text":"Meta+Enter","action_class":"ordinary"});
+        let meta_enter = json!({"kind":"press_key","text":"Meta+Enter","action_class":"ordinary"});
         let reason = evaluate_browser_action(&meta_enter, &floor(&[]), true, None)
             .expect("Meta+Enter in payment context must be rejected when under-declared");
         assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
@@ -600,21 +722,37 @@ mod tests {
         // sidecar — it commits even though it is not itself an Enter keypress, so it
         // must be treated as committing (previously only an Enter-spelling `commit`
         // qualified).
-        assert!(is_committing_action(&json!({"kind":"type","ref":"e1","commit":"arrow_enter"})));
-        assert!(is_committing_action(&json!({"kind":"fill","ref":"e1","commit":"arrow_enter"})));
+        assert!(is_committing_action(
+            &json!({"kind":"type","ref":"e1","commit":"arrow_enter"})
+        ));
+        assert!(is_committing_action(
+            &json!({"kind":"fill","ref":"e1","commit":"arrow_enter"})
+        ));
         // An empty commit string is not a real commit directive.
-        assert!(!is_committing_action(&json!({"kind":"type","ref":"e1","commit":""})));
+        assert!(!is_committing_action(
+            &json!({"kind":"type","ref":"e1","commit":""})
+        ));
     }
 
     #[test]
     fn is_submitting_action_covers_refless_enter_and_submitting_type_or_fill() {
         assert!(is_submitting_action(&json!({"kind":"press","key":"Enter"})));
-        assert!(is_submitting_action(&json!({"kind":"press_key","text":"Control+Enter"})));
-        assert!(is_submitting_action(&json!({"kind":"type","ref":"e1","submit":true})));
-        assert!(is_submitting_action(&json!({"kind":"type","ref":"e1","text":"x\n"})));
-        assert!(is_submitting_action(&json!({"kind":"type","ref":"e1","commit":"arrow_enter"})));
+        assert!(is_submitting_action(
+            &json!({"kind":"press_key","text":"Control+Enter"})
+        ));
+        assert!(is_submitting_action(
+            &json!({"kind":"type","ref":"e1","submit":true})
+        ));
+        assert!(is_submitting_action(
+            &json!({"kind":"type","ref":"e1","text":"x\n"})
+        ));
+        assert!(is_submitting_action(
+            &json!({"kind":"type","ref":"e1","commit":"arrow_enter"})
+        ));
         // A plain, non-submitting type/fill must NOT count — only a genuine submit.
-        assert!(!is_submitting_action(&json!({"kind":"type","ref":"e1","text":"Napoli"})));
+        assert!(!is_submitting_action(
+            &json!({"kind":"type","ref":"e1","text":"Napoli"})
+        ));
         assert!(!is_submitting_action(&json!({"kind":"click","ref":"e5"})));
     }
 
@@ -699,7 +837,10 @@ mod tests {
         });
         let reason = evaluate_browser_action(&fill, &floor(&["e9"]), false, None)
             .expect("a fill whose fields[] targets a floored ref must be gated as payment");
-        assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"), "got: {reason}");
+        assert!(
+            reason.contains("BROWSER_ACTION_CLASS_CONFLICT"),
+            "got: {reason}"
+        );
 
         // Declaring payment_commit correctly requires (and is unblocked by) an
         // approval, exactly like a top-level-ref fill would be.
@@ -719,7 +860,9 @@ mod tests {
             "action_class": "payment_commit",
             "payment_approval_id": "pay_1"
         });
-        assert!(evaluate_browser_action(&approved, &floor(&["e9"]), false, Some("pay_1")).is_none());
+        assert!(
+            evaluate_browser_action(&approved, &floor(&["e9"]), false, Some("pay_1")).is_none()
+        );
 
         // action_is_payment_commit must also see it, for the claim-gating call site.
         assert!(action_is_payment_commit(

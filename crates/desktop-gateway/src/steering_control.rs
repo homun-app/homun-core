@@ -23,6 +23,7 @@ const MAX_ORPHAN_INTERPRETATION_ATTEMPTS: u32 = 5;
 const PARKED_WAITING_ACTIVITY_MARKER: &str = "steering_park_waiting_for_model";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) enum SteeringInterpretationError {
     ModelUnavailable,
     InvalidModelOutput(String),
@@ -100,10 +101,7 @@ pub(crate) fn start(state: crate::AppState) {
                 })
                 .await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(
-                COORDINATOR_POLL_MILLIS,
-            ))
-            .await;
+            tokio::time::sleep(std::time::Duration::from_millis(COORDINATOR_POLL_MILLIS)).await;
         }
     });
 }
@@ -135,17 +133,19 @@ fn interpret_pending_turn(state: &crate::AppState, pending: &TurnSteeringRecord)
             // OUTSIDE this lock (mirrors the Some(run_id) branch below, which also
             // calls the model only after releasing the store guard).
             drop(store);
-            resolve_pending_without_running_run(state, pending, |thread_id, prompt, active, binding| {
-                crate::resolve_steering_semantic_decision(state, thread_id, prompt, active, binding)
-            });
+            resolve_pending_without_running_run(
+                state,
+                pending,
+                |thread_id, prompt, active, binding| {
+                    crate::resolve_steering_semantic_decision(
+                        state, thread_id, prompt, active, binding,
+                    )
+                },
+            );
             return;
         };
         let objective = store
-            .load_objective_contract(
-                &pending.user_id,
-                &pending.workspace_id,
-                &pending.thread_id,
-            )
+            .load_objective_contract(&pending.user_id, &pending.workspace_id, &pending.thread_id)
             .ok()
             .flatten();
         let claimed = store
@@ -296,7 +296,11 @@ fn resolve_pending_without_running_run<F>(
 
             let objective = state.task_store.lock().ok().and_then(|store| {
                 store
-                    .load_objective_contract(&pending.user_id, &pending.workspace_id, &pending.thread_id)
+                    .load_objective_contract(
+                        &pending.user_id,
+                        &pending.workspace_id,
+                        &pending.thread_id,
+                    )
                     .ok()
                     .flatten()
             });
@@ -353,7 +357,9 @@ fn resolve_pending_without_running_run<F>(
             let Ok(store) = state.task_store.lock() else {
                 return;
             };
-            if pending.interpretation_attempts.saturating_add(1) >= MAX_ORPHAN_INTERPRETATION_ATTEMPTS {
+            if pending.interpretation_attempts.saturating_add(1)
+                >= MAX_ORPHAN_INTERPRETATION_ATTEMPTS
+            {
                 if let Ok(held) = store.hold_pending_turn_steering(
                     &pending.user_id,
                     &pending.workspace_id,
@@ -460,14 +466,8 @@ mod tests {
         decision.decision.steering_disposition =
             crate::semantic_decision::SteeringDisposition::FinalizeWithCurrentEvidence;
 
-        let record = persist_interpretation_result(
-            &store,
-            &claimed,
-            "run-1",
-            Ok(decision),
-            10,
-        )
-        .unwrap();
+        let record =
+            persist_interpretation_result(&store, &claimed, "run-1", Ok(decision), 10).unwrap();
 
         assert_eq!(record.status, TurnSteeringStatus::Interpreted);
         assert!(record.applied_at.is_none());
@@ -492,7 +492,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(record.status, TurnSteeringStatus::Pending);
-        assert_eq!(record.last_interpretation_error.as_deref(), Some("model_unavailable"));
+        assert_eq!(
+            record.last_interpretation_error.as_deref(),
+            Some("model_unavailable")
+        );
         assert!(record.next_retry_at.is_some_and(|value| value > 10));
         assert!(record.semantic_decision_json.is_none());
     }
@@ -503,17 +506,14 @@ mod tests {
         let claimed = queued(&store, "do not stop; continue the existing investigation");
         let fallback = crate::semantic_decision::safe_fallback(None, "low_confidence");
 
-        let record = persist_interpretation_result(
-            &store,
-            &claimed,
-            "run-1",
-            Ok(fallback),
-            10,
-        )
-        .unwrap();
+        let record =
+            persist_interpretation_result(&store, &claimed, "run-1", Ok(fallback), 10).unwrap();
 
         assert_eq!(record.status, TurnSteeringStatus::Pending);
-        assert_eq!(record.last_interpretation_error.as_deref(), Some("low_confidence"));
+        assert_eq!(
+            record.last_interpretation_error.as_deref(),
+            Some("low_confidence")
+        );
     }
 
     fn actionable_decision() -> ValidatedSemanticDecision {
@@ -551,8 +551,11 @@ mod tests {
             serde_json::json!({}),
         );
         task.status = TaskStatus::Running;
-        task.resource_requirements = vec![ResourceRequirement::new(ResourceClass::BrowserSession, 1)];
-        store.insert_chat_turn(&task, "thread", "req-1", "interactive", "full").unwrap();
+        task.resource_requirements =
+            vec![ResourceRequirement::new(ResourceClass::BrowserSession, 1)];
+        store
+            .insert_chat_turn(&task, "thread", "req-1", "interactive", "full")
+            .unwrap();
         store
             .create_agent_run(&NewAgentRun {
                 run_id: format!("run-{turn_id}"),
@@ -566,7 +569,13 @@ mod tests {
             })
             .unwrap();
         store
-            .append_agent_checkpoint(&format!("run-{turn_id}"), 3, &serde_json::json!({"round": 3}), "fp", true)
+            .append_agent_checkpoint(
+                &format!("run-{turn_id}"),
+                3,
+                &serde_json::json!({"round": 3}),
+                "fp",
+                true,
+            )
             .unwrap();
         store.park_chat_turn(turn_id, "u", "w").unwrap();
 
@@ -610,11 +619,21 @@ mod tests {
             .unwrap();
         assert_eq!(task.status, TaskStatus::Parked, "model down: stays parked");
 
-        let row = store.load_turn_steering(pending.steering_id, "u", "w").unwrap().unwrap();
-        assert_eq!(row.status, TurnSteeringStatus::Pending, "steering stays pending across the park");
+        let row = store
+            .load_turn_steering(pending.steering_id, "u", "w")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.status,
+            TurnSteeringStatus::Pending,
+            "steering stays pending across the park"
+        );
         assert_eq!(row.interpretation_attempts, 1);
         assert!(row.next_retry_at.is_some_and(|value| value > 0));
-        assert_eq!(row.last_interpretation_error.as_deref(), Some("model_unavailable"));
+        assert_eq!(
+            row.last_interpretation_error.as_deref(),
+            Some("model_unavailable")
+        );
     }
 
     #[test]
@@ -633,11 +652,25 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        assert_eq!(task.status, TaskStatus::Queued, "model up: unparked back to queued");
+        assert_eq!(
+            task.status,
+            TaskStatus::Queued,
+            "model up: unparked back to queued"
+        );
 
-        let row = store.load_turn_steering(pending.steering_id, "u", "w").unwrap().unwrap();
-        assert_eq!(row.status, TurnSteeringStatus::Pending, "still pending — the resumed run interprets it");
-        assert_eq!(row.interpretation_attempts, 0, "the probe itself is not a recorded interpretation attempt");
+        let row = store
+            .load_turn_steering(pending.steering_id, "u", "w")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.status,
+            TurnSteeringStatus::Pending,
+            "still pending — the resumed run interprets it"
+        );
+        assert_eq!(
+            row.interpretation_attempts, 0,
+            "the probe itself is not a recorded interpretation attempt"
+        );
     }
 
     #[test]
@@ -672,17 +705,28 @@ mod tests {
         let unreachable_probe = |_: Option<&str>,
                                  _: &str,
                                  _: Option<&local_first_task_runtime::ObjectiveContractRecord>,
-                                 _: Option<&crate::RoutingBinding>| -> ValidatedSemanticDecision {
+                                 _: Option<&crate::RoutingBinding>|
+         -> ValidatedSemanticDecision {
             panic!("orphan handling must not call the model");
         };
 
         for attempt in 1..MAX_ORPHAN_INTERPRETATION_ATTEMPTS {
             resolve_pending_without_running_run(&state, &pending, unreachable_probe);
             let store = state.task_store.lock().unwrap();
-            let row = store.load_turn_steering(pending.steering_id, "u", "w").unwrap().unwrap();
-            assert_eq!(row.status, TurnSteeringStatus::Pending, "attempt {attempt}: still backing off");
+            let row = store
+                .load_turn_steering(pending.steering_id, "u", "w")
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                row.status,
+                TurnSteeringStatus::Pending,
+                "attempt {attempt}: still backing off"
+            );
             assert_eq!(row.interpretation_attempts, attempt);
-            assert_eq!(row.last_interpretation_error.as_deref(), Some("turn_orphaned"));
+            assert_eq!(
+                row.last_interpretation_error.as_deref(),
+                Some("turn_orphaned")
+            );
             drop(store);
             pending = row;
         }
@@ -690,8 +734,15 @@ mod tests {
         // Crossing the budget: terminal (`held`), surfaced instead of polling forever.
         resolve_pending_without_running_run(&state, &pending, unreachable_probe);
         let store = state.task_store.lock().unwrap();
-        let row = store.load_turn_steering(pending.steering_id, "u", "w").unwrap().unwrap();
-        assert_eq!(row.status, TurnSteeringStatus::Held, "surfaced instead of polling forever");
+        let row = store
+            .load_turn_steering(pending.steering_id, "u", "w")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.status,
+            TurnSteeringStatus::Held,
+            "surfaced instead of polling forever"
+        );
     }
 
     #[test]
@@ -712,7 +763,10 @@ mod tests {
                         == Some(PARKED_WAITING_ACTIVITY_MARKER)
             })
             .count();
-        assert_eq!(waiting_activity_count, 1, "idempotent — emitted exactly once despite two calls");
+        assert_eq!(
+            waiting_activity_count, 1,
+            "idempotent — emitted exactly once despite two calls"
+        );
     }
 
     /// Review C1 regression: the window between `unpark_chat_turn_to_queued` (task ->
@@ -737,10 +791,16 @@ mod tests {
                 fallback_decision("model_unavailable")
             });
             let store = state.task_store.lock().unwrap();
-            pending = store.load_turn_steering(pending.steering_id, "u", "w").unwrap().unwrap();
+            pending = store
+                .load_turn_steering(pending.steering_id, "u", "w")
+                .unwrap()
+                .unwrap();
             drop(store);
         }
-        assert!(pending.interpretation_attempts >= 3, "attempts accumulated from the outage");
+        assert!(
+            pending.interpretation_attempts >= 3,
+            "attempts accumulated from the outage"
+        );
 
         // The model recovers: the probe is actionable -> unpark.
         resolve_pending_without_running_run(&state, &pending, |_, _, _, _| actionable_decision());
@@ -758,9 +818,15 @@ mod tests {
         }
         let after_unpark = {
             let store = state.task_store.lock().unwrap();
-            store.load_turn_steering(pending.steering_id, "u", "w").unwrap().unwrap()
+            store
+                .load_turn_steering(pending.steering_id, "u", "w")
+                .unwrap()
+                .unwrap()
         };
-        assert_eq!(after_unpark.interpretation_attempts, 0, "unpark resets the shared attempts counter");
+        assert_eq!(
+            after_unpark.interpretation_attempts, 0,
+            "unpark resets the shared attempts counter"
+        );
         assert_eq!(after_unpark.status, TurnSteeringStatus::Pending);
 
         // In-transit window: the scheduler flips the task Running (mirrors the real
@@ -780,20 +846,37 @@ mod tests {
                 .unwrap()
                 .unwrap();
             task.status = TaskStatus::Running;
-            store.insert_chat_turn(&task, "thread", "req-1", "interactive", "full").unwrap();
+            store
+                .insert_chat_turn(&task, "thread", "req-1", "interactive", "full")
+                .unwrap();
         }
 
         let unreachable_probe = |_: Option<&str>,
                                  _: &str,
                                  _: Option<&local_first_task_runtime::ObjectiveContractRecord>,
                                  _: Option<&crate::RoutingBinding>|
-         -> ValidatedSemanticDecision { panic!("in-transit must not probe the model") };
+         -> ValidatedSemanticDecision {
+            panic!("in-transit must not probe the model")
+        };
         resolve_pending_without_running_run(&state, &after_unpark, unreachable_probe);
 
         let store = state.task_store.lock().unwrap();
-        let row = store.load_turn_steering(after_unpark.steering_id, "u", "w").unwrap().unwrap();
-        assert_eq!(row.status, TurnSteeringStatus::Pending, "still pending — not held");
-        assert_eq!(row.interpretation_attempts, 0, "in-transit does not consume the orphan budget");
-        assert!(row.next_retry_at.is_none(), "a plain wait, not a deferred retry");
+        let row = store
+            .load_turn_steering(after_unpark.steering_id, "u", "w")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.status,
+            TurnSteeringStatus::Pending,
+            "still pending — not held"
+        );
+        assert_eq!(
+            row.interpretation_attempts, 0,
+            "in-transit does not consume the orphan budget"
+        );
+        assert!(
+            row.next_retry_at.is_none(),
+            "a plain wait, not a deferred retry"
+        );
     }
 }

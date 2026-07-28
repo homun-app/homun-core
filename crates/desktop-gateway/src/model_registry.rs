@@ -856,6 +856,7 @@ pub fn slugify(label: &str) -> String {
 
 /// Parses a provider model-list HTTP response body into bare model ids,
 /// according to the provider kind. Tolerant of missing fields.
+#[allow(dead_code)]
 pub fn parse_models_response(kind: ProviderKind, body: &serde_json::Value) -> Vec<String> {
     let mut out = parse_model_entries(kind, body, None)
         .into_iter()
@@ -941,7 +942,7 @@ fn parse_openrouter_price(entry: &serde_json::Value) -> Option<ModelPrice> {
         || price.reasoning_microusd_per_million.is_some()
         || price.cache_read_microusd_per_million.is_some()
         || price.cache_write_microusd_per_million.is_some())
-        .then_some(price)
+    .then_some(price)
 }
 
 fn decimal_usd_per_token_to_microusd_per_million(value: &str) -> Option<u64> {
@@ -962,7 +963,12 @@ fn decimal_usd_per_token_to_microusd_per_million(value: &str) -> Option<u64> {
     } else {
         fraction.parse::<u128>().ok()? * 10u128.checked_pow((12 - fraction.len()) as u32)?
     };
-    u64::try_from(whole.checked_mul(1_000_000_000_000)?.checked_add(fraction)?).ok()
+    u64::try_from(
+        whole
+            .checked_mul(1_000_000_000_000)?
+            .checked_add(fraction)?,
+    )
+    .ok()
 }
 
 #[cfg(test)]

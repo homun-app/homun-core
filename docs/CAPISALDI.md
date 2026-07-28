@@ -100,7 +100,10 @@ Tutto è **scoped per `workspace_id` (progetto) + `user_id`**.
    invarianti del piano: **monotonìa** (un `done` verificato non si riapre),
    **limitatezza** (un avanzamento non gonfia il piano), **identità non inferita**
    (l'id è del runtime, mai dedotto dal testo). Output strutturato imposto dove il
-   backend lo supporta + parsing tollerante ovunque.
+   backend lo supporta + parsing tollerante ovunque. Stesso principio sul **turno**:
+   in ogni istante esattamente uno tra `model | harness | user` possiede il
+   control-flow — vedi [TURN_CONTRACT.md](TURN_CONTRACT.md) (niente contratti HITL
+   paralleli: CHOICES/confirm/clarify convergono su un solo `AwaitingUser`).
 7. **Capability activation da registry unico, non keyword sparse.** Workflow nativi
    (`make_*`), MCP, skills/addon, connector tools e strumenti atomici interni stanno
    nello stesso registry logico interrogabile. Il turno fa retrieval/decisione

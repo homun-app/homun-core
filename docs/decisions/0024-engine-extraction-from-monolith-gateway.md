@@ -104,16 +104,18 @@ incrementalmente quando si tocca un'area).
 - **Invarianti preservati:** il loop è quello di 0021 (nessun secondo motore); memoria off-path (0022);
   local-first (caposaldo #3); l'harness possiede il control-flow (caposaldo #2).
 
-## Sequenza d'implementazione (incrementale, behavior-preserving, gated)
+## Sequenza d'implementazione originaria (storica; oggi completata no-flag)
 
 1. **Contratto:** definire i trait del confine (`CapabilityExecutor`, `ModelClient`) nel crate motore;
    il gateway ne fornisce gli impl. Nessun comportamento cambia.
 2. **Chokepoint:** convergere i `match name` sparsi (4321/5639/20638/37325/37621) su
    `CapabilityFacade::call_tool` via `CapabilityExecutor`. Test di parità per ogni tool migrato.
-3. **Loop:** spostare `stream_chat_via_openai` nel crate motore come funzione che prende il contesto
-   iniettato; `main.rs` conserva solo il wiring HTTP→motore. Dietro flag `HOMUN_ENGINE_CRATE`, parità
-   verificata (stesso output turno-per-turno) prima di rendere default.
-4. **Pulizia:** rimuovere la parallela inline una volta che il crate è default (caposaldo #1 igiene).
+3. **Loop:** spostare il round loop nel crate motore come funzione che prende il contesto
+   iniettato; `main.rs` conserva solo il wiring HTTP→motore. La fase dietro flag
+   `HOMUN_ENGINE_CRATE` è stata completata e rimossa: oggi `run_agent_rounds` chiama
+   `engine::run_turn` incondizionatamente.
+4. **Pulizia:** la parallela inline è stata rimossa una volta che il crate è diventato default
+   (caposaldo #1 igiene).
 5. **(Fase B, ADR futura):** valutare il processo satellite se serve blast-radius isolation.
 
 ## Addendum 2026-07-07 — l'ordinamento è stato corretto leggendo il codice reale

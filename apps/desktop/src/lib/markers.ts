@@ -82,6 +82,9 @@ export const PAYMENT_APPROVAL_RE = /‹‹PAYMENT_APPROVAL››([\s\S]*?)‹‹
 // Single/multi-choice question card (Claude-Code style): the model emits the choices
 // instead of listing them in prose, and the click sends the answer back.
 export const CHOICES_RE = /‹‹CHOICES››([\s\S]*?)‹‹\/CHOICES››/;
+export const CLARIFY_RE = /‹‹CLARIFY››([\s\S]*?)‹‹\/CLARIFY››/;
+/** Canonical Always Contract envelope (legacy CHOICES/CLARIFY normalize into this). */
+export const AWAIT_USER_RE = /‹‹AWAIT_USER››([\s\S]*?)‹‹\/AWAIT_USER››/;
 // Plan-mode: the model proposes a plan and STOPS; the card gates execution behind
 // Accetta / Edit (the answer becomes the next user message).
 // Require a closed marker before rendering an actionable plan card. During streaming an
@@ -92,7 +95,7 @@ export const GOAL_PROPOSE_RE = /‹‹GOAL_PROPOSE››([\s\S]*?)‹‹\/GOAL_P
 // Strips an UNCLOSED plan/goal marker (open present, no close) from the visible prose.
 export const UNCLOSED_PROPOSE_RE = /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*$/;
 export const COMPOSIO_MARKERS_RE =
-  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|SANDBOX_ESCALATE|SANDBOX_READONLY|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|SANDBOX_ESCALATE|SANDBOX_READONLY|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
+  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|SANDBOX_ESCALATE|SANDBOX_READONLY|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|CLARIFY|AWAIT_USER|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|SANDBOX_ESCALATE|SANDBOX_READONLY|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|CLARIFY|AWAIT_USER|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
 export const PROPOSE_MARKERS_VISIBLE_RE =
   /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*?‹‹\/(?:PLAN_PROPOSE|GOAL_PROPOSE)››/g;
 
@@ -113,7 +116,7 @@ export const PLAN_RE = /‹‹PLAN››([\s\S]*?)‹‹\/PLAN››/g;
 // Streaming delta guard (ChatView.tsx)
 // ─────────────────────────────────────────────────────────────────────────────
 export const STRUCTURED_MARKER_DELTA_RE =
-  /^‹‹(?:ACT|REASONING|PLAN|CHOICES|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL)››[\s\S]*?‹‹\/(?:ACT|REASONING|PLAN|CHOICES|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL)››$/;
+  /^‹‹(?:ACT|REASONING|PLAN|CHOICES|CLARIFY|AWAIT_USER|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL)››[\s\S]*?‹‹\/(?:ACT|REASONING|PLAN|CHOICES|CLARIFY|AWAIT_USER|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL)››$/;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers

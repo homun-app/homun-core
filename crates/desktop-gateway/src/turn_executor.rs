@@ -73,7 +73,11 @@ fn finalize_agent_run(
         }
         if let Ok(data_dir) = crate::gateway_data_dir() {
             if let Err(error) = crate::working_ledger::materialize(
-                &store, &data_dir, user_id, workspace_id, thread_id,
+                &store,
+                &data_dir,
+                user_id,
+                workspace_id,
+                thread_id,
             ) {
                 tracing::warn!(target: "agent::ledger", %run_id, %error, "could not materialize working ledger");
             }
@@ -571,8 +575,7 @@ pub fn execute_chat_turn_task(
     // (unlike Telegram's self-expiring action) would otherwise stay "typing" on a cancelled turn.
     if let Some(handle) = typing_keepalive {
         handle.abort();
-        tokio::runtime::Handle::current()
-            .block_on(crate::clear_channel_typing(state, thread_id));
+        tokio::runtime::Handle::current().block_on(crate::clear_channel_typing(state, thread_id));
     }
     let cancelled = run.is_none();
     let agent_result = run.and_then(|result| result.ok()).flatten();
@@ -586,8 +589,11 @@ pub fn execute_chat_turn_task(
         .and_then(|result| result.remote_approval.as_ref())
         .is_some_and(|intent| intent.approval_id.is_some());
     let answer = agent_result
-        .map(|result| result.text)
+        .as_ref()
+        .map(|result| result.text.clone())
         .unwrap_or_default();
+    let answer_with_cards =
+        crate::answer_text_with_actionable_markers(&answer, agent_result.as_ref());
     let generated = !cancelled && !answer.trim().is_empty();
     // Parked at the finalization boundary (Build 2, park+resume): `run_agent_rounds`'s outcome
     // consumer already called `park_chat_turn` synchronously — this agent_run aborted with
@@ -705,37 +711,49 @@ pub fn execute_chat_turn_task(
         // separates activity into its own event kind, so to keep the island working
         // we re-prefix the activity markers (collected from the turn_events emitted
         // during the drain) ahead of the clean answer text.
-        let activity_prefix = build_activity_prefix_from_turn_events(state, turn_id);
-        let full_text = if activity_prefix.is_empty() {
-            answer.clone()
+        //
+        // CHOICES exception: `finalize_streamed_assistant_message` already persisted the
+        // raw answer with the choice card. Rewriting again with activity_prefix causes the
+        // visible "answer flashed 2–3 times then CHOICES appeared" regression — skip the
+        // text stomp, only emit Done so the UI can stop streaming.
+        let skip_text_rewrite = answer_with_cards.contains("‹‹CHOICES››")
+            || answer_with_cards.contains("‹‹CLARIFY››")
+            || answer_with_cards.contains("‹‹AWAIT_USER››");
+        let full_text = if skip_text_rewrite {
+            answer_with_cards.clone()
         } else {
-            format!("{activity_prefix}\n{answer}")
+            let activity_prefix = build_activity_prefix_from_turn_events(state, turn_id);
+            let text = if activity_prefix.is_empty() {
+                answer_with_cards.clone()
+            } else {
+                format!("{activity_prefix}\n{answer_with_cards}")
+            };
+            crate::update_channel_assistant_message(
+                state,
+                thread_id,
+                &visible_turn.assistant_message_id,
+                &text,
+            );
+            text
         };
-        crate::update_channel_assistant_message(
-            state,
-            thread_id,
-            &visible_turn.assistant_message_id,
-            &full_text,
-        );
         let assistant_message = crate::channel_chat_message_with_id(
             "assistant",
             &full_text,
             &visible_turn.assistant_message_id,
         );
-        tokio::runtime::Handle::current().block_on(
-            crate::activate_remote_approvals_from_message(
-                state,
-                thread_id,
-                &assistant_message,
-            ),
-        );
+        tokio::runtime::Handle::current().block_on(crate::activate_remote_approvals_from_message(
+            state,
+            thread_id,
+            &assistant_message,
+        ));
 
         // Channel convergence: mirror the CLEAN answer out to Telegram/WhatsApp when this
         // thread is a channel conversation (no-op otherwise). The OUTPUT adapter — a channel
         // message runs the SAME broker/engine turn (island/turn_events) and still gets a reply.
         // This executor is sync (block_on, like the engine call above), so block on the send.
-        tokio::runtime::Handle::current()
-            .block_on(crate::mirror_reply_to_channel_if_any(state, thread_id, &answer));
+        tokio::runtime::Handle::current().block_on(crate::mirror_reply_to_channel_if_any(
+            state, thread_id, &answer,
+        ));
 
         // 7. Emit the terminal `done` turn event (durable + best-effort live).
         tracing::info!(target: "broker::executor", turn_id = %turn_id, "emitting done event");
@@ -756,16 +774,12 @@ pub fn execute_chat_turn_task(
         // structured approval provenance and `WaitingUser`. Bind/dispatch only
         // from that saved card: never reconstruct a marker from display text.
         if has_dispatchable_remote_approval {
-            let approval_message = state
-                .chat_store
-                .lock()
-                .ok()
-                .and_then(|store| {
-                    store
-                        .message(thread_id, &visible_turn.assistant_message_id)
-                        .ok()
-                        .flatten()
-                });
+            let approval_message = state.chat_store.lock().ok().and_then(|store| {
+                store
+                    .message(thread_id, &visible_turn.assistant_message_id)
+                    .ok()
+                    .flatten()
+            });
             if let Some(message) = approval_message {
                 tokio::runtime::Handle::current().block_on(
                     crate::activate_remote_approvals_from_message(state, thread_id, &message),
@@ -803,8 +817,11 @@ pub fn execute_chat_turn_task(
         } else {
             Some("chat turn produced no final reply".to_string())
         },
+        wait_until: None,
         pending_approval: waiting_for_user.then(|| crate::PendingExecutorApproval {
-            action: waiting_action.clone().unwrap_or_else(|| "action card".to_string()),
+            action: waiting_action
+                .clone()
+                .unwrap_or_else(|| "action card".to_string()),
             risk_level: "high".to_string(),
             data_boundary: "in-chat action card".to_string(),
             explanation: "The chat turn is waiting for its persisted action card.".to_string(),
@@ -938,10 +955,20 @@ mod tests {
     #[test]
     fn register_and_unregister_turn() {
         let _ = register_turn("turn_test_reg");
-        assert!(turn_broadcast_registry().lock().unwrap().contains_key("turn_test_reg"));
+        assert!(
+            turn_broadcast_registry()
+                .lock()
+                .unwrap()
+                .contains_key("turn_test_reg")
+        );
         assert!(turn_cancel_notify("turn_test_reg").is_some());
         unregister_turn("turn_test_reg");
-        assert!(!turn_broadcast_registry().lock().unwrap().contains_key("turn_test_reg"));
+        assert!(
+            !turn_broadcast_registry()
+                .lock()
+                .unwrap()
+                .contains_key("turn_test_reg")
+        );
         assert!(turn_cancel_notify("turn_test_reg").is_none());
     }
 
@@ -1017,12 +1044,9 @@ mod tests {
         let wait = std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                let _ = tokio::time::timeout(
-                    std::time::Duration::from_secs(1),
-                    cancel.cancelled(),
-                )
-                .await
-                .expect("latched cancellation must wake a late waiter");
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(1), cancel.cancelled())
+                    .await
+                    .expect("latched cancellation must wake a late waiter");
             });
         });
         wait.join().unwrap();

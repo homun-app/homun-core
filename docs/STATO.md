@@ -3,7 +3,100 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-24.**
+> **Ultimo aggiornamento: 2026-07-27.**
+
+## ⭐ CHECKPOINT 2026-07-27 (quinquies) — Always Contract HITL (un chokepoint)
+
+**Implementato:**
+- `crates/engine/src/hitl.rs`: `HitlEnvelope` / `HoldPolicy` / `classify_no_tools_stop`
+  (Await | NudgeEmit | NotHitl). Prosa **mai** Await.
+- Marker canonico `‹‹AWAIT_USER››` + normalizzazione legacy CHOICES/CLARIFY/confirm.
+- Loop: gate post-model + skip `forced_synthesis` su envelope; Free marker inject per
+  steering Clarify (`ensure_free_hitl_marker_in_text`).
+- Gateway: `try_resume_open_wait` unico; persist Free da CHOICES|CLARIFY|AWAIT_USER;
+  Hold vs Free su payload AWAIT_USER; `TurnOutcome.awaiting_user` ora apre la wait durable
+  anche senza `event_parts` marker-derived.
+- Engine: forced synthesis passa dal gate HITL terminale; una domanda finale in prosa viene
+  materializzata come Free wait, non consegnata come risposta completata.
+- Cleanup: `TurnOutcome.needs_clarification` rimosso; Clarify steering usa solo
+  `awaiting_user=Clarify Free`.
+- UI: `threadTailAwaitsUser` + `forceNewTurn` (mai steer su wait Free); strip AWAIT_USER.
+- Docs: [`TURN_CONTRACT.md`](TURN_CONTRACT.md) = legge Always.
+
+**Ancora aperti (fuori Always):** quarantine scrub doc drive; RPC Choice stile approval
+(opzionale — click→composer+resume già ok).
+
+## ⭐ CHECKPOINT 2026-07-27 (quater) — Turn Contract: CHOICES ferma il turno (testabile)
+
+**Implementato (gate verde engine):**
+- `CHOICES` in `ACTIONABLE_CARD_MARKER_TAGS` + `text_awaits_user`
+- Nudge piano soppresso se await user (`should_nudge_for_open_plan`)
+- Loop: exit `awaiting_user_choice`, no reconcile-done sullo step aperto, no `forced_synthesis` su wait
+- Gateway: `actionable_cards_from_raw_text` → `agent_turn_waits_for_user` true su CHOICES JSON
+
+**Test (punto valido):**
+```bash
+cargo test -p local-first-engine --lib
+# focus:
+cargo test -p local-first-engine -- choices_card_stops_the_turn_instead_of_nudging_an_open_plan
+cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway choices_card_makes_the_agent_turn_wait
+```
+Engine: **142 passed**. Smoke manuale: chiedere una scelta discreta → card CHOICES → turn `waiting_user_approval`, Activity non “writing”, click opzione = nuovo messaggio.
+
+**Ancora aperti (dopo smoke):** quarantine scrub doc drive; resume CHOICES stile approval RPC (oggi click→composer ok).
+
+Vedi [`TURN_CONTRACT.md`](TURN_CONTRACT.md) + piano convergenza.
+
+## ⭐ CHECKPOINT 2026-07-27 (ter) — Turn Contract + punti saldi + kill list
+
+Diagnosi ampia: le basi **loop / memoria / broker / WS / confirm HITL** sono salde;
+il buco rispetto a Codex/Cowork è **ownership del turno** (contratti HITL rivali:
+confirm ferma, CHOICES no; nudge piano combatte lo stop).
+
+**Scritto:**
+- [`docs/TURN_CONTRACT.md`](TURN_CONTRACT.md) — invariante `model|harness|user`, fasi,
+  regole anti-sovrapposizione, gate di review.
+- [`docs/superpowers/2026-07-27-foundations-and-kill-list.md`](superpowers/2026-07-27-foundations-and-kill-list.md)
+  — KEEP / CONVERGE / KILL / DEFER.
+- [`docs/superpowers/plans/2026-07-27-turn-contract-convergence.md`](superpowers/plans/2026-07-27-turn-contract-convergence.md)
+  — piano a task (TDD → gate nudge → CHOICES=confirm → clarify wire|delete → quarantine scaffold).
+
+**Punti saldi (non reinventare):** `run_turn`, `MemoryFacade`, `request_confirm`+actionable
+cards, broker+`TaskStatus`, `Parked` macchina, WS live, `canonical_plan_value`, brain
+`plan_only` (non chat).
+
+**Da togliere / non costruire sopra:** scaffold `tool_exec.rs` rimosso (non era il chokepoint live);
+doc che ancora citano drive-as-chat cablato (codice già 0); non resuscitare reconcile auto-done.
+
+**Prossimo passo codice:** Task 1–3 del piano (test contratto → CHOICES sullo stesso stop
+di confirm). Browser/Trenitalia restano consumer, non il fix.
+
+Caposaldo #6 aggiornato con link al Turn Contract.
+
+## ⭐ CHECKPOINT 2026-07-27 — Ordine idee: branch backlog + pulizia + canali su main
+
+Censiti i branch fuori da `main`. Inventario in
+[`docs/superpowers/2026-07-27-branch-backlog.md`](superpowers/2026-07-27-branch-backlog.md).
+
+**Canali portati su `main` (cherry-pick):** `ready_tasks_for_user` +
+`non_terminal_workspace_ids` → `next_ready_task_across_workspaces` in
+`run_next_task_once` → Telegram `/configure-gateway` riscrive status via `getMe`.
+Docs design/plan/verification inclusi. Conflitto risolto tenendo anche
+`chat_turn_task_is_parked`. Gate: `local-first-task-runtime` ALL GREEN (incluso
+`scheduler_selects_ready_tasks_across_workspaces…` +
+`store_lists_only_workspace_scopes_with_non_terminal_tasks`); gateway
+`task_executor_finds_personal_channel_turn_while_project_is_active` OK.
+
+**Ancora aperti:** license-compliance, launch-media (docs), residui piano-ui,
+remoti stantii, stash WIP UI. Validazione live WhatsApp (progetto attivo + inbound)
+ancora da fare a mano.
+
+**Failure map turn-trace (stesso giorno):** corpus `~/.homun/logs/turn-trace.jsonl` —
+85 turni; browse ~68% bad vs non-browse quasi sempre ok; morte tipica
+`forced_synthesis`/`post_loop_exhausted` + piano cieco. Dettaglio:
+[`docs/superpowers/2026-07-27-turn-trace-failure-map.md`](superpowers/2026-07-27-turn-trace-failure-map.md).
+
+**`main` locale** ahead di `origin/main` (11 + 6 canali). Push solo a richiesta.
 
 ## ⭐ CHECKPOINT 2026-07-24 (bis) — Fluidità UI desktop + residui triage chiusi
 
@@ -1843,8 +1936,10 @@ plugin.json+SKILL.md+.mcp.json = la formalizzazione che manca a F0–F3), e2e. P
   registrati. Convergere = provider-ificare builtin+browser (stato accoppiato a memoria/artefatti/piani) +
   spostare confirmation card nel policy layer — NON un refactor piccolo. **Piano fasato per rischio:**
   [plans/2026-07-02-tool-chokepoint-convergence.md](plans/2026-07-02-tool-chokepoint-convergence.md).
-  **Fase 0 FATTA** (`59a48f2d`): `crates/desktop-gateway/src/tool_exec.rs` — tipi seam `ToolCall`/`ToolOutcome`/
-  trait `ToolExecutor` (pura addizione, non ancora cablato, `#![allow(dead_code)]`).
+  **Fase 0 superata/rimossa** (`59a48f2d`, cleanup 2026-07-27): lo scaffold
+  `crates/desktop-gateway/src/tool_exec.rs` / `ToolExecutor` era pura addizione non cablata
+  ed è stato eliminato. Il chokepoint reale resta `execute_chat_tool(...)` finché non verrà
+  estratto dal dispatch live con test.
   **Fase 1 FATTA** (2026-07-02, 4 commit `26410823`→`9feda778`→`5bc46bc5`→`680f8d20`, piano
   [plans/2026-07-02-fase1-chokepoint-extraction.md](plans/2026-07-02-fase1-chokepoint-extraction.md)):
   il chat loop ora dispaccia **OGNI** tool attraverso **un** chokepoint

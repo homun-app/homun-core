@@ -31,14 +31,17 @@ pub mod text;
 /// Pure; relocated whole from the gateway (ADR 0024 inc 5e.3) — `model_normalize` depends on it.
 pub mod markers;
 
+/// Turn Contract HITL: one [`hitl::HitlEnvelope`] for every human wait; legacy markers normalize in.
+pub mod hitl;
+
 /// Model-output normalization (ADR 0019): raw model shapes → one canonical valid form.
 /// Pure (serde only); relocated whole from the gateway (ADR 0024 inc 5e.3) as loop-move prep.
 pub mod model_normalize;
 
+pub mod loop_checkpoint;
 /// The loop's turn-carried state (ADR 0024 inc 5, Point 4) — bundled at its destination
 /// ahead of the loop-body move; the gateway constructs it and the inline loop mutates it.
 pub mod loop_state;
-pub mod loop_checkpoint;
 pub mod prompt_packets;
 
 /// The loop's turn-constant config (ADR 0024 inc 5, 5.D1c.1) — resolved gateway-side, injected so the
@@ -72,19 +75,25 @@ pub mod agent_loop;
 /// The `browse(goal) → BrowseResult` contract (ADR 0025): the browser as a delegated sub-agent.
 pub mod browse;
 
+pub use browse::{BrowseResult, Confidence};
+pub use config::{BrowserBudget, BrowserStopReason, TurnConfig};
 pub use contract::{
-    BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, ExecutionJournal, LoadedTool,
-    FinalizationFence, ModelCall, ModelCallError, ModelClient, ModelRoundOutput, PlanProgress, ProviderBinding,
-    ToolEffects, ToolOutcome, ToolOutcomeHint, TurnCompletionJudge, TurnControlDecision, TurnControlDisposition,
-    TurnPolicy,
+    BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, ExecutionJournal,
+    FinalizationFence, LoadedTool, ModelCall, ModelCallError, ModelClient, ModelRoundOutput,
+    PlanProgress, ProviderBinding, ToolEffects, ToolOutcome, ToolOutcomeHint, TurnCompletionJudge,
+    TurnControlDecision, TurnControlDisposition, TurnPolicy,
 };
 pub use execution_journal::{
     AgentExecutionEvent, NoopExecutionJournal, PromptMessageSnapshot, PromptSnapshot,
     PromptToolSnapshot, build_prompt_snapshot,
 };
-pub use browse::{BrowseResult, Confidence};
-pub use config::{BrowserBudget, BrowserStopReason, TurnConfig};
-pub use loop_state::LoopState;
+pub use hitl::{
+    AWAIT_USER_MARKER, HitlEnvelope, HitlKind, HoldPolicy, NoToolsClassification,
+    classify_no_tools_stop, ensure_free_hitl_marker_in_text, hitl_envelopes_from_text,
+};
 pub use loop_checkpoint::LoopCheckpoint;
-pub use prompt_packets::{PromptPacket, PromptPacketMetadata, PromptPacketSource, compose_prompt_packets};
+pub use loop_state::LoopState;
 pub use outcome::{TurnDelivery, TurnOutcome};
+pub use prompt_packets::{
+    PromptPacket, PromptPacketMetadata, PromptPacketSource, compose_prompt_packets,
+};

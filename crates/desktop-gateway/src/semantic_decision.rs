@@ -166,7 +166,7 @@ pub(crate) struct SemanticDecisionInput<'a> {
     pub(crate) capabilities: &'a [CapabilitySemanticEntry],
 }
 
-const SEMANTIC_DECISION_SCHEMA_VERSION: u32 = 1;
+pub(crate) const SEMANTIC_DECISION_SCHEMA_VERSION: u32 = 1;
 
 fn write_effect(effect: EffectClass) -> bool {
     matches!(
@@ -910,7 +910,10 @@ mod tests {
         );
 
         assert_eq!(validated.provenance.fallback_reason, None);
-        assert_eq!(validated.decision.execution_shape, ExecutionShape::AgentLoop);
+        assert_eq!(
+            validated.decision.execution_shape,
+            ExecutionShape::AgentLoop
+        );
         assert_eq!(validated.decision.selected_capability, None);
         assert_eq!(
             validated.decision.steering_disposition,
