@@ -4,6 +4,7 @@ pub mod approval;
 pub mod broker;
 pub mod checkpoint;
 pub mod error;
+pub mod execution_projection;
 pub mod execution_store;
 pub mod executor;
 pub mod facade;
@@ -18,11 +19,12 @@ pub mod ui;
 
 pub use approval::{ApprovalGate, ApprovalRequest, ApprovalStatus};
 pub use broker::{
-    chat_turn_task_id, ChatTurnInput, ChatTurnSource, EnqueueError, EnqueuedTurn,
-    EnqueueTurnOutcome, TurnApproval,
+    ChatTurnInput, ChatTurnSource, EnqueueError, EnqueueTurnOutcome, EnqueuedTurn, TurnApproval,
+    chat_turn_task_id,
 };
 pub use checkpoint::{RetryController, TaskCheckpoint};
 pub use error::{TaskRuntimeError, TaskRuntimeResult};
+pub use execution_projection::{ExecutionProjection, ExecutionPublicEventKind};
 pub use execution_store::{
     CreateExecution, ExecutionEvent, ExecutionJournalEvent, ExecutionRecord, OutcomeCommit,
     StartExecutionRevision,
@@ -36,14 +38,13 @@ pub use resources::{ResourceGovernor, ResourceLimits};
 pub use scheduler::TaskScheduler;
 pub use store::TaskStore;
 pub use types::{
-    AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus, AgentToolReceipt, ApprovalPolicy,
-    Automation, AutomationRun,
-    AutomationSource, AutomationTrigger, EventTrigger, NewAgentRun, ResourceClass,
-    BrowserCheckpointRecord, NewAgentToolReceipt, NewBrowserCheckpoint, ObjectiveContractRecord,
-    ObjectiveMode, ResourceRequirement, RetryPolicy,
-    ActiveTurnProjection, NewTurnSteering, RuntimePlanRecord, TaskId,
-    TaskPriority, TaskRecord, TaskStatus, SubagentInfo, ThreadActivityProjection, ThreadAttention,
-    TerminalWrite, ToolReceiptClaim, TurnEvent, TurnEventKind, TurnSteeringRecord,
-    TurnSteeringStatus, UserId, WorkflowId, WorkspaceId,
+    ActiveTurnProjection, AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus,
+    AgentToolReceipt, ApprovalPolicy, Automation, AutomationRun, AutomationSource,
+    AutomationTrigger, BrowserCheckpointRecord, EventTrigger, NewAgentRun, NewAgentToolReceipt,
+    NewBrowserCheckpoint, NewTurnSteering, ObjectiveContractRecord, ObjectiveMode, ResourceClass,
+    ResourceRequirement, RetryPolicy, RuntimePlanRecord, SubagentInfo, TaskId, TaskPriority,
+    TaskRecord, TaskStatus, TerminalWrite, ThreadActivityProjection, ThreadAttention,
+    ToolReceiptClaim, TurnEvent, TurnEventKind, TurnSteeringRecord, TurnSteeringStatus, UserId,
+    WorkflowId, WorkspaceId,
 };
 pub use ui::{TaskQueueSnapshot, TaskUiDetail, TaskUiItem, TaskUiReadModel};
