@@ -28,8 +28,8 @@ preserve unsent form state.
 
 - Preserve the exact live page, including unsent form state, when the sidecar or gateway is lost
   but the contained Chromium page is still alive.
-- Recover after a full browser-page loss by navigating to the last trusted URL and restoring only
-  bounded, reversible form draft values.
+- Recover after a full browser-page loss by navigating to the last trusted URL and exposing a
+  bounded encrypted draft manifest for explicit, policy-governed rehydration.
 - Bind every checkpoint to the owning user, workspace, thread, objective revision, target, and
   browser epoch.
 - Keep observation generations monotonic across recovery and rebuild refs from a fresh snapshot.
@@ -65,8 +65,9 @@ or session change. This approach violates the existing exactly-once boundary.
 ### Layered checkpoint and restore
 
 The selected design first adopts the exact live Chromium page. Only when that page is gone does it
-navigate to the last URL and restore a restricted encrypted form draft. No committing action is
-replayed. This addresses the observed failure without claiming impossible reconstruction.
+navigate to the last URL and expose a restricted encrypted form draft through opaque references. No
+field or committing action is replayed automatically. This addresses the observed failure without
+claiming impossible reconstruction.
 
 ## Recovery model
 
@@ -74,8 +75,8 @@ Recovery has three explicit results:
 
 - `adopted_live_page`: the original Chromium target still exists. Homun adopts it and preserves
   the exact DOM, unsent form values, scroll position, cookies, and in-memory page state.
-- `restored_safe_draft`: the original target is gone. Homun navigates to the checkpoint URL and
-  restores the bounded set of eligible form controls from encrypted storage.
+- `draft_available`: the original target is gone. Homun navigates to the checkpoint URL and reports
+  opaque references for eligible saved controls. Values are not applied automatically.
 - `degraded_url_only`: only the URL could be restored, or one or more controls no longer match.
   Homun returns structured missing-field metadata and never invents values or claims full recovery.
 
@@ -111,9 +112,12 @@ The composite owner key is `(user_id, workspace_id, thread_id, target_id)`. Upda
 same objective revision. A stale turn cannot overwrite or consume a checkpoint belonging to a
 newer objective.
 
-The row contains metadata only. `draft_secret_ref` points at encrypted material in the existing
-`EncryptedFileSecretStore`; the SQLite row never contains control values, cookies, page content,
-or request payloads.
+The row contains metadata only. `draft_secret_ref` points at encrypted material in a dedicated
+browser-checkpoint secret store. That store reuses the existing encryption primitive and key
+provider, but writes to `browser-checkpoint-secrets.json`, not the connector/Vault `secrets.json`.
+The different file, retention rules, and instance prevent high-churn ephemeral drafts from coupling
+their lifecycle or file rewrites to connector credentials. SQLite never contains control values,
+cookies, page content, or request payloads.
 
 The draft secret contains a versioned, bounded payload:
 
@@ -135,9 +139,10 @@ serialized plaintext before encryption. Values beyond the limits are omitted and
 The Rust and TypeScript browser contracts add:
 
 - `browser.checkpoint`: captures target metadata and the safe draft; it does not mutate the page.
-- `browser.restore`: adopts a live CDP target or performs URL plus safe-draft restoration.
-- `browser.detach`: disconnects a sidecar from a shared contained-browser context without closing
-  owned pages. This is used for abnormal parent loss and timeout recovery.
+- `browser.restore`: adopts a live CDP target or navigates to the checkpoint URL and returns an
+  opaque draft manifest. It never applies field values.
+- `browser.rehydrate`: applies selected opaque draft references to exact controls from the current
+  fresh snapshot. It is a normal `external_write` action, not an automatic recovery hook.
 
 Explicit `browser.stop`, thread archive/delete, user "close all browsers", objective completion or
 cancellation, and idle expiry still close pages and remove checkpoint data.
@@ -146,9 +151,10 @@ Every successful open, navigation, snapshot, or post-action observation returns 
 refresh the checkpoint: logical target, current URL, CDP target id, browser epoch, and generation.
 The gateway removes that metadata before the result enters model context or durable agent journals.
 
-On stdin EOF the sidecar uses detach semantics only for a shared CDP context. A sidecar that owns an
-isolated or host-launched context still closes it, because there is no external browser process that
-can safely retain the page. Explicit stop always closes regardless of context mode.
+Detach is lifecycle behavior, not a model-facing or ordinary RPC. On stdin EOF the sidecar detaches
+only from a shared CDP context and leaves its pages alive. A sidecar that owns an isolated or
+host-launched context still closes it, because there is no external browser process that can safely
+retain the page. Explicit `browser.stop` always closes regardless of context mode.
 
 ## Live page adoption
 
@@ -161,7 +167,8 @@ Adoption additionally requires:
 - exact user/workspace/thread metadata selected by the gateway;
 - exact active objective revision;
 - unexpired checkpoint status;
-- matching browser epoch;
+- matching browser epoch, derived from the shared Chromium/container instance rather than the
+  replaceable sidecar process;
 - matching page origin unless the page is at a navigation transition already recorded by a newer
   checkpoint.
 
@@ -181,8 +188,9 @@ Draft capture considers only visible, enabled controls on the active page:
 - checkboxes and radio buttons.
 
 Each locator descriptor uses bounded structural attributes such as tag, type, name, id,
-`autocomplete`, accessible label, and form identity. Restore requires an unambiguous match and the
-same origin. Ambiguous, missing, disabled, or changed controls are skipped.
+`autocomplete`, accessible label, and form identity. Rehydration requires an unambiguous match, the
+same origin, a fresh current-generation ref, and an empty current control. Ambiguous, populated,
+missing, disabled, or changed controls are skipped.
 
 The following are never captured:
 
@@ -196,39 +204,44 @@ The following are never captured:
 
 Names, email addresses, phone numbers, passenger data, and addresses may be draft data. They are
 eligible only because the payload is encrypted, scoped to the active objective revision, and deleted
-at the terminal boundary. They must not appear in logs, SQLite, traces, tool results, or debug output.
+at the terminal boundary. The model sees only an opaque draft reference and bounded control metadata,
+never the saved value. Values must not appear in logs, SQLite, traces, tool results, or debug output.
 
 ## Restore authorization
 
-Safe-draft restoration is a page mutation and requires the active objective contract to allow
-`external_write`. Live-page adoption and a fresh snapshot are reads, but adoption alone does not
-authorize a subsequent write.
+Live-page adoption, URL restoration, and a fresh snapshot are reads. Applying a saved value is a
+separate `browser.rehydrate` mutation and requires the active objective contract to allow
+`external_write`. Rehydration is never triggered merely because a checkpoint exists.
 
 Restore refuses when:
 
 - the objective revision changed;
 - the contract is completed or cancelled;
-- `external_write` is absent for draft restoration;
+- `external_write` is absent for draft rehydration;
 - URL policy rejects the checkpoint URL;
 - origin changed;
 - encrypted material is missing or invalid;
 - the checkpoint expired.
 
 The independent payment approval gate remains unchanged. Recovery cannot synthesize, consume, or
-reuse a payment approval.
+reuse a payment approval. `browser.rehydrate` cannot target payment-floor, credential, file, hidden,
+already-populated, or ambiguous controls and cannot click, submit, press a key, or dispatch a batch.
 
 ## Gateway lifecycle
 
 1. A browser observation succeeds.
 2. The gateway strips recovery metadata from the model-facing result.
 3. The gateway upserts metadata in `browser_checkpoints` with the owned objective revision.
-4. At bounded points after reversible draft mutation and before parking the turn, the gateway calls
-   `browser.checkpoint` and writes the encrypted payload through `SecretStore`.
+4. At bounded points after confirmed draft mutation and before parking the turn, the gateway calls
+   `browser.checkpoint` and writes the encrypted payload through the dedicated checkpoint store.
 5. A later call first attempts the warm in-process client.
 6. If no client exists, the gateway loads the active checkpoint and spawns a replacement sidecar.
 7. The gateway calls `browser.restore` using only trusted checkpoint data.
 8. A fresh snapshot establishes refs and the next generation before the browser agent continues.
-9. Restore status is journaled as metadata only: tier, generation, counts, and reason. URLs and values
+9. If draft references are available, the browser agent may request `browser.rehydrate` only after
+   inspecting that snapshot. The gateway resolves values internally and executes the write through
+   the ordinary effect-policy path.
+10. Restore status is journaled as metadata only: tier, generation, counts, and reason. URLs and values
    are excluded from the agent journal event.
 
 ## Timeout ownership
@@ -238,7 +251,7 @@ page". When a call times out:
 
 - the timed-out client is quarantined and cannot receive another request;
 - the checkpoint from the last successful observation remains authoritative;
-- abnormal EOF detaches from shared Chromium instead of closing the page;
+- abnormal EOF applies internal detach semantics to shared Chromium instead of closing the page;
 - the next browser operation creates a replacement sidecar and attempts restore once;
 - the failed RPC is never automatically replayed.
 
@@ -264,7 +277,8 @@ The agent journal records bounded metadata-only events:
 
 - `browser_checkpoint_saved`;
 - `browser_restore_adopted`;
-- `browser_restore_safe_draft`;
+- `browser_restore_draft_available`;
+- `browser_draft_rehydrated`;
 - `browser_restore_degraded`;
 - `browser_checkpoint_cleared`.
 
@@ -278,9 +292,11 @@ and a typed reason. They contain no URL, origin, selector, field name, value, co
 - A shared CDP page survives abnormal sidecar detach and is adopted by a replacement manager.
 - Explicit stop still closes the page.
 - Adoption keeps an unsent safe form value and resumes generation monotonically.
-- Full page loss restores eligible draft controls after navigation.
-- Password, payment, CVV, file, hidden, ambiguous, and cross-origin controls are never restored.
-- Restore never submits a form or triggers a click.
+- Full page loss returns opaque references without applying eligible draft controls.
+- Explicit rehydration restores only requested empty controls from a fresh snapshot.
+- Password, payment, CVV, file, hidden, populated, ambiguous, and cross-origin controls are never
+  offered or rehydrated.
+- Restore and rehydration never submit a form or trigger a click.
 - Checkpoint payload bounds are enforced.
 
 ### Rust contracts and store
@@ -288,7 +304,8 @@ and a typed reason. They contain no URL, origin, selector, field name, value, co
 - New browser methods serialize identically across Rust and TypeScript.
 - Checkpoint upsert/load/delete is scope exact and revision guarded.
 - Stale objective revisions cannot restore or overwrite a checkpoint.
-- Draft values exist only in the encrypted secret store and never in SQLite or journal payloads.
+- Draft values exist only in the dedicated encrypted checkpoint store and never in the connector
+  secret file, SQLite, model context, or journal payloads.
 - Terminal objective transitions and thread deletion remove metadata and encrypted material.
 - Timeout recovery attempts restore once and does not replay the timed-out operation.
 - A restored session forces a fresh snapshot before any action.
@@ -300,8 +317,9 @@ and a typed reason. They contain no URL, origin, selector, field name, value, co
 3. Record generation `N` and force the browser sidecar to terminate.
 4. Continue the same thread and objective.
 5. Prove the original page is adopted, values remain present, and the next observation is `N + 1`.
-6. Repeat after closing only the page; prove safe-draft fallback and explicit skipped-sensitive counts.
-7. Prove no submit request occurred.
+6. Repeat after closing only the page; prove the URL plus opaque draft manifest is restored while the
+   fields remain empty.
+7. Explicitly rehydrate safe fields and prove skipped-sensitive counts and no submit request.
 8. Cancel the objective and verify task, run, message, objective, checkpoint metadata, and encrypted
    draft all reach terminal/removed state.
 
@@ -313,7 +331,7 @@ reach form draft after a forced sidecar loss without restarting discovery or inv
 The gap is complete when deterministic tests and a real development smoke prove:
 
 - exact page adoption across sidecar loss;
-- bounded safe-draft recovery when the page itself is lost;
+- bounded opaque draft availability and explicit policy-governed rehydration when the page is lost;
 - no sensitive plaintext persistence;
 - no replay of uncertain or committing actions;
 - monotonic generation and fresh refs;
