@@ -8,12 +8,12 @@
 //! its plan. This is the payoff of the ADR 0024 extraction (the loop is now a recursively-callable
 //! engine).
 
-use crate::outcome::{TurnDelivery, TurnOutcome};
+use crate::outcome::{TurnOutcome, TurnStop};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 /// A legacy no-answer phrase is still mapped to NOT-FOUND if it reaches a browse result. New engine
-/// turns use `TurnDelivery::NoVisibleAnswer` instead of manufacturing this prose. This is the sub-agent's
+/// turns use a failed [`TurnStop`] instead of manufacturing this prose. This is the sub-agent's
 /// ENTIRE canned answer when it fires (never a fragment of a longer one), so recognizing it must be
 /// ANCHORED to the start of the (trimmed, lowercased) answer — not `contains` — or a legitimate answer
 /// that merely quotes/discusses this phrase mid-text (e.g. summarizing what an error page said) would be
@@ -206,7 +206,7 @@ pub fn seed_browse_messages(system_prompt: &str, goal: &str) -> Vec<Value> {
 /// actually visited (a source URL grounds the answer), else `Low`. The `**Sources**` block the loop may
 /// append is stripped from `answer` — sources travel structured in `sources`.
 pub fn browse_result_from_outcome(outcome: &TurnOutcome) -> BrowseResult {
-    if outcome.delivery != TurnDelivery::Delivered {
+    if outcome.stop != TurnStop::Completed {
         return BrowseResult::default();
     }
     let raw = outcome.memory_answer.trim();
@@ -433,7 +433,7 @@ mod tests {
     #[test]
     fn maps_substantive_grounded_answer_to_found_high_and_strips_sources_block() {
         let outcome = TurnOutcome {
-            delivery: TurnDelivery::Delivered,
+            stop: TurnStop::Completed,
             memory_answer: "The price is $63,120.\n\n**Sources**\n- https://kraken.com/btc".to_string(),
             tool_actions: String::new(),
             browse_sources: vec!["https://kraken.com/btc".to_string()],
@@ -450,7 +450,7 @@ mod tests {
     #[test]
     fn substantive_answer_without_sources_is_found_but_low_confidence() {
         let outcome = TurnOutcome {
-            delivery: TurnDelivery::Delivered,
+            stop: TurnStop::Completed,
             memory_answer: "Roughly 42% according to the page.".to_string(),
             browse_sources: vec![],
             ..Default::default()
@@ -464,7 +464,7 @@ mod tests {
     fn legacy_no_answer_text_maps_to_not_found() {
         // Historical data carrying this phrase remains a NOT-FOUND result.
         let outcome = TurnOutcome {
-            delivery: TurnDelivery::Delivered,
+            stop: TurnStop::Completed,
             memory_answer: "I completed the steps but couldn't produce a final answer. \
 Tell me if you want me to retry or rephrase."
                 .to_string(),
@@ -482,7 +482,7 @@ Tell me if you want me to retry or rephrase."
         // sentinel mid-text (e.g. summarizing what an error banner said) is real evidence and must
         // survive as `found: true`.
         let outcome = TurnOutcome {
-            delivery: TurnDelivery::Delivered,
+            stop: TurnStop::Completed,
             memory_answer: "The support page says: \"if the bot couldn't produce a final answer, \
 contact support\" — but I did find the answer: the fare is EUR 39."
                 .to_string(),
@@ -497,7 +497,7 @@ contact support\" — but I did find the answer: the fare is EUR 39."
     #[test]
     fn the_exact_sentinel_is_still_classified_no_answer() {
         let outcome = TurnOutcome {
-            delivery: TurnDelivery::Delivered,
+            stop: TurnStop::Completed,
             memory_answer: "I completed the steps but couldn't produce a final answer.".to_string(),
             ..Default::default()
         };
@@ -514,7 +514,7 @@ contact support\" — but I did find the answer: the fare is EUR 39."
     #[test]
     fn grounded_snapshot_survives_when_subagent_synthesis_has_no_answer() {
         let outcome = TurnOutcome {
-            delivery: TurnDelivery::NoVisibleAnswer,
+            stop: TurnStop::default(),
             browse_sources: vec!["https://official.example/report".to_string()],
             ..Default::default()
         };

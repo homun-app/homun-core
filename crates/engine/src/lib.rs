@@ -93,7 +93,7 @@ pub use hitl::{
 };
 pub use loop_checkpoint::LoopCheckpoint;
 pub use loop_state::LoopState;
-pub use outcome::{TurnDelivery, TurnOutcome};
+pub use outcome::{TurnOutcome, TurnStop};
 pub use prompt_packets::{
     PromptPacket, PromptPacketMetadata, PromptPacketSource, compose_prompt_packets,
 };

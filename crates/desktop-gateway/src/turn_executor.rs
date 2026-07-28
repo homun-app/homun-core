@@ -8,106 +8,58 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+use local_first_execution_protocol::{
+    CancelReason, CheckpointDataRef, CheckpointEnvelope, DurableDataRef, ExecutionFailure,
+    ExecutionOutcome, ValidatedExecutionContract, WakeCondition,
+};
 use local_first_task_runtime::{
-    AgentRunStatus, NewAgentRun, TaskRuntimeResult, TaskStatus, TaskStore, TurnEventKind,
-    broker::CancelNotify,
+    NewAgentRun, TaskRuntimeResult, TaskStatus, TaskStore, TurnEventKind, broker::CancelNotify,
 };
 use serde_json::Value;
 #[cfg(test)]
 use serde_json::json;
 use tokio::sync::{Notify, broadcast};
 
-/// Which post-run branch `execute_chat_turn_task` takes once the drained turn resolves.
-/// `Parked` (steering park+resume, Build 2) only applies once `Cancelled` is ruled out: a
-/// manual Stop that raced the park always wins — the user's own terminal request predates
-/// whatever the engine decided at its finalization fence — so the two paths can never both
-/// try to produce a terminal outcome for the same turn (see `classify_chat_turn_run`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ChatTurnRunBranch {
-    Cancelled,
-    Parked,
-    Generated,
-    NoAnswer,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ObjectiveTerminalProjection {
-    Completed,
-    Cancelled,
-    KeepActive,
-}
-
-/// Pure decision: given the three independently-observed signals, which branch applies.
-/// Kept as a free function (not inlined into the executor's if/else chain) so the
-/// precedence — cancel beats park beats a real answer beats nothing — is a single,
-/// directly testable statement instead of buried in a page of I/O.
-fn classify_chat_turn_run(cancelled: bool, generated: bool, parked: bool) -> ChatTurnRunBranch {
-    if cancelled {
-        ChatTurnRunBranch::Cancelled
-    } else if parked {
-        ChatTurnRunBranch::Parked
-    } else if generated {
-        ChatTurnRunBranch::Generated
-    } else {
-        ChatTurnRunBranch::NoAnswer
-    }
-}
-
-fn project_objective_terminal(
-    branch: ChatTurnRunBranch,
-    has_actionable_wait: bool,
-) -> ObjectiveTerminalProjection {
-    match branch {
-        ChatTurnRunBranch::Cancelled => ObjectiveTerminalProjection::Cancelled,
-        ChatTurnRunBranch::Generated if !has_actionable_wait => {
-            ObjectiveTerminalProjection::Completed
-        }
-        ChatTurnRunBranch::Generated | ChatTurnRunBranch::Parked | ChatTurnRunBranch::NoAnswer => {
-            ObjectiveTerminalProjection::KeepActive
-        }
-    }
-}
-
-fn finalize_agent_run(
-    state: &crate::AppState,
-    thread_id: &str,
-    user_id: &str,
-    workspace_id: &str,
-    agent_run: &Option<(String, crate::agent_journal::GatewayExecutionJournal)>,
-    status: AgentRunStatus,
-    reason: &'static str,
-    terminal_event: Option<local_first_engine::AgentExecutionEvent>,
-) {
-    let Some((run_id, journal)) = agent_run else {
-        return;
+pub(crate) fn canonical_chat_outcome(
+    execution_id: &str,
+    revision: u64,
+    producer_kind: &str,
+    turn: &local_first_engine::TurnOutcome,
+    checkpoint_ref: Option<CheckpointDataRef>,
+) -> Result<ExecutionOutcome, crate::LocalTaskExecutionError> {
+    let suspended = |wake| {
+        let data_ref = checkpoint_ref
+            .clone()
+            .ok_or_else(|| crate::LocalTaskExecutionError {
+                message: "suspended chat turn has no durable checkpoint reference".to_string(),
+            })?;
+        Ok(ExecutionOutcome::Suspended {
+            wake,
+            checkpoint: CheckpointEnvelope::new(execution_id, revision, producer_kind, 1, data_ref),
+        })
     };
-    if let Some(event) = terminal_event {
-        local_first_engine::ExecutionJournal::record(journal, event);
-    }
-    let flushed = journal.close_and_flush();
-    let dropped = journal.dropped_events();
-    if !flushed || dropped > 0 {
-        tracing::warn!(target: "agent::journal", %run_id, flushed, dropped, "journal completed with degraded observability");
-    }
-    if let Ok(store) = state.task_store.lock() {
-        if let Err(error) = store.finish_agent_run(run_id, status, Some(reason)) {
-            tracing::warn!(target: "agent::journal", %run_id, %error, "could not finalize agent run");
-        }
-        if let Ok(data_dir) = crate::gateway_data_dir() {
-            if let Err(error) = crate::working_ledger::materialize(
-                &store,
-                &data_dir,
-                user_id,
-                workspace_id,
-                thread_id,
-            ) {
-                tracing::warn!(target: "agent::ledger", %run_id, %error, "could not materialize working ledger");
-            }
-        }
-    }
-    crate::agent_journal::unregister(run_id);
-}
 
+    match &turn.stop {
+        local_first_engine::TurnStop::Completed => {
+            Ok(ExecutionOutcome::completed(serde_json::json!({
+                "kind": "chat_turn",
+                "answer": turn.memory_answer,
+            })))
+        }
+        local_first_engine::TurnStop::SuspendedUser => suspended(WakeCondition::User {
+            wait_ref: format!("{execution_id}:{revision}:user"),
+        }),
+        local_first_engine::TurnStop::SuspendedApproval => suspended(WakeCondition::Approval {
+            approval_ref: format!("{execution_id}:{revision}:approval"),
+        }),
+        local_first_engine::TurnStop::SuspendedModel { role } => {
+            suspended(WakeCondition::ModelAvailable { role: role.clone() })
+        }
+        local_first_engine::TurnStop::Failed { failure } => Ok(ExecutionOutcome::Failed {
+            failure: failure.clone(),
+        }),
+    }
+}
 /// A live subscriber fan-out for a single turn_id. Created when the turn starts running,
 /// dropped when it terminates. Mirrors the StreamEntry pattern but keyed by turn_id
 /// and broker-owned.
@@ -308,7 +260,8 @@ impl CancelNotify for GatewayCancelNotify {
 pub fn execute_chat_turn_task(
     state: &crate::AppState,
     task: &local_first_task_runtime::TaskRecord,
-) -> Result<crate::TaskExecutionOutcome, crate::LocalTaskExecutionError> {
+    contract: &ValidatedExecutionContract,
+) -> Result<ExecutionOutcome, crate::LocalTaskExecutionError> {
     let turn_id = task.task_id.as_str();
     tracing::info!(target: "broker::executor", turn_id = %turn_id, "executor started");
 
@@ -497,13 +450,6 @@ pub fn execute_chat_turn_task(
             let Some(journal) =
                 crate::agent_journal::GatewayExecutionJournal::start(run_id.clone(), database_path)
             else {
-                if let Ok(store) = state.task_store.lock() {
-                    let _ = store.finish_agent_run(
-                        &run_id,
-                        AgentRunStatus::Failed,
-                        Some("journal_writer_spawn_failed"),
-                    );
-                }
                 tracing::warn!(target: "agent::journal", %run_id, "could not spawn journal writer");
                 return None;
             };
@@ -569,18 +515,10 @@ pub fn execute_chat_turn_task(
         Some(turn_id),
     );
     let Some(visible_turn) = visible_turn else {
-        finalize_agent_run(
-            state,
-            thread_id,
-            task.user_id.as_str(),
-            &workspace_id,
-            &agent_run,
-            AgentRunStatus::Failed,
-            "visible_turn_start_failed",
-            Some(local_first_engine::AgentExecutionEvent::RunFailed {
-                reason: "visible_turn_start_failed".to_string(),
-            }),
-        );
+        if let Some((run_id, journal)) = &agent_run {
+            journal.close_and_flush();
+            crate::agent_journal::unregister(run_id);
+        }
         unregister_turn(turn_id);
         return Err(crate::LocalTaskExecutionError {
             message: "could not start a visible conversation turn".to_string(),
@@ -597,7 +535,6 @@ pub fn execute_chat_turn_task(
     //    mirror each stream event into turn_events + the broadcast; the stub
     //    just delegates to the existing drainer.
     tracing::info!(target: "broker::executor", turn_id = %turn_id, thread_id = %thread_id, "agent-loop starting");
-    let drain_started = std::time::Instant::now();
     // Race the turn against its cancel signal (fired by `cancel_chat_turn` →
     // `GatewayCancelNotify`). Dropping the turn future on cancel aborts the in-flight
     // model/tool work; on cancel we SKIP the Completed finalize below so the `Cancelled`
@@ -620,7 +557,7 @@ pub fn execute_chat_turn_task(
                 &visible_turn.assistant_message_id,
                 turn_id,
                 agent_run.as_ref().map(|(run_id, _)| run_id.as_str()),
-                local_first_desktop_gateway::MessageDeliveryState::Delivered,
+                local_first_desktop_gateway::MessageDeliveryState::Streaming,
             ) => Some(answer),
         }
     });
@@ -631,475 +568,208 @@ pub fn execute_chat_turn_task(
         handle.abort();
         tokio::runtime::Handle::current().block_on(crate::clear_channel_typing(state, thread_id));
     }
-    let cancelled = run.is_none();
-    let agent_result = run.and_then(|result| result.ok()).flatten();
-    let has_actionable_wait = agent_result.as_ref().is_some_and(|result| {
-        result
-            .actionable_cards
-            .iter()
-            .any(|card| card.requires_user)
-    });
-    let waiting_for_user = crate::agent_turn_waits_for_user(agent_result.as_ref());
-    let waiting_action = agent_result
-        .as_ref()
-        .and_then(|result| result.actionable_cards.first())
-        .map(|card| card.kind.to_string());
-    let has_dispatchable_remote_approval = agent_result
-        .as_ref()
-        .and_then(|result| result.remote_approval.as_ref())
-        .is_some_and(|intent| intent.approval_id.is_some());
-    let answer = agent_result
-        .as_ref()
-        .map(|result| result.text.clone())
-        .unwrap_or_default();
-    let answer_with_cards =
-        crate::answer_text_with_actionable_markers(&answer, agent_result.as_ref());
-    let generated = !cancelled && !answer.trim().is_empty();
-    // Parked at the finalization boundary (Build 2, park+resume): `run_agent_rounds`'s outcome
-    // consumer already called `park_chat_turn` synchronously — this agent_run aborted with
-    // `parked_waiting_for_model`, the task flipped to `Parked`, steering left `pending` — before
-    // unblocking this drain with an empty `done` line (the ONLY way it and `answer` end up empty
-    // without a genuine failure). Re-reading the task's own authoritative status, rather than
-    // threading a new signal through the SSE/`AgentTurnResult` plumbing, mirrors how a manual Stop
-    // is detected elsewhere in this same pipeline (the runner's `externally_cancelled` reload).
-    let parked = !cancelled
-        && !generated
-        && state
-            .task_store
-            .lock()
-            .ok()
-            .and_then(|store| {
-                store
-                    .get_task(&task.task_id, &task.user_id, &task.workspace_id)
-                    .ok()
-                    .flatten()
-            })
-            .is_some_and(|persisted| persisted.status == TaskStatus::Parked);
-    let run_branch = classify_chat_turn_run(cancelled, generated, parked);
-    match run_branch {
-        ChatTurnRunBranch::Cancelled => {
-            if let Ok(store) = state.chat_store.lock() {
-                let partial = store
-                    .message(thread_id, &visible_turn.assistant_message_id)
-                    .ok()
-                    .flatten()
-                    .map(|message| crate::strip_chat_markers(&message.text))
-                    .filter(|text| !text.trim().is_empty())
-                    .unwrap_or_else(|| "Operazione interrotta.".to_string());
-                let _ = store.set_message_text(
-                    thread_id,
-                    &visible_turn.assistant_message_id,
-                    partial.trim(),
-                );
-                let _ = store.set_message_delivery_state(
-                    thread_id,
-                    &visible_turn.assistant_message_id,
-                    local_first_desktop_gateway::MessageDeliveryState::Cancelled,
-                );
-            }
-            finalize_agent_run(
-                state,
-                thread_id,
-                task.user_id.as_str(),
-                &workspace_id,
-                &agent_run,
-                AgentRunStatus::Aborted,
-                "cancelled",
-                Some(local_first_engine::AgentExecutionEvent::RunAborted {
-                    reason: "cancelled".to_string(),
-                }),
-            );
-        }
-        ChatTurnRunBranch::Parked => {
-            // The task-runtime row is already terminal-for-this-attempt (aborted with
-            // `parked_waiting_for_model`) via `park_chat_turn`; calling `finalize_agent_run`
-            // again would try to `finish_agent_run` a row no longer `running` (a harmless
-            // no-op guarded by its own WHERE clause) and record a misleading `RunFailed`
-            // journal event. Only close out THIS run's in-process observability journal so
-            // the writer thread + registry entry don't leak — the DB row and task status are
-            // already correct, and NO terminal turn event / assistant-message finalize happens
-            // here (the bubble stays open; see the "6+7" step below).
-            if let Some((run_id, journal)) = &agent_run {
-                journal.close_and_flush();
-                crate::agent_journal::unregister(run_id);
-            }
-        }
-        ChatTurnRunBranch::Generated => {
-            finalize_agent_run(
-                state,
-                thread_id,
-                task.user_id.as_str(),
-                &workspace_id,
-                &agent_run,
-                AgentRunStatus::Completed,
-                "delivered",
-                Some(local_first_engine::AgentExecutionEvent::RunCompleted {
-                    reason: "delivered".to_string(),
-                }),
-            );
-        }
-        ChatTurnRunBranch::NoAnswer => {
-            finalize_agent_run(
-                state,
-                thread_id,
-                task.user_id.as_str(),
-                &workspace_id,
-                &agent_run,
-                AgentRunStatus::Failed,
-                "no_reply_generated",
-                Some(local_first_engine::AgentExecutionEvent::RunFailed {
-                    reason: "no_reply_generated".to_string(),
-                }),
-            );
-        }
-    }
-    tracing::info!(
-        target: "broker::executor",
-        turn_id = %turn_id,
-        elapsed_ms = drain_started.elapsed().as_millis() as u64,
-        answer_len = answer.len(),
-        "agent-loop completed — persisting assistant message"
-    );
-
-    // 6+7. Finalize — ONLY when the turn ran to completion. On cancel we skip both the
-    // assistant-message finalize and the `done` event: `cancel_chat_turn` already persisted
-    // the `Cancelled` status and emitted the `Cancelled` turn event, so writing a `done`/full
-    // answer here would resurrect a cancelled turn.
-    if generated && !waiting_for_user {
-        // 6. Finalize the assistant message. The legacy path persists the full
-        // streamed text (which includes ‹‹ACT›› activity markers as inline deltas),
-        // so the working island can parse them out of `message.text`. The broker
-        // separates activity into its own event kind, so to keep the island working
-        // we re-prefix the activity markers (collected from the turn_events emitted
-        // during the drain) ahead of the clean answer text.
-        //
-        // CHOICES exception: `finalize_streamed_assistant_message` already persisted the
-        // raw answer with the choice card. Rewriting again with activity_prefix causes the
-        // visible "answer flashed 2–3 times then CHOICES appeared" regression — skip the
-        // text stomp, only emit Done so the UI can stop streaming.
-        let skip_text_rewrite = answer_with_cards.contains("‹‹CHOICES››")
-            || answer_with_cards.contains("‹‹CLARIFY››")
-            || answer_with_cards.contains("‹‹AWAIT_USER››");
-        let full_text = if skip_text_rewrite {
-            answer_with_cards.clone()
-        } else {
-            let activity_prefix = build_activity_prefix_from_turn_events(state, turn_id);
-            let text = if activity_prefix.is_empty() {
-                answer_with_cards.clone()
-            } else {
-                format!("{activity_prefix}\n{answer_with_cards}")
-            };
-            crate::update_channel_assistant_message(
-                state,
-                thread_id,
-                &visible_turn.assistant_message_id,
-                &text,
-            );
-            text
-        };
-        let assistant_message = crate::channel_chat_message_with_id(
-            "assistant",
-            &full_text,
-            &visible_turn.assistant_message_id,
-        );
-        tokio::runtime::Handle::current().block_on(crate::activate_remote_approvals_from_message(
-            state,
-            thread_id,
-            &assistant_message,
-        ));
-
-        // Channel convergence: mirror the CLEAN answer out to Telegram/WhatsApp when this
-        // thread is a channel conversation (no-op otherwise). The OUTPUT adapter — a channel
-        // message runs the SAME broker/engine turn (island/turn_events) and still gets a reply.
-        // This executor is sync (block_on, like the engine call above), so block on the send.
-        tokio::runtime::Handle::current().block_on(crate::mirror_reply_to_channel_if_any(
-            state, thread_id, &answer,
-        ));
-
-        // 7. Emit the terminal `done` turn event (durable + best-effort live).
-        tracing::info!(target: "broker::executor", turn_id = %turn_id, "emitting done event");
-        if let Ok(store) = state.task_store.lock() {
-            let _ = emit_turn_event(
-                state,
-                &store,
-                turn_id,
-                local_first_task_runtime::TurnEventKind::Done,
-                serde_json::json!({
-                    "assistant_message_id": visible_turn.assistant_message_id,
-                    "user_message_id": visible_turn.user_message_id,
-                }),
-            );
-        }
-    } else if generated {
-        // The drainer has already atomically persisted the visible card, its
-        // structured approval provenance and `WaitingUser`. Bind/dispatch only
-        // from that saved card: never reconstruct a marker from display text.
-        if has_dispatchable_remote_approval {
-            let approval_message = state.chat_store.lock().ok().and_then(|store| {
-                store
-                    .message(thread_id, &visible_turn.assistant_message_id)
-                    .ok()
-                    .flatten()
-            });
-            if let Some(message) = approval_message {
-                tokio::runtime::Handle::current().block_on(
-                    crate::activate_remote_approvals_from_message(state, thread_id, &message),
-                );
-            }
-        }
-        tracing::info!(target: "broker::executor", turn_id = %turn_id, "approval card persisted; skipping channel mirror and terminal done event");
-    } else if parked {
-        tracing::info!(target: "broker::executor", turn_id = %turn_id, "turn parked at the finalization boundary — bubble left open, steering pending for coordinator-driven resume");
-    } else {
-        tracing::info!(target: "broker::executor", turn_id = %turn_id, cancelled, "turn did not produce a final reply — skipping finalization + done event");
-    }
-
-    if let Some(objective) = objective.as_ref() {
-        let terminal_status = match project_objective_terminal(run_branch, has_actionable_wait) {
-            ObjectiveTerminalProjection::Completed => Some("completed"),
-            ObjectiveTerminalProjection::Cancelled => Some("cancelled"),
-            ObjectiveTerminalProjection::KeepActive => None,
-        };
-        if let Some(terminal_status) = terminal_status
-            && let Ok(store) = state.task_store.lock()
-        {
-            match store.transition_objective_contract_status(
-                task.user_id.as_str(),
-                &workspace_id,
-                thread_id,
-                objective.revision,
-                terminal_status,
+    let mut canonical = match run {
+        None => ExecutionOutcome::Cancelled {
+            reason: CancelReason::User,
+        },
+        Some(Err(error)) => ExecutionOutcome::Failed {
+            failure: ExecutionFailure::transient(
+                "chat_transport_unavailable",
+                crate::redact_sensitive_text(&error),
+            ),
+        },
+        Some(Ok(result)) => {
+            let turn = result.outcome;
+            let checkpoint_ref = if matches!(
+                turn.stop,
+                local_first_engine::TurnStop::SuspendedUser
+                    | local_first_engine::TurnStop::SuspendedApproval
+                    | local_first_engine::TurnStop::SuspendedModel { .. }
             ) {
-                Ok(true) => {
-                    let secret_refs = store
-                        .delete_browser_checkpoints_for_objective(
-                            task.user_id.as_str(),
-                            &workspace_id,
-                            thread_id,
-                            objective.revision,
-                        )
-                        .unwrap_or_default();
-                    drop(store);
-                    let cleared_secret_count = secret_refs.len();
-                    for reference in secret_refs {
-                        let _ = state.browser_checkpoint_secret_store.delete(&reference);
-                    }
-                    tracing::info!(
-                        target: "browser::checkpoint",
-                        event = "browser_checkpoint_cleared",
-                        reason = terminal_status,
-                        cleared_secret_count,
-                        "browser checkpoint lifecycle cleanup"
-                    );
-                    tracing::info!(
-                        target: "objective::contract",
-                        thread_id,
-                        revision = objective.revision,
-                        status = terminal_status,
-                        "objective reached broker-owned terminal state"
+                let stop_kind = match &turn.stop {
+                    local_first_engine::TurnStop::SuspendedUser => "user",
+                    local_first_engine::TurnStop::SuspendedApproval => "approval",
+                    local_first_engine::TurnStop::SuspendedModel { .. } => "model",
+                    local_first_engine::TurnStop::Completed
+                    | local_first_engine::TurnStop::Failed { .. } => unreachable!(),
+                };
+                let checkpoint = state
+                    .task_store
+                    .lock()
+                    .map_err(|error| crate::LocalTaskExecutionError {
+                        message: error.to_string(),
+                    })?
+                    .append_checkpoint(
+                        &task.task_id,
+                        &task.user_id,
+                        &task.workspace_id,
+                        serde_json::json!({
+                            "kind": "chat_turn",
+                            "stop": stop_kind,
+                            "thread_id": thread_id,
+                            "assistant_message_id": visible_turn.assistant_message_id,
+                            "user_message_id": visible_turn.user_message_id,
+                            "agent_run_id": agent_run.as_ref().map(|(run_id, _)| run_id),
+                            "objective_revision": objective.as_ref().map(|record| record.revision),
+                            "awaiting_user": turn.awaiting_user,
+                            "answer": turn.memory_answer,
+                        }),
+                        serde_json::json!({
+                            "kind": "chat_turn",
+                            "stop": stop_kind,
+                            "thread_id": thread_id,
+                            "assistant_message_id": visible_turn.assistant_message_id,
+                            "user_message_id": visible_turn.user_message_id,
+                            "agent_run_id": agent_run.as_ref().map(|(run_id, _)| run_id),
+                            "objective_revision": objective.as_ref().map(|record| record.revision),
+                            "awaiting_user_kind": turn
+                                .awaiting_user
+                                .as_ref()
+                                .map(|wait| wait.wait_kind_key()),
+                        }),
                     )
-                }
-                Ok(false) => tracing::warn!(
-                    target: "objective::contract",
-                    thread_id,
-                    revision = objective.revision,
-                    status = terminal_status,
-                    "objective terminal transition skipped because ownership changed"
-                ),
-                Err(error) => tracing::warn!(
-                    target: "objective::contract",
-                    thread_id,
-                    revision = objective.revision,
-                    status = terminal_status,
-                    %error,
-                    "objective terminal transition failed"
-                ),
-            }
+                    .map_err(|error| crate::LocalTaskExecutionError {
+                        message: error.to_string(),
+                    })?;
+                Some(CheckpointDataRef::Redacted {
+                    record_ref: DurableDataRef::from_store_id(&checkpoint.checkpoint_id).map_err(
+                        |error| crate::LocalTaskExecutionError {
+                            message: error.to_string(),
+                        },
+                    )?,
+                })
+            } else {
+                None
+            };
+            canonical_chat_outcome(
+                contract.as_ref().execution_id.as_str(),
+                contract.as_ref().revision,
+                contract.as_ref().kind.as_str(),
+                &turn,
+                checkpoint_ref,
+            )?
         }
+    };
+
+    if let ExecutionOutcome::Completed { output, .. } = &mut canonical {
+        output["thread_id"] = serde_json::json!(thread_id);
+        output["assistant_message_id"] =
+            serde_json::json!(visible_turn.assistant_message_id.as_str());
+        output["user_message_id"] = serde_json::json!(visible_turn.user_message_id.as_str());
+        output["agent_run_id"] =
+            serde_json::json!(agent_run.as_ref().map(|(run_id, _)| run_id.as_str()));
+        output["objective_revision"] =
+            serde_json::json!(objective.as_ref().map(|record| record.revision));
     }
 
-    // 8. Drop the live broadcast (subscribers see the channel close).
+    if let Some((run_id, journal)) = &agent_run {
+        let flushed = journal.close_and_flush();
+        let dropped = journal.dropped_events();
+        if !flushed || dropped > 0 {
+            tracing::warn!(
+                target: "agent::journal",
+                %run_id,
+                flushed,
+                dropped,
+                "journal closed with degraded observability before canonical projection"
+            );
+        }
+        crate::agent_journal::unregister(run_id);
+    }
     unregister_turn(turn_id);
-
-    // 9. Build the outcome — same shape as `execute_proactive_prompt_task`. A cancelled
-    // turn is never "completed"; the runner sees completed=false + the store's Cancelled
-    // status and closes out without overwriting it.
-    let completed = generated && !waiting_for_user;
-    tracing::info!(
-        target: "broker::executor",
-        turn_id = %turn_id,
-        completed,
-        "executor finished — assistant message persisted, broadcast closed"
-    );
-    Ok(crate::TaskExecutionOutcome {
-        completed,
-        blocked_reason: if completed {
-            None
-        } else if waiting_for_user {
-            Some("chat turn is waiting for a user action".to_string())
-        } else if parked {
-            Some("chat turn parked at its finalization boundary; waiting for the model".to_string())
-        } else {
-            Some("chat turn produced no final reply".to_string())
-        },
-        wait_until: None,
-        pending_approval: waiting_for_user.then(|| crate::PendingExecutorApproval {
-            action: waiting_action
-                .clone()
-                .unwrap_or_else(|| "action card".to_string()),
-            risk_level: "high".to_string(),
-            data_boundary: "in-chat action card".to_string(),
-            explanation: "The chat turn is waiting for its persisted action card.".to_string(),
-            inline_action_card: true,
-        }),
-        summary: if completed {
-            "Chat turn executed.".to_string()
-        } else if waiting_for_user {
-            "Chat turn is waiting for approval.".to_string()
-        } else if parked {
-            "Chat turn parked; waiting for the model.".to_string()
-        } else {
-            "Chat turn produced no reply.".to_string()
-        },
-        checkpoint_payload: serde_json::json!({
-            "kind": "chat_turn",
-            "thread_id": thread_id,
-            "assistant_message_id": visible_turn.assistant_message_id,
-            "user_message_id": visible_turn.user_message_id,
-            "completed": completed,
-            "waiting_user_action": waiting_for_user,
-        }),
-        checkpoint_redacted: serde_json::json!({
-            "kind": "chat_turn",
-            "completed": completed,
-        }),
-        chat_message: answer.clone(),
-        result_surfacing: crate::TaskResultSurfacing::AlreadyPersisted,
-        surface: crate::SurfaceKind::Logs,
-        event_kind: if completed {
-            "chat_turn_completed".to_string()
-        } else if waiting_for_user {
-            "chat_turn_waiting_approval".to_string()
-        } else if parked {
-            "chat_turn_parked".to_string()
-        } else {
-            "chat_turn_incomplete".to_string()
-        },
-        event_title: if completed {
-            "Chat turn completed".to_string()
-        } else if waiting_for_user {
-            "Chat turn waiting approval".to_string()
-        } else if parked {
-            "Chat turn parked".to_string()
-        } else {
-            "Chat turn incomplete".to_string()
-        },
-        event_subtitle: if completed {
-            "Interactive chat turn.".to_string()
-        } else if waiting_for_user {
-            "Remote approval required before the turn can continue.".to_string()
-        } else if parked {
-            "Waiting for the model; steering stays queued for the resumed turn.".to_string()
-        } else {
-            "Chat turn stopped before producing a reply.".to_string()
-        },
-        event_payload: serde_json::json!({
-            "thread_id": thread_id,
-            "assistant_message_id": visible_turn.assistant_message_id,
-        }),
-        artifacts: vec![],
-    })
-}
-
-/// Reconstruct the `‹‹ACT››…‹‹/ACT››` activity prefix the working island parses
-/// out of `message.text`. The broker separates activity into its own
-/// `TurnEventKind::Activity` events during the drain; this reads them back from
-/// the durable `turn_events` table and re-wraps each label as the inline marker
-/// the legacy client UI expects. Returns "" if there were no activity events.
-fn build_activity_prefix_from_turn_events(state: &crate::AppState, turn_id: &str) -> String {
-    let Ok(store) = state.task_store.lock() else {
-        return String::new();
-    };
-    let Ok(events) = store.read_turn_events(turn_id, 0) else {
-        return String::new();
-    };
-    let mut labels: Vec<String> = Vec::new();
-    for event in events {
-        if event.kind == local_first_task_runtime::TurnEventKind::Activity {
-            if let Some(text) = event.payload.get("text").and_then(|v| v.as_str()) {
-                let trimmed = text.trim();
-                if !trimmed.is_empty() {
-                    labels.push(format!("‹‹ACT››{trimmed}‹‹/ACT››"));
-                }
-            }
-        }
-    }
-    labels.join("\n")
+    Ok(canonical)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::AppState;
+    use local_first_execution_protocol::{
+        CheckpointDataRef, DurableDataRef, ExecutionOutcome, FailureClass, WakeCondition,
+    };
     use local_first_task_runtime::TaskStore;
 
-    #[test]
-    fn classify_chat_turn_run_cancel_wins_over_park() {
-        // A manual Stop that raced the park must still win: exactly one terminal path, never
-        // both a cancel finalize AND a park.
-        assert_eq!(
-            classify_chat_turn_run(true, false, true),
-            ChatTurnRunBranch::Cancelled
-        );
-        assert_eq!(
-            classify_chat_turn_run(true, true, true),
-            ChatTurnRunBranch::Cancelled
-        );
+    fn checkpoint_ref() -> CheckpointDataRef {
+        CheckpointDataRef::Redacted {
+            record_ref: DurableDataRef::from_store_id("0123456789abcdef0123456789abcdef")
+                .expect("valid durable ref"),
+        }
     }
 
     #[test]
-    fn classify_chat_turn_run_park_is_distinct_from_genuine_no_answer() {
-        assert_eq!(
-            classify_chat_turn_run(false, false, true),
-            ChatTurnRunBranch::Parked
-        );
-        assert_eq!(
-            classify_chat_turn_run(false, false, false),
-            ChatTurnRunBranch::NoAnswer
-        );
+    fn typed_turn_stops_map_exhaustively_to_canonical_outcomes() {
+        let cases = [
+            (local_first_engine::TurnStop::Completed, "completed"),
+            (local_first_engine::TurnStop::SuspendedUser, "user"),
+            (local_first_engine::TurnStop::SuspendedApproval, "approval"),
+            (
+                local_first_engine::TurnStop::SuspendedModel {
+                    role: "primary".to_string(),
+                },
+                "model",
+            ),
+            (
+                local_first_engine::TurnStop::Failed {
+                    failure: local_first_execution_protocol::ExecutionFailure::permanent(
+                        "no_reply", "No reply",
+                    ),
+                },
+                "failed",
+            ),
+        ];
+
+        for (stop, expected) in cases {
+            let turn = local_first_engine::TurnOutcome {
+                stop,
+                memory_answer: "answer".to_string(),
+                ..Default::default()
+            };
+            let outcome =
+                canonical_chat_outcome("turn-1", 1, "chat_turn", &turn, Some(checkpoint_ref()))
+                    .expect("typed stop maps");
+            match (expected, outcome) {
+                ("completed", ExecutionOutcome::Completed { output, .. }) => {
+                    assert_eq!(output["answer"], "answer");
+                }
+                ("user", ExecutionOutcome::Suspended { wake, .. }) => assert_eq!(
+                    wake,
+                    WakeCondition::User {
+                        wait_ref: "turn-1:1:user".to_string()
+                    }
+                ),
+                ("approval", ExecutionOutcome::Suspended { wake, .. }) => assert_eq!(
+                    wake,
+                    WakeCondition::Approval {
+                        approval_ref: "turn-1:1:approval".to_string()
+                    }
+                ),
+                ("model", ExecutionOutcome::Suspended { wake, .. }) => assert_eq!(
+                    wake,
+                    WakeCondition::ModelAvailable {
+                        role: "primary".to_string()
+                    }
+                ),
+                ("failed", ExecutionOutcome::Failed { failure }) => {
+                    assert_eq!(failure.class, FailureClass::Permanent);
+                    assert_eq!(failure.code, "no_reply");
+                }
+                (expected, outcome) => panic!("expected {expected}, got {outcome:?}"),
+            }
+        }
     }
 
     #[test]
-    fn classify_chat_turn_run_generated_takes_the_normal_path() {
-        assert_eq!(
-            classify_chat_turn_run(false, true, false),
-            ChatTurnRunBranch::Generated
-        );
-    }
+    fn completed_typed_stop_needs_no_task_status_reread() {
+        let turn = local_first_engine::TurnOutcome {
+            stop: local_first_engine::TurnStop::Completed,
+            memory_answer: "visible answer".to_string(),
+            ..Default::default()
+        };
 
-    #[test]
-    fn objective_terminal_projection_covers_all_turn_boundaries() {
-        assert_eq!(
-            project_objective_terminal(ChatTurnRunBranch::Generated, false),
-            ObjectiveTerminalProjection::Completed
-        );
-        assert_eq!(
-            project_objective_terminal(ChatTurnRunBranch::Generated, true),
-            ObjectiveTerminalProjection::KeepActive,
-            "free and hold waits both keep open work active"
-        );
-        assert_eq!(
-            project_objective_terminal(ChatTurnRunBranch::Parked, false),
-            ObjectiveTerminalProjection::KeepActive
-        );
-        assert_eq!(
-            project_objective_terminal(ChatTurnRunBranch::NoAnswer, false),
-            ObjectiveTerminalProjection::KeepActive
-        );
-        assert_eq!(
-            project_objective_terminal(ChatTurnRunBranch::Cancelled, false),
-            ObjectiveTerminalProjection::Cancelled
-        );
+        let outcome = canonical_chat_outcome("turn-stale", 2, "chat_turn", &turn, None)
+            .expect("completed outcome");
+
+        assert!(matches!(outcome, ExecutionOutcome::Completed { .. }));
     }
 
     #[test]

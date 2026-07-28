@@ -41,7 +41,7 @@ use crate::plan::{
 };
 use crate::text::{extract_source_urls, fonti_section, is_low_value_source_url};
 use crate::tools::{connected_capability_execution_trace_line, summarize_tool_action};
-use crate::{LoopState, TurnConfig, TurnDelivery};
+use crate::{LoopState, TurnConfig};
 use std::time::Instant;
 
 /// Max harness "you're not done — plan the rest" nudges per turn before giving up (F1 anti-loop).
@@ -257,7 +257,7 @@ where
     X: ExecutionJournal,
     E: EventSink,
 {
-    let mut delivery = TurnDelivery::NoVisibleAnswer;
+    let mut visible_answer_delivered = false;
     let mut awaiting_envelope: Option<HitlEnvelope> = None;
     let mut choices_card_nudges: u32 = 0;
     let mut clarify_card_nudges: u32 = 0;
@@ -933,7 +933,7 @@ again to find the right control). Keep working on the task — do not stop and d
                                 redacted_user_text: None,
                             })
                             .await;
-                        delivery = TurnDelivery::Delivered;
+                        visible_answer_delivered = true;
                         final_done = true;
                         loop_exit = Some("browser_done_terminal");
                         break 'rounds;
@@ -1186,7 +1186,7 @@ again to find the right control). Keep working on the task — do not stop and d
                         })
                         .await;
                     memory_answer = final_text;
-                    delivery = TurnDelivery::Delivered;
+                    visible_answer_delivered = true;
                     final_done = true;
                 }
                 loop_exit = Some("pending_user_confirmation");
@@ -1242,7 +1242,7 @@ again to find the right control). Keep working on the task — do not stop and d
                         redacted_user_text: None,
                     })
                     .await;
-                delivery = TurnDelivery::Delivered;
+                visible_answer_delivered = true;
                 final_done = true;
                 loop_exit = Some("awaiting_user");
                 break;
@@ -1517,7 +1517,7 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
                     redacted_user_text: None,
                 })
                 .await;
-            delivery = TurnDelivery::Delivered;
+            visible_answer_delivered = true;
             final_done = true;
         }
         loop_exit = Some("model_stopped_naturally");
@@ -1592,7 +1592,9 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
             complete_drained_steering(model_client, &mut steering_to_complete);
             execution_journal.checkpoint(crate::LoopCheckpoint::from_state(last_round, &ls));
             return crate::TurnOutcome {
-                delivery: TurnDelivery::Parked,
+                stop: crate::TurnStop::SuspendedModel {
+                    role: "primary".to_string(),
+                },
                 memory_answer: String::new(),
                 image_rejection: None,
                 ..Default::default()
@@ -1662,7 +1664,7 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
                         })
                         .await;
                 }
-                delivery = TurnDelivery::Delivered;
+                visible_answer_delivered = true;
                 final_done = true;
             }
             // Skip forced synthesis — fall through to outcome assembly.
@@ -1786,7 +1788,7 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
                                 redacted_user_text: None,
                             })
                             .await;
-                        delivery = TurnDelivery::Delivered;
+                        visible_answer_delivered = true;
                         final_done = true;
                     }
                     // Human wait owns the turn boundary; do not reconcile plan steps to done.
@@ -1817,13 +1819,13 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
                                 redacted_user_text: None,
                             })
                             .await;
-                        delivery = TurnDelivery::Delivered;
+                        visible_answer_delivered = true;
                     }
                 }
             }
         } // end else (!awaiting_user forced synthesis)
     }
-    if final_done || delivery == TurnDelivery::Delivered {
+    if final_done || visible_answer_delivered {
         complete_drained_steering(model_client, &mut steering_to_complete);
     }
     // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern (AppState /
@@ -1832,8 +1834,13 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
     if let Some(ref envelope) = awaiting_envelope {
         memory_answer = ensure_free_hitl_marker_in_text(&memory_answer, envelope);
     }
+    let stop = crate::outcome::classify_turn_stop(
+        visible_answer_delivered || visible_answer(&memory_answer).is_some(),
+        awaiting_envelope.as_ref(),
+        None,
+    );
     crate::TurnOutcome {
-        delivery,
+        stop,
         memory_answer,
         tool_actions: ls.tool_trace.join("\n"),
         memory_reads: ls.memory_reads,
@@ -2214,7 +2221,7 @@ mod tests {
         )
         .await;
 
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
         assert_eq!(outcome.memory_answer, "done");
         assert_eq!(
             model.calls.load(Ordering::SeqCst),
@@ -2290,7 +2297,7 @@ mod tests {
         // The browser_done terminal did NOT fire: `memory_answer` is NOT the raw tool result
         // ("done") and the model was called a SECOND time (forced synthesis actually ran),
         // unlike the subturn case above where exactly one model call happens.
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
         assert_ne!(outcome.memory_answer, "done");
         assert_eq!(outcome.memory_answer, "forced synthesis should not run");
         assert_eq!(
@@ -2520,7 +2527,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
              until hard_round_ceiling"
         );
         drop(journal_events);
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
     }
 
     /// Like `StaleRefChurnModel` but each round targets a DIFFERENT ref — a model legitimately
@@ -2688,7 +2695,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             "a browse that makes progress every round must never be stopped by the stall window"
         );
         drop(journal_events);
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
     }
 
     /// Makes real progress on every call and counts how many times it ran, so a test can prove the
@@ -2914,7 +2921,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             "a browse with no progress for longer than the stall window must stop (reason: stall)"
         );
         drop(journal_events);
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
     }
 
     /// Every `browser_act` comes back with PROSE that reads like success ("Action performed.
@@ -3002,7 +3009,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             "a NoProgress hint must trip max_no_progress even though the result prose reads as success"
         );
         drop(journal_events);
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
     }
 
     struct NoPlan;
@@ -3165,7 +3172,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             outcome.memory_answer
         );
         assert!(!outcome.memory_reads.has_linked_reads());
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
         // A terminal Done event was emitted.
         assert!(
             sink.0
@@ -3221,9 +3228,8 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         )
         .await;
 
-        assert_eq!(
-            outcome.delivery,
-            crate::TurnDelivery::NoVisibleAnswer,
+        assert!(
+            matches!(outcome.stop, crate::TurnStop::Failed { .. }),
             "display-only text must not be delivered"
         );
         assert!(outcome.memory_answer.is_empty());
@@ -3286,7 +3292,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         )
         .await;
 
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
         assert!(outcome.memory_answer.contains("‹‹PLAN››"));
         assert!(outcome.memory_answer.contains("‹‹ARTIFACT››"));
         let done_text = sink
@@ -3348,7 +3354,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         )
         .await;
 
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered,);
+        assert_eq!(outcome.stop, crate::TurnStop::Completed,);
         let expected = "‹‹PLAN››- [x] Deliver result‹‹/PLAN››\n‹‹ARTIFACT››report.md‹‹/ARTIFACT››\n‹‹CHOICES››choose a format‹‹/CHOICES››\n‹‹REASONING››synthesis reasoning‹‹/REASONING››\nForced synthesis answer.";
         assert_eq!(outcome.memory_answer, expected);
         assert_eq!(outcome.memory_answer.matches("‹‹PLAN››").count(), 1,);
@@ -3415,7 +3421,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         let envelope = outcome.awaiting_user.expect("forced synthesis prose wait");
         assert_eq!(envelope.kind, HitlKind::Choice);
         assert_eq!(envelope.hold_policy, crate::hitl::HoldPolicy::Free);
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::SuspendedUser);
         assert!(outcome.memory_answer.contains("‹‹CHOICES››"));
         let done_text = sink
             .0
@@ -3503,7 +3509,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
                 .count(),
             1
         );
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
         assert!(outcome.memory_answer.contains("Non sono riuscito"));
     }
 
@@ -3968,7 +3974,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         )
         .await;
 
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
         assert_eq!(model.calls.load(Ordering::SeqCst), 2);
         assert!(model.applied.load(Ordering::SeqCst));
         assert!(model.completed.load(Ordering::SeqCst));
@@ -4133,7 +4139,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         )
         .await;
 
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
         assert!(model.applied.load(Ordering::SeqCst));
         assert!(model.completed.load(Ordering::SeqCst));
         assert_eq!(model.calls.load(Ordering::SeqCst), 2);
@@ -4257,7 +4263,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         .await;
 
         assert!(started.elapsed() < std::time::Duration::from_millis(100));
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
         assert_eq!(model.calls.load(Ordering::SeqCst), 2);
     }
 
@@ -4376,7 +4382,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             2,
             "the model must get its post-browse round to use the result"
         );
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
     }
 
     /// A manager-level delegated `browse` that SUCCEEDS every time, with a distinct goal per round
@@ -4669,7 +4675,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
 
         // The trailing `continue` sitting at the fence is drained (applied) rather than parked —
         // the turn finalizes via forced synthesis instead of hanging on the old spin.
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
         assert!(model.applied.load(Ordering::SeqCst));
         assert!(model.completed.load(Ordering::SeqCst));
         assert_eq!(
@@ -4792,10 +4798,10 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         .await
         .expect("run_turn must not hang");
 
-        assert_ne!(
-            outcome.delivery,
-            crate::TurnDelivery::Parked,
-            "a turn holding a finished answer must deliver it, not park it away"
+        assert_eq!(
+            outcome.stop,
+            crate::TurnStop::Completed,
+            "a turn holding a finished answer must complete, not suspend it away"
         );
         assert!(
             outcome.memory_answer.contains("Frecciarossa 9524"),
@@ -4858,7 +4864,10 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         .expect("run_turn must park within its bounded wait budget, not hang");
         let elapsed = started.elapsed();
 
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Parked);
+        assert!(matches!(
+            outcome.stop,
+            crate::TurnStop::SuspendedModel { .. }
+        ));
         assert!(outcome.memory_answer.is_empty());
         // Proves the budget is wall-clock-ticked (PARK_WAIT_CYCLES=40 * 50ms ~= 2s), not an
         // instant return and not a hang: real time actually elapsed, comfortably under the
@@ -5033,7 +5042,10 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         .await
         .expect("run_turn must park within its bounded wait budget, not hang");
 
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Parked);
+        assert!(matches!(
+            outcome.stop,
+            crate::TurnStop::SuspendedModel { .. }
+        ));
         assert!(model.early_applied.load(Ordering::SeqCst));
         // The regression: without the flush-before-park fix, this stays false — the id applied
         // earlier in the turn is silently dropped when the turn parks on the later, different,
@@ -5281,7 +5293,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             1,
             "open-plan nudge must not call the model again after CHOICES"
         );
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::SuspendedUser);
         assert!(
             outcome.memory_answer.contains("‹‹CHOICES››"),
             "choice card must be delivered so the UI/gateway can park: {}",
@@ -5388,7 +5400,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             1,
             "open-plan nudge must not call the model again after CLARIFY"
         );
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.stop, crate::TurnStop::SuspendedUser);
         assert!(
             outcome.memory_answer.contains("‹‹CLARIFY››"),
             "clarify card must be delivered: {}",

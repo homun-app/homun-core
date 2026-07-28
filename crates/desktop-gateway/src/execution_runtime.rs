@@ -9,7 +9,7 @@ use futures_util::future::BoxFuture;
 use local_first_execution_protocol::{
     ApprovalPolicy, CancelReason, CheckpointDataRef, CheckpointEnvelope, DurableDataRef,
     EffectClass, ExecutionBudget, ExecutionContract, ExecutionFailure, ExecutionOutcome,
-    ExecutionPolicy, ExecutionScope, ExecutionState, ResourceRequirement,
+    ExecutionPolicy, ExecutionScope, ExecutionState, FailureClass, ResourceRequirement,
     ValidatedExecutionContract, ValidatedExecutionOutcome, WakeCondition,
 };
 use local_first_task_runtime::{CreateExecution, ExecutionProjection, TaskRuntimeError};
@@ -37,7 +37,6 @@ pub(crate) struct AdapterExecution {
 }
 
 impl AdapterExecution {
-    #[cfg(test)]
     pub(crate) fn canonical(outcome: ExecutionOutcome) -> Self {
         Self {
             canonical: Some(outcome),
@@ -57,6 +56,7 @@ pub(crate) struct ExecutionRuntimeResult {
     execution_id: String,
     compatibility: Option<TaskExecutionOutcome>,
     projection: ExecutionProjection,
+    outcome: ExecutionOutcome,
 }
 
 impl ExecutionRuntimeResult {
@@ -70,6 +70,10 @@ impl ExecutionRuntimeResult {
 
     pub(crate) fn projection(&self) -> ExecutionProjection {
         self.projection
+    }
+
+    pub(crate) fn outcome(&self) -> &ExecutionOutcome {
+        &self.outcome
     }
 }
 
@@ -103,6 +107,27 @@ impl ExecutionRuntime {
         let task = task_from_contract(&requested_contract)?;
         validate_task_identity(&task, &requested_contract)?;
         let acquired_fence = acquired_task_fencing_token(&task)?;
+
+        let recovered = {
+            let store = state.task_store.lock().map_err(runtime_lock_error)?;
+            store
+                .execution(requested_contract.as_ref().execution_id.as_str())
+                .map_err(runtime_store_error)?
+                .and_then(|record| record.outcome.map(|outcome| (record.contract, outcome)))
+        };
+        if let Some((contract, outcome)) = recovered {
+            validate_authoritative_contract(&task, &contract)?;
+            if should_project_chat(&task, outcome.as_ref()) {
+                crate::execution_projection::project_chat_execution(
+                    state,
+                    &task,
+                    &contract,
+                    outcome.as_ref(),
+                )
+                .await?;
+            }
+            return Ok(recovered_execution_result(&task, outcome.as_ref()));
+        }
 
         let contract = {
             let store = state.task_store.lock().map_err(runtime_lock_error)?;
@@ -210,6 +235,7 @@ impl ExecutionRuntime {
                 .expect("legacy adapter output always persists a checkpoint first");
             legacy_task_outcome_to_execution_outcome(state, &task, &contract, legacy, checkpoint)?
         };
+        let outcome = normalize_transient_failure(state, &task, &contract, outcome)?;
         align_compatibility_with_canonical_outcome(
             adapter_execution.compatibility.as_mut(),
             &outcome,
@@ -223,13 +249,93 @@ impl ExecutionRuntime {
                 .map_err(runtime_store_error)?;
         }
 
+        if should_project_chat(&task, validated.as_ref()) {
+            crate::execution_projection::project_chat_execution(
+                state,
+                &task,
+                &contract,
+                validated.as_ref(),
+            )
+            .await?;
+        }
+
         let projection = ExecutionProjection::from_outcome(validated.as_ref());
         Ok(ExecutionRuntimeResult {
             execution_id: contract.as_ref().execution_id.clone(),
             compatibility: adapter_execution.compatibility,
             projection,
+            outcome: validated.as_ref().clone(),
         })
     }
+}
+
+fn should_project_chat(task: &TaskRecord, outcome: &ExecutionOutcome) -> bool {
+    task.kind == "chat_turn"
+        && (task
+            .input_json
+            .get("thread_id")
+            .and_then(Value::as_str)
+            .is_some()
+            || matches!(
+                outcome,
+                ExecutionOutcome::Completed { output, .. }
+                    if output.get("kind").and_then(Value::as_str) == Some("chat_turn")
+            ))
+}
+
+fn normalize_transient_failure(
+    state: &AppState,
+    task: &TaskRecord,
+    contract: &ValidatedExecutionContract,
+    outcome: ExecutionOutcome,
+) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
+    let ExecutionOutcome::Failed { failure } = outcome else {
+        return Ok(outcome);
+    };
+    if failure.class != FailureClass::Transient
+        || task.attempt_count.saturating_add(1) >= contract.as_ref().budget.max_attempts
+    {
+        return Ok(ExecutionOutcome::Failed { failure });
+    }
+
+    let checkpoint = state
+        .task_store
+        .lock()
+        .map_err(runtime_lock_error)?
+        .append_checkpoint(
+            &task.task_id,
+            &task.user_id,
+            &task.workspace_id,
+            json!({
+                "kind": "runtime_transient_failure",
+                "code": failure.code,
+                "detail": failure.redacted_detail,
+            }),
+            json!({
+                "kind": "runtime_transient_failure",
+                "code": failure.code,
+                "detail": failure.redacted_detail,
+            }),
+        )
+        .map_err(runtime_store_error)?;
+    let record_ref = DurableDataRef::from_store_id(&checkpoint.checkpoint_id)
+        .map_err(|error| runtime_error(error.to_string()))?;
+    Ok(ExecutionOutcome::Suspended {
+        wake: WakeCondition::At {
+            unix_seconds: OffsetDateTime::now_utc()
+                .saturating_add(time::Duration::seconds(
+                    contract.as_ref().budget.backoff_seconds,
+                ))
+                .unix_timestamp(),
+        },
+        checkpoint: CheckpointEnvelope::new(
+            contract.as_ref().execution_id.clone(),
+            contract.as_ref().revision,
+            contract.as_ref().kind.clone(),
+            1,
+            CheckpointDataRef::Redacted { record_ref },
+        ),
+    })
 }
 
 fn align_compatibility_with_canonical_outcome(
@@ -372,8 +478,10 @@ fn recovered_execution_result(
 ) -> ExecutionRuntimeResult {
     ExecutionRuntimeResult {
         execution_id: task.task_id.as_str().to_string(),
-        compatibility: Some(recovered_legacy_compatibility(task, outcome)),
+        compatibility: (task.kind != "chat_turn")
+            .then(|| recovered_legacy_compatibility(task, outcome)),
         projection: ExecutionProjection::from_outcome(outcome),
+        outcome: outcome.clone(),
     }
 }
 
@@ -664,9 +772,31 @@ legacy_adapter!(SubagentAdapter, "subagent", |_state, task| {
 legacy_adapter!(ProactivePromptAdapter, "proactive_prompt", |state, task| {
     execute_proactive_prompt_task(state, task)
 });
-legacy_adapter!(ChatTurnAdapter, "chat_turn", |state, task| {
-    crate::turn_executor::execute_chat_turn_task(state, task)
-});
+struct ChatTurnAdapter;
+
+impl GatewayExecutionAdapter for ChatTurnAdapter {
+    fn name(&self) -> &'static str {
+        "chat_turn"
+    }
+
+    fn execute<'a>(
+        &'a self,
+        state: &'a AppState,
+        contract: &'a ValidatedExecutionContract,
+    ) -> BoxFuture<'a, Result<AdapterExecution, LocalTaskExecutionError>> {
+        Box::pin(async move {
+            let task = task_from_contract(contract)?;
+            let outcome = crate::turn_executor::execute_chat_turn_task(state, &task, contract)
+                .unwrap_or_else(|error| ExecutionOutcome::Failed {
+                    failure: ExecutionFailure::permanent(
+                        "chat_execution_failed",
+                        crate::redact_sensitive_text(&error.message),
+                    ),
+                });
+            Ok(AdapterExecution::canonical(outcome))
+        })
+    }
+}
 legacy_adapter!(LegacyShellAdapter, "legacy_shell", |_state, task| {
     execute_shell_read_only_task(task)
 });
@@ -774,6 +904,8 @@ mod tests {
 
     struct FailingAdapter;
 
+    struct TransientCanonicalAdapter;
+
     impl GatewayExecutionAdapter for FailingAdapter {
         fn execute<'a>(
             &'a self,
@@ -784,6 +916,23 @@ mod tests {
                 Err(LocalTaskExecutionError {
                     message: "provider temporarily unavailable".to_string(),
                 })
+            })
+        }
+    }
+
+    impl GatewayExecutionAdapter for TransientCanonicalAdapter {
+        fn execute<'a>(
+            &'a self,
+            _state: &'a AppState,
+            _contract: &'a ValidatedExecutionContract,
+        ) -> BoxFuture<'a, Result<AdapterExecution, LocalTaskExecutionError>> {
+            Box::pin(async {
+                Ok(AdapterExecution::canonical(ExecutionOutcome::Failed {
+                    failure: local_first_execution_protocol::ExecutionFailure::transient(
+                        "provider_unavailable",
+                        "Provider unavailable",
+                    ),
+                }))
             })
         }
     }
@@ -1148,6 +1297,41 @@ mod tests {
         assert!(matches!(
             execution.outcome.expect("outcome").as_ref(),
             ExecutionOutcome::Failed { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn canonical_transient_failure_uses_the_runtime_retry_budget() {
+        let mut registry = TaskExecutorRegistry::new();
+        registry.register("*", Arc::new(TransientCanonicalAdapter));
+        let runtime = ExecutionRuntime::new(registry);
+        let state = AppState::for_tests();
+        let initial = contract("capability.test", "canonical-transient-1");
+        let mut task = super::task_from_contract(&initial).expect("task from contract");
+        task.retry_policy.max_attempts = 2;
+        task.retry_policy.backoff_seconds = 30;
+        let contract = super::contract_for_acquired_task(&task).expect("retry contract");
+        insert_contract_task(&state, &contract);
+
+        let result = runtime
+            .execute(&state, contract)
+            .await
+            .expect("runtime suspends transient failure");
+
+        assert_eq!(result.projection().task_status, TaskStatus::WaitingTime);
+        let execution = state
+            .task_store
+            .lock()
+            .expect("task store")
+            .execution("canonical-transient-1")
+            .expect("load execution")
+            .expect("execution exists");
+        assert!(matches!(
+            execution.outcome.as_ref().map(|outcome| outcome.as_ref()),
+            Some(ExecutionOutcome::Suspended {
+                wake: WakeCondition::At { .. },
+                ..
+            })
         ));
     }
 }

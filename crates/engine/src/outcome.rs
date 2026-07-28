@@ -6,25 +6,58 @@
 //! returns, driven by this outcome. Splitting them out is what lets the loop body move into this leaf
 //! crate without dragging the memory/graph subsystems along.
 
-/// Whether the turn emitted a user-visible final answer.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum TurnDelivery {
-    Delivered,
-    #[default]
-    NoVisibleAnswer,
-    /// The turn hit its finalization boundary with steering still pending that
-    /// the coordinator could not interpret (model unavailable). It checkpointed
-    /// and parked; the caller keeps the bubble open and finishes the run with
-    /// `parked_waiting_for_model` for coordinator-driven resume. No terminal event.
-    Parked,
+use local_first_execution_protocol::ExecutionFailure;
+
+/// Engine-level reason the guarded loop stopped.
+///
+/// These variants intentionally describe no task, run, message, or transport
+/// state. The execution runtime is the sole owner of that lifecycle projection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TurnStop {
+    Completed,
+    SuspendedUser,
+    SuspendedApproval,
+    SuspendedModel { role: String },
+    Failed { failure: ExecutionFailure },
+}
+
+impl Default for TurnStop {
+    fn default() -> Self {
+        Self::Failed {
+            failure: ExecutionFailure::permanent("no_reply", "The turn produced no final reply"),
+        }
+    }
+}
+
+pub(crate) fn classify_turn_stop(
+    visible_answer: bool,
+    awaiting_user: Option<&crate::hitl::HitlEnvelope>,
+    suspended_model_role: Option<&str>,
+) -> TurnStop {
+    if let Some(wait) = awaiting_user {
+        return if wait.is_free() {
+            TurnStop::SuspendedUser
+        } else {
+            TurnStop::SuspendedApproval
+        };
+    }
+    if visible_answer {
+        return TurnStop::Completed;
+    }
+    if let Some(role) = suspended_model_role {
+        return TurnStop::SuspendedModel {
+            role: role.to_string(),
+        };
+    }
+    TurnStop::default()
 }
 
 /// The turn's result the gateway tail consumes. Kept minimal — only what the tail can't already see
 /// (everything else, like `read_only` / `thread_id` / the memory scope, the caller still holds).
 #[derive(Debug, Default, Clone)]
 pub struct TurnOutcome {
-    /// The final-delivery status. `Delivered` is set only when the engine emitted a visible `Done`.
-    pub delivery: TurnDelivery,
+    /// Exhaustive engine-level stop classification consumed by the execution runtime.
+    pub stop: TurnStop,
     /// The committed final answer text (the `Done` payload). Fed to the memory learn extractor; empty
     /// means the turn produced no answer (the tail then skips learning).
     pub memory_answer: String,
@@ -57,4 +90,67 @@ pub struct TurnOutcome {
     /// persist a Free wait / hold Confirm and MUST NOT treat the next user message as a fresh
     /// objective without ResumeBinding. Prose-only asks never set this.
     pub awaiting_user: Option<crate::hitl::HitlEnvelope>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TurnStop, classify_turn_stop};
+    use crate::hitl::{HitlEnvelope, HitlKind, HoldPolicy};
+    use local_first_execution_protocol::{ExecutionFailure, FailureClass};
+
+    fn wait(kind: HitlKind, hold_policy: HoldPolicy) -> HitlEnvelope {
+        HitlEnvelope {
+            kind,
+            hold_policy,
+            payload: serde_json::json!({"prompt": "continue?"}),
+            source_marker: "test".to_string(),
+        }
+    }
+
+    #[test]
+    fn visible_answer_completes_without_a_wait() {
+        assert_eq!(classify_turn_stop(true, None, None), TurnStop::Completed);
+    }
+
+    #[test]
+    fn free_and_hold_waits_have_distinct_stops() {
+        let choice = wait(HitlKind::Choice, HoldPolicy::Free);
+        let approval = wait(HitlKind::Confirm, HoldPolicy::Hold);
+
+        assert_eq!(
+            classify_turn_stop(true, Some(&choice), None),
+            TurnStop::SuspendedUser
+        );
+        assert_eq!(
+            classify_turn_stop(true, Some(&approval), None),
+            TurnStop::SuspendedApproval
+        );
+    }
+
+    #[test]
+    fn model_suspension_wins_only_without_a_visible_answer() {
+        assert_eq!(
+            classify_turn_stop(false, None, Some("primary")),
+            TurnStop::SuspendedModel {
+                role: "primary".to_string()
+            }
+        );
+        assert_eq!(
+            classify_turn_stop(true, None, Some("primary")),
+            TurnStop::Completed
+        );
+    }
+
+    #[test]
+    fn missing_final_answer_is_a_permanent_failure() {
+        let TurnStop::Failed { failure } = classify_turn_stop(false, None, None) else {
+            panic!("missing answer must fail");
+        };
+        assert_eq!(failure.class, FailureClass::Permanent);
+        assert_eq!(failure.code, "no_reply");
+        assert_eq!(
+            failure,
+            ExecutionFailure::permanent("no_reply", "The turn produced no final reply")
+        );
+    }
 }

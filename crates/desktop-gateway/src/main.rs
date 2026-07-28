@@ -19,6 +19,7 @@ mod db_migrate;
 // make_templated_document).
 mod document_content;
 mod execution_runtime;
+mod execution_projection;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod inference_transport;
 mod model_client;
@@ -27963,6 +27964,8 @@ fn drain_stream_sink() -> StreamSink {
         last_event_at: std::sync::atomic::AtomicU64::new(now_epoch_secs()),
         thread_id: None,
         assistant_message_id: std::sync::Mutex::new(None),
+        outcome: std::sync::Mutex::new(None),
+        outcome_ready: tokio::sync::Notify::new(),
     });
     StreamSink {
         mpsc: mpsc_tx,
@@ -29935,6 +29938,8 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         last_event_at: std::sync::atomic::AtomicU64::new(now_epoch_secs()),
         thread_id: request.thread_id.clone(),
         assistant_message_id: std::sync::Mutex::new(None),
+        outcome: std::sync::Mutex::new(None),
+        outcome_ready: tokio::sync::Notify::new(),
     });
     let resume_id = request.request_id.clone();
     if let Ok(mut map) = stream_registry().lock() {
@@ -30395,6 +30400,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         let fence_turn_id = request.request_id.clone();
         let fence_user_id = automation_user_id.clone();
         let fence_workspace_id = automation_workspace_id.clone();
+        let canonical_broker_turn = effect_turn_id.is_some();
         // 5.D1c.9: resolve the trace-dump dir gateway-side (armed only when HOMUN_TRACE_DUMP=1) and
         // inject it, so the engine loop appends without calling the gateway's path resolver.
         let trace_dir = local_first_engine::trace::dump_enabled()
@@ -30438,14 +30444,16 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             vision_fallback_armed,
         )
         .await;
-        if let (Some(thread_id), Some(assistant_message_id)) = (
+        if !canonical_broker_turn
+            && let (Some(thread_id), Some(assistant_message_id)) = (
             tail_thread.as_deref(),
             tx.entry
                 .assistant_message_id
                 .lock()
                 .ok()
                 .and_then(|id| id.clone()),
-        ) {
+        )
+        {
             persist_hitl_wait_from_outcome(&tail_state, thread_id, &assistant_message_id, &outcome);
         }
         // Turn trace: the final record. `outcome.memory_answer` is the committed answer; `final_plan` is
@@ -30534,6 +30542,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             &fence_user_id,
             &fence_workspace_id,
         );
+        publish_stream_outcome(&tx.entry, outcome);
         // Mark the resume entry finished and evict it after a grace window so a
         // client that reloaded right at the end can still reattach and read it.
         tx.entry
@@ -30562,37 +30571,8 @@ fn delivered_image_rejection_outcome(
     rejection: String,
 ) -> local_first_engine::TurnOutcome {
     outcome.memory_answer = rejection;
-    outcome.delivery = local_first_engine::TurnDelivery::Delivered;
+    outcome.stop = local_first_engine::TurnStop::Completed;
     outcome
-}
-
-/// Called from `run_agent_rounds`'s outcome consumer when `run_turn` returns
-/// `TurnDelivery::Parked` (steering park+resume, Build 2): parks the chat_turn task —
-/// aborts the running agent_run with `parked_waiting_for_model` (keeping its resumable
-/// checkpoint), releases the browser-session resource, flips the task to `Parked` — so the
-/// SAME turn_id/assistant bubble resumes later once the coordinator's probe finds the
-/// semantic model back. `turn_id` is `None` for a non-broker call (no steering context, so
-/// the engine never parks in practice) — a defensive no-op, not a panic. Best-effort: a
-/// store failure is logged, not fatal; a stuck `running` row still recovers via the existing
-/// stale-lease path instead of hanging this stream.
-fn park_chat_turn_task(
-    state: &AppState,
-    turn_id: Option<&str>,
-    user_id: &UserId,
-    workspace_id: &WorkspaceId,
-) {
-    let Some(turn_id) = turn_id else {
-        tracing::warn!(
-            target: "agent::park",
-            "engine parked a turn with no broker turn_id — nothing to park"
-        );
-        return;
-    };
-    if let Ok(store) = state.task_store.lock() {
-        if let Err(error) = store.park_chat_turn(turn_id, user_id.as_str(), workspace_id.as_str()) {
-            tracing::warn!(target: "agent::park", %turn_id, %error, "could not park chat turn");
-        }
-    }
 }
 
 // ADR 0024 inc 5 (5.D1a): the agent turn's round loop + forced synthesis + post-turn
@@ -30784,35 +30764,13 @@ async fn run_agent_rounds(
     )
     .await;
 
-    // Park at the finalization boundary (Build 2, park+resume): the engine hit its fence with
-    // steering still pending that the coordinator could not interpret (semantic model
-    // unavailable) and checkpointed instead of spinning (T1) — `memory_answer` is empty and NO
-    // terminal event was emitted by the engine. Park the chat_turn task here (T2's
-    // `park_chat_turn`: aborts the running agent_run with `parked_waiting_for_model`, releases
-    // the browser-session resource, keeps steering `pending` for the resumed run) and unblock
-    // the gateway's OWN SSE drain (`turn_executor::drain_agent_stream_into_message_with_fanout`,
-    // which otherwise waits forever on a terminal line the engine deliberately never sends) with
-    // a plain empty `done` — NOT an `error` (which `fanout_turn_event` would turn into a durable
-    // terminal event) and NOT a real answer. The empty text keeps `generated` false downstream,
-    // so the executor's own no-answer branch runs; ITS re-read of this task's now-`Parked`
-    // status (not this outcome) is what tells it — and the runner — not to treat this as a
-    // failure. No terminal turn event is emitted here or anywhere else on this path.
-    if outcome.delivery == local_first_engine::TurnDelivery::Parked {
-        park_chat_turn_task(
-            &state_owned,
-            effect_turn_id.as_deref(),
-            &automation_user_id,
-            &automation_workspace_id,
-        );
-        let _ = emit_stream_event(
-            tx,
-            GenerateStreamEvent::Done {
-                text: String::new(),
-                metrics: TokenMetrics::zero(),
-                redacted_user_text: None,
-            },
-        )
-        .await;
+    // A model suspension is a typed engine stop. The broker drain observes it
+    // through the stream entry's outcome channel; no fabricated `done` event and
+    // no task-state mutation are needed to unblock transport.
+    if matches!(
+        outcome.stop,
+        local_first_engine::TurnStop::SuspendedModel { .. }
+    ) {
         return outcome;
     }
 
@@ -37218,6 +37176,10 @@ pub(crate) struct AgentTurnResult {
     actionable_cards: Vec<ActionableCard>,
 }
 
+pub(crate) struct BrokerAgentTurnResult {
+    outcome: local_first_engine::TurnOutcome,
+}
+
 pub(crate) fn agent_turn_waits_for_user(result: Option<&AgentTurnResult>) -> bool {
     // Always Contract: only Hold-policy cards keep WaitingUserApproval.
     // Free HITL (Choice/Clarify / AWAIT_USER kind=choice|clarify) frees the thread so
@@ -37260,6 +37222,7 @@ fn actionable_part_holds_thread(part: &serde_json::Value) -> bool {
 /// Re-attach Free HITL markers onto a stripped answer.
 /// The completed-turn executor rewrites the bubble with `strip_chat_markers` text; without
 /// this, freeing the thread for Choice/Clarify erased the card the UI needs.
+#[cfg(test)]
 pub(crate) fn answer_text_with_actionable_markers(
     stripped_answer: &str,
     result: Option<&AgentTurnResult>,
@@ -37510,7 +37473,7 @@ async fn drain_agent_stream_into_message_with_fanout(
     entry: std::sync::Arc<StreamEntry>,
     turn_id: &str,
     requested_delivery_state: local_first_desktop_gateway::MessageDeliveryState,
-) -> Result<Option<AgentTurnResult>, String> {
+) -> Result<BrokerAgentTurnResult, String> {
     if let Ok(mut stored_id) = entry.assistant_message_id.lock() {
         *stored_id = Some(assistant_message_id.to_string());
     }
@@ -37547,8 +37510,15 @@ async fn drain_agent_stream_into_message_with_fanout(
         }
     }
 
-    while final_text.is_none() {
-        match brx.recv().await {
+    let mut typed_outcome = None;
+    while final_text.is_none() && typed_outcome.is_none() {
+        let outcome_ready = entry.outcome_ready.notified();
+        if let Some(outcome) = entry.outcome.lock().ok().and_then(|slot| slot.clone()) {
+            typed_outcome = Some(outcome);
+            break;
+        }
+        tokio::select! {
+            received = brx.recv() => match received {
             Ok(line) => {
                 let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
                 memory_reuse.observe_line(&line);
@@ -37578,8 +37548,26 @@ async fn drain_agent_stream_into_message_with_fanout(
             }
             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            },
+            _ = outcome_ready => {
+                typed_outcome = entry.outcome.lock().ok().and_then(|slot| slot.clone());
+            }
         }
     }
+
+    // The engine publishes the typed outcome only after all stream emissions.
+    // Drain any lines already queued before using the outcome as the transport close.
+    while let Ok(line) = brx.try_recv() {
+        apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+        memory_reuse.observe_line(&line);
+        persist_redacted_user_text_from_stream_line(state, thread_id, user_message_id, &line);
+        persist_recall_event_part(state, thread_id, assistant_message_id, &line);
+        fanout_turn_event(state, turn_id, &line);
+    }
+    let outcome = match typed_outcome {
+        Some(outcome) => outcome,
+        None => wait_for_stream_outcome(entry.clone()).await,
+    };
 
     let raw_final_text = final_text.unwrap_or(streamed_text);
     let remote_approval = remote_approval_intent_from_raw_text(&raw_final_text);
@@ -37588,26 +37576,18 @@ async fn drain_agent_stream_into_message_with_fanout(
         memory_reuse.observe_remote_approval(intent);
     }
     memory_reuse.observe_actionable_cards(&actionable_cards);
-    let mut final_text = strip_chat_markers(&raw_final_text);
-    if final_text.is_empty() && actionable_cards.is_empty() {
-        return Ok(None);
+    let final_text = strip_chat_markers(&raw_final_text);
+    if !(final_text.is_empty() && actionable_cards.is_empty()) {
+        finalize_streamed_assistant_message(
+            state,
+            thread_id,
+            assistant_message_id,
+            &raw_final_text,
+            &memory_reuse,
+            requested_delivery_state,
+        )?;
     }
-    if final_text.is_empty() {
-        final_text = "Waiting for your approval.".to_string();
-    }
-    finalize_streamed_assistant_message(
-        state,
-        thread_id,
-        assistant_message_id,
-        &raw_final_text,
-        &memory_reuse,
-        requested_delivery_state,
-    )?;
-    Ok(Some(AgentTurnResult {
-        text: final_text,
-        remote_approval,
-        actionable_cards,
-    }))
+    Ok(BrokerAgentTurnResult { outcome })
 }
 
 /// Runs an agent turn for channel-originated work while keeping the owning chat
@@ -37695,7 +37675,7 @@ async fn run_agent_turn_into_message_with_fanout(
     turn_id: &str,
     agent_run_id: Option<&str>,
     requested_delivery_state: local_first_desktop_gateway::MessageDeliveryState,
-) -> Result<Option<AgentTurnResult>, String> {
+) -> Result<BrokerAgentTurnResult, String> {
     let (base_url, model, api_key) = chat_role_config_for_thread(state, Some(thread_id))
         .ok_or_else(|| "chat role configuration is unavailable".to_string())?;
     let context = agent_turn_context(
@@ -39087,6 +39067,29 @@ struct StreamEntry {
     /// The assistant bubble this stream is being drained into. The engine outcome
     /// arrives outside the drain, so this records the durable message id once known.
     assistant_message_id: std::sync::Mutex<Option<String>>,
+    /// Typed engine stop for broker-owned turns. Transport consumers wait on
+    /// this value instead of interpreting an empty terminal stream event.
+    outcome: std::sync::Mutex<Option<local_first_engine::TurnOutcome>>,
+    outcome_ready: tokio::sync::Notify,
+}
+
+fn publish_stream_outcome(entry: &StreamEntry, outcome: local_first_engine::TurnOutcome) {
+    if let Ok(mut slot) = entry.outcome.lock() {
+        *slot = Some(outcome);
+    }
+    entry.outcome_ready.notify_waiters();
+}
+
+async fn wait_for_stream_outcome(
+    entry: std::sync::Arc<StreamEntry>,
+) -> local_first_engine::TurnOutcome {
+    loop {
+        let notified = entry.outcome_ready.notified();
+        if let Some(outcome) = entry.outcome.lock().ok().and_then(|slot| slot.clone()) {
+            return outcome;
+        }
+        notified.await;
+    }
 }
 
 /// Sink the generation emits to: tees every event to the ORIGINAL live response
@@ -39830,10 +39833,9 @@ async fn get_turn(
 /// (`cancel_turn`, `cancel_task`) routes through this now (converge, don't
 /// duplicate) so bubble treatment cannot silently diverge between them again.
 ///
-/// For a `Running` turn the live executor's own cancel-detection
-/// (`ChatTurnRunBranch::Cancelled` in turn_executor.rs, or the runner loop's
-/// `externally_cancelled` guard) ALSO finalizes the bubble once its drain
-/// unwinds — this call's write is redundant-but-harmless there (idempotent).
+/// For a `Running` turn the execution runtime commits `Cancelled(User)` after
+/// its cancel race unwinds and the canonical projector repeats the same message
+/// state idempotently.
 ///
 /// For a `Parked` turn (steering park+resume, Build 2) there is NO live executor —
 /// it was unregistered and its agent_run aborted at park time — so nothing else
@@ -41405,10 +41407,46 @@ fn run_next_task_once(
         });
     }
     let canonical_projection = runtime_result.projection();
-    let outcome = runtime_result.into_compatibility().ok_or_else(|| GatewayError {
+    let canonical_outcome = runtime_result.outcome().clone();
+    let compatibility = runtime_result.into_compatibility();
+    if task.kind == "chat_turn" {
+        let (status, message, stopped_reason) = match &canonical_outcome {
+            local_first_execution_protocol::ExecutionOutcome::Completed { .. } => (
+                "completed",
+                "Chat turn completed.".to_string(),
+                None,
+            ),
+            local_first_execution_protocol::ExecutionOutcome::Suspended { wake, .. } => (
+                "suspended",
+                format!("Chat turn suspended for {wake:?}."),
+                Some(format!("waiting for {wake:?}")),
+            ),
+            local_first_execution_protocol::ExecutionOutcome::Cancelled { .. } => (
+                "cancelled",
+                "Chat turn cancelled.".to_string(),
+                Some("cancelled by user".to_string()),
+            ),
+            local_first_execution_protocol::ExecutionOutcome::Failed { failure } => (
+                "failed",
+                failure.redacted_detail.clone(),
+                Some(failure.redacted_detail.clone()),
+            ),
+        };
+        return Ok(TaskRunBatchResponse {
+            status: status.to_string(),
+            completed: u32::from(canonical_projection.task_status == TaskStatus::Completed),
+            stopped_reason,
+            results: vec![TaskRunStepResponse {
+                status: status.to_string(),
+                task_id: Some(task_id),
+                message,
+            }],
+        });
+    }
+    let outcome = compatibility.ok_or_else(|| GatewayError {
         status: StatusCode::BAD_GATEWAY,
         code: "execution_compatibility_missing",
-        message: "Production execution adapter returned no Task 5 compatibility result."
+        message: "Legacy execution adapter returned no compatibility result."
             .to_string(),
     })?;
 
@@ -62867,10 +62905,7 @@ mod tests {
             local_first_engine::TurnOutcome::default(),
             "The selected model cannot inspect this image.".to_string(),
         );
-        assert_eq!(
-            outcome.delivery,
-            local_first_engine::TurnDelivery::Delivered
-        );
+        assert_eq!(outcome.stop, local_first_engine::TurnStop::Completed);
         assert_eq!(
             outcome.memory_answer,
             "The selected model cannot inspect this image."
@@ -67693,7 +67728,7 @@ prs.save(Path({path:?}))
             .expect("assistant message");
 
         let outcome = local_first_engine::TurnOutcome {
-            delivery: local_first_engine::TurnDelivery::Delivered,
+            stop: local_first_engine::TurnStop::SuspendedUser,
             memory_answer: "Pick one.".to_string(),
             awaiting_user: Some(local_first_engine::hitl::HitlEnvelope {
                 kind: local_first_engine::hitl::HitlKind::Choice,
@@ -74869,6 +74904,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
             thread_id: Some("thread-a".to_string()),
             assistant_message_id: std::sync::Mutex::new(None),
+            outcome: std::sync::Mutex::new(None),
+            outcome_ready: tokio::sync::Notify::new(),
         };
 
         assert!(super::stream_entry_has_terminal_event(&entry));
@@ -74972,6 +75009,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             ),
             thread_id: Some("thread-a".to_string()),
             assistant_message_id: std::sync::Mutex::new(None),
+            outcome: std::sync::Mutex::new(None),
+            outcome_ready: tokio::sync::Notify::new(),
         };
 
         assert!(super::stream_entry_is_activity_stale(&entry, now));
@@ -74990,6 +75029,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             ),
             thread_id: Some("thread-a".to_string()),
             assistant_message_id: std::sync::Mutex::new(None),
+            outcome: std::sync::Mutex::new(None),
+            outcome_ready: tokio::sync::Notify::new(),
         };
 
         assert!(super::stream_entry_is_activity_stale(&entry, now));
@@ -75007,6 +75048,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
             thread_id: Some("thread-a".to_string()),
             assistant_message_id: std::sync::Mutex::new(None),
+            outcome: std::sync::Mutex::new(None),
+            outcome_ready: tokio::sync::Notify::new(),
         });
         let sink = super::StreamSink {
             mpsc,
@@ -75026,6 +75069,42 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let _ = rx.recv().await;
 
         assert!(entry.finished.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn typed_engine_stop_unblocks_broker_transport_without_a_done_event() {
+        let (tx, _) = tokio::sync::broadcast::channel::<String>(4);
+        let entry = std::sync::Arc::new(super::StreamEntry {
+            lines: std::sync::Mutex::new(Vec::new()),
+            tx,
+            finished: std::sync::atomic::AtomicBool::new(false),
+            last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
+            thread_id: Some("thread-a".to_string()),
+            assistant_message_id: std::sync::Mutex::new(None),
+            outcome: std::sync::Mutex::new(None),
+            outcome_ready: tokio::sync::Notify::new(),
+        });
+        let waiter = tokio::spawn(super::wait_for_stream_outcome(entry.clone()));
+
+        super::publish_stream_outcome(
+            &entry,
+            local_first_engine::TurnOutcome {
+                stop: local_first_engine::TurnStop::SuspendedModel {
+                    role: "primary".to_string(),
+                },
+                ..Default::default()
+            },
+        );
+
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+            .await
+            .expect("typed outcome wakes the transport")
+            .expect("waiter joins");
+        assert!(matches!(
+            outcome.stop,
+            local_first_engine::TurnStop::SuspendedModel { .. }
+        ));
+        assert!(entry.lines.lock().expect("stream lines").is_empty());
     }
 
     #[test]
@@ -75059,6 +75138,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
             thread_id: Some("thread-a".to_string()),
             assistant_message_id: std::sync::Mutex::new(None),
+            outcome: std::sync::Mutex::new(None),
+            outcome_ready: tokio::sync::Notify::new(),
         });
         let sink = super::StreamSink {
             mpsc,
@@ -80518,6 +80599,8 @@ data: [DONE]\n";
                 last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
                 thread_id: None,
                 assistant_message_id: std::sync::Mutex::new(None),
+                outcome: std::sync::Mutex::new(None),
+                outcome_ready: tokio::sync::Notify::new(),
             }),
         };
 
@@ -84148,167 +84231,6 @@ data: [DONE]\n";
                 .delivery_state,
             local_first_desktop_gateway::MessageDeliveryState::Retrying
         );
-    }
-
-    #[test]
-    fn park_chat_turn_task_parks_the_running_task_and_aborts_its_run() {
-        let state = AppState::for_tests();
-        let user = super::gateway_user_id();
-        let workspace = WorkspaceId::new("workspace_test");
-        let mut task = TaskRecord::new(
-            "turn_park_wrapper",
-            user.clone(),
-            workspace.clone(),
-            "chat_turn",
-            "prompt",
-            serde_json::json!({}),
-        );
-        task.status = TaskStatus::Running;
-        {
-            let store = super::lock_task_store(&state).unwrap();
-            store.insert_task(&task).unwrap();
-            store
-                .create_agent_run(&local_first_task_runtime::NewAgentRun {
-                    run_id: "agent_run_park_wrapper".to_string(),
-                    turn_id: task.task_id.as_str().to_string(),
-                    thread_id: "thread_park_wrapper".to_string(),
-                    user_id: user.as_str().to_string(),
-                    workspace_id: workspace.as_str().to_string(),
-                    model: None,
-                    provider: None,
-                    prompt_fingerprint: None,
-                })
-                .unwrap();
-        }
-
-        super::park_chat_turn_task(&state, Some(task.task_id.as_str()), &user, &workspace);
-
-        let persisted = super::lock_task_store(&state)
-            .unwrap()
-            .get_task(&task.task_id, &user, &workspace)
-            .unwrap()
-            .expect("task still present");
-        assert_eq!(persisted.status, TaskStatus::Parked);
-        let runs = super::lock_task_store(&state)
-            .unwrap()
-            .list_agent_runs_for_turn(task.task_id.as_str(), user.as_str(), workspace.as_str())
-            .unwrap();
-        assert_eq!(runs.len(), 1);
-        assert_eq!(
-            runs[0].terminal_reason.as_deref(),
-            Some("parked_waiting_for_model")
-        );
-    }
-
-    #[test]
-    fn park_chat_turn_task_is_a_noop_without_a_broker_turn_id() {
-        let state = AppState::for_tests();
-        // The engine can only reach `TurnDelivery::Parked` with a live steering context, which
-        // requires a broker turn_id — but the wrapper must not panic if that invariant is ever
-        // violated (e.g. a non-broker call somehow parks). Nothing to park, nothing crashes.
-        super::park_chat_turn_task(
-            &state,
-            None,
-            &super::gateway_user_id(),
-            &WorkspaceId::new("workspace_test"),
-        );
-    }
-
-    #[test]
-    fn parked_chat_turn_short_circuits_the_runner_without_a_terminal_event_or_failed_bubble() {
-        let state = AppState::for_tests();
-        let thread = super::lock_store(&state)
-            .unwrap()
-            .create_thread("workspace_test")
-            .unwrap();
-        let mut assistant =
-            super::channel_chat_message_with_id("assistant", "", "local_assistant_park_guard");
-        assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
-        super::lock_store(&state)
-            .unwrap()
-            .append_assistant_message(&thread.thread_id, &assistant)
-            .unwrap();
-
-        let user = super::gateway_user_id();
-        let workspace = WorkspaceId::new("workspace_test");
-        let mut task = TaskRecord::new(
-            "turn_park_guard",
-            user.clone(),
-            workspace.clone(),
-            "chat_turn",
-            "prompt",
-            serde_json::json!({
-                "thread_id": thread.thread_id,
-                "assistant_message_id": assistant.id,
-            }),
-        );
-        task.status = TaskStatus::Running;
-        {
-            let store = super::lock_task_store(&state).unwrap();
-            store.insert_task(&task).unwrap();
-            store
-                .create_agent_run(&local_first_task_runtime::NewAgentRun {
-                    run_id: "agent_run_park_guard".to_string(),
-                    turn_id: task.task_id.as_str().to_string(),
-                    thread_id: thread.thread_id.clone(),
-                    user_id: user.as_str().to_string(),
-                    workspace_id: workspace.as_str().to_string(),
-                    model: None,
-                    provider: None,
-                    prompt_fingerprint: None,
-                })
-                .unwrap();
-            // Simulate `run_agent_rounds`'s outcome consumer having already parked the turn
-            // (T2's `park_chat_turn`, wired to this exact call in `park_chat_turn_task`).
-            store
-                .park_chat_turn(task.task_id.as_str(), user.as_str(), workspace.as_str())
-                .unwrap();
-        }
-        task.status = TaskStatus::Parked;
-
-        // (b) the runner's guard sees the task as parked — this is what makes it skip
-        // `handle_failed_task_run` in `run_next_task_once` instead of clobbering the status.
-        assert_eq!(
-            super::lock_task_store(&state)
-                .unwrap()
-                .get_task(&task.task_id, &user, &workspace)
-                .unwrap()
-                .expect("parked task")
-                .status,
-            TaskStatus::Parked
-        );
-        let runs = super::lock_task_store(&state)
-            .unwrap()
-            .list_agent_runs_for_turn(task.task_id.as_str(), user.as_str(), workspace.as_str())
-            .unwrap();
-        assert_eq!(
-            runs[0].terminal_reason.as_deref(),
-            Some("parked_waiting_for_model")
-        );
-
-        // (c) the assistant bubble was NEVER touched by the park path — still `Streaming`,
-        // not `Failed`/`Completed`/`Cancelled` (no half-finalized bubble).
-        let stored = super::lock_store(&state)
-            .unwrap()
-            .message(&thread.thread_id, &assistant.id)
-            .unwrap()
-            .expect("assistant message still present");
-        assert_eq!(
-            stored.delivery_state,
-            local_first_desktop_gateway::MessageDeliveryState::Streaming
-        );
-
-        // (a) no terminal turn event exists for this turn — park emits none.
-        let events = super::lock_task_store(&state)
-            .unwrap()
-            .read_turn_events(task.task_id.as_str(), 0)
-            .unwrap();
-        assert!(!events.iter().any(|event| matches!(
-            event.kind,
-            local_first_task_runtime::TurnEventKind::Done
-                | local_first_task_runtime::TurnEventKind::Error
-                | local_first_task_runtime::TurnEventKind::Cancelled
-        )));
     }
 
     #[test]
