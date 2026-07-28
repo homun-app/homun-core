@@ -41,15 +41,7 @@ pub fn secret_ref() -> SecretRef {
 }
 
 pub fn checkpoint_with(data_ref: CheckpointDataRef) -> CheckpointEnvelope {
-    CheckpointEnvelope {
-        checkpoint_id: "exec-1:1".into(),
-        execution_id: "exec-1".into(),
-        revision: 1,
-        producer_kind: "chat_turn".into(),
-        protocol_schema_version: PROTOCOL_SCHEMA_VERSION,
-        producer_schema_version: 1,
-        data_ref,
-    }
+    CheckpointEnvelope::new("exec-1", 1, "chat_turn", 1, data_ref)
 }
 
 pub fn checkpoint_for(

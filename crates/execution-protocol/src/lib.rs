@@ -124,6 +124,15 @@ impl ExecutionContract {
                 .map(|objective| objective.thread_id.as_str()),
         )?;
         if let Some(objective) = &self.objective {
+            let Some(scope_thread_id) = self.scope.thread_id.as_ref() else {
+                return Err(ProtocolValidationError::ObjectiveScopeThreadMissing);
+            };
+            if scope_thread_id != &objective.thread_id {
+                return Err(ProtocolValidationError::ObjectiveScopeThreadMismatch {
+                    scope_thread_id: scope_thread_id.clone(),
+                    objective_thread_id: objective.thread_id.clone(),
+                });
+            }
             if objective.revision == 0 {
                 return Err(ProtocolValidationError::ObjectiveRevisionZero);
             }
@@ -389,9 +398,12 @@ fn validate_outcome(
             if checkpoint.producer_kind != contract.kind {
                 return Err(ProtocolValidationError::CheckpointProducerKindMismatch);
             }
-            if is_blank(&checkpoint.checkpoint_id) {
-                return Err(ProtocolValidationError::EmptyScopedReference {
-                    field: "checkpoint.checkpoint_id",
+            let expected_checkpoint_id =
+                canonical_checkpoint_id(&checkpoint.execution_id, checkpoint.revision);
+            if checkpoint.checkpoint_id != expected_checkpoint_id {
+                return Err(ProtocolValidationError::CheckpointIdMismatch {
+                    expected: expected_checkpoint_id,
+                    actual: checkpoint.checkpoint_id.clone(),
                 });
             }
             if checkpoint.protocol_schema_version != PROTOCOL_SCHEMA_VERSION {
@@ -719,8 +731,8 @@ pub struct WakeDelivery {
 /// of an outcome accepted by [`ValidatedExecutionOutcome`].
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CheckpointEnvelope {
-    /// Stable checkpoint identity.
-    pub checkpoint_id: String,
+    /// Canonical protocol identity derived from execution identity and revision.
+    checkpoint_id: String,
     /// Execution that owns this checkpoint.
     pub execution_id: String,
     /// Monotonic execution revision that produced the checkpoint.
@@ -736,7 +748,7 @@ pub struct CheckpointEnvelope {
 }
 
 impl CheckpointEnvelope {
-    /// Builds a protocol-v1 checkpoint around an already checked external data reference.
+    /// Builds a protocol-v1 checkpoint with a canonical, length-prefixed identity.
     pub fn new(
         execution_id: impl Into<String>,
         revision: u64,
@@ -745,7 +757,7 @@ impl CheckpointEnvelope {
         data_ref: CheckpointDataRef,
     ) -> Self {
         let execution_id = execution_id.into();
-        let checkpoint_id = format!("{execution_id}:{revision}");
+        let checkpoint_id = canonical_checkpoint_id(&execution_id, revision);
         Self {
             checkpoint_id,
             execution_id,
@@ -756,6 +768,18 @@ impl CheckpointEnvelope {
             data_ref,
         }
     }
+
+    /// Returns the canonical checkpoint identity derived from execution and revision.
+    pub fn checkpoint_id(&self) -> &str {
+        &self.checkpoint_id
+    }
+}
+
+fn canonical_checkpoint_id(execution_id: &str, revision: u64) -> String {
+    format!(
+        "v1:checkpoint:{}:{execution_id}:{revision}",
+        execution_id.len()
+    )
 }
 
 /// Reference-only checkpoint representation persisted in the canonical journal.
@@ -989,6 +1013,15 @@ pub enum ProtocolValidationError {
     ObjectiveRevisionZero,
     /// Objective revision cannot be represented by the durable SQL integer.
     ObjectiveRevisionOutOfRange,
+    /// An objective exists without a thread in the execution scope.
+    ObjectiveScopeThreadMissing,
+    /// An objective belongs to a different thread than the execution scope.
+    ObjectiveScopeThreadMismatch {
+        /// Thread identity carried by the execution scope.
+        scope_thread_id: String,
+        /// Thread identity carried by the objective reference.
+        objective_thread_id: String,
+    },
     /// Fencing token cannot be represented by the durable SQL integer.
     FencingTokenOutOfRange,
     /// Execution budget permits no attempts.
@@ -1027,6 +1060,13 @@ pub enum ProtocolValidationError {
     CheckpointRevisionMismatch,
     /// A suspended checkpoint was produced by another execution kind.
     CheckpointProducerKindMismatch,
+    /// A checkpoint identity is not canonical for its execution and revision.
+    CheckpointIdMismatch {
+        /// Canonical identity derived by the protocol.
+        expected: String,
+        /// Identity decoded from the raw checkpoint DTO.
+        actual: String,
+    },
     /// A suspended checkpoint uses an unsupported protocol envelope schema version.
     UnsupportedCheckpointProtocolSchemaVersion {
         /// Unsupported protocol envelope schema version.

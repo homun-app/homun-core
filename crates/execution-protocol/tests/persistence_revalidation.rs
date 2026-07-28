@@ -25,6 +25,34 @@ fn hostile_stored_contract_json_cannot_become_a_validated_contract() {
 }
 
 #[test]
+fn stored_cross_thread_objective_cannot_become_a_validated_contract() {
+    let mut stored = serde_json::to_value(valid_contract()).unwrap();
+    stored["objective"] = json!({"thread_id": "other-thread", "revision": 1});
+    let decoded: ExecutionContract = serde_json::from_value(stored).unwrap();
+
+    assert_eq!(
+        ValidatedExecutionContract::try_from(decoded),
+        Err(ProtocolValidationError::ObjectiveScopeThreadMismatch {
+            scope_thread_id: "thread-1".into(),
+            objective_thread_id: "other-thread".into(),
+        })
+    );
+}
+
+#[test]
+fn stored_objective_without_scoped_thread_cannot_become_a_validated_contract() {
+    let mut stored = serde_json::to_value(valid_contract()).unwrap();
+    stored["scope"]["thread_id"] = Value::Null;
+    stored["objective"] = json!({"thread_id": "thread-1", "revision": 1});
+    let decoded: ExecutionContract = serde_json::from_value(stored).unwrap();
+
+    assert_eq!(
+        ValidatedExecutionContract::try_from(decoded),
+        Err(ProtocolValidationError::ObjectiveScopeThreadMissing)
+    );
+}
+
+#[test]
 fn stored_outcome_json_is_revalidated_against_the_loaded_contract() {
     let contract = ValidatedExecutionContract::try_from(valid_contract()).unwrap();
     let outcome = ExecutionOutcome::Suspended {
@@ -38,7 +66,7 @@ fn stored_outcome_json_is_revalidated_against_the_loaded_contract() {
 }
 
 #[test]
-fn hostile_stored_outcome_json_cannot_become_a_validated_outcome() {
+fn stored_cross_execution_checkpoint_cannot_become_a_validated_outcome() {
     let contract = ValidatedExecutionContract::try_from(valid_contract()).unwrap();
     let mut stored = serde_json::to_value(ExecutionOutcome::Suspended {
         wake: signal(),
@@ -51,6 +79,26 @@ fn hostile_stored_outcome_json_cannot_become_a_validated_outcome() {
     assert_eq!(
         ValidatedExecutionOutcome::new(decoded, &contract),
         Err(ProtocolValidationError::CheckpointExecutionIdMismatch)
+    );
+}
+
+#[test]
+fn stored_checkpoint_with_wrong_canonical_id_cannot_become_a_validated_outcome() {
+    let contract = ValidatedExecutionContract::try_from(valid_contract()).unwrap();
+    let mut stored = serde_json::to_value(ExecutionOutcome::Suspended {
+        wake: signal(),
+        checkpoint: checkpoint_for("exec-1", 1, "chat_turn"),
+    })
+    .unwrap();
+    stored["checkpoint"]["checkpoint_id"] = Value::String("v1:checkpoint:5:other:1".into());
+    let decoded: ExecutionOutcome = serde_json::from_value(stored).unwrap();
+
+    assert_eq!(
+        ValidatedExecutionOutcome::new(decoded, &contract),
+        Err(ProtocolValidationError::CheckpointIdMismatch {
+            expected: "v1:checkpoint:6:exec-1:1".into(),
+            actual: "v1:checkpoint:5:other:1".into(),
+        })
     );
 }
 

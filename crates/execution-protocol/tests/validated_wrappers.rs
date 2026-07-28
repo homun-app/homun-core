@@ -205,7 +205,7 @@ fn zero_checkpoint_producer_schema_cannot_become_a_validated_outcome() {
 
 #[test]
 fn malformed_checkpoint_refs_cannot_deserialize_into_raw_outcomes() {
-    let malformed = r#"{"type":"suspended","wake":{"type":"signal","kind":"connector.message","correlation_id":"msg-1"},"checkpoint":{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","protocol_schema_version":1,"producer_schema_version":1,"data_ref":{"mode":"public","record_ref":"durable:v1:99:short"}}}"#;
+    let malformed = r#"{"type":"suspended","wake":{"type":"signal","kind":"connector.message","correlation_id":"msg-1"},"checkpoint":{"checkpoint_id":"v1:checkpoint:6:exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","protocol_schema_version":1,"producer_schema_version":1,"data_ref":{"mode":"public","record_ref":"durable:v1:99:short"}}}"#;
 
     assert!(serde_json::from_str::<ExecutionOutcome>(malformed).is_err());
 }

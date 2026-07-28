@@ -58,7 +58,7 @@ fn execution_outcomes_v1_wire_format_is_stable() {
                     record_ref: durable_ref(),
                 }),
             },
-            r#"{"type":"suspended","wake":{"type":"signal","kind":"connector.message","correlation_id":"msg-1"},"checkpoint":{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","protocol_schema_version":1,"producer_schema_version":1,"data_ref":{"mode":"public","record_ref":"durable:v1:32:0123456789abcdef0123456789abcdef"}}}"#,
+            r#"{"type":"suspended","wake":{"type":"signal","kind":"connector.message","correlation_id":"msg-1"},"checkpoint":{"checkpoint_id":"v1:checkpoint:6:exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","protocol_schema_version":1,"producer_schema_version":1,"data_ref":{"mode":"public","record_ref":"durable:v1:32:0123456789abcdef0123456789abcdef"}}}"#,
         ),
         (
             ExecutionOutcome::Cancelled {
@@ -156,19 +156,19 @@ fn checkpoint_data_modes_v1_wire_format_are_stable() {
             checkpoint_with(CheckpointDataRef::Public {
                 record_ref: durable_ref(),
             }),
-            r#"{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","protocol_schema_version":1,"producer_schema_version":1,"data_ref":{"mode":"public","record_ref":"durable:v1:32:0123456789abcdef0123456789abcdef"}}"#,
+            r#"{"checkpoint_id":"v1:checkpoint:6:exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","protocol_schema_version":1,"producer_schema_version":1,"data_ref":{"mode":"public","record_ref":"durable:v1:32:0123456789abcdef0123456789abcdef"}}"#,
         ),
         (
             checkpoint_with(CheckpointDataRef::Redacted {
                 record_ref: durable_ref(),
             }),
-            r#"{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","protocol_schema_version":1,"producer_schema_version":1,"data_ref":{"mode":"redacted","record_ref":"durable:v1:32:0123456789abcdef0123456789abcdef"}}"#,
+            r#"{"checkpoint_id":"v1:checkpoint:6:exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","protocol_schema_version":1,"producer_schema_version":1,"data_ref":{"mode":"redacted","record_ref":"durable:v1:32:0123456789abcdef0123456789abcdef"}}"#,
         ),
         (
             checkpoint_with(CheckpointDataRef::Encrypted {
                 secret_ref: secret_ref(),
             }),
-            r#"{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","protocol_schema_version":1,"producer_schema_version":1,"data_ref":{"mode":"encrypted","secret_ref":"secret:v1:32:abcdef0123456789abcdef0123456789"}}"#,
+            r#"{"checkpoint_id":"v1:checkpoint:6:exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","protocol_schema_version":1,"producer_schema_version":1,"data_ref":{"mode":"encrypted","secret_ref":"secret:v1:32:abcdef0123456789abcdef0123456789"}}"#,
         ),
     ];
 

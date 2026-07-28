@@ -17,7 +17,7 @@ fn checkpoint_constructor_requires_an_external_data_reference() {
         },
     );
 
-    assert_eq!(checkpoint.checkpoint_id, "exec-1:3");
+    assert_eq!(checkpoint.checkpoint_id(), "v1:checkpoint:6:exec-1:3");
     assert_eq!(checkpoint.execution_id, "exec-1");
     assert_eq!(checkpoint.revision, 3);
     assert_eq!(checkpoint.producer_kind, "chat_turn");
@@ -29,6 +29,21 @@ fn checkpoint_constructor_requires_an_external_data_reference() {
             record_ref: durable_ref()
         }
     );
+}
+
+#[test]
+fn checkpoint_ids_length_prefix_utf8_execution_ids() {
+    let checkpoint = CheckpointEnvelope::new(
+        "exec:α",
+        12,
+        "chat_turn",
+        1,
+        CheckpointDataRef::Public {
+            record_ref: durable_ref(),
+        },
+    );
+
+    assert_eq!(checkpoint.checkpoint_id(), "v1:checkpoint:7:exec:α:12");
 }
 
 #[test]

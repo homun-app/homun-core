@@ -162,6 +162,33 @@ fn validation_rejects_objective_revisions_outside_sqlite_integer_range() {
 }
 
 #[test]
+fn validation_requires_objective_to_belong_to_the_scoped_thread() {
+    let mut contract = valid_contract();
+    contract.scope.thread_id = None;
+    contract.objective = Some(ObjectiveRef {
+        thread_id: "thread-1".into(),
+        revision: 1,
+    });
+    assert_invalid(
+        contract,
+        ProtocolValidationError::ObjectiveScopeThreadMissing,
+    );
+
+    let mut contract = valid_contract();
+    contract.objective = Some(ObjectiveRef {
+        thread_id: "other-thread".into(),
+        revision: 1,
+    });
+    assert_invalid(
+        contract,
+        ProtocolValidationError::ObjectiveScopeThreadMismatch {
+            scope_thread_id: "thread-1".into(),
+            objective_thread_id: "other-thread".into(),
+        },
+    );
+}
+
+#[test]
 fn validation_rejects_zero_checkpoint_producer_schema_version() {
     let mut contract = valid_contract();
     contract.checkpoint = Some(CheckpointRef {
