@@ -3,6 +3,9 @@
 use local_first_execution_protocol::*;
 use serde_json::{Value, json};
 
+pub const DURABLE_STORE_ID: &str = "0123456789abcdef0123456789abcdef";
+pub const SECRET_STORE_ID: &str = "abcdef0123456789abcdef0123456789";
+
 pub fn scope() -> ExecutionScope {
     ExecutionScope {
         user_id: "user-1".into(),
@@ -29,12 +32,12 @@ where
     assert_eq!(serde_json::to_string(&decoded).unwrap(), golden);
 }
 
-pub fn durable_ref(value: &str) -> DurableDataRef {
-    DurableDataRef::new(value).unwrap()
+pub fn durable_ref() -> DurableDataRef {
+    DurableDataRef::from_store_id(DURABLE_STORE_ID).unwrap()
 }
 
-pub fn secret_ref(value: &str) -> SecretRef {
-    SecretRef::new(value).unwrap()
+pub fn secret_ref() -> SecretRef {
+    SecretRef::from_store_id(SECRET_STORE_ID).unwrap()
 }
 
 pub fn checkpoint_with(data_ref: CheckpointDataRef) -> CheckpointEnvelope {
@@ -43,9 +46,26 @@ pub fn checkpoint_with(data_ref: CheckpointDataRef) -> CheckpointEnvelope {
         execution_id: "exec-1".into(),
         revision: 1,
         producer_kind: "chat_turn".into(),
-        schema_version: 1,
+        protocol_schema_version: PROTOCOL_SCHEMA_VERSION,
+        producer_schema_version: 1,
         data_ref,
     }
+}
+
+pub fn checkpoint_for(
+    execution_id: &str,
+    revision: u64,
+    producer_kind: &str,
+) -> CheckpointEnvelope {
+    CheckpointEnvelope::new(
+        execution_id,
+        revision,
+        producer_kind,
+        1,
+        CheckpointDataRef::Public {
+            record_ref: durable_ref(),
+        },
+    )
 }
 
 pub fn signal() -> WakeCondition {

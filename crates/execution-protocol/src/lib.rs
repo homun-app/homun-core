@@ -123,12 +123,27 @@ impl ExecutionContract {
                 .as_ref()
                 .map(|objective| objective.thread_id.as_str()),
         )?;
+        if let Some(objective) = &self.objective {
+            if objective.revision == 0 {
+                return Err(ProtocolValidationError::ObjectiveRevisionZero);
+            }
+            if objective.revision > i64::MAX as u64 {
+                return Err(ProtocolValidationError::ObjectiveRevisionOutOfRange);
+            }
+        }
         validate_optional_ref(
             "checkpoint.checkpoint_id",
             self.checkpoint
                 .as_ref()
                 .map(|checkpoint| checkpoint.checkpoint_id.as_str()),
         )?;
+        if self
+            .checkpoint
+            .as_ref()
+            .is_some_and(|checkpoint| checkpoint.producer_schema_version == 0)
+        {
+            return Err(ProtocolValidationError::CheckpointProducerSchemaVersionZero);
+        }
 
         for (index, resource) in self.resources.iter().enumerate() {
             if is_blank(&resource.class) {
@@ -162,6 +177,16 @@ impl ExecutionContract {
 pub struct ValidatedExecutionContract(ExecutionContract);
 
 impl ValidatedExecutionContract {
+    /// Returns the validated revision as a SQLite-compatible integer.
+    pub fn revision_i64(&self) -> i64 {
+        i64::try_from(self.0.revision).expect("validated revision must fit in i64")
+    }
+
+    /// Returns the validated fencing token as a SQLite-compatible integer.
+    pub fn fencing_token_i64(&self) -> i64 {
+        i64::try_from(self.0.fencing_token).expect("validated fencing token must fit in i64")
+    }
+
     /// Consumes the wrapper and returns the raw DTO.
     pub fn into_inner(self) -> ExecutionContract {
         self.0
@@ -242,7 +267,10 @@ impl ExecutionOutcome {
 
 /// Execution outcome proven consistent with a validated contract.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ValidatedExecutionOutcome(ExecutionOutcome);
+pub struct ValidatedExecutionOutcome {
+    outcome: ExecutionOutcome,
+    binding: ExecutionBinding,
+}
 
 impl ValidatedExecutionOutcome {
     /// Validates an outcome against its contract before persistence.
@@ -251,18 +279,90 @@ impl ValidatedExecutionOutcome {
         contract: &ValidatedExecutionContract,
     ) -> Result<Self, ProtocolValidationError> {
         validate_outcome(&outcome, contract.as_ref())?;
-        Ok(Self(outcome))
+        let contract = contract.as_ref();
+        Ok(Self {
+            outcome,
+            binding: ExecutionBinding {
+                execution_id: contract.execution_id.clone(),
+                revision: contract.revision,
+                kind: contract.kind.clone(),
+                fencing_token: contract.fencing_token,
+            },
+        })
+    }
+
+    /// Returns immutable identity metadata captured during validation.
+    pub fn binding(&self) -> &ExecutionBinding {
+        &self.binding
     }
 
     /// Consumes the wrapper and returns the raw DTO.
     pub fn into_inner(self) -> ExecutionOutcome {
-        self.0
+        self.outcome
     }
 }
 
 impl AsRef<ExecutionOutcome> for ValidatedExecutionOutcome {
     fn as_ref(&self) -> &ExecutionOutcome {
-        &self.0
+        &self.outcome
+    }
+}
+
+/// Immutable contract identity attached to a validated outcome.
+///
+/// Persistence adapters compare these fields with the loaded execution row in
+/// the same transaction before accepting the outcome.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExecutionBinding {
+    execution_id: String,
+    revision: u64,
+    kind: String,
+    fencing_token: u64,
+}
+
+impl ExecutionBinding {
+    /// Returns the bound execution identity.
+    pub fn execution_id(&self) -> &str {
+        &self.execution_id
+    }
+
+    /// Returns the bound execution revision.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Returns the bound revision as a SQLite-compatible integer.
+    pub fn revision_i64(&self) -> i64 {
+        i64::try_from(self.revision).expect("bound validated revision must fit in i64")
+    }
+
+    /// Returns the bound execution kind.
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+
+    /// Returns the bound fencing token.
+    pub fn fencing_token(&self) -> u64 {
+        self.fencing_token
+    }
+
+    /// Returns the bound fencing token as a SQLite-compatible integer.
+    pub fn fencing_token_i64(&self) -> i64 {
+        i64::try_from(self.fencing_token).expect("bound validated fencing token must fit in i64")
+    }
+
+    /// Compares all bound identity fields with a loaded persistence row.
+    pub fn matches_persisted(
+        &self,
+        execution_id: &str,
+        revision: i64,
+        kind: &str,
+        fencing_token: i64,
+    ) -> bool {
+        self.execution_id == execution_id
+            && self.revision_i64() == revision
+            && self.kind == kind
+            && self.fencing_token_i64() == fencing_token
     }
 }
 
@@ -294,12 +394,15 @@ fn validate_outcome(
                     field: "checkpoint.checkpoint_id",
                 });
             }
-            if checkpoint.schema_version != PROTOCOL_SCHEMA_VERSION {
+            if checkpoint.protocol_schema_version != PROTOCOL_SCHEMA_VERSION {
                 return Err(
-                    ProtocolValidationError::UnsupportedCheckpointSchemaVersion {
-                        actual: checkpoint.schema_version,
+                    ProtocolValidationError::UnsupportedCheckpointProtocolSchemaVersion {
+                        actual: checkpoint.protocol_schema_version,
                     },
                 );
+            }
+            if checkpoint.producer_schema_version == 0 {
+                return Err(ProtocolValidationError::CheckpointProducerSchemaVersionZero);
             }
             checkpoint.data_ref.validate().map_err(|reason| {
                 ProtocolValidationError::InvalidCheckpointDataReference { reason }
@@ -529,8 +632,8 @@ pub struct ObjectiveRef {
 pub struct CheckpointRef {
     /// Stable checkpoint identity.
     pub checkpoint_id: String,
-    /// Producer-defined checkpoint schema version.
-    pub schema_version: u32,
+    /// Nonzero producer codec schema version for the referenced checkpoint data.
+    pub producer_schema_version: u32,
 }
 
 /// Reference to a linked execution that continues completed work.
@@ -610,7 +713,10 @@ pub struct WakeDelivery {
     pub delivered_at_unix_seconds: i64,
 }
 
-/// Durable checkpoint metadata containing only a checked external data reference.
+/// Mutable checkpoint DTO containing only a checked external data reference.
+///
+/// Serialization alone does not make an envelope persistable. It must be part
+/// of an outcome accepted by [`ValidatedExecutionOutcome`].
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CheckpointEnvelope {
     /// Stable checkpoint identity.
@@ -621,30 +727,33 @@ pub struct CheckpointEnvelope {
     pub revision: u64,
     /// Neutral producer execution kind.
     pub producer_kind: String,
-    /// Producer-defined checkpoint schema version.
-    pub schema_version: u32,
+    /// Protocol-owned envelope schema version, validated by this crate.
+    pub protocol_schema_version: u32,
+    /// Nonzero producer-owned codec schema version, evolved independently.
+    pub producer_schema_version: u32,
     /// Reference to checkpoint data stored outside the canonical journal.
     pub data_ref: CheckpointDataRef,
 }
 
 impl CheckpointEnvelope {
-    /// Builds an empty public schema-v1 checkpoint for an execution revision.
-    pub fn empty(
+    /// Builds a protocol-v1 checkpoint around an already checked external data reference.
+    pub fn new(
         execution_id: impl Into<String>,
         revision: u64,
         producer_kind: impl Into<String>,
+        producer_schema_version: u32,
+        data_ref: CheckpointDataRef,
     ) -> Self {
         let execution_id = execution_id.into();
         let checkpoint_id = format!("{execution_id}:{revision}");
-        let record_ref = DurableDataRef::new(format!("{checkpoint_id}:empty"))
-            .expect("execution identifiers used by an empty checkpoint are nonempty");
         Self {
             checkpoint_id,
             execution_id,
             revision,
             producer_kind: producer_kind.into(),
-            schema_version: PROTOCOL_SCHEMA_VERSION,
-            data_ref: CheckpointDataRef::Public { record_ref },
+            protocol_schema_version: PROTOCOL_SCHEMA_VERSION,
+            producer_schema_version,
+            data_ref,
         }
     }
 }
@@ -686,10 +795,9 @@ impl CheckpointDataRef {
 pub struct DurableDataRef(String);
 
 impl DurableDataRef {
-    /// Builds a `durable:v1` reference from a nonempty scoped identifier.
-    pub fn new(identifier: impl Into<String>) -> Result<Self, ReferenceValidationError> {
-        let identifier = identifier.into();
-        checked_reference("durable:v1:", identifier).map(Self)
+    /// Builds a `durable:v1` reference from a store-issued canonical identifier.
+    pub fn from_store_id(store_id: impl AsRef<str>) -> Result<Self, ReferenceValidationError> {
+        checked_reference("durable:v1:", store_id.as_ref()).map(Self)
     }
 
     /// Parses and validates an encoded `durable:v1` reference.
@@ -742,10 +850,9 @@ impl<'de> Deserialize<'de> for DurableDataRef {
 pub struct SecretRef(String);
 
 impl SecretRef {
-    /// Builds a `secret:v1` reference from a nonempty scoped identifier.
-    pub fn new(identifier: impl Into<String>) -> Result<Self, ReferenceValidationError> {
-        let identifier = identifier.into();
-        checked_reference("secret:v1:", identifier).map(Self)
+    /// Builds a `secret:v1` reference from a store-issued canonical identifier.
+    pub fn from_store_id(store_id: impl AsRef<str>) -> Result<Self, ReferenceValidationError> {
+        checked_reference("secret:v1:", store_id.as_ref()).map(Self)
     }
 
     /// Parses and validates an encoded `secret:v1` reference.
@@ -795,12 +902,10 @@ impl<'de> Deserialize<'de> for SecretRef {
 
 fn checked_reference(
     prefix: &'static str,
-    identifier: String,
+    store_id: &str,
 ) -> Result<String, ReferenceValidationError> {
-    if is_blank(&identifier) {
-        return Err(ReferenceValidationError::EmptyIdentifier);
-    }
-    Ok(format!("{prefix}{}:{identifier}", identifier.len()))
+    validate_store_id(store_id)?;
+    Ok(format!("{prefix}32:{store_id}"))
 }
 
 fn validate_encoded_reference(
@@ -810,18 +915,23 @@ fn validate_encoded_reference(
     let remainder = encoded
         .strip_prefix(prefix)
         .ok_or(ReferenceValidationError::InvalidPrefix { expected: prefix })?;
-    let (length, identifier) = remainder
-        .split_once(':')
-        .ok_or(ReferenceValidationError::InvalidLength)?;
-    let expected = length
-        .parse::<usize>()
-        .map_err(|_| ReferenceValidationError::InvalidLength)?;
-    if is_blank(identifier) {
-        return Err(ReferenceValidationError::EmptyIdentifier);
+    let store_id = remainder
+        .strip_prefix("32:")
+        .ok_or(ReferenceValidationError::NonCanonicalEncoding)?;
+    validate_store_id(store_id)
+}
+
+fn validate_store_id(store_id: &str) -> Result<(), ReferenceValidationError> {
+    if store_id.len() != 32 {
+        return Err(ReferenceValidationError::InvalidStoreIdLength {
+            actual: store_id.len(),
+        });
     }
-    let actual = identifier.len();
-    if expected != actual {
-        return Err(ReferenceValidationError::LengthMismatch { expected, actual });
+    if !store_id
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(ReferenceValidationError::InvalidStoreIdCharacter);
     }
     Ok(())
 }
@@ -829,22 +939,20 @@ fn validate_encoded_reference(
 /// Reason a durable or secret data reference is malformed.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ReferenceValidationError {
-    /// Scoped identifier is empty.
-    EmptyIdentifier,
     /// Encoded reference does not use the required versioned prefix.
     InvalidPrefix {
         /// Required prefix.
         expected: &'static str,
     },
-    /// Encoded reference has no valid decimal byte length.
-    InvalidLength,
-    /// Encoded byte length does not match the identifier.
-    LengthMismatch {
-        /// Length declared by the reference.
-        expected: usize,
-        /// Actual UTF-8 byte length.
+    /// Store ID is not exactly 32 UTF-8 bytes.
+    InvalidStoreIdLength {
+        /// Actual input byte length.
         actual: usize,
     },
+    /// Store ID contains uppercase, whitespace, control, or non-hex characters.
+    InvalidStoreIdCharacter,
+    /// Encoded reference is a noncanonical alias of the v1 wire form.
+    NonCanonicalEncoding,
 }
 
 impl std::fmt::Display for ReferenceValidationError {
@@ -877,6 +985,10 @@ pub enum ProtocolValidationError {
     FencingTokenZero,
     /// Execution revision cannot be represented by the durable SQL integer.
     RevisionOutOfRange,
+    /// Objective revision is zero.
+    ObjectiveRevisionZero,
+    /// Objective revision cannot be represented by the durable SQL integer.
+    ObjectiveRevisionOutOfRange,
     /// Fencing token cannot be represented by the durable SQL integer.
     FencingTokenOutOfRange,
     /// Execution budget permits no attempts.
@@ -915,11 +1027,13 @@ pub enum ProtocolValidationError {
     CheckpointRevisionMismatch,
     /// A suspended checkpoint was produced by another execution kind.
     CheckpointProducerKindMismatch,
-    /// A suspended checkpoint uses an unsupported schema version.
-    UnsupportedCheckpointSchemaVersion {
-        /// Unsupported checkpoint schema version.
+    /// A suspended checkpoint uses an unsupported protocol envelope schema version.
+    UnsupportedCheckpointProtocolSchemaVersion {
+        /// Unsupported protocol envelope schema version.
         actual: u32,
     },
+    /// A checkpoint producer codec schema version is zero.
+    CheckpointProducerSchemaVersionZero,
     /// A checkpoint data reference failed structural validation.
     InvalidCheckpointDataReference {
         /// Structural reference validation failure.

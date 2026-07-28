@@ -13,7 +13,9 @@ fn canonical_outcomes_round_trip_without_domain_types() {
                 kind: "connector.message".into(),
                 correlation_id: "msg-1".into(),
             },
-            checkpoint: CheckpointEnvelope::empty("exec-1", 1, "chat_turn"),
+            checkpoint: checkpoint_with(CheckpointDataRef::Public {
+                record_ref: durable_ref(),
+            }),
         },
         ExecutionOutcome::Cancelled {
             reason: CancelReason::User,
@@ -52,9 +54,11 @@ fn execution_outcomes_v1_wire_format_is_stable() {
                     kind: "connector.message".into(),
                     correlation_id: "msg-1".into(),
                 },
-                checkpoint: CheckpointEnvelope::empty("exec-1", 1, "chat_turn"),
+                checkpoint: checkpoint_with(CheckpointDataRef::Public {
+                    record_ref: durable_ref(),
+                }),
             },
-            r#"{"type":"suspended","wake":{"type":"signal","kind":"connector.message","correlation_id":"msg-1"},"checkpoint":{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","schema_version":1,"data_ref":{"mode":"public","record_ref":"durable:v1:14:exec-1:1:empty"}}}"#,
+            r#"{"type":"suspended","wake":{"type":"signal","kind":"connector.message","correlation_id":"msg-1"},"checkpoint":{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","protocol_schema_version":1,"producer_schema_version":1,"data_ref":{"mode":"public","record_ref":"durable:v1:32:0123456789abcdef0123456789abcdef"}}}"#,
         ),
         (
             ExecutionOutcome::Cancelled {
@@ -150,21 +154,21 @@ fn checkpoint_data_modes_v1_wire_format_are_stable() {
     let cases = [
         (
             checkpoint_with(CheckpointDataRef::Public {
-                record_ref: durable_ref("checkpoint-public"),
+                record_ref: durable_ref(),
             }),
-            r#"{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","schema_version":1,"data_ref":{"mode":"public","record_ref":"durable:v1:17:checkpoint-public"}}"#,
+            r#"{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","protocol_schema_version":1,"producer_schema_version":1,"data_ref":{"mode":"public","record_ref":"durable:v1:32:0123456789abcdef0123456789abcdef"}}"#,
         ),
         (
             checkpoint_with(CheckpointDataRef::Redacted {
-                record_ref: durable_ref("checkpoint-redacted"),
+                record_ref: durable_ref(),
             }),
-            r#"{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","schema_version":1,"data_ref":{"mode":"redacted","record_ref":"durable:v1:19:checkpoint-redacted"}}"#,
+            r#"{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","protocol_schema_version":1,"producer_schema_version":1,"data_ref":{"mode":"redacted","record_ref":"durable:v1:32:0123456789abcdef0123456789abcdef"}}"#,
         ),
         (
             checkpoint_with(CheckpointDataRef::Encrypted {
-                secret_ref: secret_ref("checkpoint-secret"),
+                secret_ref: secret_ref(),
             }),
-            r#"{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","schema_version":1,"data_ref":{"mode":"encrypted","secret_ref":"secret:v1:17:checkpoint-secret"}}"#,
+            r#"{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","protocol_schema_version":1,"producer_schema_version":1,"data_ref":{"mode":"encrypted","secret_ref":"secret:v1:32:abcdef0123456789abcdef0123456789"}}"#,
         ),
     ];
 

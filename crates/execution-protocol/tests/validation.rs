@@ -131,13 +131,47 @@ fn validation_rejects_empty_scoped_references() {
     let mut contract = valid_contract();
     contract.checkpoint = Some(CheckpointRef {
         checkpoint_id: " ".into(),
-        schema_version: 1,
+        producer_schema_version: 1,
     });
     assert_invalid(
         contract,
         ProtocolValidationError::EmptyScopedReference {
             field: "checkpoint.checkpoint_id",
         },
+    );
+}
+
+#[test]
+fn validation_rejects_objective_revisions_outside_sqlite_integer_range() {
+    let mut contract = valid_contract();
+    contract.objective = Some(ObjectiveRef {
+        thread_id: "thread-1".into(),
+        revision: 0,
+    });
+    assert_invalid(contract, ProtocolValidationError::ObjectiveRevisionZero);
+
+    let mut contract = valid_contract();
+    contract.objective = Some(ObjectiveRef {
+        thread_id: "thread-1".into(),
+        revision: i64::MAX as u64 + 1,
+    });
+    assert_invalid(
+        contract,
+        ProtocolValidationError::ObjectiveRevisionOutOfRange,
+    );
+}
+
+#[test]
+fn validation_rejects_zero_checkpoint_producer_schema_version() {
+    let mut contract = valid_contract();
+    contract.checkpoint = Some(CheckpointRef {
+        checkpoint_id: "checkpoint-1".into(),
+        producer_schema_version: 0,
+    });
+
+    assert_invalid(
+        contract,
+        ProtocolValidationError::CheckpointProducerSchemaVersionZero,
     );
 }
 

@@ -1,23 +1,32 @@
 mod common;
 
-use common::{checkpoint_with, durable_ref, secret_ref};
+use common::{DURABLE_STORE_ID, SECRET_STORE_ID, checkpoint_with, durable_ref, secret_ref};
 use local_first_execution_protocol::{
     CheckpointDataRef, CheckpointEnvelope, DurableDataRef, SecretRef,
 };
 
 #[test]
-fn empty_checkpoint_is_public_and_contains_no_payload_or_secrets() {
-    let checkpoint = CheckpointEnvelope::empty("exec-1", 3, "chat_turn");
+fn checkpoint_constructor_requires_an_external_data_reference() {
+    let checkpoint = CheckpointEnvelope::new(
+        "exec-1",
+        3,
+        "chat_turn",
+        4,
+        CheckpointDataRef::Public {
+            record_ref: durable_ref(),
+        },
+    );
 
     assert_eq!(checkpoint.checkpoint_id, "exec-1:3");
     assert_eq!(checkpoint.execution_id, "exec-1");
     assert_eq!(checkpoint.revision, 3);
     assert_eq!(checkpoint.producer_kind, "chat_turn");
-    assert_eq!(checkpoint.schema_version, 1);
+    assert_eq!(checkpoint.protocol_schema_version, 1);
+    assert_eq!(checkpoint.producer_schema_version, 4);
     assert_eq!(
         checkpoint.data_ref,
         CheckpointDataRef::Public {
-            record_ref: durable_ref("exec-1:3:empty")
+            record_ref: durable_ref()
         }
     );
 }
@@ -26,13 +35,13 @@ fn empty_checkpoint_is_public_and_contains_no_payload_or_secrets() {
 fn checkpoint_modes_serialize_references_without_payload_fields() {
     let checkpoints = [
         checkpoint_with(CheckpointDataRef::Public {
-            record_ref: durable_ref("checkpoint-public"),
+            record_ref: durable_ref(),
         }),
         checkpoint_with(CheckpointDataRef::Redacted {
-            record_ref: durable_ref("checkpoint-redacted"),
+            record_ref: durable_ref(),
         }),
         checkpoint_with(CheckpointDataRef::Encrypted {
-            secret_ref: secret_ref("checkpoint-secret"),
+            secret_ref: secret_ref(),
         }),
     ];
 
@@ -47,30 +56,66 @@ fn checkpoint_modes_serialize_references_without_payload_fields() {
 
 #[test]
 fn durable_data_refs_use_checked_versioned_length_prefixes() {
-    let reference = DurableDataRef::new("scope:α").unwrap();
-    assert_eq!(reference.as_ref(), "durable:v1:8:scope:α");
-    assert_eq!(
-        "durable:v1:8:scope:α".parse::<DurableDataRef>().unwrap(),
-        reference
-    );
-
-    assert!(DurableDataRef::new(" ").is_err());
-    assert!("durable:v1:7:scope:α".parse::<DurableDataRef>().is_err());
-    assert!("secret:v1:8:scope:α".parse::<DurableDataRef>().is_err());
+    let reference = DurableDataRef::from_store_id(DURABLE_STORE_ID).unwrap();
+    let encoded = format!("durable:v1:32:{DURABLE_STORE_ID}");
+    assert_eq!(reference.as_ref(), encoded);
+    assert_eq!(encoded.parse::<DurableDataRef>().unwrap(), reference);
 }
 
 #[test]
 fn secret_refs_use_checked_versioned_length_prefixes() {
-    let reference = SecretRef::new("secret:β").unwrap();
-    assert_eq!(reference.as_ref(), "secret:v1:9:secret:β");
-    assert_eq!(
-        "secret:v1:9:secret:β".parse::<SecretRef>().unwrap(),
-        reference
-    );
+    let reference = SecretRef::from_store_id(SECRET_STORE_ID).unwrap();
+    let encoded = format!("secret:v1:32:{SECRET_STORE_ID}");
+    assert_eq!(reference.as_ref(), encoded);
+    assert_eq!(encoded.parse::<SecretRef>().unwrap(), reference);
+}
 
-    assert!(SecretRef::new("").is_err());
-    assert!("secret:v1:8:secret:β".parse::<SecretRef>().is_err());
-    assert!("durable:v1:9:secret:β".parse::<SecretRef>().is_err());
+#[test]
+fn hostile_values_cannot_become_store_references() {
+    let hostile = [
+        "",
+        " ",
+        r#"{"token":"secret-value"}"#,
+        "sk-proj-credential-control-string",
+        "0123456789ABCDEF0123456789ABCDEF",
+        "0123456789abcdef0123456789abcde",
+        "0123456789abcdef0123456789abcdef0",
+        "0123456789abcdef0123456789abcdeg",
+        "0123456789abcdef0123456789abcde\n",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ];
+
+    for value in hostile {
+        assert!(DurableDataRef::from_store_id(value).is_err(), "{value:?}");
+        assert!(SecretRef::from_store_id(value).is_err(), "{value:?}");
+    }
+}
+
+#[test]
+fn noncanonical_encoded_aliases_are_rejected() {
+    let durable_aliases = [
+        format!("durable:v1:032:{DURABLE_STORE_ID}"),
+        format!("durable:v1:31:{DURABLE_STORE_ID}"),
+        format!("durable:v1:32:{}", DURABLE_STORE_ID.to_uppercase()),
+        format!("durable:v1:32:{DURABLE_STORE_ID}\n"),
+        format!("secret:v1:32:{DURABLE_STORE_ID}"),
+    ];
+
+    for alias in durable_aliases {
+        assert!(alias.parse::<DurableDataRef>().is_err(), "{alias:?}");
+    }
+
+    let secret_aliases = [
+        format!("secret:v1:032:{SECRET_STORE_ID}"),
+        format!("secret:v1:31:{SECRET_STORE_ID}"),
+        format!("secret:v1:32:{}", SECRET_STORE_ID.to_uppercase()),
+        format!("secret:v1:32:{SECRET_STORE_ID}\n"),
+        format!("durable:v1:32:{SECRET_STORE_ID}"),
+    ];
+
+    for alias in secret_aliases {
+        assert!(alias.parse::<SecretRef>().is_err(), "{alias:?}");
+    }
 }
 
 #[test]
@@ -82,9 +127,15 @@ fn malformed_serialized_refs_cannot_deserialize() {
 
 #[test]
 fn checked_refs_can_be_recovered_for_storage_adapters() {
-    let durable = DurableDataRef::new("record-1").unwrap();
-    let secret = SecretRef::new("secret-1").unwrap();
+    let durable = DurableDataRef::from_store_id(DURABLE_STORE_ID).unwrap();
+    let secret = SecretRef::from_store_id(SECRET_STORE_ID).unwrap();
 
-    assert_eq!(durable.into_inner(), "durable:v1:8:record-1");
-    assert_eq!(secret.into_inner(), "secret:v1:8:secret-1");
+    assert_eq!(
+        durable.into_inner(),
+        format!("durable:v1:32:{DURABLE_STORE_ID}")
+    );
+    assert_eq!(
+        secret.into_inner(),
+        format!("secret:v1:32:{SECRET_STORE_ID}")
+    );
 }
