@@ -22,6 +22,7 @@ tokio-tungstenite = "0.29"
 # is filterable and the broker/turn/chat paths are traceable without noise.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+local-first-execution-protocol = { path = "../execution-protocol" }
 local-first-context-compression = { path = "../context-compression" }
 local-first-capabilities = { path = "../capabilities" }
 local-first-engine = { path = "../engine" }

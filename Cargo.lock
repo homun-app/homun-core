@@ -3600,6 +3600,7 @@ dependencies = [
  "local-first-capabilities",
  "local-first-context-compression",
  "local-first-engine",
+ "local-first-execution-protocol",
  "local-first-host-computer",
  "local-first-inference",
  "local-first-inference-usage",
@@ -3634,11 +3635,20 @@ dependencies = [
 name = "local-first-engine"
 version = "0.1.0"
 dependencies = [
+ "local-first-execution-protocol",
  "local-first-inference-usage",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "tokio",
+]
+
+[[package]]
+name = "local-first-execution-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3795,6 +3805,7 @@ name = "local-first-task-runtime"
 version = "0.1.0"
 dependencies = [
  "jiff",
+ "local-first-execution-protocol",
  "rusqlite",
  "serde",
  "serde_json",

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+local-first-execution-protocol = { path = "../execution-protocol" }
 # jiff powers DST-aware calendar recurrence (daily/weekly at a wall-clock time in
 # a named timezone). Kept internal to `recurrence`; the rest of the crate stays on
 # `time` and conversions happen via unix seconds. `time`'s local-offset is unsound
