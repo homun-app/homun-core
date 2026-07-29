@@ -145,44 +145,6 @@ pub(crate) async fn project_chat_execution(
     Ok(ProjectionAttempt::Completed)
 }
 
-pub(crate) async fn replay_committed_chat_projections(
-    state: &crate::AppState,
-    limit: usize,
-) -> Result<usize, crate::LocalTaskExecutionError> {
-    let records = state
-        .task_store
-        .lock()
-        .map_err(projection_lock_error)?
-        .committed_executions(limit)
-        .map_err(projection_store_error)?;
-    let mut replayed = 0usize;
-    for record in records {
-        if record.contract.as_ref().kind != "chat_turn" {
-            continue;
-        }
-        let contract = record.contract;
-        let scope = &contract.as_ref().scope;
-        let task_id = local_first_task_runtime::TaskId::new(contract.as_ref().execution_id.clone());
-        let user_id = local_first_task_runtime::UserId::new(scope.user_id.clone());
-        let workspace_id = local_first_task_runtime::WorkspaceId::new(scope.workspace_id.clone());
-        let task = state
-            .task_store
-            .lock()
-            .map_err(projection_lock_error)?
-            .get_task(&task_id, &user_id, &workspace_id)
-            .map_err(projection_store_error)?;
-        let Some(task) = task else {
-            continue;
-        };
-        let Some(outcome) = record.outcome else {
-            continue;
-        };
-        project_chat_execution(state, &task, &contract, outcome.as_ref()).await?;
-        replayed += 1;
-    }
-    Ok(replayed)
-}
-
 fn projection_metadata(
     state: &crate::AppState,
     task: &TaskRecord,
@@ -639,7 +601,7 @@ mod tests {
                 .expect("commit outcome");
         }
 
-        replay_committed_chat_projections(&state, 100)
+        project_chat_execution(&state, &task, &contract, &outcome)
             .await
             .expect_err("projection must remain pending while the message is missing");
         assert!(

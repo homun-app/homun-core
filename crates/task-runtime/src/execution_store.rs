@@ -990,7 +990,7 @@ impl TaskStore {
         &self,
         receipt_ref: &EffectReceiptRef,
         resolution: &EffectReceiptResolution,
-    ) -> TaskRuntimeResult<ExecutionEffectReceipt> {
+    ) -> TaskRuntimeResult<crate::EffectReceiptResolutionCommit> {
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
         let receipt = crate::store::load_effect_receipt_on(&tx, receipt_ref)?
             .ok_or_else(|| TaskRuntimeError::NotFound(receipt_ref.as_ref().to_string()))?;
@@ -1001,8 +1001,16 @@ impl TaskStore {
 
         if receipt_resolution_matches(&receipt, resolution) {
             verify_effect_resolution_owner_on(&tx, &receipt, &payload)?;
+            let requeued_projections = crate::projection_outbox::requeue_blocked_projections_on(
+                &tx,
+                receipt_ref,
+                OffsetDateTime::now_utc().unix_timestamp(),
+            )?;
             tx.commit()?;
-            return Ok(receipt);
+            return Ok(crate::EffectReceiptResolutionCommit {
+                receipt,
+                requeued_projections,
+            });
         }
         if receipt.status != EffectReceiptStatus::Uncertain {
             return Err(TaskRuntimeError::InvalidTransition(
@@ -1073,8 +1081,16 @@ impl TaskStore {
         }
         let resolved = crate::store::load_effect_receipt_on(&tx, receipt_ref)?
             .ok_or_else(|| TaskRuntimeError::Store("resolved effect receipt disappeared".into()))?;
+        let requeued_projections = crate::projection_outbox::requeue_blocked_projections_on(
+            &tx,
+            receipt_ref,
+            resolved_at,
+        )?;
         tx.commit()?;
-        Ok(resolved)
+        Ok(crate::EffectReceiptResolutionCommit {
+            receipt: resolved,
+            requeued_projections,
+        })
     }
 
     /// Marks an effect compensated only after its linked compensation execution completed.

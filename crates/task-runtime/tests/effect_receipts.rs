@@ -279,7 +279,7 @@ fn resolving_uncertain_effect_and_delivering_wake_is_one_transition() {
         )
         .unwrap();
 
-    assert_eq!(resolved.status, EffectReceiptStatus::Completed);
+    assert_eq!(resolved.receipt.status, EffectReceiptStatus::Completed);
     let execution = store.execution("execution-1").unwrap().unwrap();
     assert_eq!(execution.state, ExecutionState::Ready);
     assert_eq!(execution.contract.as_ref().revision, 2);
@@ -324,9 +324,9 @@ fn not_applied_resolution_makes_the_verified_absent_effect_retryable() {
         )
         .unwrap();
 
-    assert_eq!(resolved.status, EffectReceiptStatus::Prepared);
+    assert_eq!(resolved.receipt.status, EffectReceiptStatus::Prepared);
     assert_eq!(
-        resolved.error_json,
+        resolved.receipt.error_json,
         Some(json!({"code": "verified_absent"}))
     );
     assert_eq!(
@@ -372,6 +372,13 @@ fn terminal_adapter_effect_can_be_resolved_without_fabricating_a_wake() {
     let prepared = store.prepare_effect_receipt(&new_receipt()).unwrap();
     store.claim_effect_receipt(&prepared.receipt_ref).unwrap();
     store.claim_effect_receipt(&prepared.receipt_ref).unwrap();
+    let projection = store
+        .claim_projection("chat_lifecycle", "projector", 1, 1)
+        .unwrap()
+        .expect("terminal projection");
+    store
+        .block_projection(&projection, &prepared.receipt_ref, 2)
+        .unwrap();
 
     let resolved = store
         .resolve_effect_receipt(
@@ -383,7 +390,21 @@ fn terminal_adapter_effect_can_be_resolved_without_fabricating_a_wake() {
         )
         .unwrap();
 
-    assert_eq!(resolved.status, EffectReceiptStatus::Completed);
+    assert_eq!(resolved.receipt.status, EffectReceiptStatus::Completed);
+    assert_eq!(resolved.requeued_projections, 1);
+    let projection_ref = local_first_task_runtime::projection_outbox::projection_ref(
+        "execution-1",
+        1,
+        local_first_task_runtime::projection_outbox::CHAT_LIFECYCLE_PROJECTION,
+    );
+    assert_eq!(
+        store
+            .projection_outbox_record(&projection_ref)
+            .unwrap()
+            .unwrap()
+            .status,
+        local_first_task_runtime::ProjectionStatus::Pending
+    );
     let execution = store.execution("execution-1").unwrap().unwrap();
     assert_eq!(execution.state, ExecutionState::Completed);
     assert_eq!(execution.contract.as_ref().revision, 1);

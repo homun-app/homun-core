@@ -35,7 +35,8 @@ pub use facade::{RunReadySummary, TaskRuntime};
 pub use lease::LeaseManager;
 pub use plan_context::TaskDependencyOutput;
 pub use projection_outbox::{
-    ProjectionClaim, ProjectionErrorEvidence, ProjectionOutboxRecord, ProjectionStatus,
+    EffectReceiptResolutionCommit, ProjectionClaim, ProjectionErrorEvidence,
+    ProjectionOutboxRecord, ProjectionStatus,
 };
 pub use recurrence::next_occurrence;
 pub use resources::{ResourceGovernor, ResourceLimits};

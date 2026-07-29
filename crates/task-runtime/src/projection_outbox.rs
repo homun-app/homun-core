@@ -62,6 +62,12 @@ pub struct ProjectionClaim {
     pub token: u64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EffectReceiptResolutionCommit {
+    pub receipt: crate::ExecutionEffectReceipt,
+    pub requeued_projections: usize,
+}
+
 pub fn projection_ref(execution_id: &str, revision: u64, projection_kind: &str) -> String {
     format!("{execution_id}:{revision}:{projection_kind}")
 }
@@ -159,6 +165,21 @@ pub(crate) fn enqueue_projection_on(
         ));
     }
     Ok(())
+}
+
+pub(crate) fn requeue_blocked_projections_on(
+    connection: &Connection,
+    receipt_ref: &EffectReceiptRef,
+    now: i64,
+) -> TaskRuntimeResult<usize> {
+    let changed = connection.execute(
+        "UPDATE execution_projection_outbox
+         SET status = 'pending', not_before = NULL, blocked_on_ref = NULL,
+             last_error_code = NULL, last_error_detail = NULL, updated_at = ?1
+         WHERE status = 'blocked' AND blocked_on_ref = ?2",
+        params![now, receipt_ref.as_ref()],
+    )?;
+    Ok(changed)
 }
 
 fn projector_kind(execution_kind: &str) -> Option<&'static str> {

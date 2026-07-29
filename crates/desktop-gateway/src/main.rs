@@ -41106,7 +41106,7 @@ struct UncertainEffectQuery {
 #[derive(Debug, Serialize)]
 struct ResolveEffectResponse {
     receipt: local_first_task_runtime::ExecutionEffectReceipt,
-    projections_replayed: usize,
+    projections_requeued: usize,
 }
 
 type EffectResolutionLocks = std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>;
@@ -41222,28 +41222,21 @@ async fn resolve_uncertain_effect_receipt(
             });
         }
     };
-    {
+    let resolution_commit = {
         let store = lock_task_store(&state)?;
         store
             .resolve_effect_receipt(&receipt_ref, &resolution)
-            .map_err(GatewayError::task)?;
-    }
-    let projections_replayed =
-        execution_projection::replay_committed_chat_projections(&state, usize::MAX)
-            .await
-            .map_err(|error| GatewayError {
-                status: StatusCode::BAD_GATEWAY,
-                code: "effect_projection_error",
-                message: error.message,
-            })?;
-    let receipt = lock_task_store(&state)?
-        .effect_receipt(&receipt_ref)
-        .map_err(GatewayError::task)?
-        .ok_or_else(|| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "effect_receipt_disappeared",
-            message: "Resolved effect receipt disappeared.".to_string(),
+            .map_err(GatewayError::task)?
+    };
+    projection_worker::notify();
+    projection_worker::drain_available(&state)
+        .await
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "effect_projection_error",
+            message: error.message,
         })?;
+    let receipt = resolution_commit.receipt;
     publish_app_event(serde_json::json!({
         "type": "effect.resolved",
         "receipt_ref": receipt_ref.as_ref(),
@@ -41253,7 +41246,7 @@ async fn resolve_uncertain_effect_receipt(
     }));
     Ok(Json(ResolveEffectResponse {
         receipt,
-        projections_replayed,
+        projections_requeued: resolution_commit.requeued_projections,
     }))
 }
 
