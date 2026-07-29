@@ -77,6 +77,10 @@ impl ExecutionRuntime {
         let task = task_from_contract(&requested_contract)?;
         validate_task_identity(&task, &requested_contract)?;
         let acquired_fence = acquired_task_fencing_token(&task)?;
+        let attempt_owner = task
+            .lease_owner
+            .as_deref()
+            .ok_or_else(|| runtime_error("acquired task has no lease owner"))?;
 
         let recovered = {
             let store = state.task_store.lock().map_err(runtime_lock_error)?;
@@ -110,18 +114,32 @@ impl ExecutionRuntime {
                     if let Some(outcome) = record.outcome.as_ref() {
                         return Ok(recovered_execution_result(&task, outcome.as_ref()));
                     }
-                    if record.state != ExecutionState::Ready {
-                        return Err(runtime_error(
-                            "only a ready authoritative execution revision can be dispatched",
-                        ));
-                    }
                     let authoritative = record.contract.as_ref();
                     if acquired_fence < authoritative.fencing_token {
                         return Err(runtime_error(
                             "acquired task lease fence is older than the authoritative execution fence",
                         ));
                     }
-                    if acquired_fence > authoritative.fencing_token {
+                    if record.state == ExecutionState::Running
+                        && acquired_fence > authoritative.fencing_token
+                    {
+                        store
+                            .reclaim_execution_attempt(
+                                &authoritative.execution_id,
+                                authoritative.revision,
+                                authoritative.fencing_token,
+                                acquired_fence,
+                                attempt_owner,
+                            )
+                            .map_err(runtime_store_error)?
+                            .contract
+                    } else if record.state == ExecutionState::Running {
+                        record.contract
+                    } else if record.state != ExecutionState::Ready {
+                        return Err(runtime_error(
+                            "only a ready or running authoritative execution revision can be dispatched",
+                        ));
+                    } else if acquired_fence > authoritative.fencing_token {
                         store
                             .advance_execution_fence(
                                 &authoritative.execution_id,
@@ -144,6 +162,18 @@ impl ExecutionRuntime {
                     }
                 },
             }
+        };
+        let contract = {
+            let store = state.task_store.lock().map_err(runtime_lock_error)?;
+            store
+                .start_execution_attempt(
+                    &contract.as_ref().execution_id,
+                    contract.as_ref().revision,
+                    contract.as_ref().fencing_token,
+                    attempt_owner,
+                )
+                .map_err(runtime_store_error)?
+                .contract
         };
 
         let adapter_outcome = match self.registry.resolve(&contract.as_ref().kind) {
@@ -214,7 +244,7 @@ impl ExecutionRuntime {
         {
             let store = state.task_store.lock().map_err(runtime_lock_error)?;
             store
-                .commit_execution_outcome(&validated)
+                .commit_running_execution_outcome(&validated)
                 .map_err(runtime_store_error)?;
         }
 
@@ -850,7 +880,8 @@ mod tests {
     use crate::{SurfaceKind, TaskExecutionPresentation, TaskResultSurfacing};
     use local_first_execution_protocol::{
         CheckpointDataRef, CheckpointEnvelope, DurableDataRef, ExecutionContract, ExecutionOutcome,
-        ExecutionScope, ValidatedExecutionContract, ValidatedExecutionOutcome, WakeCondition,
+        ExecutionScope, ExecutionState, ValidatedExecutionContract, ValidatedExecutionOutcome,
+        WakeCondition,
     };
     use local_first_task_runtime::{ExecutionProjection, TaskStatus, UserId, WorkspaceId};
     use std::sync::{Arc, Mutex};
@@ -864,6 +895,30 @@ mod tests {
 
     struct RevisionRecordingAdapter {
         revisions: Arc<Mutex<Vec<RecordedRevision>>>,
+    }
+
+    struct JournalStateRecordingAdapter {
+        states: Arc<Mutex<Vec<ExecutionState>>>,
+    }
+
+    impl GatewayExecutionAdapter for JournalStateRecordingAdapter {
+        fn execute(
+            &self,
+            context: &ExecutionAdapterContext,
+        ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
+            let execution_id = context.contract().as_ref().execution_id.as_str();
+            let state = context
+                .test_state()
+                .task_store
+                .lock()
+                .expect("task store")
+                .execution(execution_id)
+                .expect("load execution")
+                .expect("execution exists")
+                .state;
+            self.states.lock().expect("states").push(state);
+            Ok(ExecutionOutcome::completed(serde_json::Value::Null))
+        }
     }
 
     impl GatewayExecutionAdapter for RevisionRecordingAdapter {
@@ -1183,6 +1238,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn journal_attempt_is_running_while_the_adapter_executes() {
+        let states = Arc::new(Mutex::new(Vec::new()));
+        let mut registry = TaskExecutorRegistry::new();
+        registry.register(
+            "capability.*",
+            Arc::new(JournalStateRecordingAdapter {
+                states: states.clone(),
+            }),
+        );
+        let runtime = ExecutionRuntime::new(registry);
+        let state = AppState::for_tests();
+        let contract = contract("capability.test", "running-attempt-1");
+        insert_contract_task(&state, &contract);
+
+        runtime
+            .execute(&state, contract)
+            .await
+            .expect("execute through claimed journal attempt");
+
+        assert_eq!(
+            *states.lock().expect("states"),
+            vec![ExecutionState::Running]
+        );
+    }
+
+    #[tokio::test]
+    async fn newer_task_lease_reclaims_a_crashed_running_attempt() {
+        let revisions = Arc::new(Mutex::new(Vec::new()));
+        let mut registry = TaskExecutorRegistry::new();
+        registry.register(
+            "capability.*",
+            Arc::new(RevisionRecordingAdapter {
+                revisions: revisions.clone(),
+            }),
+        );
+        let runtime = ExecutionRuntime::new(registry);
+        let state = AppState::for_tests();
+        let original = contract("capability.test", "running-reclaim-1");
+        let original_task = super::task_from_contract(&original).expect("original task");
+        {
+            let store = state.task_store.lock().expect("task store");
+            store.create_execution(&original).expect("create execution");
+            store
+                .start_execution_attempt(
+                    "running-reclaim-1",
+                    1,
+                    original.as_ref().fencing_token,
+                    original_task.lease_owner.as_deref().expect("lease owner"),
+                )
+                .expect("start old attempt");
+        }
+        let mut replacement_task = original_task;
+        replacement_task.lease_owner = Some("replacement-worker".to_string());
+        replacement_task.last_heartbeat_at = replacement_task
+            .last_heartbeat_at
+            .map(|timestamp| timestamp + Duration::seconds(1));
+        let requested = super::contract_for_acquired_task(&replacement_task)
+            .expect("replacement requested contract");
+        insert_contract_task(&state, &requested);
+        let replacement_fence = requested.as_ref().fencing_token;
+
+        runtime
+            .execute(&state, requested)
+            .await
+            .expect("reclaim running execution");
+
+        assert_eq!(
+            *revisions.lock().expect("revisions"),
+            vec![("running-reclaim-1".to_string(), 1, replacement_fence, false,)]
+        );
+        let events = state
+            .task_store
+            .lock()
+            .expect("task store")
+            .execution_events("running-reclaim-1", 1)
+            .expect("execution events");
+        assert!(events.iter().any(|event| matches!(
+            event.event,
+            local_first_task_runtime::ExecutionJournalEvent::AttemptReclaimed { .. }
+        )));
+    }
+
+    #[tokio::test]
     async fn unsupported_kind_commits_a_typed_permanent_failure() {
         let runtime = ExecutionRuntime::new(TaskExecutorRegistry::new());
         let state = AppState::for_tests();
@@ -1446,7 +1584,7 @@ mod tests {
             .expect("execution exists");
         assert_eq!(
             execution.state,
-            local_first_execution_protocol::ExecutionState::Ready
+            local_first_execution_protocol::ExecutionState::Running
         );
         assert!(execution.outcome.is_none());
     }

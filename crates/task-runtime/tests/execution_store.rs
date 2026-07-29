@@ -422,6 +422,97 @@ fn journal_events_are_typed_complete_and_timestamp_the_projection() {
 }
 
 #[test]
+fn execution_attempt_start_is_durable_and_idempotent_for_the_same_owner() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let contract = contract("exec-attempt", 1, 7);
+    store.create_execution(&contract).unwrap();
+
+    let started = store
+        .start_execution_attempt("exec-attempt", 1, 7, "worker-a")
+        .unwrap();
+    let repeated = store
+        .start_execution_attempt("exec-attempt", 1, 7, "worker-a")
+        .unwrap();
+
+    assert_eq!(started.state, ExecutionState::Running);
+    assert_eq!(repeated, started);
+    let events = store.execution_events("exec-attempt", 1).unwrap();
+    assert_eq!(events.len(), 2);
+    assert!(matches!(
+        &events[1].event,
+        ExecutionJournalEvent::AttemptStarted {
+            version: 1,
+            owner_id,
+            fencing_token: 7,
+        } if owner_id == "worker-a"
+    ));
+    assert!(matches!(
+        store.start_execution_attempt("exec-attempt", 1, 7, "worker-b"),
+        Err(TaskRuntimeError::Conflict(_)) | Err(TaskRuntimeError::InvalidTransition(_))
+    ));
+    assert!(matches!(
+        store.advance_execution_fence("exec-attempt", 1, 7, 8),
+        Err(TaskRuntimeError::InvalidTransition(_))
+    ));
+}
+
+#[test]
+fn production_outcome_commit_requires_a_running_attempt() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let contract = contract("exec-strict-commit", 1, 7);
+    store.create_execution(&contract).unwrap();
+    let outcome = completed(&contract, json!({"ok": true}));
+
+    assert!(matches!(
+        store.commit_running_execution_outcome(&outcome),
+        Err(TaskRuntimeError::InvalidTransition(_))
+    ));
+    store
+        .start_execution_attempt("exec-strict-commit", 1, 7, "worker-a")
+        .unwrap();
+
+    let committed = store
+        .commit_running_execution_outcome(&outcome)
+        .expect("running attempt commits");
+    assert!(matches!(committed, OutcomeCommit::Inserted(_)));
+}
+
+#[test]
+fn newer_fence_reclaims_a_running_attempt_and_rejects_the_stale_outcome() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let original = contract("exec-reclaim", 1, 7);
+    store.create_execution(&original).unwrap();
+    store
+        .start_execution_attempt("exec-reclaim", 1, 7, "worker-a")
+        .unwrap();
+    let stale = completed(&original, json!({"worker": "a"}));
+
+    let reclaimed = store
+        .reclaim_execution_attempt("exec-reclaim", 1, 7, 8, "worker-b")
+        .unwrap();
+
+    assert_eq!(reclaimed.state, ExecutionState::Running);
+    assert_eq!(reclaimed.contract.as_ref().fencing_token, 8);
+    assert!(matches!(
+        store.commit_execution_outcome(&stale),
+        Err(TaskRuntimeError::InvalidTransition(_))
+    ));
+    let events = store.execution_events("exec-reclaim", 1).unwrap();
+    assert!(matches!(
+        &events[2].event,
+        ExecutionJournalEvent::AttemptReclaimed {
+            version: 1,
+            previous_owner_id,
+            owner_id,
+            previous_fencing_token: 7,
+            contract,
+        } if previous_owner_id == "worker-a"
+            && owner_id == "worker-b"
+            && contract.fencing_token == 8
+    ));
+}
+
+#[test]
 fn suspended_revision_can_start_and_complete_the_next_revision() {
     let (path, store) = file_store();
     let revision_one = contract("exec-multi-revision", 1, 2);

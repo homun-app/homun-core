@@ -40,6 +40,18 @@ pub enum ExecutionJournalEvent {
         previous_fencing_token: u64,
         contract: ExecutionContract,
     },
+    AttemptStarted {
+        version: u32,
+        owner_id: String,
+        fencing_token: u64,
+    },
+    AttemptReclaimed {
+        version: u32,
+        previous_owner_id: String,
+        owner_id: String,
+        previous_fencing_token: u64,
+        contract: ExecutionContract,
+    },
     OutcomeCommitted {
         version: u32,
         outcome: ExecutionOutcome,
@@ -101,8 +113,15 @@ pub struct PendingExecutionWake {
 
 struct FoldedExecution {
     record: ExecutionRecord,
+    active_attempt: Option<AttemptEvidence>,
     outcome_committed_at: Option<i64>,
     wake_transition: Option<WakeTransitionEvidence>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AttemptEvidence {
+    owner_id: String,
+    fencing_token: u64,
 }
 
 struct FoldedJournal {
@@ -281,6 +300,134 @@ impl TaskStore {
             .map(|folded| folded.record.clone()))
     }
 
+    pub fn start_execution_attempt(
+        &self,
+        execution_id: &str,
+        revision: u64,
+        fencing_token: u64,
+        owner_id: &str,
+    ) -> TaskRuntimeResult<ExecutionRecord> {
+        let execution_id = validated_text(execution_id, "execution id")?;
+        let owner_id = validated_text(owner_id, "execution attempt owner")?;
+        sqlite_integer(revision, "execution attempt revision")?;
+        sqlite_integer(fencing_token, "execution attempt fencing token")?;
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let (_, journal) = load_validated_journal_on(&tx, execution_id)?
+            .ok_or_else(|| TaskRuntimeError::NotFound(format!("execution {execution_id}")))?;
+        let current = journal.latest()?;
+        let contract = current.record.contract.as_ref();
+        if contract.revision != revision || contract.fencing_token != fencing_token {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "execution attempt revision or fencing token is stale".into(),
+            ));
+        }
+        if current.record.state == ExecutionState::Running {
+            if current.active_attempt.as_ref()
+                == Some(&AttemptEvidence {
+                    owner_id: owner_id.to_string(),
+                    fencing_token,
+                })
+            {
+                let record = current.record.clone();
+                tx.commit()?;
+                return Ok(record);
+            }
+            return Err(TaskRuntimeError::Conflict(
+                "execution revision is already owned by another attempt".into(),
+            ));
+        }
+        if current.record.state != ExecutionState::Ready || current.record.outcome.is_some() {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "only a ready execution revision can start an attempt".into(),
+            ));
+        }
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        append_journal_event_on(
+            &tx,
+            execution_id,
+            sqlite_integer(revision, "execution attempt revision")?,
+            &ExecutionJournalEvent::AttemptStarted {
+                version: JOURNAL_EVENT_VERSION,
+                owner_id: owner_id.to_string(),
+                fencing_token,
+            },
+            now,
+        )?;
+        let (_, journal) = load_validated_journal_on(&tx, execution_id)?
+            .ok_or_else(|| TaskRuntimeError::Store("claimed journal disappeared".into()))?;
+        let latest = journal.latest()?;
+        write_projection_on(&tx, latest)?;
+        let record = latest.record.clone();
+        tx.commit()?;
+        Ok(record)
+    }
+
+    pub fn reclaim_execution_attempt(
+        &self,
+        execution_id: &str,
+        revision: u64,
+        expected_fencing_token: u64,
+        next_fencing_token: u64,
+        owner_id: &str,
+    ) -> TaskRuntimeResult<ExecutionRecord> {
+        let execution_id = validated_text(execution_id, "execution id")?;
+        let owner_id = validated_text(owner_id, "execution attempt owner")?;
+        if next_fencing_token <= expected_fencing_token {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "reclaimed execution fence must increase".into(),
+            ));
+        }
+        sqlite_integer(revision, "execution attempt revision")?;
+        sqlite_integer(expected_fencing_token, "expected execution attempt fence")?;
+        sqlite_integer(next_fencing_token, "next execution attempt fence")?;
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let (_, journal) = load_validated_journal_on(&tx, execution_id)?
+            .ok_or_else(|| TaskRuntimeError::NotFound(format!("execution {execution_id}")))?;
+        let current = journal.latest()?;
+        let contract = current.record.contract.as_ref();
+        if current.record.state != ExecutionState::Running
+            || current.record.outcome.is_some()
+            || contract.revision != revision
+            || contract.fencing_token != expected_fencing_token
+        {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "only the current running execution attempt can be reclaimed".into(),
+            ));
+        }
+        let previous_attempt = current.active_attempt.as_ref().ok_or_else(|| {
+            TaskRuntimeError::InvalidTransition(
+                "running execution has no durable attempt owner".into(),
+            )
+        })?;
+        let mut updated_contract = contract.clone();
+        updated_contract.fencing_token = next_fencing_token;
+        let updated_contract =
+            ValidatedExecutionContract::try_from(updated_contract).map_err(|error| {
+                TaskRuntimeError::Store(format!("reclaimed execution contract is invalid: {error}"))
+            })?;
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        append_journal_event_on(
+            &tx,
+            execution_id,
+            sqlite_integer(revision, "execution attempt revision")?,
+            &ExecutionJournalEvent::AttemptReclaimed {
+                version: JOURNAL_EVENT_VERSION,
+                previous_owner_id: previous_attempt.owner_id.clone(),
+                owner_id: owner_id.to_string(),
+                previous_fencing_token: expected_fencing_token,
+                contract: updated_contract.as_ref().clone(),
+            },
+            now,
+        )?;
+        let (_, journal) = load_validated_journal_on(&tx, execution_id)?
+            .ok_or_else(|| TaskRuntimeError::Store("reclaimed journal disappeared".into()))?;
+        let latest = journal.latest()?;
+        write_projection_on(&tx, latest)?;
+        let record = latest.record.clone();
+        tx.commit()?;
+        Ok(record)
+    }
+
     pub fn committed_executions(&self, limit: usize) -> TaskRuntimeResult<Vec<ExecutionRecord>> {
         if limit == 0 {
             return Ok(Vec::new());
@@ -395,6 +542,11 @@ impl TaskStore {
                 "cannot advance the fence after an outcome is committed".into(),
             ));
         }
+        if current.record.state != ExecutionState::Ready {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "a running execution fence must advance through attempt reclaim".into(),
+            ));
+        }
 
         let mut updated_contract = raw.clone();
         updated_contract.fencing_token = next;
@@ -426,6 +578,21 @@ impl TaskStore {
     pub fn commit_execution_outcome(
         &self,
         outcome: &ValidatedExecutionOutcome,
+    ) -> TaskRuntimeResult<OutcomeCommit> {
+        self.commit_execution_outcome_with_requirement(outcome, false)
+    }
+
+    pub fn commit_running_execution_outcome(
+        &self,
+        outcome: &ValidatedExecutionOutcome,
+    ) -> TaskRuntimeResult<OutcomeCommit> {
+        self.commit_execution_outcome_with_requirement(outcome, true)
+    }
+
+    fn commit_execution_outcome_with_requirement(
+        &self,
+        outcome: &ValidatedExecutionOutcome,
+        require_running_attempt: bool,
     ) -> TaskRuntimeResult<OutcomeCommit> {
         let binding = outcome.binding();
         let execution_id = validated_text(binding.execution_id(), "execution id")?;
@@ -468,6 +635,12 @@ impl TaskStore {
             }
             return Err(TaskRuntimeError::InvalidTransition(
                 "a conflicting execution outcome is already committed".into(),
+            ));
+        }
+
+        if require_running_attempt && current.record.state != ExecutionState::Running {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "production outcome commit requires a running execution attempt".into(),
             ));
         }
 
@@ -2546,6 +2719,7 @@ fn fold_journal(events: &[ExecutionEvent], execution_id: &str) -> TaskRuntimeRes
                         created_at: event.created_at,
                         updated_at: event.created_at,
                     },
+                    active_attempt: None,
                     outcome_committed_at: None,
                     wake_transition: None,
                 });
@@ -2616,6 +2790,7 @@ fn fold_journal(events: &[ExecutionEvent], execution_id: &str) -> TaskRuntimeRes
                         created_at: prior.record.created_at,
                         updated_at: event.created_at,
                     },
+                    active_attempt: None,
                     outcome_committed_at: None,
                     wake_transition: None,
                 });
@@ -2653,6 +2828,90 @@ fn fold_journal(events: &[ExecutionEvent], execution_id: &str) -> TaskRuntimeRes
                 }
                 current.record.contract = updated;
                 current.record.updated_at = event.created_at;
+            }
+            ExecutionJournalEvent::AttemptStarted {
+                version,
+                owner_id,
+                fencing_token,
+            } => {
+                require_event_version(*version)?;
+                let current = revisions.last_mut().ok_or_else(|| {
+                    TaskRuntimeError::Store("attempt event precedes execution creation".into())
+                })?;
+                if current.record.contract.as_ref().revision != event.revision
+                    || current.record.state != ExecutionState::Ready
+                    || current.active_attempt.is_some()
+                {
+                    return Err(TaskRuntimeError::Store(
+                        "attempt-start does not follow a ready unowned revision".into(),
+                    ));
+                }
+                require_nonterminal_fold(current, event.created_at)?;
+                if owner_id.trim().is_empty()
+                    || *fencing_token != current.record.contract.as_ref().fencing_token
+                {
+                    return Err(TaskRuntimeError::Store(
+                        "attempt-start owner or fence is invalid".into(),
+                    ));
+                }
+                current.record.state = ExecutionState::Running;
+                current.record.updated_at = event.created_at;
+                current.active_attempt = Some(AttemptEvidence {
+                    owner_id: owner_id.clone(),
+                    fencing_token: *fencing_token,
+                });
+            }
+            ExecutionJournalEvent::AttemptReclaimed {
+                version,
+                previous_owner_id,
+                owner_id,
+                previous_fencing_token,
+                contract,
+            } => {
+                require_event_version(*version)?;
+                let current = revisions.last_mut().ok_or_else(|| {
+                    TaskRuntimeError::Store("attempt reclaim precedes execution creation".into())
+                })?;
+                if current.record.contract.as_ref().revision != event.revision
+                    || current.record.state != ExecutionState::Running
+                {
+                    return Err(TaskRuntimeError::Store(
+                        "attempt reclaim does not belong to the running revision".into(),
+                    ));
+                }
+                require_nonterminal_fold(current, event.created_at)?;
+                let previous_attempt = current.active_attempt.as_ref().ok_or_else(|| {
+                    TaskRuntimeError::Store("attempt reclaim has no previous owner".into())
+                })?;
+                if owner_id.trim().is_empty()
+                    || previous_attempt.owner_id != *previous_owner_id
+                    || previous_attempt.fencing_token != *previous_fencing_token
+                {
+                    return Err(TaskRuntimeError::Store(
+                        "attempt reclaim owner or previous fence is invalid".into(),
+                    ));
+                }
+                let updated = validate_journal_contract(contract.clone())?;
+                let current_raw = current.record.contract.as_ref();
+                if updated.as_ref().fencing_token <= *previous_fencing_token {
+                    return Err(TaskRuntimeError::Store(
+                        "attempt reclaim did not advance the fence".into(),
+                    ));
+                }
+                let mut expected = current_raw.clone();
+                expected.fencing_token = updated.as_ref().fencing_token;
+                if expected != *updated.as_ref() {
+                    return Err(TaskRuntimeError::Store(
+                        "attempt reclaim changed fields other than the fence".into(),
+                    ));
+                }
+                current.record.contract = updated;
+                current.record.state = ExecutionState::Running;
+                current.record.updated_at = event.created_at;
+                current.active_attempt = Some(AttemptEvidence {
+                    owner_id: owner_id.clone(),
+                    fencing_token: current.record.contract.as_ref().fencing_token,
+                });
             }
             ExecutionJournalEvent::OutcomeCommitted {
                 version,
@@ -3072,6 +3331,8 @@ fn journal_event_kind(event: &ExecutionJournalEvent) -> &'static str {
         ExecutionJournalEvent::Created { .. } => "execution_created",
         ExecutionJournalEvent::RevisionStarted { .. } => "revision_started",
         ExecutionJournalEvent::FenceAdvanced { .. } => "fence_advanced",
+        ExecutionJournalEvent::AttemptStarted { .. } => "attempt_started",
+        ExecutionJournalEvent::AttemptReclaimed { .. } => "attempt_reclaimed",
         ExecutionJournalEvent::OutcomeCommitted { .. } => "outcome_committed",
         ExecutionJournalEvent::WakeDelivered { .. } => "wake_delivered",
     }

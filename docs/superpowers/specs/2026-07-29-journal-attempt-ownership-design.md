@@ -45,3 +45,11 @@ Reclaim proves only lifecycle ownership. It does not imply that a consequential 
 - Stale outcomes from the previous fence are rejected after reclaim.
 - Runtime tests prove every adapter observes a journal state of `Running` while executing.
 - Workspace tests and warning-denied builds remain green.
+
+## Implementation result
+
+- `AttemptStarted` and `AttemptReclaimed` are typed journal events folded into `Running`.
+- Same-owner/same-fence start is idempotent; conflicting ownership is rejected.
+- Running fence changes must use reclaim and may change no contract field except the fence.
+- The desktop runtime starts or reclaims the attempt before constructing the adapter context.
+- Production outcome commit uses the strict Running-only API; the compatibility API remains for legacy journal fixtures.

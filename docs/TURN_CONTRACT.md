@@ -78,6 +78,12 @@ Ready -> Running
   -> Completed | Failed | Cancelled
 ```
 
+`Running` non è nominale: nasce da `AttemptStarted(owner_id, fencing_token)` nel
+journal. Dopo un crash, una nuova lease può sostituire l'owner soltanto con fence
+strettamente maggiore tramite `AttemptReclaimed`; un semplice `FenceAdvanced` è
+vietato mentre la revisione è Running. Il gateway committa l'outcome con l'API
+stretta che richiede un attempt Running al fence del contratto.
+
 `WaitingUserApproval`, `WaitingTime`, `WaitingResource`, delivery state del messaggio
 e objective status sono proiezioni. `Parked` non viene più prodotto dal nuovo loop:
 resta leggibile soltanto nel bridge di recovery dei record steering precedenti.
@@ -87,7 +93,9 @@ resta leggibile soltanto nel bridge di recovery dei record steering precedenti.
 1. La sorgente (`interactive`, channel, automation, connector) costruisce lo stesso
    input e lo accoda al broker; prompt e placeholder visibile sono persistiti insieme.
 2. Il worker acquisisce task, risorse e lease; il runtime crea o carica il contratto
-   autorevole e confronta il fencing token.
+   autorevole, confronta il fencing token e registra `AttemptStarted`. Una revisione
+   Running lasciata da un worker perso viene reclamata atomicamente solo da una
+   lease con fence maggiore.
 3. Il registry risolve soltanto kind esatti o prefissi registrati. Il runtime consegna
    all'adapter un `ExecutionAdapterContext`, mai `AppState`; il context entra nel
    dominio registrato senza esporre store o client generici all'adapter.

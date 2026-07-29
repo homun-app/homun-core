@@ -17,19 +17,19 @@
 - Modify: `crates/task-runtime/src/lib.rs`
 - Modify: `crates/task-runtime/tests/execution_store.rs`
 
-- [ ] Add failing tests for attempt start, idempotency, conflicting owner, reclaim, and stale outcome rejection.
-- [ ] Add `AttemptStarted` and `AttemptReclaimed` events and fold them into `ExecutionState::Running`.
-- [ ] Add transactional start and reclaim APIs with exact revision/fence checks.
-- [ ] Require `Running` for new outcome commits while retaining legacy journal readability.
+- [x] Add failing tests for attempt start, idempotency, conflicting owner, reclaim, and stale outcome rejection.
+- [x] Add `AttemptStarted` and `AttemptReclaimed` events and fold them into `ExecutionState::Running`.
+- [x] Add transactional start and reclaim APIs with exact revision/fence checks.
+- [x] Require `Running` for new production outcome commits while retaining legacy journal readability.
 
 ### Task 2: Runtime ownership wiring
 
 **Files:**
 - Modify: `crates/desktop-gateway/src/execution_runtime.rs`
 
-- [ ] Add a failing adapter test proving journal state is `Running` during dispatch.
-- [ ] Start or reclaim the attempt after authoritative contract/fence resolution and before building `ExecutionAdapterContext`.
-- [ ] Verify lease loss and stale-fence tests still reject old workers.
+- [x] Add a failing adapter test proving journal state is `Running` during dispatch.
+- [x] Start or reclaim the attempt after authoritative contract/fence resolution and before building `ExecutionAdapterContext`.
+- [x] Verify lease loss and stale-fence tests still reject old workers.
 
 ### Task 3: Regression and documentation
 
@@ -38,7 +38,7 @@
 - Modify: `docs/superpowers/specs/2026-07-29-journal-attempt-ownership-design.md`
 - Modify: `docs/superpowers/plans/2026-07-29-journal-attempt-ownership.md`
 
-- [ ] Run task-runtime execution-store tests.
-- [ ] Run desktop execution-runtime and ownership tests.
-- [ ] Run workspace tests and a warning-denied workspace build.
-- [ ] Document the durable attempt and reclaim sequence.
+- [x] Run task-runtime execution-store tests.
+- [x] Run desktop execution-runtime and ownership tests.
+- [x] Run workspace tests and a warning-denied workspace build.
+- [x] Document the durable attempt and reclaim sequence.
