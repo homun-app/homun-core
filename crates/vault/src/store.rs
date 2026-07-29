@@ -420,7 +420,10 @@ impl SQLiteVaultStore {
         // Encrypt with the exact crypto `put_secret_material` uses (reuse, don't
         // reinvent) before opening the tx — a crypto error must not abort mid-tx.
         let encrypted_secret = match secret {
-            Some(material) => Some(encrypt_with_master_key(master_key, material.expose_bytes())?),
+            Some(material) => Some(encrypt_with_master_key(
+                master_key,
+                material.expose_bytes(),
+            )?),
             None => None,
         };
         let conn = self
@@ -1179,7 +1182,9 @@ mod tests {
         let result = store.put_record_with_secret(
             &record,
             &master_key,
-            Some(local_first_secrets::SecretMaterial::from_string("4111111111111111")),
+            Some(local_first_secrets::SecretMaterial::from_string(
+                "4111111111111111",
+            )),
         );
         assert!(result.is_err(), "the forced secret write must fail");
 
@@ -1220,11 +1225,16 @@ mod tests {
             .put_record_with_secret(
                 &record,
                 &master_key,
-                Some(local_first_secrets::SecretMaterial::from_string("4111111111111111")),
+                Some(local_first_secrets::SecretMaterial::from_string(
+                    "4111111111111111",
+                )),
             )
             .expect("atomic save");
 
-        assert_eq!(store.get(&record_id).unwrap().unwrap().label, "Carta personale");
+        assert_eq!(
+            store.get(&record_id).unwrap().unwrap().label,
+            "Carta personale"
+        );
         assert_eq!(
             store
                 .get_secret_material(&record_id, &master_key)

@@ -99,8 +99,14 @@ mod tests {
             connected_capability_execution_trace_line("slack", &idx).as_deref(),
             Some("capability execution connector:slack")
         );
-        assert_eq!(connected_capability_execution_trace_line("write_file", &idx), None);
+        assert_eq!(
+            connected_capability_execution_trace_line("write_file", &idx),
+            None
+        );
         // malformed mcp names fall through (not Some)
-        assert_eq!(connected_capability_execution_trace_line("mcp__only", &idx), None);
+        assert_eq!(
+            connected_capability_execution_trace_line("mcp__only", &idx),
+            None
+        );
     }
 }

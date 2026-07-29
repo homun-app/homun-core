@@ -1,8 +1,8 @@
 use local_first_memory::{
-    DataSensitivity, MemoryAccessRequest, MemoryEntity, MemoryEvent, MemoryEvidence, MemoryFacade,
-    MemoryEvolutionKind, MemoryEvolutionMetadata, MemoryRecord, MemoryRef, MemoryRefKind,
-    MemoryRelation, MemoryStatus, MemoryUiReadModel, PrivacyDomain, SQLiteMemoryStore, UserId,
-    WikiPage, WorkspaceId, write_memory_evolution_metadata,
+    DataSensitivity, MemoryAccessRequest, MemoryEntity, MemoryEvent, MemoryEvidence,
+    MemoryEvolutionKind, MemoryEvolutionMetadata, MemoryFacade, MemoryRecord, MemoryRef,
+    MemoryRefKind, MemoryRelation, MemoryStatus, MemoryUiReadModel, PrivacyDomain,
+    SQLiteMemoryStore, UserId, WikiPage, WorkspaceId, write_memory_evolution_metadata,
 };
 
 #[test]

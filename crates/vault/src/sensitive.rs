@@ -104,12 +104,9 @@ fn detect_contextual_digits(
         while let Some(relative) = lower[offset..].find(label) {
             let label_start = offset + relative;
             let after = label_start + label.len();
-            let Some((digits_start, digits_end)) = first_digit_run(
-                text,
-                after,
-                *pattern.length.start(),
-                *pattern.length.end(),
-            ) else {
+            let Some((digits_start, digits_end)) =
+                first_digit_run(text, after, *pattern.length.start(), *pattern.length.end())
+            else {
                 offset = after;
                 continue;
             };
@@ -339,7 +336,9 @@ fn looks_like_secret_value(value: &str) -> bool {
     }
     let has_digit = trimmed.chars().any(|c| c.is_ascii_digit());
     let has_alpha = trimmed.chars().any(|c| c.is_ascii_alphabetic());
-    let has_symbol = trimmed.chars().any(|c| matches!(c, '-' | '_' | '.' | '/' | '+'));
+    let has_symbol = trimmed
+        .chars()
+        .any(|c| matches!(c, '-' | '_' | '.' | '/' | '+'));
     let mixed_case = trimmed.chars().any(|c| c.is_ascii_uppercase())
         && trimmed.chars().any(|c| c.is_ascii_lowercase());
     has_alpha && (has_digit || (has_symbol && mixed_case))

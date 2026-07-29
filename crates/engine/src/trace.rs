@@ -237,11 +237,7 @@ pub fn extract_markers(prev_len: usize, accumulated: &str) -> Vec<String> {
         let after_open = &search[open_at + OPEN.len()..];
         if let Some(close_at) = after_open.find(CLOSE) {
             let name = &after_open[..close_at];
-            if !name.is_empty()
-                && name
-                    .chars()
-                    .all(|c| c.is_ascii_uppercase() || c == '_')
-            {
+            if !name.is_empty() && name.chars().all(|c| c.is_ascii_uppercase() || c == '_') {
                 out.push(format!("{OPEN}{name}{CLOSE}"));
             }
             // Advance past this closing delimiter so we don't rescan it.
@@ -364,7 +360,10 @@ mod tests {
         let acc = "prefix‹‹PLAN››middle‹‹ARTIFACT››tail";
         // prev_len at start of "middle" region? Use 0 to scan whole thing.
         let got = extract_markers(0, acc);
-        assert_eq!(got, vec!["‹‹PLAN››".to_string(), "‹‹ARTIFACT››".to_string()]);
+        assert_eq!(
+            got,
+            vec!["‹‹PLAN››".to_string(), "‹‹ARTIFACT››".to_string()]
+        );
     }
 
     #[test]

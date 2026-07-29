@@ -147,7 +147,10 @@ pub struct DirectAnswer {
     pub reason: String,
     // Weak models emit `confidence` as a WORD ("high") or omit it; coerce/​default it
     // instead of failing the whole plan ("invalid type: string \"high\", expected f64").
-    #[serde(default = "default_confidence", deserialize_with = "lenient_confidence")]
+    #[serde(
+        default = "default_confidence",
+        deserialize_with = "lenient_confidence"
+    )]
     pub confidence: f64,
 }
 

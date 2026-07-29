@@ -10,7 +10,7 @@
 
 use crate::outcome::{TurnOutcome, TurnStop};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// A legacy no-answer phrase is still mapped to NOT-FOUND if it reaches a browse result. New engine
 /// turns use a failed [`TurnStop`] instead of manufacturing this prose. This is the sub-agent's
@@ -163,13 +163,19 @@ pub fn validate_browser_done_payload(
             }
         }
     }
-    let found = matches!(status, BrowserDoneStatus::Completed | BrowserDoneStatus::Partial)
-        && (!payload.answer.trim().is_empty() || !payload.items.is_empty());
+    let found = matches!(
+        status,
+        BrowserDoneStatus::Completed | BrowserDoneStatus::Partial
+    ) && (!payload.answer.trim().is_empty() || !payload.items.is_empty());
     BrowseResult {
         found,
         answer: payload.answer.trim().to_string(),
         sources: payload.sources,
-        confidence: if found { Confidence::High } else { Confidence::Low },
+        confidence: if found {
+            Confidence::High
+        } else {
+            Confidence::Low
+        },
         note: (!found).then(|| format!("{status:?}")),
         status,
         items: payload.items,
@@ -351,10 +357,22 @@ mod tests {
             kind: BrowseResultKind::List,
             minimum_items: Some(3),
             fields: vec![
-                BrowseResultField { name: "departure".into(), required: true },
-                BrowseResultField { name: "arrival".into(), required: true },
-                BrowseResultField { name: "duration".into(), required: true },
-                BrowseResultField { name: "price".into(), required: false },
+                BrowseResultField {
+                    name: "departure".into(),
+                    required: true,
+                },
+                BrowseResultField {
+                    name: "arrival".into(),
+                    required: true,
+                },
+                BrowseResultField {
+                    name: "duration".into(),
+                    required: true,
+                },
+                BrowseResultField {
+                    name: "price".into(),
+                    required: false,
+                },
             ],
             boundary: Some("Stop before booking or payment".into()),
         };
@@ -385,10 +403,22 @@ mod tests {
             kind: BrowseResultKind::List,
             minimum_items: Some(1),
             fields: vec![
-                BrowseResultField { name: "departure".into(), required: true },
-                BrowseResultField { name: "arrival".into(), required: true },
-                BrowseResultField { name: "duration".into(), required: true },
-                BrowseResultField { name: "price".into(), required: false },
+                BrowseResultField {
+                    name: "departure".into(),
+                    required: true,
+                },
+                BrowseResultField {
+                    name: "arrival".into(),
+                    required: true,
+                },
+                BrowseResultField {
+                    name: "duration".into(),
+                    required: true,
+                },
+                BrowseResultField {
+                    name: "price".into(),
+                    required: false,
+                },
             ],
             boundary: Some("Stop before booking or payment".into()),
         };
@@ -423,7 +453,11 @@ mod tests {
     #[test]
     fn seed_produces_an_isolated_two_message_context() {
         let msgs = seed_browse_messages("You drive a browser.", "current BTC price on Kraken");
-        assert_eq!(msgs.len(), 2, "exactly system + user — no manager history leaks in");
+        assert_eq!(
+            msgs.len(),
+            2,
+            "exactly system + user — no manager history leaks in"
+        );
         assert_eq!(msgs[0]["role"], "system");
         assert_eq!(msgs[0]["content"], "You drive a browser.");
         assert_eq!(msgs[1]["role"], "user");
@@ -434,16 +468,24 @@ mod tests {
     fn maps_substantive_grounded_answer_to_found_high_and_strips_sources_block() {
         let outcome = TurnOutcome {
             stop: TurnStop::Completed,
-            memory_answer: "The price is $63,120.\n\n**Sources**\n- https://kraken.com/btc".to_string(),
+            memory_answer: "The price is $63,120.\n\n**Sources**\n- https://kraken.com/btc"
+                .to_string(),
             tool_actions: String::new(),
             browse_sources: vec!["https://kraken.com/btc".to_string()],
             ..Default::default()
         };
         let r = browse_result_from_outcome(&outcome);
         assert!(r.found);
-        assert_eq!(r.answer, "The price is $63,120.", "the Sources block is stripped from answer");
+        assert_eq!(
+            r.answer, "The price is $63,120.",
+            "the Sources block is stripped from answer"
+        );
         assert_eq!(r.sources, vec!["https://kraken.com/btc".to_string()]);
-        assert_eq!(r.confidence, Confidence::High, "a visited page grounds the answer");
+        assert_eq!(
+            r.confidence,
+            Confidence::High,
+            "a visited page grounds the answer"
+        );
         assert!(r.note.is_none());
     }
 
@@ -457,7 +499,11 @@ mod tests {
         };
         let r = browse_result_from_outcome(&outcome);
         assert!(r.found);
-        assert_eq!(r.confidence, Confidence::Low, "no visited source → self-assessed low");
+        assert_eq!(
+            r.confidence,
+            Confidence::Low,
+            "no visited source → self-assessed low"
+        );
     }
 
     #[test]
@@ -490,7 +536,10 @@ contact support\" — but I did find the answer: the fare is EUR 39."
             ..Default::default()
         };
         let r = browse_result_from_outcome(&outcome);
-        assert!(r.found, "quoting the phrase mid-text is not the canned no-answer fallback");
+        assert!(
+            r.found,
+            "quoting the phrase mid-text is not the canned no-answer fallback"
+        );
         assert!(r.answer.contains("EUR 39"));
     }
 
@@ -502,7 +551,10 @@ contact support\" — but I did find the answer: the fare is EUR 39."
             ..Default::default()
         };
         let r = browse_result_from_outcome(&outcome);
-        assert!(!r.found, "the exact canonical sentinel is still a no-answer");
+        assert!(
+            !r.found,
+            "the exact canonical sentinel is still a no-answer"
+        );
     }
 
     #[test]
@@ -576,7 +628,10 @@ Option 3: 14:20 → 18:59, 4h39m, EUR 52"
         };
         let text = browse_result_for_manager(&r);
         let back = browse_result_from_manager_text(&text).expect("valid JSON parses back");
-        assert_eq!(back.answer, answer, "every line of the multi-line answer survives the round trip");
+        assert_eq!(
+            back.answer, answer,
+            "every line of the multi-line answer survives the round trip"
+        );
         assert_eq!(back.answer.lines().count(), 3);
         assert!(back.found);
         assert_eq!(back.sources, r.sources);
@@ -588,8 +643,9 @@ Option 3: 14:20 → 18:59, 4h39m, EUR 52"
         // IMPORTANT 3: an answer whose OWN text contains lines equal to the old section headers
         // (`sources:`, `items:`, ...) used to flip the line-parser's section state and manufacture
         // fake structured fields out of prose. JSON never re-interprets a string value as syntax.
-        let tricky_answer = "Here is what the board shows:\nsources:\nitems:\n- this is prose, not a real list"
-            .to_string();
+        let tricky_answer =
+            "Here is what the board shows:\nsources:\nitems:\n- this is prose, not a real list"
+                .to_string();
         let r = BrowseResult {
             found: true,
             answer: tricky_answer.clone(),
@@ -603,8 +659,14 @@ Option 3: 14:20 → 18:59, 4h39m, EUR 52"
             back.answer, tricky_answer,
             "the literal 'sources:'/'items:' lines inside the answer are not section headers"
         );
-        assert!(back.sources.is_empty(), "no sources were fabricated from the answer text");
-        assert!(back.items.is_empty(), "no items were fabricated from the answer text");
+        assert!(
+            back.sources.is_empty(),
+            "no sources were fabricated from the answer text"
+        );
+        assert!(
+            back.items.is_empty(),
+            "no items were fabricated from the answer text"
+        );
         assert!(back.fields_missing.is_empty());
         assert!(back.evidence.is_empty());
     }
@@ -616,18 +678,26 @@ Option 3: 14:20 → 18:59, 4h39m, EUR 52"
         let legacy = "The train departs at 09:05 and arrives at 13:40.";
         let back = browse_result_from_manager_text(legacy).expect("legacy text still parses");
         assert_eq!(back.answer, legacy);
-        assert!(back.found, "a non-empty legacy string degrades to a found answer");
+        assert!(
+            back.found,
+            "a non-empty legacy string degrades to a found answer"
+        );
         assert!(back.sources.is_empty());
     }
 
     #[test]
     fn manager_view_of_not_found_carries_note_as_json_with_empty_answer() {
-        let text = browse_result_for_manager(&BrowseResult::not_found("not available on Polymarket"));
+        let text =
+            browse_result_for_manager(&BrowseResult::not_found("not available on Polymarket"));
         let value: Value = serde_json::from_str(&text)
             .expect("the manager view is valid JSON, not the old labeled-text format");
         assert_eq!(value["found"], json!(false));
         assert_eq!(value["note"], json!("not available on Polymarket"));
-        assert_eq!(value["answer"], json!(""), "a not-found result carries no real answer");
+        assert_eq!(
+            value["answer"],
+            json!(""),
+            "a not-found result carries no real answer"
+        );
         let back = browse_result_from_manager_text(&text).expect("valid JSON parses back");
         assert!(!back.found);
         assert_eq!(back.note.as_deref(), Some("not available on Polymarket"));

@@ -48,7 +48,8 @@ fn fence_unavailable(exit: Option<i32>, out: &str) -> bool {
 
 #[test]
 fn write_inside_root_succeeds_and_outside_is_denied() {
-    let workspace = std::env::temp_dir().join(format!("homun-landlock-test-{}", std::process::id()));
+    let workspace =
+        std::env::temp_dir().join(format!("homun-landlock-test-{}", std::process::id()));
     std::fs::create_dir_all(&workspace).expect("create workspace temp dir");
 
     let ok_file = workspace.join("ok.txt");
@@ -84,7 +85,10 @@ fn write_inside_root_succeeds_and_outside_is_denied() {
         "in-workspace write should succeed under the fence; helper output:\n{out}"
     );
     let ok_contents = std::fs::read_to_string(&ok_file).unwrap_or_default();
-    assert!(ok_contents.contains("data"), "ok.txt should contain the written data");
+    assert!(
+        ok_contents.contains("data"),
+        "ok.txt should contain the written data"
+    );
 
     // The out-of-workspace write was denied: the EVIL file must NOT exist, and the
     // command output should carry a permission error (Landlock surfaces EACCES /
@@ -108,10 +112,8 @@ fn write_inside_root_succeeds_and_outside_is_denied() {
 
 #[test]
 fn normal_command_runs_and_exits_zero_under_the_fence() {
-    let workspace = std::env::temp_dir().join(format!(
-        "homun-landlock-test-basic-{}",
-        std::process::id()
-    ));
+    let workspace =
+        std::env::temp_dir().join(format!("homun-landlock-test-basic-{}", std::process::id()));
     std::fs::create_dir_all(&workspace).expect("create workspace temp dir");
 
     let (exit, out) = run_helper(&workspace, "echo ok");
@@ -125,8 +127,15 @@ fn normal_command_runs_and_exits_zero_under_the_fence() {
         return;
     }
 
-    assert_eq!(exit, Some(0), "a plain command should exit 0 under the fence; output:\n{out}");
-    assert!(out.contains("ok"), "expected the command's output; got:\n{out}");
+    assert_eq!(
+        exit,
+        Some(0),
+        "a plain command should exit 0 under the fence; output:\n{out}"
+    );
+    assert!(
+        out.contains("ok"),
+        "expected the command's output; got:\n{out}"
+    );
 
     let _ = std::fs::remove_dir_all(&workspace);
 }

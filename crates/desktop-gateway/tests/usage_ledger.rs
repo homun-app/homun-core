@@ -77,11 +77,17 @@ fn file_ledger_aggregates_known_and_unknown_usage_and_purges_exact_scope() {
 
     assert_eq!(store.purge_workspace("user-a", "workspace-a").unwrap(), 1);
     assert_eq!(
-        store.events_for_scope("user-a", Some("workspace-b")).unwrap().len(),
+        store
+            .events_for_scope("user-a", Some("workspace-b"))
+            .unwrap()
+            .len(),
         1
     );
     assert_eq!(
-        store.events_for_scope("user-b", Some("workspace-b")).unwrap().len(),
+        store
+            .events_for_scope("user-b", Some("workspace-b"))
+            .unwrap()
+            .len(),
         1
     );
 
@@ -111,6 +117,10 @@ fn ledger_file_never_contains_prompt_content() {
     drop(store);
 
     let bytes = std::fs::read(&path).unwrap();
-    assert!(!bytes.windows(SENTINEL.len()).any(|window| window == SENTINEL.as_bytes()));
+    assert!(
+        !bytes
+            .windows(SENTINEL.len())
+            .any(|window| window == SENTINEL.as_bytes())
+    );
     let _ = std::fs::remove_file(path);
 }

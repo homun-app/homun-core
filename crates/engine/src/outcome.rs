@@ -22,8 +22,12 @@ pub enum TurnStop {
         /// Receipt that must be resolved before execution may continue.
         receipt_ref: local_first_execution_protocol::EffectReceiptRef,
     },
-    SuspendedModel { role: String },
-    Failed { failure: ExecutionFailure },
+    SuspendedModel {
+        role: String,
+    },
+    Failed {
+        failure: ExecutionFailure,
+    },
 }
 
 impl Default for TurnStop {

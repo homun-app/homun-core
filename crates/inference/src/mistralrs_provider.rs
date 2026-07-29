@@ -100,12 +100,8 @@ impl InferenceProvider for MistralRsProvider {
         &self,
         request: &GenerateJsonRequest,
     ) -> Result<GenerateJsonResponse, RuntimeClientError> {
-        let attempt = ProviderAttempt::start(
-            &self.usage,
-            request,
-            &self.descriptor,
-            &self.descriptor.id,
-        );
+        let attempt =
+            ProviderAttempt::start(&self.usage, request, &self.descriptor, &self.descriptor.id);
         let messages = TextMessages::new().add_message(TextMessageRole::User, &request.prompt);
         let request_future = self.model.send_chat_request(messages);
         // Without this the caller's bound was advisory only: a hung local
@@ -154,7 +150,11 @@ impl InferenceProvider for MistralRsProvider {
         attempt.completed(
             local_first_inference_usage::NormalizedUsage {
                 input_tokens: Some((request.prompt.chars().count() as u64).div_ceil(4).max(1)),
-                output_tokens: Some((parsed.raw_output.chars().count() as u64).div_ceil(4).max(1)),
+                output_tokens: Some(
+                    (parsed.raw_output.chars().count() as u64)
+                        .div_ceil(4)
+                        .max(1),
+                ),
                 ..Default::default()
             },
             local_first_inference_usage::UsageProvenance::HomunEstimated,
@@ -171,7 +171,10 @@ mod tests {
     #[test]
     fn timeout_duration_maps_only_positive_finite_seconds() {
         assert_eq!(timeout_duration(Some(45.0)), Some(Duration::from_secs(45)));
-        assert_eq!(timeout_duration(Some(0.5)), Some(Duration::from_millis(500)));
+        assert_eq!(
+            timeout_duration(Some(0.5)),
+            Some(Duration::from_millis(500))
+        );
         // No bound configured, or a nonsense bound, must never become a 0s timeout
         // that fails every request instantly — it means "no timeout".
         assert_eq!(timeout_duration(None), None);

@@ -95,9 +95,15 @@ mod tests {
     fn ranks_relevant_tool_first_and_loads_detail_lazily() {
         let mut corpus = ToolCorpus::default();
         corpus.rebuild_from_tools(&[
-            tool("calendar_create_event", "create a calendar event with attendees"),
+            tool(
+                "calendar_create_event",
+                "create a calendar event with attendees",
+            ),
             tool("email_send", "send an email message to a contact"),
-            tool("browser_navigate", "open a URL in the browser and read the page"),
+            tool(
+                "browser_navigate",
+                "open a URL in the browser and read the page",
+            ),
         ]);
         let cards = corpus.search("open a website and read it", 1);
         assert_eq!(cards.len(), 1);

@@ -5,7 +5,8 @@ use local_first_capabilities::{
 };
 use local_first_orchestrator::{
     MemoryContextSnippet, OrchestratorAuditStore, OrchestratorBrain, OrchestratorBudgets,
-    OrchestratorRequest, OrchestratorUiReadModel, StaticMemoryContextProvider,};
+    OrchestratorRequest, OrchestratorUiReadModel, StaticMemoryContextProvider,
+};
 use local_first_subagents::{
     GenerateJsonRequest, GenerateJsonResponse, JsonRuntime, RuntimeClientError, TokenMetrics,
 };

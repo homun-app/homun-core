@@ -76,7 +76,11 @@ impl<'a> ProviderAttempt<'a> {
         descriptor: &CapabilityDescriptor,
         model_id: &str,
     ) -> Self {
-        let provider_id = descriptor.id.split_once(':').map(|(provider, _)| provider).unwrap_or(&descriptor.id);
+        let provider_id = descriptor
+            .id
+            .split_once(':')
+            .map(|(provider, _)| provider)
+            .unwrap_or(&descriptor.id);
         let locality = match descriptor.locality {
             Locality::Local => local_first_inference_usage::Locality::Local,
             Locality::Cloud => local_first_inference_usage::Locality::Cloud,
@@ -91,7 +95,11 @@ impl<'a> ProviderAttempt<'a> {
             recorded_at,
         );
         recorder.record(started.clone());
-        Self { recorder: recorder.as_ref(), started, clock: std::time::Instant::now() }
+        Self {
+            recorder: recorder.as_ref(),
+            started,
+            clock: std::time::Instant::now(),
+        }
     }
 
     pub(crate) fn completed(

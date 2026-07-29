@@ -65,8 +65,7 @@ fn beta_projection_strips_screenshot_refs_for_every_provider() {
     let mut input = snapshot(Some("safe text"), false);
     input.screenshot_ref = Some(ArtifactRef {
         artifact_ref:
-            "host-computer:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                .into(),
+            "host-computer:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
         mime_type: "image/png".into(),
         size_bytes: 42,
         sha256: "a".repeat(64),

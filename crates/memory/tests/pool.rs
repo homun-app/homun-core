@@ -112,7 +112,10 @@ fn pool_and_single_produce_same_reads_and_fts() {
         .search_memory_refs(&user, &ws, "preventivo")
         .unwrap();
 
-    assert_eq!(single_count, pool_count, "stesso numero di memorie in single e pool");
+    assert_eq!(
+        single_count, pool_count,
+        "stesso numero di memorie in single e pool"
+    );
     // I ref FTS non sono confrontabili per identità (MemoryRef::generated usa UUID
     // randomici per store indipendenti): la parità è sul NUMERO di hit FTS.
     assert_eq!(
@@ -120,7 +123,10 @@ fn pool_and_single_produce_same_reads_and_fts() {
         pool_refs.len(),
         "stesso numero di ref FTS in single e pool"
     );
-    assert!(!pool_refs.is_empty(), "la FTS search deve trovare il preventivo");
+    assert!(
+        !pool_refs.is_empty(),
+        "la FTS search deve trovare il preventivo"
+    );
 }
 
 /// Concorrenza WAL: N thread leggono (via reader pool del facade) mentre 1
@@ -134,9 +140,7 @@ fn pool_concurrent_reads_do_not_block_writer_and_stay_consistent() {
     let user = UserId::new("concurrent-user");
     let ws = WorkspaceId::new("proj-concurrent");
 
-    let facade = std::sync::Arc::new(MemoryFacade::new(
-        SQLiteMemoryStore::open(&path).unwrap(),
-    ));
+    let facade = std::sync::Arc::new(MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap()));
     // Seed iniziale.
     facade
         .upsert_memory(&sample_memory(&user, &ws, "stato iniziale"))
@@ -189,7 +193,10 @@ fn pool_concurrent_reads_do_not_block_writer_and_stay_consistent() {
     }
 
     let errors = errors.lock().unwrap();
-    assert!(errors.is_empty(), "errori durante read/write concorrenti: {errors:?}");
+    assert!(
+        errors.is_empty(),
+        "errori durante read/write concorrenti: {errors:?}"
+    );
     assert!(
         read_count.load(Ordering::Relaxed) > 0,
         "i reader devono aver completato almeno una lettura"
@@ -197,7 +204,10 @@ fn pool_concurrent_reads_do_not_block_writer_and_stay_consistent() {
 
     // Stato finale: 21 memorie (seed + 20).
     let final_count = facade.list_memories_for_ui(&user, &ws).unwrap().len();
-    assert_eq!(final_count, 21, "tutte le scritture devono essere persistite");
+    assert_eq!(
+        final_count, 21,
+        "tutte le scritture devono essere persistite"
+    );
 }
 
 /// `import_graphify_batch` (BEGIN/COMMIT) in pool mode: gira sulla writer senza
@@ -269,7 +279,11 @@ fn pool_embeddings_upsert_and_search_roundtrip() {
     let hits = store
         .search_embeddings(&user, &ws, &[0.95, 0.85, 0.75], 2)
         .unwrap();
-    assert_eq!(hits.len(), 2, "search_embeddings deve trovare entrambi i vector");
+    assert_eq!(
+        hits.len(),
+        2,
+        "search_embeddings deve trovare entrambi i vector"
+    );
     // Il più simile alla query [0.95,0.85,0.75] è r2.
     assert_eq!(hits[0].memory_ref, r2);
 }

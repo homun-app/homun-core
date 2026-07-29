@@ -104,20 +104,32 @@ impl InferenceProvider for AnthropicProvider {
             local_first_inference_usage::NormalizedUsage {
                 input_tokens: body.pointer("/usage/input_tokens").and_then(Value::as_u64),
                 output_tokens: body.pointer("/usage/output_tokens").and_then(Value::as_u64),
-                cache_read_tokens: body.pointer("/usage/cache_read_input_tokens").and_then(Value::as_u64),
-                cache_write_tokens: body.pointer("/usage/cache_creation_input_tokens").and_then(Value::as_u64),
+                cache_read_tokens: body
+                    .pointer("/usage/cache_read_input_tokens")
+                    .and_then(Value::as_u64),
+                cache_write_tokens: body
+                    .pointer("/usage/cache_creation_input_tokens")
+                    .and_then(Value::as_u64),
                 ..Default::default()
             }
         } else {
             local_first_inference_usage::NormalizedUsage {
                 input_tokens: Some((request.prompt.chars().count() as u64).div_ceil(4).max(1)),
-                output_tokens: Some((parsed.raw_output.chars().count() as u64).div_ceil(4).max(1)),
+                output_tokens: Some(
+                    (parsed.raw_output.chars().count() as u64)
+                        .div_ceil(4)
+                        .max(1),
+                ),
                 ..Default::default()
             }
         };
         attempt.completed(
             usage,
-            if reported { local_first_inference_usage::UsageProvenance::ProviderReported } else { local_first_inference_usage::UsageProvenance::HomunEstimated },
+            if reported {
+                local_first_inference_usage::UsageProvenance::ProviderReported
+            } else {
+                local_first_inference_usage::UsageProvenance::HomunEstimated
+            },
         );
         Ok(parsed)
     }

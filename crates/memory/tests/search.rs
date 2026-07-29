@@ -1,6 +1,6 @@
 use local_first_memory::{
-    DataSensitivity, MemoryAccessRequest, MemoryCreateRequest, MemoryFacade,
-    MemoryEvolutionKind, MemoryEvolutionMetadata, MemoryLifecycleRequest, MemoryRecord, MemoryRef,
+    DataSensitivity, MemoryAccessRequest, MemoryCreateRequest, MemoryEvolutionKind,
+    MemoryEvolutionMetadata, MemoryFacade, MemoryLifecycleRequest, MemoryRecord, MemoryRef,
     MemoryRefKind, MemorySearchRequest, MemoryStatus, PrivacyDomain, SQLiteMemoryStore, UserId,
     WorkspaceId, write_memory_evolution_metadata,
 };
@@ -174,10 +174,7 @@ fn temporal_expiry_is_idempotent_and_preserves_the_record() {
         .unwrap()
         .unwrap();
     assert_eq!(stored.status, MemoryStatus::Stale);
-    assert_eq!(
-        stored.metadata["last_lifecycle_reason"],
-        "temporal_expiry"
-    );
+    assert_eq!(stored.metadata["last_lifecycle_reason"], "temporal_expiry");
 }
 
 fn seeded_facade() -> MemoryFacade {

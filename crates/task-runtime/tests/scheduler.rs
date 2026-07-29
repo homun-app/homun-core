@@ -45,8 +45,7 @@ fn scheduler_selects_ready_tasks_across_workspaces_with_global_ordering() {
     older_personal.updated_at = older_personal.created_at;
     store.insert_task(&older_personal).unwrap();
 
-    let mut newer_project =
-        task("project_turn", &user, &project).with_priority(TaskPriority::High);
+    let mut newer_project = task("project_turn", &user, &project).with_priority(TaskPriority::High);
     newer_project.created_at = OffsetDateTime::from_unix_timestamp(200).unwrap();
     newer_project.updated_at = newer_project.created_at;
     store.insert_task(&newer_project).unwrap();

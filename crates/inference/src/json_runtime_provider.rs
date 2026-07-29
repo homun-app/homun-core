@@ -35,16 +35,12 @@ impl<R: JsonRuntime> InferenceProvider for JsonRuntimeProvider<R> {
         &self,
         request: &GenerateJsonRequest,
     ) -> Result<GenerateJsonResponse, RuntimeClientError> {
-        let attempt = ProviderAttempt::start(
-            &self.usage,
-            request,
-            &self.descriptor,
-            &self.descriptor.id,
-        );
+        let attempt =
+            ProviderAttempt::start(&self.usage, request, &self.descriptor, &self.descriptor.id);
         match self.runtime.generate_json(request) {
             Ok(response) => {
-                let has_reported = response.metrics.prompt_tokens > 0
-                    || response.metrics.generation_tokens > 0;
+                let has_reported =
+                    response.metrics.prompt_tokens > 0 || response.metrics.generation_tokens > 0;
                 let usage = if has_reported {
                     local_first_inference_usage::NormalizedUsage {
                         input_tokens: Some(response.metrics.prompt_tokens.into()),
@@ -53,8 +49,14 @@ impl<R: JsonRuntime> InferenceProvider for JsonRuntimeProvider<R> {
                     }
                 } else {
                     local_first_inference_usage::NormalizedUsage {
-                        input_tokens: Some((request.prompt.chars().count() as u64).div_ceil(4).max(1)),
-                        output_tokens: Some((response.raw_output.chars().count() as u64).div_ceil(4).max(1)),
+                        input_tokens: Some(
+                            (request.prompt.chars().count() as u64).div_ceil(4).max(1),
+                        ),
+                        output_tokens: Some(
+                            (response.raw_output.chars().count() as u64)
+                                .div_ceil(4)
+                                .max(1),
+                        ),
                         ..Default::default()
                     }
                 };

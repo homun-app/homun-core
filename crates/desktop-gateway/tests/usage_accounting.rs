@@ -130,15 +130,17 @@ fn mixed_cost_provenance_and_provider_account_state_remain_separate() {
     assert_eq!(providers[0].key, "openrouter");
     assert_eq!(providers[0].cost_breakdown, summary.cost_breakdown);
 
-    let loaded_policy = store.provider_policy("local", "openrouter").unwrap().unwrap();
+    let loaded_policy = store
+        .provider_policy("local", "openrouter")
+        .unwrap()
+        .unwrap();
     let loaded_snapshots = store
         .latest_provider_snapshots("local", "openrouter")
         .unwrap();
     assert_eq!(loaded_policy.monthly_budget_microusd, Some(20_000_000));
     assert_eq!(loaded_snapshots[0].limit_value, Some(50_000_000));
     assert_ne!(
-        loaded_policy.monthly_budget_microusd,
-        loaded_snapshots[0].limit_value,
+        loaded_policy.monthly_budget_microusd, loaded_snapshots[0].limit_value,
         "manual budget must not be presented as a provider-reported limit",
     );
 }
@@ -165,7 +167,14 @@ fn compact_summary_reports_active_providers_dominant_model_and_token_trend() {
     for event in [
         terminal_attempt_at("current-a", "openrouter", "model-a", 1_400, 600, now - DAY),
         terminal_attempt_at("current-b", "anthropic", "model-b", 700, 300, now - 2 * DAY),
-        terminal_attempt_at("previous", "openrouter", "model-a", 1_500, 500, now - 8 * DAY),
+        terminal_attempt_at(
+            "previous",
+            "openrouter",
+            "model-a",
+            1_500,
+            500,
+            now - 8 * DAY,
+        ),
     ] {
         store.append(&event).unwrap();
     }

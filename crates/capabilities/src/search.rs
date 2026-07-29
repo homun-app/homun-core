@@ -79,8 +79,7 @@ pub fn bm25_rank_indices(docs: &[Vec<String>], query: &str, limit: usize) -> Vec
                     continue;
                 }
                 let containing = *document_frequency.get(term.as_str()).unwrap_or(&0.0);
-                let idf =
-                    (((document_count - containing + 0.5) / (containing + 0.5)) + 1.0).ln();
+                let idf = (((document_count - containing + 0.5) / (containing + 0.5)) + 1.0).ln();
                 score += idf * (frequency * (k1 + 1.0))
                     / (frequency + k1 * (1.0 - b + b * length / average_length));
             }

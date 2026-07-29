@@ -107,7 +107,13 @@ where
         // Render once per round with the latest snapshot full, older ones stubbed.
         let history_text = render_history(&history);
         let prompt = build_prompt(
-            step, goal, contract, &upstream, gather_tools, &history_text, force_finish,
+            step,
+            goal,
+            contract,
+            &upstream,
+            gather_tools,
+            &history_text,
+            force_finish,
         );
         let request = GenerateJsonRequest {
             usage: {
@@ -130,9 +136,9 @@ where
             required_keys: vec!["action".to_string()],
             repair: true,
         };
-        let response = runtime
-            .generate_json(&request)
-            .map_err(|error| OrchestratorError::Capability(format!("agentic_step_failed:{error:?}")))?;
+        let response = runtime.generate_json(&request).map_err(|error| {
+            OrchestratorError::Capability(format!("agentic_step_failed:{error:?}"))
+        })?;
         let action = response.json;
         let action_kind = action.get("action").and_then(|value| value.as_str());
         if dbg {
@@ -193,7 +199,11 @@ where
                     // Pass the loop history (with the latest snapshot's element refs)
                     // so arg-fill can choose the right ref for a browser_act.
                     match crate::step_executor::fill_arguments(
-                        runtime, step, tool, completed, &history_text,
+                        runtime,
+                        step,
+                        tool,
+                        completed,
+                        &history_text,
                     ) {
                         Ok(arguments) => {
                             if dbg {
@@ -445,7 +455,10 @@ mod tests {
             &self,
             request: &GenerateJsonRequest,
         ) -> Result<GenerateJsonResponse, RuntimeClientError> {
-            self.schemas.lock().unwrap().push(request.json_schema.clone());
+            self.schemas
+                .lock()
+                .unwrap()
+                .push(request.json_schema.clone());
             let json = self.actions.lock().unwrap().remove(0);
             Ok(GenerateJsonResponse {
                 valid: true,
@@ -552,7 +565,9 @@ mod tests {
 
         // The first action schema constrained tool_name to exactly the gather tools.
         let schema = runtime.schemas.lock().unwrap()[0].clone().unwrap();
-        let names = schema["properties"]["tool_name"]["enum"].as_array().unwrap();
+        let names = schema["properties"]["tool_name"]["enum"]
+            .as_array()
+            .unwrap();
         let mut got: Vec<&str> = names.iter().map(|n| n.as_str().unwrap()).collect();
         got.sort();
         assert_eq!(got, vec!["read_page", "web_search"]);
@@ -571,7 +586,10 @@ mod tests {
             &self,
             request: &GenerateJsonRequest,
         ) -> Result<GenerateJsonResponse, RuntimeClientError> {
-            self.schemas.lock().unwrap().push(request.json_schema.clone());
+            self.schemas
+                .lock()
+                .unwrap()
+                .push(request.json_schema.clone());
             let schema = request.json_schema.clone().unwrap_or_default();
             let action = &schema["properties"]["action"];
             let json = if action.is_null() {

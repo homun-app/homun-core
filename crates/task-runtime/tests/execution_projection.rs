@@ -91,10 +91,8 @@ fn every_canonical_outcome_has_one_projection() {
         ),
         (
             suspended(WakeCondition::EffectResolution {
-                receipt_ref: EffectReceiptRef::from_store_id(
-                    "11111111111111111111111111111111",
-                )
-                .unwrap(),
+                receipt_ref: EffectReceiptRef::from_store_id("11111111111111111111111111111111")
+                    .unwrap(),
             }),
             TaskStatus::WaitingUserApproval,
             None,

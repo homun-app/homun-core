@@ -99,7 +99,8 @@ impl TurnMemoryReadSet {
                 self.blocked_unknown = true;
                 continue;
             };
-            let Some(source_revision) = hit.source_revision.as_ref().map(|value| value.trim()) else {
+            let Some(source_revision) = hit.source_revision.as_ref().map(|value| value.trim())
+            else {
                 self.blocked_unknown = true;
                 continue;
             };

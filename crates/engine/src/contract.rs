@@ -11,9 +11,9 @@
 //! (`engine::events`, inc 5a), so `EventSink` can be defined here (inc 5b) — and `PlanProgress`
 //! (inc 5c) — ahead of the loop move (inc 5e) that consumes them: the same contract-first pattern.
 
+use crate::LoopCheckpoint;
 use crate::events::{GenerateStreamEvent, TurnMemoryReadSet};
 use crate::execution_journal::AgentExecutionEvent;
-use crate::LoopCheckpoint;
 use serde_json::Value;
 use std::future::Future;
 
@@ -115,9 +115,7 @@ pub trait ModelClient {
         None
     }
 
-    fn wait_for_turn_control(
-        &self,
-    ) -> impl Future<Output = TurnControlDecision> + Send {
+    fn wait_for_turn_control(&self) -> impl Future<Output = TurnControlDecision> + Send {
         std::future::pending()
     }
 
@@ -510,14 +508,27 @@ mod tests {
         assert_eq!(out.provider.base_url, "http://x");
         assert_eq!(out.latency_ms, Some(12));
         assert_eq!(out.time_to_first_token_ms, Some(4));
-        assert_eq!(*streamed.lock().unwrap(), "hi", "on_delta streamed the live token");
+        assert_eq!(
+            *streamed.lock().unwrap(),
+            "hi",
+            "on_delta streamed the live token"
+        );
 
         let tools = FixedTools;
         let mut ls = crate::loop_state::LoopState::new();
-        let outcome = tools.execute_tool("browse", "{}", "c1", &mut ls).await.unwrap();
+        let outcome = tools
+            .execute_tool("browse", "{}", "c1", &mut ls)
+            .await
+            .unwrap();
         assert_eq!(outcome.result, "ran browse");
-        assert_eq!(outcome.effects.append_output, vec!["did browse".to_string()]);
-        assert!(!outcome.effects.request_confirm, "default effects are empty");
+        assert_eq!(
+            outcome.effects.append_output,
+            vec!["did browse".to_string()]
+        );
+        assert!(
+            !outcome.effects.request_confirm,
+            "default effects are empty"
+        );
     }
 
     // A stub browser proves the BrowserExecutor seam is usable + mockable: `&mut self` lets it carry
@@ -569,8 +580,14 @@ mod tests {
         assert_eq!(outcome.result, "browsed browser_navigate (#1)");
         assert_eq!(outcome.effects.outcome_hint, Some(ToolOutcomeHint::Success));
         assert!(outcome.effects.suspend_effect_receipt.is_some());
-        assert!(ls.browser_used, "execute_browser flipped the loop-visible flag via LoopState");
-        assert_eq!(browser.calls, 1, "executor mutated its own subsystem state (&mut self)");
+        assert!(
+            ls.browser_used,
+            "execute_browser flipped the loop-visible flag via LoopState"
+        );
+        assert_eq!(
+            browser.calls, 1,
+            "executor mutated its own subsystem state (&mut self)"
+        );
         browser.close_session(ls.browser_used).await;
         assert!(browser.closed, "close_session ran the teardown");
     }
@@ -597,7 +614,11 @@ mod tests {
         ];
         let mut start = 1usize; // the step's work begins at index 1
         c.compact(&mut msgs, &mut start).await;
-        assert_eq!(msgs.len(), 2, "the step slice collapsed to one summary note");
+        assert_eq!(
+            msgs.len(),
+            2,
+            "the step slice collapsed to one summary note"
+        );
         assert_eq!(msgs[1]["content"], "[summary]");
         assert_eq!(start, 2, "start advanced past the summary");
     }
@@ -617,7 +638,10 @@ mod tests {
     #[test]
     fn turn_policy_is_usable_with_a_mock() {
         let p = FixedPolicy;
-        assert_eq!(p.route_blocked("forbidden").as_deref(), Some("blocked by route"));
+        assert_eq!(
+            p.route_blocked("forbidden").as_deref(),
+            Some("blocked by route")
+        );
         assert_eq!(p.route_blocked("write_file"), None);
         assert!(p.supports_vision("http://x", "vision-model"));
         assert!(!p.supports_vision("http://x", "text-only"));
@@ -636,7 +660,8 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn event_sink_is_usable_with_a_mock() {
         let sink = CollectingSink::default();
-        sink.emit(GenerateStreamEvent::Delta { text: "hi".into() }).await;
+        sink.emit(GenerateStreamEvent::Delta { text: "hi".into() })
+            .await;
         sink.emit(GenerateStreamEvent::Error {
             code: "e".into(),
             message: "boom".into(),
@@ -660,7 +685,12 @@ mod tests {
         async fn persist_plan(&self, _thread: Option<&str>, steps: &[Value]) {
             self.persisted.lock().unwrap().push(steps.len());
         }
-        async fn record_step_outcome(&self, _thread: Option<&str>, _step: &Value, _evidence: &[String]) {
+        async fn record_step_outcome(
+            &self,
+            _thread: Option<&str>,
+            _step: &Value,
+            _evidence: &[String],
+        ) {
             *self.outcomes.lock().unwrap() += 1;
         }
         async fn verify_step_complete(
@@ -683,13 +713,28 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn plan_progress_is_usable_with_a_mock() {
-        let plan = RecordingPlan { judge: true, ..Default::default() };
-        plan.persist_plan(Some("t1"), &[Value::Null, Value::Null]).await;
-        let (done, _why) = plan.verify_step_complete("step", "crit", "did the thing").await;
+        let plan = RecordingPlan {
+            judge: true,
+            ..Default::default()
+        };
+        plan.persist_plan(Some("t1"), &[Value::Null, Value::Null])
+            .await;
+        let (done, _why) = plan
+            .verify_step_complete("step", "crit", "did the thing")
+            .await;
         assert!(done, "scripted judge said complete");
-        plan.record_step_outcome(Some("t1"), &Value::Null, &["evidence".into()]).await;
-        assert_eq!(*plan.persisted.lock().unwrap(), vec![2], "persisted a 2-step plan");
-        assert_eq!(*plan.outcomes.lock().unwrap(), 1, "recorded one verified outcome");
+        plan.record_step_outcome(Some("t1"), &Value::Null, &["evidence".into()])
+            .await;
+        assert_eq!(
+            *plan.persisted.lock().unwrap(),
+            vec![2],
+            "persisted a 2-step plan"
+        );
+        assert_eq!(
+            *plan.outcomes.lock().unwrap(),
+            1,
+            "recorded one verified outcome"
+        );
         assert_eq!(
             plan.reconcile_on_delivery(&Value::Null, "a substantial delivered answer"),
             Some(vec![Value::Null]),
@@ -713,8 +758,13 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn turn_completion_judge_is_usable_with_a_mock() {
-        let judge = ScriptedJudge { verdict: true, ..Default::default() };
-        let incomplete = judge.task_appears_incomplete("do A and B", "did only A").await;
+        let judge = ScriptedJudge {
+            verdict: true,
+            ..Default::default()
+        };
+        let incomplete = judge
+            .task_appears_incomplete("do A and B", "did only A")
+            .await;
         assert!(incomplete, "scripted judge said the turn is incomplete");
         assert_eq!(
             judge.seen.lock().unwrap().as_deref(),

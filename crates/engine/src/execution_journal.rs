@@ -184,15 +184,11 @@ impl AgentExecutionEvent {
                 round,
                 boundary,
                 payload,
-            } => (
-                "browser_protocol",
-                Some(round),
-                {
-                    let mut obj = payload.as_object().cloned().unwrap_or_default();
-                    obj.insert("boundary".to_string(), Value::String(boundary));
-                    Value::Object(obj)
-                },
-            ),
+            } => ("browser_protocol", Some(round), {
+                let mut obj = payload.as_object().cloned().unwrap_or_default();
+                obj.insert("boundary".to_string(), Value::String(boundary));
+                Value::Object(obj)
+            }),
             Self::RunCompleted { reason } => ("run_completed", None, json!({"reason": reason})),
             Self::RunFailed { reason } => ("run_failed", None, json!({"reason": reason})),
             Self::RunAborted { reason } => ("run_aborted", None, json!({"reason": reason})),

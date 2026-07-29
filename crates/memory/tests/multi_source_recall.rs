@@ -1,11 +1,11 @@
 use local_first_memory::{
-    AuthorizedMemorySearchRequest, AuthorizedMemorySource, DataSensitivity, MemoryAccessRequest,
-    LinkedMemoryReadRef, MemoryCollectionKey, MemoryEntity, MemoryExtraction, MemoryFacade,
+    AuthorizedMemorySearchRequest, AuthorizedMemorySource, DataSensitivity, LinkedMemoryReadRef,
+    MemoryAccessRequest, MemoryCollectionKey, MemoryEntity, MemoryExtraction, MemoryFacade,
     MemoryGrantOverrideEffect, MemoryLifecycleRequest, MemoryRecord, MemoryRef, MemoryRefKind,
-    MemoryRelation, MemoryScope, MemorySourceAccessEvent,
-    MemorySourceAccessOutcome, MemorySourceGrant, MemorySourcePolicy, MemoryStatus,
-    MemoryUpdatePatch, MemoryWikiProjection, PrivacyDomain, RecallHit, SQLiteMemoryStore, UserId,
-    WikiFileStore, WikiPage, WorkspaceId, merge_recall_hits, recall_authorized_sources_on_facade,
+    MemoryRelation, MemoryScope, MemorySourceAccessEvent, MemorySourceAccessOutcome,
+    MemorySourceGrant, MemorySourcePolicy, MemoryStatus, MemoryUpdatePatch, MemoryWikiProjection,
+    PrivacyDomain, RecallHit, SQLiteMemoryStore, UserId, WikiFileStore, WikiPage, WorkspaceId,
+    merge_recall_hits, recall_authorized_sources_on_facade,
     recall_authorized_sources_on_facade_with_source_filter, recall_source_on_facade,
     revalidate_recall_hits_before_injection,
 };
@@ -125,25 +125,22 @@ fn validate_linked_memory_read_rechecks_current_grant_and_revision() {
     assert!(
         fixture
             .facade
-            .validate_linked_memory_read(
-                &fixture.user,
-                &fixture.consumer,
-                &read,
-                1_800_000_000,
-            )
+            .validate_linked_memory_read(&fixture.user, &fixture.consumer, &read, 1_800_000_000,)
             .unwrap()
     );
     let mut wrong_version = read.clone();
     wrong_version.policy_version += 1;
-    assert!(!fixture
-        .facade
-        .validate_linked_memory_read(
-            &fixture.user,
-            &fixture.consumer,
-            &wrong_version,
-            1_800_000_000,
-        )
-        .unwrap());
+    assert!(
+        !fixture
+            .facade
+            .validate_linked_memory_read(
+                &fixture.user,
+                &fixture.consumer,
+                &wrong_version,
+                1_800_000_000,
+            )
+            .unwrap()
+    );
 
     fixture
         .facade
@@ -154,15 +151,12 @@ fn validate_linked_memory_read_rechecks_current_grant_and_revision() {
             1_800_000_001,
         )
         .unwrap();
-    assert!(!fixture
-        .facade
-        .validate_linked_memory_read(
-            &fixture.user,
-            &fixture.consumer,
-            &read,
-            1_800_000_001,
-        )
-        .unwrap());
+    assert!(
+        !fixture
+            .facade
+            .validate_linked_memory_read(&fixture.user, &fixture.consumer, &read, 1_800_000_001,)
+            .unwrap()
+    );
 }
 
 #[test]
@@ -221,15 +215,12 @@ fn validate_linked_memory_read_rejects_source_revision_drift() {
         )
         .unwrap();
 
-    assert!(!fixture
-        .facade
-        .validate_linked_memory_read(
-            &fixture.user,
-            &fixture.consumer,
-            &read,
-            1_800_000_000,
-        )
-        .unwrap());
+    assert!(
+        !fixture
+            .facade
+            .validate_linked_memory_read(&fixture.user, &fixture.consumer, &read, 1_800_000_000,)
+            .unwrap()
+    );
 }
 
 #[test]
@@ -280,51 +271,45 @@ fn validate_linked_memory_read_rejects_expiry_deny_and_removed_refs() {
     grant.policy_version = 2;
     grant.expires_at = Some(1_800_000_100);
     grant.updated_at = "unix:1800000001".to_string();
-    fixture
-        .facade
-        .upsert_memory_source_grant(&grant)
-        .unwrap();
+    fixture.facade.upsert_memory_source_grant(&grant).unwrap();
     let mut current_read = original_read.clone();
     current_read.policy_version = 2;
-    assert!(!fixture
-        .facade
-        .validate_linked_memory_read(
-            &fixture.user,
-            &fixture.consumer,
-            &current_read,
-            1_800_000_100,
-        )
-        .unwrap());
+    assert!(
+        !fixture
+            .facade
+            .validate_linked_memory_read(
+                &fixture.user,
+                &fixture.consumer,
+                &current_read,
+                1_800_000_100,
+            )
+            .unwrap()
+    );
 
     grant.policy_version = 3;
     grant.expires_at = None;
-    grant.overrides.insert(
-        reference.clone(),
-        MemoryGrantOverrideEffect::Deny,
-    );
+    grant
+        .overrides
+        .insert(reference.clone(), MemoryGrantOverrideEffect::Deny);
     grant.updated_at = "unix:1800000002".to_string();
-    fixture
-        .facade
-        .upsert_memory_source_grant(&grant)
-        .unwrap();
+    fixture.facade.upsert_memory_source_grant(&grant).unwrap();
     current_read.policy_version = 3;
-    assert!(!fixture
-        .facade
-        .validate_linked_memory_read(
-            &fixture.user,
-            &fixture.consumer,
-            &current_read,
-            1_800_000_002,
-        )
-        .unwrap());
+    assert!(
+        !fixture
+            .facade
+            .validate_linked_memory_read(
+                &fixture.user,
+                &fixture.consumer,
+                &current_read,
+                1_800_000_002,
+            )
+            .unwrap()
+    );
 
     grant.policy_version = 4;
     grant.overrides.clear();
     grant.updated_at = "unix:1800000003".to_string();
-    fixture
-        .facade
-        .upsert_memory_source_grant(&grant)
-        .unwrap();
+    fixture.facade.upsert_memory_source_grant(&grant).unwrap();
     current_read.policy_version = 4;
     fixture
         .facade
@@ -339,15 +324,17 @@ fn validate_linked_memory_read_rejects_expiry_deny_and_removed_refs() {
             "test removal",
         )
         .unwrap();
-    assert!(!fixture
-        .facade
-        .validate_linked_memory_read(
-            &fixture.user,
-            &fixture.consumer,
-            &current_read,
-            1_800_000_003,
-        )
-        .unwrap());
+    assert!(
+        !fixture
+            .facade
+            .validate_linked_memory_read(
+                &fixture.user,
+                &fixture.consumer,
+                &current_read,
+                1_800_000_003,
+            )
+            .unwrap()
+    );
 }
 
 #[test]
@@ -392,7 +379,10 @@ fn linked_hit_revision_changes_with_the_source() {
         .expect("source exists");
     changed.text = "Revision anchor is beta".to_string();
     changed.updated_at = "unix:1800000001".to_string();
-    fixture.facade.upsert_memory(&changed).expect("update source");
+    fixture
+        .facade
+        .upsert_memory(&changed)
+        .expect("update source");
     let second = recall_authorized_sources_on_facade(
         &fixture.facade,
         &fixture.user,
@@ -1127,13 +1117,7 @@ fn denied_graph_neighbours_cannot_crowd_out_an_authorized_relation() {
         );
         overrides.insert(denied, MemoryGrantOverrideEffect::Deny);
     }
-    fixture.link(
-        "project-b",
-        "z-authorized",
-        &seed,
-        "relates_to",
-        &allowed,
-    );
+    fixture.link("project-b", "z-authorized", &seed, "relates_to", &allowed);
     fixture.grant(
         "grant-b",
         "project-b",

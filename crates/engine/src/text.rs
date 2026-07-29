@@ -81,20 +81,36 @@ mod tests {
 
     #[test]
     fn extract_dedups_and_trims_trailing_punct() {
-        let urls = extract_source_urls("see https://a.example/x. and https://a.example/x, also http://b.example)");
-        assert_eq!(urls, vec!["https://a.example/x".to_string(), "http://b.example".to_string()]);
+        let urls = extract_source_urls(
+            "see https://a.example/x. and https://a.example/x, also http://b.example)",
+        );
+        assert_eq!(
+            urls,
+            vec![
+                "https://a.example/x".to_string(),
+                "http://b.example".to_string()
+            ]
+        );
     }
 
     #[test]
     fn low_value_urls_are_flagged() {
-        assert!(is_low_value_source_url("https://en.wikipedia.org/w/index.php?action=edit"));
-        assert!(!is_low_value_source_url("https://en.wikipedia.org/wiki/Rust"));
+        assert!(is_low_value_source_url(
+            "https://en.wikipedia.org/w/index.php?action=edit"
+        ));
+        assert!(!is_low_value_source_url(
+            "https://en.wikipedia.org/wiki/Rust"
+        ));
     }
 
     #[test]
     fn fonti_section_skips_when_empty_or_already_cited() {
         assert_eq!(fonti_section(&[], "x"), None);
         assert_eq!(fonti_section(&["u".into()], "see **Sources** below"), None);
-        assert!(fonti_section(&["https://a".into()], "answer").unwrap().contains("**Sources**"));
+        assert!(
+            fonti_section(&["https://a".into()], "answer")
+                .unwrap()
+                .contains("**Sources**")
+        );
     }
 }

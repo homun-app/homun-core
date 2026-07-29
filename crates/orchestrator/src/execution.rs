@@ -145,7 +145,10 @@ mod tests {
             "browser_navigate.url: https://www.trenitalia.com",
             "browser_navigate"
         ));
-        assert!(tool_name_resolves("browser_navigate url=x", "browser_navigate"));
+        assert!(tool_name_resolves(
+            "browser_navigate url=x",
+            "browser_navigate"
+        ));
         // No accidental cross-tool resolution: a different tool sharing a prefix, or a
         // truncation, must NOT match.
         assert!(!tool_name_resolves("browser_navigatex", "browser_navigate"));

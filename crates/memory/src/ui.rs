@@ -1,7 +1,7 @@
 use crate::{
-    AccessDecisionKind, DataSensitivity, MemoryAccessRequest, MemoryEntity, MemoryFacade,
-    MemoryEvolutionMetadata, MemoryRecord, MemoryRef, MemoryRelation, PrivacyDomain, UserId,
-    WikiPage, WorkspaceId, memory_evolution_metadata,
+    AccessDecisionKind, DataSensitivity, MemoryAccessRequest, MemoryEntity,
+    MemoryEvolutionMetadata, MemoryFacade, MemoryRecord, MemoryRef, MemoryRelation, PrivacyDomain,
+    UserId, WikiPage, WorkspaceId, memory_evolution_metadata,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet, VecDeque};
@@ -211,7 +211,8 @@ impl<'a> MemoryUiReadModel<'a> {
                 &reference,
                 &request.user_id,
                 &request.workspace_id,
-            )? else {
+            )?
+            else {
                 continue;
             };
             let decision = self.facade.decide_memory_for_ui(request, &memory);
