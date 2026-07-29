@@ -2,10 +2,11 @@ use crate::{
     ActiveTurnProjection, AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus,
     ApprovalRequest, Automation, AutomationRun, BrowserCheckpointRecord, EffectReceiptClaim,
     ExecutionEffectReceipt, NewAgentRun, NewBrowserCheckpoint, NewExecutionEffectReceipt,
-    NewTurnSteering, ObjectiveContractRecord, ObjectiveMode, ResourceClass, RuntimePlanRecord,
-    SubagentInfo, TaskCheckpoint, TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError,
-    TaskRuntimeResult, TaskStatus, TerminalWrite, ThreadActivityProjection, ThreadAttention,
-    TurnEvent, TurnEventKind, TurnSteeringRecord, TurnSteeringStatus, UserId, WorkspaceId,
+    NewTurnSteering, ObjectiveContractRecord, ObjectiveMode, ProjectionClaim, ResourceClass,
+    RuntimePlanRecord, SubagentInfo, TaskCheckpoint, TaskDependencyOutput, TaskId, TaskRecord,
+    TaskRuntimeError, TaskRuntimeResult, TaskStatus, TerminalWrite, ThreadActivityProjection,
+    ThreadAttention, TurnEvent, TurnEventKind, TurnSteeringRecord, TurnSteeringStatus, UserId,
+    WorkspaceId,
 };
 use local_first_execution_protocol::{EffectClass, EffectReceiptRef, EffectReceiptStatus};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
@@ -101,6 +102,45 @@ fn first_terminal_event_on(
         })
     })
     .transpose()
+}
+
+fn projection_event_on(
+    connection: &Connection,
+    turn_id: &str,
+    projection_ref: &str,
+) -> TaskRuntimeResult<Option<TurnEvent>> {
+    let mut statement = connection.prepare(
+        "SELECT event_id, turn_id, seq, kind, payload_json, created_at
+         FROM turn_events WHERE turn_id = ?1 ORDER BY seq",
+    )?;
+    let rows = statement.query_map([turn_id], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, i64>(5)?,
+        ))
+    })?;
+    for row in rows {
+        let (event_id, turn_id, seq, kind, payload_json, created_at) = row?;
+        let payload: Value = serde_json::from_str(&payload_json)?;
+        if payload.get("projection_ref").and_then(Value::as_str) != Some(projection_ref) {
+            continue;
+        }
+        let kind = TurnEventKind::parse(&kind)
+            .ok_or_else(|| TaskRuntimeError::Store("unknown projected event kind".to_string()))?;
+        return Ok(Some(TurnEvent {
+            event_id,
+            turn_id,
+            seq,
+            kind,
+            payload,
+            created_at,
+        }));
+    }
+    Ok(None)
 }
 
 impl TaskStore {
@@ -1893,12 +1933,21 @@ impl TaskStore {
     /// Claims an adapter-output receipt against the authoritative execution revision. Projection
     /// may run after the adapter outcome is terminal, so it is fenced by revision/token rather than
     /// by the worker lease used for capability dispatch.
-    pub fn prepare_and_claim_effect_receipt_for_execution(
+    pub fn prepare_and_claim_effect_receipt_for_projection(
         &self,
         new_receipt: &NewExecutionEffectReceipt,
         expected_fencing_token: u64,
+        projection_claim: &ProjectionClaim,
     ) -> TaskRuntimeResult<EffectReceiptClaim> {
+        if projection_claim.record.execution_id != new_receipt.execution_id
+            || projection_claim.record.revision != new_receipt.revision
+        {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "projection claim does not own the adapter effect execution revision".into(),
+            ));
+        }
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        crate::projection_outbox::assert_projection_claim_current_on(&tx, projection_claim)?;
         if let Some(claim) =
             claim_existing_non_executable_receipt_on(&tx, &new_receipt.receipt_ref)?
         {
@@ -1907,7 +1956,8 @@ impl TaskStore {
         }
         let execution_current = tx.query_row(
             "SELECT COUNT(*) FROM executions
-                 WHERE execution_id = ?1 AND revision = ?2 AND fencing_token = ?3",
+                 WHERE execution_id = ?1 AND revision = ?2 AND fencing_token = ?3
+                   AND user_id = ?4 AND workspace_id = ?5 AND thread_id IS ?6",
             params![
                 new_receipt.execution_id,
                 i64::try_from(new_receipt.revision).map_err(|_| {
@@ -1916,6 +1966,9 @@ impl TaskStore {
                 i64::try_from(expected_fencing_token).map_err(|_| {
                     TaskRuntimeError::Store("effect fencing token is out of range".into())
                 })?,
+                new_receipt.user_id,
+                new_receipt.workspace_id,
+                new_receipt.thread_id,
             ],
             |row| row.get::<_, i64>(0),
         )? == 1;
@@ -1965,6 +2018,52 @@ impl TaskStore {
         }
         load_effect_receipt_on(&self.connection, receipt_ref)?
             .ok_or_else(|| TaskRuntimeError::Store("completed effect receipt disappeared".into()))
+    }
+
+    pub fn mark_effect_receipt_uncertain(
+        &self,
+        receipt_ref: &EffectReceiptRef,
+        evidence: &Value,
+    ) -> TaskRuntimeResult<ExecutionEffectReceipt> {
+        let changed = self.connection.execute(
+            "UPDATE execution_effect_receipts
+             SET status = 'uncertain', effects_json = ?1
+             WHERE receipt_ref = ?2 AND status = 'started'",
+            params![serde_json::to_string(evidence)?, receipt_ref.as_ref()],
+        )?;
+        if changed != 1 {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "only a started effect may become uncertain".into(),
+            ));
+        }
+        load_effect_receipt_on(&self.connection, receipt_ref)?
+            .ok_or_else(|| TaskRuntimeError::Store("uncertain effect receipt disappeared".into()))
+    }
+
+    pub fn release_effect_receipt_not_applied(
+        &self,
+        receipt_ref: &EffectReceiptRef,
+        error: &Value,
+    ) -> TaskRuntimeResult<ExecutionEffectReceipt> {
+        let resolved_at = OffsetDateTime::now_utc().unix_timestamp();
+        let changed = self.connection.execute(
+            "UPDATE execution_effect_receipts
+             SET status = 'prepared', result_json = NULL, effects_json = NULL,
+                 error_json = ?1, started_at = NULL, resolved_at = ?2
+             WHERE receipt_ref = ?3 AND status = 'started'",
+            params![
+                serde_json::to_string(error)?,
+                resolved_at,
+                receipt_ref.as_ref(),
+            ],
+        )?;
+        if changed != 1 {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "only a started effect may be released as verified not applied".into(),
+            ));
+        }
+        load_effect_receipt_on(&self.connection, receipt_ref)?
+            .ok_or_else(|| TaskRuntimeError::Store("released effect receipt disappeared".into()))
     }
 
     pub fn list_effect_receipts_for_thread(
@@ -2719,6 +2818,63 @@ impl TaskStore {
         Ok(TerminalWrite::Inserted(event))
     }
 
+    /// Atomically persists one visible event for a canonical execution projection.
+    /// The projection reference is the idempotency identity across overlapping workers.
+    pub fn insert_turn_projection_event_once(
+        &self,
+        turn_id: &str,
+        kind: TurnEventKind,
+        projection_ref: &str,
+        payload: Value,
+    ) -> TaskRuntimeResult<TerminalWrite> {
+        if projection_ref.trim().is_empty()
+            || payload.get("projection_ref").and_then(Value::as_str) != Some(projection_ref)
+        {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "projection event requires its exact projection reference".into(),
+            ));
+        }
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        if let Some(existing) = projection_event_on(&tx, turn_id, projection_ref)? {
+            tx.commit()?;
+            return Ok(TerminalWrite::Existing(existing));
+        }
+        if matches!(
+            kind,
+            TurnEventKind::Done | TurnEventKind::Error | TurnEventKind::Cancelled
+        ) && let Some(mut existing) = first_terminal_event_on(&tx, turn_id)?
+        {
+            let may_adopt_legacy_error = kind == TurnEventKind::Error
+                && existing.kind == TurnEventKind::Error
+                && existing
+                    .payload
+                    .get("projection_ref")
+                    .and_then(Value::as_str)
+                    .is_none();
+            if may_adopt_legacy_error {
+                let changed = tx.execute(
+                    "UPDATE turn_events SET payload_json = ?1
+                     WHERE event_id = ?2 AND kind = 'error'",
+                    params![serde_json::to_string(&payload)?, existing.event_id],
+                )?;
+                if changed != 1 {
+                    return Err(TaskRuntimeError::Store(
+                        "legacy terminal event disappeared during projection adoption".into(),
+                    ));
+                }
+                existing.payload = payload;
+                tx.commit()?;
+                return Ok(TerminalWrite::Inserted(existing));
+            }
+            return Err(TaskRuntimeError::Conflict(
+                "canonical projection conflicts with an unacknowledged terminal event".into(),
+            ));
+        }
+        let event = insert_turn_event_on(&tx, turn_id, kind, payload)?;
+        tx.commit()?;
+        Ok(TerminalWrite::Inserted(event))
+    }
+
     /// Reads a turn's events with seq > since (for stream resume). Returned in
     /// ascending seq order.
     pub fn read_turn_events(&self, turn_id: &str, since: i64) -> TaskRuntimeResult<Vec<TurnEvent>> {
@@ -3182,6 +3338,26 @@ impl TaskStore {
             "UPDATE agent_runs
              SET status = 'aborted', completed_at = ?1, terminal_reason = ?2
              WHERE status = 'running'",
+            params![OffsetDateTime::now_utc().unix_timestamp(), terminal_reason],
+        )?)
+    }
+
+    /// Abort only runs that have no canonical outcome waiting to be projected.
+    /// A committed execution still owns its running journal until the projector
+    /// converges the visible task/run/message state.
+    pub fn abort_orphaned_running_agent_runs(
+        &self,
+        terminal_reason: &str,
+    ) -> TaskRuntimeResult<usize> {
+        Ok(self.connection.execute(
+            "UPDATE agent_runs
+             SET status = 'aborted', completed_at = ?1, terminal_reason = ?2
+             WHERE status = 'running'
+               AND NOT EXISTS (
+                   SELECT 1 FROM executions
+                   WHERE executions.execution_id = agent_runs.turn_id
+                     AND executions.outcome_committed_at IS NOT NULL
+               )",
             params![OffsetDateTime::now_utc().unix_timestamp(), terminal_reason],
         )?)
     }

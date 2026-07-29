@@ -68,7 +68,7 @@ The unique identity is `(execution_id, revision, projection_kind)`. The initial 
 
 `commit_execution_outcome_with_requirement` appends `OutcomeCommitted`, registers a suspended wake, updates the folded execution projection, and inserts the outbox row in the same SQLite transaction. A rollback leaves neither outcome nor projection intent. An idempotent replay of the same outcome verifies or creates the same deterministic outbox row without producing another row.
 
-Only execution kinds with a registered projector create outbox work. The first registry mapping is `chat_turn -> chat_lifecycle`; unsupported kinds remain valid execution contracts and do not acquire an accidental chat projection.
+Only execution kinds with a registered projector create outbox work. The initial registry maps `chat_turn` and `proactive_prompt` to `chat_lifecycle`; the gateway closes a proactive row as not applicable when its checkpoint has no visible chat metadata. Unsupported kinds remain valid execution contracts and do not acquire an accidental chat projection.
 
 `continue_execution_as_new` must apply the same enqueue rule to the parent outcome in its atomic parent/child transaction when product wiring begins. The current continuation tests must remain green even though this increment does not activate continuation from the gateway.
 
@@ -123,7 +123,7 @@ The effect resolver already serializes resolution per receipt. It will stop scan
 
 ## Migration and compatibility
 
-The schema migration creates the table and backfills one `chat_lifecycle` row for every committed `chat_turn` journal revision that has an `OutcomeCommitted` event. Backfill is deterministic and idempotent.
+The schema migration creates the table and backfills one `chat_lifecycle` row for every committed `chat_turn` or `proactive_prompt` journal revision that has an `OutcomeCommitted` event. Backfill is deterministic and idempotent.
 
 Already projected revisions are harmless: the existing terminal turn event makes projector replay a no-op, after which the outbox row is completed. Pending or partially projected revisions are recovered normally. The migration must validate that every backfilled event folds to a matching exact-revision contract and outcome; incoherent history fails atomically.
 
@@ -173,3 +173,18 @@ The harness injects faults at explicit interfaces or transaction boundaries. Pro
 ## Follow-up boundary
 
 After this increment, the next lifecycle work is end-to-end cancellation/deadline propagation, product-wired `continue_as_new`, compensation orchestration, and an Inspector surface for uncertain receipts and projection health. Those features must consume this outbox and the existing contracts rather than introduce parallel execution or effect abstractions.
+
+## Implementation result
+
+- Outcome commit and `chat_lifecycle` enqueue are one SQLite transaction, including idempotent commit and continuation parent handling.
+- Exact journal revisions remain loadable after the folded execution projection advances.
+- Pending rows use fenced owner, process generation, claim token, a 120-second claim-validity window, and a 30-second heartbeat while projection is active. The heartbeat is owned by an RAII guard, so cancellation or panic cannot detach a task that renews the claim forever. Every drain attempt, including startup replay, is isolated behind the same panic boundary; the persistent worker supervisor continues after runtime panics, and an expired claim is reclaimable in the same generation. No generation can steal live work; claim validation and adapter receipt claim are one SQLite transaction, and a stale worker cannot dispatch or acknowledge after takeover. Claims are ordered per execution and projector: revision N+1 remains ineligible until every lower revision is completed. Production endpoints only notify the supervisor and never start an overlapping drain.
+- Startup drains committed outcomes before aborting only the remaining outcome-less runs. Replay failure does not invalidate the canonical outcome or prevent startup: persisted health remains degraded while the independent worker retries bounded due work.
+- The runtime only notifies the projector after commit; projection failure cannot change the caller's canonical execution result or synchronously drain unrelated work.
+- Task/run lifecycle belongs only to `chat_turn`; `proactive_prompt` reuses visible projection without releasing its runner lifecycle. Scheduled and connector task constructors persist a deterministic thread scope, and contract construction normalizes legacy unscoped proactive records to the same rule.
+- Channel reply and remote-approval uncertainty return `BlockedOnEffect`; sidecar `5xx` is ambiguous rather than retryable, while verified pre-dispatch or client-rejection failures release the receipt. Receipt resolution and outbox requeue commit atomically before the worker is notified.
+- Remote approval receipts use stable approval/thread identity independent of replay-time channel preferences, and due cards expire before dispatch. Completed and uncertain delivery receipts store the attempted channel and a SHA-256 recipient fingerprint, not the raw recipient, as resolution evidence without changing receipt identity.
+- Projected journal events use an atomic `projection_ref` acknowledgement for suspended and terminal events. An overlapping stale process cannot duplicate the event. Transport stream errors are nonterminal `Activity` observations; a legacy unacknowledged `Error` can be atomically adopted by the canonical `Error` projection, while any incompatible prior terminal remains an invariant conflict.
+- Legacy committed chat and proactive revisions backfill deterministically. Already acknowledged history with a removed task completes without replay; missing unacknowledged scope remains an invariant error.
+- The crash harness uses file-backed reopen tests for commit, stale claim, and resolution/requeue atomicity. The gateway test induces real partial-projection and acknowledgement-before-outbox-completion boundaries without a production crash switch.
+- Projector failures are redacted, retried with bounded backoff, logged, and exposed through gateway health until a later drain succeeds.

@@ -21,6 +21,7 @@ const GATEWAY_URL =
   process.env.HOMUN_DESKTOP_GATEWAY_URL ?? `http://127.0.0.1:${GATEWAY_PORT}`;
 const GATEWAY_TOKEN =
   process.env.HOMUN_DESKTOP_GATEWAY_TOKEN ?? randomBytes(32).toString("hex");
+const GATEWAY_STARTUP_TIMEOUT_MS = app.isPackaged ? 60_000 : 180_000;
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 const RESOURCES_ROOT =
   process.env.HOMUN_DESKTOP_RESOURCES_DIR ??
@@ -157,7 +158,7 @@ function gatewayHealthUrl() {
   return new URL("/api/health", normalizeGatewayUrl(GATEWAY_URL)).toString();
 }
 
-async function waitForGateway(timeoutMs = 60_000) {
+async function waitForGateway(timeoutMs = GATEWAY_STARTUP_TIMEOUT_MS) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     try {
@@ -1026,6 +1027,19 @@ function applyContentSecurityPolicy() {
   });
 }
 
+function handleStartupFailure(error) {
+  const detail = error instanceof Error ? error.message : String(error);
+  const line = `desktop startup failed: ${detail}`;
+  console.error(line);
+  desktopLog.log(line);
+  try {
+    dialog.showErrorBox("Homun non si e avviato", detail);
+  } catch (dialogError) {
+    desktopLog.log(`startup error dialog failed: ${String(dialogError)}`);
+  }
+  app.quit();
+}
+
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return; // quitting — don't spawn the gateway
   applyContentSecurityPolicy();
@@ -1045,7 +1059,7 @@ app.whenReady().then(async () => {
       createWindow();
     }
   });
-});
+}).catch(handleStartupFailure);
 
 app.on("before-quit", () => {
   isQuitting = true;

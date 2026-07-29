@@ -363,7 +363,18 @@ pub fn emit_turn_event(
     kind: TurnEventKind,
     payload: Value,
 ) -> TaskRuntimeResult<()> {
-    let event = if matches!(
+    let event = if let Some(projection_ref) = payload.get("projection_ref").and_then(Value::as_str)
+    {
+        match store.insert_turn_projection_event_once(
+            turn_id,
+            kind,
+            projection_ref,
+            payload.clone(),
+        )? {
+            local_first_task_runtime::TerminalWrite::Inserted(event) => event,
+            local_first_task_runtime::TerminalWrite::Existing(_) => return Ok(()),
+        }
+    } else if matches!(
         kind,
         TurnEventKind::Done | TurnEventKind::Error | TurnEventKind::Cancelled
     ) {

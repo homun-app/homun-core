@@ -95,6 +95,9 @@ resta leggibile soltanto nel bridge di recovery dei record steering precedenti.
 
 1. La sorgente (`interactive`, channel, automation, connector) costruisce lo stesso
    input e lo accoda al broker; prompt e placeholder visibile sono persistiti insieme.
+   I task `proactive_prompt` ricevono gia alla creazione uno scope thread deterministico
+   derivato da task id e sorgente; i record legacy senza scope vengono normalizzati nello
+   stesso modo prima di costruire il contratto.
 2. Il worker acquisisce task, risorse e lease; il runtime crea o carica il contratto
    autorevole, confronta il fencing token e registra `AttemptStarted`. Una revisione
    Running lasciata da un worker perso viene reclamata atomicamente solo da una
@@ -113,14 +116,37 @@ resta leggibile soltanto nel bridge di recovery dei record steering precedenti.
    approval restano gate di dominio più stretti, non protocolli alternativi.
    Per le capability, prepare e claim sono una sola transazione che verifica task running,
    owner, generazione della lease, revisione e fencing token autorevoli. Gli output di projection sono invece
-   legati atomicamente alla revisione/fence, perché possono essere rigiocati dopo il terminal.
-5. Il runtime valida e committa esattamente un outcome per la revisione.
-6. Il projector aggiorna task, run, messaggio, objective, HITL e UI. Se fallisce,
-   startup/recovery lo rigioca dal journal senza rieseguire l'adapter.
+   legati atomicamente alla revisione/fence e al claim outbox corrente, perché possono essere
+   rigiocati dopo il terminal. `EffectHost` rifiuta un adapter output senza quel claim e la
+   stessa transazione verifica il claim prima di preparare o reclamare la receipt.
+5. Il runtime valida e committa esattamente un outcome per la revisione. La stessa
+   transazione crea una riga `execution_projection_outbox` per ogni projector registrato,
+   legata a execution, revisione e kind; l'outbox non duplica outcome o payload sensibili.
+6. Il projector reclama la riga outbox con owner, process generation e claim token,
+   carica la revisione esatta dal journal e aggiorna task, run, messaggio, objective,
+   HITL e UI. L'evento terminale con `projection_ref` è l'ack finale. Dopo crash un
+   nuovo process generation reclama un claim precedente solo dopo la sua finestra di
+   validità. Il worker rinnova il claim ogni 30 secondi, verifica il token prima di
+   ogni adapter output e il guard RAII cancella l'heartbeat anche se la projection
+   viene cancellata o va in panic. Ogni drain, incluso il replay di startup, gira in un task supervisionato: un panic
+   degrada la health ma non termina il supervisor; dopo la finestra di validità il claim
+   e reclamabile anche nella stessa process generation. Per lo stesso execution e projector,
+   la revisione N+1 non e reclamabile finche ogni revisione precedente non e `Completed`;
+   gli endpoint notificano l'unico supervisor e non avviano drain concorrenti.
+   `projection_ref` rende atomico l'ack nel journal anche per
+   gli eventi terminali; una proiezione parziale o già ackata converge
+   idempotentemente senza rieseguire l'adapter.
+   Gli errori del trasporto stream sono eventi `Activity`, non terminali logici. Solo
+   l'outcome canonico proietta `Error`; un vecchio `Error` stream privo di
+   `projection_ref` puo essere adottato atomicamente dalla corrispondente projection
+   `Error`, mentre terminali di tipo diverso restano conflitti di invariante.
 7. Un outcome sospeso registra un solo wake. La delivery atomica crea la revisione
    successiva con checkpoint e payload; il worker richiama lo stesso `execute`.
 8. Dopo crash, una revisione senza outcome viene recuperata secondo lease/receipt;
    un effetto `Started` diventa `Uncertain`, mai un retry implicito.
+   Per delivery canale e remote approval, la receipt completata o incerta conserva canale,
+   contesto e fingerprint SHA-256 del destinatario tentato, mai il destinatario in chiaro;
+   questa evidenza non entra nell'identita stabile della chiamata.
    La risoluzione verificata `Applied` completa la receipt; `NotApplied` la riporta a
    `Prepared`, rendendo sicuro un nuovo dispatch con la stessa identità/idempotency key.
 9. Storie troppo lunghe possono chiudere il parent e creare atomicamente un child
@@ -307,6 +333,28 @@ conversazione e non il lavoro in corso.
     proiezioni terminali senza fabbricare una wake quando l'effetto appartiene all'output adapter.
     La risoluzione e il replay sono single-flight per receipt; un concorrente attende il leader
     e riceve `409` invece di reclamare di nuovo una receipt `Started`.
+20. `OutcomeCommitted` e projection outbox sono una sola transazione. Il worker non
+    scandisce più tutta la storia committata: reclama solo righe `pending` dovute o
+    claim appartenenti a un process generation precedente.
+21. `pending → claimed → completed|pending|blocked` è l'unico lifecycle della delivery
+    di proiezione. Un worker può completare, ritentare o bloccare solo con owner,
+    generation e token del claim corrente. `blocked` non ha timeout automatico.
+22. `Applied` e `NotApplied` aggiornano receipt, wake e righe outbox bloccate nella
+    stessa transazione. Il gateway può quindi osservare soltanto receipt incerta con
+    projection bloccata oppure receipt risolta con projection nuovamente `pending`.
+23. Il commit canonico non attende il projector: notifica il worker e restituisce lo
+    stesso outcome anche se una proiezione propria o altrui deve essere ritentata. Al
+    boot gli outcome già committed vengono proiettati prima di abortire i soli run
+    rimasti senza outcome; un errore viene esposto in health e ripreso dal worker.
+24. Solo `chat_turn` possiede le transizioni lifecycle di task e agent run.
+    `proactive_prompt` può riusare il projector per superfici visibili senza chiudere
+    prematuramente lease o run del runner non-chat.
+25. Risposte di canale e notifiche di approvazione remota sono adapter output dello
+    stesso `EffectHost`. Un errore verificato prima dell'invio riporta la receipt a
+    `Prepared`; timeout e risposte sidecar `5xx` sono esiti remoti ambigui e bloccano
+    l'outbox su receipt fino a risoluzione. L'identità della notifica di approvazione
+    usa approval id e thread, non le preferenze correnti di canale/destinatario; una
+    card scaduta viene marcata `expired` prima di qualsiasi dispatch.
 
 ## Mapping oggi → contratto
 

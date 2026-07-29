@@ -91,9 +91,7 @@ impl ExecutionRuntime {
         };
         if let Some((contract, outcome)) = recovered {
             validate_authoritative_contract(&task, &contract)?;
-            if should_project_chat(state, &task, outcome.as_ref())? {
-                crate::projection_worker::drain_available(state).await?;
-            }
+            crate::projection_worker::notify();
             return Ok(recovered_execution_result(&task, outcome.as_ref()));
         }
 
@@ -248,10 +246,6 @@ impl ExecutionRuntime {
         }
         crate::projection_worker::notify();
 
-        if should_project_chat(state, &task, validated.as_ref())? {
-            crate::projection_worker::drain_available(state).await?;
-        }
-
         let projection = ExecutionProjection::from_outcome(validated.as_ref());
         Ok(ExecutionRuntimeResult {
             execution_id: contract.as_ref().execution_id.clone(),
@@ -404,12 +398,34 @@ pub(crate) fn contract_for_acquired_task(
             "an execution contract can only be built from an acquired running task",
         ));
     }
-    let thread_id = task
+    let mut contract_task = task.clone();
+    let mut thread_id = task
         .input_json
         .get("thread_id")
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string);
+    if task.kind == "proactive_prompt" && thread_id.is_none() {
+        let source = task
+            .input_json
+            .get("thread_source")
+            .or_else(|| task.input_json.get("source"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("scheduled");
+        let (_, derived_thread_id) = crate::proactive_thread_scope(task.task_id.as_str(), source);
+        let mut input = contract_task
+            .input_json
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        input.insert(
+            "thread_id".to_string(),
+            Value::String(derived_thread_id.clone()),
+        );
+        contract_task.input_json = Value::Object(input);
+        thread_id = Some(derived_thread_id);
+    }
     let mut contract = ExecutionContract::new(
         task.task_id.as_str(),
         task.kind.clone(),
@@ -418,7 +434,7 @@ pub(crate) fn contract_for_acquired_task(
             workspace_id: task.workspace_id.as_str().to_string(),
             thread_id,
         },
-        serde_json::to_value(task).map_err(|error| runtime_error(error.to_string()))?,
+        serde_json::to_value(contract_task).map_err(|error| runtime_error(error.to_string()))?,
     );
     contract.fencing_token = acquired_task_fencing_token(task)?;
     contract.policy = execution_policy_for_task(task);

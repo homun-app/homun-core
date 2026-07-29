@@ -4,7 +4,9 @@ use local_first_execution_protocol::{
 };
 use local_first_task_runtime::{
     NewExecutionEffectReceipt, ProjectionStatus, TaskStore,
-    projection_outbox::{CHAT_LIFECYCLE_PROJECTION, projection_ref},
+    projection_outbox::{
+        CHAT_LIFECYCLE_PROJECTION, PROJECTION_CLAIM_STALE_AFTER_SECONDS, projection_ref,
+    },
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -93,13 +95,18 @@ fn restart_reclaims_stale_claim_and_rejects_old_acknowledgement() {
     drop(store);
 
     let reopened = TaskStore::open(&path).expect("reopen store");
+    let reclaim_at = 100 + PROJECTION_CLAIM_STALE_AFTER_SECONDS;
     let fresh = reopened
-        .claim_projection(CHAT_LIFECYCLE_PROJECTION, "projector-new", 2, 200)
+        .claim_projection(CHAT_LIFECYCLE_PROJECTION, "projector-new", 2, reclaim_at)
         .expect("reclaim")
         .expect("stale claim recovered");
-    assert!(reopened.complete_projection(&stale, 201).is_err());
+    assert!(
+        reopened
+            .complete_projection(&stale, reclaim_at + 1)
+            .is_err()
+    );
     reopened
-        .complete_projection(&fresh, 202)
+        .complete_projection(&fresh, reclaim_at + 2)
         .expect("fresh claim completes");
     drop(reopened);
     std::fs::remove_file(path).ok();

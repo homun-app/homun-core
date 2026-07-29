@@ -1,7 +1,7 @@
 use local_first_execution_protocol::ExecutionOutcome;
 use local_first_execution_protocol::{ValidatedExecutionContract, WakeCondition};
 use local_first_task_runtime::{
-    AgentRunStatus, ExecutionProjection, TaskRecord, TaskStatus, TurnEventKind,
+    AgentRunStatus, ExecutionProjection, ProjectionClaim, TaskRecord, TaskStatus, TurnEventKind,
 };
 use time::OffsetDateTime;
 
@@ -38,6 +38,7 @@ pub(crate) async fn project_chat_execution(
     task: &TaskRecord,
     contract: &ValidatedExecutionContract,
     outcome: &ExecutionOutcome,
+    projection_claim: Option<&ProjectionClaim>,
 ) -> Result<ProjectionAttempt, crate::LocalTaskExecutionError> {
     let projection_ref = format!(
         "{}:{}",
@@ -83,20 +84,41 @@ pub(crate) async fn project_chat_execution(
         .ok_or_else(|| projection_error("chat projection has no assistant_message_id"))?;
     let decision = chat_projection_decision(outcome);
 
-    project_task_state(state, task, decision.task_status, outcome)?;
-    project_agent_run(state, task, &metadata, decision.run_status)?;
+    if projects_task_lifecycle(&task.kind) {
+        project_task_state(state, task, decision.task_status, outcome)?;
+        project_agent_run(state, task, &metadata, decision.run_status)?;
+    }
     project_message_state(state, thread_id, assistant_message_id, outcome)?;
     project_objective(state, task, thread_id, &metadata, outcome)?;
-    project_human_wait(state, thread_id, assistant_message_id, &metadata, outcome).await?;
+    if let Some(receipt_ref) = project_human_wait(
+        state,
+        contract,
+        projection_claim,
+        thread_id,
+        assistant_message_id,
+        &metadata,
+        outcome,
+    )
+    .await?
+    {
+        return Ok(ProjectionAttempt::BlockedOnEffect(receipt_ref));
+    }
 
     let channel_delivery = if let ExecutionOutcome::Completed { .. } = outcome {
+        crate::projection_worker::assert_claim_current(state, projection_claim)?;
         let answer = metadata
             .get("answer")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
-        match crate::mirror_reply_to_channel_if_any(state, contract, thread_id, answer)
-            .await
-            .map_err(projection_error)?
+        match crate::mirror_reply_to_channel_if_any(
+            state,
+            contract,
+            projection_claim,
+            thread_id,
+            answer,
+        )
+        .await
+        .map_err(projection_error)?
         {
             crate::ChannelProjectionDelivery::NotApplicable => None,
             crate::ChannelProjectionDelivery::Delivered(delivery) => Some(delivery),
@@ -143,6 +165,10 @@ pub(crate) async fn project_chat_execution(
     )
     .map_err(projection_store_error)?;
     Ok(ProjectionAttempt::Completed)
+}
+
+fn projects_task_lifecycle(task_kind: &str) -> bool {
+    task_kind == "chat_turn"
 }
 
 fn projection_metadata(
@@ -366,11 +392,14 @@ fn project_objective(
 
 async fn project_human_wait(
     state: &crate::AppState,
+    contract: &ValidatedExecutionContract,
+    projection_claim: Option<&ProjectionClaim>,
     thread_id: &str,
     assistant_message_id: &str,
     metadata: &serde_json::Value,
     outcome: &ExecutionOutcome,
-) -> Result<(), crate::LocalTaskExecutionError> {
+) -> Result<Option<local_first_execution_protocol::EffectReceiptRef>, crate::LocalTaskExecutionError>
+{
     match outcome {
         ExecutionOutcome::Suspended {
             wake: WakeCondition::User { .. },
@@ -404,12 +433,21 @@ async fn project_human_wait(
                     .flatten()
             });
             if let Some(message) = message {
-                crate::activate_remote_approvals_from_message(state, thread_id, &message).await;
+                crate::projection_worker::assert_claim_current(state, projection_claim)?;
+                return crate::activate_remote_approvals_from_message(
+                    state,
+                    contract,
+                    projection_claim,
+                    thread_id,
+                    &message,
+                )
+                .await
+                .map_err(projection_error);
             }
         }
         _ => {}
     }
-    Ok(())
+    Ok(None)
 }
 
 fn wake_projection_fields(wake: &WakeCondition) -> (Option<&'static str>, Option<&str>) {
@@ -521,6 +559,13 @@ mod tests {
         }
     }
 
+    #[test]
+    fn only_chat_turn_projection_owns_task_and_run_lifecycle() {
+        assert!(projects_task_lifecycle("chat_turn"));
+        assert!(!projects_task_lifecycle("proactive_prompt"));
+        assert!(!projects_task_lifecycle("capability.test"));
+    }
+
     #[tokio::test]
     async fn replaying_a_committed_projection_is_a_noop() {
         let state = crate::AppState::for_tests();
@@ -601,7 +646,7 @@ mod tests {
                 .expect("commit outcome");
         }
 
-        project_chat_execution(&state, &task, &contract, &outcome)
+        project_chat_execution(&state, &task, &contract, &outcome, None)
             .await
             .expect_err("projection must remain pending while the message is missing");
         assert!(
@@ -644,7 +689,7 @@ mod tests {
             .append_assistant_message(&thread.thread_id, &assistant)
             .expect("assistant");
         assert_eq!(
-            project_chat_execution(&state, &task, &contract, &outcome)
+            project_chat_execution(&state, &task, &contract, &outcome, None)
                 .await
                 .expect("complete projection before outbox acknowledgement"),
             ProjectionAttempt::Completed

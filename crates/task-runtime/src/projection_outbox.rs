@@ -5,6 +5,7 @@ use local_first_execution_protocol::{EffectReceiptRef, ExecutionContract};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
 pub const CHAT_LIFECYCLE_PROJECTION: &str = "chat_lifecycle";
+pub const PROJECTION_CLAIM_STALE_AFTER_SECONDS: i64 = 120;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectionStatus {
@@ -257,6 +258,45 @@ impl TaskStore {
             .map_err(Into::into)
     }
 
+    pub fn pending_projection_error(
+        &self,
+        projection_kind: &str,
+    ) -> TaskRuntimeResult<Option<ProjectionErrorEvidence>> {
+        let projection_kind = required_text(projection_kind, "projection kind")?;
+        self.connection
+            .query_row(
+                "SELECT last_error_code, last_error_detail
+                 FROM execution_projection_outbox
+                 WHERE projection_kind = ?1 AND status = 'pending'
+                   AND last_error_code IS NOT NULL AND last_error_detail IS NOT NULL
+                 ORDER BY updated_at, projection_ref
+                 LIMIT 1",
+                [projection_kind],
+                |row| {
+                    Ok(ProjectionErrorEvidence {
+                        code: row.get(0)?,
+                        redacted_detail: row.get(1)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn has_unfinished_projection(&self, projection_kind: &str) -> TaskRuntimeResult<bool> {
+        let projection_kind = required_text(projection_kind, "projection kind")?;
+        self.connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM execution_projection_outbox
+                    WHERE projection_kind = ?1 AND status != 'completed'
+                 )",
+                [projection_kind],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
     pub fn claim_projection(
         &self,
         projection_kind: &str,
@@ -267,19 +307,30 @@ impl TaskStore {
         let projection_kind = required_text(projection_kind, "projection kind")?;
         let owner = required_text(owner, "projection owner")?;
         let generation_sql = positive_sqlite_u64(generation, "projection claim generation")?;
+        let stale_before = now.saturating_sub(PROJECTION_CLAIM_STALE_AFTER_SECONDS);
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
         let reference = tx
             .query_row(
-                "SELECT projection_ref
-                 FROM execution_projection_outbox
-                 WHERE projection_kind = ?1
+                "SELECT candidate.projection_ref
+                 FROM execution_projection_outbox AS candidate
+                 WHERE candidate.projection_kind = ?1
                    AND (
-                       (status = 'pending' AND (not_before IS NULL OR not_before <= ?2))
-                       OR (status = 'claimed' AND claim_generation < ?3)
+                       (candidate.status = 'pending'
+                           AND (candidate.not_before IS NULL OR candidate.not_before <= ?2))
+                       OR (candidate.status = 'claimed'
+                           AND candidate.claim_generation <= ?3
+                           AND candidate.claimed_at <= ?4)
                    )
-                 ORDER BY created_at, projection_ref
+                   AND NOT EXISTS (
+                       SELECT 1 FROM execution_projection_outbox AS earlier
+                       WHERE earlier.execution_id = candidate.execution_id
+                         AND earlier.projection_kind = candidate.projection_kind
+                         AND earlier.revision < candidate.revision
+                         AND earlier.status != 'completed'
+                   )
+                 ORDER BY candidate.created_at, candidate.projection_ref
                  LIMIT 1",
-                params![projection_kind, now, generation_sql],
+                params![projection_kind, now, generation_sql, stale_before],
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
@@ -296,9 +347,16 @@ impl TaskStore {
              WHERE projection_ref = ?4
                AND (
                    (status = 'pending' AND (not_before IS NULL OR not_before <= ?3))
-                   OR (status = 'claimed' AND claim_generation < ?2)
+                   OR (status = 'claimed' AND claim_generation <= ?2 AND claimed_at <= ?5)
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM execution_projection_outbox AS earlier
+                   WHERE earlier.execution_id = execution_projection_outbox.execution_id
+                     AND earlier.projection_kind = execution_projection_outbox.projection_kind
+                     AND earlier.revision < execution_projection_outbox.revision
+                     AND earlier.status != 'completed'
                )",
-            params![owner, generation_sql, now, reference],
+            params![owner, generation_sql, now, reference, stale_before],
         )?;
         if changed != 1 {
             return Err(TaskRuntimeError::Conflict(
@@ -322,6 +380,42 @@ impl TaskStore {
             generation,
             token,
         }))
+    }
+
+    pub fn assert_projection_claim_current(
+        &self,
+        claim: &ProjectionClaim,
+    ) -> TaskRuntimeResult<()> {
+        assert_projection_claim_current_on(&self.connection, claim)
+    }
+
+    pub fn renew_projection_claim(
+        &self,
+        claim: &ProjectionClaim,
+        now: i64,
+    ) -> TaskRuntimeResult<()> {
+        let generation = positive_sqlite_u64(claim.generation, "projection claim generation")?;
+        let token = positive_sqlite_u64(claim.token, "projection claim token")?;
+        let changed = self.connection.execute(
+            "UPDATE execution_projection_outbox
+             SET claimed_at = ?1, updated_at = ?1
+             WHERE projection_ref = ?2 AND status = 'claimed'
+               AND claim_owner = ?3 AND claim_generation = ?4 AND claim_token = ?5",
+            params![
+                now,
+                claim.record.projection_ref,
+                claim.owner,
+                generation,
+                token,
+            ],
+        )?;
+        if changed == 1 {
+            Ok(())
+        } else {
+            Err(TaskRuntimeError::InvalidTransition(
+                "projection claim is stale or no longer active".into(),
+            ))
+        }
     }
 
     pub fn complete_projection(&self, claim: &ProjectionClaim, now: i64) -> TaskRuntimeResult<()> {
@@ -413,6 +507,30 @@ impl TaskStore {
             ));
         }
         Ok(())
+    }
+}
+
+pub(crate) fn assert_projection_claim_current_on(
+    connection: &Connection,
+    claim: &ProjectionClaim,
+) -> TaskRuntimeResult<()> {
+    let generation = positive_sqlite_u64(claim.generation, "projection claim generation")?;
+    let token = positive_sqlite_u64(claim.token, "projection claim token")?;
+    let current = connection.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM execution_projection_outbox
+            WHERE projection_ref = ?1 AND status = 'claimed'
+              AND claim_owner = ?2 AND claim_generation = ?3 AND claim_token = ?4
+         )",
+        params![claim.record.projection_ref, claim.owner, generation, token],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if current {
+        Ok(())
+    } else {
+        Err(TaskRuntimeError::InvalidTransition(
+            "projection claim is stale or no longer active".into(),
+        ))
     }
 }
 

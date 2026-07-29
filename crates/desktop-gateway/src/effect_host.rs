@@ -1,6 +1,7 @@
 use local_first_execution_protocol::{EffectClass, EffectReceiptRef, ValidatedExecutionContract};
 use local_first_task_runtime::{
-    EffectReceiptClaim, ExecutionEffectReceipt, NewExecutionEffectReceipt, TaskRecord, TaskStore,
+    EffectReceiptClaim, ExecutionEffectReceipt, NewExecutionEffectReceipt, ProjectionClaim,
+    TaskRecord, TaskStore,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -75,6 +76,7 @@ pub(crate) struct EffectHost<'a> {
     store: &'a Mutex<TaskStore>,
     contract: &'a ValidatedExecutionContract,
     run_id: Option<&'a str>,
+    projection_claim: Option<&'a ProjectionClaim>,
 }
 
 impl<'a> EffectHost<'a> {
@@ -87,6 +89,20 @@ impl<'a> EffectHost<'a> {
             store,
             contract,
             run_id,
+            projection_claim: None,
+        }
+    }
+
+    pub(crate) fn for_projection(
+        store: &'a Mutex<TaskStore>,
+        contract: &'a ValidatedExecutionContract,
+        projection_claim: &'a ProjectionClaim,
+    ) -> Self {
+        Self {
+            store,
+            contract,
+            run_id: None,
+            projection_claim: Some(projection_claim),
         }
     }
 
@@ -142,11 +158,16 @@ impl<'a> EffectHost<'a> {
                 })?;
                 store.prepare_and_claim_effect_receipt(&new_receipt, owner, contract.fencing_token)
             }
-            EffectRequestKind::AdapterOutput => store
-                .prepare_and_claim_effect_receipt_for_execution(
+            EffectRequestKind::AdapterOutput => {
+                let projection_claim = self.projection_claim.ok_or_else(|| {
+                    "adapter output requires the current projection claim".to_string()
+                })?;
+                store.prepare_and_claim_effect_receipt_for_projection(
                     &new_receipt,
                     contract.fencing_token,
-                ),
+                    projection_claim,
+                )
+            }
         }
         .map_err(|error| format!("effect receipt claim failed: {error}"))?;
         match claim {
@@ -190,6 +211,36 @@ impl<'a> EffectHost<'a> {
         }
     }
 
+    pub(crate) fn mark_uncertain_with_evidence(
+        &self,
+        lease: &EffectLease,
+        evidence: &Value,
+    ) -> Result<ExecutionEffectReceipt, String> {
+        let evidence = crate::agent_journal::redact_json_value(evidence.clone());
+        self.store
+            .lock()
+            .map_err(|_| "effect receipt uncertainty store unavailable".to_string())?
+            .mark_effect_receipt_uncertain(lease.receipt_ref(), &evidence)
+            .map_err(|error| format!("effect receipt uncertainty failed: {error}"))
+    }
+
+    pub(crate) fn release_not_applied(
+        &self,
+        lease: &EffectLease,
+        code: &str,
+        detail: &str,
+    ) -> Result<ExecutionEffectReceipt, String> {
+        let evidence = crate::agent_journal::redact_json_value(serde_json::json!({
+            "code": code,
+            "detail": detail,
+        }));
+        self.store
+            .lock()
+            .map_err(|_| "effect receipt release store unavailable".to_string())?
+            .release_effect_receipt_not_applied(lease.receipt_ref(), &evidence)
+            .map_err(|error| format!("effect receipt release failed: {error}"))
+    }
+
     pub(crate) fn authorize_request(&self, request: &EffectRequest) -> Result<(), String> {
         if request.operation.trim().is_empty() || request.logical_call_id.trim().is_empty() {
             return Err("effect requires operation and logical call identity".into());
@@ -222,27 +273,37 @@ impl<'a> EffectHost<'a> {
         let task_thread = task.input_json.get("thread_id").and_then(Value::as_str);
         let requested_thread = request.arguments.get("thread_id").and_then(Value::as_str);
         let requested_channel = request.arguments.get("channel").and_then(Value::as_str);
-        let channel_operation = matches!(
+        let channel_reply_operation = matches!(
             request.operation.as_str(),
             "channel.telegram.reply" | "channel.whatsapp.reply"
         );
+        let channel_approval_operation = request.operation == "channel.remote_approval";
         let operation_channel = request
             .operation
             .strip_prefix("channel.")
             .and_then(|value| {
                 value
                     .strip_suffix(".reply")
+                    .or_else(|| value.strip_suffix(".approval"))
                     .filter(|value| !value.is_empty())
             });
-        if contract.kind == "chat_turn"
-            && task.kind == "chat_turn"
-            && task.input_json.get("source").and_then(Value::as_str) == Some("channel")
+        let projected_kind = matches!(contract.kind.as_str(), "chat_turn" | "proactive_prompt");
+        let common_scope = projected_kind
+            && task.kind == contract.kind
             && task_thread == contract.scope.thread_id.as_deref()
             && requested_thread == contract.scope.thread_id.as_deref()
+            && request.effect_class == EffectClass::ExternalWrite;
+        let reply_allowed = contract.kind == "chat_turn"
+            && channel_reply_operation
             && requested_channel == operation_channel
-            && request.effect_class == EffectClass::ExternalWrite
-            && channel_operation
-        {
+            && task.input_json.get("source").and_then(Value::as_str) == Some("channel");
+        let approval_allowed = channel_approval_operation
+            && request
+                .arguments
+                .get("approval_id")
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty());
+        if common_scope && (reply_allowed || approval_allowed) {
             Ok(())
         } else {
             Err(format!(
@@ -300,11 +361,12 @@ fn effect_receipt_identity(
 mod tests {
     use super::{EffectDecision, EffectHost, EffectRequest};
     use local_first_execution_protocol::{
-        ApprovalPolicy, EffectClass, EffectReceiptRef, ExecutionContract, ExecutionScope,
-        ValidatedExecutionContract,
+        ApprovalPolicy, EffectClass, EffectReceiptRef, ExecutionContract, ExecutionOutcome,
+        ExecutionScope, ValidatedExecutionContract, ValidatedExecutionOutcome,
     };
     use local_first_task_runtime::{
-        NewExecutionEffectReceipt, TaskRecord, TaskStatus, TaskStore, UserId, WorkspaceId,
+        NewExecutionEffectReceipt, ProjectionClaim, TaskRecord, TaskStatus, TaskStore, UserId,
+        WorkspaceId,
     };
     use serde_json::json;
     use sha2::{Digest, Sha256};
@@ -393,6 +455,29 @@ mod tests {
             .expect("attempt");
     }
 
+    fn activate_projection(
+        store: &Mutex<TaskStore>,
+        contract: &ValidatedExecutionContract,
+    ) -> ProjectionClaim {
+        let task: TaskRecord =
+            serde_json::from_value(contract.as_ref().input.clone()).expect("task input");
+        let store = store.lock().expect("store");
+        store.insert_task(&task).expect("task");
+        store.create_execution(contract).expect("execution");
+        let outcome = ValidatedExecutionOutcome::new(
+            ExecutionOutcome::completed(json!({"answer": "done"})),
+            contract,
+        )
+        .expect("outcome");
+        store
+            .commit_execution_outcome(&outcome)
+            .expect("commit outcome");
+        store
+            .claim_projection("chat_lifecycle", "projector", 1, 1)
+            .expect("claim projection")
+            .expect("pending projection")
+    }
+
     fn request(call_id: &str) -> EffectRequest {
         EffectRequest::capability(
             "connector.send",
@@ -471,6 +556,32 @@ mod tests {
     }
 
     #[test]
+    fn uncertain_effect_keeps_dispatch_evidence() {
+        let store = Mutex::new(TaskStore::open_in_memory().expect("store"));
+        let contract = contract(
+            "execution-uncertain-evidence",
+            vec![EffectClass::Read, EffectClass::ExternalWrite],
+        );
+        activate(&store, &contract);
+        let host = EffectHost::new(&store, &contract, Some("run-evidence"));
+        let EffectDecision::Execute(lease) = host.begin(request("call-evidence")).expect("claim")
+        else {
+            panic!("first call must execute");
+        };
+        let evidence = json!({
+            "channel": "telegram",
+            "recipient_fingerprint": "sha256:abc",
+            "attempted": true
+        });
+
+        let receipt = host
+            .mark_uncertain_with_evidence(&lease, &evidence)
+            .expect("uncertain receipt");
+
+        assert_eq!(receipt.effects_json, Some(evidence));
+    }
+
+    #[test]
     fn denied_effect_fails_before_creating_a_receipt() {
         let store = Mutex::new(TaskStore::open_in_memory().expect("store"));
         let contract = contract("execution-4", vec![EffectClass::Read]);
@@ -536,8 +647,8 @@ mod tests {
     fn adapter_output_requires_a_matching_channel_chat_contract() {
         let store = Mutex::new(TaskStore::open_in_memory().expect("store"));
         let channel = channel_contract("execution-6");
-        activate(&store, &channel);
-        let channel_host = EffectHost::new(&store, &channel, None);
+        let projection_claim = activate_projection(&store, &channel);
+        let channel_host = EffectHost::for_projection(&store, &channel, &projection_claim);
         assert!(matches!(
             channel_host
                 .begin(EffectRequest::adapter_output(
@@ -596,5 +707,130 @@ mod tests {
             .expect_err("adapter output must stay inside the contract thread");
 
         assert!(denied.contains("denies adapter output"));
+    }
+
+    #[test]
+    fn adapter_output_cannot_begin_without_a_projection_claim() {
+        let store = Mutex::new(TaskStore::open_in_memory().expect("store"));
+        let contract = channel_contract("execution-channel-no-claim");
+        let host = EffectHost::new(&store, &contract, None);
+
+        let error = host
+            .begin(EffectRequest::adapter_output(
+                "channel.telegram.reply",
+                "projection_revision_1",
+                EffectClass::ExternalWrite,
+                json!({
+                    "thread_id": "thread-1",
+                    "channel": "telegram",
+                    "recipient": "recipient-1",
+                    "answer": "hello",
+                }),
+            ))
+            .expect_err("adapter output requires projection ownership");
+
+        assert!(error.contains("current projection claim"));
+    }
+
+    #[test]
+    fn approval_adapter_output_requires_the_contract_thread() {
+        let store = Mutex::new(TaskStore::open_in_memory().expect("store"));
+        let contract = contract("execution-approval", vec![EffectClass::Read]);
+        let host = EffectHost::new(&store, &contract, None);
+        let request = |thread_id| {
+            EffectRequest::adapter_output(
+                "channel.remote_approval",
+                "approval_123",
+                EffectClass::ExternalWrite,
+                json!({
+                    "thread_id": thread_id,
+                    "channel": "telegram",
+                    "recipient": "recipient-1",
+                    "approval_id": "approval_123",
+                }),
+            )
+        };
+
+        host.authorize_request(&request("thread-1"))
+            .expect("approval output belongs to this execution thread");
+        assert!(host.authorize_request(&request("thread-2")).is_err());
+    }
+
+    #[test]
+    fn proactive_approval_adapter_output_uses_the_same_thread_contract() {
+        let store = Mutex::new(TaskStore::open_in_memory().expect("store"));
+        let now = OffsetDateTime::now_utc();
+        let mut task = TaskRecord::new(
+            "proactive-approval",
+            UserId::new("user-1"),
+            WorkspaceId::new("workspace-1"),
+            "proactive_prompt",
+            "scheduled approval",
+            json!({"thread_id": "thread-1"}),
+        );
+        task.status = TaskStatus::Running;
+        task.lease_owner = Some("worker-1".into());
+        let mut raw = ExecutionContract::new(
+            "proactive-approval",
+            "proactive_prompt",
+            ExecutionScope {
+                user_id: "user-1".into(),
+                workspace_id: "workspace-1".into(),
+                thread_id: Some("thread-1".into()),
+            },
+            serde_json::to_value(task).expect("task"),
+        );
+        raw.fencing_token = u64::try_from(now.unix_timestamp_nanos()).expect("fence");
+        let contract: ValidatedExecutionContract = raw.try_into().expect("contract");
+        let host = EffectHost::new(&store, &contract, None);
+
+        host.authorize_request(&EffectRequest::adapter_output(
+            "channel.remote_approval",
+            "approval_proactive",
+            EffectClass::ExternalWrite,
+            json!({
+                "thread_id": "thread-1",
+                "channel": "telegram",
+                "recipient": "recipient-1",
+                "approval_id": "approval_proactive",
+            }),
+        ))
+        .expect("proactive approval output");
+    }
+
+    #[test]
+    fn completed_approval_adapter_output_replays_without_a_new_dispatch_lease() {
+        let store = Mutex::new(TaskStore::open_in_memory().expect("store"));
+        let contract = contract("execution-approval-replay", vec![EffectClass::Read]);
+        let projection_claim = activate_projection(&store, &contract);
+        let host = EffectHost::for_projection(&store, &contract, &projection_claim);
+        let request = || {
+            EffectRequest::adapter_output(
+                "channel.remote_approval",
+                "approval_456",
+                EffectClass::ExternalWrite,
+                json!({
+                    "thread_id": "thread-1",
+                    "channel": "telegram",
+                    "recipient": "recipient-1",
+                    "approval_id": "approval_456",
+                }),
+            )
+        };
+        let EffectDecision::Execute(lease) = host.begin(request()).expect("first dispatch lease")
+        else {
+            panic!("first approval dispatch must execute");
+        };
+        host.complete(
+            &lease,
+            &json!({"delivered": true}),
+            &json!({"channel": "telegram"}),
+        )
+        .expect("complete dispatch");
+
+        assert!(matches!(
+            host.begin(request()).expect("replay dispatch"),
+            EffectDecision::Replay(_)
+        ));
     }
 }

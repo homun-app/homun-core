@@ -1584,6 +1584,20 @@ impl ChatStore {
         Ok(())
     }
 
+    pub fn expire_remote_approval_if_due(
+        &self,
+        approval_id: &str,
+        now: i64,
+    ) -> rusqlite::Result<bool> {
+        let changed = self.conn.execute(
+            "update remote_approvals
+                set status = 'expired', resolved_at = ?1
+              where approval_id = ?2 and status = 'pending' and expires_at <= ?1",
+            params![now, approval_id],
+        )?;
+        Ok(changed > 0)
+    }
+
     pub fn cancel_remote_approval_by_code(&self, code: &str) -> rusqlite::Result<bool> {
         let changed = self.conn.execute(
             "update remote_approvals
@@ -5780,6 +5794,39 @@ mod tests {
 
         assert!(store.claim_remote_approval(approval_id).unwrap().is_some());
         assert!(store.claim_remote_approval(approval_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn due_remote_approval_expires_before_dispatch() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        store
+            .create_remote_approval(&RemoteApprovalInput {
+                approval_id: "approval-expired",
+                code: "EXPIRED",
+                tool: "mcp__filesystem__create",
+                arguments: &serde_json::json!({}),
+                label: "expired action",
+                thread_id: Some(&thread.thread_id),
+                objective_revision: None,
+                requires_source: true,
+                expires_at: 100,
+            })
+            .unwrap();
+
+        assert!(
+            store
+                .expire_remote_approval_if_due("approval-expired", 100)
+                .unwrap()
+        );
+        assert_eq!(
+            store
+                .remote_approval_by_id("approval-expired")
+                .unwrap()
+                .unwrap()
+                .status,
+            "expired"
+        );
     }
 
     fn mk_message(id: &str, role: &str) -> ChatMessage {

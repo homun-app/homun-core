@@ -630,6 +630,7 @@ struct HealthResponse {
     /// Names of stores reset at startup after failing quick_check (backups kept
     /// as *.corrupt-<epoch>.bak beside the store). Empty on a healthy boot.
     recovered_stores: Vec<String>,
+    projection_worker_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1178,19 +1179,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // so the old "sfilza di domande" push stops (the thread stays as inert data).
     cancel_homun_checkins(&state);
     eprintln!("turn broker: the only chat path; running lease-aware boot recovery");
-    // Phase 1a: lease-aware boot recovery. Bump the process generation, then re-queue any
-    // chat_turn left Running by a previous (now-dead) process. Must run BEFORE the worker
-    // pool starts AND before the background VACUUM (VACUUM takes an exclusive lock that
-    // would collide with bump_process_generation on the unified DB → "database is locked").
-    // Bare block scopes the task_store lock guard so it is released before the VACUUM below.
-    let (process_generation, recovered_chat_turns) = {
+    // Phase 1a: fence the new process, then project every committed outcome before
+    // classifying the remaining running runs as crash orphans. This preserves the
+    // canonical outcome's ownership of task/run/message convergence across restart.
+    // The critical writes must precede the worker pool and background VACUUM.
+    let process_generation = {
         let store = state.task_store.lock().expect("task store lock at boot");
         let generation = store
             .bump_process_generation()
             .expect("bump process generation");
-        if let Err(error) = store.abort_running_agent_runs("gateway_restart") {
-            eprintln!("agent journal: boot recovery error: {error}");
-        }
         let journal_cutoff = (OffsetDateTime::now_utc()
             - Duration::days(AGENT_JOURNAL_RETENTION_DAYS))
         .unix_timestamp();
@@ -1199,20 +1196,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         {
             eprintln!("agent journal: retention error: {error}");
         }
+        generation
+    };
+    match projection_worker::drain_at_startup(&state, process_generation).await {
+        Ok(replayed) if replayed > 0 => {
+            eprintln!("execution projection: drained {replayed} durable outbox rows");
+        }
+        Ok(_) => {}
+        Err(error) => {
+            eprintln!(
+                "execution projection: startup replay deferred to worker: {}",
+                error.message
+            );
+        }
+    }
+    let recovered_chat_turns = {
+        let store = state.task_store.lock().expect("task store lock at boot");
+        if let Err(error) = store.abort_orphaned_running_agent_runs("gateway_restart") {
+            eprintln!("agent journal: boot recovery error: {error}");
+        }
         let user_id = gateway_user_id();
         let workspace_id = gateway_workspace_id();
         let recovered = local_first_task_runtime::broker::recover_chat_turns_at_boot(
             &store,
             &user_id,
             &workspace_id,
-            generation,
+            process_generation,
         )
         .unwrap_or_else(|e| {
             eprintln!("turn broker: recovery error: {e}");
             Vec::new()
         });
         eprintln!(
-            "turn broker: recovery generation={generation} recovered={} turns",
+            "turn broker: recovery generation={process_generation} recovered={} turns",
             recovered.len()
         );
         let recovered_tasks = recovered
@@ -1224,7 +1240,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .flatten()
             })
             .collect::<Vec<_>>();
-        (generation, recovered_tasks)
+        recovered_tasks
     };
     // The broker has re-queued these tasks, but their visible placeholders are
     // owned by the chat store. Update them only after the task-store guard is
@@ -1235,17 +1251,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             task,
             local_first_desktop_gateway::MessageDeliveryState::Retrying,
         );
-    }
-    let replayed = projection_worker::drain_at_startup(&state, process_generation)
-        .await
-        .map_err(|error| {
-            std::io::Error::other(format!(
-                "execution projection startup replay failed: {}",
-                error.message
-            ))
-        })?;
-    if replayed > 0 {
-        eprintln!("execution projection: drained {replayed} durable outbox rows");
     }
     projection_worker::start(state.clone());
     steering_control::start(state.clone());
@@ -1956,12 +1961,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
+    let projection_worker_error = projection_worker::health_error();
     Json(HealthResponse {
-        ok: true,
+        ok: projection_worker_error.is_none(),
         service: "local-first-desktop-gateway",
         local_first: true,
         auth_required: !state.auth_token.is_empty(),
         recovered_stores: state.recovered_stores.as_ref().clone(),
+        projection_worker_error,
     })
 }
 
@@ -3252,9 +3259,11 @@ async fn chat_messages(
 
 pub(crate) async fn activate_remote_approvals_from_message(
     state: &AppState,
+    contract: &local_first_execution_protocol::ValidatedExecutionContract,
+    projection_claim: Option<&local_first_task_runtime::ProjectionClaim>,
     thread_id: &str,
     message: &ChatMessage,
-) {
+) -> Result<Option<local_first_execution_protocol::EffectReceiptRef>, String> {
     for intent in remote_approval_intents_from_message(message) {
         let Some(approval_id) = intent.approval_id.as_deref() else {
             continue;
@@ -3280,6 +3289,16 @@ pub(crate) async fn activate_remote_approvals_from_message(
         let Some(row) = row else {
             continue;
         };
+        if lock_store(state)
+            .map_err(|error| error.message)?
+            .expire_remote_approval_if_due(
+                &row.approval_id,
+                OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .map_err(|error| format!("remote approval expiry failed: {error}"))?
+        {
+            continue;
+        }
         if row.status != "pending"
             || !row.requires_source
             || row.dispatched_at.is_some()
@@ -3287,12 +3306,20 @@ pub(crate) async fn activate_remote_approvals_from_message(
         {
             continue;
         }
-        if dispatch_remote_approval(state, &row).await
-            && let Ok(store) = lock_store(state)
-        {
-            let _ = store.mark_remote_approval_dispatched(&row.approval_id);
+        let projection_claim = projection_claim
+            .ok_or_else(|| "remote approval dispatch requires a projection claim".to_string())?;
+        match dispatch_remote_approval(state, contract, projection_claim, &row).await? {
+            ChannelProjectionDelivery::NotApplicable => {}
+            ChannelProjectionDelivery::Pending(receipt_ref) => return Ok(Some(receipt_ref)),
+            ChannelProjectionDelivery::Delivered(_) => {
+                lock_store(state)
+                    .map_err(|error| error.message)?
+                    .mark_remote_approval_dispatched(&row.approval_id)
+                    .map_err(|error| format!("remote approval dispatch marker failed: {error}"))?;
+            }
         }
     }
+    Ok(None)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -11078,13 +11105,17 @@ fn schedule_proactive_task(state: &AppState, goal: &str, every: &str, tz: Option
         );
     };
     let id = format!("sched_{}", uuid::Uuid::new_v4().simple());
+    let (_, thread_id) = proactive_thread_scope(&id, "scheduled");
     let mut task = TaskRecord::new(
         id,
         gateway_user_id(),
         gateway_workspace_id(),
         "proactive_prompt",
         goal,
-        serde_json::json!({}),
+        serde_json::json!({
+            "thread_id": thread_id,
+            "thread_source": "scheduled",
+        }),
     );
     task.not_before = Some(next);
     task.recurrence = Some(every.to_string());
@@ -11275,13 +11306,19 @@ fn materialize_automation_task(
     let next = local_first_task_runtime::next_occurrence(&recurrence, tz.as_deref(), now)
         .ok_or_else(|| format!("recurrence '{recurrence}' is not valid"))?;
     let task_id = format!("autorun_{}", uuid::Uuid::new_v4().simple());
+    let (_, thread_id) = proactive_thread_scope(&task_id, "scheduled");
     let mut task = TaskRecord::new(
         task_id.clone(),
         automation.user_id.clone(),
         automation.workspace_id.clone(),
         "proactive_prompt",
         automation.prompt.clone(),
-        serde_json::json!({ "automation_id": automation.id, "approval": automation.approval }),
+        serde_json::json!({
+            "automation_id": automation.id,
+            "approval": automation.approval,
+            "thread_id": thread_id,
+            "thread_source": "scheduled",
+        }),
     );
     task.not_before = Some(next);
     task.recurrence = Some(recurrence);
@@ -11846,8 +11883,10 @@ fn connector_fire_run(
         "{}\n\n[Triggering event: {label}]\nEvent data (JSON):\n{item_str}",
         automation.prompt
     );
+    let task_id = format!("autorun_{}", uuid::Uuid::new_v4().simple());
+    let (_, thread_id) = proactive_thread_scope(&task_id, "connector_poll");
     let mut task = TaskRecord::new(
-        format!("autorun_{}", uuid::Uuid::new_v4().simple()),
+        task_id,
         automation.user_id.clone(),
         automation.workspace_id.clone(),
         "proactive_prompt",
@@ -11856,6 +11895,8 @@ fn connector_fire_run(
             "automation_id": automation.id,
             "approval": automation.approval,
             "source": "connector_poll",
+            "thread_id": thread_id,
+            "thread_source": "connector_poll",
             "event": event,
             "thread_title": format!("Automation · {label}"),
         }),
@@ -35677,9 +35718,27 @@ enum ChannelSendFailureKind {
     UnknownRemoteOutcome,
 }
 
+impl ChannelSendFailureKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ConnectFailedBeforeDispatch => "connect_failed_before_dispatch",
+            Self::VerifiedRejection => "verified_rejection",
+            Self::UnknownRemoteOutcome => "unknown_remote_outcome",
+        }
+    }
+}
+
 struct ChannelSendFailure {
     kind: ChannelSendFailureKind,
     message: String,
+}
+
+fn channel_send_failure_kind_for_status(status: StatusCode) -> ChannelSendFailureKind {
+    if status.is_client_error() {
+        ChannelSendFailureKind::VerifiedRejection
+    } else {
+        ChannelSendFailureKind::UnknownRemoteOutcome
+    }
 }
 
 fn telegram_send_may_rebind(kind: ChannelSendFailureKind) -> bool {
@@ -35713,7 +35772,7 @@ async fn channel_send_classified(
         Ok(())
     } else {
         Err(ChannelSendFailure {
-            kind: ChannelSendFailureKind::VerifiedRejection,
+            kind: channel_send_failure_kind_for_status(response.status()),
             message: format!("sidecar /send responded {}", response.status()),
         })
     }
@@ -35735,26 +35794,26 @@ async fn telegram_send_with_rebind(
     state: &AppState,
     recipient: &str,
     text: &str,
-) -> Result<(), String> {
+) -> Result<(), ChannelSendFailure> {
     match channel_send_classified(state, TELEGRAM_HTTP_PORT, recipient, text).await {
         Ok(()) => return Ok(()),
         Err(first_error) if telegram_send_may_rebind(first_error.kind) => {
             let Some(token) = load_telegram_token() else {
-                return Err(format!(
-                    "{}; telegram token unavailable",
-                    first_error.message
-                ));
+                return Err(ChannelSendFailure {
+                    kind: ChannelSendFailureKind::ConnectFailedBeforeDispatch,
+                    message: format!("{}; telegram token unavailable", first_error.message),
+                });
             };
             if let Err(error) = ensure_telegram_sidecar(state, &token).await {
-                return Err(format!(
-                    "{}; rebind failed: {}",
-                    first_error.message, error.message
-                ));
+                return Err(ChannelSendFailure {
+                    kind: ChannelSendFailureKind::ConnectFailedBeforeDispatch,
+                    message: format!("{}; rebind failed: {}", first_error.message, error.message),
+                });
             }
         }
-        Err(first_error) => return Err(first_error.message),
+        Err(first_error) => return Err(first_error),
     }
-    channel_send(state, TELEGRAM_HTTP_PORT, recipient, text).await
+    channel_send_classified(state, TELEGRAM_HTTP_PORT, recipient, text).await
 }
 
 fn channel_reply_effect_request(
@@ -35780,6 +35839,10 @@ fn channel_reply_effect_request(
     )
 }
 
+fn recipient_fingerprint(recipient: &str) -> String {
+    format!("sha256:{:x}", Sha256::digest(recipient.trim().as_bytes()))
+}
+
 /// Turn-completion hook for a channel conversation. The external send is guarded by
 /// a durable effect receipt so projection replay never repeats an uncertain delivery.
 pub(crate) enum ChannelProjectionDelivery {
@@ -35791,6 +35854,7 @@ pub(crate) enum ChannelProjectionDelivery {
 pub(crate) async fn mirror_reply_to_channel_if_any(
     state: &AppState,
     contract: &local_first_execution_protocol::ValidatedExecutionContract,
+    projection_claim: Option<&local_first_task_runtime::ProjectionClaim>,
     thread_id: &str,
     answer: &str,
 ) -> Result<ChannelProjectionDelivery, String> {
@@ -35817,8 +35881,13 @@ pub(crate) async fn mirror_reply_to_channel_if_any(
         Some("whatsapp") => "whatsapp",
         _ => return Ok(ChannelProjectionDelivery::NotApplicable),
     };
-    let effect_host =
-        crate::effect_host::EffectHost::new(state.task_store.as_ref(), contract, None);
+    let projection_claim = projection_claim
+        .ok_or_else(|| "channel reply dispatch requires a projection claim".to_string())?;
+    let effect_host = crate::effect_host::EffectHost::for_projection(
+        state.task_store.as_ref(),
+        contract,
+        projection_claim,
+    );
     let lease = match effect_host.begin(channel_reply_effect_request(
         contract, thread_id, channel, &recipient, answer,
     ))? {
@@ -35837,22 +35906,45 @@ pub(crate) async fn mirror_reply_to_channel_if_any(
 
     let send_result = match channel {
         "telegram" => telegram_send_with_rebind(state, &recipient, answer).await,
-        "whatsapp" => channel_send(state, WHATSAPP_HTTP_PORT, &recipient, answer).await,
+        "whatsapp" => channel_send_classified(state, WHATSAPP_HTTP_PORT, &recipient, answer).await,
         _ => unreachable!("channel was validated before receipt preparation"),
     };
     if let Err(error) = send_result {
-        let receipt = effect_host.mark_uncertain(&lease)?;
-        eprintln!(
-            "channel/{channel}: reply delivery uncertain for {}: {}",
-            receipt.receipt_ref.as_ref(),
-            redact_sensitive_text(&error)
-        );
-        return Ok(ChannelProjectionDelivery::Pending(receipt.receipt_ref));
+        if error.kind == ChannelSendFailureKind::UnknownRemoteOutcome {
+            let receipt = effect_host.mark_uncertain_with_evidence(
+                &lease,
+                &serde_json::json!({
+                    "channel": channel,
+                    "recipient_fingerprint": recipient_fingerprint(&recipient),
+                    "thread_id": thread_id,
+                    "attempted": true,
+                }),
+            )?;
+            eprintln!(
+                "channel/{channel}: reply delivery uncertain for {}: {}",
+                receipt.receipt_ref.as_ref(),
+                redact_sensitive_text(&error.message)
+            );
+            return Ok(ChannelProjectionDelivery::Pending(receipt.receipt_ref));
+        }
+        effect_host.release_not_applied(
+            &lease,
+            error.kind.as_str(),
+            &redact_sensitive_text(&error.message),
+        )?;
+        return Err(format!(
+            "channel/{channel} reply was verified not applied: {}",
+            redact_sensitive_text(&error.message)
+        ));
     }
     let receipt = effect_host.complete(
         &lease,
         &serde_json::json!({"delivered": true}),
-        &serde_json::json!({"channel": channel}),
+        &serde_json::json!({
+            "channel": channel,
+            "recipient_fingerprint": recipient_fingerprint(&recipient),
+            "thread_id": thread_id,
+        }),
     )?;
     eprintln!("channel/{channel}: reply mirrored to {recipient}");
     // Nudge the app: a BACKGROUND channel turn isn't streamed to this client, so without this
@@ -35931,7 +36023,7 @@ async fn telegram_send_buttons_with_rebind(
     recipient: &str,
     text: &str,
     buttons: Vec<[String; 2]>,
-) -> Result<(), String> {
+) -> Result<(), ChannelSendFailure> {
     match channel_send_buttons_classified(
         state,
         TELEGRAM_HTTP_PORT,
@@ -35944,21 +36036,21 @@ async fn telegram_send_buttons_with_rebind(
         Ok(()) => return Ok(()),
         Err(first_error) if telegram_send_may_rebind(first_error.kind) => {
             let Some(token) = load_telegram_token() else {
-                return Err(format!(
-                    "{}; telegram token unavailable",
-                    first_error.message
-                ));
+                return Err(ChannelSendFailure {
+                    kind: ChannelSendFailureKind::ConnectFailedBeforeDispatch,
+                    message: format!("{}; telegram token unavailable", first_error.message),
+                });
             };
             if let Err(error) = ensure_telegram_sidecar(state, &token).await {
-                return Err(format!(
-                    "{}; rebind failed: {}",
-                    first_error.message, error.message
-                ));
+                return Err(ChannelSendFailure {
+                    kind: ChannelSendFailureKind::ConnectFailedBeforeDispatch,
+                    message: format!("{}; rebind failed: {}", first_error.message, error.message),
+                });
             }
         }
-        Err(first_error) => return Err(first_error.message),
+        Err(first_error) => return Err(first_error),
     }
-    channel_send_buttons(state, TELEGRAM_HTTP_PORT, recipient, text, buttons).await
+    channel_send_buttons_classified(state, TELEGRAM_HTTP_PORT, recipient, text, buttons).await
 }
 
 /// Drives a channel's typing indicator via its sidecar: `presence` is
@@ -37733,8 +37825,12 @@ fn turn_event_from_stream_value(
                 .unwrap_or(serde_json::Value::Null),
         ),
         "error" => (
-            local_first_task_runtime::TurnEventKind::Error,
-            value.clone(),
+            local_first_task_runtime::TurnEventKind::Activity,
+            serde_json::json!({
+                "phase": "stream_error",
+                "message": value.get("message").and_then(Value::as_str).unwrap_or(""),
+                "transport": value,
+            }),
         ),
         // unknown event types (e.g. choice_prompt, vault_propose) are not turn events
         _ => return None,
@@ -41229,13 +41325,6 @@ async fn resolve_uncertain_effect_receipt(
             .map_err(GatewayError::task)?
     };
     projection_worker::notify();
-    projection_worker::drain_available(&state)
-        .await
-        .map_err(|error| GatewayError {
-            status: StatusCode::BAD_GATEWAY,
-            code: "effect_projection_error",
-            message: error.message,
-        })?;
     let receipt = resolution_commit.receipt;
     publish_app_event(serde_json::json!({
         "type": "effect.resolved",
@@ -43259,9 +43348,10 @@ fn proactive_thread_plan(task: &TaskRecord, goal: &str) -> ProactiveThreadPlan {
         .filter(|v| !v.trim().is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| scheduled_thread_title(goal));
-    let scheduled_root = thread_id
-        .is_none()
-        .then(|| scheduled_thread_sender_for_task_id(task.task_id.as_str()));
+    let (derived_root, derived_thread_id) = proactive_thread_scope(task.task_id.as_str(), &source);
+    let scheduled_root = (thread_id.is_none()
+        || thread_id.as_deref() == Some(derived_thread_id.as_str()))
+    .then_some(derived_root);
     ProactiveThreadPlan {
         thread_id,
         workspace_id,
@@ -43344,18 +43434,12 @@ fn execute_proactive_prompt_task(
     // Scheduled tasks get a stable per-schedule thread. Evented tasks can carry
     // their owning thread explicitly (channel, connector, addon), so the visible
     // run lands where the trigger happened instead of in a generic background chat.
-    let thread_id = if let Some(thread_id) = thread_plan.thread_id.clone() {
-        Some(thread_id)
-    } else {
-        let root = thread_plan
-            .scheduled_root
-            .clone()
-            .unwrap_or_else(|| scheduled_thread_sender_for_task_id(task.task_id.as_str()));
+    let thread_id = if let Some(root) = thread_plan.scheduled_root.clone() {
         match lock_store(state) {
             Ok(store) => store
                 .find_or_create_channel_thread(
                     &thread_plan.workspace_id,
-                    "scheduled",
+                    &thread_plan.source,
                     &root,
                     &thread_plan.title,
                 )
@@ -43363,6 +43447,8 @@ fn execute_proactive_prompt_task(
                 .map(|thread| thread.thread_id),
             Err(_) => None,
         }
+    } else {
+        thread_plan.thread_id.clone()
     };
     let Some(thread_id) = thread_id else {
         return Err(LocalTaskExecutionError {
@@ -43526,6 +43612,12 @@ fn execute_proactive_prompt_task(
 
 fn scheduled_thread_sender_for_task_id(task_id: &str) -> String {
     task_id.split("@occ@").next().unwrap_or(task_id).to_string()
+}
+
+pub(crate) fn proactive_thread_scope(task_id: &str, source: &str) -> (String, String) {
+    let root = scheduled_thread_sender_for_task_id(task_id);
+    let thread_id = format!("channel_{source}_{root}");
+    (root, thread_id)
 }
 
 fn scheduled_thread_title(goal: &str) -> String {
@@ -46662,18 +46754,6 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
 
 /// POST an outbound message to a channel sidecar WITH an inline keyboard (Telegram only).
 /// `buttons` = `[[label, callback_data], …]`.
-async fn channel_send_buttons(
-    state: &AppState,
-    port: u16,
-    recipient: &str,
-    text: &str,
-    buttons: Vec<[String; 2]>,
-) -> Result<(), String> {
-    channel_send_buttons_classified(state, port, recipient, text, buttons)
-        .await
-        .map_err(|error| error.message)
-}
-
 async fn channel_send_buttons_classified(
     state: &AppState,
     port: u16,
@@ -46701,13 +46781,34 @@ async fn channel_send_buttons_classified(
         Ok(())
     } else {
         Err(ChannelSendFailure {
-            kind: ChannelSendFailureKind::VerifiedRejection,
+            kind: channel_send_failure_kind_for_status(response.status()),
             message: format!("sidecar /send responded {}", response.status()),
         })
     }
 }
 
-async fn dispatch_remote_approval(state: &AppState, approval: &RemoteApprovalRow) -> bool {
+fn remote_approval_effect_request(
+    approval: &RemoteApprovalRow,
+    thread_id: &str,
+) -> crate::effect_host::EffectRequest {
+    crate::effect_host::EffectRequest::adapter_output(
+        "channel.remote_approval",
+        approval.approval_id.clone(),
+        local_first_execution_protocol::EffectClass::ExternalWrite,
+        serde_json::json!({
+            "thread_id": thread_id,
+            "approval_id": approval.approval_id,
+            "label": approval.label,
+        }),
+    )
+}
+
+async fn dispatch_remote_approval(
+    state: &AppState,
+    contract: &local_first_execution_protocol::ValidatedExecutionContract,
+    projection_claim: &local_first_task_runtime::ProjectionClaim,
+    approval: &RemoteApprovalRow,
+) -> Result<ChannelProjectionDelivery, String> {
     let prefs = load_user_prefs();
     let channel = prefs
         .approval_channel
@@ -46716,10 +46817,38 @@ async fn dispatch_remote_approval(state: &AppState, approval: &RemoteApprovalRow
         .to_string();
     let target = prefs.approval_target.unwrap_or_default();
     if target.trim().is_empty() || channel == "in_app" {
-        return false;
+        return Ok(ChannelProjectionDelivery::NotApplicable);
     }
+    let thread_id = approval
+        .thread_id
+        .as_deref()
+        .ok_or_else(|| "remote approval dispatch has no thread".to_string())?;
+    if contract.as_ref().scope.thread_id.as_deref() != Some(thread_id) {
+        return Err("remote approval thread does not match execution scope".to_string());
+    }
+    if !matches!(channel.as_str(), "telegram" | "whatsapp") {
+        return Ok(ChannelProjectionDelivery::NotApplicable);
+    }
+    let effect_host = crate::effect_host::EffectHost::for_projection(
+        state.task_store.as_ref(),
+        contract,
+        projection_claim,
+    );
+    let lease = match effect_host.begin(remote_approval_effect_request(approval, thread_id))? {
+        crate::effect_host::EffectDecision::Replay(receipt) => {
+            return Ok(ChannelProjectionDelivery::Delivered(serde_json::json!({
+                "receipt_ref": receipt.receipt_ref.as_ref(),
+                "channel": channel,
+                "status": "completed",
+            })));
+        }
+        crate::effect_host::EffectDecision::Resolve(receipt) => {
+            return Ok(ChannelProjectionDelivery::Pending(receipt.receipt_ref));
+        }
+        crate::effect_host::EffectDecision::Execute(lease) => lease,
+    };
     let code = approval.code.as_str();
-    match channel.as_str() {
+    let send_result = match channel.as_str() {
         "telegram" => {
             let text = format!(
                 "🔐 Homun is asking for your confirmation:\n{}\n\n(or reply: OK {code} / NO {code} — expires in 10 min)",
@@ -46729,32 +46858,50 @@ async fn dispatch_remote_approval(state: &AppState, approval: &RemoteApprovalRow
                 ["✅ Authorize".to_string(), format!("approve:{code}")],
                 ["❌ Cancel".to_string(), format!("cancel:{code}")],
             ];
-            let sent =
-                telegram_send_buttons_with_rebind(state, target.trim(), &text, buttons).await;
-            if let Err(error) = &sent {
-                append_remote_approval_thread_status(
-                    state,
-                    approval,
-                    "delivery_failed",
-                    Some(&format!(
-                        "Non sono riuscito a inviare la notifica Telegram: {error}. \
-Puoi usare la card in app o riconnettere Telegram."
-                    )),
-                );
-            }
-            sent.is_ok()
+            telegram_send_buttons_with_rebind(state, target.trim(), &text, buttons).await
         }
         "whatsapp" => {
             let text = format!(
                 "🔐 Homun is asking for your confirmation:\n{}\n\nAuthorize: OK {code}\nCancel: NO {code}\n(expires in 10 minutes)",
                 approval.label
             );
-            channel_send(state, WHATSAPP_HTTP_PORT, target.trim(), &text)
-                .await
-                .is_ok()
+            channel_send_classified(state, WHATSAPP_HTTP_PORT, target.trim(), &text).await
         }
-        _ => false,
+        _ => unreachable!("approval channel was validated before receipt preparation"),
+    };
+    if let Err(error) = send_result {
+        let detail = redact_sensitive_text(&error.message);
+        if error.kind == ChannelSendFailureKind::UnknownRemoteOutcome {
+            let receipt = effect_host.mark_uncertain_with_evidence(
+                &lease,
+                &serde_json::json!({
+                    "channel": channel,
+                    "recipient_fingerprint": recipient_fingerprint(target.trim()),
+                    "approval_id": approval.approval_id,
+                    "attempted": true,
+                }),
+            )?;
+            return Ok(ChannelProjectionDelivery::Pending(receipt.receipt_ref));
+        }
+        effect_host.release_not_applied(&lease, error.kind.as_str(), &detail)?;
+        return Err(format!(
+            "channel/{channel} approval was verified not applied: {detail}"
+        ));
     }
+    let receipt = effect_host.complete(
+        &lease,
+        &serde_json::json!({"delivered": true}),
+        &serde_json::json!({
+            "channel": channel,
+            "recipient_fingerprint": recipient_fingerprint(target.trim()),
+            "approval_id": approval.approval_id,
+        }),
+    )?;
+    Ok(ChannelProjectionDelivery::Delivered(serde_json::json!({
+        "receipt_ref": receipt.receipt_ref.as_ref(),
+        "channel": channel,
+        "status": "completed",
+    })))
 }
 
 /// Parse a remote-approval control reply: `OK 7F3` / `SI 7F3` (approve) or `NO 7F3` (cancel).
@@ -67553,6 +67700,28 @@ prs.save(Path({path:?}))
         ));
     }
 
+    #[test]
+    fn sidecar_http_status_preserves_remote_outcome_uncertainty() {
+        assert_eq!(
+            super::channel_send_failure_kind_for_status(super::StatusCode::BAD_REQUEST),
+            super::ChannelSendFailureKind::VerifiedRejection
+        );
+        assert_eq!(
+            super::channel_send_failure_kind_for_status(super::StatusCode::BAD_GATEWAY),
+            super::ChannelSendFailureKind::UnknownRemoteOutcome
+        );
+    }
+
+    #[test]
+    fn recipient_fingerprint_is_stable_and_does_not_expose_the_recipient() {
+        let first = super::recipient_fingerprint(" chat-id-123 ");
+        let second = super::recipient_fingerprint("chat-id-123");
+
+        assert_eq!(first, second);
+        assert!(first.starts_with("sha256:"));
+        assert!(!first.contains("chat-id-123"));
+    }
+
     #[tokio::test]
     async fn effect_resolution_is_single_flight_per_receipt() {
         let receipt_ref = "effect:v1:32:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -69100,7 +69269,28 @@ prs.save(Path({path:?}))
             .expect("task store")
             .create_execution(&contract)
             .expect("execution");
-        let host = super::effect_host::EffectHost::new(state.task_store.as_ref(), &contract, None);
+        let outcome = local_first_execution_protocol::ValidatedExecutionOutcome::new(
+            local_first_execution_protocol::ExecutionOutcome::completed(
+                serde_json::json!({"answer": "Delivered answer"}),
+            ),
+            &contract,
+        )
+        .expect("outcome");
+        let projection_claim = {
+            let store = state.task_store.lock().expect("task store");
+            store
+                .commit_execution_outcome(&outcome)
+                .expect("commit outcome");
+            store
+                .claim_projection("chat_lifecycle", "projector", 1, 1)
+                .expect("claim projection")
+                .expect("pending projection")
+        };
+        let host = super::effect_host::EffectHost::for_projection(
+            state.task_store.as_ref(),
+            &contract,
+            &projection_claim,
+        );
         let super::effect_host::EffectDecision::Execute(lease) = host
             .begin(super::channel_reply_effect_request(
                 &contract,
@@ -69124,6 +69314,7 @@ prs.save(Path({path:?}))
         let delivery = super::mirror_reply_to_channel_if_any(
             &state,
             &contract,
+            Some(&projection_claim),
             &thread.thread_id,
             "Delivered answer",
         )
@@ -76578,6 +76769,20 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     }
 
     #[test]
+    fn fanout_stream_error_is_an_observation_not_a_logical_terminal() {
+        let raw = serde_json::json!({
+            "type": "error",
+            "message": "provider stream disconnected"
+        });
+
+        let (kind, payload) = super::turn_event_from_stream_value(&raw).expect("stream error maps");
+
+        assert_eq!(kind, local_first_task_runtime::TurnEventKind::Activity);
+        assert_eq!(payload["phase"], "stream_error");
+        assert_eq!(payload["message"], "provider stream disconnected");
+    }
+
+    #[test]
     fn automatic_recall_payload_keeps_an_empty_recall_visible_to_the_stream() {
         let pack = local_first_memory::RecallPack::from_block(
             "launch",
@@ -83870,6 +84075,20 @@ data: [DONE]\n";
         assert!(task.not_before.expect("first run scheduled") > now);
         assert_eq!(task.input_json["automation_id"], "auto_sched");
         assert_eq!(task.input_json["approval"], "confirm");
+        let thread_id = task.input_json["thread_id"]
+            .as_str()
+            .expect("scheduled task has canonical thread scope");
+        assert_eq!(thread_id, format!("channel_scheduled_{task_id}"));
+        let mut acquired = task.clone();
+        acquired.status = TaskStatus::Running;
+        acquired.lease_owner = Some("worker-test".into());
+        acquired.lease_fencing_token = Some(1);
+        let contract = super::execution_runtime::contract_for_acquired_task(&acquired)
+            .expect("scoped proactive contract");
+        assert_eq!(
+            contract.as_ref().scope.thread_id.as_deref(),
+            Some(thread_id)
+        );
         assert_eq!(task.retry_policy.max_attempts, 3);
         assert_eq!(task.retry_policy.backoff_seconds, 120);
     }

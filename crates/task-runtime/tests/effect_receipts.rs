@@ -202,6 +202,31 @@ fn receipt_is_prepared_claimed_completed_and_replayed() {
 }
 
 #[test]
+fn verified_not_dispatched_receipt_returns_to_prepared_for_same_identity_retry() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let prepared = store.prepare_effect_receipt(&new_receipt()).unwrap();
+    assert!(matches!(
+        store.claim_effect_receipt(&prepared.receipt_ref).unwrap(),
+        EffectReceiptClaim::Execute(_)
+    ));
+
+    let released = store
+        .release_effect_receipt_not_applied(
+            &prepared.receipt_ref,
+            &json!({"code": "connect_failed_before_dispatch"}),
+        )
+        .unwrap();
+    assert_eq!(released.status, EffectReceiptStatus::Prepared);
+    assert!(matches!(
+        store.claim_effect_receipt(&prepared.receipt_ref).unwrap(),
+        EffectReceiptClaim::Execute(ExecutionEffectReceipt {
+            status: EffectReceiptStatus::Started,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn interrupted_started_receipt_becomes_uncertain_and_never_executes_again() {
     let store = TaskStore::open_in_memory().unwrap();
     let prepared = store.prepare_effect_receipt(&new_receipt()).unwrap();
@@ -218,6 +243,35 @@ fn interrupted_started_receipt_becomes_uncertain_and_never_executes_again() {
             ..
         })
     ));
+    assert!(matches!(
+        store.claim_effect_receipt(&prepared.receipt_ref).unwrap(),
+        EffectReceiptClaim::Resolve(ExecutionEffectReceipt {
+            status: EffectReceiptStatus::Uncertain,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn uncertain_receipt_persists_redacted_dispatch_evidence() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let prepared = store.prepare_effect_receipt(&new_receipt()).unwrap();
+    assert!(matches!(
+        store.claim_effect_receipt(&prepared.receipt_ref).unwrap(),
+        EffectReceiptClaim::Execute(_)
+    ));
+    let evidence = json!({
+        "channel": "telegram",
+        "recipient_fingerprint": "sha256:abc",
+        "attempted": true
+    });
+
+    let uncertain = store
+        .mark_effect_receipt_uncertain(&prepared.receipt_ref, &evidence)
+        .expect("started receipt becomes uncertain with evidence");
+
+    assert_eq!(uncertain.status, EffectReceiptStatus::Uncertain);
+    assert_eq!(uncertain.effects_json, Some(evidence));
     assert!(matches!(
         store.claim_effect_receipt(&prepared.receipt_ref).unwrap(),
         EffectReceiptClaim::Resolve(ExecutionEffectReceipt {
