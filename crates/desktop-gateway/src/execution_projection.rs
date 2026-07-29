@@ -5,6 +5,12 @@ use local_first_task_runtime::{
 };
 use time::OffsetDateTime;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ProjectionAttempt {
+    Completed,
+    BlockedOnEffect(local_first_execution_protocol::EffectReceiptRef),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ChatProjectionDecision {
     pub(crate) task_status: TaskStatus,
@@ -32,7 +38,7 @@ pub(crate) async fn project_chat_execution(
     task: &TaskRecord,
     contract: &ValidatedExecutionContract,
     outcome: &ExecutionOutcome,
-) -> Result<(), crate::LocalTaskExecutionError> {
+) -> Result<ProjectionAttempt, crate::LocalTaskExecutionError> {
     let projection_ref = format!(
         "{}:{}",
         contract.as_ref().execution_id,
@@ -53,7 +59,7 @@ pub(crate) async fn project_chat_execution(
                 == Some(projection_ref.as_str())
         })
     {
-        return Ok(());
+        return Ok(ProjectionAttempt::Completed);
     }
 
     let metadata = projection_metadata(state, task, outcome)?;
@@ -99,7 +105,7 @@ pub(crate) async fn project_chat_execution(
                     "channel projection awaiting effect resolution: {}",
                     receipt_ref.as_ref()
                 );
-                return Ok(());
+                return Ok(ProjectionAttempt::BlockedOnEffect(receipt_ref));
             }
         }
     } else {
@@ -135,7 +141,8 @@ pub(crate) async fn project_chat_execution(
         decision.event_kind,
         payload,
     )
-    .map_err(projection_store_error)
+    .map_err(projection_store_error)?;
+    Ok(ProjectionAttempt::Completed)
 }
 
 pub(crate) async fn replay_committed_chat_projections(
@@ -652,12 +659,12 @@ mod tests {
             .expect("chat store")
             .append_assistant_message(&thread.thread_id, &assistant)
             .expect("assistant");
-        replay_committed_chat_projections(&state, 100)
+        crate::projection_worker::drain_available(&state)
             .await
-            .expect("recovered projection");
-        replay_committed_chat_projections(&state, 100)
+            .expect("recovered projection through outbox");
+        crate::projection_worker::drain_available(&state)
             .await
-            .expect("idempotent replay");
+            .expect("idempotent outbox drain");
 
         let store = state.task_store.lock().expect("task store");
         let projected = store
@@ -694,6 +701,22 @@ mod tests {
         assert_eq!(
             message.delivery_state,
             local_first_desktop_gateway::MessageDeliveryState::Delivered
+        );
+        let reference = local_first_task_runtime::projection_outbox::projection_ref(
+            "turn-projection-1",
+            1,
+            local_first_task_runtime::projection_outbox::CHAT_LIFECYCLE_PROJECTION,
+        );
+        assert_eq!(
+            state
+                .task_store
+                .lock()
+                .expect("task store")
+                .projection_outbox_record(&reference)
+                .expect("projection row")
+                .expect("projection exists")
+                .status,
+            local_first_task_runtime::ProjectionStatus::Completed
         );
     }
 

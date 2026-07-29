@@ -92,13 +92,7 @@ impl ExecutionRuntime {
         if let Some((contract, outcome)) = recovered {
             validate_authoritative_contract(&task, &contract)?;
             if should_project_chat(state, &task, outcome.as_ref())? {
-                crate::execution_projection::project_chat_execution(
-                    state,
-                    &task,
-                    &contract,
-                    outcome.as_ref(),
-                )
-                .await?;
+                crate::projection_worker::drain_available(state).await?;
             }
             return Ok(recovered_execution_result(&task, outcome.as_ref()));
         }
@@ -252,15 +246,10 @@ impl ExecutionRuntime {
                 .commit_running_execution_outcome(&validated)
                 .map_err(runtime_store_error)?;
         }
+        crate::projection_worker::notify();
 
         if should_project_chat(state, &task, validated.as_ref())? {
-            crate::execution_projection::project_chat_execution(
-                state,
-                &task,
-                &contract,
-                validated.as_ref(),
-            )
-            .await?;
+            crate::projection_worker::drain_available(state).await?;
         }
 
         let projection = ExecutionProjection::from_outcome(validated.as_ref());
@@ -272,7 +261,7 @@ impl ExecutionRuntime {
     }
 }
 
-fn should_project_chat(
+pub(crate) fn should_project_chat(
     state: &AppState,
     task: &TaskRecord,
     outcome: &ExecutionOutcome,

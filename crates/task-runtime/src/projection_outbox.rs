@@ -162,7 +162,7 @@ pub(crate) fn enqueue_projection_on(
 }
 
 fn projector_kind(execution_kind: &str) -> Option<&'static str> {
-    (execution_kind == "chat_turn").then_some(CHAT_LIFECYCLE_PROJECTION)
+    matches!(execution_kind, "chat_turn" | "proactive_prompt").then_some(CHAT_LIFECYCLE_PROJECTION)
 }
 
 fn backfill_projection_outbox_v16(connection: &Connection) -> TaskRuntimeResult<()> {

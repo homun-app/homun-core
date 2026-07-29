@@ -56,6 +56,7 @@ mod panic_log;
 mod pdf_render;
 mod plugin_packages;
 mod privacy_guard;
+mod projection_worker;
 // Linux Landlock filesystem fence for `run_in_project` (ADR 0023 Linux enforcement;
 // the counterpart to `seatbelt`). Linux-only — the whole module is cfg-gated so it
 // never compiles on macOS/Windows (the `landlock` dep is Linux-only too).
@@ -1182,7 +1183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // pool starts AND before the background VACUUM (VACUUM takes an exclusive lock that
     // would collide with bump_process_generation on the unified DB → "database is locked").
     // Bare block scopes the task_store lock guard so it is released before the VACUUM below.
-    let recovered_chat_turns = {
+    let (process_generation, recovered_chat_turns) = {
         let store = state.task_store.lock().expect("task store lock at boot");
         let generation = store
             .bump_process_generation()
@@ -1214,7 +1215,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "turn broker: recovery generation={generation} recovered={} turns",
             recovered.len()
         );
-        recovered
+        let recovered_tasks = recovered
             .iter()
             .filter_map(|task_id| {
                 store
@@ -1222,7 +1223,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .ok()
                     .flatten()
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        (generation, recovered_tasks)
     };
     // The broker has re-queued these tasks, but their visible placeholders are
     // owned by the chat store. Update them only after the task-store guard is
@@ -1234,7 +1236,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             local_first_desktop_gateway::MessageDeliveryState::Retrying,
         );
     }
-    let replayed = execution_projection::replay_committed_chat_projections(&state, usize::MAX)
+    let replayed = projection_worker::drain_at_startup(&state, process_generation)
         .await
         .map_err(|error| {
             std::io::Error::other(format!(
@@ -1243,8 +1245,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ))
         })?;
     if replayed > 0 {
-        eprintln!("execution projection: replayed {replayed} committed chat outcomes");
+        eprintln!("execution projection: drained {replayed} durable outbox rows");
     }
+    projection_worker::start(state.clone());
     steering_control::start(state.clone());
     // Graph regeneration runs in the BACKGROUND so it never blocks the HTTP bind. Start it
     // only after the lease-aware broker recovery above has completed its critical write to
