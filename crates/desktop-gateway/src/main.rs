@@ -1050,26 +1050,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let unified = gateway_unified_database_path()?;
         let legacy_chat = gateway_legacy_chat_database_path()?;
         let legacy_task = gateway_legacy_task_database_path()?;
-        match db_migrate::unify_databases_if_needed(&legacy_chat, &legacy_task, &unified) {
-            Ok(report) => {
-                if report.unified {
-                    let total_chat: usize = report.chat_rows.values().sum();
-                    let total_task: usize = report.task_rows.values().sum();
-                    eprintln!(
-                        "db unify: migrated legacy chat ({total_chat} rows across {} tables) + task ({total_task} rows across {} tables) into {}",
-                        report.chat_rows.len(),
-                        report.task_rows.len(),
-                        unified.display()
-                    );
-                }
-            }
-            Err(e) => {
-                eprintln!(
-                    "db unify: WARNING migration failed ({e}); continuing with whatever state exists at {}",
+        let report = db_migrate::unify_databases_if_needed(&legacy_chat, &legacy_task, &unified)
+            .map_err(|error| {
+                std::io::Error::other(format!(
+                    "db unify failed for {}: {error}",
                     unified.display()
-                );
-                // Non-fatal: the stores will open on whatever the unified path resolves to.
-            }
+                ))
+            })?;
+        if report.unified {
+            let total_chat: usize = report.chat_rows.values().sum();
+            let total_task: usize = report.task_rows.values().sum();
+            eprintln!(
+                "db unify: migrated legacy chat ({total_chat} rows across {} tables) + task ({total_task} rows across {} tables) into {}",
+                report.chat_rows.len(),
+                report.task_rows.len(),
+                unified.display()
+            );
         }
     }
     // Unified WS registry: build the Arc once, register it process-wide (so free
@@ -1237,17 +1233,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             local_first_desktop_gateway::MessageDeliveryState::Retrying,
         );
     }
-    match execution_projection::replay_committed_chat_projections(&state, usize::MAX).await {
-        Ok(replayed) if replayed > 0 => {
-            eprintln!("execution projection: replayed {replayed} committed chat outcomes");
-        }
-        Ok(_) => {}
-        Err(error) => {
-            eprintln!(
-                "execution projection: startup replay incomplete: {}",
+    let replayed = execution_projection::replay_committed_chat_projections(&state, usize::MAX)
+        .await
+        .map_err(|error| {
+            std::io::Error::other(format!(
+                "execution projection startup replay failed: {}",
                 error.message
-            );
-        }
+            ))
+        })?;
+    if replayed > 0 {
+        eprintln!("execution projection: replayed {replayed} committed chat outcomes");
     }
     steering_control::start(state.clone());
     // Graph regeneration runs in the BACKGROUND so it never blocks the HTTP bind. Start it

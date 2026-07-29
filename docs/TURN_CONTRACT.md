@@ -264,6 +264,9 @@ conversazione e non il lavoro in corso.
     revisione di proiezione. Un replay riusa `Completed`; un invio interrotto diventa
     `Uncertain` e non viene ripetuto implicitamente. L'evento terminale espone lo stato
     `channel_delivery` e il riferimento alla receipt.
+16. Il bootstrap non avvia worker su una migrazione DB fallita o su outcome committati
+    che il projector non riesce a rigiocare. Una wake `At` fuori dal range temporale
+    fallisce la proiezione invece di perdere `not_before` e rendere subito eseguibile il task.
 
 ## Mapping oggi → contratto
 

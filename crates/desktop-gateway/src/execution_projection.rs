@@ -226,7 +226,10 @@ fn project_task_state(
         ExecutionOutcome::Suspended {
             wake: WakeCondition::At { unix_seconds },
             ..
-        } => OffsetDateTime::from_unix_timestamp(*unix_seconds).ok(),
+        } => Some(
+            OffsetDateTime::from_unix_timestamp(*unix_seconds)
+                .map_err(|error| projection_error(format!("invalid wake timestamp: {error}")))?,
+        ),
         _ => None,
     };
     current.lease_owner = None;
@@ -694,5 +697,33 @@ mod tests {
             .expect_err("missing completed message must keep projection pending");
 
         assert!(error.message.contains("message"));
+    }
+
+    #[test]
+    fn invalid_timer_wake_cannot_become_an_unbounded_task_projection() {
+        let state = crate::AppState::for_tests();
+        let mut task = TaskRecord::new(
+            "turn-invalid-timer",
+            UserId::new("user-1"),
+            WorkspaceId::new("workspace-1"),
+            "chat_turn",
+            "projection test",
+            serde_json::json!({}),
+        );
+        task.status = TaskStatus::Running;
+        state
+            .task_store
+            .lock()
+            .expect("task store")
+            .insert_task(&task)
+            .expect("task");
+        let outcome = suspended(WakeCondition::At {
+            unix_seconds: i64::MAX,
+        });
+
+        let error = project_task_state(&state, &task, TaskStatus::WaitingTime, &outcome)
+            .expect_err("out-of-range timer must keep projection pending");
+
+        assert!(error.message.contains("wake timestamp"));
     }
 }
