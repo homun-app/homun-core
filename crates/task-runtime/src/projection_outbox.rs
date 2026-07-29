@@ -54,6 +54,14 @@ pub struct ProjectionErrorEvidence {
     pub redacted_detail: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProjectionClaim {
+    pub record: ProjectionOutboxRecord,
+    pub owner: String,
+    pub generation: u64,
+    pub token: u64,
+}
+
 pub fn projection_ref(execution_id: &str, revision: u64, projection_kind: &str) -> String {
     format!("{execution_id}:{revision}:{projection_kind}")
 }
@@ -227,6 +235,164 @@ impl TaskStore {
             .optional()
             .map_err(Into::into)
     }
+
+    pub fn claim_projection(
+        &self,
+        projection_kind: &str,
+        owner: &str,
+        generation: u64,
+        now: i64,
+    ) -> TaskRuntimeResult<Option<ProjectionClaim>> {
+        let projection_kind = required_text(projection_kind, "projection kind")?;
+        let owner = required_text(owner, "projection owner")?;
+        let generation_sql = positive_sqlite_u64(generation, "projection claim generation")?;
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let reference = tx
+            .query_row(
+                "SELECT projection_ref
+                 FROM execution_projection_outbox
+                 WHERE projection_kind = ?1
+                   AND (
+                       (status = 'pending' AND (not_before IS NULL OR not_before <= ?2))
+                       OR (status = 'claimed' AND claim_generation < ?3)
+                   )
+                 ORDER BY created_at, projection_ref
+                 LIMIT 1",
+                params![projection_kind, now, generation_sql],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let Some(reference) = reference else {
+            tx.commit()?;
+            return Ok(None);
+        };
+        let changed = tx.execute(
+            "UPDATE execution_projection_outbox
+             SET status = 'claimed', attempt_count = attempt_count + 1,
+                 claim_owner = ?1, claim_generation = ?2, claim_token = claim_token + 1,
+                 claimed_at = ?3, not_before = NULL, blocked_on_ref = NULL,
+                 completed_at = NULL, updated_at = ?3
+             WHERE projection_ref = ?4
+               AND (
+                   (status = 'pending' AND (not_before IS NULL OR not_before <= ?3))
+                   OR (status = 'claimed' AND claim_generation < ?2)
+               )",
+            params![owner, generation_sql, now, reference],
+        )?;
+        if changed != 1 {
+            return Err(TaskRuntimeError::Conflict(
+                "projection claim changed concurrently".into(),
+            ));
+        }
+        let record = tx.query_row(
+            "SELECT projection_ref, execution_id, revision, projection_kind, status,
+                    attempt_count, claim_owner, claim_generation, claim_token, not_before,
+                    blocked_on_ref, last_error_code, last_error_detail, created_at, updated_at,
+                    completed_at
+             FROM execution_projection_outbox WHERE projection_ref = ?1",
+            [&reference],
+            projection_row,
+        )?;
+        let token = record.claim_token;
+        tx.commit()?;
+        Ok(Some(ProjectionClaim {
+            record,
+            owner: owner.to_string(),
+            generation,
+            token,
+        }))
+    }
+
+    pub fn complete_projection(&self, claim: &ProjectionClaim, now: i64) -> TaskRuntimeResult<()> {
+        self.finish_claim(claim, "completed", None, None, None, None, Some(now), now)
+    }
+
+    pub fn retry_projection(
+        &self,
+        claim: &ProjectionClaim,
+        error: &ProjectionErrorEvidence,
+        not_before: i64,
+        now: i64,
+    ) -> TaskRuntimeResult<()> {
+        let code = required_text(&error.code, "projection error code")?;
+        let detail = required_text(&error.redacted_detail, "projection error detail")?;
+        if not_before < now {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "projection retry cannot be scheduled in the past".into(),
+            ));
+        }
+        self.finish_claim(
+            claim,
+            "pending",
+            Some(not_before),
+            None,
+            Some(code),
+            Some(detail),
+            None,
+            now,
+        )
+    }
+
+    pub fn block_projection(
+        &self,
+        claim: &ProjectionClaim,
+        receipt_ref: &EffectReceiptRef,
+        now: i64,
+    ) -> TaskRuntimeResult<()> {
+        self.finish_claim(
+            claim,
+            "blocked",
+            None,
+            Some(receipt_ref.as_ref()),
+            None,
+            None,
+            None,
+            now,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn finish_claim(
+        &self,
+        claim: &ProjectionClaim,
+        status: &str,
+        not_before: Option<i64>,
+        blocked_on_ref: Option<&str>,
+        last_error_code: Option<&str>,
+        last_error_detail: Option<&str>,
+        completed_at: Option<i64>,
+        now: i64,
+    ) -> TaskRuntimeResult<()> {
+        let generation = positive_sqlite_u64(claim.generation, "projection claim generation")?;
+        let token = positive_sqlite_u64(claim.token, "projection claim token")?;
+        let changed = self.connection.execute(
+            "UPDATE execution_projection_outbox
+             SET status = ?1, claim_owner = NULL, claim_generation = NULL, claimed_at = NULL,
+                 not_before = ?2, blocked_on_ref = ?3, last_error_code = ?4,
+                 last_error_detail = ?5, completed_at = ?6, updated_at = ?7
+             WHERE projection_ref = ?8 AND status = 'claimed'
+               AND claim_owner = ?9 AND claim_generation = ?10 AND claim_token = ?11",
+            params![
+                status,
+                not_before,
+                blocked_on_ref,
+                last_error_code,
+                last_error_detail,
+                completed_at,
+                now,
+                claim.record.projection_ref,
+                claim.owner,
+                generation,
+                token,
+            ],
+        )?;
+        if changed != 1 {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "projection claim is stale or no longer active".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 fn projection_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectionOutboxRecord> {
@@ -275,4 +441,19 @@ fn value_error(
 fn sqlite_u64(value: u64, field: &str) -> TaskRuntimeResult<i64> {
     i64::try_from(value)
         .map_err(|_| TaskRuntimeError::Store(format!("{field} exceeds SQLite integer range")))
+}
+
+fn positive_sqlite_u64(value: u64, field: &str) -> TaskRuntimeResult<i64> {
+    if value == 0 {
+        return Err(TaskRuntimeError::Store(format!("{field} must be positive")));
+    }
+    sqlite_u64(value, field)
+}
+
+fn required_text<'a>(value: &'a str, field: &str) -> TaskRuntimeResult<&'a str> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(TaskRuntimeError::Store(format!("{field} cannot be empty")));
+    }
+    Ok(value)
 }

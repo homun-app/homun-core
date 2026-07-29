@@ -3,11 +3,13 @@ use local_first_execution_protocol::{
     ValidatedExecutionOutcome,
 };
 use local_first_task_runtime::{
-    ProjectionStatus, TaskStore,
+    ProjectionErrorEvidence, ProjectionStatus, TaskStore,
     projection_outbox::{CHAT_LIFECYCLE_PROJECTION, projection_ref},
 };
 use rusqlite::{Connection, params};
 use std::path::PathBuf;
+use std::sync::{Arc, Barrier};
+use std::thread;
 use uuid::Uuid;
 
 fn file_store() -> (PathBuf, TaskStore) {
@@ -32,6 +34,20 @@ fn contract(execution_id: &str, kind: &str) -> ValidatedExecutionContract {
     )
     .try_into()
     .expect("valid contract")
+}
+
+fn commit_chat_projection(store: &TaskStore, execution_id: &str) -> String {
+    let contract = contract(execution_id, "chat_turn");
+    store.create_execution(&contract).expect("create execution");
+    let outcome = ValidatedExecutionOutcome::new(
+        ExecutionOutcome::completed(serde_json::json!({"answer": "done"})),
+        &contract,
+    )
+    .expect("valid outcome");
+    store
+        .commit_execution_outcome(&outcome)
+        .expect("commit outcome");
+    projection_ref(execution_id, 1, CHAT_LIFECYCLE_PROJECTION)
 }
 
 #[test]
@@ -204,4 +220,112 @@ fn reopening_legacy_committed_history_backfills_projection_once() {
     );
     drop(reopened_again);
     std::fs::remove_file(path).ok();
+}
+
+#[test]
+fn concurrent_workers_claim_one_projection_once() {
+    let (path, store) = file_store();
+    let reference = commit_chat_projection(&store, "turn-claim-race");
+    drop(store);
+    let barrier = Arc::new(Barrier::new(2));
+    let mut workers = Vec::new();
+    for owner in ["projector-a", "projector-b"] {
+        let path = path.clone();
+        let barrier = Arc::clone(&barrier);
+        workers.push(thread::spawn(move || {
+            let store = TaskStore::open(path).expect("open racing store");
+            barrier.wait();
+            store
+                .claim_projection(CHAT_LIFECYCLE_PROJECTION, owner, 1, 100)
+                .expect("claim projection")
+        }));
+    }
+    let claims = workers
+        .into_iter()
+        .filter_map(|worker| worker.join().expect("join worker"))
+        .collect::<Vec<_>>();
+    assert_eq!(claims.len(), 1);
+    assert_eq!(claims[0].record.projection_ref, reference);
+    assert_eq!(claims[0].token, 1);
+    assert_eq!(claims[0].generation, 1);
+
+    std::fs::remove_file(path).ok();
+}
+
+#[test]
+fn newer_generation_reclaims_and_fences_stale_projection_claim() {
+    let store = TaskStore::open_in_memory().expect("store");
+    let reference = commit_chat_projection(&store, "turn-stale-claim");
+    let stale = store
+        .claim_projection(CHAT_LIFECYCLE_PROJECTION, "projector", 1, 100)
+        .expect("claim")
+        .expect("pending row");
+    assert!(
+        store
+            .claim_projection(CHAT_LIFECYCLE_PROJECTION, "projector", 1, 101)
+            .expect("same-generation claim")
+            .is_none()
+    );
+
+    let fresh = store
+        .claim_projection(CHAT_LIFECYCLE_PROJECTION, "projector", 2, 102)
+        .expect("reclaim")
+        .expect("stale row is reclaimable");
+    assert_eq!(fresh.token, stale.token + 1);
+    assert!(store.complete_projection(&stale, 103).is_err());
+    store
+        .complete_projection(&fresh, 104)
+        .expect("fresh owner completes");
+    assert_eq!(
+        store
+            .projection_outbox_record(&reference)
+            .expect("read row")
+            .expect("row")
+            .status,
+        ProjectionStatus::Completed
+    );
+}
+
+#[test]
+fn retry_waits_until_due_and_blocked_projection_never_auto_claims() {
+    let store = TaskStore::open_in_memory().expect("store");
+    commit_chat_projection(&store, "turn-retry-claim");
+    let retry_claim = store
+        .claim_projection(CHAT_LIFECYCLE_PROJECTION, "projector", 1, 100)
+        .expect("claim")
+        .expect("pending row");
+    store
+        .retry_projection(
+            &retry_claim,
+            &ProjectionErrorEvidence {
+                code: "sqlite_busy".into(),
+                redacted_detail: "projection store was busy".into(),
+            },
+            200,
+            101,
+        )
+        .expect("retry projection");
+    assert!(
+        store
+            .claim_projection(CHAT_LIFECYCLE_PROJECTION, "projector", 1, 199)
+            .expect("early claim")
+            .is_none()
+    );
+    let due = store
+        .claim_projection(CHAT_LIFECYCLE_PROJECTION, "projector", 1, 200)
+        .expect("due claim")
+        .expect("retry is due");
+    let receipt = local_first_execution_protocol::EffectReceiptRef::from_store_id(
+        "11111111111111111111111111111111",
+    )
+    .expect("receipt ref");
+    store
+        .block_projection(&due, &receipt, 201)
+        .expect("block projection");
+    assert!(
+        store
+            .claim_projection(CHAT_LIFECYCLE_PROJECTION, "projector", 2, i64::MAX)
+            .expect("blocked claim")
+            .is_none()
+    );
 }
