@@ -35250,51 +35250,145 @@ async fn telegram_send_with_rebind(
     channel_send(state, TELEGRAM_HTTP_PORT, recipient, text).await
 }
 
-/// Turn-completion hook: if `thread_id` is a channel conversation (has a stored recipient),
-/// mirror the CLEAN assistant answer out to that channel. This is the OUTPUT half of the
-/// channel-as-adapter convergence — the canonical turn runs through the broker/engine (island /
-/// turn_events / persistence for free) and its reply is ADDITIONALLY sent to the contact.
-/// No-op for non-channel threads and empty answers. Called from `execute_chat_turn_task`.
+fn channel_reply_receipt(
+    contract: &local_first_execution_protocol::ValidatedExecutionContract,
+    channel: &str,
+    recipient: &str,
+    answer: &str,
+) -> Result<local_first_task_runtime::NewExecutionEffectReceipt, String> {
+    let contract = contract.as_ref();
+    let operation = format!("channel.{channel}.reply");
+    let logical_call_id = format!("projection_revision_{}", contract.revision);
+    let (idempotency_key, receipt_ref) =
+        effect_receipt_identity(&contract.execution_id, &operation, &logical_call_id)?;
+    let arguments = canonical_json(serde_json::json!({
+        "channel": channel,
+        "recipient": recipient,
+        "answer": answer,
+    }));
+    let arguments_hash = format!(
+        "{:x}",
+        Sha256::digest(
+            serde_json::to_vec(&arguments)
+                .map_err(|error| format!("channel receipt arguments failed: {error}"))?
+        )
+    );
+    Ok(local_first_task_runtime::NewExecutionEffectReceipt {
+        receipt_ref,
+        execution_id: contract.execution_id.clone(),
+        revision: contract.revision,
+        idempotency_key,
+        run_id: None,
+        thread_id: contract.scope.thread_id.clone(),
+        user_id: contract.scope.user_id.clone(),
+        workspace_id: contract.scope.workspace_id.clone(),
+        effect_class: local_first_execution_protocol::EffectClass::ExternalWrite,
+        operation,
+        arguments_hash,
+        compensation: None,
+    })
+}
+
+/// Turn-completion hook for a channel conversation. The external send is guarded by
+/// a durable effect receipt so projection replay never repeats an uncertain delivery.
 pub(crate) async fn mirror_reply_to_channel_if_any(
     state: &AppState,
+    contract: &local_first_execution_protocol::ValidatedExecutionContract,
     thread_id: &str,
     answer: &str,
-) {
+) -> Result<Option<serde_json::Value>, String> {
     let answer = answer.trim();
     if answer.is_empty() {
-        return;
+        return Ok(None);
     }
-    let Some(thread) = lock_store(state)
-        .ok()
-        .and_then(|s| s.thread(thread_id).ok().flatten())
-    else {
-        return;
+    let thread = lock_store(state)
+        .map_err(|error| error.message)?
+        .thread(thread_id)
+        .map_err(|error| format!("channel thread lookup failed: {error}"))?;
+    let Some(thread) = thread else {
+        return Ok(None);
     };
     let recipient = match thread.channel_recipient.as_deref().map(str::trim) {
         Some(r) if !r.is_empty() => r.to_string(),
-        _ => return,
+        _ => return Ok(None),
     };
     let channel = match thread.source.as_deref() {
-        Some("telegram") => {
-            match telegram_send_with_rebind(state, &recipient, answer).await {
-                Ok(()) => eprintln!("channel/telegram: reply mirrored to {recipient}"),
-                Err(error) => {
-                    eprintln!("channel/telegram: reply mirror FAILED to {recipient}: {error}")
-                }
-            }
-            "telegram"
-        }
-        Some("whatsapp") => {
-            match channel_send(state, WHATSAPP_HTTP_PORT, &recipient, answer).await {
-                Ok(()) => eprintln!("channel/whatsapp: reply mirrored to {recipient}"),
-                Err(error) => {
-                    eprintln!("channel/whatsapp: reply mirror FAILED to {recipient}: {error}")
-                }
-            }
-            "whatsapp"
-        }
-        _ => return, // not a sendable channel thread
+        Some("telegram") => "telegram",
+        Some("whatsapp") => "whatsapp",
+        _ => return Ok(None),
     };
+    let new_receipt = channel_reply_receipt(contract, channel, &recipient, answer)?;
+    let receipt_ref = new_receipt.receipt_ref.clone();
+    let claim = {
+        let store = state
+            .task_store
+            .lock()
+            .map_err(|error| format!("channel receipt store unavailable: {error}"))?;
+        store
+            .prepare_effect_receipt(&new_receipt)
+            .map_err(|error| format!("channel receipt prepare failed: {error}"))?;
+        store
+            .claim_effect_receipt(&receipt_ref)
+            .map_err(|error| format!("channel receipt claim failed: {error}"))?
+    };
+    match claim {
+        local_first_task_runtime::EffectReceiptClaim::Replay(_) => {
+            return Ok(Some(serde_json::json!({
+                "receipt_ref": receipt_ref.as_ref(),
+                "channel": channel,
+                "status": "completed",
+            })));
+        }
+        local_first_task_runtime::EffectReceiptClaim::Resolve(_) => {
+            return Ok(Some(serde_json::json!({
+                "receipt_ref": receipt_ref.as_ref(),
+                "channel": channel,
+                "status": "uncertain",
+            })));
+        }
+        local_first_task_runtime::EffectReceiptClaim::Execute(_) => {}
+    }
+
+    let send_result = match channel {
+        "telegram" => telegram_send_with_rebind(state, &recipient, answer).await,
+        "whatsapp" => channel_send(state, WHATSAPP_HTTP_PORT, &recipient, answer).await,
+        _ => unreachable!("channel was validated before receipt preparation"),
+    };
+    if let Err(error) = send_result {
+        let status = state
+            .task_store
+            .lock()
+            .map_err(|lock_error| format!("channel receipt store unavailable: {lock_error}"))?
+            .claim_effect_receipt(&receipt_ref)
+            .map_err(|claim_error| format!("channel receipt uncertainty failed: {claim_error}"))?;
+        if !matches!(
+            status,
+            local_first_task_runtime::EffectReceiptClaim::Resolve(_)
+        ) {
+            return Err("failed channel send did not become uncertain".to_string());
+        }
+        eprintln!(
+            "channel/{channel}: reply delivery uncertain for {}: {}",
+            receipt_ref.as_ref(),
+            redact_sensitive_text(&error)
+        );
+        return Ok(Some(serde_json::json!({
+            "receipt_ref": receipt_ref.as_ref(),
+            "channel": channel,
+            "status": "uncertain",
+        })));
+    }
+    state
+        .task_store
+        .lock()
+        .map_err(|error| format!("channel receipt store unavailable: {error}"))?
+        .complete_effect_receipt(
+            &receipt_ref,
+            &serde_json::json!({"delivered": true}),
+            &serde_json::json!({"channel": channel}),
+        )
+        .map_err(|error| format!("channel receipt completion failed: {error}"))?;
+    eprintln!("channel/{channel}: reply mirrored to {recipient}");
     // Nudge the app: a BACKGROUND channel turn isn't streamed to this client, so without this
     // event the open thread's messages + working-island projection never refresh (they only
     // re-fetch on thread-switch / a streamed turn end). This is what re-populates the island.
@@ -35304,6 +35398,11 @@ pub(crate) async fn mirror_reply_to_channel_if_any(
         "workspace": base_workspace_id(),
         "channel": channel,
     }));
+    Ok(Some(serde_json::json!({
+        "receipt_ref": receipt_ref.as_ref(),
+        "channel": channel,
+        "status": "completed",
+    })))
 }
 
 /// Resolve a thread's outbound channel endpoint (sidecar port + recipient), or `None` when the
@@ -68237,6 +68336,72 @@ prs.save(Path({path:?}))
         assert_eq!(first_ref, replayed_ref);
         assert_ne!(second_key, "connector.send:call-1");
         assert_ne!(second_ref, replayed_ref);
+    }
+
+    #[tokio::test]
+    async fn channel_projection_replays_completed_receipt_without_sending_again() {
+        let state = super::AppState::for_tests();
+        let thread = {
+            let store = state.chat_store.lock().expect("chat store");
+            let thread = store
+                .find_or_create_channel_thread(
+                    "workspace-1",
+                    "telegram",
+                    "sender-1",
+                    "Telegram sender",
+                )
+                .expect("channel thread");
+            store
+                .set_channel_thread_recipient(&thread.thread_id, "recipient-1")
+                .expect("channel recipient");
+            thread
+        };
+        let contract: local_first_execution_protocol::ValidatedExecutionContract =
+            local_first_execution_protocol::ExecutionContract::new(
+                "turn-channel-replay-1",
+                "chat_turn",
+                local_first_execution_protocol::ExecutionScope {
+                    user_id: "user-1".to_string(),
+                    workspace_id: "workspace-1".to_string(),
+                    thread_id: Some(thread.thread_id.clone()),
+                },
+                serde_json::json!({}),
+            )
+            .try_into()
+            .expect("contract");
+        let receipt =
+            super::channel_reply_receipt(&contract, "telegram", "recipient-1", "Delivered answer")
+                .expect("channel receipt");
+        {
+            let store = state.task_store.lock().expect("task store");
+            store.prepare_effect_receipt(&receipt).expect("prepare");
+            assert!(matches!(
+                store
+                    .claim_effect_receipt(&receipt.receipt_ref)
+                    .expect("claim"),
+                local_first_task_runtime::EffectReceiptClaim::Execute(_)
+            ));
+            store
+                .complete_effect_receipt(
+                    &receipt.receipt_ref,
+                    &serde_json::json!({"delivered": true}),
+                    &serde_json::json!({"channel": "telegram"}),
+                )
+                .expect("complete");
+        }
+
+        let delivery = super::mirror_reply_to_channel_if_any(
+            &state,
+            &contract,
+            &thread.thread_id,
+            "Delivered answer",
+        )
+        .await
+        .expect("replay completed delivery")
+        .expect("channel delivery");
+
+        assert_eq!(delivery["status"], "completed");
+        assert_eq!(delivery["receipt_ref"], receipt.receipt_ref.as_ref());
     }
 
     #[test]

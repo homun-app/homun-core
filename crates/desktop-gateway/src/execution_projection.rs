@@ -83,13 +83,17 @@ pub(crate) async fn project_chat_execution(
     project_objective(state, task, thread_id, &metadata, outcome)?;
     project_human_wait(state, thread_id, assistant_message_id, &metadata, outcome).await?;
 
-    if let ExecutionOutcome::Completed { .. } = outcome {
+    let channel_delivery = if let ExecutionOutcome::Completed { .. } = outcome {
         let answer = metadata
             .get("answer")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
-        crate::mirror_reply_to_channel_if_any(state, thread_id, answer).await;
-    }
+        crate::mirror_reply_to_channel_if_any(state, contract, thread_id, answer)
+            .await
+            .map_err(projection_error)?
+    } else {
+        None
+    };
 
     let (wake_kind, scoped_ref) = match outcome {
         ExecutionOutcome::Suspended { wake, .. } => wake_projection_fields(wake),
@@ -110,6 +114,7 @@ pub(crate) async fn project_chat_execution(
         "wake_kind": wake_kind,
         "scoped_ref": scoped_ref,
         "text": terminal_text,
+        "channel_delivery": channel_delivery,
     });
     let store = state.task_store.lock().map_err(projection_lock_error)?;
     crate::turn_executor::emit_turn_event(

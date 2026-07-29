@@ -260,6 +260,10 @@ conversazione e non il lavoro in corso.
 14. Una sospensione user non è proiettata finché payload HITL e `OpenWork` non sono
     persistiti. Errori di store, lock o serializzazione mantengono la proiezione
     pendente e rigiocabile; non sono convertiti in snapshot vuoti.
+15. La risposta verso Telegram/WhatsApp è un `external_write` con receipt legata alla
+    revisione di proiezione. Un replay riusa `Completed`; un invio interrotto diventa
+    `Uncertain` e non viene ripetuto implicitamente. L'evento terminale espone lo stato
+    `channel_delivery` e il riferimento alla receipt.
 
 ## Mapping oggi → contratto
 
