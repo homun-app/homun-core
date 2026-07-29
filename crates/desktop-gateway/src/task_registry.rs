@@ -49,7 +49,7 @@ fn pattern_matches(pattern: &str, task_kind: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::TaskExecutorRegistry;
-    use crate::execution_runtime::{AdapterExecution, GatewayExecutionAdapter};
+    use crate::execution_runtime::GatewayExecutionAdapter;
     use crate::{AppState, LocalTaskExecutionError};
     use local_first_execution_protocol::{ExecutionOutcome, ValidatedExecutionContract};
     use std::sync::Arc;
@@ -65,10 +65,8 @@ mod tests {
             &self,
             _state: &AppState,
             _contract: &ValidatedExecutionContract,
-        ) -> Result<AdapterExecution, LocalTaskExecutionError> {
-            Ok(AdapterExecution::canonical(ExecutionOutcome::completed(
-                serde_json::Value::Null,
-            )))
+        ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
+            Ok(ExecutionOutcome::completed(serde_json::Value::Null))
         }
     }
 

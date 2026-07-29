@@ -49,3 +49,26 @@ fn chat_dispatch_and_legacy_bridge_keep_one_terminal_owner() {
     assert!(!runtime.contains("persisted_task_status"));
     assert!(!runtime.contains("TaskStatus::Parked"));
 }
+
+#[test]
+fn every_gateway_adapter_returns_only_the_canonical_outcome() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let runtime = production_source(&root.join("src/execution_runtime.rs"));
+    let production = format!("{main}\n{runtime}");
+    let forbidden = [
+        "TaskExecutionOutcome",
+        "AdapterExecution::legacy",
+        "legacy_task_outcome_to_execution_outcome",
+        "into_compatibility",
+    ];
+
+    let violations = forbidden
+        .into_iter()
+        .filter(|pattern| production.contains(pattern))
+        .collect::<Vec<_>>();
+    assert!(
+        violations.is_empty(),
+        "non-chat adapters still expose a competing lifecycle contract: {violations:?}"
+    );
+}

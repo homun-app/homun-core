@@ -711,10 +711,8 @@ struct TaskExecutorStatusResponse {
     failure_count: u64,
 }
 
-struct TaskExecutionOutcome {
-    completed: bool,
-    blocked_reason: Option<String>,
-    wait_until: Option<OffsetDateTime>,
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct TaskExecutionPresentation {
     pending_approval: Option<PendingExecutorApproval>,
     summary: String,
     checkpoint_payload: Value,
@@ -734,12 +732,14 @@ struct TaskExecutionOutcome {
 /// Broker and proactive turns stream into a stable assistant bubble themselves;
 /// the runner must not append their outcome again. Other executors rely on the
 /// runner to materialize their chat result.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum TaskResultSurfacing {
     AppendToChat,
     AlreadyPersisted,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct PendingExecutorApproval {
     action: String,
     risk_level: String,
@@ -748,6 +748,7 @@ struct PendingExecutorApproval {
     inline_action_card: bool,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct TaskArtifactOutput {
     artifact_id: String,
     title: String,
@@ -10222,9 +10223,9 @@ fn record_subagent_task_step_outcome_memory(
     lifecycle: &MemoryLifecycleRequest,
     thread_id: Option<&str>,
     task: &TaskRecord,
-    outcome: &TaskExecutionOutcome,
+    outcome: &TaskExecutionPresentation,
 ) -> Result<Option<MemoryRef>, String> {
-    if !task.kind.starts_with("subagent.") || !outcome.completed {
+    if !task.kind.starts_with("subagent.") {
         return Ok(None);
     }
     let title = task
@@ -10266,7 +10267,7 @@ fn record_subagent_task_step_outcome_memory(
 fn record_subagent_task_step_outcome(
     state: &AppState,
     task: &TaskRecord,
-    outcome: &TaskExecutionOutcome,
+    outcome: &TaskExecutionPresentation,
 ) {
     let thread_id = lock_store(state)
         .ok()
@@ -41374,7 +41375,6 @@ fn run_next_task_once(
     }
     let canonical_projection = runtime_result.projection();
     let canonical_outcome = runtime_result.outcome().clone();
-    let compatibility = runtime_result.into_compatibility();
     if task.kind == "chat_turn" {
         let (status, message, stopped_reason) = match &canonical_outcome {
             local_first_execution_protocol::ExecutionOutcome::Completed { .. } => {
@@ -41407,11 +41407,12 @@ fn run_next_task_once(
             }],
         });
     }
-    let outcome = compatibility.ok_or_else(|| GatewayError {
-        status: StatusCode::BAD_GATEWAY,
-        code: "execution_compatibility_missing",
-        message: "Legacy execution adapter returned no compatibility result.".to_string(),
-    })?;
+    let outcome = execution_runtime::task_execution_presentation(state, &task, &canonical_outcome)
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "execution_presentation_invalid",
+            message: error.message,
+        })?;
 
     // Guard: if the lease was stolen during execution (recovery + re-acquire by
     // another worker), do NOT write the result. The task is now owned by the
@@ -41489,15 +41490,26 @@ fn run_next_task_once(
             Some(approval.explanation.clone()),
         )?;
     } else if canonical_projection.task_status == TaskStatus::WaitingTime {
-        let wait_until = outcome.wait_until.ok_or_else(|| GatewayError {
-            status: StatusCode::BAD_GATEWAY,
-            code: "execution_timer_projection_missing",
-            message: "Canonical timer suspension has no compatibility wake time.".to_string(),
-        })?;
-        let reason = outcome
-            .blocked_reason
-            .as_deref()
-            .unwrap_or("Task is waiting for its scheduled resume time.");
+        let wait_until = match &canonical_outcome {
+            local_first_execution_protocol::ExecutionOutcome::Suspended {
+                wake: local_first_execution_protocol::WakeCondition::At { unix_seconds },
+                ..
+            } => OffsetDateTime::from_unix_timestamp(*unix_seconds).map_err(|error| {
+                GatewayError {
+                    status: StatusCode::BAD_GATEWAY,
+                    code: "execution_timer_projection_invalid",
+                    message: error.to_string(),
+                }
+            })?,
+            _ => {
+                return Err(GatewayError {
+                    status: StatusCode::BAD_GATEWAY,
+                    code: "execution_timer_projection_missing",
+                    message: "WaitingTime projection has no canonical timer wake.".to_string(),
+                });
+            }
+        };
+        let reason = outcome.summary.as_str();
         mark_task_waiting_time(state, &mut task, wait_until, reason)?;
         sync_session_for_task_run(
             state,
@@ -41507,15 +41519,27 @@ fn run_next_task_once(
             Some(format!("Riprendo dopo {}: {reason}", wait_until)),
         )?;
     } else {
-        let reason = outcome
-            .blocked_reason
-            .as_deref()
-            .unwrap_or("The operational plan did not meet the success criteria.")
-            .to_string();
+        let reason = match &canonical_outcome {
+            local_first_execution_protocol::ExecutionOutcome::Failed { failure } => {
+                failure.redacted_detail.clone()
+            }
+            local_first_execution_protocol::ExecutionOutcome::Cancelled { .. } => {
+                "Task cancelled.".to_string()
+            }
+            _ => outcome.summary.clone(),
+        };
         // Blocked = didn't meet success criteria. Retry while attempts remain, else
         // mark terminal AND (if recurring) schedule the next occurrence so a single
         // failure never silently stops the automation; notify + record on terminal.
-        handle_failed_task_run(state, &mut task, false, &reason)?;
+        handle_failed_task_run(
+            state,
+            &mut task,
+            matches!(
+                canonical_outcome,
+                local_first_execution_protocol::ExecutionOutcome::Failed { .. }
+            ),
+            &reason,
+        )?;
         let retried = matches!(task.status, TaskStatus::Queued);
         sync_session_for_task_run(
             state,
@@ -41542,7 +41566,11 @@ fn run_next_task_once(
             "blocked".to_string()
         },
         completed: u32::from(canonical_projection.task_status == TaskStatus::Completed),
-        stopped_reason: outcome.blocked_reason.clone(),
+        stopped_reason: (!matches!(
+            canonical_outcome,
+            local_first_execution_protocol::ExecutionOutcome::Completed { .. }
+        ))
+        .then(|| outcome.summary.clone()),
         results: vec![TaskRunStepResponse {
             status: if canonical_projection.task_status == TaskStatus::Completed {
                 "completed".to_string()
@@ -42399,7 +42427,7 @@ fn append_task_result_to_chat(
 fn surface_task_execution_outcome(
     state: &AppState,
     task_id: &str,
-    outcome: &TaskExecutionOutcome,
+    outcome: &TaskExecutionPresentation,
 ) -> Result<(), GatewayError> {
     if outcome.result_surfacing == TaskResultSurfacing::AppendToChat {
         append_task_result_to_chat(state, task_id, &outcome.chat_message)?;
@@ -42410,7 +42438,7 @@ fn surface_task_execution_outcome(
 fn append_task_observation_to_session(
     state: &AppState,
     task: &TaskRecord,
-    outcome: &TaskExecutionOutcome,
+    outcome: &TaskExecutionPresentation,
 ) -> Result<(), GatewayError> {
     let thread = {
         let chat_store = lock_store(state)?;
@@ -42695,7 +42723,8 @@ fn start_proactive_visible_turn(
 fn execute_proactive_prompt_task(
     state: &AppState,
     task: &TaskRecord,
-) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+    contract: &local_first_execution_protocol::ValidatedExecutionContract,
+) -> Result<local_first_execution_protocol::ExecutionOutcome, LocalTaskExecutionError> {
     let goal = task.goal.clone();
     let thread_plan = proactive_thread_plan(task, &goal);
 
@@ -42820,10 +42849,7 @@ fn execute_proactive_prompt_task(
             "Scheduled task executed.".to_string()
         }
     });
-    Ok(TaskExecutionOutcome {
-        completed,
-        blocked_reason,
-        wait_until: None,
+    let presentation = TaskExecutionPresentation {
         pending_approval: waiting_for_user.then(|| PendingExecutorApproval {
             action: waiting_action
                 .clone()
@@ -42871,7 +42897,38 @@ fn execute_proactive_prompt_task(
         },
         event_payload: serde_json::json!({ "goal": goal }),
         artifacts: vec![],
-    })
+    };
+    if completed {
+        execution_runtime::complete_task_execution(state, task, presentation)
+    } else if waiting_for_user {
+        let action = waiting_action.as_deref().unwrap_or("action_card");
+        execution_runtime::suspend_task_execution(
+            state,
+            task,
+            contract,
+            local_first_execution_protocol::WakeCondition::Approval {
+                approval_ref: format!(
+                    "{}:{}:approval:{}",
+                    contract.as_ref().execution_id,
+                    contract.as_ref().revision,
+                    action
+                ),
+            },
+            presentation,
+        )
+    } else {
+        execution_runtime::fail_task_execution(
+            state,
+            task,
+            local_first_execution_protocol::ExecutionFailure::transient(
+                "proactive_prompt_incomplete",
+                incomplete_reason
+                    .as_deref()
+                    .unwrap_or("scheduled task stopped before completing"),
+            ),
+            presentation,
+        )
+    }
 }
 
 fn scheduled_thread_sender_for_task_id(task_id: &str) -> String {
@@ -42886,7 +42943,8 @@ fn scheduled_thread_title(goal: &str) -> String {
 fn execute_capability_browser_task(
     state: &AppState,
     task: &TaskRecord,
-) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+    contract: &local_first_execution_protocol::ValidatedExecutionContract,
+) -> Result<local_first_execution_protocol::ExecutionOutcome, LocalTaskExecutionError> {
     let payload: CapabilityTaskPayload =
         serde_json::from_value(task.input_json.clone()).map_err(|error| {
             LocalTaskExecutionError {
@@ -42921,7 +42979,9 @@ fn execute_capability_browser_task(
         execute_persistent_browser_capability(state, task, method, payload.call.arguments)?;
 
     task_execution_outcome_from_executor_result(
+        state,
         task,
+        contract,
         "browser-capability-executor",
         &payload.call.tool_name,
         result,
@@ -43235,12 +43295,14 @@ fn browser_capability_redacted_checkpoint(
 }
 
 /// Runs a `subagent.*` task through the real `SubagentTaskExecutor` (trait-based)
-/// and bridges its `ExecutorResult` into the gateway's `TaskExecutionOutcome`
+/// and maps its `ExecutorResult` into the canonical execution protocol.
 /// (ADR 0008 pillar #3 / GAP 4: de-stub the registered executors). The runner
 /// only needs the local LLM runtime.
 fn execute_subagent_task(
+    state: &AppState,
     task: &TaskRecord,
-) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+    contract: &local_first_execution_protocol::ValidatedExecutionContract,
+) -> Result<local_first_execution_protocol::ExecutionOutcome, LocalTaskExecutionError> {
     // Pick the model that best fits THIS task's goal: the semantic stage-2 router
     // (with heuristic fallback) over the "orchestrator" role.
     let goal = task
@@ -43260,9 +43322,15 @@ fn execute_subagent_task(
         .map_err(|error| LocalTaskExecutionError {
             message: format!("subagent executor failed: {error}"),
         })?;
-    // Reuse the existing ExecutorResult -> TaskExecutionOutcome bridge (the same
-    // one the browser capability path uses).
-    task_execution_outcome_from_executor_result(task, &executor_id, "subagent", result)
+    // Reuse the shared ExecutorResult presentation mapping used by browser capabilities.
+    task_execution_outcome_from_executor_result(
+        state,
+        task,
+        contract,
+        &executor_id,
+        "subagent",
+        result,
+    )
 }
 
 /// P2: executes a non-browser `capability.*` task by building a LIVE provider
@@ -43277,7 +43345,8 @@ fn execute_subagent_task(
 fn execute_capability_generic(
     state: &AppState,
     task: &TaskRecord,
-) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+    _contract: &local_first_execution_protocol::ValidatedExecutionContract,
+) -> Result<local_first_execution_protocol::ExecutionOutcome, LocalTaskExecutionError> {
     let payload: CapabilityTaskPayload =
         serde_json::from_value(task.input_json.clone()).map_err(|error| {
             LocalTaskExecutionError {
@@ -43362,7 +43431,15 @@ fn execute_capability_generic(
                 &provider_id,
                 call.tool_name.as_str(),
             ) {
-                return Ok(capability_call_failed_outcome(task, &reason));
+                return execution_runtime::fail_task_execution(
+                    state,
+                    task,
+                    local_first_execution_protocol::ExecutionFailure::policy_denied(
+                        "capability_policy_denied",
+                        &reason,
+                    ),
+                    capability_call_failed_outcome(task, &reason),
+                );
             }
             composio_execute_tool(state, call.tool_name.as_str(), &call.arguments)
                 .map(|output| local_first_capabilities::CapabilityCallResult {
@@ -43372,13 +43449,39 @@ fn execute_capability_generic(
                 })
                 .map_err(|error| CapabilityError::ToolExecutionFailed(error.message))
         }
-        other => return Ok(capability_kind_not_wired_outcome(task, other)),
+        other => {
+            let presentation = capability_kind_not_wired_outcome(task, other);
+            return execution_runtime::fail_task_execution(
+                state,
+                task,
+                local_first_execution_protocol::ExecutionFailure::permanent(
+                    "capability_provider_not_wired",
+                    &presentation.summary,
+                ),
+                presentation,
+            );
+        }
     };
 
-    Ok(match result {
-        Ok(call_result) => capability_call_completed_outcome(task, &call_result),
-        Err(error) => capability_call_failed_outcome(task, &error.to_string()),
-    })
+    match result {
+        Ok(call_result) => execution_runtime::complete_task_execution(
+            state,
+            task,
+            capability_call_completed_outcome(task, &call_result),
+        ),
+        Err(error) => {
+            let reason = error.to_string();
+            execution_runtime::fail_task_execution(
+                state,
+                task,
+                local_first_execution_protocol::ExecutionFailure::transient(
+                    "capability_call_failed",
+                    &reason,
+                ),
+                capability_call_failed_outcome(task, &reason),
+            )
+        }
+    }
 }
 
 /// Re-check the deny-by-default policy for a Managed (Composio) tool before AUTONOMOUS
@@ -43988,12 +44091,9 @@ async fn connect_mcp(
 fn capability_call_completed_outcome(
     _task: &TaskRecord,
     result: &local_first_capabilities::CapabilityCallResult,
-) -> TaskExecutionOutcome {
+) -> TaskExecutionPresentation {
     let summary = format!("Tool `{}` eseguito.", result.tool_name);
-    TaskExecutionOutcome {
-        completed: true,
-        blocked_reason: None,
-        wait_until: None,
+    TaskExecutionPresentation {
         pending_approval: None,
         summary: summary.clone(),
         // Raw output stays in the (audited, non-UI) checkpoint; the redacted
@@ -44027,11 +44127,8 @@ fn capability_call_completed_outcome(
     }
 }
 
-fn capability_call_failed_outcome(task: &TaskRecord, reason: &str) -> TaskExecutionOutcome {
-    TaskExecutionOutcome {
-        completed: false,
-        blocked_reason: Some(reason.to_string()),
-        wait_until: None,
+fn capability_call_failed_outcome(task: &TaskRecord, reason: &str) -> TaskExecutionPresentation {
+    TaskExecutionPresentation {
         pending_approval: None,
         summary: reason.to_string(),
         checkpoint_payload: serde_json::json!({
@@ -44058,7 +44155,7 @@ fn capability_call_failed_outcome(task: &TaskRecord, reason: &str) -> TaskExecut
 fn capability_kind_not_wired_outcome(
     task: &TaskRecord,
     kind: CapabilityProviderKind,
-) -> TaskExecutionOutcome {
+) -> TaskExecutionPresentation {
     let reason = format!(
         "Capability execution for provider kind {kind:?} not yet wired (MCP and Composio active)."
     );
@@ -49514,166 +49611,196 @@ async fn connect_composio(
 }
 
 fn task_execution_outcome_from_executor_result(
+    state: &AppState,
     task: &TaskRecord,
+    contract: &local_first_execution_protocol::ValidatedExecutionContract,
     executor_id: &str,
     tool_name: &str,
     result: ExecutorResult,
-) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+) -> Result<local_first_execution_protocol::ExecutionOutcome, LocalTaskExecutionError> {
     match result {
-        ExecutorResult::Completed { output } => Ok(completed_executor_outcome(
+        ExecutorResult::Completed { output } => execution_runtime::complete_task_execution(
+            state,
             task,
-            executor_id,
-            tool_name,
-            output,
-        )),
+            completed_executor_outcome(task, executor_id, tool_name, output),
+        ),
         ExecutorResult::Checkpoint {
             payload,
             redacted_payload,
         } => {
             let output = payload.clone();
-            let mut outcome = completed_executor_outcome(task, executor_id, tool_name, output);
-            outcome.checkpoint_payload = serde_json::json!({
+            let mut presentation = completed_executor_outcome(task, executor_id, tool_name, output);
+            presentation.checkpoint_payload = serde_json::json!({
                 "kind": "executor_completed",
                 "executor_id": executor_id,
                 "tool": tool_name,
                 "output": payload,
             });
-            outcome.checkpoint_redacted = serde_json::json!({
+            presentation.checkpoint_redacted = serde_json::json!({
                 "kind": "executor_completed",
                 "executor_id": executor_id,
                 "tool": tool_name,
                 "output": redacted_payload,
             });
-            Ok(outcome)
+            execution_runtime::complete_task_execution(state, task, presentation)
         }
         ExecutorResult::NeedsApproval {
             action,
             risk_level,
             data_boundary,
             explanation,
-        } => Ok(TaskExecutionOutcome {
-            completed: false,
-            blocked_reason: Some(explanation.clone()),
-            wait_until: None,
-            pending_approval: Some(PendingExecutorApproval {
-                action: action.clone(),
-                risk_level: risk_level.clone(),
-                data_boundary: data_boundary.clone(),
-                explanation: explanation.clone(),
-                inline_action_card: false,
-            }),
-            summary: "Task in attesa di approval.".to_string(),
-            checkpoint_payload: serde_json::json!({
-                "kind": "executor_needs_approval",
-                "executor_id": executor_id,
-                "tool": tool_name,
-                "approval": {
-                    "action": action,
-                    "risk_level": risk_level,
-                    "data_boundary": data_boundary,
-                    "explanation": explanation,
+        } => {
+            let presentation = TaskExecutionPresentation {
+                pending_approval: Some(PendingExecutorApproval {
+                    action: action.clone(),
+                    risk_level: risk_level.clone(),
+                    data_boundary: data_boundary.clone(),
+                    explanation: explanation.clone(),
+                    inline_action_card: false,
+                }),
+                summary: "Task in attesa di approval.".to_string(),
+                checkpoint_payload: serde_json::json!({
+                    "kind": "executor_needs_approval",
+                    "executor_id": executor_id,
+                    "tool": tool_name,
+                    "approval": {
+                        "action": action,
+                        "risk_level": risk_level,
+                        "data_boundary": data_boundary,
+                        "explanation": explanation,
+                    },
+                }),
+                checkpoint_redacted: serde_json::json!({
+                    "kind": "executor_needs_approval",
+                    "executor_id": executor_id,
+                    "tool": tool_name,
+                    "approval": {
+                        "action": action,
+                        "risk_level": risk_level,
+                        "data_boundary": data_boundary,
+                        "explanation": explanation,
+                    },
+                }),
+                chat_message: format!(
+                    "The task `{}` requires a new approval before continuing: {}",
+                    task.kind, explanation
+                ),
+                result_surfacing: TaskResultSurfacing::AppendToChat,
+                surface: SurfaceKind::Logs,
+                event_kind: "computer_executor_waiting_approval".to_string(),
+                event_title: "Approval required".to_string(),
+                event_subtitle: explanation,
+                event_payload: serde_json::json!({
+                    "executor_id": executor_id,
+                    "tool": tool_name,
+                }),
+                artifacts: vec![],
+            };
+            execution_runtime::suspend_task_execution(
+                state,
+                task,
+                contract,
+                local_first_execution_protocol::WakeCondition::Approval {
+                    approval_ref: format!(
+                        "{}:{}:approval:{}",
+                        contract.as_ref().execution_id,
+                        contract.as_ref().revision,
+                        action
+                    ),
                 },
-            }),
-            checkpoint_redacted: serde_json::json!({
-                "kind": "executor_needs_approval",
-                "executor_id": executor_id,
-                "tool": tool_name,
-                "approval": {
-                    "action": action,
-                    "risk_level": risk_level,
-                    "data_boundary": data_boundary,
-                    "explanation": explanation,
-                },
-            }),
-            chat_message: format!(
-                "The task `{}` requires a new approval before continuing: {}",
-                task.kind, explanation
-            ),
-            result_surfacing: TaskResultSurfacing::AppendToChat,
-            surface: SurfaceKind::Logs,
-            event_kind: "computer_executor_waiting_approval".to_string(),
-            event_title: "Approval required".to_string(),
-            event_subtitle: explanation,
-            event_payload: serde_json::json!({
-                "executor_id": executor_id,
-                "tool": tool_name,
-            }),
-            artifacts: vec![],
-        }),
-        ExecutorResult::WaitUntil { not_before, reason } => Ok(TaskExecutionOutcome {
-            completed: false,
-            blocked_reason: Some(reason.clone()),
-            wait_until: Some(not_before),
-            pending_approval: None,
-            summary: reason.clone(),
-            checkpoint_payload: serde_json::json!({
-                "kind": "executor_waiting_time",
-                "executor_id": executor_id,
-                "tool": tool_name,
-                "output": {
-                    "blocked_reason": reason,
+                presentation,
+            )
+        }
+        ExecutorResult::WaitUntil { not_before, reason } => {
+            let presentation = TaskExecutionPresentation {
+                pending_approval: None,
+                summary: reason.clone(),
+                checkpoint_payload: serde_json::json!({
+                    "kind": "executor_waiting_time",
+                    "executor_id": executor_id,
+                    "tool": tool_name,
+                    "output": {
+                        "blocked_reason": reason,
+                        "not_before": not_before.unix_timestamp(),
+                    },
+                }),
+                checkpoint_redacted: serde_json::json!({
+                    "kind": "executor_waiting_time",
+                    "executor_id": executor_id,
+                    "tool": tool_name,
+                    "output": {
+                        "blocked_reason": reason,
+                        "not_before": not_before.unix_timestamp(),
+                    },
+                }),
+                chat_message: format!(
+                    "The task `{}` is waiting until {}: {}",
+                    task.kind, not_before, reason
+                ),
+                result_surfacing: TaskResultSurfacing::AppendToChat,
+                surface: SurfaceKind::Logs,
+                event_kind: "computer_executor_waiting_time".to_string(),
+                event_title: "Task waiting".to_string(),
+                event_subtitle: reason.clone(),
+                event_payload: serde_json::json!({
+                    "executor_id": executor_id,
+                    "tool": tool_name,
                     "not_before": not_before.unix_timestamp(),
+                }),
+                artifacts: vec![],
+            };
+            execution_runtime::suspend_task_execution(
+                state,
+                task,
+                contract,
+                local_first_execution_protocol::WakeCondition::At {
+                    unix_seconds: not_before.unix_timestamp(),
                 },
-            }),
-            checkpoint_redacted: serde_json::json!({
-                "kind": "executor_waiting_time",
-                "executor_id": executor_id,
-                "tool": tool_name,
-                "output": {
-                    "blocked_reason": reason,
-                    "not_before": not_before.unix_timestamp(),
-                },
-            }),
-            chat_message: format!(
-                "The task `{}` is waiting until {}: {}",
-                task.kind, not_before, reason
-            ),
-            result_surfacing: TaskResultSurfacing::AppendToChat,
-            surface: SurfaceKind::Logs,
-            event_kind: "computer_executor_waiting_time".to_string(),
-            event_title: "Task waiting".to_string(),
-            event_subtitle: reason,
-            event_payload: serde_json::json!({
-                "executor_id": executor_id,
-                "tool": tool_name,
-                "not_before": not_before.unix_timestamp(),
-            }),
-            artifacts: vec![],
-        }),
-        ExecutorResult::RetryableFailure { reason } => Ok(TaskExecutionOutcome {
-            completed: false,
-            blocked_reason: Some(reason.clone()),
-            wait_until: None,
-            pending_approval: None,
-            summary: reason.clone(),
-            checkpoint_payload: serde_json::json!({
-                "kind": "executor_blocked",
-                "executor_id": executor_id,
-                "tool": tool_name,
-                "output": {
-                    "blocked_reason": reason,
-                },
-            }),
-            checkpoint_redacted: serde_json::json!({
-                "kind": "executor_blocked",
-                "executor_id": executor_id,
-                "tool": tool_name,
-                "output": {
-                    "blocked_reason": reason,
-                },
-            }),
-            chat_message: format!("The task `{}` is blocked: {}", task.kind, reason),
-            result_surfacing: TaskResultSurfacing::AppendToChat,
-            surface: SurfaceKind::Logs,
-            event_kind: "computer_executor_blocked".to_string(),
-            event_title: "Task blocked".to_string(),
-            event_subtitle: reason,
-            event_payload: serde_json::json!({
-                "executor_id": executor_id,
-                "tool": tool_name,
-            }),
-            artifacts: vec![],
-        }),
+                presentation,
+            )
+        }
+        ExecutorResult::RetryableFailure { reason } => {
+            let presentation = TaskExecutionPresentation {
+                pending_approval: None,
+                summary: reason.clone(),
+                checkpoint_payload: serde_json::json!({
+                    "kind": "executor_blocked",
+                    "executor_id": executor_id,
+                    "tool": tool_name,
+                    "output": {
+                        "blocked_reason": reason,
+                    },
+                }),
+                checkpoint_redacted: serde_json::json!({
+                    "kind": "executor_blocked",
+                    "executor_id": executor_id,
+                    "tool": tool_name,
+                    "output": {
+                        "blocked_reason": reason,
+                    },
+                }),
+                chat_message: format!("The task `{}` is blocked: {}", task.kind, reason),
+                result_surfacing: TaskResultSurfacing::AppendToChat,
+                surface: SurfaceKind::Logs,
+                event_kind: "computer_executor_blocked".to_string(),
+                event_title: "Task blocked".to_string(),
+                event_subtitle: reason.clone(),
+                event_payload: serde_json::json!({
+                    "executor_id": executor_id,
+                    "tool": tool_name,
+                }),
+                artifacts: vec![],
+            };
+            execution_runtime::fail_task_execution(
+                state,
+                task,
+                local_first_execution_protocol::ExecutionFailure::transient(
+                    "executor_retryable_failure",
+                    &reason,
+                ),
+                presentation,
+            )
+        }
     }
 }
 
@@ -49682,11 +49809,8 @@ fn completed_executor_outcome(
     executor_id: &str,
     tool_name: &str,
     output: Value,
-) -> TaskExecutionOutcome {
-    TaskExecutionOutcome {
-        completed: true,
-        blocked_reason: None,
-        wait_until: None,
+) -> TaskExecutionPresentation {
+    TaskExecutionPresentation {
         pending_approval: None,
         summary: format!("Executor `{executor_id}` completed."),
         checkpoint_payload: serde_json::json!({
@@ -49806,31 +49930,30 @@ fn redact_json_for_task_output(output: &Value) -> Value {
 }
 
 fn execute_local_read_only_task(
+    state: &AppState,
     task: &TaskRecord,
-) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+) -> Result<local_first_execution_protocol::ExecutionOutcome, LocalTaskExecutionError> {
     if let Some(answer) = evaluate_simple_arithmetic(&task.goal) {
-        return Ok(TaskExecutionOutcome {
-            completed: true,
-            blocked_reason: None,
-            wait_until: None,
-            pending_approval: None,
-            summary: format!("Calculation completed: {answer}"),
-            checkpoint_payload: serde_json::json!({ "kind": "calculation", "answer": answer }),
-            checkpoint_redacted: serde_json::json!({ "kind": "calculation", "answer": answer }),
-            chat_message: format!("The result is **{answer}**."),
-            result_surfacing: TaskResultSurfacing::AppendToChat,
-            surface: SurfaceKind::Logs,
-            event_kind: "computer_calculation_completed".to_string(),
-            event_title: "Local calculation completed".to_string(),
-            event_subtitle: "Result calculated without external tools.".to_string(),
-            event_payload: serde_json::json!({ "answer": answer }),
-            artifacts: vec![],
-        });
+        return execution_runtime::complete_task_execution(
+            state,
+            task,
+            TaskExecutionPresentation {
+                pending_approval: None,
+                summary: format!("Calculation completed: {answer}"),
+                checkpoint_payload: serde_json::json!({ "kind": "calculation", "answer": answer }),
+                checkpoint_redacted: serde_json::json!({ "kind": "calculation", "answer": answer }),
+                chat_message: format!("The result is **{answer}**."),
+                result_surfacing: TaskResultSurfacing::AppendToChat,
+                surface: SurfaceKind::Logs,
+                event_kind: "computer_calculation_completed".to_string(),
+                event_title: "Local calculation completed".to_string(),
+                event_subtitle: "Result calculated without external tools.".to_string(),
+                event_payload: serde_json::json!({ "answer": answer }),
+                artifacts: vec![],
+            },
+        );
     }
-    Ok(TaskExecutionOutcome {
-        completed: true,
-        blocked_reason: None,
-        wait_until: None,
+    execution_runtime::complete_task_execution(state, task, TaskExecutionPresentation {
         pending_approval: None,
         summary: "Local task read and completed without external actions.".to_string(),
         checkpoint_payload: serde_json::json!({ "kind": "local_read_only", "goal": task.goal }),
@@ -49847,8 +49970,9 @@ fn execute_local_read_only_task(
 }
 
 fn execute_shell_read_only_task(
+    state: &AppState,
     task: &TaskRecord,
-) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+) -> Result<local_first_execution_protocol::ExecutionOutcome, LocalTaskExecutionError> {
     let normalized = task.goal.to_lowercase();
     let output = if normalized.contains("ora")
         || normalized.contains("orario")
@@ -49861,26 +49985,27 @@ fn execute_shell_read_only_task(
             message: "The shell task does not contain an allowed read-only command.".to_string(),
         })
     }?;
-    Ok(TaskExecutionOutcome {
-        completed: true,
-        blocked_reason: None,
-        wait_until: None,
-        pending_approval: None,
-        summary: "Read-only shell command completed.".to_string(),
-        checkpoint_payload: serde_json::json!({ "kind": "shell_read_only", "command": "date", "output": output }),
-        checkpoint_redacted: serde_json::json!({ "kind": "shell_read_only", "command": "date", "output": output }),
-        chat_message: format!(
-            "I ran a local read-only check:\n\n```text\n{}\n```",
-            output.trim()
-        ),
-        result_surfacing: TaskResultSurfacing::AppendToChat,
-        surface: SurfaceKind::Shell,
-        event_kind: "computer_terminal_output".to_string(),
-        event_title: "Terminal output".to_string(),
-        event_subtitle: "Read-only command completed.".to_string(),
-        event_payload: serde_json::json!({ "command": "date", "output": output }),
-        artifacts: vec![],
-    })
+    execution_runtime::complete_task_execution(
+        state,
+        task,
+        TaskExecutionPresentation {
+            pending_approval: None,
+            summary: "Read-only shell command completed.".to_string(),
+            checkpoint_payload: serde_json::json!({ "kind": "shell_read_only", "command": "date", "output": output }),
+            checkpoint_redacted: serde_json::json!({ "kind": "shell_read_only", "command": "date", "output": output }),
+            chat_message: format!(
+                "I ran a local read-only check:\n\n```text\n{}\n```",
+                output.trim()
+            ),
+            result_surfacing: TaskResultSurfacing::AppendToChat,
+            surface: SurfaceKind::Shell,
+            event_kind: "computer_terminal_output".to_string(),
+            event_title: "Terminal output".to_string(),
+            event_subtitle: "Read-only command completed.".to_string(),
+            event_payload: serde_json::json!({ "command": "date", "output": output }),
+            artifacts: vec![],
+        },
+    )
 }
 
 fn run_read_only_command(command: &str, args: &[&str]) -> Result<String, LocalTaskExecutionError> {
@@ -76901,10 +77026,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 "contract": "SubagentReview",
             }),
         );
-        let outcome = super::TaskExecutionOutcome {
-            completed: true,
-            blocked_reason: None,
-            wait_until: None,
+        let outcome = super::TaskExecutionPresentation {
             pending_approval: None,
             summary: "Review complete".to_string(),
             checkpoint_payload: serde_json::json!({"raw": "hidden"}),
@@ -80945,7 +81067,6 @@ data: [DONE]\n";
             output: serde_json::json!({ "contents": "SECRET-CONTENTS" }),
         };
         let outcome = capability_call_completed_outcome(&task, &result);
-        assert!(outcome.completed);
         // Raw output is preserved in the audited checkpoint...
         assert_eq!(
             outcome.checkpoint_payload["output"]["contents"],
@@ -81339,7 +81460,8 @@ data: [DONE]\n";
 
     #[test]
     fn executor_needs_approval_is_not_treated_as_generic_block() {
-        let task = TaskRecord::new(
+        let state = AppState::for_tests();
+        let mut task = TaskRecord::new(
             "task_approval",
             UserId::new("user"),
             WorkspaceId::new("workspace"),
@@ -81347,9 +81469,16 @@ data: [DONE]\n";
             "Click a protected browser control",
             serde_json::json!({}),
         );
+        task.status = TaskStatus::Running;
+        task.lease_owner = Some("test-worker".to_string());
+        task.last_heartbeat_at = Some(super::OffsetDateTime::now_utc());
+        state.task_store.lock().unwrap().insert_task(&task).unwrap();
+        let contract = super::execution_runtime::contract_for_acquired_task(&task).unwrap();
 
         let outcome = task_execution_outcome_from_executor_result(
+            &state,
             &task,
+            &contract,
             "browser-capability-executor",
             "browser.act",
             ExecutorResult::NeedsApproval {
@@ -81361,15 +81490,23 @@ data: [DONE]\n";
         )
         .unwrap();
 
-        let pending = outcome
+        assert!(matches!(
+            &outcome,
+            local_first_execution_protocol::ExecutionOutcome::Suspended {
+                wake: local_first_execution_protocol::WakeCondition::Approval { .. },
+                ..
+            }
+        ));
+        let presentation =
+            super::execution_runtime::task_execution_presentation(&state, &task, &outcome).unwrap();
+        let pending = presentation
             .pending_approval
             .as_ref()
             .expect("executor approval should be preserved");
-        assert!(!outcome.completed);
         assert_eq!(pending.action, "browser.manual_action");
         assert_eq!(pending.data_boundary, "local_browser");
         assert_eq!(
-            outcome.checkpoint_payload["kind"],
+            presentation.checkpoint_payload["kind"],
             "executor_needs_approval"
         );
     }
@@ -83892,10 +84029,7 @@ data: [DONE]\n";
                 .unwrap();
         }
 
-        let outcome = super::TaskExecutionOutcome {
-            completed: false,
-            blocked_reason: Some("scheduled task is waiting for a user action".to_string()),
-            wait_until: None,
+        let outcome = super::TaskExecutionPresentation {
             pending_approval: None,
             summary: "Scheduled task is waiting for a user action.".to_string(),
             checkpoint_payload: serde_json::json!({}),
@@ -84029,7 +84163,8 @@ data: [DONE]\n";
 
     #[test]
     fn executor_wait_until_outcome_preserves_scheduled_resume() {
-        let task = TaskRecord::new(
+        let state = AppState::for_tests();
+        let mut task = TaskRecord::new(
             "wait-until-task",
             UserId::new("user_test"),
             WorkspaceId::new("workspace_test"),
@@ -84037,10 +84172,17 @@ data: [DONE]\n";
             "wait for scheduled availability",
             serde_json::json!({}),
         );
+        task.status = TaskStatus::Running;
+        task.lease_owner = Some("test-worker".to_string());
+        task.last_heartbeat_at = Some(super::OffsetDateTime::now_utc());
+        state.task_store.lock().unwrap().insert_task(&task).unwrap();
+        let contract = super::execution_runtime::contract_for_acquired_task(&task).unwrap();
         let not_before = super::OffsetDateTime::from_unix_timestamp(1_800_000_000).unwrap();
 
         let outcome = super::task_execution_outcome_from_executor_result(
+            &state,
             &task,
+            &contract,
             "executor-test",
             "wait_tool",
             ExecutorResult::WaitUntil {
@@ -84050,26 +84192,34 @@ data: [DONE]\n";
         )
         .unwrap();
 
-        assert!(!outcome.completed);
+        assert!(matches!(
+            &outcome,
+            local_first_execution_protocol::ExecutionOutcome::Suspended {
+                wake: local_first_execution_protocol::WakeCondition::At { unix_seconds },
+                ..
+            } if *unix_seconds == not_before.unix_timestamp()
+        ));
+        let presentation =
+            super::execution_runtime::task_execution_presentation(&state, &task, &outcome).unwrap();
         assert_eq!(
-            outcome.blocked_reason.as_deref(),
-            Some("remote system asked us to retry later")
+            presentation.summary,
+            "remote system asked us to retry later"
         );
         assert_eq!(
-            outcome
+            presentation
                 .checkpoint_payload
                 .get("kind")
                 .and_then(|v| v.as_str()),
             Some("executor_waiting_time")
         );
         assert_eq!(
-            outcome
+            presentation
                 .checkpoint_payload
                 .pointer("/output/not_before")
                 .and_then(|v| v.as_i64()),
             Some(not_before.unix_timestamp())
         );
-        assert_eq!(outcome.event_kind, "computer_executor_waiting_time");
+        assert_eq!(presentation.event_kind, "computer_executor_waiting_time");
     }
 
     #[test]

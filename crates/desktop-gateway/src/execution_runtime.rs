@@ -1,9 +1,9 @@
 use crate::task_registry::TaskExecutorRegistry;
 use crate::{
-    AppState, LocalTaskExecutionError, PendingExecutorApproval, SurfaceKind, TaskExecutionOutcome,
-    TaskRecord, TaskResultSurfacing, TaskStatus, execute_capability_browser_task,
-    execute_capability_generic, execute_local_read_only_task, execute_proactive_prompt_task,
-    execute_shell_read_only_task, execute_subagent_task,
+    AppState, LocalTaskExecutionError, PendingExecutorApproval, SurfaceKind,
+    TaskExecutionPresentation, TaskRecord, TaskResultSurfacing, TaskStatus,
+    execute_capability_browser_task, execute_capability_generic, execute_local_read_only_task,
+    execute_proactive_prompt_task, execute_shell_read_only_task, execute_subagent_task,
 };
 use local_first_execution_protocol::{
     ApprovalPolicy, CancelReason, CheckpointDataRef, CheckpointEnvelope, DurableDataRef,
@@ -27,33 +27,11 @@ pub(crate) trait GatewayExecutionAdapter: Send + Sync {
         &self,
         state: &AppState,
         contract: &ValidatedExecutionContract,
-    ) -> Result<AdapterExecution, LocalTaskExecutionError>;
-}
-
-pub(crate) struct AdapterExecution {
-    canonical: Option<ExecutionOutcome>,
-    compatibility: Option<TaskExecutionOutcome>,
-}
-
-impl AdapterExecution {
-    pub(crate) fn canonical(outcome: ExecutionOutcome) -> Self {
-        Self {
-            canonical: Some(outcome),
-            compatibility: None,
-        }
-    }
-
-    fn legacy(outcome: TaskExecutionOutcome) -> Self {
-        Self {
-            canonical: None,
-            compatibility: Some(outcome),
-        }
-    }
+    ) -> Result<ExecutionOutcome, LocalTaskExecutionError>;
 }
 
 pub(crate) struct ExecutionRuntimeResult {
     execution_id: String,
-    compatibility: Option<TaskExecutionOutcome>,
     projection: ExecutionProjection,
     outcome: ExecutionOutcome,
 }
@@ -61,10 +39,6 @@ pub(crate) struct ExecutionRuntimeResult {
 impl ExecutionRuntimeResult {
     pub(crate) fn execution_id(&self) -> &str {
         &self.execution_id
-    }
-
-    pub(crate) fn into_compatibility(self) -> Option<TaskExecutionOutcome> {
-        self.compatibility
     }
 
     pub(crate) fn projection(&self) -> ExecutionProjection {
@@ -187,11 +161,14 @@ impl ExecutionRuntime {
             tokio::task::spawn_blocking(move || adapter.execute(&adapter_state, &adapter_contract))
                 .await
                 .map_err(|error| runtime_error(format!("execution adapter join error: {error}")));
-        let mut adapter_execution = match adapter_result {
-            Ok(Ok(execution)) => execution,
-            Ok(Err(error)) | Err(error) => {
-                AdapterExecution::legacy(legacy_adapter_error_outcome(error))
-            }
+        let adapter_outcome = match adapter_result {
+            Ok(Ok(outcome)) => outcome,
+            Ok(Err(error)) | Err(error) => ExecutionOutcome::Failed {
+                failure: ExecutionFailure::transient(
+                    "execution_adapter_failed",
+                    crate::redact_sensitive_text(&error.message),
+                ),
+            },
         };
 
         let pre_checkpoint_task = current_task(state, &task)?;
@@ -200,23 +177,6 @@ impl ExecutionRuntime {
         {
             return Err(runtime_error(LEASE_LOST_MESSAGE));
         }
-
-        let persisted_checkpoint = if let Some(legacy) = adapter_execution.compatibility.as_ref() {
-            let store = state.task_store.lock().map_err(runtime_lock_error)?;
-            Some(
-                store
-                    .append_checkpoint(
-                        &task.task_id,
-                        &task.user_id,
-                        &task.workspace_id,
-                        legacy.checkpoint_payload.clone(),
-                        legacy.checkpoint_redacted.clone(),
-                    )
-                    .map_err(runtime_store_error)?,
-            )
-        } else {
-            None
-        };
 
         let pre_commit_task = current_task(state, &task)?;
         if pre_commit_task.status != TaskStatus::Cancelled
@@ -230,23 +190,10 @@ impl ExecutionRuntime {
             ExecutionOutcome::Cancelled {
                 reason: CancelReason::User,
             }
-        } else if let Some(outcome) = adapter_execution.canonical.take() {
-            outcome
         } else {
-            let legacy = adapter_execution
-                .compatibility
-                .as_ref()
-                .expect("adapter execution must contain canonical or compatibility output");
-            let checkpoint = persisted_checkpoint
-                .as_ref()
-                .expect("legacy adapter output always persists a checkpoint first");
-            legacy_task_outcome_to_execution_outcome(&task, &contract, legacy, checkpoint)?
+            adapter_outcome
         };
         let outcome = normalize_transient_failure(state, &task, &contract, outcome)?;
-        align_compatibility_with_canonical_outcome(
-            adapter_execution.compatibility.as_mut(),
-            &outcome,
-        );
         let validated = ValidatedExecutionOutcome::new(outcome, &contract)
             .map_err(|error| runtime_error(error.to_string()))?;
         {
@@ -269,7 +216,6 @@ impl ExecutionRuntime {
         let projection = ExecutionProjection::from_outcome(validated.as_ref());
         Ok(ExecutionRuntimeResult {
             execution_id: contract.as_ref().execution_id.clone(),
-            compatibility: adapter_execution.compatibility,
             projection,
             outcome: validated.as_ref().clone(),
         })
@@ -305,26 +251,30 @@ fn normalize_transient_failure(
         return Ok(ExecutionOutcome::Failed { failure });
     }
 
-    let checkpoint = state
-        .task_store
-        .lock()
-        .map_err(runtime_lock_error)?
-        .append_checkpoint(
-            &task.task_id,
-            &task.user_id,
-            &task.workspace_id,
-            json!({
-                "kind": "runtime_transient_failure",
-                "code": failure.code,
-                "detail": failure.redacted_detail,
-            }),
-            json!({
-                "kind": "runtime_transient_failure",
-                "code": failure.code,
-                "detail": failure.redacted_detail,
-            }),
-        )
-        .map_err(runtime_store_error)?;
+    let store = state.task_store.lock().map_err(runtime_lock_error)?;
+    let checkpoint = match store
+        .latest_checkpoint(&task.task_id, &task.user_id, &task.workspace_id)
+        .map_err(runtime_store_error)?
+    {
+        Some(checkpoint) => checkpoint,
+        None => store
+            .append_checkpoint(
+                &task.task_id,
+                &task.user_id,
+                &task.workspace_id,
+                json!({
+                    "kind": "runtime_transient_failure",
+                    "code": failure.code,
+                    "detail": failure.redacted_detail,
+                }),
+                json!({
+                    "kind": "runtime_transient_failure",
+                    "code": failure.code,
+                    "detail": failure.redacted_detail,
+                }),
+            )
+            .map_err(runtime_store_error)?,
+    };
     let record_ref = DurableDataRef::from_store_id(&checkpoint.checkpoint_id)
         .map_err(|error| runtime_error(error.to_string()))?;
     Ok(ExecutionOutcome::Suspended {
@@ -343,27 +293,6 @@ fn normalize_transient_failure(
             CheckpointDataRef::Redacted { record_ref },
         ),
     })
-}
-
-fn align_compatibility_with_canonical_outcome(
-    compatibility: Option<&mut TaskExecutionOutcome>,
-    outcome: &ExecutionOutcome,
-) {
-    let Some(compatibility) = compatibility else {
-        return;
-    };
-    match outcome {
-        ExecutionOutcome::Completed { .. } => compatibility.completed = true,
-        ExecutionOutcome::Suspended {
-            wake: WakeCondition::At { unix_seconds },
-            ..
-        } if compatibility.wait_until.is_none() => {
-            compatibility.wait_until = OffsetDateTime::from_unix_timestamp(*unix_seconds).ok();
-        }
-        ExecutionOutcome::Suspended { .. }
-        | ExecutionOutcome::Cancelled { .. }
-        | ExecutionOutcome::Failed { .. } => compatibility.completed = false,
-    }
 }
 
 pub(crate) fn is_lease_lost_error(error: &LocalTaskExecutionError) -> bool {
@@ -485,78 +414,69 @@ fn recovered_execution_result(
 ) -> ExecutionRuntimeResult {
     ExecutionRuntimeResult {
         execution_id: task.task_id.as_str().to_string(),
-        compatibility: (task.kind != "chat_turn")
-            .then(|| recovered_legacy_compatibility(task, outcome)),
         projection: ExecutionProjection::from_outcome(outcome),
         outcome: outcome.clone(),
     }
 }
 
-fn recovered_legacy_compatibility(
+pub(crate) fn task_execution_presentation(
+    state: &AppState,
     task: &TaskRecord,
     outcome: &ExecutionOutcome,
-) -> TaskExecutionOutcome {
-    let (completed, blocked_reason, wait_until, pending_approval, summary) = match outcome {
+) -> Result<TaskExecutionPresentation, LocalTaskExecutionError> {
+    if matches!(outcome, ExecutionOutcome::Cancelled { .. }) {
+        return Ok(default_task_presentation(task, outcome));
+    }
+    let checkpoint = state
+        .task_store
+        .lock()
+        .map_err(runtime_lock_error)?
+        .latest_checkpoint(&task.task_id, &task.user_id, &task.workspace_id)
+        .map_err(runtime_store_error)?;
+    if let Some(presentation) = checkpoint
+        .as_ref()
+        .and_then(|checkpoint| checkpoint.payload.get("presentation"))
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+    {
+        return Ok(presentation);
+    }
+    Ok(default_task_presentation(task, outcome))
+}
+
+fn default_task_presentation(
+    task: &TaskRecord,
+    outcome: &ExecutionOutcome,
+) -> TaskExecutionPresentation {
+    let (summary, pending_approval) = match outcome {
         ExecutionOutcome::Completed { output, .. } => (
-            true,
-            None,
-            None,
-            None,
             output
                 .get("summary")
                 .and_then(Value::as_str)
-                .unwrap_or("Execution already completed.")
+                .unwrap_or("Execution completed.")
                 .to_string(),
+            None,
         ),
-        ExecutionOutcome::Suspended { wake, .. } => match wake {
-            WakeCondition::At { unix_seconds } => (
-                false,
-                Some("Execution is waiting for its durable wake.".to_string()),
-                OffsetDateTime::from_unix_timestamp(*unix_seconds).ok(),
-                None,
-                "Execution already suspended.".to_string(),
-            ),
-            WakeCondition::Approval { approval_ref } => (
-                false,
-                Some("Execution is waiting for approval.".to_string()),
-                None,
-                Some(PendingExecutorApproval {
-                    action: approval_ref.clone(),
-                    risk_level: task.risk_level.clone(),
-                    data_boundary: "execution_contract".to_string(),
-                    explanation: "Execution is waiting for a previously registered approval."
-                        .to_string(),
-                    inline_action_card: false,
-                }),
-                "Execution already suspended for approval.".to_string(),
-            ),
-            _ => (
-                false,
-                Some("Execution is waiting for its durable wake.".to_string()),
-                None,
-                None,
-                "Execution already suspended.".to_string(),
-            ),
-        },
-        ExecutionOutcome::Cancelled { .. } => (
-            false,
-            Some("Execution was cancelled.".to_string()),
-            None,
-            None,
-            "Execution already cancelled.".to_string(),
+        ExecutionOutcome::Suspended {
+            wake: WakeCondition::Approval { approval_ref },
+            ..
+        } => (
+            "Execution is waiting for approval.".to_string(),
+            Some(PendingExecutorApproval {
+                action: approval_ref.clone(),
+                risk_level: task.risk_level.clone(),
+                data_boundary: "execution_contract".to_string(),
+                explanation: "Execution is waiting for a registered approval.".to_string(),
+                inline_action_card: false,
+            }),
         ),
-        ExecutionOutcome::Failed { failure } => (
-            false,
-            Some(failure.redacted_detail.clone()),
+        ExecutionOutcome::Suspended { .. } => (
+            "Execution is waiting for its durable wake.".to_string(),
             None,
-            None,
-            "Execution already failed.".to_string(),
         ),
+        ExecutionOutcome::Cancelled { .. } => ("Execution was cancelled.".to_string(), None),
+        ExecutionOutcome::Failed { failure } => (failure.redacted_detail.clone(), None),
     };
-    TaskExecutionOutcome {
-        completed,
-        blocked_reason,
-        wait_until,
+    TaskExecutionPresentation {
         pending_approval,
         summary: summary.clone(),
         checkpoint_payload: json!({"kind": "execution_recovered"}),
@@ -568,33 +488,6 @@ fn recovered_legacy_compatibility(
         event_title: "Execution recovered".to_string(),
         event_subtitle: "The canonical outcome was already committed.".to_string(),
         event_payload: json!({"execution_id": task.task_id.as_str()}),
-        artifacts: Vec::new(),
-    }
-}
-
-fn legacy_adapter_error_outcome(error: LocalTaskExecutionError) -> TaskExecutionOutcome {
-    let detail = crate::redact_sensitive_text(&error.message);
-    TaskExecutionOutcome {
-        completed: false,
-        blocked_reason: Some(detail.clone()),
-        wait_until: None,
-        pending_approval: None,
-        summary: detail.clone(),
-        checkpoint_payload: json!({
-            "kind": "legacy_adapter_error",
-            "detail": detail,
-        }),
-        checkpoint_redacted: json!({
-            "kind": "legacy_adapter_error",
-            "detail": detail,
-        }),
-        chat_message: detail.clone(),
-        result_surfacing: TaskResultSurfacing::AlreadyPersisted,
-        surface: SurfaceKind::Logs,
-        event_kind: "execution_adapter_failed".to_string(),
-        event_title: "Task execution failed".to_string(),
-        event_subtitle: detail.clone(),
-        event_payload: json!({"detail": detail}),
         artifacts: Vec::new(),
     }
 }
@@ -653,65 +546,96 @@ fn execution_policy_for_task(task: &TaskRecord) -> ExecutionPolicy {
     }
 }
 
-// Non-chat adapters still return the old shape while they migrate to canonical outcomes.
-fn legacy_task_outcome_to_execution_outcome(
+fn persist_task_execution_checkpoint(
+    state: &AppState,
     task: &TaskRecord,
+    presentation: &TaskExecutionPresentation,
+) -> Result<local_first_task_runtime::TaskCheckpoint, LocalTaskExecutionError> {
+    let mut redacted_presentation = presentation.clone();
+    redacted_presentation.checkpoint_payload = presentation.checkpoint_redacted.clone();
+    redacted_presentation.chat_message =
+        crate::redact_sensitive_text(&redacted_presentation.chat_message);
+    redacted_presentation.event_subtitle =
+        crate::redact_sensitive_text(&redacted_presentation.event_subtitle);
+    redacted_presentation.event_payload =
+        crate::agent_journal::redact_json_value(redacted_presentation.event_payload);
+    let payload = json!({
+        "schema_version": 1,
+        "kind": "gateway_task_execution",
+        "state": presentation.checkpoint_payload,
+        "presentation": presentation,
+    });
+    let redacted_payload = json!({
+        "schema_version": 1,
+        "kind": "gateway_task_execution",
+        "state": presentation.checkpoint_redacted,
+        "presentation": redacted_presentation,
+    });
+    state
+        .task_store
+        .lock()
+        .map_err(runtime_lock_error)?
+        .append_checkpoint(
+            &task.task_id,
+            &task.user_id,
+            &task.workspace_id,
+            payload,
+            redacted_payload,
+        )
+        .map_err(runtime_store_error)
+}
+
+fn checkpoint_envelope(
     contract: &ValidatedExecutionContract,
-    legacy: &TaskExecutionOutcome,
     checkpoint: &local_first_task_runtime::TaskCheckpoint,
-) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
-    if legacy.completed {
-        return Ok(ExecutionOutcome::completed(json!({
-            "summary": legacy.summary,
-            "checkpoint": legacy.checkpoint_redacted,
-        })));
-    }
-
-    let wake = if let Some(approval) = legacy.pending_approval.as_ref() {
-        WakeCondition::Approval {
-            approval_ref: format!(
-                "{}:{}:approval:{}",
-                contract.as_ref().execution_id,
-                contract.as_ref().revision,
-                approval.action
-            ),
-        }
-    } else if let Some(not_before) = legacy.wait_until {
-        WakeCondition::At {
-            unix_seconds: not_before.unix_timestamp(),
-        }
-    } else if task.attempt_count.saturating_add(1) < contract.as_ref().budget.max_attempts {
-        WakeCondition::At {
-            unix_seconds: OffsetDateTime::now_utc()
-                .saturating_add(time::Duration::seconds(
-                    contract.as_ref().budget.backoff_seconds,
-                ))
-                .unix_timestamp(),
-        }
-    } else {
-        return Ok(ExecutionOutcome::Failed {
-            failure: ExecutionFailure::permanent(
-                "legacy_task_incomplete",
-                legacy
-                    .blocked_reason
-                    .as_deref()
-                    .unwrap_or("legacy task did not produce a successful outcome"),
-            ),
-        });
-    };
-
+) -> Result<CheckpointEnvelope, LocalTaskExecutionError> {
     let record_ref = DurableDataRef::from_store_id(&checkpoint.checkpoint_id)
         .map_err(|error| runtime_error(error.to_string()))?;
+    Ok(CheckpointEnvelope::new(
+        contract.as_ref().execution_id.clone(),
+        contract.as_ref().revision,
+        contract.as_ref().kind.clone(),
+        1,
+        CheckpointDataRef::Redacted { record_ref },
+    ))
+}
+
+pub(crate) fn complete_task_execution(
+    state: &AppState,
+    task: &TaskRecord,
+    presentation: TaskExecutionPresentation,
+) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
+    let checkpoint = persist_task_execution_checkpoint(state, task, &presentation)?;
+    Ok(ExecutionOutcome::completed(json!({
+        "kind": "gateway_task_execution",
+        "summary": presentation.summary,
+        "checkpoint_id": checkpoint.checkpoint_id,
+        "result": presentation.checkpoint_redacted,
+    })))
+}
+
+pub(crate) fn suspend_task_execution(
+    state: &AppState,
+    task: &TaskRecord,
+    contract: &ValidatedExecutionContract,
+    wake: WakeCondition,
+    presentation: TaskExecutionPresentation,
+) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
+    let checkpoint = persist_task_execution_checkpoint(state, task, &presentation)?;
     Ok(ExecutionOutcome::Suspended {
         wake,
-        checkpoint: CheckpointEnvelope::new(
-            contract.as_ref().execution_id.clone(),
-            contract.as_ref().revision,
-            contract.as_ref().kind.clone(),
-            1,
-            CheckpointDataRef::Redacted { record_ref },
-        ),
+        checkpoint: checkpoint_envelope(contract, &checkpoint)?,
     })
+}
+
+pub(crate) fn fail_task_execution(
+    state: &AppState,
+    task: &TaskRecord,
+    failure: ExecutionFailure,
+    presentation: TaskExecutionPresentation,
+) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
+    persist_task_execution_checkpoint(state, task, &presentation)?;
+    Ok(ExecutionOutcome::Failed { failure })
 }
 
 fn runtime_store_error(error: TaskRuntimeError) -> LocalTaskExecutionError {
@@ -728,7 +652,7 @@ fn runtime_error(message: impl Into<String>) -> LocalTaskExecutionError {
     }
 }
 
-macro_rules! legacy_adapter {
+macro_rules! gateway_adapter {
     ($name:ident, $label:literal, $execute:expr) => {
         struct $name;
 
@@ -741,28 +665,30 @@ macro_rules! legacy_adapter {
                 &self,
                 state: &AppState,
                 contract: &ValidatedExecutionContract,
-            ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+            ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
                 let task = task_from_contract(contract)?;
-                ($execute)(state, &task).map(AdapterExecution::legacy)
+                ($execute)(state, &task, contract)
             }
         }
     };
 }
 
-legacy_adapter!(
+gateway_adapter!(
     CapabilityBrowserAdapter,
     "capability_browser",
-    |state, task| { execute_capability_browser_task(state, task) }
+    |state, task, contract| { execute_capability_browser_task(state, task, contract) }
 );
-legacy_adapter!(CapabilityAdapter, "capability", |state, task| {
-    execute_capability_generic(state, task)
+gateway_adapter!(CapabilityAdapter, "capability", |state, task, contract| {
+    execute_capability_generic(state, task, contract)
 });
-legacy_adapter!(SubagentAdapter, "subagent", |_state, task| {
-    execute_subagent_task(task)
+gateway_adapter!(SubagentAdapter, "subagent", |state, task, contract| {
+    execute_subagent_task(state, task, contract)
 });
-legacy_adapter!(ProactivePromptAdapter, "proactive_prompt", |state, task| {
-    execute_proactive_prompt_task(state, task)
-});
+gateway_adapter!(
+    ProactivePromptAdapter,
+    "proactive_prompt",
+    |state, task, contract| { execute_proactive_prompt_task(state, task, contract) }
+);
 struct ChatTurnAdapter;
 
 impl GatewayExecutionAdapter for ChatTurnAdapter {
@@ -774,7 +700,7 @@ impl GatewayExecutionAdapter for ChatTurnAdapter {
         &self,
         state: &AppState,
         contract: &ValidatedExecutionContract,
-    ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+    ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
         let task = task_from_contract(contract)?;
         let outcome = crate::turn_executor::execute_chat_turn_task(state, &task, contract)
             .unwrap_or_else(|error| ExecutionOutcome::Failed {
@@ -783,22 +709,26 @@ impl GatewayExecutionAdapter for ChatTurnAdapter {
                     crate::redact_sensitive_text(&error.message),
                 ),
             });
-        Ok(AdapterExecution::canonical(outcome))
+        Ok(outcome)
     }
 }
-legacy_adapter!(LegacyShellAdapter, "legacy_shell", |_state, task| {
-    execute_shell_read_only_task(task)
-});
-legacy_adapter!(LegacyLocalAdapter, "legacy_local", |_state, task| {
-    execute_local_read_only_task(task)
-});
+gateway_adapter!(
+    LegacyShellAdapter,
+    "legacy_shell",
+    |state, task, _contract| { execute_shell_read_only_task(state, task) }
+);
+gateway_adapter!(
+    LegacyLocalAdapter,
+    "legacy_local",
+    |state, task, _contract| { execute_local_read_only_task(state, task) }
+);
 
 #[cfg(test)]
 mod tests {
-    use super::{AdapterExecution, ExecutionRuntime, GatewayExecutionAdapter};
+    use super::{ExecutionRuntime, GatewayExecutionAdapter};
     use crate::task_registry::TaskExecutorRegistry;
     use crate::{AppState, LocalTaskExecutionError, TaskRecord};
-    use crate::{SurfaceKind, TaskExecutionOutcome, TaskResultSurfacing};
+    use crate::{SurfaceKind, TaskExecutionPresentation, TaskResultSurfacing};
     use local_first_execution_protocol::{
         CheckpointDataRef, CheckpointEnvelope, DurableDataRef, ExecutionContract, ExecutionOutcome,
         ExecutionScope, ValidatedExecutionContract, ValidatedExecutionOutcome, WakeCondition,
@@ -822,7 +752,7 @@ mod tests {
             &self,
             _state: &AppState,
             contract: &ValidatedExecutionContract,
-        ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+        ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
             let contract = contract.as_ref();
             self.revisions.lock().expect("revision adapter lock").push((
                 contract.execution_id.clone(),
@@ -830,37 +760,44 @@ mod tests {
                 contract.fencing_token,
                 contract.wake.is_some(),
             ));
-            Ok(AdapterExecution::canonical(ExecutionOutcome::completed(
+            Ok(ExecutionOutcome::completed(
                 serde_json::json!({"revision": contract.revision}),
-            )))
+            ))
         }
     }
 
-    struct SuspendingLegacyAdapter;
+    struct SuspendingCanonicalAdapter;
 
-    impl GatewayExecutionAdapter for SuspendingLegacyAdapter {
+    impl GatewayExecutionAdapter for SuspendingCanonicalAdapter {
         fn execute(
             &self,
-            _state: &AppState,
-            _contract: &ValidatedExecutionContract,
-        ) -> Result<AdapterExecution, LocalTaskExecutionError> {
-            Ok(AdapterExecution::legacy(TaskExecutionOutcome {
-                completed: false,
-                blocked_reason: Some("wait for timer".to_string()),
-                wait_until: Some(OffsetDateTime::now_utc() + Duration::minutes(1)),
-                pending_approval: None,
-                summary: "waiting".to_string(),
-                checkpoint_payload: serde_json::json!({"secret": "raw"}),
-                checkpoint_redacted: serde_json::json!({"secret": "[REDACTED]"}),
-                chat_message: String::new(),
-                result_surfacing: TaskResultSurfacing::AlreadyPersisted,
-                surface: SurfaceKind::Logs,
-                event_kind: "test_wait".to_string(),
-                event_title: "Waiting".to_string(),
-                event_subtitle: "Waiting".to_string(),
-                event_payload: serde_json::json!({}),
-                artifacts: Vec::new(),
-            }))
+            state: &AppState,
+            contract: &ValidatedExecutionContract,
+        ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
+            let task = super::task_from_contract(contract)?;
+            super::suspend_task_execution(
+                state,
+                &task,
+                contract,
+                WakeCondition::At {
+                    unix_seconds: (OffsetDateTime::now_utc() + Duration::minutes(1))
+                        .unix_timestamp(),
+                },
+                TaskExecutionPresentation {
+                    pending_approval: None,
+                    summary: "waiting".to_string(),
+                    checkpoint_payload: serde_json::json!({"secret": "raw"}),
+                    checkpoint_redacted: serde_json::json!({"secret": "[REDACTED]"}),
+                    chat_message: String::new(),
+                    result_surfacing: TaskResultSurfacing::AlreadyPersisted,
+                    surface: SurfaceKind::Logs,
+                    event_kind: "test_wait".to_string(),
+                    event_title: "Waiting".to_string(),
+                    event_subtitle: "Waiting".to_string(),
+                    event_payload: serde_json::json!({}),
+                    artifacts: Vec::new(),
+                },
+            )
         }
     }
 
@@ -871,7 +808,7 @@ mod tests {
             &self,
             state: &AppState,
             contract: &ValidatedExecutionContract,
-        ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+        ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
             let mut task = super::task_from_contract(contract).expect("task from contract");
             task.lease_owner = Some("replacement-worker".to_string());
             state
@@ -880,9 +817,9 @@ mod tests {
                 .expect("task store")
                 .insert_task(&task)
                 .expect("replace lease owner");
-            Ok(AdapterExecution::canonical(ExecutionOutcome::completed(
+            Ok(ExecutionOutcome::completed(
                 serde_json::json!({"must_not_commit": true}),
-            )))
+            ))
         }
     }
 
@@ -897,11 +834,11 @@ mod tests {
             &self,
             _state: &AppState,
             _contract: &ValidatedExecutionContract,
-        ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+        ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
             drop(reqwest::blocking::Client::new());
-            Ok(AdapterExecution::canonical(ExecutionOutcome::completed(
+            Ok(ExecutionOutcome::completed(
                 serde_json::json!({"blocking_adapter": "completed"}),
-            )))
+            ))
         }
     }
 
@@ -910,7 +847,7 @@ mod tests {
             &self,
             _state: &AppState,
             _contract: &ValidatedExecutionContract,
-        ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+        ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
             Err(LocalTaskExecutionError {
                 message: "provider temporarily unavailable".to_string(),
             })
@@ -922,13 +859,13 @@ mod tests {
             &self,
             _state: &AppState,
             _contract: &ValidatedExecutionContract,
-        ) -> Result<AdapterExecution, LocalTaskExecutionError> {
-            Ok(AdapterExecution::canonical(ExecutionOutcome::Failed {
+        ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
+            Ok(ExecutionOutcome::Failed {
                 failure: local_first_execution_protocol::ExecutionFailure::transient(
                     "provider_unavailable",
                     "Provider unavailable",
                 ),
-            }))
+            })
         }
     }
 
@@ -937,14 +874,14 @@ mod tests {
             &self,
             _state: &AppState,
             contract: &ValidatedExecutionContract,
-        ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+        ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
             self.execution_ids
                 .lock()
                 .expect("recording adapter lock")
                 .push(contract.as_ref().execution_id.clone());
-            Ok(AdapterExecution::canonical(ExecutionOutcome::completed(
+            Ok(ExecutionOutcome::completed(
                 serde_json::json!({"execution_id": contract.as_ref().execution_id}),
-            )))
+            ))
         }
     }
 
@@ -1150,7 +1087,7 @@ mod tests {
     #[tokio::test]
     async fn suspended_outcome_references_the_persisted_task_checkpoint() {
         let mut registry = TaskExecutorRegistry::new();
-        registry.register("*", Arc::new(SuspendingLegacyAdapter));
+        registry.register("*", Arc::new(SuspendingCanonicalAdapter));
         let runtime = ExecutionRuntime::new(registry);
         let state = AppState::for_tests();
         let contract = contract("capability.test", "checkpoint-1");
@@ -1250,14 +1187,13 @@ mod tests {
             .expect("adapter error becomes canonical outcome");
 
         assert_eq!(result.projection().task_status, TaskStatus::WaitingTime);
-        assert!(
-            result
-                .compatibility
-                .as_ref()
-                .expect("compatibility outcome")
-                .wait_until
-                .is_some()
-        );
+        assert!(matches!(
+            result.outcome(),
+            ExecutionOutcome::Suspended {
+                wake: WakeCondition::At { .. },
+                ..
+            }
+        ));
         let store = state.task_store.lock().expect("task store");
         let execution = store
             .execution("adapter-retry-1")
