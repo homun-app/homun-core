@@ -86,7 +86,12 @@ fn effective_chat_attempt_input(
 
     let images_value = wake_payload
         .and_then(|payload| payload.get("images"))
-        .or_else(|| task.input_json.get("images"));
+        .filter(|value| !value.is_null())
+        .or_else(|| {
+            task.input_json
+                .get("images")
+                .filter(|value| !value.is_null())
+        });
     let images = images_value
         .cloned()
         .map(serde_json::from_value)
@@ -98,7 +103,11 @@ fn effective_chat_attempt_input(
     let attachments_value = wake_payload
         .and_then(|payload| payload.get("attachments"))
         .filter(|value| !value.is_null())
-        .or_else(|| task.input_json.get("attachments"));
+        .or_else(|| {
+            task.input_json
+                .get("attachments")
+                .filter(|value| !value.is_null())
+        });
     let attachments = attachments_value
         .cloned()
         .map(serde_json::from_value)
@@ -1067,6 +1076,27 @@ mod tests {
         assert_eq!(input.user_message_id.as_deref(), Some("local_user_resume"));
         assert_eq!(input.images, vec!["new-image"]);
         assert_eq!(input.attachments[0].display_name, "new.txt");
+    }
+
+    #[test]
+    fn fresh_chat_attempt_accepts_null_optional_collections() {
+        let task = TaskRecord::new(
+            "turn-input-null-collections",
+            UserId::new("user-1"),
+            WorkspaceId::new("workspace-1"),
+            "chat_turn",
+            "answer directly",
+            json!({
+                "prompt": "Answer directly",
+                "request_id": "initial",
+                "images": null,
+                "attachments": null,
+            }),
+        );
+
+        let input = effective_chat_attempt_input(&task, None).unwrap();
+        assert!(input.images.is_empty());
+        assert!(input.attachments.is_empty());
     }
 
     #[test]
