@@ -614,6 +614,28 @@ mod tests {
                 .iter()
                 .all(|event| event.payload["projection_ref"] != "turn-projection-1:1")
         );
+        {
+            let store = state.task_store.lock().expect("task store");
+            assert_eq!(
+                store
+                    .get_task(&task.task_id, &task.user_id, &task.workspace_id)
+                    .expect("load partially projected task")
+                    .expect("task exists")
+                    .status,
+                TaskStatus::Completed
+            );
+            assert_eq!(
+                store
+                    .list_agent_runs_for_turn(
+                        task.task_id.as_str(),
+                        task.user_id.as_str(),
+                        task.workspace_id.as_str(),
+                    )
+                    .expect("load projected run")[0]
+                    .status,
+                AgentRunStatus::Completed
+            );
+        }
 
         state
             .chat_store
@@ -621,6 +643,28 @@ mod tests {
             .expect("chat store")
             .append_assistant_message(&thread.thread_id, &assistant)
             .expect("assistant");
+        assert_eq!(
+            project_chat_execution(&state, &task, &contract, &outcome)
+                .await
+                .expect("complete projection before outbox acknowledgement"),
+            ProjectionAttempt::Completed
+        );
+        let reference = local_first_task_runtime::projection_outbox::projection_ref(
+            "turn-projection-1",
+            1,
+            local_first_task_runtime::projection_outbox::CHAT_LIFECYCLE_PROJECTION,
+        );
+        assert_eq!(
+            state
+                .task_store
+                .lock()
+                .expect("task store")
+                .projection_outbox_record(&reference)
+                .expect("projection row")
+                .expect("projection exists")
+                .status,
+            local_first_task_runtime::ProjectionStatus::Pending
+        );
         crate::projection_worker::drain_available(&state)
             .await
             .expect("recovered projection through outbox");
@@ -663,11 +707,6 @@ mod tests {
         assert_eq!(
             message.delivery_state,
             local_first_desktop_gateway::MessageDeliveryState::Delivered
-        );
-        let reference = local_first_task_runtime::projection_outbox::projection_ref(
-            "turn-projection-1",
-            1,
-            local_first_task_runtime::projection_outbox::CHAT_LIFECYCLE_PROJECTION,
         );
         assert_eq!(
             state
