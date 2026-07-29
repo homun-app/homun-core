@@ -15275,6 +15275,27 @@ struct SuggestionsResponse {
     suggestions: Vec<String>,
 }
 
+fn chat_suggestions_payload(
+    base_url: &str,
+    model: &str,
+    system: &str,
+    user: &str,
+) -> serde_json::Value {
+    let mut payload = serde_json::json!({
+        "model": model,
+        "temperature": 0.5,
+        "max_tokens": 2000,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": user },
+        ],
+    });
+    if is_ollama_base(base_url) {
+        payload["reasoning_effort"] = serde_json::Value::String("none".to_string());
+    }
+    payload
+}
+
 /// Proposes a few short follow-up prompts the user might ask next, given the last
 /// exchange (the ✦ dynamic suggestions under the latest answer). One cheap
 /// non-streaming LLM call; best-effort (empty list on any failure).
@@ -15299,20 +15320,10 @@ without numbering, dashes or quotes. Return ONLY the 3 lines.";
         request.prompt.chars().take(2000).collect::<String>(),
         request.answer.chars().take(4000).collect::<String>()
     );
-    // Generous ceiling: a reasoning model spends the budget "thinking" before
-    // emitting content, so 160 tokens (fine for 3 short lines from an instruct
-    // model) can be burned mid-thought, returning empty content and silently
-    // showing no suggestions. A high ceiling costs nothing for instruct models
-    // (they stop after the 3 lines). See the note on `generate_thread_title`.
-    let payload = serde_json::json!({
-        "model": model,
-        "temperature": 0.5,
-        "max_tokens": 2000,
-        "messages": [
-            { "role": "system", "content": system },
-            { "role": "user", "content": user },
-        ],
-    });
+    // Ollama reasoning models can spend the entire output budget before emitting
+    // these three utility lines. Disable reasoning through its supported
+    // OpenAI-compatible field; leave other compatible providers unchanged.
+    let payload = chat_suggestions_payload(&base_url, &model, system, &user);
     let mut usage = local_first_inference_usage::UsageContext::new(
         uuid::Uuid::new_v4().to_string(),
         local_first_inference_usage::InferencePurpose::Other,
@@ -76620,6 +76631,25 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert_eq!(payload["reasoning_effort"], "none");
         assert_eq!(payload["response_format"]["type"], "json_object");
         assert_eq!(payload["messages"][1]["content"], "nessun segreto");
+    }
+
+    #[test]
+    fn suggestions_payload_disables_reasoning_only_for_ollama() {
+        let ollama = super::chat_suggestions_payload(
+            "https://ollama.com/v1",
+            "deepseek-v4-pro",
+            "system",
+            "user",
+        );
+        assert_eq!(ollama["reasoning_effort"], "none");
+
+        let generic = super::chat_suggestions_payload(
+            "https://api.openai.com/v1",
+            "gpt-4.1-mini",
+            "system",
+            "user",
+        );
+        assert!(generic.get("reasoning_effort").is_none());
     }
 
     #[test]
