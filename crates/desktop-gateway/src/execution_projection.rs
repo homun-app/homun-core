@@ -404,7 +404,8 @@ async fn project_human_wait(
                 assistant_message_id,
                 envelope.wait_kind_key(),
                 envelope.payload,
-            );
+            )
+            .map_err(projection_error)?;
         }
         ExecutionOutcome::Suspended {
             wake: WakeCondition::Approval { .. } | WakeCondition::EffectResolution { .. },

@@ -255,6 +255,9 @@ conversazione e non il lavoro in corso.
 13. Una deadline scaduta termina come `Failed(permanent,
     execution_deadline_exceeded)` senza invocare l'adapter; un backoff non può creare
     un wake alla deadline o oltre.
+14. Una sospensione user non è proiettata finché payload HITL e `OpenWork` non sono
+    persistiti. Errori di store, lock o serializzazione mantengono la proiezione
+    pendente e rigiocabile; non sono convertiti in snapshot vuoti.
 
 ## Mapping oggi → contratto
 

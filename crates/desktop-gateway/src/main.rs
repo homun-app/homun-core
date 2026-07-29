@@ -30495,7 +30495,14 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
                     .and_then(|id| id.clone()),
             )
         {
-            persist_hitl_wait_from_outcome(&tail_state, thread_id, &assistant_message_id, &outcome);
+            if let Err(error) = persist_hitl_wait_from_outcome(
+                &tail_state,
+                thread_id,
+                &assistant_message_id,
+                &outcome,
+            ) {
+                eprintln!("[hitl] legacy turn projection failed: {error}");
+            }
         }
         // Turn trace: the final record. `outcome.memory_answer` is the committed answer; `final_plan` is
         // the turn's last runtime plan (carried out for exactly this). The derived flags (incomplete
@@ -36843,12 +36850,12 @@ fn persist_hitl_wait_from_outcome(
     thread_id: &str,
     message_id: &str,
     outcome: &local_first_engine::TurnOutcome,
-) {
+) -> Result<(), String> {
     let Some(envelope) = outcome.awaiting_user.as_ref() else {
-        return;
+        return Ok(());
     };
     if !envelope.is_free() {
-        return;
+        return Ok(());
     }
     let wait_kind = match envelope.kind {
         local_first_engine::hitl::HitlKind::Choice
@@ -36856,11 +36863,9 @@ fn persist_hitl_wait_from_outcome(
         | local_first_engine::hitl::HitlKind::PlanPropose => envelope.wait_kind_key(),
         local_first_engine::hitl::HitlKind::Confirm
         | local_first_engine::hitl::HitlKind::Vault
-        | local_first_engine::hitl::HitlKind::Payment => return,
+        | local_first_engine::hitl::HitlKind::Payment => return Ok(()),
     };
-    let Ok(store) = lock_store(state) else {
-        return;
-    };
+    let store = lock_store(state).map_err(|error| error.message)?;
     persist_hitl_wait_payload(
         &store,
         state,
@@ -36868,7 +36873,7 @@ fn persist_hitl_wait_from_outcome(
         message_id,
         wait_kind,
         envelope.payload.clone(),
-    );
+    )
 }
 
 fn persist_hitl_wait_payload(
@@ -36878,46 +36883,41 @@ fn persist_hitl_wait_payload(
     message_id: &str,
     wait_kind: &str,
     payload: serde_json::Value,
-) {
-    let browser_live = thread_has_live_browser_session(state, thread_id);
+) -> Result<(), String> {
+    let browser_live = state
+        .browser_thread_sessions
+        .lock()
+        .map_err(|error| format!("browser session store unavailable: {error}"))?
+        .get(thread_id)
+        .is_some_and(|session| thread_browser_session_is_live(session.last_used));
     // `store` is already held by both callers. Resolve the workspace through that
     // guard and read task state directly; calling `runtime_plan_control_scope` here
     // would try to acquire the same chat-store mutex again and self-deadlock.
-    let (contract, remaining_plan, browser_checkpoint_generation) = store
+    let workspace_id = store
         .workspace_for_thread(thread_id)
-        .ok()
-        .and_then(|workspace_id| {
-            let task_store = state.task_store.lock().ok()?;
-            let user_id = gateway_user_id();
-            let contract = task_store
-                .load_objective_contract(user_id.as_str(), &workspace_id, thread_id)
-                .ok()
-                .flatten()
-                .as_ref()
-                .map(hitl_resume::ResumeContractSnapshot::from_objective);
-            let plan = task_store
-                .load_runtime_plan(user_id.as_str(), &workspace_id, thread_id)
-                .ok()
-                .flatten()
-                .filter(|plan| plan.status == "open")
-                .and_then(|plan| plan.plan_json.as_array().cloned())
-                .unwrap_or_default();
-            let checkpoint_generation = task_store
-                .load_active_browser_checkpoint_for_thread(
-                    user_id.as_str(),
-                    &workspace_id,
-                    thread_id,
-                )
-                .ok()
-                .flatten()
-                .map(|checkpoint| checkpoint.generation);
-            Some((
-                contract,
-                hitl_resume::bounded_remaining_plan(plan),
-                checkpoint_generation,
-            ))
-        })
+        .map_err(|error| format!("HITL workspace lookup failed: {error}"))?;
+    let task_store = state
+        .task_store
+        .lock()
+        .map_err(|error| format!("task store unavailable while persisting HITL wait: {error}"))?;
+    let user_id = gateway_user_id();
+    let contract = task_store
+        .load_objective_contract(user_id.as_str(), &workspace_id, thread_id)
+        .map_err(|error| format!("HITL objective lookup failed: {error}"))?
+        .as_ref()
+        .map(hitl_resume::ResumeContractSnapshot::from_objective);
+    let plan = task_store
+        .load_runtime_plan(user_id.as_str(), &workspace_id, thread_id)
+        .map_err(|error| format!("HITL runtime plan lookup failed: {error}"))?
+        .filter(|plan| plan.status == "open")
+        .and_then(|plan| plan.plan_json.as_array().cloned())
         .unwrap_or_default();
+    let remaining_plan = hitl_resume::bounded_remaining_plan(plan);
+    let browser_checkpoint_generation = task_store
+        .load_active_browser_checkpoint_for_thread(user_id.as_str(), &workspace_id, thread_id)
+        .map_err(|error| format!("HITL browser checkpoint lookup failed: {error}"))?
+        .map(|checkpoint| checkpoint.generation);
+    drop(task_store);
     let open_work = hitl_resume::OpenWorkSnapshot {
         schema_version: hitl_resume::OPEN_WORK_SCHEMA_VERSION,
         browser_session_live: browser_live,
@@ -36930,22 +36930,20 @@ fn persist_hitl_wait_payload(
         remaining_plan,
     };
     let wait_id = format!("hitl_{wait_kind}_{message_id}");
-    let Ok(payload_json) = serde_json::to_string(&payload) else {
-        return;
-    };
-    let Ok(open_work_json) = serde_json::to_string(&open_work) else {
-        return;
-    };
-    if let Err(error) = store.set_open_hitl_wait(
-        &wait_id,
-        thread_id,
-        message_id,
-        wait_kind,
-        &payload_json,
-        &open_work_json,
-    ) {
-        eprintln!("[hitl] failed to persist {wait_kind} wait: {error}");
-    }
+    let payload_json = serde_json::to_string(&payload)
+        .map_err(|error| format!("HITL payload serialization failed: {error}"))?;
+    let open_work_json = serde_json::to_string(&open_work)
+        .map_err(|error| format!("HITL open-work serialization failed: {error}"))?;
+    store
+        .set_open_hitl_wait(
+            &wait_id,
+            thread_id,
+            message_id,
+            wait_kind,
+            &payload_json,
+            &open_work_json,
+        )
+        .map_err(|error| format!("HITL wait persistence failed: {error}"))
 }
 
 #[derive(Debug, Clone)]
@@ -68121,7 +68119,8 @@ prs.save(Path({path:?}))
             ..local_first_engine::TurnOutcome::default()
         };
 
-        super::persist_hitl_wait_from_outcome(&state, &thread_id, &assistant.id, &outcome);
+        super::persist_hitl_wait_from_outcome(&state, &thread_id, &assistant.id, &outcome)
+            .expect("persist typed wait");
 
         let wait = state
             .chat_store
@@ -68133,6 +68132,65 @@ prs.save(Path({path:?}))
         assert_eq!(wait.kind, super::hitl_resume::HitlWaitKind::Choice);
         assert_eq!(wait.source_message_id, assistant.id);
         assert_eq!(wait.payload["options"][0], "Alpha");
+    }
+
+    #[test]
+    fn typed_hitl_wait_persistence_fails_closed_when_runtime_state_is_unavailable() {
+        let state = super::AppState::for_tests();
+        let thread = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .create_thread("ws_hitl_fail_closed")
+            .expect("thread");
+        let assistant =
+            super::channel_chat_message_with_id("assistant", "", "assistant_hitl_fail_closed");
+        state
+            .chat_store
+            .lock()
+            .unwrap()
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .expect("assistant message");
+        let outcome = local_first_engine::TurnOutcome {
+            stop: local_first_engine::TurnStop::SuspendedUser,
+            awaiting_user: Some(local_first_engine::hitl::HitlEnvelope {
+                kind: local_first_engine::hitl::HitlKind::Choice,
+                hold_policy: local_first_engine::hitl::HoldPolicy::Free,
+                payload: serde_json::json!({
+                    "question": "Which option?",
+                    "multi": false,
+                    "options": ["Alpha", "Beta"]
+                }),
+                source_marker: "CHOICES".to_string(),
+            }),
+            ..local_first_engine::TurnOutcome::default()
+        };
+        let task_store = state.task_store.clone();
+        std::thread::spawn(move || {
+            let _guard = task_store.lock().expect("task store");
+            panic!("poison task store for fail-closed test");
+        })
+        .join()
+        .expect_err("poisoning thread must panic");
+
+        let error = super::persist_hitl_wait_from_outcome(
+            &state,
+            &thread.thread_id,
+            &assistant.id,
+            &outcome,
+        )
+        .expect_err("missing runtime state must keep HITL projection pending");
+
+        assert!(error.contains("task store unavailable"));
+        assert!(
+            state
+                .chat_store
+                .lock()
+                .unwrap()
+                .open_hitl_wait(&thread.thread_id)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
