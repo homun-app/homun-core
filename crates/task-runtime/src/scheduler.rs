@@ -166,9 +166,7 @@ impl TaskScheduler {
         occurrence.attempt_count = 0;
         occurrence.checkpoint_json = None;
         occurrence.blocked_reason = None;
-        occurrence.lease_owner = None;
-        occurrence.lease_expires_at = None;
-        occurrence.last_heartbeat_at = None;
+        occurrence.clear_lease();
         occurrence.created_at = now;
         occurrence.updated_at = now;
         Some(occurrence)

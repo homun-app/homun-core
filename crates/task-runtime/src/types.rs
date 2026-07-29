@@ -750,6 +750,10 @@ pub struct TaskRecord {
     pub last_heartbeat_at: Option<OffsetDateTime>,
     pub lease_owner: Option<String>,
     pub lease_expires_at: Option<OffsetDateTime>,
+    /// Immutable generation assigned when the current lease is acquired. Heartbeats must not
+    /// change it; effect dispatch uses it to fence a previous lease held by the same owner.
+    #[serde(default)]
+    pub lease_fencing_token: Option<u64>,
     pub blocked_reason: Option<String>,
 }
 
@@ -789,8 +793,23 @@ impl TaskRecord {
             last_heartbeat_at: None,
             lease_owner: None,
             lease_expires_at: None,
+            lease_fencing_token: None,
             blocked_reason: None,
         }
+    }
+
+    pub fn effective_lease_fencing_token(&self) -> Option<u64> {
+        self.lease_fencing_token.or_else(|| {
+            self.last_heartbeat_at
+                .and_then(|heartbeat| u64::try_from(heartbeat.unix_timestamp_nanos()).ok())
+        })
+    }
+
+    pub fn clear_lease(&mut self) {
+        self.lease_owner = None;
+        self.lease_expires_at = None;
+        self.last_heartbeat_at = None;
+        self.lease_fencing_token = None;
     }
 
     pub fn with_recurrence(mut self, rule: impl Into<String>, tz: Option<String>) -> Self {

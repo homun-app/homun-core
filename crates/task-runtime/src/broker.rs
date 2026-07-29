@@ -642,9 +642,7 @@ pub fn recover_chat_turns_at_boot(
                 || task.lease_expires_at.is_some()
                 || task.last_heartbeat_at.is_some()
             {
-                task.lease_owner = None;
-                task.lease_expires_at = None;
-                task.last_heartbeat_at = None;
+                task.clear_lease();
                 task.updated_at = OffsetDateTime::now_utc();
                 store.insert_chat_turn(
                     &task,
@@ -697,9 +695,7 @@ pub fn recover_chat_turns_at_boot(
         // release resources, clear lease, re-queue
         store.release_resources(&task)?;
         task.status = TaskStatus::Queued;
-        task.lease_owner = None;
-        task.lease_expires_at = None;
-        task.last_heartbeat_at = None;
+        task.clear_lease();
         task.blocked_reason = Some("recovered at boot (stale lease)".into());
         task.updated_at = OffsetDateTime::now_utc();
         let task_id = task.task_id.clone();
@@ -778,9 +774,7 @@ pub fn cancel_chat_turn(
     task.updated_at = now;
     store.release_resources(&task)?;
     if !was_running {
-        task.lease_owner = None;
-        task.lease_expires_at = None;
-        task.last_heartbeat_at = None;
+        task.clear_lease();
     }
     let thread_id = task
         .input_json

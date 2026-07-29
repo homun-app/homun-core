@@ -815,12 +815,11 @@ again to find the right control). Keep working on the task — do not stop and d
                         // and mutates the loop-visible browser fields + provider via `&mut ls`. Produces no
                         // ToolEffects (it mutates directly). Folds into a recursive `browse` at ADR 0025.
                         tokio::select! {
-                            (r, hint) = browser_executor.execute_browser(name, args_raw, &call_id, &mut ls) => {
-                                // The browser branch produces no other ToolEffects (it mutates its own
-                                // state directly), but it DOES carry a machine outcome hint so the loop's
-                                // stall/no-progress accounting isn't fooled by prose that always reads
-                                // "success" (a timed-out or no-op action, or a type that selected nothing).
-                                (r, crate::ToolEffects { outcome_hint: Some(hint), ..crate::ToolEffects::default() }, None)
+                            outcome = browser_executor.execute_browser(name, args_raw, &call_id, &mut ls) => {
+                                // Browser dispatch uses the same ToolOutcome contract as every other
+                                // capability. Besides machine progress hints it can therefore suspend
+                                // immediately on an uncertain durable effect receipt.
+                                (outcome.result, outcome.effects, None)
                             }
                             control = wait_for_interrupting_control(model_client) => {
                                 (
@@ -2159,6 +2158,18 @@ mod tests {
             })
         }
     }
+    fn browser_outcome(
+        result: impl Into<String>,
+        hint: crate::contract::ToolOutcomeHint,
+    ) -> ToolOutcome {
+        ToolOutcome {
+            result: result.into(),
+            effects: ToolEffects {
+                outcome_hint: Some(hint),
+                ..ToolEffects::default()
+            },
+        }
+    }
     struct NoBrowser;
     impl BrowserExecutor for NoBrowser {
         async fn execute_browser(
@@ -2167,8 +2178,8 @@ mod tests {
             _a: &str,
             _c: &str,
             _s: &mut LoopState,
-        ) -> (String, crate::contract::ToolOutcomeHint) {
-            (String::new(), crate::contract::ToolOutcomeHint::Success)
+        ) -> ToolOutcome {
+            browser_outcome(String::new(), crate::contract::ToolOutcomeHint::Success)
         }
         async fn close_session(&mut self, _b: bool) {}
     }
@@ -2176,6 +2187,7 @@ mod tests {
     #[derive(Default)]
     struct UncertainEffectModel {
         calls: AtomicUsize,
+        browser: bool,
     }
 
     impl ModelClient for UncertainEffectModel {
@@ -2189,6 +2201,11 @@ mod tests {
                 call_index, 0,
                 "an uncertain effect must suspend before synthesis"
             );
+            let tool_name = if self.browser {
+                "browser_act"
+            } else {
+                "connector_send"
+            };
             Ok(ModelRoundOutput {
                 message: json!({
                     "role": "assistant",
@@ -2196,7 +2213,7 @@ mod tests {
                     "tool_calls": [{
                         "id": "send_1",
                         "type": "function",
-                        "function": { "name": "connector_send", "arguments": "{}" }
+                        "function": { "name": tool_name, "arguments": "{}" }
                     }]
                 }),
                 provider: ProviderBinding {
@@ -2210,6 +2227,34 @@ mod tests {
                 time_to_first_token_ms: None,
             })
         }
+    }
+
+    struct UncertainBrowser;
+
+    impl BrowserExecutor for UncertainBrowser {
+        async fn execute_browser(
+            &mut self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            _state: &mut LoopState,
+        ) -> ToolOutcome {
+            ToolOutcome {
+                result: "browser outcome requires verification".into(),
+                effects: ToolEffects {
+                    suspend_effect_receipt: Some(
+                        local_first_execution_protocol::EffectReceiptRef::from_store_id(
+                            "22222222222222222222222222222222",
+                        )
+                        .unwrap(),
+                    ),
+                    outcome_hint: Some(crate::contract::ToolOutcomeHint::NoProgress),
+                    ..ToolEffects::default()
+                },
+            }
+        }
+
+        async fn close_session(&mut self, _browser_used: bool) {}
     }
 
     struct UncertainEffectTool;
@@ -2295,6 +2340,58 @@ mod tests {
         );
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn uncertain_browser_effect_suspends_without_another_model_round() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "click" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = UncertainEffectModel {
+            browser: true,
+            ..Default::default()
+        };
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = UncertainBrowser;
+
+        let outcome = run_turn(
+            ls,
+            cfg(),
+            &usage_context(),
+            &model,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "click".into(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert!(matches!(
+            outcome.stop,
+            crate::TurnStop::SuspendedEffect { .. }
+        ));
+        assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+    }
+
     #[derive(Default)]
     struct BrowserDoneModel {
         calls: AtomicUsize,
@@ -2354,13 +2451,10 @@ mod tests {
             _args: &str,
             _call_id: &str,
             state: &mut LoopState,
-        ) -> (String, crate::contract::ToolOutcomeHint) {
+        ) -> ToolOutcome {
             assert_eq!(name, "browser_done");
             state.browser_used = true;
-            (
-                "done".to_string(),
-                crate::contract::ToolOutcomeHint::Success,
-            )
+            browser_outcome("done", crate::contract::ToolOutcomeHint::Success)
         }
 
         async fn close_session(&mut self, _browser_used: bool) {}
@@ -2564,9 +2658,9 @@ mod tests {
             _args: &str,
             _call_id: &str,
             state: &mut LoopState,
-        ) -> (String, crate::contract::ToolOutcomeHint) {
+        ) -> ToolOutcome {
             state.browser_used = true;
-            (
+            browser_outcome(
                 json!({ "status": "blocked" }).to_string(),
                 crate::contract::ToolOutcomeHint::NoProgress,
             )
@@ -2641,12 +2735,12 @@ mod tests {
             _args: &str,
             _call_id: &str,
             state: &mut LoopState,
-        ) -> (String, crate::contract::ToolOutcomeHint) {
+        ) -> ToolOutcome {
             assert_eq!(name, "browser_act");
             state.browser_used = true;
             // Hint = Success on purpose: this fixture proves the stale-ref MARKER trips
             // no-progress independently (the `||` in the branch), not the hint.
-            (
+            browser_outcome(
                 format!(
                     "{} I took a fresh snapshot. Do NOT retry e1; choose a NEW [ref=...] \
 from this snapshot:\n[ref=e2] Same control, re-rendered",
@@ -2790,10 +2884,10 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             _args: &str,
             _call_id: &str,
             state: &mut LoopState,
-        ) -> (String, crate::contract::ToolOutcomeHint) {
+        ) -> ToolOutcome {
             state.browser_used = true;
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            (
+            browser_outcome(
                 "Action performed. Updated snapshot:\n[ref=e2] Next field".to_string(),
                 crate::contract::ToolOutcomeHint::Success,
             )
@@ -2814,10 +2908,10 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             _args: &str,
             _call_id: &str,
             state: &mut LoopState,
-        ) -> (String, crate::contract::ToolOutcomeHint) {
+        ) -> ToolOutcome {
             state.browser_used = true;
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-            (
+            browser_outcome(
                 "Action performed. Updated snapshot:\n[ref=e1] Same field".to_string(),
                 crate::contract::ToolOutcomeHint::NoProgress,
             )
@@ -2903,10 +2997,10 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             _args: &str,
             _call_id: &str,
             state: &mut LoopState,
-        ) -> (String, crate::contract::ToolOutcomeHint) {
+        ) -> ToolOutcome {
             state.browser_used = true;
             self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            (
+            browser_outcome(
                 "Action performed. Updated snapshot:\n[ref=e2] Next field".to_string(),
                 crate::contract::ToolOutcomeHint::Success,
             )
@@ -3133,10 +3227,10 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             _args: &str,
             _call_id: &str,
             state: &mut LoopState,
-        ) -> (String, crate::contract::ToolOutcomeHint) {
+        ) -> ToolOutcome {
             assert_eq!(name, "browser_act");
             state.browser_used = true;
-            (
+            browser_outcome(
                 "Action performed. Updated snapshot:\n[ref=e1] Station field".to_string(),
                 crate::contract::ToolOutcomeHint::NoProgress,
             )

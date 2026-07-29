@@ -28,6 +28,23 @@ fn lease_manager_acquires_and_heartbeats_a_task() {
             )
             .unwrap()
     );
+    let acquired = store
+        .get_task(&TaskId::new("task_1"), &user, &workspace)
+        .unwrap()
+        .unwrap();
+    let fencing_token = acquired.lease_fencing_token.unwrap();
+    assert!(
+        !manager
+            .acquire(
+                &store,
+                &TaskId::new("task_1"),
+                &user,
+                &workspace,
+                "worker_a",
+                now + Duration::seconds(30),
+            )
+            .unwrap()
+    );
     manager
         .heartbeat(
             &store,
@@ -35,6 +52,7 @@ fn lease_manager_acquires_and_heartbeats_a_task() {
             &user,
             &workspace,
             "worker_a",
+            fencing_token,
             now + Duration::minutes(1),
         )
         .unwrap();
@@ -47,6 +65,60 @@ fn lease_manager_acquires_and_heartbeats_a_task() {
     assert_eq!(leased.lease_owner.as_deref(), Some("worker_a"));
     assert_eq!(leased.last_heartbeat_at, Some(now + Duration::minutes(1)));
     assert_eq!(leased.lease_expires_at, Some(now + Duration::minutes(6)));
+    assert_eq!(leased.lease_fencing_token, Some(fencing_token));
+}
+
+#[test]
+fn stale_same_owner_cannot_heartbeat_a_reacquired_lease() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let user = UserId::new("user_1");
+    let workspace = WorkspaceId::new("workspace_1");
+    store
+        .insert_task(&task("task_1", &user, &workspace))
+        .unwrap();
+    let manager = LeaseManager::new(Duration::minutes(5));
+    let first_at = OffsetDateTime::now_utc();
+    manager
+        .acquire(
+            &store,
+            &TaskId::new("task_1"),
+            &user,
+            &workspace,
+            "worker_a",
+            first_at,
+        )
+        .unwrap();
+    let first_fence = store
+        .get_task(&TaskId::new("task_1"), &user, &workspace)
+        .unwrap()
+        .unwrap()
+        .lease_fencing_token
+        .unwrap();
+    manager
+        .recover_stale_leases(&store, &user, &workspace, first_at + Duration::minutes(6))
+        .unwrap();
+    manager
+        .acquire(
+            &store,
+            &TaskId::new("task_1"),
+            &user,
+            &workspace,
+            "worker_a",
+            first_at + Duration::minutes(7),
+        )
+        .unwrap();
+
+    manager
+        .heartbeat(
+            &store,
+            &TaskId::new("task_1"),
+            &user,
+            &workspace,
+            "worker_a",
+            first_fence,
+            first_at + Duration::minutes(8),
+        )
+        .expect_err("old lease generation must not renew the replacement");
 }
 
 #[test]

@@ -28,7 +28,6 @@ impl LeaseManager {
         if task
             .lease_expires_at
             .is_some_and(|expires_at| expires_at > now)
-            && task.lease_owner.as_deref() != Some(owner)
         {
             return Ok(false);
         }
@@ -37,6 +36,12 @@ impl LeaseManager {
         task.lease_owner = Some(owner.to_string());
         task.last_heartbeat_at = Some(now);
         task.lease_expires_at = Some(now + self.lease_duration);
+        task.lease_fencing_token =
+            Some(u64::try_from(now.unix_timestamp_nanos()).map_err(|_| {
+                TaskRuntimeError::InvalidTransition(
+                    "lease acquisition timestamp cannot be used as a fence".into(),
+                )
+            })?);
         task.updated_at = now;
         store.insert_task(&task)?;
         Ok(true)
@@ -49,16 +54,18 @@ impl LeaseManager {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
         owner: &str,
+        expected_fencing_token: u64,
         now: OffsetDateTime,
     ) -> TaskRuntimeResult<()> {
         let mut task = store
             .get_task(task_id, user_id, workspace_id)?
             .ok_or_else(|| TaskRuntimeError::NotFound(task_id.as_str().to_string()))?;
-        if task.lease_owner.as_deref() != Some(owner) {
+        if task.lease_owner.as_deref() != Some(owner)
+            || task.effective_lease_fencing_token() != Some(expected_fencing_token)
+        {
             return Err(TaskRuntimeError::LeaseConflict(format!(
-                "task {} is leased by {:?}",
+                "task {} lease generation is not owned by {owner}",
                 task_id.as_str(),
-                task.lease_owner
             )));
         }
 
@@ -89,9 +96,7 @@ impl LeaseManager {
 
             store.release_resources(&task)?;
             task.status = TaskStatus::Queued;
-            task.lease_owner = None;
-            task.lease_expires_at = None;
-            task.last_heartbeat_at = None;
+            task.clear_lease();
             task.blocked_reason = Some("stale lease recovered".to_string());
             task.updated_at = now;
             let task_id = task.task_id.clone();

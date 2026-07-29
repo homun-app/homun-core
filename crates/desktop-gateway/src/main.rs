@@ -18,6 +18,7 @@ mod db_migrate;
 // doc.json. Wired into make_document's templated path (F2-T8,
 // make_templated_document).
 mod document_content;
+mod effect_host;
 mod execution_adapter_context;
 mod execution_projection;
 mod execution_runtime;
@@ -1525,6 +1526,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/tasks/queue", get(task_queue))
         .route("/api/tasks/executor", get(task_executor_status))
         .route("/api/tasks/run_next", post(run_next_task))
+        .route("/api/effects/uncertain", get(uncertain_effect_receipts))
+        .route(
+            "/api/effects/{receipt_ref}/resolve",
+            post(resolve_uncertain_effect_receipt),
+        )
         .route("/api/tasks/{task_id}/cancel", post(cancel_task))
         .route("/api/tasks/{task_id}", get(task_detail))
         .route(
@@ -22762,12 +22768,111 @@ struct BrowserToolCtx<'a> {
     // `GatewayBrowserExecutor` so every boundary this ctx crosses persists the same handle — a real
     // `GatewayJournal::Durable` when the enclosing run is registered, else the silent `Disabled` arm.
     journal: &'a agent_journal::GatewayJournal,
+    execution_contract: Option<&'a local_first_execution_protocol::ValidatedExecutionContract>,
+    effect_run_id: Option<&'a str>,
+    suspend_effect_receipt: &'a mut Option<local_first_execution_protocol::EffectReceiptRef>,
     // Out-parameter (D1/D2): the machine progress classification of the action just executed,
     // written where the sidecar's signals live (committed suggestion, page change, error) and
     // read back by `GatewayBrowserExecutor::execute_browser`. `None` on the neutral read-only
     // tools (snapshot/tabs/dialog/screenshot) → the caller defaults them to `Success`. Never
     // derived from the result prose — that is exactly the misclassification this replaces.
     outcome_hint: &'a mut Option<local_first_engine::contract::ToolOutcomeHint>,
+}
+
+fn browser_effect_class(name: &str) -> Option<local_first_execution_protocol::EffectClass> {
+    matches!(name, "browser_act" | "browser_rehydrate")
+        .then_some(local_first_execution_protocol::EffectClass::ExternalWrite)
+}
+
+fn begin_browser_effect(
+    ctx: &BrowserToolCtx<'_>,
+    operation: &str,
+    call_id: &str,
+    arguments: serde_json::Value,
+) -> Result<crate::effect_host::EffectDecision, String> {
+    let contract = ctx.execution_contract.ok_or_else(|| {
+        "Browser mutation blocked: no durable execution scope is available.".to_string()
+    })?;
+    let effect_class = browser_effect_class(operation)
+        .ok_or_else(|| format!("browser operation {operation} is not effectful"))?;
+    crate::effect_host::EffectHost::new(ctx.state.task_store.as_ref(), contract, ctx.effect_run_id)
+        .begin(crate::effect_host::EffectRequest::capability(
+            operation,
+            call_id,
+            effect_class,
+            arguments,
+        ))
+}
+
+fn authorize_browser_effect(
+    ctx: &BrowserToolCtx<'_>,
+    operation: &str,
+    call_id: &str,
+    arguments: serde_json::Value,
+) -> Result<(), String> {
+    let contract = ctx.execution_contract.ok_or_else(|| {
+        "Browser mutation blocked: no durable execution scope is available.".to_string()
+    })?;
+    let effect_class = browser_effect_class(operation)
+        .ok_or_else(|| format!("browser operation {operation} is not effectful"))?;
+    let request =
+        crate::effect_host::EffectRequest::capability(operation, call_id, effect_class, arguments);
+    crate::effect_host::EffectHost::new(ctx.state.task_store.as_ref(), contract, ctx.effect_run_id)
+        .authorize_request(&request)
+}
+
+fn complete_browser_effect(
+    ctx: &mut BrowserToolCtx<'_>,
+    lease: &crate::effect_host::EffectLease,
+    result: serde_json::Value,
+    effects: serde_json::Value,
+) -> Result<(), String> {
+    let contract = ctx
+        .execution_contract
+        .ok_or_else(|| "browser effect contract disappeared".to_string())?;
+    let host = crate::effect_host::EffectHost::new(
+        ctx.state.task_store.as_ref(),
+        contract,
+        ctx.effect_run_id,
+    );
+    match host.complete(lease, &result, &effects) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            *ctx.suspend_effect_receipt = Some(lease.receipt_ref().clone());
+            let _ = host.mark_uncertain(lease);
+            Err(error)
+        }
+    }
+}
+
+fn mark_browser_effect_uncertain(
+    ctx: &mut BrowserToolCtx<'_>,
+    lease: &crate::effect_host::EffectLease,
+) -> Result<local_first_task_runtime::ExecutionEffectReceipt, String> {
+    let contract = ctx
+        .execution_contract
+        .ok_or_else(|| "browser effect contract disappeared".to_string())?;
+    *ctx.suspend_effect_receipt = Some(lease.receipt_ref().clone());
+    crate::effect_host::EffectHost::new(ctx.state.task_store.as_ref(), contract, ctx.effect_run_id)
+        .mark_uncertain(lease)
+}
+
+fn replayed_browser_effect_text(
+    receipt: local_first_task_runtime::ExecutionEffectReceipt,
+) -> String {
+    receipt
+        .result_json
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| "Previously completed browser effect replayed.".to_string())
+}
+
+fn uncertain_browser_effect_text(
+    receipt: &local_first_task_runtime::ExecutionEffectReceipt,
+) -> String {
+    format!(
+        "BROWSER EFFECT UNCERTAIN (receipt {}): the action may already have run before an interruption. It was not repeated. Inspect the current page state before any new action.",
+        receipt.receipt_ref.as_ref()
+    )
 }
 
 /// The NON-browser tool context (ADR 0026 / inc 5): the read-set of `execute_chat_tool` only —
@@ -23698,6 +23803,35 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                 Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
                             return "Draft reference, scope, or field mapping is invalid. Nothing was written.".into();
                         };
+                        let effect_lease = match begin_browser_effect(
+                            ctx,
+                            "browser_rehydrate",
+                            call_id,
+                            serde_json::json!({
+                                "target_id": ctx.current_target.as_str(),
+                                "generation": generation,
+                                "fields": fields.clone(),
+                            }),
+                        ) {
+                            Ok(crate::effect_host::EffectDecision::Execute(lease)) => lease,
+                            Ok(crate::effect_host::EffectDecision::Replay(receipt)) => {
+                                *browser_session = Some(client);
+                                return replayed_browser_effect_text(receipt);
+                            }
+                            Ok(crate::effect_host::EffectDecision::Resolve(receipt)) => {
+                                *ctx.suspend_effect_receipt = Some(receipt.receipt_ref.clone());
+                                *browser_session = Some(client);
+                                *ctx.outcome_hint =
+                                    Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
+                                return uncertain_browser_effect_text(&receipt);
+                            }
+                            Err(error) => {
+                                *browser_session = Some(client);
+                                *ctx.outcome_hint =
+                                    Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
+                                return error;
+                            }
+                        };
                         let guard = browse_web_lock().lock().await;
                         let (client_back, rehydrated) = chat_browser_call_bounded(
                             client,
@@ -23753,14 +23887,73 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                     "reason": "explicit_selected_fields",
                                 }),
                             ));
-                                Ok(format!(
+                                let output = format!(
                                     "Draft rehydration completed: {count} filled, {skipped} skipped. No form was submitted and no other action was replayed.\nFresh snapshot:\n{}",
                                     browser_snapshot_text(&snapshot)
-                                ))
+                                );
+                                if let Err(error) = complete_browser_effect(
+                                    ctx,
+                                    &effect_lease,
+                                    serde_json::Value::String(format!(
+                                        "Previously completed draft rehydration was not repeated: {count} filled, {skipped} skipped. Inspect the page with browser_snapshot."
+                                    )),
+                                    serde_json::json!({
+                                        "rehydrated": count,
+                                        "skipped": skipped,
+                                        "snapshot": "completed",
+                                    }),
+                                ) {
+                                    Err(format!(
+                                        "Draft rehydration was applied, but its receipt could not be completed: {error}. Do not repeat it."
+                                    ))
+                                } else {
+                                    Ok(output)
+                                }
                             }
-                            (Err(error), _) | (_, Err(error)) => Err(format!(
-                                "Draft rehydration failed: {error}. No submit, click, booking, or payment action was executed."
-                            )),
+                            (Ok(result), Err(snapshot_error)) => {
+                                let count = result
+                                    .get("rehydrated")
+                                    .and_then(Value::as_u64)
+                                    .unwrap_or(0);
+                                let skipped =
+                                    result.get("skipped").and_then(Value::as_u64).unwrap_or(0);
+                                let output = format!(
+                                    "Draft rehydration completed: {count} filled, {skipped} skipped, but the fresh snapshot failed: {snapshot_error}. Do not repeat the rehydration; inspect the page with browser_snapshot."
+                                );
+                                if let Err(error) = complete_browser_effect(
+                                    ctx,
+                                    &effect_lease,
+                                    serde_json::Value::String(format!(
+                                        "Previously completed draft rehydration was not repeated: {count} filled, {skipped} skipped. Inspect the page with browser_snapshot."
+                                    )),
+                                    serde_json::json!({
+                                        "rehydrated": count,
+                                        "skipped": skipped,
+                                        "snapshot": "failed",
+                                    }),
+                                ) {
+                                    Err(format!(
+                                        "Draft rehydration was applied, but its receipt could not be completed: {error}. Do not repeat it."
+                                    ))
+                                } else {
+                                    Ok(output)
+                                }
+                            }
+                            (Err(error), _) => {
+                                *ctx.outcome_hint =
+                                    Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
+                                match mark_browser_effect_uncertain(ctx, &effect_lease) {
+                                    Ok(receipt) => Err(format!(
+                                        "{} Sidecar error: {}",
+                                        uncertain_browser_effect_text(&receipt),
+                                        redact_sensitive_text(&error)
+                                    )),
+                                    Err(receipt_error) => Err(format!(
+                                        "Browser draft outcome is unknown and its receipt could not be marked uncertain: {receipt_error}. Do not repeat it. Sidecar error: {}",
+                                        redact_sensitive_text(&error)
+                                    )),
+                                }
+                            }
                         }
                     }
                 }
@@ -23858,23 +24051,11 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             single_action_rejects_unsupported_execution_before_payment_claim(
                                 &action,
                             );
-                        let mut preflight_error = None;
-                        let vault_secret_used = if blocked_before_claim.is_some() {
-                            false
+                        let mut preflight_error = if blocked_before_claim.is_some() {
+                            None
                         } else {
-                            match apply_payment_approval_secret_for_action(ctx.state, &mut action) {
-                                Ok(used) => used,
-                                Err(error) => {
-                                    push_browser_step(
-                                        "payment vault secret blocked".to_string(),
-                                        "error",
-                                    );
-                                    preflight_error = Some(format!(
-                                        "Payment vault secret unavailable: {error}. Ask the user to approve the Payment Approval Card again."
-                                    ));
-                                    false
-                                }
-                            }
+                            authorize_browser_effect(ctx, "browser_act", call_id, action.clone())
+                                .err()
                         };
                         // SAFETY GATE: arbitrary page script remains forbidden and
                         // the final action that transfers money requires a matching
@@ -23898,12 +24079,12 @@ or tell the user to start the contained computer (Settings → Local computer)."
                         // grant unconsumed so the re-declared retry can use it.
                         let approved_payment_id = if blocked_before_claim.is_some() {
                             None
-                        } else if should_claim_payment_approval(
+                        } else if browser_safety::action_is_payment_commit(
                             &action,
                             &current_floor_refs,
                             focus_ctx,
                         ) {
-                            match claim_payment_approval_for_action(
+                            match validate_payment_approval_for_action(
                                 ctx.state,
                                 &action,
                                 &current_floor_refs,
@@ -23979,6 +24160,77 @@ navigate elsewhere to work around it.",
                                 ))
                             }
                         } else {
+                            let effect_lease = match begin_browser_effect(
+                                ctx,
+                                "browser_act",
+                                call_id,
+                                action.clone(),
+                            ) {
+                                Ok(crate::effect_host::EffectDecision::Execute(lease)) => lease,
+                                Ok(crate::effect_host::EffectDecision::Replay(receipt)) => {
+                                    *browser_session = Some(client);
+                                    return replayed_browser_effect_text(receipt);
+                                }
+                                Ok(crate::effect_host::EffectDecision::Resolve(receipt)) => {
+                                    *ctx.suspend_effect_receipt = Some(receipt.receipt_ref.clone());
+                                    *browser_session = Some(client);
+                                    *ctx.outcome_hint = Some(
+                                        local_first_engine::contract::ToolOutcomeHint::NoProgress,
+                                    );
+                                    return uncertain_browser_effect_text(&receipt);
+                                }
+                                Err(error) => {
+                                    *browser_session = Some(client);
+                                    *ctx.outcome_hint = Some(
+                                        local_first_engine::contract::ToolOutcomeHint::NoProgress,
+                                    );
+                                    return error;
+                                }
+                            };
+                            let vault_secret_used = match apply_payment_approval_secret_for_action(
+                                ctx.state,
+                                &mut action,
+                            ) {
+                                Ok(used) => used,
+                                Err(error) => {
+                                    let output = format!(
+                                        "Payment vault secret unavailable: {error}. Ask the user to approve the Payment Approval Card again."
+                                    );
+                                    let _ = complete_browser_effect(
+                                        ctx,
+                                        &effect_lease,
+                                        serde_json::Value::String(output.clone()),
+                                        serde_json::json!({"applied": false}),
+                                    );
+                                    *browser_session = Some(client);
+                                    *ctx.outcome_hint = Some(
+                                        local_first_engine::contract::ToolOutcomeHint::NoProgress,
+                                    );
+                                    return output;
+                                }
+                            };
+                            if should_claim_payment_approval(
+                                &action,
+                                &current_floor_refs,
+                                focus_ctx,
+                            ) && let Err(error) = claim_payment_approval_for_action(
+                                ctx.state,
+                                &action,
+                                &current_floor_refs,
+                                focus_ctx,
+                                ctx.thread_id,
+                            ) {
+                                let _ = complete_browser_effect(
+                                    ctx,
+                                    &effect_lease,
+                                    serde_json::Value::String(error.clone()),
+                                    serde_json::json!({"applied": false}),
+                                );
+                                *browser_session = Some(client);
+                                *ctx.outcome_hint =
+                                    Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
+                                return error;
+                            }
                             let kind = args
                                 .get("kind")
                                 .and_then(|k| k.as_str())
@@ -24122,7 +24374,24 @@ chosen. Otherwise try a different element, scroll, or wait (kind=wait).]",
                                         suggestions_present,
                                         false,
                                     ));
-                                    Ok(out)
+                                    if let Err(error) = complete_browser_effect(
+                                        ctx,
+                                        &effect_lease,
+                                        serde_json::Value::String(
+                                            "Previously completed browser action was not repeated. Inspect the current page with browser_snapshot before deciding the next action."
+                                                .to_string(),
+                                        ),
+                                        serde_json::json!({
+                                            "action_kinds": action_kinds,
+                                            "applied": true,
+                                        }),
+                                    ) {
+                                        Err(format!(
+                                            "The browser action was applied, but its receipt could not be completed: {error}. Do not repeat it."
+                                        ))
+                                    } else {
+                                        Ok(out)
+                                    }
                                 }
                                 Err(error) => {
                                     // Always log the REAL error text (not only under HOMUN_DEBUG): the
@@ -24158,89 +24427,124 @@ chosen. Otherwise try a different element, scroll, or wait (kind=wait).]",
                                     // take a fresh snapshot NOW and hand it back so it
                                     // retries with new refs in the same round.
                                     let stale = is_stale_ref_error(&error);
-                                    match (stale, browser_session.take()) {
-                                        (true, Some(c)) => {
-                                            let guard = browse_web_lock().lock().await;
-                                            // Stale-ref recovery is an ACTING re-observation → small view.
-                                            let (c_back, snap_res) =
-                                                chat_browser_call_checkpointed(
-                                                    ctx.state,
-                                                    ctx.thread_id,
-                                                    ctx.current_target.as_str(),
-                                                    c,
-                                                    BrowserMethod::Snapshot,
-                                                    browser_chat_act_snapshot_params(
+                                    if stale {
+                                        let recovery = match browser_session.take() {
+                                            Some(c) => {
+                                                let guard = browse_web_lock().lock().await;
+                                                // Stale-ref recovery is an ACTING re-observation → small view.
+                                                let (c_back, snap_res) =
+                                                    chat_browser_call_checkpointed(
+                                                        ctx.state,
+                                                        ctx.thread_id,
                                                         ctx.current_target.as_str(),
-                                                    ),
-                                                    BrowserCheckpointTelemetry {
-                                                        journal: ctx.journal,
-                                                        call_id,
-                                                    },
-                                                )
-                                                .await;
-                                            drop(guard);
-                                            *browser_session = c_back;
-                                            let snap = snap_res
-                                                .as_ref()
-                                                .map(browser_snapshot_text)
-                                                .unwrap_or_default();
-                                            if snap.is_empty() {
-                                                Err(format!(
-                                                    "Action failed: {error}{}",
-                                                    browser_act_error_hint(&error)
-                                                ))
-                                            } else {
-                                                *ctx.last_snapshot = snap.clone();
-                                                browser_set_target_floor(
-                                                    ctx.payment_floor_refs,
-                                                    ctx.current_target.as_str(),
-                                                    browser_floor_refs(snap_res.as_ref().unwrap()),
-                                                );
-                                                // A stale ref means the page genuinely changed under us —
-                                                // this recovery snapshot is a real fresh observation of
-                                                // THIS target, so treat it like an explicit
-                                                // browser_snapshot: refresh focus AND clear the robust flag.
-                                                browser_set_target_focus(
-                                                    ctx.payment_context_by_target,
-                                                    ctx.current_target.as_str(),
-                                                    browser_focus_payment_context(
+                                                        c,
+                                                        BrowserMethod::Snapshot,
+                                                        browser_chat_act_snapshot_params(
+                                                            ctx.current_target.as_str(),
+                                                        ),
+                                                        BrowserCheckpointTelemetry {
+                                                            journal: ctx.journal,
+                                                            call_id,
+                                                        },
+                                                    )
+                                                    .await;
+                                                drop(guard);
+                                                *browser_session = c_back;
+                                                let snap = snap_res
+                                                    .as_ref()
+                                                    .map(browser_snapshot_text)
+                                                    .unwrap_or_default();
+                                                if snap.is_empty() {
+                                                    Err(format!(
+                                                        "Action failed: {error}{}",
+                                                        browser_act_error_hint(&error)
+                                                    ))
+                                                } else {
+                                                    *ctx.last_snapshot = snap.clone();
+                                                    browser_set_target_floor(
+                                                        ctx.payment_floor_refs,
+                                                        ctx.current_target.as_str(),
+                                                        browser_floor_refs(
+                                                            snap_res.as_ref().unwrap(),
+                                                        ),
+                                                    );
+                                                    // A stale ref means the page genuinely changed under us —
+                                                    // this recovery snapshot is a real fresh observation of
+                                                    // THIS target, so treat it like an explicit
+                                                    // browser_snapshot: refresh focus AND clear the robust flag.
+                                                    browser_set_target_focus(
+                                                        ctx.payment_context_by_target,
+                                                        ctx.current_target.as_str(),
+                                                        browser_focus_payment_context(
+                                                            snap_res.as_ref().unwrap(),
+                                                        ),
+                                                    );
+                                                    browser_clear_target_acted_floored(
+                                                        ctx.payment_context_by_target,
+                                                        ctx.current_target.as_str(),
+                                                    );
+                                                    let metrics = browser_observation_metrics(
                                                         snap_res.as_ref().unwrap(),
-                                                    ),
-                                                );
-                                                browser_clear_target_acted_floored(
-                                                    ctx.payment_context_by_target,
-                                                    ctx.current_target.as_str(),
-                                                );
-                                                let metrics = browser_observation_metrics(
-                                                    snap_res.as_ref().unwrap(),
-                                                    vec!["snapshot".to_string()],
-                                                    "stale_ref_recovered",
-                                                );
-                                                ctx.journal.record(browser_protocol_journal_event(
-                                                    call_id,
-                                                    "stale_ref_recovery_observation",
-                                                    &metrics,
-                                                ));
-                                                push_browser_step(
-                                                    browser_protocol_event_summary(
-                                                        call_id,
-                                                        "stale_ref_recovery_observation",
-                                                        metrics,
-                                                    ),
-                                                    "done",
-                                                );
-                                                Ok(stale_ref_recovery_message(
-                                                    args.get("ref").and_then(|v| v.as_str()),
-                                                    &snap,
-                                                ))
+                                                        vec!["snapshot".to_string()],
+                                                        "stale_ref_recovered",
+                                                    );
+                                                    ctx.journal.record(
+                                                        browser_protocol_journal_event(
+                                                            call_id,
+                                                            "stale_ref_recovery_observation",
+                                                            &metrics,
+                                                        ),
+                                                    );
+                                                    push_browser_step(
+                                                        browser_protocol_event_summary(
+                                                            call_id,
+                                                            "stale_ref_recovery_observation",
+                                                            metrics,
+                                                        ),
+                                                        "done",
+                                                    );
+                                                    Ok(stale_ref_recovery_message(
+                                                        args.get("ref").and_then(|v| v.as_str()),
+                                                        &snap,
+                                                    ))
+                                                }
                                             }
-                                        }
-                                        (_, restored) => {
-                                            *browser_session = restored;
-                                            Err(format!(
+                                            None => Err(format!(
                                                 "Action failed: {error}{}",
                                                 browser_act_error_hint(&error)
+                                            )),
+                                        };
+                                        let persisted = match &recovery {
+                                            Ok(text) | Err(text) => text.clone(),
+                                        };
+                                        if let Err(receipt_error) = complete_browser_effect(
+                                            ctx,
+                                            &effect_lease,
+                                            serde_json::Value::String(persisted),
+                                            serde_json::json!({
+                                                "applied": false,
+                                                "reason": "stale_ref",
+                                            }),
+                                        ) {
+                                            Err(format!(
+                                                "The browser rejected a stale reference before applying it, but its receipt could not be completed: {receipt_error}."
                                             ))
+                                        } else {
+                                            recovery
+                                        }
+                                    } else {
+                                        let receipt =
+                                            mark_browser_effect_uncertain(ctx, &effect_lease);
+                                        match receipt {
+                                            Ok(receipt) => Err(format!(
+                                                "{} Sidecar error: {}",
+                                                uncertain_browser_effect_text(&receipt),
+                                                redact_sensitive_text(&error)
+                                            )),
+                                            Err(receipt_error) => Err(format!(
+                                                "Browser action outcome is unknown and its receipt could not be marked uncertain: {receipt_error}. Do not repeat it. Sidecar error: {}",
+                                                redact_sensitive_text(&error)
+                                            )),
                                         }
                                     }
                                 }
@@ -24799,6 +25103,33 @@ async fn make_templated_document(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EffectDispatchStatus {
+    Verified,
+    UnknownRemoteOutcome,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EffectReceiptFinishAction {
+    Complete,
+    MarkUncertainAndSuspend,
+}
+
+fn effect_receipt_finish_action(status: EffectDispatchStatus) -> EffectReceiptFinishAction {
+    match status {
+        EffectDispatchStatus::Verified => EffectReceiptFinishAction::Complete,
+        EffectDispatchStatus::UnknownRemoteOutcome => {
+            EffectReceiptFinishAction::MarkUncertainAndSuspend
+        }
+    }
+}
+
+struct GatewayToolDispatch {
+    result: String,
+    effects: local_first_engine::ToolEffects,
+    effect_status: EffectDispatchStatus,
+}
+
 /// Pure per-tool-call dispatch for the chat loop: the single `if name == … else if …`
 /// chain, extracted verbatim from `stream_chat_via_openai`'s dispatch loop (fase 1b).
 /// Turn-state is read/mutated through `ctx.<field>` exactly as inline (disjoint field
@@ -24815,7 +25146,7 @@ async fn execute_chat_tool(
     // Unused since the browser dispatch (its only user) moved to the call site (5d.2); kept for the
     // `CapabilityExecutor::execute_tool(name, args, call_id)` signature this becomes at 5e.
     _call_id: &str,
-) -> (String, local_first_engine::ToolEffects) {
+) -> GatewayToolDispatch {
     // ADR 0023: observe-only sandbox classification/log alongside the (now unconditional)
     // OS fence. NEVER blocks or alters `result`; it only reads state and logs.
     shadow_log_sandbox(ctx.state, ctx.thread_id, name, args_raw);
@@ -24824,6 +25155,7 @@ async fn execute_chat_tool(
     // — behavior-preserving. (The browser arm still delegates to `execute_browser_tool`, the temporary
     // seam headed for ADR 0025, which keeps mutating `ctx` directly for now.)
     let mut effects = local_first_engine::ToolEffects::default();
+    let mut effect_status = EffectDispatchStatus::Verified;
     let result = if ctx.read_only
         && matches!(
             name,
@@ -27075,6 +27407,9 @@ require your confirmation in the app. Propose it and stop."
                             .collect()
                     }
                     Ok(Ok(Err(error))) => {
+                        if is_write {
+                            effect_status = EffectDispatchStatus::UnknownRemoteOutcome;
+                        }
                         // Classify the failure so a broken MCP server tells the user
                         // what to do (reconnect / wait) instead of a raw error.
                         run_err = classify_connector_error(&error.to_string())
@@ -27086,10 +27421,12 @@ require your confirmation in the app. Propose it and stop."
                         format!("MCP tool error: {error}.{hint}")
                     }
                     Ok(Err(_join)) => {
+                        effect_status = EffectDispatchStatus::UnknownRemoteOutcome;
                         run_err = Some("other");
                         "Error: MCP execution interrupted.".to_string()
                     }
                     Err(_elapsed) => {
+                        effect_status = EffectDispatchStatus::UnknownRemoteOutcome;
                         run_err = Some("unavailable");
                         format!(
                             "The MCP tool didn't respond within {}s (timeout): the server \
@@ -27181,6 +27518,20 @@ Connectors → MCP; do NOT claim it's done.",
             let mut run_ok = false;
             let mut run_err: Option<&'static str> = None;
             let composio_result = match outcome {
+                Ok(Ok(value))
+                    if value
+                        .get("unknown_remote_outcome")
+                        .and_then(serde_json::Value::as_bool)
+                        == Some(true) =>
+                {
+                    effect_status = EffectDispatchStatus::UnknownRemoteOutcome;
+                    run_err = Some("unavailable");
+                    let error = composio_execution_error(&value)
+                        .unwrap_or_else(|| "remote outcome is unknown".to_string());
+                    format!(
+                        "The tool {name} may have performed the action, but its response was lost: {error}. Do not retry until the target state is verified."
+                    )
+                }
                 Ok(Ok(value)) => match composio_execution_error(&value) {
                     // Composio returned 200 but the tool failed: tell the
                     // model so it reports the failure, not a false success.
@@ -27206,6 +27557,9 @@ Tell the user clearly; do NOT claim it's done."
                     }
                 },
                 Ok(Err(error)) => {
+                    if is_write {
+                        effect_status = EffectDispatchStatus::UnknownRemoteOutcome;
+                    }
                     run_err = classify_connector_error(&error.message)
                         .map(connector_error_kind_str)
                         .or(Some("other"));
@@ -27215,6 +27569,7 @@ Tell the user clearly; do NOT claim it's done."
                     format!("Error from the tool {name}: {}.{hint}", error.message)
                 }
                 Err(error) => {
+                    effect_status = EffectDispatchStatus::UnknownRemoteOutcome;
                     run_err = Some("other");
                     format!("Tool execution error: {error}")
                 }
@@ -27233,7 +27588,11 @@ Tell the user clearly; do NOT claim it's done."
     } else {
         format!("Tool not available: {name}")
     };
-    (result, effects)
+    GatewayToolDispatch {
+        result,
+        effects,
+        effect_status,
+    }
 }
 
 /// The gateway's `CapabilityExecutor` (ADR 0026): holds ONLY the turn-constant read-only context
@@ -27266,43 +27625,7 @@ struct GatewayCapabilityExecutor<'a> {
     turn_trace: &'a local_first_engine::turn_trace::TurnTrace,
     turn_id: Option<&'a str>,
     run_id: Option<&'a str>,
-}
-
-fn canonical_json(value: serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Object(values) => {
-            let ordered = values
-                .into_iter()
-                .map(|(key, value)| (key, canonical_json(value)))
-                .collect::<std::collections::BTreeMap<_, _>>();
-            serde_json::Value::Object(ordered.into_iter().collect())
-        }
-        serde_json::Value::Array(values) => {
-            serde_json::Value::Array(values.into_iter().map(canonical_json).collect())
-        }
-        other => other,
-    }
-}
-
-fn effect_receipt_identity(
-    turn_id: &str,
-    operation: &str,
-    tool_call_id: &str,
-) -> Result<(String, local_first_execution_protocol::EffectReceiptRef), String> {
-    if turn_id.trim().is_empty() || operation.trim().is_empty() || tool_call_id.trim().is_empty() {
-        return Err(
-            "effect receipt requires execution, operation, and logical call identity".into(),
-        );
-    }
-    let idempotency_key = format!("tool_call:{operation}:{tool_call_id}");
-    let receipt_hash = format!(
-        "{:x}",
-        Sha256::digest(format!("{turn_id}:{idempotency_key}").as_bytes())
-    );
-    let receipt_ref =
-        local_first_execution_protocol::EffectReceiptRef::from_store_id(&receipt_hash[..32])
-            .map_err(|error| format!("effect receipt reference failed: {error}"))?;
-    Ok((idempotency_key, receipt_ref))
+    execution_contract: Option<&'a local_first_execution_protocol::ValidatedExecutionContract>,
 }
 
 /// Does this tool name look effectful? `composio_writes` is the authoritative set for connector tools;
@@ -27405,6 +27728,27 @@ fn tool_effect_class(
         EffectClass::ExternalWrite
     } else {
         EffectClass::Read
+    }
+}
+
+fn protocol_effect_class(
+    name: &str,
+    composio_writes: &std::collections::BTreeSet<String>,
+) -> local_first_execution_protocol::EffectClass {
+    match tool_effect_class(name, composio_writes) {
+        semantic_decision::EffectClass::Read => local_first_execution_protocol::EffectClass::Read,
+        semantic_decision::EffectClass::RequestAuthorization => {
+            local_first_execution_protocol::EffectClass::RequestAuthorization
+        }
+        semantic_decision::EffectClass::FilesystemWrite => {
+            local_first_execution_protocol::EffectClass::FilesystemWrite
+        }
+        semantic_decision::EffectClass::ArtifactCreation => {
+            local_first_execution_protocol::EffectClass::ArtifactCreation
+        }
+        semantic_decision::EffectClass::ExternalWrite => {
+            local_first_execution_protocol::EffectClass::ExternalWrite
+        }
     }
 }
 
@@ -27528,6 +27872,45 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             } else {
                 format!("{goal}\nPreferred app: {app}")
             };
+            let Some(contract) = self.execution_contract else {
+                return Ok(local_first_engine::ToolOutcome {
+                    result: "Computer action blocked: no durable execution scope is available."
+                        .to_string(),
+                    effects: Default::default(),
+                });
+            };
+            let effect_host = crate::effect_host::EffectHost::new(
+                self.state.task_store.as_ref(),
+                contract,
+                self.run_id,
+            );
+            let lease = match effect_host.begin(crate::effect_host::EffectRequest::capability(
+                name,
+                call_id,
+                local_first_execution_protocol::EffectClass::ExternalWrite,
+                value,
+            ))? {
+                crate::effect_host::EffectDecision::Execute(lease) => lease,
+                crate::effect_host::EffectDecision::Replay(receipt) => {
+                    let result = receipt
+                        .result_json
+                        .and_then(|value| value.as_str().map(str::to_string))
+                        .unwrap_or_else(|| "Previously completed computer action replayed.".into());
+                    return Ok(local_first_engine::ToolOutcome {
+                        result,
+                        effects: Default::default(),
+                    });
+                }
+                crate::effect_host::EffectDecision::Resolve(receipt) => {
+                    return Ok(local_first_engine::ToolOutcome {
+                        result: "This computer action may already have run before an interruption. It was not repeated; inspect the target state before retrying.".to_string(),
+                        effects: local_first_engine::ToolEffects {
+                            suspend_effect_receipt: Some(receipt.receipt_ref),
+                            ..Default::default()
+                        },
+                    });
+                }
+            };
             let outcome = GatewayComputerExecutor {
                 state: self.state,
                 http: &self.state.http,
@@ -27535,10 +27918,20 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             }
             .run(&delegated_goal)
             .await;
-            return Ok(local_first_engine::ToolOutcome {
-                result: local_first_engine::browse::browse_result_for_manager(&outcome),
-                effects: Default::default(),
-            });
+            let mut result = local_first_engine::browse::browse_result_for_manager(&outcome);
+            let mut effects = local_first_engine::ToolEffects::default();
+            if let Err(error) = effect_host.complete(
+                &lease,
+                &serde_json::Value::String(result.clone()),
+                &serde_json::json!({"computer_action": true}),
+            ) {
+                let _ = effect_host.mark_uncertain(&lease);
+                effects.suspend_effect_receipt = Some(lease.receipt_ref().clone());
+                result = format!(
+                    "{result}\nComputer effect receipt completion failed: {error}. The outcome requires verification."
+                );
+            }
+            return Ok(local_first_engine::ToolOutcome { result, effects });
         }
         // ADR 0025 slice 2: `browse` is delegated, not a normal capability. Intercept it BEFORE the
         // ChatToolCtx path and route it to the isolated recursive sub-turn (GatewayBrowseExecutor). The
@@ -27558,7 +27951,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 let deferred = local_first_engine::BrowseResult::not_found(
                     "browse deferred: another browse call already ran in this model round; inspect its result before deciding whether another source is needed",
                 );
-                return Ok(delegated_browse_tool_outcome(&deferred));
+                return Ok(delegated_browse_tool_outcome(&deferred, None));
             }
             let request = parse_browse_request(args_raw);
             if request.goal.is_empty() {
@@ -27576,10 +27969,14 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                     || !objective_policy.allows(semantic_decision::EffectClass::ExternalWrite),
                 channel_owner: self.channel_owner,
                 agent_run_id: self.run_id.map(str::to_string),
+                execution_contract: self.execution_contract.cloned(),
             };
             let outcome = browse_executor.browse(request).await;
             ls.browse_calls_completed = ls.browse_calls_completed.saturating_add(1);
-            return Ok(delegated_browse_tool_outcome(&outcome));
+            return Ok(delegated_browse_tool_outcome(
+                &outcome.result,
+                outcome.suspend_effect_receipt,
+            ));
         }
         // ADR 0023 Step 5: re-hydrate the turn's armed sensitive domains (carried as tokens in the
         // engine-safe LoopState) into the gateway enum for the approval gates. Read before the `&mut`
@@ -27589,89 +27986,31 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             .iter()
             .filter_map(|t| crate::skills::SensitiveCategory::parse(t))
             .collect();
+        let effect_host = self.execution_contract.map(|contract| {
+            crate::effect_host::EffectHost::new(
+                self.state.task_store.as_ref(),
+                contract,
+                self.run_id,
+            )
+        });
         let receipt = if effectful_tool_name(name, self.composio_writes) {
-            let (Some(turn_id), Some(run_id), Some(thread_id)) =
-                (self.turn_id, self.run_id, self.thread_id)
-            else {
+            let Some(host) = effect_host.as_ref() else {
                 return Ok(local_first_engine::ToolOutcome {
                     result: "Effectful tool blocked: no durable execution scope is available."
                         .to_string(),
                     effects: Default::default(),
                 });
             };
-            let args = canonical_json(
-                serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({})),
-            );
-            let arguments_hash = format!(
-                "{:x}",
-                Sha256::digest(serde_json::to_vec(&args).unwrap_or_default())
-            );
-            let (mut idempotency_key, mut receipt_ref) =
-                effect_receipt_identity(turn_id, name, call_id)?;
-            let store = self
-                .state
-                .task_store
-                .lock()
-                .map_err(|_| "effect receipt store unavailable".to_string())?;
-            let revision = store
-                .execution(turn_id)
-                .map_err(|error| format!("effect execution lookup failed: {error}"))?
-                .map(|record| record.contract.as_ref().revision)
-                .unwrap_or(1);
-            let legacy_idempotency_key = format!("{name}:{arguments_hash}");
-            if let Some(legacy) = store
-                .list_effect_receipts_for_execution(turn_id, revision)
-                .map_err(|error| format!("effect receipt migration lookup failed: {error}"))?
-                .into_iter()
-                .find(|receipt| {
-                    receipt.idempotency_key == legacy_idempotency_key
-                        && receipt.operation == name
-                        && receipt.arguments_hash == arguments_hash
-                })
-            {
-                idempotency_key = legacy.idempotency_key;
-                receipt_ref = legacy.receipt_ref;
-            }
-            let effect_class = match tool_effect_class(name, self.composio_writes) {
-                semantic_decision::EffectClass::Read => {
-                    local_first_execution_protocol::EffectClass::Read
-                }
-                semantic_decision::EffectClass::RequestAuthorization => {
-                    local_first_execution_protocol::EffectClass::RequestAuthorization
-                }
-                semantic_decision::EffectClass::FilesystemWrite => {
-                    local_first_execution_protocol::EffectClass::FilesystemWrite
-                }
-                semantic_decision::EffectClass::ArtifactCreation => {
-                    local_first_execution_protocol::EffectClass::ArtifactCreation
-                }
-                semantic_decision::EffectClass::ExternalWrite => {
-                    local_first_execution_protocol::EffectClass::ExternalWrite
-                }
-            };
-            let new_receipt = local_first_task_runtime::NewExecutionEffectReceipt {
-                receipt_ref: receipt_ref.clone(),
-                execution_id: turn_id.to_string(),
-                revision,
-                idempotency_key: idempotency_key.clone(),
-                run_id: Some(run_id.to_string()),
-                thread_id: Some(thread_id.to_string()),
-                user_id: self.automation_user_id.as_str().to_string(),
-                workspace_id: self.automation_workspace_id.as_str().to_string(),
-                effect_class,
-                operation: name.to_string(),
-                arguments_hash,
-                compensation: None,
-            };
-            store
-                .prepare_effect_receipt(&new_receipt)
-                .map_err(|error| format!("effect receipt prepare failed: {error}"))?;
-            let claim = store
-                .claim_effect_receipt(&receipt_ref)
-                .map_err(|error| format!("effect receipt claim failed: {error}"))?;
-            match claim {
-                local_first_task_runtime::EffectReceiptClaim::Execute(_) => Some(receipt_ref),
-                local_first_task_runtime::EffectReceiptClaim::Replay(receipt) => {
+            let arguments =
+                serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+            match host.begin(crate::effect_host::EffectRequest::capability(
+                name,
+                call_id,
+                protocol_effect_class(name, self.composio_writes),
+                arguments,
+            ))? {
+                crate::effect_host::EffectDecision::Execute(lease) => Some(lease),
+                crate::effect_host::EffectDecision::Replay(receipt) => {
                     let result = receipt
                         .result_json
                         .and_then(|value| value.as_str().map(str::to_string))
@@ -27682,7 +28021,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                         .unwrap_or_default();
                     return Ok(local_first_engine::ToolOutcome { result, effects });
                 }
-                local_first_task_runtime::EffectReceiptClaim::Resolve(receipt) => {
+                crate::effect_host::EffectDecision::Resolve(receipt) => {
                     return Ok(local_first_engine::ToolOutcome {
                         result: "This effect may already have run before an interruption. It was not repeated; inspect the target state before retrying.".to_string(),
                         effects: local_first_engine::ToolEffects {
@@ -27721,7 +28060,11 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             turn_trace: self.turn_trace,
             active_sensitive,
         };
-        let (result, effects) = execute_chat_tool(&ctx, name, args_raw, call_id).await;
+        let GatewayToolDispatch {
+            mut result,
+            mut effects,
+            effect_status,
+        } = execute_chat_tool(&ctx, name, args_raw, call_id).await;
         // S2 T4: `effects.clear_routing_binding` is a gateway-side signal the engine-safe
         // `LoopState::apply_effects` can't act on (it has no `ChatStore` access) — this is
         // the gateway seam that DOES, right after the call that set it, before the flag
@@ -27732,18 +28075,28 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
         {
             let _ = store.clear_thread_routing_binding(thread_id);
         }
-        if let Some(receipt_ref) = receipt {
-            let result_json =
-                agent_journal::redact_json_value(serde_json::Value::String(result.clone()));
-            let effects_json = agent_journal::redact_json_value(
-                serde_json::to_value(&effects).unwrap_or_else(|_| serde_json::json!({})),
-            );
-            self.state
-                .task_store
-                .lock()
-                .map_err(|_| "effect receipt completion store unavailable".to_string())?
-                .complete_effect_receipt(&receipt_ref, &result_json, &effects_json)
-                .map_err(|error| format!("effect receipt completion failed: {error}"))?;
+        if let Some(lease) = receipt {
+            let host = effect_host
+                .as_ref()
+                .expect("a lease is only returned by an effect host");
+            match effect_receipt_finish_action(effect_status) {
+                EffectReceiptFinishAction::Complete => {
+                    let result_json = serde_json::Value::String(result.clone());
+                    let effects_json =
+                        serde_json::to_value(&effects).unwrap_or_else(|_| serde_json::json!({}));
+                    if let Err(error) = host.complete(&lease, &result_json, &effects_json) {
+                        let _ = host.mark_uncertain(&lease);
+                        effects.suspend_effect_receipt = Some(lease.receipt_ref().clone());
+                        result = format!(
+                            "{result}\nEffect receipt completion failed: {error}. The outcome requires verification."
+                        );
+                    }
+                }
+                EffectReceiptFinishAction::MarkUncertainAndSuspend => {
+                    let _ = host.mark_uncertain(&lease);
+                    effects.suspend_effect_receipt = Some(lease.receipt_ref().clone());
+                }
+            }
         }
         Ok(local_first_engine::ToolOutcome { result, effects })
     }
@@ -27791,6 +28144,8 @@ struct GatewayBrowserExecutor<'a> {
     // `browser_protocol_journal_event`). `Disabled` when the caller has no registered agent_run_id
     // (e.g. no journal for this run) — recording is then a silent no-op, never a fabricated id.
     journal: agent_journal::GatewayJournal,
+    execution_contract: Option<local_first_execution_protocol::ValidatedExecutionContract>,
+    effect_run_id: Option<String>,
 }
 
 impl Drop for GatewayBrowserExecutor<'_> {
@@ -27811,7 +28166,7 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
         args_raw: &str,
         call_id: &str,
         ls: &mut local_first_engine::LoopState,
-    ) -> (String, local_first_engine::contract::ToolOutcomeHint) {
+    ) -> local_first_engine::ToolOutcome {
         if name == "browser_done" {
             let payload =
                 serde_json::from_str::<local_first_engine::browse::BrowserDonePayload>(args_raw)
@@ -27841,16 +28196,20 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
                 browser_protocol_event_summary(call_id, "browser_done", metrics),
                 "done",
             );
-            return (
-                local_first_engine::browse::browse_result_for_manager(&result),
-                local_first_engine::contract::ToolOutcomeHint::Success,
-            );
+            return local_first_engine::ToolOutcome {
+                result: local_first_engine::browse::browse_result_for_manager(&result),
+                effects: local_first_engine::ToolEffects {
+                    outcome_hint: Some(local_first_engine::contract::ToolOutcomeHint::Success),
+                    ..Default::default()
+                },
+            };
         }
         // The browser branch mutates its ctx directly (disjoint read-set): browser-private state from
         // `&mut self`, loop-visible browser fields + provider from `&mut ls`. `browser_session` is
         // threaded separately (its Cell/RefCell would make the ctx non-`Sync`). ADR 0025 folds this
         // whole ctx into a recursive `browse(goal)` and the seam goes away.
         let mut outcome_hint: Option<local_first_engine::contract::ToolOutcomeHint> = None;
+        let mut suspend_effect_receipt = None;
         let text = {
             let mut bctx = BrowserToolCtx {
                 browser_used: &mut ls.browser_used,
@@ -27869,6 +28228,9 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
                 read_only: self.read_only,
                 channel_owner: self.channel_owner,
                 journal: &self.journal,
+                execution_contract: self.execution_contract.as_ref(),
+                effect_run_id: self.effect_run_id.as_deref(),
+                suspend_effect_receipt: &mut suspend_effect_receipt,
                 outcome_hint: &mut outcome_hint,
             };
             execute_browser_tool(
@@ -27880,10 +28242,16 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
             )
             .await
         };
-        (
-            text,
-            outcome_hint.unwrap_or(local_first_engine::contract::ToolOutcomeHint::Success),
-        )
+        local_first_engine::ToolOutcome {
+            result: text,
+            effects: local_first_engine::ToolEffects {
+                suspend_effect_receipt,
+                outcome_hint: Some(
+                    outcome_hint.unwrap_or(local_first_engine::contract::ToolOutcomeHint::Success),
+                ),
+                ..Default::default()
+            },
+        }
     }
 
     async fn close_session(&mut self, browser_used: bool) {
@@ -28158,6 +28526,7 @@ fn earlier_browse_call_in_current_round(
 /// Nothing here interprets user prose or keywords.
 fn delegated_browse_tool_outcome(
     result: &local_first_engine::BrowseResult,
+    suspend_effect_receipt: Option<local_first_execution_protocol::EffectReceiptRef>,
 ) -> local_first_engine::ToolOutcome {
     local_first_engine::ToolOutcome {
         result: local_first_engine::browse::browse_result_for_manager(result),
@@ -28168,9 +28537,15 @@ fn delegated_browse_tool_outcome(
             } else {
                 local_first_engine::ToolOutcomeHint::NoProgress
             }),
+            suspend_effect_receipt,
             ..Default::default()
         },
     }
+}
+
+struct GatewayBrowseOutcome {
+    result: local_first_engine::BrowseResult,
+    suspend_effect_receipt: Option<local_first_execution_protocol::EffectReceiptRef>,
 }
 
 /// Round budget scaled from the declared result contract. Progress (the engine's
@@ -28213,13 +28588,14 @@ struct GatewayBrowseExecutor<'a> {
     // `agent_journal::for_run`. `None`/unregistered both resolve to `GatewayJournal::Disabled` (a
     // silent no-op), never a fabricated id.
     agent_run_id: Option<String>,
+    execution_contract: Option<local_first_execution_protocol::ValidatedExecutionContract>,
 }
 
 impl GatewayBrowseExecutor<'_> {
     /// Run one browser sub-turn for `goal` and return its `BrowseResult`. The recursion (this calls
     /// `run_turn`, which dispatches browser tools back through the sub `GatewayBrowserExecutor`) stays
     /// finite: the sub CapabilityExecutor type has no `browse`, so there is no self-recursive tool.
-    async fn browse(&self, request: ParsedBrowseRequest) -> local_first_engine::BrowseResult {
+    async fn browse(&self, request: ParsedBrowseRequest) -> GatewayBrowseOutcome {
         // Browser model (falls back to the chat model when the browser role is auto/unresolved), so the
         // sub-agent runs on the small/cheap browsing model without ever switching the manager's provider.
         let (base_url, model, api_key) = browser_openai_stream_config()
@@ -28309,6 +28685,8 @@ impl GatewayBrowseExecutor<'_> {
             read_only: self.read_only,
             channel_owner: self.channel_owner,
             journal: journal.clone(),
+            execution_contract: self.execution_contract.clone(),
+            effect_run_id: self.agent_run_id.clone(),
         };
         if let Some(hint_url) = request.hint_url.as_deref() {
             let nav_args = serde_json::json!({
@@ -28316,7 +28694,7 @@ impl GatewayBrowseExecutor<'_> {
                 "target": "chat_0"
             })
             .to_string();
-            let _ =
+            let pre_navigation =
                 <GatewayBrowserExecutor as local_first_engine::BrowserExecutor>::execute_browser(
                     &mut browser_executor,
                     "browser_navigate",
@@ -28325,6 +28703,14 @@ impl GatewayBrowseExecutor<'_> {
                     &mut ls,
                 )
                 .await;
+            if let Some(receipt_ref) = pre_navigation.effects.suspend_effect_receipt {
+                return GatewayBrowseOutcome {
+                    result: local_first_engine::BrowseResult::not_found(
+                        "Pre-navigation requires verification before browsing can continue.",
+                    ),
+                    suspend_effect_receipt: Some(receipt_ref),
+                };
+            }
             let pre_nav_metrics = serde_json::json!({
                 "stop_reason": "completed",
                 "action_kinds": ["navigate"],
@@ -28431,6 +28817,13 @@ impl GatewayBrowseExecutor<'_> {
         )
         .await;
 
+        let suspend_effect_receipt = match &outcome.stop {
+            local_first_engine::TurnStop::SuspendedEffect { receipt_ref } => {
+                Some(receipt_ref.clone())
+            }
+            _ => None,
+        };
+
         if let Some(result) =
             local_first_engine::browse::browse_result_from_manager_text(&outcome.memory_answer)
         {
@@ -28455,7 +28848,10 @@ impl GatewayBrowseExecutor<'_> {
                 ),
                 "done",
             );
-            return result;
+            return GatewayBrowseOutcome {
+                result,
+                suspend_effect_receipt,
+            };
         }
         let fallback_payload = local_first_engine::browse::BrowserDonePayload {
             status: local_first_engine::browse::BrowserDoneStatus::Timeout,
@@ -28483,10 +28879,13 @@ impl GatewayBrowseExecutor<'_> {
             ),
             "error",
         );
-        local_first_engine::browse::validate_browser_done_payload(
-            fallback_payload,
-            request.contract.as_ref(),
-        )
+        GatewayBrowseOutcome {
+            result: local_first_engine::browse::validate_browser_done_payload(
+                fallback_payload,
+                request.contract.as_ref(),
+            ),
+            suspend_effect_receipt,
+        }
     }
 }
 
@@ -28645,11 +29044,14 @@ impl local_first_engine::BrowserExecutor for ComputerNoBrowserExecutor {
         _args_raw: &str,
         _call_id: &str,
         _state: &mut local_first_engine::LoopState,
-    ) -> (String, local_first_engine::contract::ToolOutcomeHint) {
-        (
-            format!("browser tool unavailable: {name}"),
-            local_first_engine::contract::ToolOutcomeHint::Success,
-        )
+    ) -> local_first_engine::ToolOutcome {
+        local_first_engine::ToolOutcome {
+            result: format!("browser tool unavailable: {name}"),
+            effects: local_first_engine::ToolEffects {
+                outcome_hint: Some(local_first_engine::contract::ToolOutcomeHint::Success),
+                ..Default::default()
+            },
+        }
     }
     async fn close_session(&mut self, _browser_used: bool) {}
 }
@@ -30723,6 +31125,16 @@ async fn run_agent_rounds(
     usage_context.thread_id = thread_id.clone();
     usage_context.turn_id = effect_turn_id.clone();
     usage_context.run_id = effect_run_id.clone();
+    let effect_contract = effect_turn_id.as_deref().and_then(|execution_id| {
+        state_owned
+            .task_store
+            .lock()
+            .ok()?
+            .execution(execution_id)
+            .ok()
+            .flatten()
+            .map(|record| record.contract)
+    });
     let capability_executor = GatewayCapabilityExecutor {
         state: &state_owned,
         tx,
@@ -30746,6 +31158,7 @@ async fn run_agent_rounds(
         turn_trace,
         turn_id: effect_turn_id.as_deref(),
         run_id: effect_run_id.as_deref(),
+        execution_contract: effect_contract.as_ref(),
     };
     // The browser tool chokepoint (ADR 0025 seam): OWNS the browser subsystem's private state (session +
     // snapshot/tab/nav bookkeeping); `&mut` because run_turn mutates it per browser call.
@@ -30768,6 +31181,8 @@ async fn run_agent_rounds(
         // `&execution_journal`, so protocol metrics from a manager-level browser call land in the same
         // run as everything else this turn records.
         journal: execution_journal.clone(),
+        execution_contract: effect_contract.clone(),
+        effect_run_id: effect_run_id.clone(),
     };
     let plan_progress = GatewayPlanProgress {
         state: state_owned.clone(),
@@ -33261,6 +33676,56 @@ mod browser_rehydrate_contract_tests {
             semantic_decision::EffectClass::ExternalWrite,
         );
     }
+
+    #[test]
+    fn only_mutating_browser_tools_require_effect_receipts() {
+        for name in ["browser_act", "browser_rehydrate"] {
+            assert_eq!(
+                browser_effect_class(name),
+                Some(local_first_execution_protocol::EffectClass::ExternalWrite),
+                "{name} must cross the effect host"
+            );
+        }
+        for name in [
+            "browser_navigate",
+            "browser_snapshot",
+            "browser_screenshot",
+            "browser_tabs",
+            "browser_dialog",
+            "browser_done",
+        ] {
+            assert_eq!(
+                browser_effect_class(name),
+                None,
+                "{name} must remain receipt-free"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_remote_dispatch_requires_receipt_resolution() {
+        assert_eq!(
+            effect_receipt_finish_action(EffectDispatchStatus::UnknownRemoteOutcome),
+            EffectReceiptFinishAction::MarkUncertainAndSuspend
+        );
+        assert_eq!(
+            effect_receipt_finish_action(EffectDispatchStatus::Verified),
+            EffectReceiptFinishAction::Complete
+        );
+    }
+
+    #[test]
+    fn telegram_rebind_is_forbidden_after_unknown_first_send() {
+        assert!(!telegram_send_may_rebind(
+            ChannelSendFailureKind::UnknownRemoteOutcome
+        ));
+        assert!(!telegram_send_may_rebind(
+            ChannelSendFailureKind::VerifiedRejection
+        ));
+        assert!(telegram_send_may_rebind(
+            ChannelSendFailureKind::ConnectFailedBeforeDispatch
+        ));
+    }
 }
 
 /// Canonical Snapshot params for the chat-driven browser.
@@ -35202,14 +35667,29 @@ async fn telegram_disconnect() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "ok": true }))
 }
 
-/// Sends a text message via a channel sidecar (C2). `port` selects the sidecar
-/// (WhatsApp / Telegram / …); both speak the same `/send` protocol.
-async fn channel_send(
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ChannelSendFailureKind {
+    ConnectFailedBeforeDispatch,
+    VerifiedRejection,
+    UnknownRemoteOutcome,
+}
+
+struct ChannelSendFailure {
+    kind: ChannelSendFailureKind,
+    message: String,
+}
+
+fn telegram_send_may_rebind(kind: ChannelSendFailureKind) -> bool {
+    kind == ChannelSendFailureKind::ConnectFailedBeforeDispatch
+}
+
+/// Sends one text message via a channel sidecar and preserves whether retrying is safe.
+async fn channel_send_classified(
     state: &AppState,
     port: u16,
     recipient: &str,
     text: &str,
-) -> Result<(), String> {
+) -> Result<(), ChannelSendFailure> {
     let url = format!("http://127.0.0.1:{port}/send");
     let response = state
         .http
@@ -35218,12 +35698,34 @@ async fn channel_send(
         .json(&serde_json::json!({ "recipient": recipient, "text": text }))
         .send()
         .await
-        .map_err(|error| format!("sidecar unreachable: {error}"))?;
+        .map_err(|error| ChannelSendFailure {
+            kind: if error.is_connect() {
+                ChannelSendFailureKind::ConnectFailedBeforeDispatch
+            } else {
+                ChannelSendFailureKind::UnknownRemoteOutcome
+            },
+            message: format!("sidecar unreachable: {error}"),
+        })?;
     if response.status().is_success() {
         Ok(())
     } else {
-        Err(format!("sidecar /send responded {}", response.status()))
+        Err(ChannelSendFailure {
+            kind: ChannelSendFailureKind::VerifiedRejection,
+            message: format!("sidecar /send responded {}", response.status()),
+        })
     }
+}
+
+/// Compatibility wrapper for callers that only surface text and never retry internally.
+async fn channel_send(
+    state: &AppState,
+    port: u16,
+    recipient: &str,
+    text: &str,
+) -> Result<(), String> {
+    channel_send_classified(state, port, recipient, text)
+        .await
+        .map_err(|error| error.message)
 }
 
 async fn telegram_send_with_rebind(
@@ -35231,118 +35733,104 @@ async fn telegram_send_with_rebind(
     recipient: &str,
     text: &str,
 ) -> Result<(), String> {
-    match channel_send(state, TELEGRAM_HTTP_PORT, recipient, text).await {
+    match channel_send_classified(state, TELEGRAM_HTTP_PORT, recipient, text).await {
         Ok(()) => return Ok(()),
-        Err(first_error) => {
+        Err(first_error) if telegram_send_may_rebind(first_error.kind) => {
             let Some(token) = load_telegram_token() else {
-                return Err(format!("{first_error}; telegram token unavailable"));
+                return Err(format!(
+                    "{}; telegram token unavailable",
+                    first_error.message
+                ));
             };
             if let Err(error) = ensure_telegram_sidecar(state, &token).await {
-                return Err(format!("{first_error}; rebind failed: {}", error.message));
+                return Err(format!(
+                    "{}; rebind failed: {}",
+                    first_error.message, error.message
+                ));
             }
         }
+        Err(first_error) => return Err(first_error.message),
     }
     channel_send(state, TELEGRAM_HTTP_PORT, recipient, text).await
 }
 
-fn channel_reply_receipt(
+fn channel_reply_effect_request(
     contract: &local_first_execution_protocol::ValidatedExecutionContract,
+    thread_id: &str,
     channel: &str,
     recipient: &str,
     answer: &str,
-) -> Result<local_first_task_runtime::NewExecutionEffectReceipt, String> {
+) -> crate::effect_host::EffectRequest {
     let contract = contract.as_ref();
     let operation = format!("channel.{channel}.reply");
     let logical_call_id = format!("projection_revision_{}", contract.revision);
-    let (idempotency_key, receipt_ref) =
-        effect_receipt_identity(&contract.execution_id, &operation, &logical_call_id)?;
-    let arguments = canonical_json(serde_json::json!({
-        "channel": channel,
-        "recipient": recipient,
-        "answer": answer,
-    }));
-    let arguments_hash = format!(
-        "{:x}",
-        Sha256::digest(
-            serde_json::to_vec(&arguments)
-                .map_err(|error| format!("channel receipt arguments failed: {error}"))?
-        )
-    );
-    Ok(local_first_task_runtime::NewExecutionEffectReceipt {
-        receipt_ref,
-        execution_id: contract.execution_id.clone(),
-        revision: contract.revision,
-        idempotency_key,
-        run_id: None,
-        thread_id: contract.scope.thread_id.clone(),
-        user_id: contract.scope.user_id.clone(),
-        workspace_id: contract.scope.workspace_id.clone(),
-        effect_class: local_first_execution_protocol::EffectClass::ExternalWrite,
+    crate::effect_host::EffectRequest::adapter_output(
         operation,
-        arguments_hash,
-        compensation: None,
-    })
+        logical_call_id,
+        local_first_execution_protocol::EffectClass::ExternalWrite,
+        serde_json::json!({
+            "thread_id": thread_id,
+            "channel": channel,
+            "recipient": recipient,
+            "answer": answer,
+        }),
+    )
 }
 
 /// Turn-completion hook for a channel conversation. The external send is guarded by
 /// a durable effect receipt so projection replay never repeats an uncertain delivery.
+pub(crate) enum ChannelProjectionDelivery {
+    NotApplicable,
+    Delivered(serde_json::Value),
+    Pending(local_first_execution_protocol::EffectReceiptRef),
+}
+
 pub(crate) async fn mirror_reply_to_channel_if_any(
     state: &AppState,
     contract: &local_first_execution_protocol::ValidatedExecutionContract,
     thread_id: &str,
     answer: &str,
-) -> Result<Option<serde_json::Value>, String> {
+) -> Result<ChannelProjectionDelivery, String> {
     let answer = answer.trim();
     if answer.is_empty() {
-        return Ok(None);
+        return Ok(ChannelProjectionDelivery::NotApplicable);
+    }
+    if contract.as_ref().scope.thread_id.as_deref() != Some(thread_id) {
+        return Err("channel projection thread does not match execution scope".to_string());
     }
     let thread = lock_store(state)
         .map_err(|error| error.message)?
         .thread(thread_id)
         .map_err(|error| format!("channel thread lookup failed: {error}"))?;
     let Some(thread) = thread else {
-        return Ok(None);
+        return Ok(ChannelProjectionDelivery::NotApplicable);
     };
     let recipient = match thread.channel_recipient.as_deref().map(str::trim) {
         Some(r) if !r.is_empty() => r.to_string(),
-        _ => return Ok(None),
+        _ => return Ok(ChannelProjectionDelivery::NotApplicable),
     };
     let channel = match thread.source.as_deref() {
         Some("telegram") => "telegram",
         Some("whatsapp") => "whatsapp",
-        _ => return Ok(None),
+        _ => return Ok(ChannelProjectionDelivery::NotApplicable),
     };
-    let new_receipt = channel_reply_receipt(contract, channel, &recipient, answer)?;
-    let receipt_ref = new_receipt.receipt_ref.clone();
-    let claim = {
-        let store = state
-            .task_store
-            .lock()
-            .map_err(|error| format!("channel receipt store unavailable: {error}"))?;
-        store
-            .prepare_effect_receipt(&new_receipt)
-            .map_err(|error| format!("channel receipt prepare failed: {error}"))?;
-        store
-            .claim_effect_receipt(&receipt_ref)
-            .map_err(|error| format!("channel receipt claim failed: {error}"))?
-    };
-    match claim {
-        local_first_task_runtime::EffectReceiptClaim::Replay(_) => {
-            return Ok(Some(serde_json::json!({
-                "receipt_ref": receipt_ref.as_ref(),
+    let effect_host =
+        crate::effect_host::EffectHost::new(state.task_store.as_ref(), contract, None);
+    let lease = match effect_host.begin(channel_reply_effect_request(
+        contract, thread_id, channel, &recipient, answer,
+    ))? {
+        crate::effect_host::EffectDecision::Replay(receipt) => {
+            return Ok(ChannelProjectionDelivery::Delivered(serde_json::json!({
+                "receipt_ref": receipt.receipt_ref.as_ref(),
                 "channel": channel,
                 "status": "completed",
             })));
         }
-        local_first_task_runtime::EffectReceiptClaim::Resolve(_) => {
-            return Ok(Some(serde_json::json!({
-                "receipt_ref": receipt_ref.as_ref(),
-                "channel": channel,
-                "status": "uncertain",
-            })));
+        crate::effect_host::EffectDecision::Resolve(receipt) => {
+            return Ok(ChannelProjectionDelivery::Pending(receipt.receipt_ref));
         }
-        local_first_task_runtime::EffectReceiptClaim::Execute(_) => {}
-    }
+        crate::effect_host::EffectDecision::Execute(lease) => lease,
+    };
 
     let send_result = match channel {
         "telegram" => telegram_send_with_rebind(state, &recipient, answer).await,
@@ -35350,39 +35838,19 @@ pub(crate) async fn mirror_reply_to_channel_if_any(
         _ => unreachable!("channel was validated before receipt preparation"),
     };
     if let Err(error) = send_result {
-        let status = state
-            .task_store
-            .lock()
-            .map_err(|lock_error| format!("channel receipt store unavailable: {lock_error}"))?
-            .claim_effect_receipt(&receipt_ref)
-            .map_err(|claim_error| format!("channel receipt uncertainty failed: {claim_error}"))?;
-        if !matches!(
-            status,
-            local_first_task_runtime::EffectReceiptClaim::Resolve(_)
-        ) {
-            return Err("failed channel send did not become uncertain".to_string());
-        }
+        let receipt = effect_host.mark_uncertain(&lease)?;
         eprintln!(
             "channel/{channel}: reply delivery uncertain for {}: {}",
-            receipt_ref.as_ref(),
+            receipt.receipt_ref.as_ref(),
             redact_sensitive_text(&error)
         );
-        return Ok(Some(serde_json::json!({
-            "receipt_ref": receipt_ref.as_ref(),
-            "channel": channel,
-            "status": "uncertain",
-        })));
+        return Ok(ChannelProjectionDelivery::Pending(receipt.receipt_ref));
     }
-    state
-        .task_store
-        .lock()
-        .map_err(|error| format!("channel receipt store unavailable: {error}"))?
-        .complete_effect_receipt(
-            &receipt_ref,
-            &serde_json::json!({"delivered": true}),
-            &serde_json::json!({"channel": channel}),
-        )
-        .map_err(|error| format!("channel receipt completion failed: {error}"))?;
+    let receipt = effect_host.complete(
+        &lease,
+        &serde_json::json!({"delivered": true}),
+        &serde_json::json!({"channel": channel}),
+    )?;
     eprintln!("channel/{channel}: reply mirrored to {recipient}");
     // Nudge the app: a BACKGROUND channel turn isn't streamed to this client, so without this
     // event the open thread's messages + working-island projection never refresh (they only
@@ -35393,8 +35861,8 @@ pub(crate) async fn mirror_reply_to_channel_if_any(
         "workspace": base_workspace_id(),
         "channel": channel,
     }));
-    Ok(Some(serde_json::json!({
-        "receipt_ref": receipt_ref.as_ref(),
+    Ok(ChannelProjectionDelivery::Delivered(serde_json::json!({
+        "receipt_ref": receipt.receipt_ref.as_ref(),
         "channel": channel,
         "status": "completed",
     })))
@@ -35461,16 +35929,31 @@ async fn telegram_send_buttons_with_rebind(
     text: &str,
     buttons: Vec<[String; 2]>,
 ) -> Result<(), String> {
-    match channel_send_buttons(state, TELEGRAM_HTTP_PORT, recipient, text, buttons.clone()).await {
+    match channel_send_buttons_classified(
+        state,
+        TELEGRAM_HTTP_PORT,
+        recipient,
+        text,
+        buttons.clone(),
+    )
+    .await
+    {
         Ok(()) => return Ok(()),
-        Err(first_error) => {
+        Err(first_error) if telegram_send_may_rebind(first_error.kind) => {
             let Some(token) = load_telegram_token() else {
-                return Err(format!("{first_error}; telegram token unavailable"));
+                return Err(format!(
+                    "{}; telegram token unavailable",
+                    first_error.message
+                ));
             };
             if let Err(error) = ensure_telegram_sidecar(state, &token).await {
-                return Err(format!("{first_error}; rebind failed: {}", error.message));
+                return Err(format!(
+                    "{}; rebind failed: {}",
+                    first_error.message, error.message
+                ));
             }
         }
+        Err(first_error) => return Err(first_error.message),
     }
     channel_send_buttons(state, TELEGRAM_HTTP_PORT, recipient, text, buttons).await
 }
@@ -40611,6 +41094,166 @@ struct TaskQueueQuery {
     thread_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct UncertainEffectQuery {
+    #[serde(default)]
+    thread_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ResolveEffectResponse {
+    receipt: local_first_task_runtime::ExecutionEffectReceipt,
+    projections_replayed: usize,
+}
+
+type EffectResolutionLocks = std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>;
+
+fn effect_resolution_locks() -> &'static Mutex<EffectResolutionLocks> {
+    static LOCKS: std::sync::OnceLock<Mutex<EffectResolutionLocks>> = std::sync::OnceLock::new();
+    LOCKS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn effect_resolution_lock(receipt_ref: &str) -> Arc<tokio::sync::Mutex<()>> {
+    let mut locks = effect_resolution_locks()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    locks
+        .entry(receipt_ref.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+}
+
+struct EffectResolutionGuard {
+    receipt_ref: String,
+    lock: Arc<tokio::sync::Mutex<()>>,
+    _guard: tokio::sync::OwnedMutexGuard<()>,
+}
+
+impl Drop for EffectResolutionGuard {
+    fn drop(&mut self) {
+        let mut locks = effect_resolution_locks()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if locks
+            .get(&self.receipt_ref)
+            .is_some_and(|current| Arc::ptr_eq(current, &self.lock))
+        {
+            locks.remove(&self.receipt_ref);
+        }
+    }
+}
+
+fn begin_effect_resolution(
+    receipt_ref: &str,
+) -> Result<EffectResolutionGuard, Arc<tokio::sync::Mutex<()>>> {
+    let lock = effect_resolution_lock(receipt_ref);
+    match lock.clone().try_lock_owned() {
+        Ok(guard) => Ok(EffectResolutionGuard {
+            receipt_ref: receipt_ref.to_string(),
+            lock,
+            _guard: guard,
+        }),
+        Err(_) => Err(lock),
+    }
+}
+
+async fn uncertain_effect_receipts(
+    State(state): State<AppState>,
+    Query(query): Query<UncertainEffectQuery>,
+) -> Result<Json<Vec<local_first_task_runtime::ExecutionEffectReceipt>>, GatewayError> {
+    let user = gateway_user_id();
+    let store = lock_task_store(&state)?;
+    let mut receipts = store
+        .uncertain_effect_receipts_for_user(user.as_str())
+        .map_err(GatewayError::task)?;
+    if let Some(thread_id) = query
+        .thread_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        receipts.retain(|receipt| receipt.thread_id.as_deref() == Some(thread_id));
+    }
+    Ok(Json(receipts))
+}
+
+async fn resolve_uncertain_effect_receipt(
+    State(state): State<AppState>,
+    Path(receipt_ref): Path<String>,
+    Json(resolution): Json<local_first_execution_protocol::EffectReceiptResolution>,
+) -> Result<Json<ResolveEffectResponse>, GatewayError> {
+    let receipt_ref = local_first_execution_protocol::EffectReceiptRef::parse(receipt_ref)
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "invalid_effect_receipt",
+            message: error.to_string(),
+        })?;
+    let user = gateway_user_id();
+    {
+        let store = lock_task_store(&state)?;
+        let receipt = store
+            .effect_receipt(&receipt_ref)
+            .map_err(GatewayError::task)?
+            .ok_or_else(|| GatewayError {
+                status: StatusCode::NOT_FOUND,
+                code: "effect_receipt_not_found",
+                message: "Effect receipt not found.".to_string(),
+            })?;
+        if receipt.user_id != user.as_str() {
+            return Err(GatewayError {
+                status: StatusCode::NOT_FOUND,
+                code: "effect_receipt_not_found",
+                message: "Effect receipt not found.".to_string(),
+            });
+        }
+    }
+    let _resolution_guard = match begin_effect_resolution(receipt_ref.as_ref()) {
+        Ok(guard) => guard,
+        Err(resolution_lock) => {
+            let _completed = resolution_lock.lock_owned().await;
+            return Err(GatewayError {
+                status: StatusCode::CONFLICT,
+                code: "effect_resolution_in_flight",
+                message: "This effect receipt was resolved concurrently; reload its current state."
+                    .to_string(),
+            });
+        }
+    };
+    {
+        let store = lock_task_store(&state)?;
+        store
+            .resolve_effect_receipt(&receipt_ref, &resolution)
+            .map_err(GatewayError::task)?;
+    }
+    let projections_replayed =
+        execution_projection::replay_committed_chat_projections(&state, usize::MAX)
+            .await
+            .map_err(|error| GatewayError {
+                status: StatusCode::BAD_GATEWAY,
+                code: "effect_projection_error",
+                message: error.message,
+            })?;
+    let receipt = lock_task_store(&state)?
+        .effect_receipt(&receipt_ref)
+        .map_err(GatewayError::task)?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "effect_receipt_disappeared",
+            message: "Resolved effect receipt disappeared.".to_string(),
+        })?;
+    publish_app_event(serde_json::json!({
+        "type": "effect.resolved",
+        "receipt_ref": receipt_ref.as_ref(),
+        "execution_id": receipt.execution_id,
+        "thread_id": receipt.thread_id,
+        "status": receipt.status.as_str(),
+    }));
+    Ok(Json(ResolveEffectResponse {
+        receipt,
+        projections_replayed,
+    }))
+}
+
 async fn task_queue(
     State(state): State<AppState>,
     Query(query): Query<TaskQueueQuery>,
@@ -40710,9 +41353,7 @@ async fn cancel_task(
                     task.updated_at = OffsetDateTime::now_utc();
                     if !was_running {
                         store.release_resources(&task).map_err(GatewayError::task)?;
-                        task.lease_owner = None;
-                        task.lease_expires_at = None;
-                        task.last_heartbeat_at = None;
+                        task.clear_lease();
                     }
                     store.insert_task(&task).map_err(GatewayError::task)?;
                 }
@@ -41285,6 +41926,12 @@ fn run_next_task_once(
         user.clone(),
         workspace.clone(),
         worker_id.to_string(),
+        task.effective_lease_fencing_token()
+            .ok_or_else(|| GatewayError {
+                status: StatusCode::BAD_GATEWAY,
+                code: "lease_fence_missing",
+                message: "Acquired task has no lease fencing token.".to_string(),
+            })?,
     );
 
     let execution_contract =
@@ -41763,6 +42410,7 @@ fn spawn_lease_watchdog(
     user_id: UserId,
     workspace_id: WorkspaceId,
     worker_id: String,
+    fencing_token: u64,
 ) -> Option<tokio::task::JoinHandle<()>> {
     // run_next_task_once runs inside spawn_blocking; reach into the async runtime
     // to spawn the watchdog on the tokio reactor.
@@ -41776,7 +42424,15 @@ fn spawn_lease_watchdog(
             let now = OffsetDateTime::now_utc();
             let keep_going = match lock_task_store(&state) {
                 Ok(store) => {
-                    match lease.heartbeat(&store, &task_id, &user_id, &workspace_id, &worker_id, now) {
+                    match lease.heartbeat(
+                        &store,
+                        &task_id,
+                        &user_id,
+                        &workspace_id,
+                        &worker_id,
+                        fencing_token,
+                        now,
+                    ) {
                         Ok(()) => true,
                         Err(TaskRuntimeError::LeaseConflict(_)) => {
                             eprintln!(
@@ -41820,7 +42476,8 @@ fn is_lease_still_ours(
         .get_task(&task.task_id, &task.user_id, &task.workspace_id)
         .map_err(GatewayError::task)?;
     match current {
-        Some(t) => Ok(t.lease_owner.as_deref() == Some(worker_id)),
+        Some(t) => Ok(t.lease_owner.as_deref() == Some(worker_id)
+            && t.effective_lease_fencing_token() == task.effective_lease_fencing_token()),
         None => Ok(false),
     }
 }
@@ -41871,9 +42528,7 @@ fn acquire_task_for_execution(
 fn mark_task_completed(state: &AppState, task: &mut TaskRecord) -> Result<(), GatewayError> {
     task.status = TaskStatus::Completed;
     task.blocked_reason = None;
-    task.lease_owner = None;
-    task.lease_expires_at = None;
-    task.last_heartbeat_at = None;
+    task.clear_lease();
     task.updated_at = OffsetDateTime::now_utc();
     let store = lock_task_store(state)?;
     store.release_resources(task).map_err(GatewayError::task)?;
@@ -41887,9 +42542,7 @@ fn mark_task_failed(
 ) -> Result<(), GatewayError> {
     task.status = TaskStatus::Failed;
     task.blocked_reason = Some(reason.to_string());
-    task.lease_owner = None;
-    task.lease_expires_at = None;
-    task.last_heartbeat_at = None;
+    task.clear_lease();
     task.updated_at = OffsetDateTime::now_utc();
     let store = lock_task_store(state)?;
     store.release_resources(task).map_err(GatewayError::task)?;
@@ -41903,9 +42556,7 @@ fn mark_task_waiting_external(
 ) -> Result<(), GatewayError> {
     task.status = TaskStatus::WaitingExternalEvent;
     task.blocked_reason = Some(reason.to_string());
-    task.lease_owner = None;
-    task.lease_expires_at = None;
-    task.last_heartbeat_at = None;
+    task.clear_lease();
     task.updated_at = OffsetDateTime::now_utc();
     let store = lock_task_store(state)?;
     store.release_resources(task).map_err(GatewayError::task)?;
@@ -41921,9 +42572,7 @@ fn mark_task_waiting_time(
     task.status = TaskStatus::WaitingTime;
     task.not_before = Some(not_before);
     task.blocked_reason = Some(reason.to_string());
-    task.lease_owner = None;
-    task.lease_expires_at = None;
-    task.last_heartbeat_at = None;
+    task.clear_lease();
     task.updated_at = OffsetDateTime::now_utc();
     let store = lock_task_store(state)?;
     store.release_resources(task).map_err(GatewayError::task)?;
@@ -42040,9 +42689,7 @@ fn handle_failed_task_run(
             task.retry_policy.max_attempts
         ));
         task.not_before = Some(OffsetDateTime::now_utc() + Duration::seconds(backoff));
-        task.lease_owner = None;
-        task.lease_expires_at = None;
-        task.last_heartbeat_at = None;
+        task.clear_lease();
         task.updated_at = OffsetDateTime::now_utc();
         {
             let store = lock_task_store(state)?;
@@ -42107,9 +42754,7 @@ fn request_task_executor_approval(
         }
         task.status = TaskStatus::WaitingUserApproval;
         task.blocked_reason = Some(format!("approval required: {}", approval.action));
-        task.lease_owner = None;
-        task.lease_expires_at = None;
-        task.last_heartbeat_at = None;
+        task.clear_lease();
         task.updated_at = OffsetDateTime::now_utc();
         store.release_resources(task).map_err(GatewayError::task)?;
         store.insert_task(task).map_err(GatewayError::task)?;
@@ -42129,9 +42774,7 @@ fn request_task_executor_approval(
         .map_err(GatewayError::task)?;
     task.status = TaskStatus::WaitingUserApproval;
     task.blocked_reason = Some(format!("approval required: {}", approval.action));
-    task.lease_owner = None;
-    task.lease_expires_at = None;
-    task.last_heartbeat_at = None;
+    task.clear_lease();
     task.updated_at = OffsetDateTime::now_utc();
     store.release_resources(task).map_err(GatewayError::task)?;
     store.insert_task(task).map_err(GatewayError::task)?;
@@ -45708,9 +46351,7 @@ where
                     Some("actionable card execution failed".to_string())
                 }
             };
-            task.lease_owner = None;
-            task.lease_expires_at = None;
-            task.last_heartbeat_at = None;
+            task.clear_lease();
             store.release_resources(&task).map_err(GatewayError::task)?;
         }
         task.updated_at = OffsetDateTime::now_utc();
@@ -46032,6 +46673,18 @@ async fn channel_send_buttons(
     text: &str,
     buttons: Vec<[String; 2]>,
 ) -> Result<(), String> {
+    channel_send_buttons_classified(state, port, recipient, text, buttons)
+        .await
+        .map_err(|error| error.message)
+}
+
+async fn channel_send_buttons_classified(
+    state: &AppState,
+    port: u16,
+    recipient: &str,
+    text: &str,
+    buttons: Vec<[String; 2]>,
+) -> Result<(), ChannelSendFailure> {
     let url = format!("http://127.0.0.1:{port}/send");
     let response = state
         .http
@@ -46040,11 +46693,21 @@ async fn channel_send_buttons(
         .json(&serde_json::json!({ "recipient": recipient, "text": text, "buttons": buttons }))
         .send()
         .await
-        .map_err(|error| format!("sidecar unreachable: {error}"))?;
+        .map_err(|error| ChannelSendFailure {
+            kind: if error.is_connect() {
+                ChannelSendFailureKind::ConnectFailedBeforeDispatch
+            } else {
+                ChannelSendFailureKind::UnknownRemoteOutcome
+            },
+            message: format!("sidecar unreachable: {error}"),
+        })?;
     if response.status().is_success() {
         Ok(())
     } else {
-        Err(format!("sidecar /send responded {}", response.status()))
+        Err(ChannelSendFailure {
+            kind: ChannelSendFailureKind::VerifiedRejection,
+            message: format!("sidecar /send responded {}", response.status()),
+        })
     }
 }
 
@@ -46183,14 +46846,16 @@ fn execute_send_message(
     let recipient = to.clone();
     let body = text.clone();
     let sent = tokio::runtime::Handle::current()
-        .block_on(async move { channel_send(&st, port, &recipient, &body).await });
+        .block_on(async move { channel_send_classified(&st, port, &recipient, &body).await });
     match sent {
         Ok(()) => {
             Ok(serde_json::json!({ "successful": true, "data": { "channel": channel, "to": to } }))
         }
-        Err(e) => {
-            Ok(serde_json::json!({ "successful": false, "error": format!("Send failed: {e}") }))
-        }
+        Err(error) => Ok(serde_json::json!({
+            "successful": false,
+            "unknown_remote_outcome": error.kind == ChannelSendFailureKind::UnknownRemoteOutcome,
+            "error": format!("Send failed: {}", error.message),
+        })),
     }
 }
 
@@ -48006,8 +48671,26 @@ fn claim_payment_approval_for_action(
     )
 }
 
-fn claim_payment_approval_from_map(
-    approvals: &mut std::collections::HashMap<String, PaymentApprovalGrant>,
+fn validate_payment_approval_for_action(
+    state: &AppState,
+    action: &serde_json::Value,
+    payment_floor_refs: &std::collections::HashSet<String>,
+    focus_payment_context: bool,
+    thread_id: Option<&str>,
+) -> Result<String, String> {
+    let mut approvals = lock_payment_approvals(state).map_err(|error| error.message)?;
+    prune_expired_payment_approvals(&mut approvals);
+    validated_payment_approval_id(
+        &approvals,
+        action,
+        payment_floor_refs,
+        focus_payment_context,
+        thread_id,
+    )
+}
+
+fn validated_payment_approval_id(
+    approvals: &std::collections::HashMap<String, PaymentApprovalGrant>,
     action: &serde_json::Value,
     payment_floor_refs: &std::collections::HashSet<String>,
     focus_payment_context: bool,
@@ -48022,11 +48705,9 @@ fn claim_payment_approval_from_map(
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
         .filter(|id| !id.is_empty())
-        .ok_or_else(|| "final payment requires a Payment Approval Card".to_string())?
-        .to_string();
-    prune_expired_payment_approvals(approvals);
+        .ok_or_else(|| "final payment requires a Payment Approval Card".to_string())?;
     let grant = approvals
-        .get_mut(&approval_id)
+        .get(approval_id)
         .ok_or_else(|| "payment approval is missing or expired".to_string())?;
     if grant.thread_id != thread_id.unwrap_or_default() {
         return Err("payment approval belongs to a different conversation".to_string());
@@ -48034,8 +48715,29 @@ fn claim_payment_approval_from_map(
     if grant.consumed {
         return Err("payment approval was already used".to_string());
     }
+    Ok(approval_id.to_string())
+}
+
+fn claim_payment_approval_from_map(
+    approvals: &mut std::collections::HashMap<String, PaymentApprovalGrant>,
+    action: &serde_json::Value,
+    payment_floor_refs: &std::collections::HashSet<String>,
+    focus_payment_context: bool,
+    thread_id: Option<&str>,
+) -> Result<String, String> {
+    prune_expired_payment_approvals(approvals);
+    let approval_id = validated_payment_approval_id(
+        approvals,
+        action,
+        payment_floor_refs,
+        focus_payment_context,
+        thread_id,
+    )?;
+    let grant = approvals
+        .get_mut(approval_id.as_str())
+        .ok_or_else(|| "payment approval is missing or expired".to_string())?;
     grant.consumed = true;
-    Ok(grant.snapshot.approval_id.clone())
+    Ok(approval_id)
 }
 
 fn prune_expired_payment_approvals(
@@ -66466,7 +67168,7 @@ mod tests {
             fields_missing: Vec::new(),
             evidence: Vec::new(),
         };
-        let found_outcome = delegated_browse_tool_outcome(&found);
+        let found_outcome = delegated_browse_tool_outcome(&found, None);
         assert!(found_outcome.effects.browser_activity_observed);
         assert_eq!(
             found_outcome.effects.outcome_hint,
@@ -66474,12 +67176,25 @@ mod tests {
         );
 
         let missing = local_first_engine::BrowseResult::not_found("source unavailable");
-        let missing_outcome = delegated_browse_tool_outcome(&missing);
+        let missing_outcome = delegated_browse_tool_outcome(&missing, None);
         assert!(missing_outcome.effects.browser_activity_observed);
         assert_eq!(
             missing_outcome.effects.outcome_hint,
             Some(local_first_engine::ToolOutcomeHint::NoProgress)
         );
+    }
+
+    #[test]
+    fn delegated_browse_outcome_preserves_effect_suspension() {
+        let receipt_ref = local_first_execution_protocol::EffectReceiptRef::from_store_id(
+            "99999999999999999999999999999999",
+        )
+        .unwrap();
+        let result = local_first_engine::BrowseResult::not_found("verification required");
+
+        let outcome = delegated_browse_tool_outcome(&result, Some(receipt_ref.clone()));
+
+        assert_eq!(outcome.effects.suspend_effect_receipt, Some(receipt_ref));
     }
 
     #[test]
@@ -66827,6 +67542,29 @@ prs.save(Path({path:?}))
         assert!(super::telegram_rebind_should_wait(true, false));
         assert!(!super::telegram_rebind_should_wait(false, false));
         assert!(!super::telegram_rebind_should_wait(true, true));
+    }
+
+    #[test]
+    fn telegram_retries_only_before_dispatch_for_text_and_buttons() {
+        assert!(super::telegram_send_may_rebind(
+            super::ChannelSendFailureKind::ConnectFailedBeforeDispatch
+        ));
+        assert!(!super::telegram_send_may_rebind(
+            super::ChannelSendFailureKind::VerifiedRejection
+        ));
+        assert!(!super::telegram_send_may_rebind(
+            super::ChannelSendFailureKind::UnknownRemoteOutcome
+        ));
+    }
+
+    #[tokio::test]
+    async fn effect_resolution_is_single_flight_per_receipt() {
+        let receipt_ref = "effect:v1:32:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let leader = super::begin_effect_resolution(receipt_ref).expect("first resolver is leader");
+
+        assert!(super::begin_effect_resolution(receipt_ref).is_err());
+        drop(leader);
+        assert!(super::begin_effect_resolution(receipt_ref).is_ok());
     }
 
     #[test]
@@ -68315,24 +69053,6 @@ prs.save(Path({path:?}))
         );
     }
 
-    #[test]
-    fn effect_receipt_identity_uses_the_logical_tool_call_not_argument_equality() {
-        let (first_key, first_ref) =
-            super::effect_receipt_identity("turn-1", "connector.send", "call-1")
-                .expect("first identity");
-        let (replayed_key, replayed_ref) =
-            super::effect_receipt_identity("turn-1", "connector.send", "call-1")
-                .expect("replayed identity");
-        let (second_key, second_ref) =
-            super::effect_receipt_identity("turn-1", "connector.send", "call-2")
-                .expect("second identity");
-
-        assert_eq!(first_key, replayed_key);
-        assert_eq!(first_ref, replayed_ref);
-        assert_ne!(second_key, "connector.send:call-1");
-        assert_ne!(second_ref, replayed_ref);
-    }
-
     #[tokio::test]
     async fn channel_projection_replays_completed_receipt_without_sending_again() {
         let state = super::AppState::for_tests();
@@ -68351,6 +69071,20 @@ prs.save(Path({path:?}))
                 .expect("channel recipient");
             thread
         };
+        let mut task = local_first_task_runtime::TaskRecord::new(
+            "turn-channel-replay-1",
+            local_first_task_runtime::UserId::new("user-1"),
+            local_first_task_runtime::WorkspaceId::new("workspace-1"),
+            "chat_turn",
+            "reply",
+            serde_json::json!({
+                "thread_id": thread.thread_id,
+                "source": "channel",
+                "approval": "read_only",
+            }),
+        );
+        task.status = local_first_task_runtime::TaskStatus::Running;
+        task.lease_owner = Some("worker-1".to_string());
         let contract: local_first_execution_protocol::ValidatedExecutionContract =
             local_first_execution_protocol::ExecutionContract::new(
                 "turn-channel-replay-1",
@@ -68360,30 +69094,36 @@ prs.save(Path({path:?}))
                     workspace_id: "workspace-1".to_string(),
                     thread_id: Some(thread.thread_id.clone()),
                 },
-                serde_json::json!({}),
+                serde_json::to_value(task).expect("task"),
             )
             .try_into()
             .expect("contract");
-        let receipt =
-            super::channel_reply_receipt(&contract, "telegram", "recipient-1", "Delivered answer")
-                .expect("channel receipt");
-        {
-            let store = state.task_store.lock().expect("task store");
-            store.prepare_effect_receipt(&receipt).expect("prepare");
-            assert!(matches!(
-                store
-                    .claim_effect_receipt(&receipt.receipt_ref)
-                    .expect("claim"),
-                local_first_task_runtime::EffectReceiptClaim::Execute(_)
-            ));
-            store
-                .complete_effect_receipt(
-                    &receipt.receipt_ref,
-                    &serde_json::json!({"delivered": true}),
-                    &serde_json::json!({"channel": "telegram"}),
-                )
-                .expect("complete");
-        }
+        state
+            .task_store
+            .lock()
+            .expect("task store")
+            .create_execution(&contract)
+            .expect("execution");
+        let host = super::effect_host::EffectHost::new(state.task_store.as_ref(), &contract, None);
+        let super::effect_host::EffectDecision::Execute(lease) = host
+            .begin(super::channel_reply_effect_request(
+                &contract,
+                &thread.thread_id,
+                "telegram",
+                "recipient-1",
+                "Delivered answer",
+            ))
+            .expect("channel claim")
+        else {
+            panic!("first channel projection must execute");
+        };
+        let receipt_ref = lease.receipt_ref().clone();
+        host.complete(
+            &lease,
+            &serde_json::json!({"delivered": true}),
+            &serde_json::json!({"channel": "telegram"}),
+        )
+        .expect("complete");
 
         let delivery = super::mirror_reply_to_channel_if_any(
             &state,
@@ -68392,11 +69132,14 @@ prs.save(Path({path:?}))
             "Delivered answer",
         )
         .await
-        .expect("replay completed delivery")
-        .expect("channel delivery");
+        .expect("replay completed delivery");
+
+        let super::ChannelProjectionDelivery::Delivered(delivery) = delivery else {
+            panic!("channel delivery must be completed");
+        };
 
         assert_eq!(delivery["status"], "completed");
-        assert_eq!(delivery["receipt_ref"], receipt.receipt_ref.as_ref());
+        assert_eq!(delivery["receipt_ref"], receipt_ref.as_ref());
     }
 
     #[test]

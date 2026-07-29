@@ -232,9 +232,7 @@ impl TaskRuntime {
     }
 
     fn clear_execution_state(&self, task: &mut TaskRecord, now: OffsetDateTime) {
-        task.lease_owner = None;
-        task.lease_expires_at = None;
-        task.last_heartbeat_at = None;
+        task.clear_lease();
         task.updated_at = now;
     }
 

@@ -1816,108 +1816,125 @@ impl TaskStore {
         &self,
         new_receipt: &NewExecutionEffectReceipt,
     ) -> TaskRuntimeResult<ExecutionEffectReceipt> {
-        if new_receipt.revision == 0
-            || new_receipt.execution_id.trim().is_empty()
-            || new_receipt.operation.trim().is_empty()
-            || new_receipt.arguments_hash.trim().is_empty()
-            || new_receipt.idempotency_key.trim().is_empty()
-        {
-            return Err(TaskRuntimeError::Store(
-                "effect receipt identity and operation fields must be nonempty".into(),
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let receipt = prepare_effect_receipt_on(&tx, new_receipt)?;
+        tx.commit()?;
+        Ok(receipt)
+    }
+
+    /// Atomically verifies the current task/execution attempt, prepares the receipt, and claims it.
+    /// A worker that lost its lease or execution fence therefore cannot cross the effect boundary.
+    pub fn prepare_and_claim_effect_receipt(
+        &self,
+        new_receipt: &NewExecutionEffectReceipt,
+        expected_owner: &str,
+        expected_fencing_token: u64,
+    ) -> TaskRuntimeResult<EffectReceiptClaim> {
+        if expected_owner.trim().is_empty() || expected_fencing_token == 0 {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "effect claim requires an active execution attempt".into(),
             ));
         }
-        let now = OffsetDateTime::now_utc().unix_timestamp();
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
-        tx.execute(
-            "INSERT OR IGNORE INTO execution_effect_receipts (
-                receipt_ref, execution_id, revision, idempotency_key, run_id, thread_id,
-                user_id, workspace_id, effect_class, operation, arguments_hash, status,
-                compensation_json, prepared_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'prepared', ?12, ?13)",
+        if let Some(claim) =
+            claim_existing_non_executable_receipt_on(&tx, &new_receipt.receipt_ref)?
+        {
+            tx.commit()?;
+            return Ok(claim);
+        }
+        let task_json = tx
+            .query_row(
+                "SELECT task_json FROM tasks
+                 WHERE task_id = ?1 AND user_id = ?2 AND workspace_id = ?3",
+                params![
+                    new_receipt.execution_id,
+                    new_receipt.user_id,
+                    new_receipt.workspace_id,
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .ok_or_else(|| TaskRuntimeError::NotFound(new_receipt.execution_id.clone()))?;
+        let task: TaskRecord = serde_json::from_str(&task_json)?;
+        let lease_current = task.status == TaskStatus::Running
+            && task.lease_owner.as_deref() == Some(expected_owner)
+            && task.effective_lease_fencing_token() == Some(expected_fencing_token)
+            && task
+                .lease_expires_at
+                .is_some_and(|expires_at| expires_at > OffsetDateTime::now_utc());
+        let execution_current = tx.query_row(
+            "SELECT COUNT(*) FROM executions
+                 WHERE execution_id = ?1 AND revision = ?2 AND fencing_token = ?3
+                   AND state = 'running'",
             params![
-                new_receipt.receipt_ref.as_ref(),
                 new_receipt.execution_id,
                 i64::try_from(new_receipt.revision).map_err(|_| {
                     TaskRuntimeError::Store("effect receipt revision is out of range".into())
                 })?,
-                new_receipt.idempotency_key,
-                new_receipt.run_id,
-                new_receipt.thread_id,
-                new_receipt.user_id,
-                new_receipt.workspace_id,
-                effect_class_str(&new_receipt.effect_class),
-                new_receipt.operation,
-                new_receipt.arguments_hash,
-                new_receipt
-                    .compensation
-                    .as_ref()
-                    .map(serde_json::to_string)
-                    .transpose()?,
-                now,
+                i64::try_from(expected_fencing_token).map_err(|_| {
+                    TaskRuntimeError::Store("effect fencing token is out of range".into())
+                })?,
             ],
-        )?;
-        let receipt = load_effect_receipt_on(&tx, &new_receipt.receipt_ref)?.ok_or_else(|| {
-            TaskRuntimeError::Store("effect receipt disappeared after prepare".into())
-        })?;
-        if receipt.execution_id != new_receipt.execution_id
-            || receipt.revision != new_receipt.revision
-            || receipt.idempotency_key != new_receipt.idempotency_key
-            || receipt.effect_class != new_receipt.effect_class
-            || receipt.operation != new_receipt.operation
-            || receipt.arguments_hash != new_receipt.arguments_hash
-            || receipt.user_id != new_receipt.user_id
-            || receipt.workspace_id != new_receipt.workspace_id
-        {
-            return Err(TaskRuntimeError::Store(
-                "effect receipt reference or idempotency key conflicts with existing scope".into(),
+            |row| row.get::<_, i64>(0),
+        )? == 1;
+        if !lease_current || !execution_current {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "stale execution attempt cannot claim an effect".into(),
             ));
         }
+
+        prepare_effect_receipt_on(&tx, new_receipt)?;
+        let claim = claim_effect_receipt_on(&tx, &new_receipt.receipt_ref)?;
         tx.commit()?;
-        Ok(receipt)
+        Ok(claim)
+    }
+
+    /// Claims an adapter-output receipt against the authoritative execution revision. Projection
+    /// may run after the adapter outcome is terminal, so it is fenced by revision/token rather than
+    /// by the worker lease used for capability dispatch.
+    pub fn prepare_and_claim_effect_receipt_for_execution(
+        &self,
+        new_receipt: &NewExecutionEffectReceipt,
+        expected_fencing_token: u64,
+    ) -> TaskRuntimeResult<EffectReceiptClaim> {
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        if let Some(claim) =
+            claim_existing_non_executable_receipt_on(&tx, &new_receipt.receipt_ref)?
+        {
+            tx.commit()?;
+            return Ok(claim);
+        }
+        let execution_current = tx.query_row(
+            "SELECT COUNT(*) FROM executions
+                 WHERE execution_id = ?1 AND revision = ?2 AND fencing_token = ?3",
+            params![
+                new_receipt.execution_id,
+                i64::try_from(new_receipt.revision).map_err(|_| {
+                    TaskRuntimeError::Store("effect receipt revision is out of range".into())
+                })?,
+                i64::try_from(expected_fencing_token).map_err(|_| {
+                    TaskRuntimeError::Store("effect fencing token is out of range".into())
+                })?,
+            ],
+            |row| row.get::<_, i64>(0),
+        )? == 1;
+        if !execution_current {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "stale execution revision cannot claim adapter output".into(),
+            ));
+        }
+        prepare_effect_receipt_on(&tx, new_receipt)?;
+        let claim = claim_effect_receipt_on(&tx, &new_receipt.receipt_ref)?;
+        tx.commit()?;
+        Ok(claim)
     }
 
     pub fn claim_effect_receipt(
         &self,
         receipt_ref: &EffectReceiptRef,
     ) -> TaskRuntimeResult<EffectReceiptClaim> {
-        let now = OffsetDateTime::now_utc().unix_timestamp();
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
-        let receipt = load_effect_receipt_on(&tx, receipt_ref)?
-            .ok_or_else(|| TaskRuntimeError::NotFound(receipt_ref.as_ref().to_string()))?;
-        let claim = match receipt.status {
-            EffectReceiptStatus::Prepared => {
-                let changed = tx.execute(
-                    "UPDATE execution_effect_receipts
-                     SET status = 'started', started_at = ?1
-                     WHERE receipt_ref = ?2 AND status = 'prepared'",
-                    params![now, receipt_ref.as_ref()],
-                )?;
-                if changed != 1 {
-                    return Err(TaskRuntimeError::Store(
-                        "effect receipt was claimed concurrently".into(),
-                    ));
-                }
-                EffectReceiptClaim::Execute(load_effect_receipt_on(&tx, receipt_ref)?.ok_or_else(
-                    || TaskRuntimeError::Store("claimed effect receipt disappeared".into()),
-                )?)
-            }
-            EffectReceiptStatus::Started => {
-                tx.execute(
-                    "UPDATE execution_effect_receipts SET status = 'uncertain'
-                     WHERE receipt_ref = ?1 AND status = 'started'",
-                    params![receipt_ref.as_ref()],
-                )?;
-                EffectReceiptClaim::Resolve(load_effect_receipt_on(&tx, receipt_ref)?.ok_or_else(
-                    || TaskRuntimeError::Store("uncertain effect receipt disappeared".into()),
-                )?)
-            }
-            EffectReceiptStatus::Completed | EffectReceiptStatus::Compensated => {
-                EffectReceiptClaim::Replay(receipt)
-            }
-            EffectReceiptStatus::Failed | EffectReceiptStatus::Uncertain => {
-                EffectReceiptClaim::Resolve(receipt)
-            }
-        };
+        let claim = claim_effect_receipt_on(&tx, receipt_ref)?;
         tx.commit()?;
         Ok(claim)
     }
@@ -1968,6 +1985,30 @@ impl TaskStore {
             params![thread_id, user_id, workspace_id],
             map_effect_receipt_row,
         )?;
+        rows.map(|row| row.map_err(Into::into)).collect()
+    }
+
+    pub fn effect_receipt(
+        &self,
+        receipt_ref: &EffectReceiptRef,
+    ) -> TaskRuntimeResult<Option<ExecutionEffectReceipt>> {
+        load_effect_receipt_on(&self.connection, receipt_ref)
+    }
+
+    pub fn uncertain_effect_receipts_for_user(
+        &self,
+        user_id: &str,
+    ) -> TaskRuntimeResult<Vec<ExecutionEffectReceipt>> {
+        let mut stmt = self.connection.prepare(
+            "SELECT receipt_ref, execution_id, revision, idempotency_key, run_id, thread_id,
+                    user_id, workspace_id, effect_class, operation, arguments_hash, status,
+                    result_json, effects_json, error_json, compensation_json,
+                    prepared_at, started_at, resolved_at
+             FROM execution_effect_receipts
+             WHERE user_id = ?1 AND status = 'uncertain'
+             ORDER BY prepared_at ASC, idempotency_key ASC",
+        )?;
+        let rows = stmt.query_map([user_id], map_effect_receipt_row)?;
         rows.map(|row| row.map_err(Into::into)).collect()
     }
 
@@ -3242,9 +3283,7 @@ impl TaskStore {
         // the struct before re-serializing is sufficient — there is nothing else to null out.
         self.release_resources(&task)?;
         task.status = TaskStatus::Parked;
-        task.lease_owner = None;
-        task.lease_expires_at = None;
-        task.last_heartbeat_at = None;
+        task.clear_lease();
         task.updated_at = OffsetDateTime::now_utc();
         tx.execute(
             "UPDATE tasks SET status = ?1, updated_at = ?2, task_json = ?3
@@ -4079,6 +4118,130 @@ fn map_effect_receipt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Execution
         started_at: row.get(17)?,
         resolved_at: row.get(18)?,
     })
+}
+
+fn prepare_effect_receipt_on(
+    connection: &Connection,
+    new_receipt: &NewExecutionEffectReceipt,
+) -> TaskRuntimeResult<ExecutionEffectReceipt> {
+    if new_receipt.revision == 0
+        || new_receipt.execution_id.trim().is_empty()
+        || new_receipt.operation.trim().is_empty()
+        || new_receipt.arguments_hash.trim().is_empty()
+        || new_receipt.idempotency_key.trim().is_empty()
+    {
+        return Err(TaskRuntimeError::Store(
+            "effect receipt identity and operation fields must be nonempty".into(),
+        ));
+    }
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    connection.execute(
+        "INSERT OR IGNORE INTO execution_effect_receipts (
+            receipt_ref, execution_id, revision, idempotency_key, run_id, thread_id,
+            user_id, workspace_id, effect_class, operation, arguments_hash, status,
+            compensation_json, prepared_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'prepared', ?12, ?13)",
+        params![
+            new_receipt.receipt_ref.as_ref(),
+            new_receipt.execution_id,
+            i64::try_from(new_receipt.revision).map_err(|_| {
+                TaskRuntimeError::Store("effect receipt revision is out of range".into())
+            })?,
+            new_receipt.idempotency_key,
+            new_receipt.run_id,
+            new_receipt.thread_id,
+            new_receipt.user_id,
+            new_receipt.workspace_id,
+            effect_class_str(&new_receipt.effect_class),
+            new_receipt.operation,
+            new_receipt.arguments_hash,
+            new_receipt
+                .compensation
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
+            now,
+        ],
+    )?;
+    let receipt =
+        load_effect_receipt_on(connection, &new_receipt.receipt_ref)?.ok_or_else(|| {
+            TaskRuntimeError::Store("effect receipt disappeared after prepare".into())
+        })?;
+    if receipt.execution_id != new_receipt.execution_id
+        || receipt.revision != new_receipt.revision
+        || receipt.idempotency_key != new_receipt.idempotency_key
+        || receipt.effect_class != new_receipt.effect_class
+        || receipt.operation != new_receipt.operation
+        || receipt.arguments_hash != new_receipt.arguments_hash
+        || receipt.user_id != new_receipt.user_id
+        || receipt.workspace_id != new_receipt.workspace_id
+    {
+        return Err(TaskRuntimeError::Store(
+            "effect receipt reference or idempotency key conflicts with existing scope".into(),
+        ));
+    }
+    Ok(receipt)
+}
+
+fn claim_effect_receipt_on(
+    connection: &Connection,
+    receipt_ref: &EffectReceiptRef,
+) -> TaskRuntimeResult<EffectReceiptClaim> {
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let receipt = load_effect_receipt_on(connection, receipt_ref)?
+        .ok_or_else(|| TaskRuntimeError::NotFound(receipt_ref.as_ref().to_string()))?;
+    match receipt.status {
+        EffectReceiptStatus::Prepared => {
+            let changed = connection.execute(
+                "UPDATE execution_effect_receipts
+                 SET status = 'started', started_at = ?1, result_json = NULL,
+                     effects_json = NULL, error_json = NULL, resolved_at = NULL
+                 WHERE receipt_ref = ?2 AND status = 'prepared'",
+                params![now, receipt_ref.as_ref()],
+            )?;
+            if changed != 1 {
+                return Err(TaskRuntimeError::Store(
+                    "effect receipt was claimed concurrently".into(),
+                ));
+            }
+            Ok(EffectReceiptClaim::Execute(
+                load_effect_receipt_on(connection, receipt_ref)?.ok_or_else(|| {
+                    TaskRuntimeError::Store("claimed effect receipt disappeared".into())
+                })?,
+            ))
+        }
+        EffectReceiptStatus::Started => {
+            connection.execute(
+                "UPDATE execution_effect_receipts SET status = 'uncertain'
+                 WHERE receipt_ref = ?1 AND status = 'started'",
+                params![receipt_ref.as_ref()],
+            )?;
+            Ok(EffectReceiptClaim::Resolve(
+                load_effect_receipt_on(connection, receipt_ref)?.ok_or_else(|| {
+                    TaskRuntimeError::Store("uncertain effect receipt disappeared".into())
+                })?,
+            ))
+        }
+        EffectReceiptStatus::Completed | EffectReceiptStatus::Compensated => {
+            Ok(EffectReceiptClaim::Replay(receipt))
+        }
+        EffectReceiptStatus::Failed | EffectReceiptStatus::Uncertain => {
+            Ok(EffectReceiptClaim::Resolve(receipt))
+        }
+    }
+}
+
+fn claim_existing_non_executable_receipt_on(
+    connection: &Connection,
+    receipt_ref: &EffectReceiptRef,
+) -> TaskRuntimeResult<Option<EffectReceiptClaim>> {
+    let Some(receipt) = load_effect_receipt_on(connection, receipt_ref)? else {
+        return Ok(None);
+    };
+    if receipt.status == EffectReceiptStatus::Prepared {
+        return Ok(None);
+    }
+    claim_effect_receipt_on(connection, receipt_ref).map(Some)
 }
 
 pub(crate) fn load_effect_receipt_on(

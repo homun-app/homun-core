@@ -223,14 +223,14 @@ impl ExecutionRuntime {
 
         let pre_checkpoint_task = current_task(state, &task)?;
         if pre_checkpoint_task.status != TaskStatus::Cancelled
-            && pre_checkpoint_task.lease_owner != task.lease_owner
+            && !same_lease_generation(&pre_checkpoint_task, &task)
         {
             return Err(runtime_error(LEASE_LOST_MESSAGE));
         }
 
         let pre_commit_task = current_task(state, &task)?;
         if pre_commit_task.status != TaskStatus::Cancelled
-            && pre_commit_task.lease_owner != task.lease_owner
+            && !same_lease_generation(&pre_commit_task, &task)
         {
             return Err(runtime_error(LEASE_LOST_MESSAGE));
         }
@@ -469,6 +469,11 @@ fn current_task(
         .ok_or_else(|| runtime_error("the execution task disappeared before commit"))
 }
 
+fn same_lease_generation(current: &TaskRecord, expected: &TaskRecord) -> bool {
+    current.lease_owner == expected.lease_owner
+        && current.effective_lease_fencing_token() == expected.effective_lease_fencing_token()
+}
+
 fn validate_task_identity(
     task: &TaskRecord,
     contract: &ValidatedExecutionContract,
@@ -601,11 +606,9 @@ fn default_task_presentation(
 }
 
 fn acquired_task_fencing_token(task: &TaskRecord) -> Result<u64, LocalTaskExecutionError> {
-    let acquired_at = task
-        .last_heartbeat_at
-        .ok_or_else(|| runtime_error("acquired task has no lease acquisition timestamp"))?;
-    let token = u64::try_from(acquired_at.unix_timestamp_nanos())
-        .map_err(|_| runtime_error("lease acquisition timestamp cannot be used as a fence"))?;
+    let token = task
+        .effective_lease_fencing_token()
+        .ok_or_else(|| runtime_error("acquired task has no lease fencing token"))?;
     if token == 0 || token > i64::MAX as u64 {
         return Err(runtime_error(
             "lease acquisition fence is outside the protocol range",
@@ -624,31 +627,48 @@ fn earliest_deadline(task: &TaskRecord) -> Option<i64> {
 
 pub(crate) fn execution_policy_for_task(task: &TaskRecord) -> ExecutionPolicy {
     let mut allowed_effects = vec![EffectClass::Read, EffectClass::RequestAuthorization];
-    if let Some(effects) = task
-        .permission_context
-        .get("allowed_effects")
-        .and_then(Value::as_array)
-    {
-        for effect in effects
-            .iter()
-            .filter_map(Value::as_str)
-            .filter_map(effect_class_from_str)
-        {
+    let chat_approval = (task.kind == "chat_turn")
+        .then(|| task.input_json.get("approval").and_then(Value::as_str))
+        .flatten();
+    if matches!(chat_approval, Some("full" | "confirm" | "autonomous")) {
+        for effect in [
+            EffectClass::FilesystemWrite,
+            EffectClass::ArtifactCreation,
+            EffectClass::ExternalWrite,
+        ] {
             push_effect(&mut allowed_effects, effect);
         }
     }
-    for (field, effect) in [
-        ("allow_filesystem_write", EffectClass::FilesystemWrite),
-        ("allow_artifact_creation", EffectClass::ArtifactCreation),
-        ("allow_external_write", EffectClass::ExternalWrite),
-    ] {
-        if task
+
+    // A read-only chat turn cannot be widened by stale or copied permission metadata.
+    // Non-chat adapters and writable chat turns retain the existing explicit permission mapping.
+    if chat_approval != Some("read_only") {
+        if let Some(effects) = task
             .permission_context
-            .get(field)
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
+            .get("allowed_effects")
+            .and_then(Value::as_array)
         {
-            push_effect(&mut allowed_effects, effect);
+            for effect in effects
+                .iter()
+                .filter_map(Value::as_str)
+                .filter_map(effect_class_from_str)
+            {
+                push_effect(&mut allowed_effects, effect);
+            }
+        }
+        for (field, effect) in [
+            ("allow_filesystem_write", EffectClass::FilesystemWrite),
+            ("allow_artifact_creation", EffectClass::ArtifactCreation),
+            ("allow_external_write", EffectClass::ExternalWrite),
+        ] {
+            if task
+                .permission_context
+                .get(field)
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                push_effect(&mut allowed_effects, effect);
+            }
         }
     }
 
@@ -668,7 +688,7 @@ pub(crate) fn execution_policy_for_task(task: &TaskRecord) -> ExecutionPolicy {
             .filter_map(Value::as_str)
             .any(|action| matches!(action, "write_with_confirmation" | "approved_automation"))
     });
-    if permits_external_write {
+    if permits_external_write && chat_approval != Some("read_only") {
         push_effect(&mut allowed_effects, EffectClass::ExternalWrite);
     }
 
@@ -687,7 +707,10 @@ pub(crate) fn execution_policy_for_task(task: &TaskRecord) -> ExecutionPolicy {
         .get("max_autonomy_level")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let approval_policy = if explicitly_preauthorized
+    let approval_policy = if chat_approval == Some("read_only") {
+        ApprovalPolicy::OnRequest
+    } else if chat_approval == Some("autonomous")
+        || explicitly_preauthorized
         || (permits_approved_automation && autonomy_level >= 4 && !approval_required)
     {
         ApprovalPolicy::Preauthorized
@@ -1214,6 +1237,121 @@ mod tests {
         assert_eq!(
             contract.as_ref().policy.approval_policy,
             local_first_execution_protocol::ApprovalPolicy::OnRequest
+        );
+    }
+
+    fn acquired_chat_task_with_approval(approval: &str) -> TaskRecord {
+        let mut task = TaskRecord::new(
+            format!("chat-policy-{approval}"),
+            UserId::new("user-1"),
+            WorkspaceId::new("workspace-1"),
+            "chat_turn",
+            "test",
+            serde_json::json!({"approval": approval}),
+        );
+        task.status = TaskStatus::Running;
+        task.lease_owner = Some("test-worker".to_string());
+        task.last_heartbeat_at = Some(OffsetDateTime::now_utc());
+        task
+    }
+
+    #[test]
+    fn same_owner_with_a_new_lease_generation_is_not_the_same_attempt() {
+        let mut original = acquired_task_with_permissions("capability.test", serde_json::json!({}));
+        original.lease_fencing_token = Some(41);
+        let mut reacquired = original.clone();
+        reacquired.lease_fencing_token = Some(42);
+
+        assert!(!super::same_lease_generation(&reacquired, &original));
+        assert!(super::same_lease_generation(&original, &original));
+    }
+
+    fn assert_mutating_effects(policy: &local_first_execution_protocol::ExecutionPolicy) {
+        for effect in [
+            local_first_execution_protocol::EffectClass::FilesystemWrite,
+            local_first_execution_protocol::EffectClass::ArtifactCreation,
+            local_first_execution_protocol::EffectClass::ExternalWrite,
+        ] {
+            assert!(
+                policy.allowed_effects.contains(&effect),
+                "missing {effect:?} in {:?}",
+                policy.allowed_effects
+            );
+        }
+    }
+
+    #[test]
+    fn chat_approval_full_allows_mutating_effects_on_request() {
+        let policy = super::execution_policy_for_task(&acquired_chat_task_with_approval("full"));
+
+        assert_mutating_effects(&policy);
+        assert_eq!(
+            policy.approval_policy,
+            local_first_execution_protocol::ApprovalPolicy::OnRequest
+        );
+    }
+
+    #[test]
+    fn chat_approval_confirm_allows_mutating_effects_on_request() {
+        let policy = super::execution_policy_for_task(&acquired_chat_task_with_approval("confirm"));
+
+        assert_mutating_effects(&policy);
+        assert_eq!(
+            policy.approval_policy,
+            local_first_execution_protocol::ApprovalPolicy::OnRequest
+        );
+    }
+
+    #[test]
+    fn chat_approval_autonomous_preauthorizes_mutating_effects() {
+        let policy =
+            super::execution_policy_for_task(&acquired_chat_task_with_approval("autonomous"));
+
+        assert_mutating_effects(&policy);
+        assert_eq!(
+            policy.approval_policy,
+            local_first_execution_protocol::ApprovalPolicy::Preauthorized
+        );
+    }
+
+    #[test]
+    fn chat_approval_read_only_denies_mutating_effects() {
+        let policy =
+            super::execution_policy_for_task(&acquired_chat_task_with_approval("read_only"));
+
+        assert_eq!(
+            policy.allowed_effects,
+            vec![
+                local_first_execution_protocol::EffectClass::Read,
+                local_first_execution_protocol::EffectClass::RequestAuthorization,
+            ]
+        );
+        assert_eq!(
+            policy.approval_policy,
+            local_first_execution_protocol::ApprovalPolicy::OnRequest
+        );
+    }
+
+    #[test]
+    fn chat_approval_read_only_cannot_inherit_preauthorized_metadata() {
+        let mut task = acquired_chat_task_with_approval("read_only");
+        task.permission_context = serde_json::json!({
+            "preauthorized": true,
+            "approval_required": false,
+            "max_autonomy_level": 5,
+            "allowed_effects": ["external_write"],
+        });
+
+        let policy = super::execution_policy_for_task(&task);
+
+        assert_eq!(
+            policy.approval_policy,
+            local_first_execution_protocol::ApprovalPolicy::OnRequest
+        );
+        assert!(
+            !policy
+                .allowed_effects
+                .contains(&local_first_execution_protocol::EffectClass::ExternalWrite)
         );
     }
 

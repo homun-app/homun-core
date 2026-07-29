@@ -88,9 +88,20 @@ pub(crate) async fn project_chat_execution(
             .get("answer")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
-        crate::mirror_reply_to_channel_if_any(state, contract, thread_id, answer)
+        match crate::mirror_reply_to_channel_if_any(state, contract, thread_id, answer)
             .await
             .map_err(projection_error)?
+        {
+            crate::ChannelProjectionDelivery::NotApplicable => None,
+            crate::ChannelProjectionDelivery::Delivered(delivery) => Some(delivery),
+            crate::ChannelProjectionDelivery::Pending(receipt_ref) => {
+                eprintln!(
+                    "channel projection awaiting effect resolution: {}",
+                    receipt_ref.as_ref()
+                );
+                return Ok(());
+            }
+        }
     } else {
         None
     };
@@ -232,9 +243,7 @@ fn project_task_state(
         ),
         _ => None,
     };
-    current.lease_owner = None;
-    current.lease_expires_at = None;
-    current.last_heartbeat_at = None;
+    current.clear_lease();
     current.updated_at = OffsetDateTime::now_utc();
     store
         .release_resources(&current)

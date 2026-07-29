@@ -61,9 +61,7 @@ impl RetryController {
             .ok_or_else(|| TaskRuntimeError::NotFound(task_id.as_str().to_string()))?;
 
         task.attempt_count += 1;
-        task.lease_owner = None;
-        task.lease_expires_at = None;
-        task.last_heartbeat_at = None;
+        task.clear_lease();
         task.blocked_reason = Some(reason.to_string());
         task.updated_at = now;
 

@@ -55,7 +55,7 @@ Equal arguments do not imply equal intent. Two user-approved sends with identica
 
 The module exposes a small request/decision API:
 
-- `EffectRequest`: operation, logical call id, effect class, canonical arguments, optional compensation, and whether the operation is a model capability or adapter output.
+- `EffectRequest`: operation, logical call id, effect class, canonical arguments, and whether the operation is a model capability or adapter output.
 - `EffectDecision`: `Execute`, `Replay`, or `Resolve` with the durable receipt.
 - `EffectHost::begin`: validates scope/policy, performs legacy lookup, prepares, and claims.
 - `EffectHost::complete`: redacts and persists result/effects.
@@ -70,6 +70,7 @@ The current inline hashing, migration lookup, prepare, claim, replay, resolve, a
 ### Channel projector
 
 The projector builds an adapter-output request and uses the same host. A replay does not call the sidecar. An ambiguous send failure becomes uncertain. A completed send is persisted before `thread.updated` is emitted.
+An uncertain send leaves the terminal projection unacknowledged, so startup and explicit recovery can replay the projector without fabricating delivery. The authenticated effect resolver accepts a verified `Applied` result or a verified `NotApplied` result. `Applied` replays completion without sending; `NotApplied` returns the receipt to the prepared state and permits one fenced retry with the same idempotency identity.
 
 ### Browser executor
 
@@ -82,7 +83,7 @@ For this increment, all accepted `browser_act` calls are treated as `ExternalWri
 - Missing durable execution scope blocks the effect before dispatch.
 - A denied effect returns a typed contract-blocked result and creates no receipt.
 - A completed receipt replays its persisted result and effects.
-- A started or uncertain receipt never dispatches again automatically.
+- A started or uncertain receipt never dispatches again automatically. Only an explicit durable `NotApplied` verification returns it to a dispatchable prepared state.
 - Store failure before dispatch blocks the operation.
 - Store failure after a successful remote call is surfaced as an unknown outcome; success is never fabricated.
 - Scope, revision, operation, class, or arguments mismatch on an existing receipt fails closed.
@@ -98,8 +99,28 @@ Focused tests prove:
 5. legacy argument-keyed receipts are reused;
 6. channel adapter output is accepted only for a matching channel chat contract;
 7. browser mutations require durable scope and reads remain receipt-free;
-8. all previous task-runtime, gateway, Electron, and warning-free build gates remain green.
+8. recursive browse suspension reaches the manager turn unchanged;
+9. a same-owner lease reacquisition rejects the old heartbeat, dispatch, and commit generation;
+10. suspended and post-terminal uncertain receipts both have a productive resolution path;
+11. all previous task-runtime, gateway, Electron, and warning-free build gates remain green.
 
 ## Follow-up boundary
 
-This increment establishes one effect boundary. Product-wired `continue_as_new`, in-flight cancellation/deadline propagation, projector/outbox separation, and the crash matrix remain separate increments because they change lifecycle scheduling rather than effect dispatch semantics.
+This increment establishes one effect boundary and a recovery entrypoint. Product-wired `continue_as_new`, in-flight cancellation/deadline propagation, a dedicated projector outbox (the current reconciler scans committed executions), and the full crash matrix remain separate increments because they change lifecycle scheduling rather than effect dispatch semantics.
+
+Gateway capability dispatch now carries a typed `EffectDispatchStatus`: verified results complete the receipt, while timeouts, join failures, and write-connector transport errors mark it uncertain and suspend the loop. Provider-specific adapters can still improve precision by distinguishing verified pre-dispatch failures from ambiguous transport failures; the current fallback is deliberately conservative.
+
+## Implementation result
+
+- `EffectHost` is the only production gateway module that prepares, claims, completes, or marks receipts uncertain.
+- Chat `approval` is normalized into the canonical execution policy; `read_only` cannot be widened by stale permission metadata.
+- Generic mutating tools, `use_computer`, channel replies, `browser_act`, and `browser_rehydrate` share the host.
+- Browser reads remain receipt-free, payment validation happens before receipt claim without consuming the one-shot grant, and the final payment claim happens only after the receipt is durable.
+- Browser receipts persist no page snapshot or form values.
+- Capability claims atomically verify running task ownership, unexpired lease, authoritative revision, and fencing token. Adapter-output claims are atomically revision/fence-bound for post-terminal projection replay.
+- Browser and generic capability outcomes propagate `suspend_effect_receipt`; uncertain effects cannot continue into another model round.
+- Channel projection is thread-bound, and Telegram retries only a verified pre-dispatch connect failure.
+- Lease acquisition has an immutable persisted generation distinct from heartbeat time; effect claims, watchdog renewal, and outcome commit compare that generation even when the worker id is reused.
+- An active lease cannot be reacquired by the same worker id, and effect resolution plus terminal projection replay is single-flight per receipt.
+- Recursive browse returns the same typed suspension receipt as direct browser execution.
+- `GET /api/effects/uncertain` and `POST /api/effects/{receipt_ref}/resolve` provide the authenticated operational resolver for suspended and terminal adapter-output effects.

@@ -7,7 +7,7 @@
 > Recovery browser: [design](superpowers/specs/2026-07-28-browser-checkpoint-recovery-design.md)
 > e [checklist operativa/verifiche](superpowers/plans/2026-07-28-browser-checkpoint-recovery.md).
 
-**Ultimo aggiornamento: 2026-07-29 (journal, wake, receipt, resume e dispatch canonici).**
+**Ultimo aggiornamento: 2026-07-29 (EffectHost generale, browser/channel/tool receipt).**
 
 ---
 
@@ -82,7 +82,10 @@ Ready -> Running
 journal. Dopo un crash, una nuova lease può sostituire l'owner soltanto con fence
 strettamente maggiore tramite `AttemptReclaimed`; un semplice `FenceAdvanced` è
 vietato mentre la revisione è Running. Il gateway committa l'outcome con l'API
-stretta che richiede un attempt Running al fence del contratto.
+stretta che richiede un attempt Running al fence del contratto. La lease persiste una
+generazione immutabile separata dall'heartbeat: anche se lo stesso `worker_id` riacquisisce
+il task, il vecchio watchdog, dispatch o commit non può operare sulla nuova lease. Una
+lease ancora attiva non è riacquisibile neppure dallo stesso owner: ogni task ha un solo runner.
 
 `WaitingUserApproval`, `WaitingTime`, `WaitingResource`, delivery state del messaggio
 e objective status sono proiezioni. `Parked` non viene più prodotto dal nuovo loop:
@@ -104,6 +107,13 @@ resta leggibile soltanto nel bridge di recovery dei record steering precedenti.
    esito incerto e compensazione usano la receipt, non il testo del modello. La
    receipt è identificata dalla chiamata logica (`execution + operation + call_id`),
    mentre l'hash degli argomenti verifica il payload ma non deduplica due intenti distinti.
+   `EffectHost` è l'unico modulo gateway che prepara, reclama e completa receipt:
+   tool generici, `use_computer`, `browser_act`, `browser_rehydrate` e delivery canale
+   entrano nello stesso host. Sandbox, Vault, connector gate, browser safety e payment
+   approval restano gate di dominio più stretti, non protocolli alternativi.
+   Per le capability, prepare e claim sono una sola transazione che verifica task running,
+   owner, generazione della lease, revisione e fencing token autorevoli. Gli output di projection sono invece
+   legati atomicamente alla revisione/fence, perché possono essere rigiocati dopo il terminal.
 5. Il runtime valida e committa esattamente un outcome per la revisione.
 6. Il projector aggiorna task, run, messaggio, objective, HITL e UI. Se fallisce,
    startup/recovery lo rigioca dal journal senza rieseguire l'adapter.
@@ -111,6 +121,8 @@ resta leggibile soltanto nel bridge di recovery dei record steering precedenti.
    successiva con checkpoint e payload; il worker richiama lo stesso `execute`.
 8. Dopo crash, una revisione senza outcome viene recuperata secondo lease/receipt;
    un effetto `Started` diventa `Uncertain`, mai un retry implicito.
+   La risoluzione verificata `Applied` completa la receipt; `NotApplied` la riporta a
+   `Prepared`, rendendo sicuro un nuovo dispatch con la stessa identità/idempotency key.
 9. Storie troppo lunghe possono chiudere il parent e creare atomicamente un child
    `continue-as-new`; rollback di dominio usa child compensation in ordine inverso.
 
@@ -159,6 +171,10 @@ gli effetti dichiarati dal task siano contenuti nel contratto autorevole. Una
 violazione termina come `Failed(permanent, execution_policy_denied)` senza invocare
 l'adapter. `approved_automation` richiede autonomia almeno 4 e nessuna approval
 esplicita per diventare `Preauthorized`.
+Per `chat_turn`, anche il campo broker `approval` entra nella stessa policy:
+`read_only` non può essere ampliato da metadati residui; `full` e `confirm` rendono
+rappresentabili le tre classi mutanti con approval `OnRequest`; `autonomous` usa
+`Preauthorized`. Objective contract e gate di dominio possono sempre restringere.
 Selezionare un'opzione o digitare in un form esterno è `external_write` anche senza
 submit; vietare conferma/acquisto/pagamento non trasforma le azioni preparatorie in read.
 `read` e `request_authorization` restano sempre disponibili perché non mutano stato.
@@ -217,6 +233,15 @@ campi ancora vuoti e compatibili, poi forza un nuovo snapshot. Non esegue click,
 login, pagamento o replay di bundle. Password, payment/card/CVV, file, hidden, contenteditable,
 cross-origin, ambigui e fuori limite sono esclusi fail-closed.
 
+Ogni `browser_act` accettato dal safety gate e ogni `browser_rehydrate` reclama una
+receipt immediatamente prima della RPC mutante. Navigate, snapshot, screenshot, tabs,
+dialog e `browser_done` restano receipt-free. Un errore sidecar non classificabile
+dopo l'invio produce `Uncertain`; uno stale ref riconosciuto come non applicato chiude
+la receipt con `applied=false`. Le receipt browser non persistono snapshot o valori
+form: conservano solo un replay notice e metriche non sensibili. Il browser restituisce
+lo stesso `ToolOutcome` generale delle altre capability: una receipt incerta sospende
+subito il loop e non viene ridotta a testo interpretabile dal modello.
+
 Checkpoint e ciphertext vengono eliminati idempotentemente su terminal objective, revisione
 sostitutiva, archive/delete thread, delete workspace e scadenza; la pulizia scadenze parte anche a
 startup. Gli eventi del run registrano solo tier, generation, conteggi e reason tipizzata. Le pulizie
@@ -262,11 +287,26 @@ conversazione e non il lavoro in corso.
     pendente e rigiocabile; non sono convertiti in snapshot vuoti.
 15. La risposta verso Telegram/WhatsApp è un `external_write` con receipt legata alla
     revisione di proiezione. Un replay riusa `Completed`; un invio interrotto diventa
-    `Uncertain` e non viene ripetuto implicitamente. L'evento terminale espone lo stato
-    `channel_delivery` e il riferimento alla receipt.
+    `Uncertain` e non viene ripetuto implicitamente. La proiezione resta senza ack
+    terminale finché la receipt non viene risolta; il replay del projector la chiude
+    solo dopo `Applied` o dopo un nuovo invio consentito da `NotApplied`.
 16. Il bootstrap non avvia worker su una migrazione DB fallita o su outcome committati
     che il projector non riesce a rigiocare. Una wake `At` fuori dal range temporale
     fallisce la proiezione invece di perdere `not_before` e rendere subito eseguibile il task.
+17. Nessun call site gateway fuori da `effect_host.rs` può invocare direttamente
+    `prepare_effect_receipt`, `claim_effect_receipt` o `complete_effect_receipt`.
+    La delivery canale è ammessa come output dell'adapter solo per un contratto
+    `chat_turn` con source `channel` e thread scope coincidente; non amplia i tool del modello.
+18. Timeout, join failure e trasporti falliti di un write connector sono
+    `UnknownRemoteOutcome`: la receipt diventa `Uncertain` e il loop si sospende. Telegram
+    può fare rebind e retry solo su connect failure precedente al dispatch; timeout o risposta
+    persa non vengono mai inviati una seconda volta nello stesso claim.
+19. Il resolver operativo usa `GET /api/effects/uncertain` e
+    `POST /api/effects/{receipt_ref}/resolve`. Verifica l'ownership utente, aggiorna
+    receipt e wake nella stessa transazione quando il turno è sospeso, e rigioca le
+    proiezioni terminali senza fabbricare una wake quando l'effetto appartiene all'output adapter.
+    La risoluzione e il replay sono single-flight per receipt; un concorrente attende il leader
+    e riceve `409` invece di reclamare di nuovo una receipt `Started`.
 
 ## Mapping oggi → contratto
 

@@ -260,8 +260,9 @@ pub trait CapabilityExecutor {
 /// travel in `state: &mut LoopState`, passed per call exactly like `CapabilityExecutor`.
 pub trait BrowserExecutor {
     /// Execute one granular browser tool (navigate / snapshot / act / screenshot / tabs / dialog)
-    /// against the turn's live session. Returns the raw tool-result text PLUS a machine
-    /// `ToolOutcomeHint`: the result text is intentionally prose (a snapshot, not JSON), so the
+    /// against the turn's live session. Returns the general `ToolOutcome` contract so browser
+    /// mutations can propagate durable suspension effects as well as a machine `ToolOutcomeHint`.
+    /// The result text is intentionally prose (a snapshot, not JSON), so the
     /// guarded loop's stall/no-progress accounting must not re-derive progress from it — a
     /// timed-out or no-op action reads as "success" to `classify_tool_result`. The executor,
     /// which owns the sidecar's machine signals (committed suggestion, structural change, error),
@@ -272,7 +273,7 @@ pub trait BrowserExecutor {
         args_raw: &str,
         call_id: &str,
         state: &mut crate::loop_state::LoopState,
-    ) -> impl Future<Output = (String, ToolOutcomeHint)> + Send;
+    ) -> impl Future<Output = ToolOutcome> + Send;
 
     /// Turn-end teardown (ALL exit paths converge here): park the session warm for the thread's next
     /// turn, or stop it for an anonymous chat so the sidecar doesn't leak; hide the live activity
@@ -535,10 +536,22 @@ mod tests {
             _args_raw: &str,
             _call_id: &str,
             state: &mut crate::loop_state::LoopState,
-        ) -> (String, ToolOutcomeHint) {
+        ) -> ToolOutcome {
             self.calls += 1;
             state.browser_used = true; // the loop-visible field travels via LoopState
-            (format!("browsed {name} (#{})", self.calls), ToolOutcomeHint::Success)
+            ToolOutcome {
+                result: format!("browsed {name} (#{})", self.calls),
+                effects: ToolEffects {
+                    outcome_hint: Some(ToolOutcomeHint::Success),
+                    suspend_effect_receipt: Some(
+                        local_first_execution_protocol::EffectReceiptRef::from_store_id(
+                            "11111111111111111111111111111111",
+                        )
+                        .unwrap(),
+                    ),
+                    ..ToolEffects::default()
+                },
+            }
         }
         async fn close_session(&mut self, _browser_used: bool) {
             self.closed = true;
@@ -550,9 +563,12 @@ mod tests {
         let mut browser = StubBrowser::default();
         let mut ls = crate::loop_state::LoopState::new();
         assert!(!ls.browser_used, "browser_used starts false");
-        let (out, hint) = browser.execute_browser("browser_navigate", "{}", "c1", &mut ls).await;
-        assert_eq!(out, "browsed browser_navigate (#1)");
-        assert_eq!(hint, ToolOutcomeHint::Success);
+        let outcome = browser
+            .execute_browser("browser_navigate", "{}", "c1", &mut ls)
+            .await;
+        assert_eq!(outcome.result, "browsed browser_navigate (#1)");
+        assert_eq!(outcome.effects.outcome_hint, Some(ToolOutcomeHint::Success));
+        assert!(outcome.effects.suspend_effect_receipt.is_some());
         assert!(ls.browser_used, "execute_browser flipped the loop-visible flag via LoopState");
         assert_eq!(browser.calls, 1, "executor mutated its own subsystem state (&mut self)");
         browser.close_session(ls.browser_used).await;
