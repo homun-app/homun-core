@@ -132,9 +132,6 @@ fn blank_wake_components_cannot_become_validated_outcomes() {
         WakeCondition::Approval {
             approval_ref: " ".into(),
         },
-        WakeCondition::EffectResolution {
-            receipt_ref: "".into(),
-        },
     ];
 
     for wake in cases {

@@ -1,6 +1,9 @@
-use crate::{TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, TaskStore};
+use crate::{
+    ExecutionEffectReceipt, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, TaskStore,
+};
 use local_first_execution_protocol::{
-    CheckpointRef, ExecutionContract, ExecutionOutcome, ExecutionState, ValidatedExecutionContract,
+    CheckpointRef, EffectReceiptRef, EffectReceiptResolution, EffectReceiptStatus,
+    ExecutionContract, ExecutionOutcome, ExecutionState, ValidatedExecutionContract,
     ValidatedExecutionOutcome, WakeCondition, WakeDelivery,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
@@ -535,6 +538,147 @@ impl TaskStore {
         tx.commit()?;
         Ok(delivered)
     }
+
+    /// Resolves an uncertain effect and delivers its matching wake atomically.
+    pub fn resolve_effect_receipt(
+        &self,
+        receipt_ref: &EffectReceiptRef,
+        resolution: &EffectReceiptResolution,
+    ) -> TaskRuntimeResult<ExecutionEffectReceipt> {
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let receipt = crate::store::load_effect_receipt_on(&tx, receipt_ref)?
+            .ok_or_else(|| TaskRuntimeError::NotFound(receipt_ref.as_ref().to_string()))?;
+        let payload = json!({
+            "type": "effect_resolution",
+            "resolution": resolution,
+        });
+
+        if receipt_resolution_matches(&receipt, resolution) {
+            verify_delivered_effect_resolution_on(&tx, &receipt, &payload)?;
+            tx.commit()?;
+            return Ok(receipt);
+        }
+        if receipt.status != EffectReceiptStatus::Uncertain {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "only an uncertain effect receipt may be resolved".into(),
+            ));
+        }
+
+        let pending = load_pending_wake_receipts_on(&tx)?
+            .into_iter()
+            .filter(|wake| {
+                matches!(
+                    &wake.condition,
+                    WakeCondition::EffectResolution {
+                        receipt_ref: expected,
+                    } if expected == receipt_ref
+                )
+            })
+            .collect::<Vec<_>>();
+        let [wake] = pending.as_slice() else {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "uncertain effect must have exactly one pending resolution wake".into(),
+            ));
+        };
+        if wake.execution_id != receipt.execution_id || wake.revision != receipt.revision {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "effect receipt does not own its pending resolution wake".into(),
+            ));
+        }
+
+        let resolved_at = OffsetDateTime::now_utc().unix_timestamp();
+        let changed = match resolution {
+            EffectReceiptResolution::Applied { result, effects } => tx.execute(
+                "UPDATE execution_effect_receipts
+                 SET status = 'completed', result_json = ?1, effects_json = ?2,
+                     error_json = NULL, resolved_at = ?3
+                 WHERE receipt_ref = ?4 AND status = 'uncertain'",
+                params![
+                    serde_json::to_string(result)?,
+                    serde_json::to_string(effects)?,
+                    resolved_at,
+                    receipt_ref.as_ref(),
+                ],
+            )?,
+            EffectReceiptResolution::NotApplied { error } => tx.execute(
+                "UPDATE execution_effect_receipts
+                 SET status = 'failed', result_json = NULL, effects_json = NULL,
+                     error_json = ?1, resolved_at = ?2
+                 WHERE receipt_ref = ?3 AND status = 'uncertain'",
+                params![
+                    serde_json::to_string(error)?,
+                    resolved_at,
+                    receipt_ref.as_ref(),
+                ],
+            )?,
+        };
+        if changed != 1 {
+            return Err(TaskRuntimeError::Conflict(
+                "effect receipt was resolved concurrently".into(),
+            ));
+        }
+        deliver_pending_wake_on(&tx, wake, payload, resolved_at)?;
+        let resolved = crate::store::load_effect_receipt_on(&tx, receipt_ref)?
+            .ok_or_else(|| TaskRuntimeError::Store("resolved effect receipt disappeared".into()))?;
+        tx.commit()?;
+        Ok(resolved)
+    }
+}
+
+fn receipt_resolution_matches(
+    receipt: &ExecutionEffectReceipt,
+    resolution: &EffectReceiptResolution,
+) -> bool {
+    match resolution {
+        EffectReceiptResolution::Applied { result, effects } => {
+            receipt.status == EffectReceiptStatus::Completed
+                && receipt.result_json.as_ref() == Some(result)
+                && receipt.effects_json.as_ref() == Some(effects)
+                && receipt.error_json.is_none()
+        }
+        EffectReceiptResolution::NotApplied { error } => {
+            receipt.status == EffectReceiptStatus::Failed
+                && receipt.result_json.is_none()
+                && receipt.effects_json.is_none()
+                && receipt.error_json.as_ref() == Some(error)
+        }
+    }
+}
+
+fn verify_delivered_effect_resolution_on(
+    connection: &Connection,
+    receipt: &ExecutionEffectReceipt,
+    expected_payload: &Value,
+) -> TaskRuntimeResult<()> {
+    let condition = WakeCondition::EffectResolution {
+        receipt_ref: receipt.receipt_ref.clone(),
+    };
+    let delivery_json = connection
+        .query_row(
+            "SELECT delivery_json FROM execution_wakes
+             WHERE execution_id = ?1 AND revision = ?2 AND dedup_key = ?3
+               AND status = 'delivered'",
+            params![
+                receipt.execution_id,
+                sqlite_integer_from_store(receipt.revision, "wake revision")?,
+                condition.dedup_key(),
+            ],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten()
+        .ok_or_else(|| {
+            TaskRuntimeError::InvalidTransition(
+                "resolved effect receipt has no delivered wake".into(),
+            )
+        })?;
+    let delivery: WakeDelivery = serde_json::from_str(&delivery_json)?;
+    if delivery.condition != condition || delivery.payload != *expected_payload {
+        return Err(TaskRuntimeError::Conflict(
+            "effect receipt was resolved with a different durable decision".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn load_pending_wake_receipts_on(

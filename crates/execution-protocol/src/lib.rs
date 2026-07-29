@@ -467,7 +467,7 @@ pub enum WakeCondition {
     /// Resume when an uncertain effect receives a durable resolution.
     EffectResolution {
         /// Opaque scoped effect receipt reference.
-        receipt_ref: String,
+        receipt_ref: EffectReceiptRef,
     },
 }
 
@@ -493,7 +493,10 @@ impl WakeCondition {
                 format!("v1:approval:{}", length_prefixed(approval_ref))
             }
             Self::EffectResolution { receipt_ref } => {
-                format!("v1:effect_resolution:{}", length_prefixed(receipt_ref))
+                format!(
+                    "v1:effect_resolution:{}",
+                    length_prefixed(receipt_ref.as_ref())
+                )
             }
         }
     }
@@ -519,9 +522,6 @@ impl WakeCondition {
                 Some("wake.approval.approval_ref")
             }
             Self::Approval { .. } => None,
-            Self::EffectResolution { receipt_ref } if is_blank(receipt_ref) => {
-                Some("wake.effect_resolution.receipt_ref")
-            }
             Self::EffectResolution { .. } => None,
         };
         if let Some(field) = field {
@@ -690,6 +690,56 @@ pub enum EffectClass {
     ExternalWrite,
     /// Request for authorization without performing the effect.
     RequestAuthorization,
+}
+
+/// Durable state of one consequential effect attempt.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectReceiptStatus {
+    /// The effect was authorized and durably recorded but not dispatched.
+    Prepared,
+    /// One worker claimed the effect and may have dispatched it.
+    Started,
+    /// The remote or local effect completed with a durable result.
+    Completed,
+    /// The effect definitely failed and did not complete successfully.
+    Failed,
+    /// The worker lost certainty after dispatch and automatic retry is forbidden.
+    Uncertain,
+    /// A completed effect was reversed by its registered compensation.
+    Compensated,
+}
+
+impl EffectReceiptStatus {
+    /// Returns the stable persisted status token.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Prepared => "prepared",
+            Self::Started => "started",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Uncertain => "uncertain",
+            Self::Compensated => "compensated",
+        }
+    }
+}
+
+/// Durable verification result for an effect whose remote outcome was uncertain.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EffectReceiptResolution {
+    /// Verification proved that the effect was applied.
+    Applied {
+        /// Durable adapter result recovered during verification.
+        result: Value,
+        /// Structured description of the effects that occurred.
+        effects: Value,
+    },
+    /// Verification proved that the effect was not applied.
+    NotApplied {
+        /// Redacted structured reason the effect is known to be absent.
+        error: Value,
+    },
 }
 
 /// Capacity required from one neutral resource class.
@@ -861,6 +911,61 @@ impl Serialize for DurableDataRef {
 }
 
 impl<'de> Deserialize<'de> for DurableDataRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Self::parse(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Checked reference to one durable effect receipt.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct EffectReceiptRef(String);
+
+impl EffectReceiptRef {
+    /// Builds an `effect:v1` reference from a store-issued identifier.
+    pub fn from_store_id(store_id: impl AsRef<str>) -> Result<Self, ReferenceValidationError> {
+        checked_reference("effect:v1:", store_id.as_ref()).map(Self)
+    }
+
+    /// Parses and validates an encoded `effect:v1` reference.
+    pub fn parse(encoded: impl Into<String>) -> Result<Self, ReferenceValidationError> {
+        let encoded = encoded.into();
+        validate_encoded_reference("effect:v1:", &encoded)?;
+        Ok(Self(encoded))
+    }
+
+    /// Consumes the wrapper and returns the encoded reference.
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl AsRef<str> for EffectReceiptRef {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::str::FromStr for EffectReceiptRef {
+    type Err = ReferenceValidationError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::parse(value)
+    }
+}
+
+impl Serialize for EffectReceiptRef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_ref())
+    }
+}
+
+impl<'de> Deserialize<'de> for EffectReceiptRef {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,

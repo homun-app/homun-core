@@ -121,9 +121,12 @@ fn wake_conditions_v1_wire_format_is_stable() {
         ),
         (
             WakeCondition::EffectResolution {
-                receipt_ref: "receipt-1".into(),
+                receipt_ref: EffectReceiptRef::from_store_id(
+                    "11111111111111111111111111111111",
+                )
+                .unwrap(),
             },
-            r#"{"type":"effect_resolution","receipt_ref":"receipt-1"}"#,
+            r#"{"type":"effect_resolution","receipt_ref":"effect:v1:32:11111111111111111111111111111111"}"#,
         ),
     ];
 

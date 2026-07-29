@@ -1,6 +1,6 @@
 use local_first_execution_protocol::{
-    CancelReason, CheckpointDataRef, CheckpointEnvelope, DurableDataRef, ExecutionFailure,
-    ExecutionOutcome, WakeCondition,
+    CancelReason, CheckpointDataRef, CheckpointEnvelope, DurableDataRef, EffectReceiptRef,
+    ExecutionFailure, ExecutionOutcome, WakeCondition,
 };
 use local_first_task_runtime::{
     AgentRunStatus, ExecutionProjection, ExecutionPublicEventKind, TaskStatus,
@@ -91,7 +91,10 @@ fn every_canonical_outcome_has_one_projection() {
         ),
         (
             suspended(WakeCondition::EffectResolution {
-                receipt_ref: "effect:receipt-1".into(),
+                receipt_ref: EffectReceiptRef::from_store_id(
+                    "11111111111111111111111111111111",
+                )
+                .unwrap(),
             }),
             TaskStatus::WaitingUserApproval,
             None,

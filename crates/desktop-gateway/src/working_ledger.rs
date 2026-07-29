@@ -21,7 +21,7 @@ pub(crate) fn render(
         .list_agent_runs_for_thread(thread_id, user_id, workspace_id)
         .map_err(|error| error.to_string())?;
     let receipts = store
-        .list_tool_receipts_for_thread(thread_id, user_id, workspace_id)
+        .list_effect_receipts_for_thread(thread_id, user_id, workspace_id)
         .map_err(|error| error.to_string())?;
     let latest_run = runs.last();
     let latest_memory_status = runs.iter().rev().find_map(|run| {
@@ -180,7 +180,9 @@ pub(crate) fn render(
     for receipt in receipts {
         out.push_str(&format!(
             "- `{}` · `{}` · `{}`\n",
-            receipt.tool_name, receipt.status, receipt.idempotency_key
+            receipt.operation,
+            receipt.status.as_str(),
+            receipt.idempotency_key
         ));
     }
     out.push_str("\n## Steering\n\n");

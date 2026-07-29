@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
+use local_first_execution_protocol::{EffectClass, EffectReceiptRef, EffectReceiptStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct UserId(String);
@@ -503,39 +504,49 @@ pub struct AgentCheckpoint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NewAgentToolReceipt {
-    pub turn_id: String,
-    pub idempotency_key: String,
-    pub run_id: String,
-    pub thread_id: String,
+pub struct NewExecutionEffectReceipt {
+    pub receipt_ref: EffectReceiptRef,
+    pub execution_id: String,
+    pub revision: u64,
+    pub run_id: Option<String>,
+    pub thread_id: Option<String>,
     pub user_id: String,
     pub workspace_id: String,
-    pub tool_name: String,
+    pub effect_class: EffectClass,
+    pub operation: String,
     pub arguments_hash: String,
+    pub idempotency_key: String,
+    pub compensation: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AgentToolReceipt {
-    pub turn_id: String,
+pub struct ExecutionEffectReceipt {
+    pub receipt_ref: EffectReceiptRef,
+    pub execution_id: String,
+    pub revision: u64,
     pub idempotency_key: String,
-    pub run_id: String,
-    pub thread_id: String,
+    pub run_id: Option<String>,
+    pub thread_id: Option<String>,
     pub user_id: String,
     pub workspace_id: String,
-    pub tool_name: String,
+    pub effect_class: EffectClass,
+    pub operation: String,
     pub arguments_hash: String,
-    pub status: String,
+    pub status: EffectReceiptStatus,
     pub result_json: Option<Value>,
     pub effects_json: Option<Value>,
-    pub started_at: i64,
-    pub completed_at: Option<i64>,
+    pub error_json: Option<Value>,
+    pub compensation: Option<Value>,
+    pub prepared_at: i64,
+    pub started_at: Option<i64>,
+    pub resolved_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ToolReceiptClaim {
-    Execute,
-    Replay(AgentToolReceipt),
-    Uncertain(AgentToolReceipt),
+pub enum EffectReceiptClaim {
+    Execute(ExecutionEffectReceipt),
+    Replay(ExecutionEffectReceipt),
+    Resolve(ExecutionEffectReceipt),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

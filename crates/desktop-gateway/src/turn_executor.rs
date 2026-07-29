@@ -52,6 +52,11 @@ pub(crate) fn canonical_chat_outcome(
         local_first_engine::TurnStop::SuspendedApproval => suspended(WakeCondition::Approval {
             approval_ref: format!("{execution_id}:{revision}:approval"),
         }),
+        local_first_engine::TurnStop::SuspendedEffect { receipt_ref } => {
+            suspended(WakeCondition::EffectResolution {
+                receipt_ref: receipt_ref.clone(),
+            })
+        }
         local_first_engine::TurnStop::SuspendedModel { role } => {
             suspended(WakeCondition::ModelAvailable { role: role.clone() })
         }
@@ -583,11 +588,13 @@ pub fn execute_chat_turn_task(
                 turn.stop,
                 local_first_engine::TurnStop::SuspendedUser
                     | local_first_engine::TurnStop::SuspendedApproval
+                    | local_first_engine::TurnStop::SuspendedEffect { .. }
                     | local_first_engine::TurnStop::SuspendedModel { .. }
             ) {
                 let stop_kind = match &turn.stop {
                     local_first_engine::TurnStop::SuspendedUser => "user",
                     local_first_engine::TurnStop::SuspendedApproval => "approval",
+                    local_first_engine::TurnStop::SuspendedEffect { .. } => "effect_resolution",
                     local_first_engine::TurnStop::SuspendedModel { .. } => "model",
                     local_first_engine::TurnStop::Completed
                     | local_first_engine::TurnStop::Failed { .. } => unreachable!(),
@@ -684,7 +691,8 @@ mod tests {
     use super::*;
     use crate::AppState;
     use local_first_execution_protocol::{
-        CheckpointDataRef, DurableDataRef, ExecutionOutcome, FailureClass, WakeCondition,
+        CheckpointDataRef, DurableDataRef, EffectReceiptRef, ExecutionOutcome, FailureClass,
+        WakeCondition,
     };
     use local_first_task_runtime::TaskStore;
 
@@ -701,6 +709,15 @@ mod tests {
             (local_first_engine::TurnStop::Completed, "completed"),
             (local_first_engine::TurnStop::SuspendedUser, "user"),
             (local_first_engine::TurnStop::SuspendedApproval, "approval"),
+            (
+                local_first_engine::TurnStop::SuspendedEffect {
+                    receipt_ref: EffectReceiptRef::from_store_id(
+                        "11111111111111111111111111111111",
+                    )
+                    .unwrap(),
+                },
+                "effect",
+            ),
             (
                 local_first_engine::TurnStop::SuspendedModel {
                     role: "primary".to_string(),
@@ -740,6 +757,15 @@ mod tests {
                     wake,
                     WakeCondition::Approval {
                         approval_ref: "turn-1:1:approval".to_string()
+                    }
+                ),
+                ("effect", ExecutionOutcome::Suspended { wake, .. }) => assert_eq!(
+                    wake,
+                    WakeCondition::EffectResolution {
+                        receipt_ref: EffectReceiptRef::from_store_id(
+                            "11111111111111111111111111111111",
+                        )
+                        .unwrap(),
                     }
                 ),
                 ("model", ExecutionOutcome::Suspended { wake, .. }) => assert_eq!(

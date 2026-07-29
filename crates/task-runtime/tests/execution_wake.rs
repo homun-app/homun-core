@@ -1066,7 +1066,7 @@ fn v13_upgrade_adds_wake_evidence_to_an_authenticated_legacy_revision_start() {
     drop(connection);
 
     let migrated = TaskStore::open(&path).unwrap();
-    assert_eq!(migrated.schema_version().unwrap(), 13);
+    assert_eq!(migrated.schema_version().unwrap(), 14);
     assert_eq!(
         migrated
             .execution("exec-v13-wake-upgrade")

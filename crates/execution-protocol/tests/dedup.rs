@@ -1,4 +1,4 @@
-use local_first_execution_protocol::WakeCondition;
+use local_first_execution_protocol::{EffectReceiptRef, WakeCondition};
 
 #[test]
 fn wake_conditions_have_stable_dedup_keys() {
@@ -42,9 +42,12 @@ fn wake_conditions_have_stable_dedup_keys() {
         ),
         (
             WakeCondition::EffectResolution {
-                receipt_ref: "receipt-1".into(),
+                receipt_ref: EffectReceiptRef::from_store_id(
+                    "11111111111111111111111111111111",
+                )
+                .unwrap(),
             },
-            "v1:effect_resolution:9:receipt-1",
+            "v1:effect_resolution:45:effect:v1:32:11111111111111111111111111111111",
         ),
     ];
 

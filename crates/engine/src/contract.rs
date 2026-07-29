@@ -176,6 +176,9 @@ impl ToolOutcomeHint {
 /// `last_round_sig.clear()`), which today fire together in the `update_plan`/`step_advance` arm.
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolEffects {
+    /// A dispatched effect has an unknown remote result. The loop must suspend on this receipt
+    /// instead of asking the model to retry or infer success from prose.
+    pub suspend_effect_receipt: Option<local_first_execution_protocol::EffectReceiptRef>,
     /// Text to append to the assistant's accumulated output, in order (artifact/plan markers, cards).
     pub append_output: Vec<String>,
     /// Letture collegate effettuate dal tool; il loop le unisce alla provenance

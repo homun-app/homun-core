@@ -39,12 +39,12 @@ pub use scheduler::TaskScheduler;
 pub use store::TaskStore;
 pub use types::{
     ActiveTurnProjection, AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus,
-    AgentToolReceipt, ApprovalPolicy, Automation, AutomationRun, AutomationSource,
-    AutomationTrigger, BrowserCheckpointRecord, EventTrigger, NewAgentRun, NewAgentToolReceipt,
-    NewBrowserCheckpoint, NewTurnSteering, ObjectiveContractRecord, ObjectiveMode, ResourceClass,
-    ResourceRequirement, RetryPolicy, RuntimePlanRecord, SubagentInfo, TaskId, TaskPriority,
-    TaskRecord, TaskStatus, TerminalWrite, ThreadActivityProjection, ThreadAttention,
-    ToolReceiptClaim, TurnEvent, TurnEventKind, TurnSteeringRecord, TurnSteeringStatus, UserId,
-    WorkflowId, WorkspaceId,
+    ApprovalPolicy, Automation, AutomationRun, AutomationSource, AutomationTrigger,
+    BrowserCheckpointRecord, EffectReceiptClaim, EventTrigger, ExecutionEffectReceipt,
+    NewAgentRun, NewBrowserCheckpoint, NewExecutionEffectReceipt, NewTurnSteering,
+    ObjectiveContractRecord, ObjectiveMode, ResourceClass, ResourceRequirement, RetryPolicy,
+    RuntimePlanRecord, SubagentInfo, TaskId, TaskPriority, TaskRecord, TaskStatus, TerminalWrite,
+    ThreadActivityProjection, ThreadAttention, TurnEvent, TurnEventKind, TurnSteeringRecord,
+    TurnSteeringStatus, UserId, WorkflowId, WorkspaceId,
 };
 pub use ui::{TaskQueueSnapshot, TaskUiDetail, TaskUiItem, TaskUiReadModel};

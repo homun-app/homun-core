@@ -17,6 +17,11 @@ pub enum TurnStop {
     Completed,
     SuspendedUser,
     SuspendedApproval,
+    /// One effect may have completed remotely and needs typed resolution before resume.
+    SuspendedEffect {
+        /// Receipt that must be resolved before execution may continue.
+        receipt_ref: local_first_execution_protocol::EffectReceiptRef,
+    },
     SuspendedModel { role: String },
     Failed { failure: ExecutionFailure },
 }

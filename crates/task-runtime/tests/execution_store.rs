@@ -1684,7 +1684,7 @@ fn schema_constraints_reject_invalid_projection_event_and_wake_rows() {
 }
 
 #[test]
-fn populated_v11_database_migrates_to_constrained_v13() {
+fn populated_v11_database_migrates_to_current_schema() {
     let (path, seed) = file_store();
     let task = TaskRecord::new(
         "legacy-task",
@@ -1708,7 +1708,7 @@ fn populated_v11_database_migrates_to_constrained_v13() {
     drop(connection);
 
     let migrated = TaskStore::open(&path).unwrap();
-    assert_eq!(migrated.schema_version().unwrap(), 13);
+    assert_eq!(migrated.schema_version().unwrap(), 14);
     assert!(
         migrated
             .get_task(
@@ -1755,13 +1755,13 @@ fn populated_v11_database_migrates_to_constrained_v13() {
 }
 
 #[test]
-fn initial_v12_execution_tables_migrate_to_typed_authoritative_v13() {
+fn initial_v12_execution_tables_migrate_to_current_schema() {
     let (path, seed) = file_store();
     drop(seed);
     let fixture = install_initial_v12_fixture(&path, false);
 
     let migrated = TaskStore::open(&path).unwrap();
-    assert_eq!(migrated.schema_version().unwrap(), 13);
+    assert_eq!(migrated.schema_version().unwrap(), 14);
     let events = migrated.execution_events("exec-initial-v12", 1).unwrap();
     assert_eq!(
         events
@@ -1945,7 +1945,7 @@ fn malformed_initial_v12_event_aborts_migration_without_dropping_data() {
 }
 
 #[test]
-fn legacy_v12_wake_foreign_key_is_migrated_to_v13_without_data_loss() {
+fn legacy_v12_wake_foreign_key_is_migrated_without_data_loss() {
     let (path, store) = file_store();
     let revision_one = contract("exec-legacy-wake-migration", 1, 1);
     store.create_execution(&revision_one).unwrap();
@@ -2028,7 +2028,7 @@ fn legacy_v12_wake_foreign_key_is_migrated_to_v13_without_data_loss() {
     drop(connection);
 
     let migrated = TaskStore::open(&path).unwrap();
-    assert_eq!(migrated.schema_version().unwrap(), 13);
+    assert_eq!(migrated.schema_version().unwrap(), 14);
     let connection = raw_connection(&path);
     assert_eq!(
         connection

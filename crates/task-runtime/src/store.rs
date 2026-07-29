@@ -1,12 +1,13 @@
 use crate::{
     ActiveTurnProjection, AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus,
-    AgentToolReceipt, ApprovalRequest, Automation, AutomationRun, BrowserCheckpointRecord,
-    NewAgentRun, NewAgentToolReceipt, NewBrowserCheckpoint, NewTurnSteering,
-    ObjectiveContractRecord, ObjectiveMode, ResourceClass, RuntimePlanRecord, SubagentInfo,
-    TaskCheckpoint, TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult,
-    TaskStatus, TerminalWrite, ThreadActivityProjection, ThreadAttention, ToolReceiptClaim,
+    ApprovalRequest, Automation, AutomationRun, BrowserCheckpointRecord, EffectReceiptClaim,
+    ExecutionEffectReceipt, NewAgentRun, NewBrowserCheckpoint, NewExecutionEffectReceipt,
+    NewTurnSteering, ObjectiveContractRecord, ObjectiveMode, ResourceClass, RuntimePlanRecord,
+    SubagentInfo, TaskCheckpoint, TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError,
+    TaskRuntimeResult, TaskStatus, TerminalWrite, ThreadActivityProjection, ThreadAttention,
     TurnEvent, TurnEventKind, TurnSteeringRecord, TurnSteeringStatus, UserId, WorkspaceId,
 };
+use local_first_execution_protocol::{EffectClass, EffectReceiptRef, EffectReceiptStatus};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::Value;
 use std::path::Path;
@@ -399,25 +400,33 @@ impl TaskStore {
             CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_recovery
                 ON agent_checkpoints(turn_id, user_id, workspace_id, round DESC, created_at DESC);
 
-            CREATE TABLE IF NOT EXISTS agent_tool_receipts (
-                turn_id TEXT NOT NULL,
+            CREATE TABLE IF NOT EXISTS execution_effect_receipts (
+                receipt_ref TEXT PRIMARY KEY,
+                execution_id TEXT NOT NULL,
+                revision INTEGER NOT NULL CHECK(revision > 0),
                 idempotency_key TEXT NOT NULL,
-                run_id TEXT NOT NULL,
-                thread_id TEXT NOT NULL,
+                run_id TEXT,
+                thread_id TEXT,
                 user_id TEXT NOT NULL,
                 workspace_id TEXT NOT NULL,
-                tool_name TEXT NOT NULL,
+                effect_class TEXT NOT NULL,
+                operation TEXT NOT NULL,
                 arguments_hash TEXT NOT NULL,
-                status TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(
+                    status IN ('prepared', 'started', 'completed', 'failed', 'uncertain', 'compensated')
+                ),
                 result_json TEXT,
                 effects_json TEXT,
-                started_at INTEGER NOT NULL,
-                completed_at INTEGER,
-                PRIMARY KEY (turn_id, idempotency_key)
+                error_json TEXT,
+                compensation_json TEXT,
+                prepared_at INTEGER NOT NULL,
+                started_at INTEGER,
+                resolved_at INTEGER,
+                UNIQUE(execution_id, idempotency_key)
             );
 
-            CREATE INDEX IF NOT EXISTS idx_agent_tool_receipts_scope
-                ON agent_tool_receipts(user_id, workspace_id, thread_id, started_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_execution_effect_receipts_scope
+                ON execution_effect_receipts(user_id, workspace_id, thread_id, prepared_at DESC);
 
             CREATE TABLE IF NOT EXISTS executions (
                 execution_id TEXT PRIMARY KEY,
@@ -485,6 +494,7 @@ impl TaskStore {
             ",
         )?;
         crate::execution_store::migrate_execution_schema_v13(&self.connection)?;
+        migrate_effect_receipts_v14(&self.connection)?;
 
         // ── chat_turn columns (schema_version 4). Guarded: idempotent on existing DBs.
         // Indexed columns for chat turns. Remain NULL on non-chat_turn rows.
@@ -530,7 +540,7 @@ impl TaskStore {
             [],
         )?;
         self.connection.execute(
-            "UPDATE task_runtime_metadata SET value = '13' WHERE key = 'schema_version'",
+            "UPDATE task_runtime_metadata SET value = '14' WHERE key = 'schema_version'",
             [],
         )?;
         // Partial index: only chat_turn rows (thread_id IS NOT NULL). Indexes the
@@ -647,7 +657,7 @@ impl TaskStore {
             rusqlite::params![user_id.as_str(), workspace_id.as_str()],
         )?;
         tx.execute(
-            "DELETE FROM agent_tool_receipts WHERE user_id = ?1 AND workspace_id = ?2",
+            "DELETE FROM execution_effect_receipts WHERE user_id = ?1 AND workspace_id = ?2",
             rusqlite::params![user_id.as_str(), workspace_id.as_str()],
         )?;
         tx.execute(
@@ -1794,91 +1804,161 @@ impl TaskStore {
             .transpose()
     }
 
-    pub fn claim_tool_receipt(
+    pub fn prepare_effect_receipt(
         &self,
-        new_receipt: &NewAgentToolReceipt,
-    ) -> TaskRuntimeResult<ToolReceiptClaim> {
+        new_receipt: &NewExecutionEffectReceipt,
+    ) -> TaskRuntimeResult<ExecutionEffectReceipt> {
+        if new_receipt.revision == 0
+            || new_receipt.execution_id.trim().is_empty()
+            || new_receipt.operation.trim().is_empty()
+            || new_receipt.arguments_hash.trim().is_empty()
+            || new_receipt.idempotency_key.trim().is_empty()
+        {
+            return Err(TaskRuntimeError::Store(
+                "effect receipt identity and operation fields must be nonempty".into(),
+            ));
+        }
         let now = OffsetDateTime::now_utc().unix_timestamp();
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
-        let inserted = tx.execute(
-            "INSERT OR IGNORE INTO agent_tool_receipts (
-                turn_id, idempotency_key, run_id, thread_id, user_id, workspace_id,
-                tool_name, arguments_hash, status, started_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'started', ?9)",
+        tx.execute(
+            "INSERT OR IGNORE INTO execution_effect_receipts (
+                receipt_ref, execution_id, revision, idempotency_key, run_id, thread_id,
+                user_id, workspace_id, effect_class, operation, arguments_hash, status,
+                compensation_json, prepared_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'prepared', ?12, ?13)",
             params![
-                new_receipt.turn_id,
+                new_receipt.receipt_ref.as_ref(),
+                new_receipt.execution_id,
+                i64::try_from(new_receipt.revision).map_err(|_| {
+                    TaskRuntimeError::Store("effect receipt revision is out of range".into())
+                })?,
                 new_receipt.idempotency_key,
                 new_receipt.run_id,
                 new_receipt.thread_id,
                 new_receipt.user_id,
                 new_receipt.workspace_id,
-                new_receipt.tool_name,
+                effect_class_str(&new_receipt.effect_class),
+                new_receipt.operation,
                 new_receipt.arguments_hash,
+                new_receipt
+                    .compensation
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?,
                 now,
             ],
         )?;
-        let receipt =
-            load_tool_receipt_on(&tx, &new_receipt.turn_id, &new_receipt.idempotency_key)?
-                .ok_or_else(|| {
-                    TaskRuntimeError::Store("tool receipt disappeared after claim".into())
-                })?;
-        let claim = if inserted == 1 {
-            ToolReceiptClaim::Execute
-        } else if receipt.status == "completed" {
-            ToolReceiptClaim::Replay(receipt)
-        } else {
-            ToolReceiptClaim::Uncertain(receipt)
+        let receipt = load_effect_receipt_on(&tx, &new_receipt.receipt_ref)?.ok_or_else(|| {
+            TaskRuntimeError::Store("effect receipt disappeared after prepare".into())
+        })?;
+        if receipt.execution_id != new_receipt.execution_id
+            || receipt.revision != new_receipt.revision
+            || receipt.idempotency_key != new_receipt.idempotency_key
+            || receipt.effect_class != new_receipt.effect_class
+            || receipt.operation != new_receipt.operation
+            || receipt.arguments_hash != new_receipt.arguments_hash
+            || receipt.user_id != new_receipt.user_id
+            || receipt.workspace_id != new_receipt.workspace_id
+        {
+            return Err(TaskRuntimeError::Store(
+                "effect receipt reference or idempotency key conflicts with existing scope".into(),
+            ));
+        }
+        tx.commit()?;
+        Ok(receipt)
+    }
+
+    pub fn claim_effect_receipt(
+        &self,
+        receipt_ref: &EffectReceiptRef,
+    ) -> TaskRuntimeResult<EffectReceiptClaim> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let receipt = load_effect_receipt_on(&tx, receipt_ref)?
+            .ok_or_else(|| TaskRuntimeError::NotFound(receipt_ref.as_ref().to_string()))?;
+        let claim = match receipt.status {
+            EffectReceiptStatus::Prepared => {
+                let changed = tx.execute(
+                    "UPDATE execution_effect_receipts
+                     SET status = 'started', started_at = ?1
+                     WHERE receipt_ref = ?2 AND status = 'prepared'",
+                    params![now, receipt_ref.as_ref()],
+                )?;
+                if changed != 1 {
+                    return Err(TaskRuntimeError::Store(
+                        "effect receipt was claimed concurrently".into(),
+                    ));
+                }
+                EffectReceiptClaim::Execute(load_effect_receipt_on(&tx, receipt_ref)?.ok_or_else(
+                    || TaskRuntimeError::Store("claimed effect receipt disappeared".into()),
+                )?)
+            }
+            EffectReceiptStatus::Started => {
+                tx.execute(
+                    "UPDATE execution_effect_receipts SET status = 'uncertain'
+                     WHERE receipt_ref = ?1 AND status = 'started'",
+                    params![receipt_ref.as_ref()],
+                )?;
+                EffectReceiptClaim::Resolve(load_effect_receipt_on(&tx, receipt_ref)?.ok_or_else(
+                    || TaskRuntimeError::Store("uncertain effect receipt disappeared".into()),
+                )?)
+            }
+            EffectReceiptStatus::Completed | EffectReceiptStatus::Compensated => {
+                EffectReceiptClaim::Replay(receipt)
+            }
+            EffectReceiptStatus::Failed | EffectReceiptStatus::Uncertain => {
+                EffectReceiptClaim::Resolve(receipt)
+            }
         };
         tx.commit()?;
         Ok(claim)
     }
 
-    pub fn complete_tool_receipt(
+    pub fn complete_effect_receipt(
         &self,
-        turn_id: &str,
-        idempotency_key: &str,
+        receipt_ref: &EffectReceiptRef,
         result: &Value,
         effects: &Value,
-    ) -> TaskRuntimeResult<AgentToolReceipt> {
+    ) -> TaskRuntimeResult<ExecutionEffectReceipt> {
         let completed_at = OffsetDateTime::now_utc().unix_timestamp();
         let changed = self.connection.execute(
-            "UPDATE agent_tool_receipts
-             SET status = 'completed', result_json = ?1, effects_json = ?2, completed_at = ?3
-             WHERE turn_id = ?4 AND idempotency_key = ?5 AND status = 'started'",
+            "UPDATE execution_effect_receipts
+             SET status = 'completed', result_json = ?1, effects_json = ?2, resolved_at = ?3
+             WHERE receipt_ref = ?4 AND status = 'started'",
             params![
                 serde_json::to_string(result)?,
                 serde_json::to_string(effects)?,
                 completed_at,
-                turn_id,
-                idempotency_key
+                receipt_ref.as_ref(),
             ],
         )?;
         if changed != 1 {
             return Err(TaskRuntimeError::Store(
-                "tool receipt is not claimable".into(),
+                "effect receipt is not started".into(),
             ));
         }
-        load_tool_receipt_on(&self.connection, turn_id, idempotency_key)?
-            .ok_or_else(|| TaskRuntimeError::Store("completed tool receipt disappeared".into()))
+        load_effect_receipt_on(&self.connection, receipt_ref)?
+            .ok_or_else(|| TaskRuntimeError::Store("completed effect receipt disappeared".into()))
     }
 
-    pub fn list_tool_receipts_for_thread(
+    pub fn list_effect_receipts_for_thread(
         &self,
         thread_id: &str,
         user_id: &str,
         workspace_id: &str,
-    ) -> TaskRuntimeResult<Vec<AgentToolReceipt>> {
+    ) -> TaskRuntimeResult<Vec<ExecutionEffectReceipt>> {
         let mut stmt = self.connection.prepare(
-            "SELECT turn_id, idempotency_key, run_id, thread_id, user_id, workspace_id,
-                    tool_name, arguments_hash, status, result_json, effects_json,
-                    started_at, completed_at
-             FROM agent_tool_receipts
+            "SELECT receipt_ref, execution_id, revision, idempotency_key, run_id, thread_id,
+                    user_id, workspace_id, effect_class, operation, arguments_hash, status,
+                    result_json, effects_json, error_json, compensation_json,
+                    prepared_at, started_at, resolved_at
+             FROM execution_effect_receipts
              WHERE thread_id = ?1 AND user_id = ?2 AND workspace_id = ?3
-             ORDER BY started_at ASC, idempotency_key ASC",
+             ORDER BY prepared_at ASC, idempotency_key ASC",
         )?;
         let rows = stmt.query_map(
             params![thread_id, user_id, workspace_id],
-            map_tool_receipt_row,
+            map_effect_receipt_row,
         )?;
         rows.map(|row| row.map_err(Into::into)).collect()
     }
@@ -3871,42 +3951,100 @@ fn load_turn_steering_unscoped_by_id(
     .map_err(Into::into)
 }
 
-fn map_tool_receipt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentToolReceipt> {
-    let result_json: Option<String> = row.get(9)?;
-    let effects_json: Option<String> = row.get(10)?;
-    Ok(AgentToolReceipt {
-        turn_id: row.get(0)?,
-        idempotency_key: row.get(1)?,
-        run_id: row.get(2)?,
-        thread_id: row.get(3)?,
-        user_id: row.get(4)?,
-        workspace_id: row.get(5)?,
-        tool_name: row.get(6)?,
-        arguments_hash: row.get(7)?,
-        status: row.get(8)?,
+fn map_effect_receipt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ExecutionEffectReceipt> {
+    let raw_ref: String = row.get(0)?;
+    let raw_effect_class: String = row.get(8)?;
+    let raw_status: String = row.get(11)?;
+    let result_json: Option<String> = row.get(12)?;
+    let effects_json: Option<String> = row.get(13)?;
+    let error_json: Option<String> = row.get(14)?;
+    let compensation_json: Option<String> = row.get(15)?;
+    Ok(ExecutionEffectReceipt {
+        receipt_ref: EffectReceiptRef::parse(raw_ref)
+            .map_err(|error| invalid_receipt_column(0, error.to_string()))?,
+        execution_id: row.get(1)?,
+        revision: u64::try_from(row.get::<_, i64>(2)?)
+            .map_err(|error| invalid_receipt_column(2, error.to_string()))?,
+        idempotency_key: row.get(3)?,
+        run_id: row.get(4)?,
+        thread_id: row.get(5)?,
+        user_id: row.get(6)?,
+        workspace_id: row.get(7)?,
+        effect_class: parse_effect_class(&raw_effect_class)
+            .ok_or_else(|| invalid_receipt_column(8, "unknown effect class"))?,
+        operation: row.get(9)?,
+        arguments_hash: row.get(10)?,
+        status: parse_effect_receipt_status(&raw_status)
+            .ok_or_else(|| invalid_receipt_column(11, "unknown effect receipt status"))?,
         result_json: result_json.and_then(|raw| serde_json::from_str(&raw).ok()),
         effects_json: effects_json.and_then(|raw| serde_json::from_str(&raw).ok()),
-        started_at: row.get(11)?,
-        completed_at: row.get(12)?,
+        error_json: error_json.and_then(|raw| serde_json::from_str(&raw).ok()),
+        compensation: compensation_json.and_then(|raw| serde_json::from_str(&raw).ok()),
+        prepared_at: row.get(16)?,
+        started_at: row.get(17)?,
+        resolved_at: row.get(18)?,
     })
 }
 
-fn load_tool_receipt_on(
+pub(crate) fn load_effect_receipt_on(
     conn: &Connection,
-    turn_id: &str,
-    idempotency_key: &str,
-) -> TaskRuntimeResult<Option<AgentToolReceipt>> {
+    receipt_ref: &EffectReceiptRef,
+) -> TaskRuntimeResult<Option<ExecutionEffectReceipt>> {
     Ok(conn
         .query_row(
-            "SELECT turn_id, idempotency_key, run_id, thread_id, user_id, workspace_id,
-                    tool_name, arguments_hash, status, result_json, effects_json,
-                    started_at, completed_at
-             FROM agent_tool_receipts
-             WHERE turn_id = ?1 AND idempotency_key = ?2",
-            params![turn_id, idempotency_key],
-            map_tool_receipt_row,
+            "SELECT receipt_ref, execution_id, revision, idempotency_key, run_id, thread_id,
+                    user_id, workspace_id, effect_class, operation, arguments_hash, status,
+                    result_json, effects_json, error_json, compensation_json,
+                    prepared_at, started_at, resolved_at
+             FROM execution_effect_receipts WHERE receipt_ref = ?1",
+            params![receipt_ref.as_ref()],
+            map_effect_receipt_row,
         )
         .optional()?)
+}
+
+fn invalid_receipt_column(index: usize, message: impl Into<String>) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        index,
+        rusqlite::types::Type::Text,
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            message.into(),
+        )),
+    )
+}
+
+fn effect_class_str(effect_class: &EffectClass) -> &'static str {
+    match effect_class {
+        EffectClass::Read => "read",
+        EffectClass::FilesystemWrite => "filesystem_write",
+        EffectClass::ArtifactCreation => "artifact_creation",
+        EffectClass::ExternalWrite => "external_write",
+        EffectClass::RequestAuthorization => "request_authorization",
+    }
+}
+
+fn parse_effect_class(value: &str) -> Option<EffectClass> {
+    match value {
+        "read" => Some(EffectClass::Read),
+        "filesystem_write" => Some(EffectClass::FilesystemWrite),
+        "artifact_creation" => Some(EffectClass::ArtifactCreation),
+        "external_write" => Some(EffectClass::ExternalWrite),
+        "request_authorization" => Some(EffectClass::RequestAuthorization),
+        _ => None,
+    }
+}
+
+fn parse_effect_receipt_status(value: &str) -> Option<EffectReceiptStatus> {
+    match value {
+        "prepared" => Some(EffectReceiptStatus::Prepared),
+        "started" => Some(EffectReceiptStatus::Started),
+        "completed" => Some(EffectReceiptStatus::Completed),
+        "failed" => Some(EffectReceiptStatus::Failed),
+        "uncertain" => Some(EffectReceiptStatus::Uncertain),
+        "compensated" => Some(EffectReceiptStatus::Compensated),
+        _ => None,
+    }
 }
 
 fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
@@ -3920,8 +4058,52 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
     }
 }
 
-// Required by the Phase 0 plan; consumed by later tasks.
-#[allow(dead_code)]
+fn migrate_effect_receipts_v14(connection: &Connection) -> TaskRuntimeResult<()> {
+    if !table_exists(connection, "agent_tool_receipts") {
+        return Ok(());
+    }
+    let tx = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    tx.execute(
+        "INSERT OR IGNORE INTO execution_effect_receipts (
+            receipt_ref, execution_id, revision, idempotency_key, run_id, thread_id,
+            user_id, workspace_id, effect_class, operation, arguments_hash, status,
+            result_json, effects_json, prepared_at, started_at, resolved_at
+         )
+         SELECT
+            'effect:v1:32:' || printf('%032x', rowid),
+            turn_id,
+            COALESCE((SELECT revision FROM executions WHERE execution_id = turn_id), 1),
+            idempotency_key,
+            run_id,
+            thread_id,
+            user_id,
+            workspace_id,
+            CASE
+                WHEN tool_name LIKE '%write_project_file%' OR tool_name LIKE '%filesystem%'
+                    THEN 'filesystem_write'
+                WHEN tool_name LIKE '%make_deck%' OR tool_name LIKE '%make_document%'
+                    THEN 'artifact_creation'
+                ELSE 'external_write'
+            END,
+            tool_name,
+            arguments_hash,
+            CASE WHEN status = 'completed' THEN 'completed' ELSE 'uncertain' END,
+            result_json,
+            effects_json,
+            started_at,
+            started_at,
+            completed_at
+         FROM agent_tool_receipts",
+        [],
+    )?;
+    tx.execute_batch(
+        "DROP INDEX IF EXISTS idx_agent_tool_receipts_scope;
+         DROP TABLE agent_tool_receipts;",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 fn table_exists(conn: &Connection, table: &str) -> bool {
     conn.query_row(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -3963,12 +4145,13 @@ mod migration_tests {
         }
         // Re-running migrations must not panic (guarded ALTER).
         store.run_migrations().expect("idempotent re-run");
-        assert_eq!(store.schema_version().unwrap(), 13);
+        assert_eq!(store.schema_version().unwrap(), 14);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         assert!(table_exists(&store.connection, "runtime_plans"));
         assert!(table_exists(&store.connection, "agent_checkpoints"));
-        assert!(table_exists(&store.connection, "agent_tool_receipts"));
+        assert!(table_exists(&store.connection, "execution_effect_receipts"));
+        assert!(!table_exists(&store.connection, "agent_tool_receipts"));
         assert!(table_exists(&store.connection, "objective_contracts"));
         assert!(table_exists(&store.connection, "turn_steering"));
         assert!(table_exists(&store.connection, "executions"));
@@ -4806,19 +4989,6 @@ mod agent_control_state_tests {
         }
     }
 
-    fn receipt() -> NewAgentToolReceipt {
-        NewAgentToolReceipt {
-            turn_id: "turn".into(),
-            idempotency_key: "write_file:abc".into(),
-            run_id: "run".into(),
-            thread_id: "thread".into(),
-            user_id: "user".into(),
-            workspace_id: "workspace".into(),
-            tool_name: "write_file".into(),
-            arguments_hash: "abc".into(),
-        }
-    }
-
     #[test]
     fn checkpoint_recovery_requires_gateway_restart_abort() {
         let store = TaskStore::open_in_memory().unwrap();
@@ -5069,26 +5239,6 @@ mod agent_control_state_tests {
             .unwrap();
         assert_eq!(reclaimed.len(), 1);
         assert_eq!(reclaimed[0].claimed_run_id.as_deref(), Some("run-2"));
-    }
-
-    #[test]
-    fn tool_receipt_never_reclaims_uncertain_started_action() {
-        let store = TaskStore::open_in_memory().unwrap();
-        assert!(matches!(
-            store.claim_tool_receipt(&receipt()).unwrap(),
-            ToolReceiptClaim::Execute
-        ));
-        assert!(matches!(
-            store.claim_tool_receipt(&receipt()).unwrap(),
-            ToolReceiptClaim::Uncertain(_)
-        ));
-        store
-            .complete_tool_receipt("turn", "write_file:abc", &json!({"ok": true}), &json!({}))
-            .unwrap();
-        assert!(matches!(
-            store.claim_tool_receipt(&receipt()).unwrap(),
-            ToolReceiptClaim::Replay(_)
-        ));
     }
 }
 
@@ -5773,7 +5923,7 @@ mod upgrade_tests {
         conn.execute_batch(&format!("VACUUM INTO '{}'", tmp.display()))
             .unwrap();
         let store = TaskStore::open(&tmp).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 13);
+        assert_eq!(store.schema_version().unwrap(), 14);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         for col in ["thread_id", "request_id", "source", "approval"] {

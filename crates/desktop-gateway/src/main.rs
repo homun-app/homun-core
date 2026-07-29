@@ -27592,28 +27592,64 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 Sha256::digest(serde_json::to_vec(&args).unwrap_or_default())
             );
             let idempotency_key = format!("{name}:{arguments_hash}");
-            let new_receipt = local_first_task_runtime::NewAgentToolReceipt {
-                turn_id: turn_id.to_string(),
-                idempotency_key: idempotency_key.clone(),
-                run_id: run_id.to_string(),
-                thread_id: thread_id.to_string(),
-                user_id: self.automation_user_id.as_str().to_string(),
-                workspace_id: self.automation_workspace_id.as_str().to_string(),
-                tool_name: name.to_string(),
-                arguments_hash,
-            };
-            let claim = self
+            let receipt_hash = format!(
+                "{:x}",
+                Sha256::digest(format!("{turn_id}:{idempotency_key}").as_bytes())
+            );
+            let receipt_ref = local_first_execution_protocol::EffectReceiptRef::from_store_id(
+                &receipt_hash[..32],
+            )
+            .map_err(|error| format!("effect receipt reference failed: {error}"))?;
+            let store = self
                 .state
                 .task_store
                 .lock()
-                .map_err(|_| "effect receipt store unavailable".to_string())?
-                .claim_tool_receipt(&new_receipt)
+                .map_err(|_| "effect receipt store unavailable".to_string())?;
+            let revision = store
+                .execution(turn_id)
+                .map_err(|error| format!("effect execution lookup failed: {error}"))?
+                .map(|record| record.contract.as_ref().revision)
+                .unwrap_or(1);
+            let effect_class = match tool_effect_class(name, self.composio_writes) {
+                semantic_decision::EffectClass::Read => {
+                    local_first_execution_protocol::EffectClass::Read
+                }
+                semantic_decision::EffectClass::RequestAuthorization => {
+                    local_first_execution_protocol::EffectClass::RequestAuthorization
+                }
+                semantic_decision::EffectClass::FilesystemWrite => {
+                    local_first_execution_protocol::EffectClass::FilesystemWrite
+                }
+                semantic_decision::EffectClass::ArtifactCreation => {
+                    local_first_execution_protocol::EffectClass::ArtifactCreation
+                }
+                semantic_decision::EffectClass::ExternalWrite => {
+                    local_first_execution_protocol::EffectClass::ExternalWrite
+                }
+            };
+            let new_receipt = local_first_task_runtime::NewExecutionEffectReceipt {
+                receipt_ref: receipt_ref.clone(),
+                execution_id: turn_id.to_string(),
+                revision,
+                idempotency_key: idempotency_key.clone(),
+                run_id: Some(run_id.to_string()),
+                thread_id: Some(thread_id.to_string()),
+                user_id: self.automation_user_id.as_str().to_string(),
+                workspace_id: self.automation_workspace_id.as_str().to_string(),
+                effect_class,
+                operation: name.to_string(),
+                arguments_hash,
+                compensation: None,
+            };
+            store
+                .prepare_effect_receipt(&new_receipt)
+                .map_err(|error| format!("effect receipt prepare failed: {error}"))?;
+            let claim = store
+                .claim_effect_receipt(&receipt_ref)
                 .map_err(|error| format!("effect receipt claim failed: {error}"))?;
             match claim {
-                local_first_task_runtime::ToolReceiptClaim::Execute => {
-                    Some((turn_id.to_string(), idempotency_key))
-                }
-                local_first_task_runtime::ToolReceiptClaim::Replay(receipt) => {
+                local_first_task_runtime::EffectReceiptClaim::Execute(_) => Some(receipt_ref),
+                local_first_task_runtime::EffectReceiptClaim::Replay(receipt) => {
                     let result = receipt
                         .result_json
                         .and_then(|value| value.as_str().map(str::to_string))
@@ -27624,10 +27660,13 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                         .unwrap_or_default();
                     return Ok(local_first_engine::ToolOutcome { result, effects });
                 }
-                local_first_task_runtime::ToolReceiptClaim::Uncertain(_) => {
+                local_first_task_runtime::EffectReceiptClaim::Resolve(receipt) => {
                     return Ok(local_first_engine::ToolOutcome {
                         result: "This effect may already have run before an interruption. It was not repeated; inspect the target state before retrying.".to_string(),
-                        effects: Default::default(),
+                        effects: local_first_engine::ToolEffects {
+                            suspend_effect_receipt: Some(receipt.receipt_ref),
+                            ..Default::default()
+                        },
                     });
                 }
             }
@@ -27671,7 +27710,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
         {
             let _ = store.clear_thread_routing_binding(thread_id);
         }
-        if let Some((turn_id, idempotency_key)) = receipt {
+        if let Some(receipt_ref) = receipt {
             let result_json =
                 agent_journal::redact_json_value(serde_json::Value::String(result.clone()));
             let effects_json = agent_journal::redact_json_value(
@@ -27681,7 +27720,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 .task_store
                 .lock()
                 .map_err(|_| "effect receipt completion store unavailable".to_string())?
-                .complete_tool_receipt(&turn_id, &idempotency_key, &result_json, &effects_json)
+                .complete_effect_receipt(&receipt_ref, &result_json, &effects_json)
                 .map_err(|error| format!("effect receipt completion failed: {error}"))?;
         }
         Ok(local_first_engine::ToolOutcome { result, effects })
@@ -30753,6 +30792,7 @@ async fn run_agent_rounds(
     if matches!(
         outcome.stop,
         local_first_engine::TurnStop::SuspendedModel { .. }
+            | local_first_engine::TurnStop::SuspendedEffect { .. }
     ) {
         return outcome;
     }

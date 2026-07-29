@@ -410,7 +410,7 @@ fn wake_projection_fields(wake: &WakeCondition) -> (Option<&'static str>, Option
         WakeCondition::ModelAvailable { role } => (Some("model_available"), Some(role)),
         WakeCondition::Resource { class } => (Some("resource"), Some(class)),
         WakeCondition::EffectResolution { receipt_ref } => {
-            (Some("effect_resolution"), Some(receipt_ref))
+            (Some("effect_resolution"), Some(receipt_ref.as_ref()))
         }
     }
 }

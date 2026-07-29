@@ -954,9 +954,10 @@ mod tests {
 mod recovery_tests {
     use super::*;
     use crate::{
-        AgentRunStatus, NewAgentRun, NewAgentToolReceipt, TaskRecord, TaskStatus, TaskStore,
-        ToolReceiptClaim, UserId, WorkspaceId,
+        AgentRunStatus, EffectReceiptClaim, NewAgentRun, NewExecutionEffectReceipt, TaskRecord,
+        TaskStatus, TaskStore, UserId, WorkspaceId,
     };
+    use local_first_execution_protocol::{EffectClass, EffectReceiptRef};
     use serde_json::json;
     use time::Duration;
 
@@ -1004,19 +1005,27 @@ mod recovery_tests {
             prompt_fingerprint: None,
         })
         .unwrap();
-        let receipt = NewAgentToolReceipt {
-            turn_id: "turn_stale".into(),
+        let receipt = NewExecutionEffectReceipt {
+            receipt_ref: EffectReceiptRef::from_store_id(
+                "22222222222222222222222222222222",
+            )
+            .unwrap(),
+            execution_id: "turn_stale".into(),
+            revision: 1,
             idempotency_key: "write_file:abc".into(),
-            run_id: "run-stale".into(),
-            thread_id: "t1".into(),
+            run_id: Some("run-stale".into()),
+            thread_id: Some("t1".into()),
             user_id: "u".into(),
             workspace_id: "w".into(),
-            tool_name: "write_file".into(),
+            effect_class: EffectClass::FilesystemWrite,
+            operation: "write_file".into(),
             arguments_hash: "abc".into(),
+            compensation: None,
         };
+        s.prepare_effect_receipt(&receipt).unwrap();
         assert!(matches!(
-            s.claim_tool_receipt(&receipt).unwrap(),
-            ToolReceiptClaim::Execute
+            s.claim_effect_receipt(&receipt.receipt_ref).unwrap(),
+            EffectReceiptClaim::Execute(_)
         ));
         // bump twice to simulate "we are generation 2, the lease is from generation 1"
         s.bump_process_generation().unwrap();
@@ -1048,8 +1057,8 @@ mod recovery_tests {
             TurnEventKind::Done | TurnEventKind::Error | TurnEventKind::Cancelled
         )));
         assert!(matches!(
-            s.claim_tool_receipt(&receipt).unwrap(),
-            ToolReceiptClaim::Uncertain(_)
+            s.claim_effect_receipt(&receipt.receipt_ref).unwrap(),
+            EffectReceiptClaim::Resolve(_)
         ));
         let runs = s.list_agent_runs_for_turn("turn_stale", "u", "w").unwrap();
         assert_eq!(runs[0].status, AgentRunStatus::Aborted);

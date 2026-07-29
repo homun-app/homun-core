@@ -259,6 +259,7 @@ where
 {
     let mut visible_answer_delivered = false;
     let mut awaiting_envelope: Option<HitlEnvelope> = None;
+    let mut effect_resolution_receipt = None;
     let mut choices_card_nudges: u32 = 0;
     let mut clarify_card_nudges: u32 = 0;
     let turn_started_at = Instant::now();
@@ -997,6 +998,7 @@ again to find the right control). Keep working on the task — do not stop and d
                     // moment it returns, ending the turn before the model can use the result (C2). A
                     // browse call IS progress at the manager level → reset the stall clock.
                     let browser_activity_observed = tool_effects.browser_activity_observed;
+                    let suspend_effect_receipt = tool_effects.suspend_effect_receipt.clone();
                     // ADR 0024 inc 5d.1b: apply the tool's loop-state effects immediately, before the
                     // loop reads any field they populate (plan, ls.accumulated, …) — net state as inline.
                     ls.apply_effects(&mut pending_confirm, round, tool_effects);
@@ -1098,6 +1100,11 @@ again to find the right control). Keep working on the task — do not stop and d
                         if let Some(dir) = trace_dir.as_deref() {
                             crate::trace::append(dir, &rec);
                         }
+                    }
+                    if let Some(receipt_ref) = suspend_effect_receipt {
+                        effect_resolution_receipt = Some(receipt_ref);
+                        loop_exit = Some("effect_resolution_required");
+                        break 'rounds;
                     }
                 }
             } // end ctx scope → borrows freed before the post-loop reads below
@@ -1605,7 +1612,7 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
-    if !final_done {
+    if !final_done && effect_resolution_receipt.is_none() {
         // Turn Contract: never forced-synthesize over a human wait.
         let awaiting_user = awaiting_envelope.is_some()
             || matches!(
@@ -1826,11 +1833,14 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
     if let Some(ref envelope) = awaiting_envelope {
         memory_answer = ensure_free_hitl_marker_in_text(&memory_answer, envelope);
     }
-    let stop = crate::outcome::classify_turn_stop(
-        visible_answer_delivered || visible_answer(&memory_answer).is_some(),
-        awaiting_envelope.as_ref(),
-        None,
-    );
+    let stop = match effect_resolution_receipt {
+        Some(receipt_ref) => crate::TurnStop::SuspendedEffect { receipt_ref },
+        None => crate::outcome::classify_turn_stop(
+            visible_answer_delivered || visible_answer(&memory_answer).is_some(),
+            awaiting_envelope.as_ref(),
+            None,
+        ),
+    };
     crate::TurnOutcome {
         stop,
         memory_answer,
@@ -2091,6 +2101,128 @@ mod tests {
             (String::new(), crate::contract::ToolOutcomeHint::Success)
         }
         async fn close_session(&mut self, _b: bool) {}
+    }
+
+    #[derive(Default)]
+    struct UncertainEffectModel {
+        calls: AtomicUsize,
+    }
+
+    impl ModelClient for UncertainEffectModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let call_index = self.calls.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(
+                call_index, 0,
+                "an uncertain effect must suspend before synthesis"
+            );
+            Ok(ModelRoundOutput {
+                message: json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "send_1",
+                        "type": "function",
+                        "function": { "name": "connector_send", "arguments": "{}" }
+                    }]
+                }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some("tool_calls".into()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    struct UncertainEffectTool;
+
+    impl CapabilityExecutor for UncertainEffectTool {
+        async fn execute_tool(
+            &self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            _state: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            Ok(ToolOutcome {
+                result: "effect outcome requires verification".into(),
+                effects: ToolEffects {
+                    suspend_effect_receipt: Some(
+                        local_first_execution_protocol::EffectReceiptRef::from_store_id(
+                            "11111111111111111111111111111111",
+                        )
+                        .unwrap(),
+                    ),
+                    ..ToolEffects::default()
+                },
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn uncertain_effect_suspends_without_model_synthesis_or_visible_completion() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "send" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = UncertainEffectModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+
+        let outcome = run_turn(
+            ls,
+            cfg(),
+            &usage_context(),
+            &model,
+            &UncertainEffectTool,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "send".into(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert!(matches!(
+            outcome.stop,
+            crate::TurnStop::SuspendedEffect { .. }
+        ));
+        assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            sink.0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| matches!(event, GenerateStreamEvent::Done { .. }))
+                .count(),
+            0
+        );
     }
 
     #[derive(Default)]
