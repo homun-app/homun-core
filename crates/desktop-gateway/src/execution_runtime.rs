@@ -1,9 +1,8 @@
+use crate::execution_adapter_context::ExecutionAdapterContext;
 use crate::task_registry::TaskExecutorRegistry;
 use crate::{
     AppState, LocalTaskExecutionError, PendingExecutorApproval, SurfaceKind,
     TaskExecutionPresentation, TaskRecord, TaskResultSurfacing, TaskStatus,
-    execute_capability_browser_task, execute_capability_generic, execute_local_read_only_task,
-    execute_proactive_prompt_task, execute_shell_read_only_task, execute_subagent_task,
 };
 use local_first_execution_protocol::{
     ApprovalPolicy, CancelReason, CheckpointDataRef, CheckpointEnvelope, DurableDataRef,
@@ -25,8 +24,7 @@ pub(crate) trait GatewayExecutionAdapter: Send + Sync {
 
     fn execute(
         &self,
-        state: &AppState,
-        contract: &ValidatedExecutionContract,
+        context: &ExecutionAdapterContext,
     ) -> Result<ExecutionOutcome, LocalTaskExecutionError>;
 }
 
@@ -67,8 +65,7 @@ impl ExecutionRuntime {
         registry.register("subagent.*", Arc::new(SubagentAdapter));
         registry.register("proactive_prompt", Arc::new(ProactivePromptAdapter));
         registry.register("chat_turn", Arc::new(ChatTurnAdapter));
-        registry.register("local_shell_task", Arc::new(LegacyShellAdapter));
-        registry.register("*", Arc::new(LegacyLocalAdapter));
+        registry.register("local_shell_task", Arc::new(ShellReadOnlyAdapter));
         registry
     }
 
@@ -149,24 +146,42 @@ impl ExecutionRuntime {
             }
         };
 
-        let adapter = self
-            .registry
-            .resolve(&contract.as_ref().kind)
-            .ok_or_else(|| {
-                runtime_error("no execution adapter is registered for this task kind")
-            })?;
-        let adapter_state = state.clone();
-        let adapter_contract = contract.clone();
-        let adapter_result =
-            tokio::task::spawn_blocking(move || adapter.execute(&adapter_state, &adapter_contract))
-                .await
-                .map_err(|error| runtime_error(format!("execution adapter join error: {error}")));
-        let adapter_outcome = match adapter_result {
-            Ok(Ok(outcome)) => outcome,
-            Ok(Err(error)) | Err(error) => ExecutionOutcome::Failed {
-                failure: ExecutionFailure::transient(
-                    "execution_adapter_failed",
-                    crate::redact_sensitive_text(&error.message),
+        let adapter_outcome = match self.registry.resolve(&contract.as_ref().kind) {
+            Some(adapter) => {
+                let adapter_state = state.clone();
+                let adapter_context = ExecutionAdapterContext::new(adapter_state, contract.clone());
+                if let Err(error) = adapter_context.authorize_declared_effects() {
+                    ExecutionOutcome::Failed {
+                        failure: ExecutionFailure::permanent(
+                            "execution_policy_denied",
+                            crate::redact_sensitive_text(&error.message),
+                        ),
+                    }
+                } else {
+                    let adapter_result =
+                        tokio::task::spawn_blocking(move || adapter.execute(&adapter_context))
+                            .await
+                            .map_err(|error| {
+                                runtime_error(format!("execution adapter join error: {error}"))
+                            });
+                    match adapter_result {
+                        Ok(Ok(outcome)) => outcome,
+                        Ok(Err(error)) | Err(error) => ExecutionOutcome::Failed {
+                            failure: ExecutionFailure::transient(
+                                "execution_adapter_failed",
+                                crate::redact_sensitive_text(&error.message),
+                            ),
+                        },
+                    }
+                }
+            }
+            None => ExecutionOutcome::Failed {
+                failure: ExecutionFailure::permanent(
+                    "unsupported_execution_kind",
+                    format!(
+                        "No execution adapter is registered for kind `{}`.",
+                        contract.as_ref().kind
+                    ),
                 ),
             },
         };
@@ -547,8 +562,21 @@ fn earliest_deadline(task: &TaskRecord) -> Option<i64> {
         .min()
 }
 
-fn execution_policy_for_task(task: &TaskRecord) -> ExecutionPolicy {
+pub(crate) fn execution_policy_for_task(task: &TaskRecord) -> ExecutionPolicy {
     let mut allowed_effects = vec![EffectClass::Read, EffectClass::RequestAuthorization];
+    if let Some(effects) = task
+        .permission_context
+        .get("allowed_effects")
+        .and_then(Value::as_array)
+    {
+        for effect in effects
+            .iter()
+            .filter_map(Value::as_str)
+            .filter_map(effect_class_from_str)
+        {
+            push_effect(&mut allowed_effects, effect);
+        }
+    }
     for (field, effect) in [
         ("allow_filesystem_write", EffectClass::FilesystemWrite),
         ("allow_artifact_creation", EffectClass::ArtifactCreation),
@@ -560,14 +588,47 @@ fn execution_policy_for_task(task: &TaskRecord) -> ExecutionPolicy {
             .and_then(Value::as_bool)
             .unwrap_or(false)
         {
-            allowed_effects.push(effect);
+            push_effect(&mut allowed_effects, effect);
         }
     }
-    let approval_policy = if task
+
+    let allowed_actions = task
+        .permission_context
+        .get("allowed_actions")
+        .and_then(Value::as_array);
+    let permits_approved_automation = allowed_actions.is_some_and(|actions| {
+        actions
+            .iter()
+            .filter_map(Value::as_str)
+            .any(|action| action == "approved_automation")
+    });
+    let permits_external_write = allowed_actions.is_some_and(|actions| {
+        actions
+            .iter()
+            .filter_map(Value::as_str)
+            .any(|action| matches!(action, "write_with_confirmation" | "approved_automation"))
+    });
+    if permits_external_write {
+        push_effect(&mut allowed_effects, EffectClass::ExternalWrite);
+    }
+
+    let explicitly_preauthorized = task
         .permission_context
         .get("preauthorized")
         .and_then(Value::as_bool)
-        .unwrap_or(false)
+        .unwrap_or(false);
+    let approval_required = task
+        .permission_context
+        .get("requires_user_approval")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let autonomy_level = task
+        .permission_context
+        .get("max_autonomy_level")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let approval_policy = if explicitly_preauthorized
+        || (permits_approved_automation && autonomy_level >= 4 && !approval_required)
     {
         ApprovalPolicy::Preauthorized
     } else {
@@ -576,6 +637,23 @@ fn execution_policy_for_task(task: &TaskRecord) -> ExecutionPolicy {
     ExecutionPolicy {
         allowed_effects,
         approval_policy,
+    }
+}
+
+fn effect_class_from_str(value: &str) -> Option<EffectClass> {
+    match value {
+        "read" => Some(EffectClass::Read),
+        "filesystem_write" => Some(EffectClass::FilesystemWrite),
+        "artifact_creation" => Some(EffectClass::ArtifactCreation),
+        "external_write" => Some(EffectClass::ExternalWrite),
+        "request_authorization" => Some(EffectClass::RequestAuthorization),
+        _ => None,
+    }
+}
+
+fn push_effect(allowed_effects: &mut Vec<EffectClass>, effect: EffectClass) {
+    if !allowed_effects.contains(&effect) {
+        allowed_effects.push(effect);
     }
 }
 
@@ -715,11 +793,9 @@ macro_rules! gateway_adapter {
 
             fn execute(
                 &self,
-                state: &AppState,
-                contract: &ValidatedExecutionContract,
+                context: &ExecutionAdapterContext,
             ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
-                let task = task_from_contract(contract)?;
-                ($execute)(state, &task, contract)
+                ($execute)(context)
             }
         }
     };
@@ -728,18 +804,22 @@ macro_rules! gateway_adapter {
 gateway_adapter!(
     CapabilityBrowserAdapter,
     "capability_browser",
-    |state, task, contract| { execute_capability_browser_task(state, task, contract) }
+    |context: &ExecutionAdapterContext| { context.execute_capability_browser() }
 );
-gateway_adapter!(CapabilityAdapter, "capability", |state, task, contract| {
-    execute_capability_generic(state, task, contract)
-});
-gateway_adapter!(SubagentAdapter, "subagent", |state, task, contract| {
-    execute_subagent_task(state, task, contract)
-});
+gateway_adapter!(
+    CapabilityAdapter,
+    "capability",
+    |context: &ExecutionAdapterContext| { context.execute_capability() }
+);
+gateway_adapter!(
+    SubagentAdapter,
+    "subagent",
+    |context: &ExecutionAdapterContext| { context.execute_subagent() }
+);
 gateway_adapter!(
     ProactivePromptAdapter,
     "proactive_prompt",
-    |state, task, contract| { execute_proactive_prompt_task(state, task, contract) }
+    |context: &ExecutionAdapterContext| { context.execute_proactive_prompt() }
 );
 struct ChatTurnAdapter;
 
@@ -750,34 +830,21 @@ impl GatewayExecutionAdapter for ChatTurnAdapter {
 
     fn execute(
         &self,
-        state: &AppState,
-        contract: &ValidatedExecutionContract,
+        context: &ExecutionAdapterContext,
     ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
-        let task = task_from_contract(contract)?;
-        let outcome = crate::turn_executor::execute_chat_turn_task(state, &task, contract)
-            .unwrap_or_else(|error| ExecutionOutcome::Failed {
-                failure: ExecutionFailure::permanent(
-                    "chat_execution_failed",
-                    crate::redact_sensitive_text(&error.message),
-                ),
-            });
-        Ok(outcome)
+        context.execute_chat_turn()
     }
 }
 gateway_adapter!(
-    LegacyShellAdapter,
-    "legacy_shell",
-    |state, task, _contract| { execute_shell_read_only_task(state, task) }
-);
-gateway_adapter!(
-    LegacyLocalAdapter,
-    "legacy_local",
-    |state, task, _contract| { execute_local_read_only_task(state, task) }
+    ShellReadOnlyAdapter,
+    "shell_read_only",
+    |context: &ExecutionAdapterContext| { context.execute_shell_read_only() }
 );
 
 #[cfg(test)]
 mod tests {
     use super::{ExecutionRuntime, GatewayExecutionAdapter};
+    use crate::execution_adapter_context::ExecutionAdapterContext;
     use crate::task_registry::TaskExecutorRegistry;
     use crate::{AppState, LocalTaskExecutionError, TaskRecord};
     use crate::{SurfaceKind, TaskExecutionPresentation, TaskResultSurfacing};
@@ -802,10 +869,9 @@ mod tests {
     impl GatewayExecutionAdapter for RevisionRecordingAdapter {
         fn execute(
             &self,
-            _state: &AppState,
-            contract: &ValidatedExecutionContract,
+            context: &ExecutionAdapterContext,
         ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
-            let contract = contract.as_ref();
+            let contract = context.contract().as_ref();
             self.revisions.lock().expect("revision adapter lock").push((
                 contract.execution_id.clone(),
                 contract.revision,
@@ -823,9 +889,10 @@ mod tests {
     impl GatewayExecutionAdapter for SuspendingCanonicalAdapter {
         fn execute(
             &self,
-            state: &AppState,
-            contract: &ValidatedExecutionContract,
+            context: &ExecutionAdapterContext,
         ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
+            let state = context.test_state();
+            let contract = context.contract();
             let task = super::task_from_contract(contract)?;
             super::suspend_task_execution(
                 state,
@@ -858,9 +925,10 @@ mod tests {
     impl GatewayExecutionAdapter for LeaseStealingAdapter {
         fn execute(
             &self,
-            state: &AppState,
-            contract: &ValidatedExecutionContract,
+            context: &ExecutionAdapterContext,
         ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
+            let state = context.test_state();
+            let contract = context.contract();
             let mut task = super::task_from_contract(contract).expect("task from contract");
             task.lease_owner = Some("replacement-worker".to_string());
             state
@@ -884,8 +952,7 @@ mod tests {
     impl GatewayExecutionAdapter for BlockingClientAdapter {
         fn execute(
             &self,
-            _state: &AppState,
-            _contract: &ValidatedExecutionContract,
+            _context: &ExecutionAdapterContext,
         ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
             drop(reqwest::blocking::Client::new());
             Ok(ExecutionOutcome::completed(
@@ -897,8 +964,7 @@ mod tests {
     impl GatewayExecutionAdapter for FailingAdapter {
         fn execute(
             &self,
-            _state: &AppState,
-            _contract: &ValidatedExecutionContract,
+            _context: &ExecutionAdapterContext,
         ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
             Err(LocalTaskExecutionError {
                 message: "provider temporarily unavailable".to_string(),
@@ -909,8 +975,7 @@ mod tests {
     impl GatewayExecutionAdapter for TransientCanonicalAdapter {
         fn execute(
             &self,
-            _state: &AppState,
-            _contract: &ValidatedExecutionContract,
+            _context: &ExecutionAdapterContext,
         ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
             Ok(ExecutionOutcome::Failed {
                 failure: local_first_execution_protocol::ExecutionFailure::transient(
@@ -924,9 +989,9 @@ mod tests {
     impl GatewayExecutionAdapter for RecordingAdapter {
         fn execute(
             &self,
-            _state: &AppState,
-            contract: &ValidatedExecutionContract,
+            context: &ExecutionAdapterContext,
         ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
+            let contract = context.contract();
             self.execution_ids
                 .lock()
                 .expect("recording adapter lock")
@@ -978,6 +1043,95 @@ mod tests {
             .expect("insert acquired task");
     }
 
+    fn acquired_task_with_permissions(
+        kind: &str,
+        permission_context: serde_json::Value,
+    ) -> TaskRecord {
+        let mut task = TaskRecord::new(
+            format!("policy-{kind}"),
+            UserId::new("user-1"),
+            WorkspaceId::new("workspace-1"),
+            kind,
+            "policy test",
+            serde_json::json!({}),
+        );
+        task.status = TaskStatus::Running;
+        task.lease_owner = Some("test-worker".to_string());
+        task.last_heartbeat_at = Some(OffsetDateTime::now_utc());
+        task.permission_context = permission_context;
+        task
+    }
+
+    #[test]
+    fn capability_allowed_actions_flow_into_the_execution_policy() {
+        let task = acquired_task_with_permissions(
+            "capability.connector.send",
+            serde_json::json!({
+                "allowed_actions": ["read", "write_with_confirmation"],
+                "max_autonomy_level": 3,
+            }),
+        );
+
+        let contract = super::contract_for_acquired_task(&task).expect("execution contract");
+
+        assert!(
+            contract
+                .as_ref()
+                .policy
+                .allowed_effects
+                .contains(&local_first_execution_protocol::EffectClass::ExternalWrite)
+        );
+        assert_eq!(
+            contract.as_ref().policy.approval_policy,
+            local_first_execution_protocol::ApprovalPolicy::OnRequest
+        );
+    }
+
+    #[test]
+    fn approved_automation_flows_into_a_preauthorized_execution_policy() {
+        let task = acquired_task_with_permissions(
+            "subagent.AutomationAgent",
+            serde_json::json!({
+                "allowed_actions": ["read", "approved_automation"],
+                "max_autonomy_level": 4,
+                "requires_user_approval": false,
+            }),
+        );
+
+        let contract = super::contract_for_acquired_task(&task).expect("execution contract");
+
+        assert!(
+            contract
+                .as_ref()
+                .policy
+                .allowed_effects
+                .contains(&local_first_execution_protocol::EffectClass::ExternalWrite)
+        );
+        assert_eq!(
+            contract.as_ref().policy.approval_policy,
+            local_first_execution_protocol::ApprovalPolicy::Preauthorized
+        );
+    }
+
+    #[test]
+    fn approved_automation_without_required_autonomy_stays_on_request() {
+        let task = acquired_task_with_permissions(
+            "subagent.AutomationAgent",
+            serde_json::json!({
+                "allowed_actions": ["approved_automation"],
+                "max_autonomy_level": 3,
+                "requires_user_approval": false,
+            }),
+        );
+
+        let contract = super::contract_for_acquired_task(&task).expect("execution contract");
+
+        assert_eq!(
+            contract.as_ref().policy.approval_policy,
+            local_first_execution_protocol::ApprovalPolicy::OnRequest
+        );
+    }
+
     #[tokio::test]
     async fn all_kinds_use_the_same_execute_entry_point_and_preserve_execution_id() {
         let calls = Arc::new(Mutex::new(Vec::new()));
@@ -1014,7 +1168,7 @@ mod tests {
     #[tokio::test]
     async fn blocking_adapter_isolated_from_the_async_runtime_context() {
         let mut registry = TaskExecutorRegistry::new();
-        registry.register("*", Arc::new(BlockingClientAdapter));
+        registry.register("capability.*", Arc::new(BlockingClientAdapter));
         let runtime = ExecutionRuntime::new(registry);
         let state = AppState::for_tests();
         let contract = contract("capability.test", "blocking-adapter-1");
@@ -1029,11 +1183,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unsupported_kind_commits_a_typed_permanent_failure() {
+        let runtime = ExecutionRuntime::new(TaskExecutorRegistry::new());
+        let state = AppState::for_tests();
+        let contract = contract("unknown.task", "unsupported-kind-1");
+        insert_contract_task(&state, &contract);
+
+        let result = runtime
+            .execute(&state, contract)
+            .await
+            .expect("unsupported execution kind becomes a canonical outcome");
+
+        assert_eq!(result.projection().task_status, TaskStatus::Failed);
+        assert!(matches!(
+            result.outcome(),
+            ExecutionOutcome::Failed { failure }
+                if failure.code == "unsupported_execution_kind"
+                    && failure.class == local_first_execution_protocol::FailureClass::Permanent
+        ));
+        let stored = state
+            .task_store
+            .lock()
+            .expect("task store")
+            .execution("unsupported-kind-1")
+            .expect("load execution")
+            .expect("execution exists");
+        assert!(stored.outcome.is_some());
+    }
+
+    #[tokio::test]
+    async fn contract_policy_denies_declared_effects_before_adapter_dispatch() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut registry = TaskExecutorRegistry::new();
+        registry.register(
+            "capability.*",
+            Arc::new(RecordingAdapter {
+                execution_ids: calls.clone(),
+            }),
+        );
+        let runtime = ExecutionRuntime::new(registry);
+        let state = AppState::for_tests();
+        let task = acquired_task_with_permissions(
+            "capability.connector.send",
+            serde_json::json!({
+                "allowed_actions": ["write_with_confirmation"],
+                "max_autonomy_level": 3,
+            }),
+        );
+        let mut raw_contract = ExecutionContract::new(
+            task.task_id.as_str(),
+            task.kind.clone(),
+            ExecutionScope {
+                user_id: task.user_id.as_str().to_string(),
+                workspace_id: task.workspace_id.as_str().to_string(),
+                thread_id: None,
+            },
+            serde_json::to_value(&task).expect("serialize task"),
+        );
+        raw_contract.fencing_token = super::acquired_task_fencing_token(&task).expect("task fence");
+        let contract =
+            ValidatedExecutionContract::try_from(raw_contract).expect("read-only contract");
+        insert_contract_task(&state, &contract);
+
+        let result = runtime
+            .execute(&state, contract)
+            .await
+            .expect("policy denial becomes a canonical outcome");
+
+        assert!(calls.lock().expect("calls").is_empty());
+        assert!(matches!(
+            result.outcome(),
+            ExecutionOutcome::Failed { failure }
+                if failure.code == "execution_policy_denied"
+                    && failure.class == local_first_execution_protocol::FailureClass::Permanent
+        ));
+    }
+
+    #[tokio::test]
     async fn committed_outcome_is_recovered_without_rerunning_adapter() {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let mut registry = TaskExecutorRegistry::new();
         registry.register(
-            "*",
+            "capability.*",
             Arc::new(RecordingAdapter {
                 execution_ids: calls.clone(),
             }),
@@ -1068,7 +1299,7 @@ mod tests {
         let revisions = Arc::new(Mutex::new(Vec::new()));
         let mut registry = TaskExecutorRegistry::new();
         registry.register(
-            "*",
+            "capability.*",
             Arc::new(RevisionRecordingAdapter {
                 revisions: revisions.clone(),
             }),
@@ -1139,7 +1370,7 @@ mod tests {
     #[tokio::test]
     async fn suspended_outcome_references_the_persisted_task_checkpoint() {
         let mut registry = TaskExecutorRegistry::new();
-        registry.register("*", Arc::new(SuspendingCanonicalAdapter));
+        registry.register("capability.*", Arc::new(SuspendingCanonicalAdapter));
         let runtime = ExecutionRuntime::new(registry);
         let state = AppState::for_tests();
         let contract = contract("capability.test", "checkpoint-1");
@@ -1194,7 +1425,7 @@ mod tests {
     #[tokio::test]
     async fn stolen_lease_cannot_commit_the_adapter_outcome() {
         let mut registry = TaskExecutorRegistry::new();
-        registry.register("*", Arc::new(LeaseStealingAdapter));
+        registry.register("capability.*", Arc::new(LeaseStealingAdapter));
         let runtime = ExecutionRuntime::new(registry);
         let state = AppState::for_tests();
         let contract = contract("capability.test", "stolen-lease-1");
@@ -1223,7 +1454,7 @@ mod tests {
     #[tokio::test]
     async fn adapter_error_is_committed_as_budgeted_suspension_with_checkpoint() {
         let mut registry = TaskExecutorRegistry::new();
-        registry.register("*", Arc::new(FailingAdapter));
+        registry.register("capability.*", Arc::new(FailingAdapter));
         let runtime = ExecutionRuntime::new(registry);
         let state = AppState::for_tests();
         let initial = contract("capability.test", "adapter-retry-1");
@@ -1273,7 +1504,7 @@ mod tests {
     #[tokio::test]
     async fn exhausted_adapter_error_is_committed_as_failed() {
         let mut registry = TaskExecutorRegistry::new();
-        registry.register("*", Arc::new(FailingAdapter));
+        registry.register("capability.*", Arc::new(FailingAdapter));
         let runtime = ExecutionRuntime::new(registry);
         let state = AppState::for_tests();
         let contract = contract("capability.test", "adapter-failed-1");
@@ -1301,7 +1532,7 @@ mod tests {
     #[tokio::test]
     async fn canonical_transient_failure_uses_the_runtime_retry_budget() {
         let mut registry = TaskExecutorRegistry::new();
-        registry.register("*", Arc::new(TransientCanonicalAdapter));
+        registry.register("capability.*", Arc::new(TransientCanonicalAdapter));
         let runtime = ExecutionRuntime::new(registry);
         let state = AppState::for_tests();
         let initial = contract("capability.test", "canonical-transient-1");

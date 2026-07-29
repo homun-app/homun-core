@@ -7,7 +7,7 @@
 > Recovery browser: [design](superpowers/specs/2026-07-28-browser-checkpoint-recovery-design.md)
 > e [checklist operativa/verifiche](superpowers/plans/2026-07-28-browser-checkpoint-recovery.md).
 
-**Ultimo aggiornamento: 2026-07-29 (journal, wake, receipt e resume canonici).**
+**Ultimo aggiornamento: 2026-07-29 (journal, wake, receipt, resume e dispatch canonici).**
 
 ---
 
@@ -88,7 +88,9 @@ resta leggibile soltanto nel bridge di recovery dei record steering precedenti.
    input e lo accoda al broker; prompt e placeholder visibile sono persistiti insieme.
 2. Il worker acquisisce task, risorse e lease; il runtime crea o carica il contratto
    autorevole e confronta il fencing token.
-3. L'adapter del `kind` esegue il proprio dominio senza scrivere stati lifecycle.
+3. Il registry risolve soltanto kind esatti o prefissi registrati. Il runtime consegna
+   all'adapter un `ExecutionAdapterContext`, mai `AppState`; il context entra nel
+   dominio registrato senza esporre store o client generici all'adapter.
 4. Ogni effetto non-read viene autorizzato e registrato prima del dispatch; replay,
    esito incerto e compensazione usano la receipt, non il testo del modello.
 5. Il runtime valida e committa esattamente un outcome per la revisione.
@@ -139,6 +141,13 @@ falliscono chiusi su `read + request_authorization`.
 | `external_write` | connector write, messaggi, automazioni, computer/browser action | approval/perimeter/browser safety; pagamento one-use invariato |
 
 Esposizione iniziale, discovery dinamica e dispatch consultano la stessa policy.
+Per capability e subagent il runtime normalizza il formato prodotto
+`allowed_actions` nella `ExecutionPolicy` canonica; il vecchio formato a flag resta
+solo compatibilità. Prima del dispatch `ExecutionAdapterContext` verifica che tutti
+gli effetti dichiarati dal task siano contenuti nel contratto autorevole. Una
+violazione termina come `Failed(permanent, execution_policy_denied)` senza invocare
+l'adapter. `approved_automation` richiede autonomia almeno 4 e nessuna approval
+esplicita per diventare `Preauthorized`.
 Selezionare un'opzione o digitare in un form esterno è `external_write` anche senza
 submit; vietare conferma/acquisto/pagamento non trasforma le azioni preparatorie in read.
 `read` e `request_authorization` restano sempre disponibili perché non mutano stato.
@@ -230,6 +239,10 @@ conversazione e non il lavoro in corso.
 8. Nessun path può costruire un `ValidatedSemanticDecision` di resume senza validator.
 9. Nessun tool viene esposto o eseguito fuori dalle classi effetto del contratto.
 10. Solo il projector del journal può completare/cancellare task, run, messaggio e obiettivo, con revisione attesa.
+11. Vietati adapter wildcard: un kind sconosciuto produce e committa
+    `Failed(permanent, unsupported_execution_kind)`, senza fallback locale.
+12. Il task non può ampliare gli effetti del contratto: il context nega prima del
+    dispatch ogni classe dichiarata ma assente dalla policy autorevole.
 
 ## Mapping oggi → contratto
 

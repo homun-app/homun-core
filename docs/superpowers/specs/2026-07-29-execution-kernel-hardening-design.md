@@ -16,7 +16,7 @@ This increment changes only the adapter boundary and registry resolution. It doe
 
 1. Every production execution kind maps to an explicit exact or prefix registration.
 2. Unknown execution kinds fail before adapter code runs.
-3. Legacy local read-only execution remains available only through its explicit `local_task` registration.
+3. The obsolete legacy local adapter and its arithmetic fallback are removed because no production producer emits that task kind.
 4. `GatewayExecutionAdapter` receives an `ExecutionAdapterContext`, not `AppState`.
 5. The context exposes capability-specific dispatch methods and keeps the underlying `AppState` private outside its module.
 6. Existing domain gates remain authoritative and may be stricter than the execution contract.
@@ -34,9 +34,11 @@ A new sibling module owns `ExecutionAdapterContext`. Its private state reference
 
 The adapter trait can select one of these host operations but cannot read stores or network clients directly. Later receipt and outbox work can therefore be added in this one module without changing the stable adapter trait again.
 
+There is no generic local fallback. The existing read-only shell operation remains an explicit `local_shell_task` registration.
+
 ## Error handling
 
-Unknown kinds fail with `unsupported_execution_kind` before dispatch. Invalid wildcard registration fails immediately during registry construction and tests. Existing adapter failures retain their current redacted transient outcome behavior.
+Unknown kinds commit a permanent canonical failure with code `unsupported_execution_kind` before any adapter dispatch. Invalid wildcard registration fails immediately during registry construction and tests. Existing adapter failures retain their current redacted transient outcome behavior.
 
 ## Verification
 
@@ -48,3 +50,12 @@ Unknown kinds fail with `unsupported_execution_kind` before dispatch. Invalid wi
 ## Follow-up boundary
 
 This increment creates the enforcement point. The next increments move effect authorization and receipt dispatch into the context, add journal-owned attempts, and separate local projection from external delivery.
+
+## Implementation result
+
+- Production registry resolution is explicit and wildcard registration is forbidden.
+- Unknown kinds terminalize through the journal as permanent typed failures.
+- `GatewayExecutionAdapter` receives only `ExecutionAdapterContext`.
+- Capability/subagent `allowed_actions` are normalized into canonical effect classes, and the context rejects task-declared effects absent from the authoritative contract.
+- `approved_automation` becomes preauthorized only at autonomy level 4 with no required approval.
+- The legacy local adapter, arithmetic fallback, and their tests were removed as dead code.

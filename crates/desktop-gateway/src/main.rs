@@ -18,6 +18,7 @@ mod db_migrate;
 // doc.json. Wired into make_document's templated path (F2-T8,
 // make_templated_document).
 mod document_content;
+mod execution_adapter_context;
 mod execution_projection;
 mod execution_runtime;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
@@ -49813,46 +49814,6 @@ fn redact_json_for_task_output(output: &Value) -> Value {
     }
 }
 
-fn execute_local_read_only_task(
-    state: &AppState,
-    task: &TaskRecord,
-) -> Result<local_first_execution_protocol::ExecutionOutcome, LocalTaskExecutionError> {
-    if let Some(answer) = evaluate_simple_arithmetic(&task.goal) {
-        return execution_runtime::complete_task_execution(
-            state,
-            task,
-            TaskExecutionPresentation {
-                pending_approval: None,
-                summary: format!("Calculation completed: {answer}"),
-                checkpoint_payload: serde_json::json!({ "kind": "calculation", "answer": answer }),
-                checkpoint_redacted: serde_json::json!({ "kind": "calculation", "answer": answer }),
-                chat_message: format!("The result is **{answer}**."),
-                result_surfacing: TaskResultSurfacing::AppendToChat,
-                surface: SurfaceKind::Logs,
-                event_kind: "computer_calculation_completed".to_string(),
-                event_title: "Local calculation completed".to_string(),
-                event_subtitle: "Result calculated without external tools.".to_string(),
-                event_payload: serde_json::json!({ "answer": answer }),
-                artifacts: vec![],
-            },
-        );
-    }
-    execution_runtime::complete_task_execution(state, task, TaskExecutionPresentation {
-        pending_approval: None,
-        summary: "Local task read and completed without external actions.".to_string(),
-        checkpoint_payload: serde_json::json!({ "kind": "local_read_only", "goal": task.goal }),
-        checkpoint_redacted: serde_json::json!({ "kind": "local_read_only", "goal": task.goal }),
-        chat_message: "I logged the local task. No external actions were needed for this first read-only pass.".to_string(),
-        result_surfacing: TaskResultSurfacing::AppendToChat,
-        surface: SurfaceKind::Logs,
-        event_kind: "computer_local_task_completed".to_string(),
-        event_title: "Local task completed".to_string(),
-        event_subtitle: "No external action needed.".to_string(),
-        event_payload: serde_json::json!({ "goal": task.goal }),
-        artifacts: vec![],
-    })
-}
-
 fn execute_shell_read_only_task(
     state: &AppState,
     task: &TaskRecord,
@@ -59569,58 +59530,6 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
     truncated
 }
 
-fn evaluate_simple_arithmetic(text: &str) -> Option<String> {
-    let expression = text
-        .chars()
-        .filter(|char| {
-            char.is_ascii_digit() || matches!(char, '+' | '-' | '*' | '/' | 'x' | 'X' | ' ' | '.')
-        })
-        .collect::<String>()
-        .replace(['x', 'X'], "*");
-    let compact = expression.split_whitespace().collect::<String>();
-    if compact.is_empty()
-        || !compact
-            .chars()
-            .any(|char| matches!(char, '+' | '-' | '*' | '/'))
-    {
-        return None;
-    }
-    let (left, operator, right) = split_binary_expression(&compact)?;
-    let left = left.parse::<f64>().ok()?;
-    let right = right.parse::<f64>().ok()?;
-    let value = match operator {
-        '+' => left + right,
-        '-' => left - right,
-        '*' => left * right,
-        '/' if right != 0.0 => left / right,
-        '/' => return None,
-        _ => return None,
-    };
-    if value.fract() == 0.0 {
-        Some(format!("{}", value as i64))
-    } else {
-        Some(
-            format!("{value:.4}")
-                .trim_end_matches('0')
-                .trim_end_matches('.')
-                .to_string(),
-        )
-    }
-}
-
-fn split_binary_expression(expression: &str) -> Option<(&str, char, &str)> {
-    for operator in ['*', '/', '+', '-'] {
-        if let Some(index) = expression[1..].find(operator).map(|index| index + 1) {
-            let left = &expression[..index];
-            let right = &expression[index + 1..];
-            if !left.is_empty() && !right.is_empty() {
-                return Some((left, operator, right));
-            }
-        }
-    }
-    None
-}
-
 fn task_goal_summary(goal: &str) -> String {
     let redacted = redact_sensitive_text(goal)
         .split_whitespace()
@@ -62823,10 +62732,10 @@ mod tests {
         classify_connector_error, clawhub_origin, collect_member_counts, composio_tool_is_read,
         connector_error_hint, default_browser_headless_value, delegated_browse_tool_outcome,
         delete_workspace, earlier_browse_call_in_current_round, enforce_monotonic_plan_progress,
-        evaluate_simple_arithmetic, extract_source_urls, fonti_section, format_memory_block,
-        gateway_memory_user_id, humanize_task_kind, hybrid_memory_score, inbound_action,
-        is_auto_confirmable, is_internal_task_kind, is_low_value_source_url, is_semantic_duplicate,
-        jail_in_root, legacy_dir_action, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
+        extract_source_urls, fonti_section, format_memory_block, gateway_memory_user_id,
+        humanize_task_kind, hybrid_memory_score, inbound_action, is_auto_confirmable,
+        is_internal_task_kind, is_low_value_source_url, is_semantic_duplicate, jail_in_root,
+        legacy_dir_action, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
         mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days,
         memory_bench_ingest, memory_bench_search, memory_bench_status, memory_facade,
         memory_source_candidates_from_records, memory_source_facade_error,
@@ -81704,16 +81613,6 @@ data: [DONE]\n";
         assert!(summary.contains("token=[REDACTED]"));
         assert!(!summary.contains("super-secret"));
         assert!(summary.chars().count() <= 44);
-    }
-
-    #[test]
-    fn local_executor_understands_simple_arithmetic() {
-        assert_eq!(
-            evaluate_simple_arithmetic("quanto fa 6*3?"),
-            Some("18".to_string())
-        );
-        assert_eq!(evaluate_simple_arithmetic("12 / 4"), Some("3".to_string()));
-        assert_eq!(evaluate_simple_arithmetic("ciao"), None);
     }
 
     #[test]

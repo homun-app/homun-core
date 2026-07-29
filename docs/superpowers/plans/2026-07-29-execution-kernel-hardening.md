@@ -16,10 +16,11 @@
 - Modify: `crates/desktop-gateway/src/task_registry.rs`
 - Modify: `crates/desktop-gateway/src/execution_runtime.rs`
 
-- [ ] Add a registry test proving `unknown` resolves to `None` and wildcard registration is rejected.
-- [ ] Run `cargo test -p local-first-desktop-gateway task_registry::tests -- --nocapture` and verify it fails against the catch-all behavior.
-- [ ] Change `register` to reject `*`, remove the production wildcard, and explicitly register `local_task`.
-- [ ] Re-run the focused registry test and verify it passes.
+- [x] Add a registry test proving `unknown` resolves to `None` and wildcard registration is rejected.
+- [x] Run `cargo test -p local-first-desktop-gateway task_registry::tests -- --nocapture` and verify it fails against the catch-all behavior.
+- [x] Change `register` to reject `*`, remove the production wildcard and the dead local fallback, and retain only explicit production kinds.
+- [x] Re-run the focused registry test and verify it passes.
+- [x] Add a runtime test proving an unsupported kind commits `Failed(permanent, unsupported_execution_kind)` and implement the canonical failure path.
 
 ### Task 2: Restricted adapter context
 
@@ -30,11 +31,14 @@
 - Modify: `crates/desktop-gateway/src/task_registry.rs`
 - Modify: `crates/desktop-gateway/tests/execution_ownership_inventory.rs`
 
-- [ ] Add an ownership test proving the production `GatewayExecutionAdapter` trait does not contain `AppState`.
-- [ ] Run `cargo test -p local-first-desktop-gateway --test execution_ownership_inventory -- --nocapture` and verify it fails.
-- [ ] Add `ExecutionAdapterContext` with private state and capability-specific methods, then pass it to adapters from `spawn_blocking`.
-- [ ] Update all production and test adapters to use the restricted context.
-- [ ] Re-run runtime and ownership tests and verify they pass.
+- [x] Add an ownership test proving the production `GatewayExecutionAdapter` trait does not contain `AppState`.
+- [x] Run `cargo test -p local-first-desktop-gateway --test execution_ownership_inventory -- --nocapture` and verify it fails.
+- [x] Add `ExecutionAdapterContext` with private state and capability-specific methods, then pass it to adapters from `spawn_blocking`.
+- [x] Update all production and test adapters to use the restricted context.
+- [x] Re-run runtime and ownership tests and verify they pass.
+- [x] Add failing tests for the real capability/subagent `allowed_actions` format and normalize it into `ExecutionPolicy`.
+- [x] Add a failing test proving a task cannot widen authoritative contract effects, then deny before adapter dispatch.
+- [x] Require autonomy level 4 and no requested approval before projecting `approved_automation` as preauthorized.
 
 ### Task 3: Regression and documentation
 
@@ -43,7 +47,7 @@
 - Modify: `docs/superpowers/specs/2026-07-29-execution-kernel-hardening-design.md`
 - Modify: `docs/superpowers/plans/2026-07-29-execution-kernel-hardening.md`
 
-- [ ] Document explicit adapter registration and the restricted dispatch boundary.
+- [x] Document explicit adapter registration and the restricted dispatch boundary.
 - [ ] Run scoped `rustfmt --check` on changed Rust files.
 - [ ] Run `cargo test -p local-first-desktop-gateway execution_runtime -- --nocapture`.
 - [ ] Run `cargo test -p local-first-desktop-gateway --test execution_ownership_inventory -- --nocapture`.

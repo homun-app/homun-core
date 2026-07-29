@@ -74,6 +74,25 @@ fn every_gateway_adapter_returns_only_the_canonical_outcome() {
 }
 
 #[test]
+fn gateway_adapter_trait_does_not_receive_unrestricted_app_state() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let runtime = production_source(&root.join("src/execution_runtime.rs"));
+    let adapter_trait = runtime
+        .split("pub(crate) trait GatewayExecutionAdapter")
+        .nth(1)
+        .expect("gateway adapter trait")
+        .split("pub(crate) struct ExecutionRuntimeResult")
+        .next()
+        .expect("gateway adapter trait end");
+
+    assert!(adapter_trait.contains("ExecutionAdapterContext"));
+    assert!(
+        !adapter_trait.contains("AppState"),
+        "adapters must dispatch through the restricted execution context"
+    );
+}
+
+#[test]
 fn channel_and_stream_markers_do_not_own_lifecycle() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

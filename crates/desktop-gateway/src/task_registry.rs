@@ -22,10 +22,13 @@ impl TaskExecutorRegistry {
         pattern: impl Into<String>,
         adapter: Arc<dyn GatewayExecutionAdapter>,
     ) {
-        self.registrations.push(TaskExecutorRegistration {
-            pattern: pattern.into(),
-            adapter,
-        });
+        let pattern = pattern.into();
+        assert!(
+            pattern != "*",
+            "catch-all execution adapters are forbidden; register an exact or prefix kind"
+        );
+        self.registrations
+            .push(TaskExecutorRegistration { pattern, adapter });
     }
 
     pub(crate) fn resolve(&self, task_kind: &str) -> Option<Arc<dyn GatewayExecutionAdapter>> {
@@ -37,9 +40,6 @@ impl TaskExecutorRegistry {
 }
 
 fn pattern_matches(pattern: &str, task_kind: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
     if let Some(prefix) = pattern.strip_suffix('*') {
         return task_kind.starts_with(prefix);
     }
@@ -49,9 +49,10 @@ fn pattern_matches(pattern: &str, task_kind: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::TaskExecutorRegistry;
+    use crate::LocalTaskExecutionError;
+    use crate::execution_adapter_context::ExecutionAdapterContext;
     use crate::execution_runtime::GatewayExecutionAdapter;
-    use crate::{AppState, LocalTaskExecutionError};
-    use local_first_execution_protocol::{ExecutionOutcome, ValidatedExecutionContract};
+    use local_first_execution_protocol::ExecutionOutcome;
     use std::sync::Arc;
 
     struct NamedAdapter(&'static str);
@@ -63,15 +64,14 @@ mod tests {
 
         fn execute(
             &self,
-            _state: &AppState,
-            _contract: &ValidatedExecutionContract,
+            _context: &ExecutionAdapterContext,
         ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
             Ok(ExecutionOutcome::completed(serde_json::Value::Null))
         }
     }
 
     #[test]
-    fn registry_resolves_specific_patterns_before_fallbacks() {
+    fn registry_resolves_only_explicit_patterns() {
         let mut registry = TaskExecutorRegistry::new();
         registry.register("capability.browser.*", Arc::new(NamedAdapter("browser")));
         registry.register("capability.*", Arc::new(NamedAdapter("capability")));
@@ -79,21 +79,29 @@ mod tests {
         registry.register("proactive_prompt", Arc::new(NamedAdapter("proactive")));
         registry.register("chat_turn", Arc::new(NamedAdapter("chat")));
         registry.register("local_shell_task", Arc::new(NamedAdapter("shell")));
-        registry.register("*", Arc::new(NamedAdapter("local")));
-
         for (kind, expected) in [
             ("capability.browser.browser.snapshot", "browser"),
             ("capability.github.github.search", "capability"),
             ("subagent.MemoryAgent", "subagent"),
             ("proactive_prompt", "proactive"),
             ("chat_turn", "chat"),
-            ("browser_task", "local"),
-            ("unknown", "local"),
         ] {
             assert_eq!(
                 registry.resolve(kind).expect("registered adapter").name(),
                 expected
             );
         }
+        assert!(registry.resolve("browser_task").is_none());
+        assert!(registry.resolve("unknown").is_none());
+    }
+
+    #[test]
+    fn registry_rejects_catch_all_registration() {
+        let mut registry = TaskExecutorRegistry::new();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            registry.register("*", Arc::new(NamedAdapter("fallback")));
+        }));
+
+        assert!(result.is_err(), "catch-all adapters must fail closed");
     }
 }
