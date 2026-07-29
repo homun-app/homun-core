@@ -2,6 +2,8 @@ use crate::LoopState;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+
+pub const LOOP_CHECKPOINT_SCHEMA_VERSION: u32 = 1;
 use std::collections::BTreeSet;
 
 /// Serializable state captured only at safe round boundaries. Provider credentials,
@@ -36,7 +38,7 @@ pub struct LoopCheckpoint {
 impl LoopCheckpoint {
     pub fn from_state(round: usize, state: &LoopState) -> Self {
         Self {
-            schema_version: 1,
+            schema_version: LOOP_CHECKPOINT_SCHEMA_VERSION,
             round,
             messages: state
                 .messages
@@ -88,6 +90,17 @@ impl LoopCheckpoint {
         state.pending_browser_image = None;
     }
 
+    pub fn validate_schema(&self) -> Result<(), String> {
+        if self.schema_version == LOOP_CHECKPOINT_SCHEMA_VERSION {
+            Ok(())
+        } else {
+            Err(format!(
+                "unsupported loop checkpoint schema version {} (expected {})",
+                self.schema_version, LOOP_CHECKPOINT_SCHEMA_VERSION
+            ))
+        }
+    }
+
     pub fn fingerprint(&self) -> String {
         let bytes = serde_json::to_vec(self).unwrap_or_default();
         format!("{:x}", Sha256::digest(bytes))
@@ -128,5 +141,13 @@ mod tests {
         assert!(!encoded.contains("SECRET"));
         assert_eq!(checkpoint.round, 3);
         assert_eq!(checkpoint.fingerprint(), checkpoint.fingerprint());
+    }
+
+    #[test]
+    fn checkpoint_rejects_an_unknown_schema_version() {
+        let mut checkpoint = LoopCheckpoint::from_state(1, &LoopState::new());
+        checkpoint.schema_version = LOOP_CHECKPOINT_SCHEMA_VERSION + 1;
+
+        assert!(checkpoint.validate_schema().is_err());
     }
 }

@@ -83,6 +83,11 @@ pub struct ChatGenerateStreamRequest {
     /// Redacted, checksum-validated safe-round state from an aborted broker attempt.
     #[serde(default)]
     pub agent_checkpoint: Option<serde_json::Value>,
+    /// The new durable wake stimulus for a successor execution revision. It is
+    /// applied after restoring the prior revision's checkpoint. Same-attempt crash
+    /// recovery leaves this empty and replays only the checkpointed state.
+    #[serde(default)]
+    pub checkpoint_input: Option<serde_json::Value>,
     pub prompt: String,
     /// Chat thread this request belongs to. Lets browser work reuse a single
     /// persistent browser session per thread (search → then book on the same
@@ -123,6 +128,31 @@ pub struct ChatGenerateStreamRequest {
     /// "debug" (debugging methodology, project chats). None = "agent".
     #[serde(default)]
     pub mode: Option<String>,
+}
+
+/// Renders any adapter-neutral durable wake as one model-visible input.
+///
+/// Human replies and approvals normally carry a direct `prompt`. Other typed
+/// wakes, such as model availability and effect resolution, remain lossless by
+/// falling back to their canonical JSON payload.
+pub fn render_checkpoint_input(payload: &serde_json::Value) -> String {
+    payload
+        .get("prompt")
+        .and_then(serde_json::Value::as_str)
+        .filter(|prompt| !prompt.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("Durable execution wake:\n{payload}"))
+}
+
+/// Whether this request contributes a new model-visible stimulus.
+///
+/// A checkpoint without checkpoint input is a crash reclaim of the same attempt:
+/// its messages, attachments, and preflight decisions are already checkpointed.
+pub fn checkpoint_request_applies_new_input(
+    agent_checkpoint: Option<&serde_json::Value>,
+    checkpoint_input: Option<&serde_json::Value>,
+) -> bool {
+    agent_checkpoint.is_none() || checkpoint_input.is_some()
 }
 
 /// A plugin-owned deterministic routing binding (S2), pinned to a THREAD rather than
@@ -594,6 +624,22 @@ impl PromptCompressionSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checkpoint_request_applies_input_only_to_fresh_or_successor_attempts() {
+        let checkpoint = serde_json::json!({"round": 2});
+        let wake = serde_json::json!({"type": "effect_resolution"});
+
+        assert!(checkpoint_request_applies_new_input(None, None));
+        assert!(checkpoint_request_applies_new_input(
+            Some(&checkpoint),
+            Some(&wake)
+        ));
+        assert!(!checkpoint_request_applies_new_input(
+            Some(&checkpoint),
+            None
+        ));
+    }
 
     fn mk_message(id: &str, role: &str) -> ChatMessage {
         ChatMessage {

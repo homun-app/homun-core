@@ -1800,7 +1800,7 @@ impl TaskStore {
                  WHERE c.turn_id = ?1 AND c.user_id = ?2 AND c.workspace_id = ?3
                    AND c.resumable = 1 AND r.status = 'aborted'
                    AND r.terminal_reason IN ('gateway_restart', 'parked_waiting_for_model')
-                 ORDER BY c.created_at DESC, c.round DESC
+                 ORDER BY r.attempt DESC, c.round DESC, c.created_at DESC
                  LIMIT 1",
                 params![turn_id, user_id, workspace_id],
                 |row| {
@@ -5454,6 +5454,37 @@ mod agent_control_state_tests {
             .unwrap()
             .unwrap();
         assert_eq!(checkpoint.round, 2);
+    }
+
+    #[test]
+    fn checkpoint_recovery_prefers_the_newest_attempt_before_round() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.create_agent_run(&run("run-1")).unwrap();
+        store
+            .append_agent_checkpoint("run-1", 9, &json!({"attempt": 1}), "fp-1", true)
+            .unwrap();
+        store
+            .abort_running_agent_runs_for_turn("turn", "user", "workspace", "gateway_restart")
+            .unwrap();
+
+        store.create_agent_run(&run("run-2")).unwrap();
+        store
+            .append_agent_checkpoint("run-2", 1, &json!({"attempt": 2}), "fp-2", true)
+            .unwrap();
+        store
+            .abort_running_agent_runs_for_turn("turn", "user", "workspace", "gateway_restart")
+            .unwrap();
+
+        store
+            .connection
+            .execute("UPDATE agent_checkpoints SET created_at = 1", [])
+            .unwrap();
+        let checkpoint = store
+            .latest_resumable_checkpoint_for_turn("turn", "user", "workspace")
+            .unwrap()
+            .unwrap();
+        assert_eq!(checkpoint.run_id, "run-2");
+        assert_eq!(checkpoint.round, 1);
     }
 
     /// Seeds a `chat_turn` task (Running) mirroring `chat_turn_query_tests::make_chat_turn`,

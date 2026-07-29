@@ -29189,6 +29189,27 @@ async fn stream_chat_via_openai(
     model: String,
     api_key: Option<String>,
 ) -> Result<Response, GatewayError> {
+    let applies_new_input = local_first_desktop_gateway::checkpoint_request_applies_new_input(
+        request.agent_checkpoint.as_ref(),
+        request.checkpoint_input.as_ref(),
+    );
+    let recovery_checkpoint = request
+        .agent_checkpoint
+        .clone()
+        .map(serde_json::from_value::<local_first_engine::LoopCheckpoint>)
+        .transpose()
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "agent_checkpoint_invalid",
+            message: format!("Agent checkpoint schema is invalid: {error}"),
+        })?;
+    if let Some(checkpoint) = recovery_checkpoint.as_ref() {
+        checkpoint.validate_schema().map_err(|error| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "agent_checkpoint_invalid",
+            message: format!("Agent checkpoint schema is invalid: {error}"),
+        })?;
+    }
     // Turn trace (readable per-turn observability): handle created HERE, at the absolute entry, so a
     // hang in SETUP (memory recall, prompt-build, browser-session) is visible — see engine::turn_trace.
     // The `turn_received` event is the FIRST thing recorded; if no `turn_start` follows, the turn
@@ -29267,12 +29288,18 @@ async fn stream_chat_via_openai(
         }
         None => request.context.clone(),
     };
-    let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
-        prompt: request.prompt.clone(),
-        context: effective_context.clone(),
-        max_context_chars: Some(chat_context_budget_chars(model_context_window)),
-    })
-    .runtime_prompt;
+    let prompt = request
+        .checkpoint_input
+        .as_ref()
+        .map(local_first_desktop_gateway::render_checkpoint_input)
+        .unwrap_or_else(|| {
+            build_chat_runtime_prompt(&BuildPromptRequest {
+                prompt: request.prompt.clone(),
+                context: effective_context.clone(),
+                max_context_chars: Some(chat_context_budget_chars(model_context_window)),
+            })
+            .runtime_prompt
+        });
     let browser_discovery = browser_open_research_discovery_instruction();
     let booking_choices = booking_assumption_choice_instruction();
     // ResumeBinding: consume the per-turn stash set by semantic short-circuit (not
@@ -29868,7 +29895,7 @@ normal answers."
         // ADR 0022 — Tappa 1/4: via service quando il flag è ON; anche nel path OFF
         // usa le fn del crate (embed_query + recall_search_on_facade) con capability
         // client al volo — così `relevant_memory_for_prompt` non è più duplicata.
-        let system = if memory_injection.include_cross_thread {
+        let system = if memory_injection.include_cross_thread && applies_new_input {
             if let Some(service) = state.memory_service.as_ref() {
                 let scope = memory_scope_for_turn(request.thread_id.as_deref());
                 let pack = service.recall(&request.prompt, &scope).await;
@@ -30279,7 +30306,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // but pre-retrieve the few relevant to THIS message and load them up front, so the
     // model uses them without having to think to search. Best-effort; deduped against
     // what's already loaded (core + always-loaded MCP).
-    if has_composio {
+    if has_composio && applies_new_input {
         let loaded: std::collections::HashSet<String> = base_tools
             .iter()
             .filter_map(|s| {
@@ -30357,7 +30384,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // thread, then load the thread's FULL set so a file stays usable across turns
     // (no re-attach). A manifest lists the available files so the model uses their
     // content instead of improvising (sandbox / list_directory / download links).
-    let new_files = if request.attachments.is_empty() {
+    let new_files = if !applies_new_input || request.attachments.is_empty() {
         Vec::new()
     } else {
         let atts = request.attachments.clone();
@@ -30366,7 +30393,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             .unwrap_or_default()
     };
     let mut working: Vec<chat_store::StoredAttachment> = Vec::new();
-    if let Some(thread_id) = request.thread_id.as_deref() {
+    if applies_new_input && let Some(thread_id) = request.thread_id.as_deref() {
         // Persist new files + load the whole thread set (sync DB work, no await
         // while the lock is held).
         if let Ok(store) = lock_store(state) {
@@ -30395,8 +30422,27 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     }
 
     let mut model_text = prompt.clone();
-    let mut all_images = request.images.clone();
-    all_images.extend(append_thread_attachment_context(&mut model_text, &working));
+    let mut all_images = applies_new_input
+        .then(|| request.images.clone())
+        .unwrap_or_default();
+    let new_attachment_context = new_files
+        .iter()
+        .map(|file| chat_store::StoredAttachment {
+            display_name: file.display_name.clone(),
+            mime_type: file.mime_type.clone(),
+            text: file.text.clone(),
+            images: file.images.clone(),
+        })
+        .collect::<Vec<_>>();
+    let attachment_context = if !applies_new_input || request.checkpoint_input.is_some() {
+        &new_attachment_context
+    } else {
+        &working
+    };
+    all_images.extend(append_thread_attachment_context(
+        &mut model_text,
+        attachment_context,
+    ));
 
     // Vision: when the turn carries images (request + rendered attachments), the
     // user message becomes multimodal content (text + image_url parts) per the
@@ -30444,21 +30490,26 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         entry: stream_entry,
     };
     let orchestrator_is_local = provider_endpoint_is_local(&base_url) && !model_id_is_cloud(&model);
+    let privacy_prompt = applies_new_input
+        .then_some(request.prompt.as_str())
+        .unwrap_or_default();
     let deterministic_privacy_decision =
-        privacy_guard::classify_sensitive_input_deterministic(&request.prompt);
-    let guarded_decision =
-        match classify_sensitive_input_with_privacy_guard_model(&state.http, &request.prompt).await
-        {
+        privacy_guard::classify_sensitive_input_deterministic(privacy_prompt);
+    let guarded_decision = if applies_new_input {
+        match classify_sensitive_input_with_privacy_guard_model(&state.http, privacy_prompt).await {
             privacy_guard::PrivacyGuardModelOutcome::Classified(model_decision) => {
                 Ok(privacy_guard::merge_guard_decisions(
-                    &request.prompt,
+                    privacy_prompt,
                     model_decision,
                     deterministic_privacy_decision.clone(),
                 ))
             }
             privacy_guard::PrivacyGuardModelOutcome::Unavailable(reason) => Err(reason),
             privacy_guard::PrivacyGuardModelOutcome::InvalidOutput => Err("invalid_output"),
-        };
+        }
+    } else {
+        Ok(deterministic_privacy_decision.clone())
+    };
     let privacy_decision = match guarded_decision {
         Ok(decision) => decision,
         Err(reason) => match privacy_guard::failure_policy(orchestrator_is_local) {
@@ -30606,7 +30657,6 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     let state_owned = state.clone();
     let temperature = request.temperature;
     let execution_journal = agent_journal::for_run(request.agent_run_id.as_deref());
-    let recovery_checkpoint = request.agent_checkpoint.clone();
     let effect_run_id = request.agent_run_id.clone();
     let effect_turn_id = request.agent_run_id.as_ref().and_then(|_| {
         request
@@ -30628,7 +30678,9 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         .map(WorkspaceId::new)
         .unwrap_or_else(gateway_workspace_id);
     // Raw user message captured for post-turn memory extraction (M2).
-    let memory_user_message = request.prompt.clone();
+    let memory_user_message = applies_new_input
+        .then(|| request.prompt.clone())
+        .unwrap_or_default();
     // The assistant's most recent prior turn (the question a short "sì" would answer),
     // so the extractor can ground a confirmation into the fact it commits.
     let memory_prev_assistant = effective_context
@@ -30661,7 +30713,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // harness BLOCKS the stuck step (caposaldo #2) — `block_stalled_step` makes the plan
     // `settled`, so `upsert_runtime_plan_memory` stops it auto-resuming. Gated until validated
     // live; the bookkeeping is a no-op when off.
-    if !resume_plan.is_empty() && plan_stall_abort_enabled() {
+    if applies_new_input && !resume_plan.is_empty() && plan_stall_abort_enabled() {
         let stalled = plan_stall_check_and_bump(state, thread_id.as_deref(), &resume_plan);
         if stalled && let Some(title) = block_stalled_step(&mut resume_plan) {
             upsert_runtime_plan_memory_from_state(state, thread_id.as_deref(), &resume_plan);
@@ -30678,11 +30730,13 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         let mut ls = local_first_engine::LoopState::new();
         ls.prompt_packets = prompt_packets;
         ls.messages = messages;
-        seed_loop_memory_reads(&mut ls, automatic_recall_payload.as_ref());
+        if applies_new_input {
+            seed_loop_memory_reads(&mut ls, automatic_recall_payload.as_ref());
+        }
         // RAG completed before the loop starts. Publish the exact selected hits before any
         // narration delta so a resumed client and the persisted assistant message agree on
         // which memory sources informed this turn.
-        if let Some(payload) = automatic_recall_payload {
+        if applies_new_input && let Some(payload) = automatic_recall_payload {
             let _ = emit_stream_event(&tx, GenerateStreamEvent::Recall { payload }).await;
         }
         // Phase 3 (per-project skill confirmations): seed the turn's force-confirm set with the
@@ -30849,11 +30903,11 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             base_url,
             api_key,
         };
-        if let Some(checkpoint) = recovery_checkpoint.and_then(|value| {
-            serde_json::from_value::<local_first_engine::LoopCheckpoint>(value).ok()
-        }) {
-            checkpoint.apply_to(&mut ls);
-        }
+        let checkpoint_input = request
+            .checkpoint_input
+            .as_ref()
+            .and_then(|_| ls.messages.last().cloned());
+        apply_agent_recovery_checkpoint(&mut ls, recovery_checkpoint, checkpoint_input);
         // 5.D1c.1: resolve the loop's turn-constant config ONCE (env-stable for the turn) so the moved
         // loop never reads env. Behavior-preserving — same values the inline getters returned.
         let cfg = local_first_engine::TurnConfig {
@@ -31004,7 +31058,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         // Best-effort; never blocks or fails the turn. Skip for channel turns (read_only): the inbound
         // is from a CONTACT, not the user, and the channel handler runs its own speaker-attributed learn
         // — this one (speaker=None) would mis-attribute the contact's facts to person:self.
-        if !outcome.memory_answer.trim().is_empty() && !read_only {
+        if applies_new_input && !outcome.memory_answer.trim().is_empty() && !read_only {
             let learn_state = tail_state.clone();
             let learn_user = tail_user;
             let learn_answer = outcome.memory_answer.clone();
@@ -31078,6 +31132,19 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         .header("content-type", "application/x-ndjson")
         .body(body)
         .expect("valid streaming response"))
+}
+
+fn apply_agent_recovery_checkpoint(
+    state: &mut local_first_engine::LoopState,
+    checkpoint: Option<local_first_engine::LoopCheckpoint>,
+    new_input: Option<serde_json::Value>,
+) {
+    if let Some(checkpoint) = checkpoint {
+        checkpoint.apply_to(state);
+        if let Some(new_input) = new_input {
+            state.messages.push(new_input);
+        }
+    }
 }
 
 /// Build the terminal outcome for an image rejection that has already been surfaced with `Done`.
@@ -38067,6 +38134,7 @@ async fn run_agent_turn_into_message(
         request_id: request_id.clone(),
         agent_run_id: None,
         agent_checkpoint: None,
+        checkpoint_input: None,
         prompt: prompt.to_string(),
         thread_id: Some(thread_id.to_string()),
         context,
@@ -38128,6 +38196,7 @@ async fn run_agent_turn_into_message_with_fanout(
     turn_id: &str,
     agent_run_id: Option<&str>,
     agent_checkpoint: Option<serde_json::Value>,
+    checkpoint_input: Option<serde_json::Value>,
     requested_delivery_state: local_first_desktop_gateway::MessageDeliveryState,
 ) -> Result<BrokerAgentTurnResult, String> {
     let (base_url, model, api_key) = chat_role_config_for_thread(state, Some(thread_id))
@@ -38143,6 +38212,7 @@ async fn run_agent_turn_into_message_with_fanout(
         request_id: request_id.clone(),
         agent_run_id: agent_run_id.map(str::to_string),
         agent_checkpoint,
+        checkpoint_input,
         prompt: prompt.to_string(),
         thread_id: Some(thread_id.to_string()),
         context,
@@ -67225,6 +67295,7 @@ mod tests {
 
     #[test]
     fn active_checkpoint_keeps_browser_continuation_live_without_a_warm_sidecar() {
+        let _env = TestEnv::acquire();
         let state = super::AppState::for_tests();
         let thread = state
             .chat_store
@@ -67959,6 +68030,7 @@ prs.save(Path({path:?}))
 
     #[test]
     fn user_reply_resumes_the_suspended_chat_execution_in_place() {
+        let _env = TestEnv::acquire();
         let state = super::AppState::for_tests();
         let thread = state
             .chat_store
@@ -68101,6 +68173,7 @@ prs.save(Path({path:?}))
 
     #[test]
     fn approved_action_resumes_the_suspended_chat_execution_in_place() {
+        let _env = TestEnv::acquire();
         let state = super::AppState::for_tests();
         let thread = state
             .chat_store
@@ -68195,6 +68268,7 @@ prs.save(Path({path:?}))
 
     #[test]
     fn declined_canonical_approval_delivers_a_negative_wake() {
+        let _env = TestEnv::acquire();
         let state = super::AppState::for_tests();
         let thread = state
             .chat_store
@@ -68375,6 +68449,7 @@ prs.save(Path({path:?}))
 
     #[test]
     fn model_configuration_event_delivers_the_typed_model_wake() {
+        let _env = TestEnv::acquire();
         let state = super::AppState::for_tests();
         let user = super::gateway_user_id();
         let workspace = super::gateway_workspace_id();
@@ -71810,6 +71885,7 @@ prs.save(Path({path:?}))
 
     #[test]
     fn model_round_consumes_durable_steering_exactly_once() {
+        let _env = TestEnv::acquire();
         let state = super::AppState::for_tests();
         let thread = state
             .chat_store
@@ -71884,6 +71960,7 @@ prs.save(Path({path:?}))
 
     #[test]
     fn gateway_projects_and_acknowledges_structured_turn_control() {
+        let _env = TestEnv::acquire();
         let state = super::AppState::for_tests();
         let user_id = super::gateway_user_id();
         let objective = state
@@ -71999,6 +72076,7 @@ prs.save(Path({path:?}))
 
     #[test]
     fn gateway_confirmation_requirement_overrides_the_requested_disposition() {
+        let _env = TestEnv::acquire();
         let state = super::AppState::for_tests();
         let user_id = super::gateway_user_id();
         let objective = state
@@ -78001,6 +78079,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn contact_relationships_are_mirrored_into_canonical_memory_graph() {
+        let _env = TestEnv::acquire();
         let facade = local_first_memory::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
@@ -78040,6 +78119,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn removed_contact_relationship_tombstones_canonical_graph_edge() {
+        let _env = TestEnv::acquire();
         let facade = local_first_memory::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
@@ -78086,6 +78166,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn runtime_plan_memory_upserts_single_open_loop() {
+        let _env = TestEnv::acquire();
         let facade = local_first_memory::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
@@ -78167,6 +78248,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn runtime_plan_memory_is_staled_when_complete() {
+        let _env = TestEnv::acquire();
         let facade = local_first_memory::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
@@ -78225,6 +78307,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn runtime_plan_memory_materializes_plan_step_graph() {
+        let _env = TestEnv::acquire();
         let facade = local_first_memory::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
@@ -81110,6 +81193,7 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
 
     #[test]
     fn workspace_root_entity_keeps_stable_key_and_aliases_across_updates() {
+        let _env = TestEnv::acquire();
         let facade = local_first_memory::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
@@ -81162,6 +81246,7 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
 
     #[test]
     fn base_workspace_never_creates_a_legacy_memory_scope_root() {
+        let _env = TestEnv::acquire();
         let facade = local_first_memory::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
@@ -83789,6 +83874,56 @@ data: [DONE]\n";
     }
 
     #[test]
+    fn successor_checkpoint_restore_keeps_the_new_wake_input() {
+        let mut prior = local_first_engine::LoopState::new();
+        prior.messages = vec![
+            serde_json::json!({ "role": "system", "content": "system" }),
+            serde_json::json!({ "role": "user", "content": "original objective" }),
+            serde_json::json!({ "role": "assistant", "content": "awaiting approval" }),
+        ];
+        let checkpoint = local_first_engine::LoopCheckpoint::from_state(1, &prior);
+
+        let mut successor = local_first_engine::LoopState::new();
+        successor.messages = vec![
+            serde_json::json!({ "role": "system", "content": "system" }),
+            serde_json::json!({
+                "role": "user",
+                "content": "Recent chat context:\nUser: original objective\n\nUser: The approved action failed. Continue from the durable checkpoint."
+            }),
+        ];
+
+        super::apply_agent_recovery_checkpoint(
+            &mut successor,
+            Some(checkpoint),
+            Some(serde_json::json!({
+                "role": "user",
+                "content": "The approved action failed. Continue from the durable checkpoint."
+            })),
+        );
+
+        assert_eq!(successor.messages.len(), 4);
+        assert_eq!(
+            successor.messages.last().unwrap()["content"],
+            "The approved action failed. Continue from the durable checkpoint."
+        );
+    }
+
+    #[test]
+    fn same_attempt_checkpoint_restore_does_not_duplicate_the_original_input() {
+        let mut prior = local_first_engine::LoopState::new();
+        prior.messages = vec![
+            serde_json::json!({ "role": "system", "content": "system" }),
+            serde_json::json!({ "role": "user", "content": "original objective" }),
+        ];
+        let checkpoint = local_first_engine::LoopCheckpoint::from_state(1, &prior);
+
+        let mut recovered = prior.clone();
+        super::apply_agent_recovery_checkpoint(&mut recovered, Some(checkpoint), None);
+
+        assert_eq!(recovered.messages, prior.messages);
+    }
+
+    #[test]
     fn act_gate_blocks_final_payment_click_without_approval() {
         // Machine floor marks e9 as the payment control — never label text.
         let floor: std::collections::HashSet<String> =
@@ -84123,6 +84258,7 @@ data: [DONE]\n";
 
     #[test]
     fn automation_run_updates_rule_in_task_scope_not_gateway_scope() {
+        let _env = TestEnv::acquire();
         let store = TaskStore::open_in_memory().unwrap();
         let now = time::OffsetDateTime::now_utc();
         let mut project_automation = Automation {
@@ -84219,6 +84355,7 @@ data: [DONE]\n";
 
     #[test]
     fn create_automation_from_chat_uses_active_scope() {
+        let _env = TestEnv::acquire();
         let store = TaskStore::open_in_memory().unwrap();
         let args = serde_json::json!({
             "title": "Project channel summary",
@@ -84496,6 +84633,7 @@ data: [DONE]\n";
 
     #[test]
     fn broker_enqueue_preallocates_one_linked_user_and_assistant() {
+        let _env = TestEnv::acquire();
         let root = isolated_gateway_test_dir("broker-preallocated-visible-turn");
         std::fs::create_dir_all(&root).unwrap();
         let database = root.join("homun.sqlite");
@@ -84625,6 +84763,7 @@ data: [DONE]\n";
 
     #[test]
     fn resolving_an_actionable_source_unblocks_only_its_exact_waiting_turn() {
+        let _env = TestEnv::acquire();
         let state = AppState::for_tests();
         let thread = super::lock_store(&state)
             .unwrap()
@@ -84754,6 +84893,7 @@ data: [DONE]\n";
 
     #[test]
     fn cancelling_an_actionable_source_leaves_no_waiting_message_or_task() {
+        let _env = TestEnv::acquire();
         let state = AppState::for_tests();
         let thread = super::lock_store(&state)
             .unwrap()
@@ -84842,6 +84982,7 @@ data: [DONE]\n";
 
     #[tokio::test]
     async fn fs_authorize_rejects_mismatched_card_without_grant_or_lifecycle_change() {
+        let _env = TestEnv::acquire();
         let dir = isolated_gateway_test_dir("fs-authorize-provenance");
         std::fs::create_dir_all(&dir).unwrap();
         let _data_dir = TestGatewayDataDir::new(&dir);
@@ -84937,6 +85078,7 @@ data: [DONE]\n";
 
     #[test]
     fn resolving_linked_proactive_action_card_terminalizes_its_exact_task_and_bubble() {
+        let _env = TestEnv::acquire();
         let state = AppState::for_tests();
         let thread = super::lock_store(&state)
             .unwrap()
@@ -85012,6 +85154,7 @@ data: [DONE]\n";
 
     #[test]
     fn cancelling_linked_proactive_action_card_terminalizes_its_exact_task_and_bubble() {
+        let _env = TestEnv::acquire();
         let state = AppState::for_tests();
         let thread = super::lock_store(&state)
             .unwrap()
@@ -85088,6 +85231,7 @@ data: [DONE]\n";
 
     #[test]
     fn terminal_execution_error_fails_the_exact_actionable_source() {
+        let _env = TestEnv::acquire();
         let state = AppState::for_tests();
         let thread = super::lock_store(&state)
             .unwrap()
@@ -85169,6 +85313,7 @@ data: [DONE]\n";
 
     #[test]
     fn proactive_visible_turn_persists_generated_source_ids_on_owning_task() {
+        let _env = TestEnv::acquire();
         let state = AppState::for_tests();
         let thread = super::lock_store(&state)
             .unwrap()
@@ -85405,6 +85550,7 @@ data: [DONE]\n";
             atomic::{AtomicUsize, Ordering},
         };
 
+        let _env = TestEnv::acquire();
         let state = AppState::for_tests();
         let (thread_id, message_id, _task_id, _user, _workspace) =
             seed_sandbox_escalation_source(&state, "pwd", None);
@@ -85438,6 +85584,7 @@ data: [DONE]\n";
 
     #[test]
     fn stale_actionable_claim_after_cancel_executes_nothing() {
+        let _env = TestEnv::acquire();
         let state = AppState::for_tests();
         let (thread_id, message_id, _task_id, _user, _workspace) =
             seed_sandbox_escalation_source(&state, "pwd", None);
@@ -85460,6 +85607,7 @@ data: [DONE]\n";
 
     #[test]
     fn remote_actionable_claim_after_stop_executes_nothing() {
+        let _env = TestEnv::acquire();
         let state = AppState::for_tests();
         let (thread_id, message_id, _task_id, _user, _workspace) =
             seed_sandbox_escalation_source(&state, "pwd", None);
@@ -85852,6 +86000,7 @@ data: [DONE]\n";
 
     #[test]
     fn broker_enqueue_rejects_cross_thread_request_id_collision_without_mutating_first_turn() {
+        let _env = TestEnv::acquire();
         let root = isolated_gateway_test_dir("broker-cross-thread-request-id-collision");
         std::fs::create_dir_all(&root).unwrap();
         let database = root.join("homun.sqlite");
@@ -85977,6 +86126,7 @@ data: [DONE]\n";
 
     #[test]
     fn broker_enqueue_rejects_changed_payload_for_terminal_same_thread_turn() {
+        let _env = TestEnv::acquire();
         let root = isolated_gateway_test_dir("broker-same-thread-payload-collision");
         std::fs::create_dir_all(&root).unwrap();
         let database = root.join("homun.sqlite");
@@ -86070,6 +86220,7 @@ data: [DONE]\n";
 
     #[test]
     fn broker_steering_stays_out_of_transcript_until_claim() {
+        let _env = TestEnv::acquire();
         let root = isolated_gateway_test_dir("broker-steering-no-assistant");
         std::fs::create_dir_all(&root).unwrap();
         let database = root.join("homun.sqlite");
@@ -86156,6 +86307,7 @@ data: [DONE]\n";
 
     #[test]
     fn broker_enqueue_rolls_back_user_assistant_and_task_when_placeholder_is_rejected() {
+        let _env = TestEnv::acquire();
         let root = isolated_gateway_test_dir("broker-preallocated-rollback");
         std::fs::create_dir_all(&root).unwrap();
         let database = root.join("homun.sqlite");

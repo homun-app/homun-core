@@ -34,6 +34,7 @@ fn checkpoint_store_id(data_ref: &CheckpointDataRef) -> Option<&str> {
 #[derive(Debug)]
 struct EffectiveChatAttemptInput {
     prompt: String,
+    wake_input: Option<Value>,
     visible_prompt: String,
     user_message_id: Option<String>,
     images: Vec<String>,
@@ -53,12 +54,10 @@ fn effective_chat_attempt_input(
         .ok_or_else(|| crate::LocalTaskExecutionError {
             message: "chat_turn task missing prompt".to_string(),
         })?;
+    let wake_input = wake_payload.cloned();
     let prompt = wake_payload
-        .and_then(|payload| payload.get("prompt"))
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or(task_prompt)
-        .to_string();
+        .map(local_first_desktop_gateway::render_checkpoint_input)
+        .unwrap_or_else(|| task_prompt.to_string());
     let visible_prompt = wake_payload
         .and_then(|payload| payload.get("visible_prompt"))
         .and_then(Value::as_str)
@@ -84,14 +83,13 @@ fn effective_chat_attempt_input(
                 .map(|request_id| format!("local_user_{request_id}"))
         });
 
-    let images_value = wake_payload
-        .and_then(|payload| payload.get("images"))
-        .filter(|value| !value.is_null())
-        .or_else(|| {
-            task.input_json
-                .get("images")
-                .filter(|value| !value.is_null())
-        });
+    let images_value = match wake_payload {
+        Some(payload) => payload.get("images").filter(|value| !value.is_null()),
+        None => task
+            .input_json
+            .get("images")
+            .filter(|value| !value.is_null()),
+    };
     let images = images_value
         .cloned()
         .map(serde_json::from_value)
@@ -100,14 +98,13 @@ fn effective_chat_attempt_input(
             message: format!("chat_turn images are invalid: {error}"),
         })?
         .unwrap_or_default();
-    let attachments_value = wake_payload
-        .and_then(|payload| payload.get("attachments"))
-        .filter(|value| !value.is_null())
-        .or_else(|| {
-            task.input_json
-                .get("attachments")
-                .filter(|value| !value.is_null())
-        });
+    let attachments_value = match wake_payload {
+        Some(payload) => payload.get("attachments").filter(|value| !value.is_null()),
+        None => task
+            .input_json
+            .get("attachments")
+            .filter(|value| !value.is_null()),
+    };
     let attachments = attachments_value
         .cloned()
         .map(serde_json::from_value)
@@ -119,6 +116,7 @@ fn effective_chat_attempt_input(
 
     Ok(EffectiveChatAttemptInput {
         prompt,
+        wake_input,
         visible_prompt,
         user_message_id,
         images,
@@ -126,57 +124,209 @@ fn effective_chat_attempt_input(
     })
 }
 
+#[derive(Debug, PartialEq)]
+struct AgentResumeState {
+    checkpoint: Value,
+    apply_wake_input: bool,
+}
+
+fn verified_agent_checkpoint(
+    checkpoint: local_first_task_runtime::AgentCheckpoint,
+) -> Result<Value, crate::LocalTaskExecutionError> {
+    let actual = format!(
+        "{:x}",
+        sha2::Sha256::digest(serde_json::to_vec(&checkpoint.state_json).map_err(|error| {
+            crate::LocalTaskExecutionError {
+                message: format!("agent checkpoint serialization failed: {error}"),
+            }
+        })?)
+    );
+    if actual != checkpoint.fingerprint {
+        return Err(crate::LocalTaskExecutionError {
+            message: format!(
+                "agent checkpoint fingerprint mismatch for {}",
+                checkpoint.checkpoint_id
+            ),
+        });
+    }
+    let typed =
+        serde_json::from_value::<local_first_engine::LoopCheckpoint>(checkpoint.state_json.clone())
+            .map_err(|error| crate::LocalTaskExecutionError {
+                message: format!(
+                    "agent checkpoint schema is invalid for {}: {error}",
+                    checkpoint.checkpoint_id
+                ),
+            })?;
+    typed
+        .validate_schema()
+        .map_err(|error| crate::LocalTaskExecutionError {
+            message: format!(
+                "agent checkpoint schema is invalid for {}: {error}",
+                checkpoint.checkpoint_id
+            ),
+        })?;
+    Ok(checkpoint.state_json)
+}
+
+fn verified_execution_agent_state<'a>(
+    checkpoint_id: &str,
+    payload: &'a Value,
+) -> Result<(Value, Option<&'a str>), crate::LocalTaskExecutionError> {
+    let agent_state =
+        payload
+            .get("agent_state")
+            .cloned()
+            .ok_or_else(|| crate::LocalTaskExecutionError {
+                message: format!("execution checkpoint {checkpoint_id} has no agent state"),
+            })?;
+    let expected = payload
+        .get("agent_state_fingerprint")
+        .and_then(Value::as_str)
+        .ok_or_else(|| crate::LocalTaskExecutionError {
+            message: format!("execution checkpoint {checkpoint_id} has no agent state fingerprint"),
+        })?;
+    let actual = format!(
+        "{:x}",
+        sha2::Sha256::digest(serde_json::to_vec(&agent_state).map_err(|error| {
+            crate::LocalTaskExecutionError {
+                message: format!("prior agent checkpoint serialization failed: {error}"),
+            }
+        })?)
+    );
+    if actual != expected {
+        return Err(crate::LocalTaskExecutionError {
+            message: format!("agent checkpoint fingerprint mismatch for {checkpoint_id}"),
+        });
+    }
+    let typed = serde_json::from_value::<local_first_engine::LoopCheckpoint>(agent_state.clone())
+        .map_err(|error| crate::LocalTaskExecutionError {
+        message: format!("agent checkpoint schema is invalid for {checkpoint_id}: {error}"),
+    })?;
+    typed
+        .validate_schema()
+        .map_err(|error| crate::LocalTaskExecutionError {
+            message: format!("agent checkpoint schema is invalid for {checkpoint_id}: {error}"),
+        })?;
+    Ok((
+        agent_state,
+        payload.get("agent_run_id").and_then(Value::as_str),
+    ))
+}
+
 fn agent_resume_state(
     state: &crate::AppState,
     task: &local_first_task_runtime::TaskRecord,
     contract: &ValidatedExecutionContract,
-) -> Option<Value> {
-    let store = state.task_store.lock().ok()?;
+) -> Result<Option<AgentResumeState>, crate::LocalTaskExecutionError> {
+    let store = state
+        .task_store
+        .lock()
+        .map_err(|_| crate::LocalTaskExecutionError {
+            message: "task store lock poisoned during agent recovery".to_string(),
+        })?;
+    let current_checkpoint = store
+        .latest_resumable_checkpoint_for_turn(
+            task.task_id.as_str(),
+            task.user_id.as_str(),
+            task.workspace_id.as_str(),
+        )
+        .map_err(|error| crate::LocalTaskExecutionError {
+            message: format!("failed to load resumable agent checkpoint: {error}"),
+        })?;
+
     if contract.as_ref().revision > 1 {
         let prior = store
             .execution_revision(
                 &contract.as_ref().execution_id,
                 contract.as_ref().revision - 1,
             )
-            .ok()??;
-        let prior_outcome = prior.outcome?;
+            .map_err(|error| crate::LocalTaskExecutionError {
+                message: format!("failed to load prior execution revision: {error}"),
+            })?
+            .ok_or_else(|| crate::LocalTaskExecutionError {
+                message: "successor execution is missing its prior revision".to_string(),
+            })?;
+        let prior_outcome = prior
+            .outcome
+            .ok_or_else(|| crate::LocalTaskExecutionError {
+                message: "successor execution prior revision has no terminal outcome".to_string(),
+            })?;
         let data_ref = match prior_outcome.as_ref() {
             ExecutionOutcome::Suspended { checkpoint, .. } => &checkpoint.data_ref,
-            _ => return None,
+            _ => {
+                return Err(crate::LocalTaskExecutionError {
+                    message: "successor execution prior revision is not suspended".to_string(),
+                });
+            }
         };
+        let checkpoint_id =
+            checkpoint_store_id(data_ref).ok_or_else(|| crate::LocalTaskExecutionError {
+                message: "successor execution checkpoint uses an unsupported data reference"
+                    .to_string(),
+            })?;
         let checkpoint = store
             .checkpoint(
-                checkpoint_store_id(data_ref)?,
+                checkpoint_id,
                 &task.task_id,
                 &task.user_id,
                 &task.workspace_id,
             )
-            .ok()??;
-        let agent_state = checkpoint.payload.get("agent_state")?.clone();
-        let expected = checkpoint
-            .payload
-            .get("agent_state_fingerprint")?
-            .as_str()?;
-        let actual = format!(
-            "{:x}",
-            sha2::Sha256::digest(serde_json::to_vec(&agent_state).ok()?)
-        );
-        return (actual == expected).then_some(agent_state);
+            .map_err(|error| crate::LocalTaskExecutionError {
+                message: format!("failed to load prior execution checkpoint: {error}"),
+            })?
+            .ok_or_else(|| crate::LocalTaskExecutionError {
+                message: format!("referenced execution checkpoint {checkpoint_id} is missing"),
+            })?;
+        let (agent_state, prior_agent_run_id) =
+            verified_execution_agent_state(&checkpoint.checkpoint_id, &checkpoint.payload)?;
+
+        if let (Some(current_checkpoint), Some(prior_agent_run_id)) =
+            (current_checkpoint, prior_agent_run_id)
+        {
+            let runs = store
+                .list_agent_runs_for_turn(
+                    task.task_id.as_str(),
+                    task.user_id.as_str(),
+                    task.workspace_id.as_str(),
+                )
+                .map_err(|error| crate::LocalTaskExecutionError {
+                    message: format!("failed to load agent attempt lineage: {error}"),
+                })?;
+            let current_attempt = runs
+                .iter()
+                .find(|run| run.run_id == current_checkpoint.run_id)
+                .map(|run| run.attempt);
+            let prior_attempt = runs
+                .iter()
+                .find(|run| run.run_id == prior_agent_run_id)
+                .map(|run| run.attempt);
+            if current_attempt
+                .zip(prior_attempt)
+                .is_some_and(|(current_attempt, prior_attempt)| current_attempt > prior_attempt)
+            {
+                return verified_agent_checkpoint(current_checkpoint).map(|checkpoint| {
+                    Some(AgentResumeState {
+                        checkpoint,
+                        apply_wake_input: false,
+                    })
+                });
+            }
+        }
+
+        return Ok(Some(AgentResumeState {
+            checkpoint: agent_state,
+            apply_wake_input: true,
+        }));
     }
 
-    store
-        .latest_resumable_checkpoint_for_turn(
-            task.task_id.as_str(),
-            task.user_id.as_str(),
-            task.workspace_id.as_str(),
-        )
-        .ok()?
-        .and_then(|checkpoint| {
-            let actual = format!(
-                "{:x}",
-                sha2::Sha256::digest(serde_json::to_vec(&checkpoint.state_json).ok()?)
-            );
-            (actual == checkpoint.fingerprint).then_some(checkpoint.state_json)
+    current_checkpoint
+        .map(verified_agent_checkpoint)
+        .transpose()
+        .map(|checkpoint| {
+            checkpoint.map(|checkpoint| AgentResumeState {
+                checkpoint,
+                apply_wake_input: false,
+            })
         })
 }
 
@@ -454,7 +604,14 @@ pub fn execute_chat_turn_task(
         })?;
     let effective = effective_chat_attempt_input(task, contract.as_ref().wake.as_ref())?;
     let prompt = effective.prompt;
+    let wake_input = effective.wake_input;
     let visible_prompt = effective.visible_prompt;
+    let resume = agent_resume_state(state, task, contract)?;
+    let checkpoint_input = resume
+        .as_ref()
+        .filter(|resume| resume.apply_wake_input)
+        .and(wake_input);
+    let resume_state = resume.map(|resume| resume.checkpoint);
     // Optional inputs with defaults.
     let approval = task
         .input_json
@@ -688,7 +845,6 @@ pub fn execute_chat_turn_task(
     // resurrecting an externally-cancelled task). Without this select the `notify_one()` had
     // no waiter in production and the turn always ran to completion, overwriting `Cancelled`.
     let cancel = broadcast.cancel.clone();
-    let resume_state = agent_resume_state(state, task, contract);
     let run = tokio::runtime::Handle::current().block_on(async {
         tokio::select! {
             biased;
@@ -705,6 +861,7 @@ pub fn execute_chat_turn_task(
                 turn_id,
                 agent_run.as_ref().map(|(run_id, _)| run_id.as_str()),
                 resume_state,
+                checkpoint_input,
                 local_first_desktop_gateway::MessageDeliveryState::Streaming,
             ) => Some(answer),
         }
@@ -877,6 +1034,15 @@ mod tests {
         }
     }
 
+    fn loop_checkpoint_value(round: usize, marker: &str) -> Value {
+        let mut state = local_first_engine::LoopState::new();
+        state.messages = vec![json!({"role": "assistant", "content": marker})];
+        serde_json::to_value(local_first_engine::LoopCheckpoint::from_state(
+            round, &state,
+        ))
+        .unwrap()
+    }
+
     #[test]
     fn typed_turn_stops_map_exhaustively_to_canonical_outcomes() {
         let cases = [
@@ -965,7 +1131,7 @@ mod tests {
     }
 
     #[test]
-    fn resumed_revision_loads_the_exact_checkpoint_referenced_by_the_journal() {
+    fn resumed_revision_prefers_a_current_reclaim_checkpoint_over_the_prior_revision() {
         let state = AppState::for_tests();
         let user = UserId::new("user-1");
         let workspace = WorkspaceId::new("workspace-1");
@@ -988,7 +1154,7 @@ mod tests {
             serde_json::to_value(&task).unwrap(),
         ))
         .unwrap();
-        let agent_state = json!({"round": 4, "messages": ["committed"]});
+        let agent_state = loop_checkpoint_value(4, "committed");
         let fingerprint = format!(
             "{:x}",
             sha2::Sha256::digest(serde_json::to_vec(&agent_state).unwrap())
@@ -1001,6 +1167,25 @@ mod tests {
         let resumed_contract = {
             let store = state.task_store.lock().unwrap();
             store.insert_task(&task).unwrap();
+            store
+                .create_agent_run(&NewAgentRun {
+                    run_id: "run-prior-revision".into(),
+                    turn_id: task.task_id.as_str().into(),
+                    thread_id: "thread-1".into(),
+                    user_id: user.as_str().into(),
+                    workspace_id: workspace.as_str().into(),
+                    model: None,
+                    provider: None,
+                    prompt_fingerprint: None,
+                })
+                .unwrap();
+            store
+                .finish_agent_run(
+                    "run-prior-revision",
+                    local_first_task_runtime::AgentRunStatus::Completed,
+                    Some("canonical_completed"),
+                )
+                .unwrap();
             store.create_execution(&contract).unwrap();
             let checkpoint = store
                 .append_checkpoint(
@@ -1008,6 +1193,7 @@ mod tests {
                     &task.user_id,
                     &task.workspace_id,
                     json!({
+                        "agent_run_id": "run-prior-revision",
                         "agent_state": agent_state,
                         "agent_state_fingerprint": fingerprint,
                     }),
@@ -1040,9 +1226,247 @@ mod tests {
         };
 
         assert_eq!(
-            agent_resume_state(&state, &task, &resumed_contract),
-            Some(json!({"round": 4, "messages": ["committed"]}))
+            agent_resume_state(&state, &task, &resumed_contract).unwrap(),
+            Some(AgentResumeState {
+                checkpoint: agent_state.clone(),
+                apply_wake_input: true,
+            })
         );
+
+        let current_state = loop_checkpoint_value(7, "wake already applied");
+        let current_fingerprint = format!(
+            "{:x}",
+            sha2::Sha256::digest(serde_json::to_vec(&current_state).unwrap())
+        );
+        {
+            let store = state.task_store.lock().unwrap();
+            store
+                .create_agent_run(&NewAgentRun {
+                    run_id: "run-current-revision".into(),
+                    turn_id: task.task_id.as_str().into(),
+                    thread_id: "thread-1".into(),
+                    user_id: user.as_str().into(),
+                    workspace_id: workspace.as_str().into(),
+                    model: None,
+                    provider: None,
+                    prompt_fingerprint: None,
+                })
+                .unwrap();
+            store
+                .append_agent_checkpoint(
+                    "run-current-revision",
+                    7,
+                    &current_state,
+                    &current_fingerprint,
+                    true,
+                )
+                .unwrap();
+            store
+                .abort_running_agent_runs_for_turn(
+                    task.task_id.as_str(),
+                    user.as_str(),
+                    workspace.as_str(),
+                    "gateway_restart",
+                )
+                .unwrap();
+        }
+
+        assert_eq!(
+            agent_resume_state(&state, &task, &resumed_contract).unwrap(),
+            Some(AgentResumeState {
+                checkpoint: current_state,
+                apply_wake_input: false,
+            })
+        );
+
+        let later_prior_state = loop_checkpoint_value(9, "later suspension");
+        let later_prior_fingerprint = format!(
+            "{:x}",
+            sha2::Sha256::digest(serde_json::to_vec(&later_prior_state).unwrap())
+        );
+        let resumed_again_contract = {
+            let store = state.task_store.lock().unwrap();
+            store
+                .create_agent_run(&NewAgentRun {
+                    run_id: "run-later-prior-revision".into(),
+                    turn_id: task.task_id.as_str().into(),
+                    thread_id: "thread-1".into(),
+                    user_id: user.as_str().into(),
+                    workspace_id: workspace.as_str().into(),
+                    model: None,
+                    provider: None,
+                    prompt_fingerprint: None,
+                })
+                .unwrap();
+            store
+                .finish_agent_run(
+                    "run-later-prior-revision",
+                    local_first_task_runtime::AgentRunStatus::Completed,
+                    Some("canonical_completed"),
+                )
+                .unwrap();
+            let checkpoint = store
+                .append_checkpoint(
+                    &task.task_id,
+                    &task.user_id,
+                    &task.workspace_id,
+                    json!({
+                        "agent_run_id": "run-later-prior-revision",
+                        "agent_state": later_prior_state,
+                        "agent_state_fingerprint": later_prior_fingerprint,
+                    }),
+                    json!({"kind": "chat_turn"}),
+                )
+                .unwrap();
+            let wake = WakeCondition::Signal {
+                kind: "resume.test.second".into(),
+                correlation_id: "signal-2".into(),
+            };
+            let outcome = ValidatedExecutionOutcome::new(
+                ExecutionOutcome::Suspended {
+                    wake: wake.clone(),
+                    checkpoint: CheckpointEnvelope::new(
+                        "turn-resume",
+                        2,
+                        "chat_turn",
+                        1,
+                        CheckpointDataRef::Redacted {
+                            record_ref: DurableDataRef::from_store_id(&checkpoint.checkpoint_id)
+                                .unwrap(),
+                        },
+                    )
+                    .with_resume_context(None, wake, Vec::new()),
+                },
+                &resumed_contract,
+            )
+            .unwrap();
+            store.commit_execution_outcome(&outcome).unwrap();
+            store
+                .deliver_execution_signal("resume.test.second", "signal-2", &json!({"ok": true}))
+                .unwrap();
+            store.execution("turn-resume").unwrap().unwrap().contract
+        };
+
+        assert_eq!(
+            agent_resume_state(&state, &task, &resumed_again_contract).unwrap(),
+            Some(AgentResumeState {
+                checkpoint: later_prior_state,
+                apply_wake_input: true,
+            })
+        );
+    }
+
+    #[test]
+    fn recovery_rejects_a_corrupt_current_checkpoint_instead_of_starting_fresh() {
+        let state = AppState::for_tests();
+        let user = UserId::new("user-1");
+        let workspace = WorkspaceId::new("workspace-1");
+        let task = TaskRecord::new(
+            "turn-corrupt-checkpoint",
+            user.clone(),
+            workspace.clone(),
+            "chat_turn",
+            "resume",
+            json!({"thread_id": "thread-1", "prompt": "resume"}),
+        );
+        let contract = ValidatedExecutionContract::try_from(ExecutionContract::new(
+            task.task_id.as_str(),
+            "chat_turn",
+            ExecutionScope {
+                user_id: user.as_str().into(),
+                workspace_id: workspace.as_str().into(),
+                thread_id: Some("thread-1".into()),
+            },
+            serde_json::to_value(&task).unwrap(),
+        ))
+        .unwrap();
+        {
+            let store = state.task_store.lock().unwrap();
+            store
+                .create_agent_run(&NewAgentRun {
+                    run_id: "run-corrupt".into(),
+                    turn_id: task.task_id.as_str().into(),
+                    thread_id: "thread-1".into(),
+                    user_id: user.as_str().into(),
+                    workspace_id: workspace.as_str().into(),
+                    model: None,
+                    provider: None,
+                    prompt_fingerprint: None,
+                })
+                .unwrap();
+            store
+                .append_agent_checkpoint(
+                    "run-corrupt",
+                    1,
+                    &json!({"round": 1}),
+                    "not-the-state-fingerprint",
+                    true,
+                )
+                .unwrap();
+            store
+                .abort_running_agent_runs_for_turn(
+                    task.task_id.as_str(),
+                    user.as_str(),
+                    workspace.as_str(),
+                    "gateway_restart",
+                )
+                .unwrap();
+        }
+
+        let error = agent_resume_state(&state, &task, &contract).unwrap_err();
+        assert!(error.message.contains("fingerprint mismatch"));
+
+        let runs_before = state
+            .task_store
+            .lock()
+            .unwrap()
+            .list_agent_runs_for_turn(task.task_id.as_str(), user.as_str(), workspace.as_str())
+            .unwrap();
+        let error = execute_chat_turn_task(&state, &task, &contract).unwrap_err();
+        assert!(error.message.contains("fingerprint mismatch"));
+        let runs_after = state
+            .task_store
+            .lock()
+            .unwrap()
+            .list_agent_runs_for_turn(task.task_id.as_str(), user.as_str(), workspace.as_str())
+            .unwrap();
+        assert_eq!(runs_after, runs_before);
+    }
+
+    #[test]
+    fn referenced_execution_checkpoint_requires_state_and_fingerprint() {
+        let missing_state = verified_execution_agent_state(
+            "checkpoint-missing-state",
+            &json!({"agent_state_fingerprint": "fingerprint"}),
+        )
+        .unwrap_err();
+        assert!(missing_state.message.contains("has no agent state"));
+
+        let missing_fingerprint = verified_execution_agent_state(
+            "checkpoint-missing-fingerprint",
+            &json!({"agent_state": {"round": 1}}),
+        )
+        .unwrap_err();
+        assert!(
+            missing_fingerprint
+                .message
+                .contains("has no agent state fingerprint")
+        );
+
+        let invalid_state = json!({"round": 1});
+        let fingerprint = format!(
+            "{:x}",
+            sha2::Sha256::digest(serde_json::to_vec(&invalid_state).unwrap())
+        );
+        let invalid_schema = verified_execution_agent_state(
+            "checkpoint-invalid-schema",
+            &json!({
+                "agent_state": invalid_state,
+                "agent_state_fingerprint": fingerprint,
+            }),
+        )
+        .unwrap_err();
+        assert!(invalid_schema.message.contains("schema is invalid"));
     }
 
     #[test]
@@ -1083,10 +1507,44 @@ mod tests {
 
         let input = effective_chat_attempt_input(&task, Some(&delivery)).unwrap();
         assert_eq!(input.prompt, "A");
+        assert_eq!(input.wake_input.as_ref(), Some(&delivery.payload));
         assert_eq!(input.visible_prompt, "A");
         assert_eq!(input.user_message_id.as_deref(), Some("local_user_resume"));
         assert_eq!(input.images, vec!["new-image"]);
         assert_eq!(input.attachments[0].display_name, "new.txt");
+
+        let text_only_delivery = local_first_execution_protocol::WakeDelivery {
+            payload: json!({
+                "type": "user",
+                "prompt": "B",
+                "visible_prompt": "B",
+            }),
+            ..delivery
+        };
+        let text_only = effective_chat_attempt_input(&task, Some(&text_only_delivery)).unwrap();
+        assert!(text_only.images.is_empty());
+        assert!(text_only.attachments.is_empty());
+
+        let effect_delivery = local_first_execution_protocol::WakeDelivery {
+            condition: WakeCondition::EffectResolution {
+                receipt_ref: EffectReceiptRef::from_store_id("11111111111111111111111111111111")
+                    .unwrap(),
+            },
+            payload: json!({
+                "type": "effect_resolution",
+                "resolution": {"status": "failed", "detail": "remote outcome unknown"},
+            }),
+            ..text_only_delivery
+        };
+        let effect_input = effective_chat_attempt_input(&task, Some(&effect_delivery)).unwrap();
+        let rendered_wake = local_first_desktop_gateway::render_checkpoint_input(
+            effect_input
+                .wake_input
+                .as_ref()
+                .expect("every durable wake must remain model-visible"),
+        );
+        assert!(rendered_wake.contains("effect_resolution"));
+        assert!(rendered_wake.contains("remote outcome unknown"));
     }
 
     #[test]
