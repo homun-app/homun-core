@@ -503,6 +503,7 @@ impl TaskStore {
         crate::execution_store::migrate_execution_schema_v13(&self.connection)?;
         migrate_effect_receipts_v14(&self.connection)?;
         migrate_effect_compensations_v15(&self.connection)?;
+        crate::projection_outbox::migrate_projection_outbox_v16(&self.connection)?;
 
         // ── chat_turn columns (schema_version 4). Guarded: idempotent on existing DBs.
         // Indexed columns for chat turns. Remain NULL on non-chat_turn rows.

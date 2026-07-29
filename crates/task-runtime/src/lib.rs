@@ -10,6 +10,7 @@ pub mod executor;
 pub mod facade;
 pub mod lease;
 pub mod plan_context;
+pub mod projection_outbox;
 pub mod recurrence;
 pub mod resources;
 pub mod scheduler;
@@ -33,6 +34,9 @@ pub use executor::{ExecutorResult, FakeTaskExecutor, TaskExecutor};
 pub use facade::{RunReadySummary, TaskRuntime};
 pub use lease::LeaseManager;
 pub use plan_context::TaskDependencyOutput;
+pub use projection_outbox::{
+    ProjectionErrorEvidence, ProjectionOutboxRecord, ProjectionStatus,
+};
 pub use recurrence::next_occurrence;
 pub use resources::{ResourceGovernor, ResourceLimits};
 pub use scheduler::TaskScheduler;
