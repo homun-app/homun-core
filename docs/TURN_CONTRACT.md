@@ -96,9 +96,10 @@ resta leggibile soltanto nel bridge di recovery dei record steering precedenti.
    autorevole, confronta il fencing token e registra `AttemptStarted`. Una revisione
    Running lasciata da un worker perso viene reclamata atomicamente solo da una
    lease con fence maggiore.
-3. Il registry risolve soltanto kind esatti o prefissi registrati. Il runtime consegna
-   all'adapter un `ExecutionAdapterContext`, mai `AppState`; il context entra nel
-   dominio registrato senza esporre store o client generici all'adapter.
+3. Il runtime controlla il budget prima del dispatch e non registra retry il cui wake
+   raggiunge o supera la deadline. Il registry risolve soltanto kind esatti o prefissi
+   registrati e consegna all'adapter un `ExecutionAdapterContext`, mai `AppState`; il
+   context entra nel dominio registrato senza esporre store o client generici.
 4. Ogni effetto non-read viene autorizzato e registrato prima del dispatch; replay,
    esito incerto e compensazione usano la receipt, non il testo del modello.
 5. Il runtime valida e committa esattamente un outcome per la revisione.
@@ -251,6 +252,9 @@ conversazione e non il lavoro in corso.
     `Failed(permanent, unsupported_execution_kind)`, senza fallback locale.
 12. Il task non può ampliare gli effetti del contratto: il context nega prima del
     dispatch ogni classe dichiarata ma assente dalla policy autorevole.
+13. Una deadline scaduta termina come `Failed(permanent,
+    execution_deadline_exceeded)` senza invocare l'adapter; un backoff non può creare
+    un wake alla deadline o oltre.
 
 ## Mapping oggi → contratto
 

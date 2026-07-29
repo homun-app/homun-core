@@ -176,44 +176,49 @@ impl ExecutionRuntime {
                 .contract
         };
 
-        let adapter_outcome = match self.registry.resolve(&contract.as_ref().kind) {
-            Some(adapter) => {
-                let adapter_state = state.clone();
-                let adapter_context = ExecutionAdapterContext::new(adapter_state, contract.clone());
-                if let Err(error) = adapter_context.authorize_declared_effects() {
-                    ExecutionOutcome::Failed {
-                        failure: ExecutionFailure::permanent(
-                            "execution_policy_denied",
-                            crate::redact_sensitive_text(&error.message),
-                        ),
-                    }
-                } else {
-                    let adapter_result =
-                        tokio::task::spawn_blocking(move || adapter.execute(&adapter_context))
-                            .await
-                            .map_err(|error| {
-                                runtime_error(format!("execution adapter join error: {error}"))
-                            });
-                    match adapter_result {
-                        Ok(Ok(outcome)) => outcome,
-                        Ok(Err(error)) | Err(error) => ExecutionOutcome::Failed {
-                            failure: ExecutionFailure::transient(
-                                "execution_adapter_failed",
+        let adapter_outcome = if contract_deadline_reached(&contract, OffsetDateTime::now_utc()) {
+            deadline_exceeded_outcome("Execution deadline elapsed before adapter dispatch.")
+        } else {
+            match self.registry.resolve(&contract.as_ref().kind) {
+                Some(adapter) => {
+                    let adapter_state = state.clone();
+                    let adapter_context =
+                        ExecutionAdapterContext::new(adapter_state, contract.clone());
+                    if let Err(error) = adapter_context.authorize_declared_effects() {
+                        ExecutionOutcome::Failed {
+                            failure: ExecutionFailure::permanent(
+                                "execution_policy_denied",
                                 crate::redact_sensitive_text(&error.message),
                             ),
-                        },
+                        }
+                    } else {
+                        let adapter_result =
+                            tokio::task::spawn_blocking(move || adapter.execute(&adapter_context))
+                                .await
+                                .map_err(|error| {
+                                    runtime_error(format!("execution adapter join error: {error}"))
+                                });
+                        match adapter_result {
+                            Ok(Ok(outcome)) => outcome,
+                            Ok(Err(error)) | Err(error) => ExecutionOutcome::Failed {
+                                failure: ExecutionFailure::transient(
+                                    "execution_adapter_failed",
+                                    crate::redact_sensitive_text(&error.message),
+                                ),
+                            },
+                        }
                     }
                 }
-            }
-            None => ExecutionOutcome::Failed {
-                failure: ExecutionFailure::permanent(
-                    "unsupported_execution_kind",
-                    format!(
-                        "No execution adapter is registered for kind `{}`.",
-                        contract.as_ref().kind
+                None => ExecutionOutcome::Failed {
+                    failure: ExecutionFailure::permanent(
+                        "unsupported_execution_kind",
+                        format!(
+                            "No execution adapter is registered for kind `{}`.",
+                            contract.as_ref().kind
+                        ),
                     ),
-                ),
-            },
+                },
+            }
         };
 
         let pre_checkpoint_task = current_task(state, &task)?;
@@ -344,12 +349,23 @@ fn normalize_transient_failure(
     };
     let record_ref = DurableDataRef::from_store_id(&checkpoint.checkpoint_id)
         .map_err(|error| runtime_error(error.to_string()))?;
+    let retry_at = OffsetDateTime::now_utc()
+        .saturating_add(time::Duration::seconds(
+            contract.as_ref().budget.backoff_seconds,
+        ))
+        .unix_timestamp();
+    if contract
+        .as_ref()
+        .budget
+        .deadline_unix_seconds
+        .is_some_and(|deadline| retry_at >= deadline)
+    {
+        return Ok(deadline_exceeded_outcome(
+            "Execution cannot be retried before its deadline.",
+        ));
+    }
     let wake = WakeCondition::At {
-        unix_seconds: OffsetDateTime::now_utc()
-            .saturating_add(time::Duration::seconds(
-                contract.as_ref().budget.backoff_seconds,
-            ))
-            .unix_timestamp(),
+        unix_seconds: retry_at,
     };
     let effect_receipts = store
         .list_effect_receipts_for_execution(
@@ -371,6 +387,20 @@ fn normalize_transient_failure(
         )
         .with_resume_context(contract.as_ref().objective.clone(), wake, effect_receipts),
     })
+}
+
+fn contract_deadline_reached(contract: &ValidatedExecutionContract, now: OffsetDateTime) -> bool {
+    contract
+        .as_ref()
+        .budget
+        .deadline_unix_seconds
+        .is_some_and(|deadline| now.unix_timestamp() >= deadline)
+}
+
+fn deadline_exceeded_outcome(detail: &'static str) -> ExecutionOutcome {
+    ExecutionOutcome::Failed {
+        failure: ExecutionFailure::permanent("execution_deadline_exceeded", detail),
+    }
 }
 
 pub(crate) fn is_lease_lost_error(error: &LocalTaskExecutionError) -> bool {
@@ -1699,6 +1729,65 @@ mod tests {
                 wake: WakeCondition::At { .. },
                 ..
             })
+        ));
+    }
+
+    #[tokio::test]
+    async fn elapsed_contract_deadline_prevents_adapter_dispatch() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut registry = TaskExecutorRegistry::new();
+        registry.register(
+            "capability.*",
+            Arc::new(RecordingAdapter {
+                execution_ids: calls.clone(),
+            }),
+        );
+        let runtime = ExecutionRuntime::new(registry);
+        let state = AppState::for_tests();
+        let initial = contract("capability.test", "deadline-elapsed-1");
+        let mut task = super::task_from_contract(&initial).expect("task from contract");
+        task.deadline = Some(OffsetDateTime::now_utc() - Duration::seconds(1));
+        let contract = super::contract_for_acquired_task(&task).expect("deadline contract");
+        insert_contract_task(&state, &contract);
+
+        let result = runtime
+            .execute(&state, contract)
+            .await
+            .expect("elapsed deadline becomes a canonical failure");
+
+        assert!(calls.lock().expect("calls").is_empty());
+        assert!(matches!(
+            result.outcome(),
+            ExecutionOutcome::Failed { failure }
+                if failure.code == "execution_deadline_exceeded"
+                    && failure.class == local_first_execution_protocol::FailureClass::Permanent
+        ));
+    }
+
+    #[tokio::test]
+    async fn retry_is_not_scheduled_beyond_the_contract_deadline() {
+        let mut registry = TaskExecutorRegistry::new();
+        registry.register("capability.*", Arc::new(TransientCanonicalAdapter));
+        let runtime = ExecutionRuntime::new(registry);
+        let state = AppState::for_tests();
+        let initial = contract("capability.test", "deadline-retry-1");
+        let mut task = super::task_from_contract(&initial).expect("task from contract");
+        task.retry_policy.max_attempts = 2;
+        task.retry_policy.backoff_seconds = 30;
+        task.deadline = Some(OffsetDateTime::now_utc() + Duration::seconds(5));
+        let contract = super::contract_for_acquired_task(&task).expect("deadline contract");
+        insert_contract_task(&state, &contract);
+
+        let result = runtime
+            .execute(&state, contract)
+            .await
+            .expect("retry past deadline becomes a canonical failure");
+
+        assert!(matches!(
+            result.outcome(),
+            ExecutionOutcome::Failed { failure }
+                if failure.code == "execution_deadline_exceeded"
+                    && failure.class == local_first_execution_protocol::FailureClass::Permanent
         ));
     }
 }
