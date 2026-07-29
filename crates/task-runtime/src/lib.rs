@@ -26,8 +26,8 @@ pub use checkpoint::{RetryController, TaskCheckpoint};
 pub use error::{TaskRuntimeError, TaskRuntimeResult};
 pub use execution_projection::{ExecutionProjection, ExecutionPublicEventKind};
 pub use execution_store::{
-    CreateExecution, ExecutionEvent, ExecutionJournalEvent, ExecutionRecord, OutcomeCommit,
-    StartExecutionRevision,
+    ContinueAsNewCommit, CreateExecution, ExecutionEvent, ExecutionJournalEvent, ExecutionRecord,
+    OutcomeCommit, PendingExecutionWake, StartExecutionRevision,
 };
 pub use executor::{ExecutorResult, FakeTaskExecutor, TaskExecutor};
 pub use facade::{RunReadySummary, TaskRuntime};
@@ -38,13 +38,13 @@ pub use resources::{ResourceGovernor, ResourceLimits};
 pub use scheduler::TaskScheduler;
 pub use store::TaskStore;
 pub use types::{
-    ActiveTurnProjection, AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus,
-    ApprovalPolicy, Automation, AutomationRun, AutomationSource, AutomationTrigger,
-    BrowserCheckpointRecord, EffectReceiptClaim, EventTrigger, ExecutionEffectReceipt,
-    NewAgentRun, NewBrowserCheckpoint, NewExecutionEffectReceipt, NewTurnSteering,
-    ObjectiveContractRecord, ObjectiveMode, ResourceClass, ResourceRequirement, RetryPolicy,
-    RuntimePlanRecord, SubagentInfo, TaskId, TaskPriority, TaskRecord, TaskStatus, TerminalWrite,
-    ThreadActivityProjection, ThreadAttention, TurnEvent, TurnEventKind, TurnSteeringRecord,
-    TurnSteeringStatus, UserId, WorkflowId, WorkspaceId,
+    ActiveTurnProjection, AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus, ApprovalPolicy,
+    Automation, AutomationRun, AutomationSource, AutomationTrigger, BrowserCheckpointRecord,
+    EffectReceiptClaim, EventTrigger, ExecutionEffectReceipt, NewAgentRun, NewBrowserCheckpoint,
+    NewExecutionEffectReceipt, NewTurnSteering, ObjectiveContractRecord, ObjectiveMode,
+    ResourceClass, ResourceRequirement, RetryPolicy, RuntimePlanRecord, SubagentInfo, TaskId,
+    TaskPriority, TaskRecord, TaskStatus, TerminalWrite, ThreadActivityProjection, ThreadAttention,
+    TurnEvent, TurnEventKind, TurnSteeringRecord, TurnSteeringStatus, UserId, WorkflowId,
+    WorkspaceId,
 };
 pub use ui::{TaskQueueSnapshot, TaskUiDetail, TaskUiItem, TaskUiReadModel};

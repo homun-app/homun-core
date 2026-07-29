@@ -1708,7 +1708,7 @@ fn populated_v11_database_migrates_to_current_schema() {
     drop(connection);
 
     let migrated = TaskStore::open(&path).unwrap();
-    assert_eq!(migrated.schema_version().unwrap(), 14);
+    assert_eq!(migrated.schema_version().unwrap(), 15);
     assert!(
         migrated
             .get_task(
@@ -1761,7 +1761,7 @@ fn initial_v12_execution_tables_migrate_to_current_schema() {
     let fixture = install_initial_v12_fixture(&path, false);
 
     let migrated = TaskStore::open(&path).unwrap();
-    assert_eq!(migrated.schema_version().unwrap(), 14);
+    assert_eq!(migrated.schema_version().unwrap(), 15);
     let events = migrated.execution_events("exec-initial-v12", 1).unwrap();
     assert_eq!(
         events
@@ -2028,7 +2028,7 @@ fn legacy_v12_wake_foreign_key_is_migrated_without_data_loss() {
     drop(connection);
 
     let migrated = TaskStore::open(&path).unwrap();
-    assert_eq!(migrated.schema_version().unwrap(), 14);
+    assert_eq!(migrated.schema_version().unwrap(), 15);
     let connection = raw_connection(&path);
     assert_eq!(
         connection

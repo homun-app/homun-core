@@ -7,19 +7,34 @@
 > Recovery browser: [design](superpowers/specs/2026-07-28-browser-checkpoint-recovery-design.md)
 > e [checklist operativa/verifiche](superpowers/plans/2026-07-28-browser-checkpoint-recovery.md).
 
-**Ultimo aggiornamento: 2026-07-28 (contratto generale objective/effect/resume/terminal).**
+**Ultimo aggiornamento: 2026-07-29 (journal, wake, receipt e resume canonici).**
 
 ---
 
 ## Invariante (una riga)
 
-In ogni istante del turno, **esattamente uno** tra `model | harness | user` possiede
-il control-flow. Quella verità è di **codice** (stato tipizzato + task status), non di
-prosa nel messaggio né di card UI-only.
+In ogni istante del turno, **esattamente uno** tra `runtime | adapter | user/evento`
+possiede il control-flow. La verità autorevole è la revisione nel journal
+`ExecutionContract -> ExecutionOutcome`; task status, agent run, messaggio e UI sono
+proiezioni ricostruibili, non owner indipendenti.
 
 ## Always Contract (legge)
 
-Non N protocolli per kind. Un solo tipo + chokepoint:
+Non N protocolli per kind. Un solo ingresso e quattro soli esiti:
+
+```text
+ExecutionRuntime::execute(ExecutionContract)
+  -> Completed(output, continuation?)
+   | Suspended(WakeCondition, CheckpointEnvelope)
+   | Cancelled(reason)
+   | Failed(class, code, redacted_detail)
+```
+
+Una ripresa consegna un `WakeDelivery`, incrementa `revision` e `fencing_token`,
+referenzia il checkpoint esatto e richiama lo stesso `execute` con lo stesso
+`execution_id`. Nessun adapter possiede una API di continuazione alternativa.
+
+`HitlEnvelope` è l'estensione dati usata dal loop quando il wake dipende dall'utente:
 
 ```text
 HitlEnvelope {
@@ -48,8 +63,8 @@ Legacy (`CHOICES`, `CLARIFY`, `MCP_CONFIRM`, …) **normalizzano** nello stesso 
 
 | Caso | Comportamento |
 |---|---|
-| Wait Free aperto + resolution per kind | `try_resume_open_wait` → ResumeBinding (`continue_current_work`) |
-| Confirm Hold | Approval API sullo stesso task |
+| Wait Free aperto + resolution per kind | consegna `WakeCondition::User` sullo stesso execution; la revisione ripresa costruisce `ResumeBinding(continue_current_work)` |
+| Confirm Hold | Approval API → `WakeCondition::Approval` sullo stesso execution |
 | Nessun wait | Semantic/routing normale |
 
 Steer (`Applying #n`) = solo mid-flight mentre il modello possiede il turno. **Mai** ResumeBinding.
@@ -57,22 +72,45 @@ Steer (`Applying #n`) = solo mid-flight mentre il modello possiede il turno. **M
 ## Fasi canoniche
 
 ```text
-Running
-  → AwaitingUser(envelope) // human-in-the-loop — ferma loop e scheduler-ready
-  → Resuming(wait_id)      // risoluzione strutturata → bind OpenWork (stesso lavoro)
-  → Parked(ModelUnavailable) // attesa macchina (steering/model-down) — ≠ AwaitingUser
-  → Synthesizing           // solo se !AwaitingUser && !Parked
-  → Delivered | Failed | Cancelled
+Ready -> Running
+  -> Suspended(User | Approval | At | Signal | Resource | ModelAvailable | EffectResolution)
+  -> Ready(revision N+1, checkpoint + WakeDelivery)
+  -> Completed | Failed | Cancelled
 ```
+
+`WaitingUserApproval`, `WaitingTime`, `WaitingResource`, delivery state del messaggio
+e objective status sono proiezioni. `Parked` non viene più prodotto dal nuovo loop:
+resta leggibile soltanto nel bridge di recovery dei record steering precedenti.
+
+## Sequenza operativa di riferimento
+
+1. La sorgente (`interactive`, channel, automation, connector) costruisce lo stesso
+   input e lo accoda al broker; prompt e placeholder visibile sono persistiti insieme.
+2. Il worker acquisisce task, risorse e lease; il runtime crea o carica il contratto
+   autorevole e confronta il fencing token.
+3. L'adapter del `kind` esegue il proprio dominio senza scrivere stati lifecycle.
+4. Ogni effetto non-read viene autorizzato e registrato prima del dispatch; replay,
+   esito incerto e compensazione usano la receipt, non il testo del modello.
+5. Il runtime valida e committa esattamente un outcome per la revisione.
+6. Il projector aggiorna task, run, messaggio, objective, HITL e UI. Se fallisce,
+   startup/recovery lo rigioca dal journal senza rieseguire l'adapter.
+7. Un outcome sospeso registra un solo wake. La delivery atomica crea la revisione
+   successiva con checkpoint e payload; il worker richiama lo stesso `execute`.
+8. Dopo crash, una revisione senza outcome viene recuperata secondo lease/receipt;
+   un effetto `Started` diventa `Uncertain`, mai un retry implicito.
+9. Storie troppo lunghe possono chiudere il parent e creare atomicamente un child
+   `continue-as-new`; rollback di dominio usa child compensation in ordine inverso.
 
 ## Elementi base (stesso scheletro per ogni kind)
 
 | Elemento | Ruolo |
 |---|---|
 | `HitlEnvelope` + `AwaitingUser` | Stop: ownership → user. Nessun nudge/synthesis/tool. Free = thread libero; Hold = approval. |
-| `UserResolution` | Click/RPC tipizzato (opzione, approve, clarify text). |
-| `ResumeBinding` | Il turn successivo **deve** riprendere `open_work`, non “nuovo obiettivo” / discovery a freddo; passa dal normale `validate_decision`. |
+| `UserResolution` | Click/RPC tipizzato che consegna il wake della revisione sospesa. |
+| `ResumeBinding` | La revisione successiva **deve** riprendere `open_work`, non creare un nuovo obiettivo; passa dal normale `validate_decision`. |
 | `OpenWork` | Carrier versionato della copia di recovery del contratto, piano residuo, capability e continuazione browser (warm o checkpoint). Non è una seconda SoT: il record objective attivo vince quando disponibile. |
+| `CheckpointEnvelope` | Identità execution/revision/kind, objective, wake esatto, receipt associati e riferimento al payload persistito. |
+| `EffectReceipt` | Stato durevole `Prepared -> Started -> Completed/Failed/Uncertain -> Compensated`; un `Started` interrotto non viene ritentato alla cieca. |
 
 **Estensioni (dati, non protocolli):**
 
@@ -185,13 +223,13 @@ conversazione e non il lavoro in corso.
 1. **Un solo ingresso** in `AwaitingUser`: `classify_no_tools_stop` → envelope validato.
 2. In `AwaitingUser`: **niente** tool rounds, nudge piano, `forced_synthesis`, auto-`step_advance` su step “scegli…”.
 3. UI: `waiting` / Waiting…, **non** Working/writing.
-4. Ripresa **solo** via ResumeBinding (`try_resume_open_wait`). Click Choice/Clarify = nuovo turn + wait consumato.
+4. Ripresa **solo** via `WakeDelivered` sulla stessa execution; `ResumeBinding` è la ricostruzione semantica interna della nuova revisione.
 5. Prima di aggiungere un meccanismo: **estende** `HitlEnvelope.kind` oppure **non entra**.
-6. `Parked` (macchina) ≠ `AwaitingUser` (persona).
+6. Attesa macchina = `Suspended(ModelAvailable|Resource)`; attesa persona = `Suspended(User|Approval)`.
 7. Sul resume: **vietata** discovery a freddo se esiste sessione warm o checkpoint attivo.
 8. Nessun path può costruire un `ValidatedSemanticDecision` di resume senza validator.
 9. Nessun tool viene esposto o eseguito fuori dalle classi effetto del contratto.
-10. Solo il broker terminale può completare/cancellare l’obiettivo, con revisione attesa.
+10. Solo il projector del journal può completare/cancellare task, run, messaggio e obiettivo, con revisione attesa.
 
 ## Mapping oggi → contratto
 
@@ -199,7 +237,7 @@ conversazione e non il lavoro in corso.
 |---|---|
 | `hitl::HitlEnvelope` + `classify_no_tools_stop` | **KEEP** — chokepoint Always |
 | `‹‹AWAIT_USER››` + legacy CHOICES/CLARIFY/confirm | **KEEP** — normalizzano |
-| `thread_hitl_waits` + `try_resume_open_wait` | **KEEP** — Free resume unico |
+| `thread_hitl_waits` + `try_resume_open_wait` | **COMPATIBILITY PROJECTION** — conserva UI/OpenWork; il resume autorevole è il wake del journal |
 | `TurnOutcome.awaiting_user` | **KEEP** — SoT tipizzata; Free marker iniettato se manca; gateway persiste Free wait da outcome |
 | `needs_clarification` bool | **REMOVED** — Clarify steering è `awaiting_user=Clarify Free` |
 | Prompt-only `CHOICE RESUME` | **RETIRED** come SoT |
@@ -221,10 +259,10 @@ conversazione e non il lavoro in corso.
 
 1. Qualsiasi `HitlEnvelope` → zero tool/nudge/synthesis dopo; wait persistito; UI waiting.
 2. Prosa senza envelope → al più un nudge-to-emit; **non** wait.
-3. Resolution → ResumeBinding; ≠ `new_objective`.
+3. Resolution → `WakeDelivered` e revisione N+1 dello stesso execution; quindi ResumeBinding, mai `new_objective`.
 4. OpenWork.browser warm o checkpoint → `browse` resta live e no cold discovery; davvero morto → harness dichiara.
 5. Confirm Hold invariato.
 6. Messaggio con wait Free aperto **non** crea steering `Applying #n`.
 7. Resume conserva policy effetti e Memory/Vault intent senza escalation.
 8. Policy mista espone ed esegue solo le classi autorizzate.
-9. Delivery completa la revisione corrente; wait/park/no-answer restano active; revisione stale non transiziona.
+9. Outcome commit completa la revisione corrente; un wake apre N+1; una revisione stale non transiziona né ripete effetti.

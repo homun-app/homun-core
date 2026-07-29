@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-28
 
-**Status:** Implemented and verified; browser-page recovery remains an explicit residual item.
+**Status:** Integrated into the unified execution journal; adapter-specific long-running policies remain explicit extension work.
 
 ## Purpose
 
@@ -119,7 +119,7 @@ Automated tests must prove:
 
 This change completes the contract convergence discovered by the live test. It does not claim that every broader roadmap item is implemented. After the smoke, the implementation is audited against the prior security, sandbox, Vault, connector, long-running, stream ownership, and open-source comparison findings; any remaining item is reported explicitly rather than inferred from passing tests.
 
-## Implementation audit (2026-07-28)
+## Implementation audit (2026-07-29)
 
 Implemented and verified:
 
@@ -129,8 +129,14 @@ Implemented and verified:
 - browser form selection/fill is `external_write` while final payment keeps its independent one-use gate;
 - every Free wait stores schema version, objective revision, exact effects, memory intent and bounded remaining plan;
 - tool exposure, dynamic discovery and dispatch consume one `ObjectiveEffectPolicy`;
-- delivered/cancelled outcomes transition only the owned objective revision;
-- Rust workspace tests, warning-free build, desktop build/tests and browser-runtime tests pass.
+- every adapter returns the same `ExecutionOutcome`; channel and automation enter
+  through the same broker/runtime path as interactive chat;
+- user, approval, timer, signal, model and uncertain-effect wakes resume the same
+  execution ID at a fenced new revision;
+- resumed chat loads the exact checkpoint referenced by the prior journal revision;
+- consequential effects share one durable receipt lifecycle, while sandbox, Vault,
+  payment, browser and connector gates remain stricter domain policy layers;
+- delivered/cancelled outcomes transition only the owned objective revision.
 
 Live V5 evidence:
 
@@ -139,8 +145,14 @@ Live V5 evidence:
 - all waits were resolved and task/run projections terminalized at each wait boundary;
 - cancelling the final failed browser attempt converged objective=`cancelled`, task=`cancelled`, run=`aborted`, message=`cancelled`.
 
-Not implemented by this change:
+Current bounded extension points:
 
-- a restorable browser page/form checkpoint. During the post-choice phase the live session reset from generation 76 to 1, so the draft form could not be completed;
-- exactly-once recovery for an arbitrary external action whose remote outcome is unknown after process/session loss;
-- a single physical status row replacing task, run, message and objective projections. They now converge at broker boundaries but remain separate read models.
+- `continue-as-new` is atomic and validated in the store; each long-running adapter
+  still owns its compaction threshold and child payload;
+- compensation ordering and completion evidence are durable; each domain adapter
+  still owns interpretation of its rollback recipe;
+- task, run, message and objective remain separate read models intentionally. Their
+  authority is removed, not their UI/storage utility: the journal projector rebuilds
+  and reconciles them;
+- old persisted `Parked` steering records remain recoverable through a migration
+  bridge, but current execution code emits `Suspended(ModelAvailable)` instead.

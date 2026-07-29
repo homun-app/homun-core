@@ -1,7 +1,7 @@
+use local_first_execution_protocol::{EffectClass, EffectReceiptRef, EffectReceiptStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
-use local_first_execution_protocol::{EffectClass, EffectReceiptRef, EffectReceiptStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct UserId(String);

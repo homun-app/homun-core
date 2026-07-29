@@ -375,11 +375,20 @@ mod tests {
     fn sandbox_mode_parses_forgivingly_and_defaults_to_workspace_write() {
         assert_eq!(SandboxMode::parse("read-only"), SandboxMode::ReadOnly);
         assert_eq!(SandboxMode::parse("readonly"), SandboxMode::ReadOnly);
-        assert_eq!(SandboxMode::parse("workspace-write"), SandboxMode::WorkspaceWrite);
-        assert_eq!(SandboxMode::parse("workspace_write"), SandboxMode::WorkspaceWrite);
+        assert_eq!(
+            SandboxMode::parse("workspace-write"),
+            SandboxMode::WorkspaceWrite
+        );
+        assert_eq!(
+            SandboxMode::parse("workspace_write"),
+            SandboxMode::WorkspaceWrite
+        );
         // Explicit danger tokens are the ONLY way to reach Danger.
         assert_eq!(SandboxMode::parse("danger"), SandboxMode::Danger);
-        assert_eq!(SandboxMode::parse("danger-full-access"), SandboxMode::Danger);
+        assert_eq!(
+            SandboxMode::parse("danger-full-access"),
+            SandboxMode::Danger
+        );
         assert_eq!(SandboxMode::parse("DANGER"), SandboxMode::Danger);
         // Reconciliation divergence from source: unknown/empty → WorkspaceWrite (safe
         // default on this line), NOT Danger.
@@ -416,17 +425,38 @@ mod tests {
             SandboxMode::Danger.resolve(Some(&root)),
             SandboxPolicy::DangerFullAccess
         );
-        assert_eq!(SandboxMode::Danger.resolve(None), SandboxPolicy::DangerFullAccess);
+        assert_eq!(
+            SandboxMode::Danger.resolve(None),
+            SandboxPolicy::DangerFullAccess
+        );
     }
 
     #[test]
     fn ask_for_approval_parses_forgivingly_and_defaults_to_on_request() {
-        assert_eq!(AskForApproval::parse("untrusted"), AskForApproval::UnlessTrusted);
-        assert_eq!(AskForApproval::parse("unless-trusted"), AskForApproval::UnlessTrusted);
-        assert_eq!(AskForApproval::parse("unless_trusted"), AskForApproval::UnlessTrusted);
-        assert_eq!(AskForApproval::parse("on-failure"), AskForApproval::OnFailure);
-        assert_eq!(AskForApproval::parse("on_failure"), AskForApproval::OnFailure);
-        assert_eq!(AskForApproval::parse("on-request"), AskForApproval::OnRequest);
+        assert_eq!(
+            AskForApproval::parse("untrusted"),
+            AskForApproval::UnlessTrusted
+        );
+        assert_eq!(
+            AskForApproval::parse("unless-trusted"),
+            AskForApproval::UnlessTrusted
+        );
+        assert_eq!(
+            AskForApproval::parse("unless_trusted"),
+            AskForApproval::UnlessTrusted
+        );
+        assert_eq!(
+            AskForApproval::parse("on-failure"),
+            AskForApproval::OnFailure
+        );
+        assert_eq!(
+            AskForApproval::parse("on_failure"),
+            AskForApproval::OnFailure
+        );
+        assert_eq!(
+            AskForApproval::parse("on-request"),
+            AskForApproval::OnRequest
+        );
         assert_eq!(AskForApproval::parse("never"), AskForApproval::Never);
         // Unknown / empty → the safe-but-usable default.
         assert_eq!(AskForApproval::parse("garbage"), AskForApproval::OnRequest);
@@ -517,12 +547,18 @@ mod tests {
     fn unless_trusted_and_on_failure_follow_the_write_table() {
         for approval in [AskForApproval::UnlessTrusted, AskForApproval::OnFailure] {
             let ask = assess_tool_safety(approval, &SandboxPolicy::ReadOnly, true, false);
-            assert_eq!(ask, SafetyDecision::AskUser, "{approval:?} + unauth write → AskUser");
+            assert_eq!(
+                ask,
+                SafetyDecision::AskUser,
+                "{approval:?} + unauth write → AskUser"
+            );
 
             let auto = assess_tool_safety(approval, &SandboxPolicy::ReadOnly, true, true);
             assert_eq!(
                 auto,
-                SafetyDecision::AutoApprove { sandbox: expected_fenced_kind() },
+                SafetyDecision::AutoApprove {
+                    sandbox: expected_fenced_kind()
+                },
                 "{approval:?} + pre-authorized write → AutoApprove"
             );
         }
@@ -532,7 +568,10 @@ mod tests {
 
     #[test]
     fn danger_full_access_maps_to_no_fence() {
-        assert_eq!(sandbox_kind_for(&SandboxPolicy::DangerFullAccess), SandboxKind::None);
+        assert_eq!(
+            sandbox_kind_for(&SandboxPolicy::DangerFullAccess),
+            SandboxKind::None
+        );
     }
 
     #[test]
@@ -543,13 +582,21 @@ mod tests {
             false,
             false,
         );
-        assert_eq!(decision, SafetyDecision::AutoApprove { sandbox: SandboxKind::None });
+        assert_eq!(
+            decision,
+            SafetyDecision::AutoApprove {
+                sandbox: SandboxKind::None
+            }
+        );
     }
 
     #[cfg(target_os = "macos")]
     #[test]
     fn workspace_write_and_read_only_map_to_seatbelt_on_macos() {
-        assert_eq!(sandbox_kind_for(&SandboxPolicy::ReadOnly), SandboxKind::MacosSeatbelt);
+        assert_eq!(
+            sandbox_kind_for(&SandboxPolicy::ReadOnly),
+            SandboxKind::MacosSeatbelt
+        );
         assert_eq!(
             sandbox_kind_for(&SandboxPolicy::WorkspaceWrite {
                 writable_roots: vec![PathBuf::from("/ws")],
@@ -562,7 +609,10 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn workspace_write_and_read_only_map_to_seccomp_on_linux() {
-        assert_eq!(sandbox_kind_for(&SandboxPolicy::ReadOnly), SandboxKind::LinuxSeccomp);
+        assert_eq!(
+            sandbox_kind_for(&SandboxPolicy::ReadOnly),
+            SandboxKind::LinuxSeccomp
+        );
         assert_eq!(
             sandbox_kind_for(&SandboxPolicy::WorkspaceWrite {
                 writable_roots: vec![PathBuf::from("/ws")],
@@ -586,7 +636,11 @@ mod tests {
         };
         assert_eq!(a, b);
 
-        if let SandboxPolicy::WorkspaceWrite { writable_roots, network_access } = &a {
+        if let SandboxPolicy::WorkspaceWrite {
+            writable_roots,
+            network_access,
+        } = &a
+        {
             assert_eq!(writable_roots.len(), 2);
             assert!(*network_access);
         } else {
@@ -622,7 +676,12 @@ mod tests {
 
     #[test]
     fn read_tools_are_read_only() {
-        for name in ["read_file", "read_text_file", "list_files", "list_directory"] {
+        for name in [
+            "read_file",
+            "read_text_file",
+            "list_files",
+            "list_directory",
+        ] {
             assert_eq!(
                 tool_footprint(name, &serde_json::json!({"path": "/x"})),
                 ToolFootprint::ReadOnly,
@@ -636,7 +695,9 @@ mod tests {
         for name in ["write_file", "edit_file"] {
             assert_eq!(
                 tool_footprint(name, &serde_json::json!({"path": "/x"})),
-                ToolFootprint::Write { path: "/x".to_string() },
+                ToolFootprint::Write {
+                    path: "/x".to_string()
+                },
                 "{name} should capture path"
             );
         }
@@ -660,11 +721,15 @@ mod tests {
         // Missing / non-string path → empty string (resolution happens at the wiring site).
         assert_eq!(
             tool_footprint("write_file", &serde_json::json!({})),
-            ToolFootprint::Write { path: String::new() }
+            ToolFootprint::Write {
+                path: String::new()
+            }
         );
         assert_eq!(
             tool_footprint("edit_file", &serde_json::json!({"path": 42})),
-            ToolFootprint::Write { path: String::new() }
+            ToolFootprint::Write {
+                path: String::new()
+            }
         );
     }
 
@@ -715,7 +780,9 @@ mod tests {
     fn danger_full_access_never_fences_any_footprint() {
         for fp in [
             ToolFootprint::ReadOnly,
-            ToolFootprint::Write { path: "/anywhere".to_string() },
+            ToolFootprint::Write {
+                path: "/anywhere".to_string(),
+            },
             ToolFootprint::Exec,
             ToolFootprint::Contained,
             ToolFootprint::NonFilesystem,
@@ -755,7 +822,9 @@ mod tests {
     fn write_under_read_only_policy_would_fence() {
         assert_eq!(
             sandbox_shadow_verdict(
-                &ToolFootprint::Write { path: "/x".to_string() },
+                &ToolFootprint::Write {
+                    path: "/x".to_string()
+                },
                 &SandboxPolicy::ReadOnly,
                 // is_under_writable_root is irrelevant under a read-only policy.
                 true,
@@ -771,7 +840,9 @@ mod tests {
         // Inside a writable root → Allow.
         assert_eq!(
             sandbox_shadow_verdict(
-                &ToolFootprint::Write { path: "/ws/a".to_string() },
+                &ToolFootprint::Write {
+                    path: "/ws/a".to_string()
+                },
                 &ws_policy(),
                 /* is_under_writable_root */ true,
             ),
@@ -780,7 +851,9 @@ mod tests {
         // Outside → WouldFence.
         assert_eq!(
             sandbox_shadow_verdict(
-                &ToolFootprint::Write { path: "/etc/passwd".to_string() },
+                &ToolFootprint::Write {
+                    path: "/etc/passwd".to_string()
+                },
                 &ws_policy(),
                 /* is_under_writable_root */ false,
             ),

@@ -161,10 +161,8 @@ mod tests {
     use super::*;
 
     fn unique_tmp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "homun-integrity-test-{tag}-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("homun-integrity-test-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create tmp dir");
         dir
@@ -175,10 +173,14 @@ mod tests {
         let dir = unique_tmp_dir("healthy");
         let db = dir.join("ok.sqlite");
         let conn = Connection::open(&db).expect("create db");
-        conn.execute("CREATE TABLE t (id INTEGER)", []).expect("ddl");
+        conn.execute("CREATE TABLE t (id INTEGER)", [])
+            .expect("ddl");
         drop(conn);
 
-        let recovered = ensure_store_integrity(&[StoreCheck { name: "ok", path: db.clone() }]);
+        let recovered = ensure_store_integrity(&[StoreCheck {
+            name: "ok",
+            path: db.clone(),
+        }]);
         assert!(recovered.is_empty());
         assert!(db.exists());
         let _ = std::fs::remove_dir_all(&dir);
@@ -191,7 +193,10 @@ mod tests {
         // Bigger than a valid empty DB and NOT starting with the SQLite magic.
         std::fs::write(&db, vec![0x42; 8192]).expect("write garbage");
 
-        let recovered = ensure_store_integrity(&[StoreCheck { name: "broken", path: db.clone() }]);
+        let recovered = ensure_store_integrity(&[StoreCheck {
+            name: "broken",
+            path: db.clone(),
+        }]);
         assert_eq!(recovered, vec!["broken".to_string()]);
         assert!(!db.exists(), "corrupt file must be moved away");
         let bak_exists = std::fs::read_dir(&dir)
@@ -208,7 +213,10 @@ mod tests {
     fn missing_store_is_healthy() {
         let dir = unique_tmp_dir("missing");
         let db = dir.join("never-created.sqlite");
-        let recovered = ensure_store_integrity(&[StoreCheck { name: "missing", path: db }]);
+        let recovered = ensure_store_integrity(&[StoreCheck {
+            name: "missing",
+            path: db,
+        }]);
         assert!(recovered.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -222,21 +230,33 @@ mod tests {
         let dir = unique_tmp_dir("locked");
         let db = dir.join("live.sqlite");
         let writer = Connection::open(&db).expect("create db");
-        writer.execute("CREATE TABLE t (id INTEGER)", []).expect("ddl");
+        writer
+            .execute("CREATE TABLE t (id INTEGER)", [])
+            .expect("ddl");
         // Hold a write lock for the duration of the sweep. A short busy_timeout
         // in classify() means this returns quickly as busy, not a hang.
-        writer.execute_batch("BEGIN EXCLUSIVE").expect("acquire exclusive lock");
+        writer
+            .execute_batch("BEGIN EXCLUSIVE")
+            .expect("acquire exclusive lock");
 
-        let recovered =
-            ensure_store_integrity(&[StoreCheck { name: "live", path: db.clone() }]);
+        let recovered = ensure_store_integrity(&[StoreCheck {
+            name: "live",
+            path: db.clone(),
+        }]);
 
-        assert!(recovered.is_empty(), "locked healthy store must not be reported recovered");
+        assert!(
+            recovered.is_empty(),
+            "locked healthy store must not be reported recovered"
+        );
         assert!(db.exists(), "locked healthy store must stay in place");
         let bak_exists = std::fs::read_dir(&dir)
             .expect("read dir")
             .filter_map(Result::ok)
             .any(|e| e.file_name().to_string_lossy().contains(".corrupt-"));
-        assert!(!bak_exists, "a healthy-but-locked store must NOT be quarantined");
+        assert!(
+            !bak_exists,
+            "a healthy-but-locked store must NOT be quarantined"
+        );
 
         drop(writer);
         let _ = std::fs::remove_dir_all(&dir);

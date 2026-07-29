@@ -419,6 +419,20 @@ fn validate_outcome(
             checkpoint.data_ref.validate().map_err(|reason| {
                 ProtocolValidationError::InvalidCheckpointDataReference { reason }
             })?;
+            if checkpoint
+                .objective
+                .as_ref()
+                .is_some_and(|objective| Some(objective) != contract.objective.as_ref())
+            {
+                return Err(ProtocolValidationError::CheckpointObjectiveMismatch);
+            }
+            if checkpoint
+                .wake
+                .as_ref()
+                .is_some_and(|checkpoint_wake| checkpoint_wake != wake)
+            {
+                return Err(ProtocolValidationError::CheckpointWakeMismatch);
+            }
             Ok(())
         }
         ExecutionOutcome::Failed { failure } if is_blank(&failure.code) => {
@@ -795,6 +809,15 @@ pub struct CheckpointEnvelope {
     pub producer_schema_version: u32,
     /// Reference to checkpoint data stored outside the canonical journal.
     pub data_ref: CheckpointDataRef,
+    /// Objective lineage captured when the checkpoint was produced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub objective: Option<ObjectiveRef>,
+    /// Exact condition that must be satisfied before this checkpoint resumes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake: Option<WakeCondition>,
+    /// Consequential effects already associated with this execution revision.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effect_receipts: Vec<EffectReceiptRef>,
 }
 
 impl CheckpointEnvelope {
@@ -816,7 +839,23 @@ impl CheckpointEnvelope {
             protocol_schema_version: PROTOCOL_SCHEMA_VERSION,
             producer_schema_version,
             data_ref,
+            objective: None,
+            wake: None,
+            effect_receipts: Vec::new(),
         }
+    }
+
+    /// Attaches the durable lineage and effect context required for a new resume.
+    pub fn with_resume_context(
+        mut self,
+        objective: Option<ObjectiveRef>,
+        wake: WakeCondition,
+        effect_receipts: Vec<EffectReceiptRef>,
+    ) -> Self {
+        self.objective = objective;
+        self.wake = Some(wake);
+        self.effect_receipts = effect_receipts;
+        self
     }
 
     /// Returns the canonical checkpoint identity derived from execution and revision.
@@ -1184,6 +1223,10 @@ pub enum ProtocolValidationError {
         /// Structural reference validation failure.
         reason: ReferenceValidationError,
     },
+    /// A checkpoint captures a different objective lineage than its contract.
+    CheckpointObjectiveMismatch,
+    /// A checkpoint captures a different wake condition than its suspended outcome.
+    CheckpointWakeMismatch,
     /// A failed outcome contains no stable failure code.
     EmptyFailureCode,
 }

@@ -139,12 +139,7 @@ pub fn collect_image_urls(messages: &[Value]) -> Vec<String> {
         .filter_map(|m| m.get("content")?.as_array())
         .flatten()
         .filter(|p| p.get("type").and_then(|t| t.as_str()) == Some("image_url"))
-        .filter_map(|p| {
-            p.get("image_url")?
-                .get("url")?
-                .as_str()
-                .map(str::to_string)
-        })
+        .filter_map(|p| p.get("image_url")?.get("url")?.as_str().map(str::to_string))
         .collect()
 }
 
@@ -171,8 +166,7 @@ pub fn replace_images_with_descriptions(messages: &mut [Value], descriptions: &[
     // An image the sub-turn failed on arrives here as an empty string (the slot is KEPT so the
     // remaining descriptions stay aligned with the remaining images). Empty and missing mean the same
     // thing and get the same honest note.
-    const UNDESCRIBED: &str =
-        "(the vision model could not describe this image — tell the user you were unable to read it)";
+    const UNDESCRIBED: &str = "(the vision model could not describe this image — tell the user you were unable to read it)";
     let mut seen = 0usize;
     for message in messages.iter_mut() {
         let Some(parts) = message.get_mut("content").and_then(|c| c.as_array_mut()) else {
@@ -478,16 +472,22 @@ mod tests {
             &["a cat".to_string(), "a dog".to_string()],
         );
         let parts = messages[1]["content"].as_array().unwrap();
-        assert_eq!(parts.len(), 3, "the text part survives, the images are swapped");
+        assert_eq!(
+            parts.len(),
+            3,
+            "the text part survives, the images are swapped"
+        );
         assert!(parts.iter().all(|p| p["type"] == "text"));
         assert_eq!(parts[0]["text"], "describe them");
         assert!(parts[1]["text"].as_str().unwrap().contains("a cat"));
         assert!(parts[2]["text"].as_str().unwrap().contains("a dog"));
         // The manager must know it is reading, not seeing.
-        assert!(parts[1]["text"]
-            .as_str()
-            .unwrap()
-            .contains("you cannot see images"));
+        assert!(
+            parts[1]["text"]
+                .as_str()
+                .unwrap()
+                .contains("you cannot see images")
+        );
     }
 
     #[test]
@@ -502,6 +502,11 @@ mod tests {
         replace_images_with_descriptions(&mut messages, &[]);
         let parts = messages[0]["content"].as_array().unwrap();
         assert_eq!(parts.len(), 1);
-        assert!(parts[0]["text"].as_str().unwrap().contains("could not describe"));
+        assert!(
+            parts[0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("could not describe")
+        );
     }
 }

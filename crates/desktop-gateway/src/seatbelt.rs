@@ -201,21 +201,39 @@ mod tests {
         assert!(profile.contains("(version 1)"), "missing version");
         assert!(profile.contains("(deny default)"), "missing deny default");
         assert!(profile.contains("(allow file-read*)"), "missing file-read*");
-        assert!(profile.contains("(allow process-exec)"), "missing process-exec");
-        assert!(profile.contains("(allow process-fork)"), "missing process-fork");
-        assert!(profile.contains("(allow signal (target self))"), "missing signal self");
-        assert!(profile.contains("(allow sysctl-read)"), "missing sysctl-read");
+        assert!(
+            profile.contains("(allow process-exec)"),
+            "missing process-exec"
+        );
+        assert!(
+            profile.contains("(allow process-fork)"),
+            "missing process-fork"
+        );
+        assert!(
+            profile.contains("(allow signal (target self))"),
+            "missing signal self"
+        );
+        assert!(
+            profile.contains("(allow sysctl-read)"),
+            "missing sysctl-read"
+        );
 
         // Writes are allowed only for the temp dir — the file-write* block exists
         // and contains the tmp subpath, but NO project-root subpath.
-        assert!(profile.contains("(allow file-write*"), "missing file-write* block");
+        assert!(
+            profile.contains("(allow file-write*"),
+            "missing file-write* block"
+        );
         assert!(
             profile.contains(&tmp_subpath_line()),
             "read-only must still allow scratch writes to the temp dir"
         );
 
         // Read-only means no network allow either.
-        assert!(!profile.contains("(allow network*)"), "read-only must not allow network");
+        assert!(
+            !profile.contains("(allow network*)"),
+            "read-only must not allow network"
+        );
     }
 
     #[test]
@@ -239,7 +257,10 @@ mod tests {
         })
         .expect("WorkspaceWrite → Some");
 
-        assert!(profile.contains("(allow file-write*"), "missing file-write* block");
+        assert!(
+            profile.contains("(allow file-write*"),
+            "missing file-write* block"
+        );
         assert!(
             profile.contains("(subpath \"/Users/x/proj\")"),
             "missing the writable-root subpath:\n{profile}"
@@ -277,8 +298,14 @@ mod tests {
             network_access: false,
         })
         .unwrap();
-        assert!(profile.contains("(subpath \"/Users/x/proj\")"), "first root missing");
-        assert!(profile.contains("(subpath \"/Users/x/other\")"), "second root missing");
+        assert!(
+            profile.contains("(subpath \"/Users/x/proj\")"),
+            "first root missing"
+        );
+        assert!(
+            profile.contains("(subpath \"/Users/x/other\")"),
+            "second root missing"
+        );
     }
 
     // ---- escape_sb_path -------------------------------------------------------

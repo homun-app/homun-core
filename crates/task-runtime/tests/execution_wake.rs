@@ -227,6 +227,132 @@ fn terminal_outcome_does_not_register_a_wake() {
 }
 
 #[test]
+fn exact_typed_wake_delivery_resumes_the_same_execution_revision() {
+    let (path, store) = file_store();
+    let condition = WakeCondition::User {
+        wait_ref: "wait-1".into(),
+    };
+    suspend_execution(&store, "exec-user-wake", condition.clone());
+    let payload = json!({"type": "user", "answer": "continue"});
+
+    assert_eq!(
+        store.deliver_execution_wake(&condition, &payload).unwrap(),
+        1
+    );
+    assert_eq!(
+        store.deliver_execution_wake(&condition, &payload).unwrap(),
+        0
+    );
+
+    let revision = store
+        .execution_revision("exec-user-wake", 2)
+        .unwrap()
+        .expect("wake delivery creates revision two");
+    assert_eq!(revision.contract.as_ref().revision, 2);
+    assert_eq!(
+        revision.contract.as_ref().wake.as_ref().unwrap().payload,
+        payload
+    );
+
+    drop(store);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn exact_typed_wake_retry_rejects_a_different_payload() {
+    let (path, store) = file_store();
+    let condition = WakeCondition::Approval {
+        approval_ref: "approval-1".into(),
+    };
+    suspend_execution(&store, "exec-approval-wake", condition.clone());
+    store
+        .deliver_execution_wake(&condition, &json!({"approved": true}))
+        .unwrap();
+
+    assert!(matches!(
+        store.deliver_execution_wake(&condition, &json!({"approved": false})),
+        Err(TaskRuntimeError::Conflict(_))
+    ));
+
+    drop(store);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn pending_wakes_are_discovered_by_execution_scope() {
+    let (path, store) = file_store();
+    let condition = WakeCondition::User {
+        wait_ref: "wait-scoped".into(),
+    };
+    suspend_execution(&store, "exec-scoped-wake", condition.clone());
+
+    let wakes = store
+        .pending_execution_wakes("user-1", "workspace-1", Some("thread-1"))
+        .unwrap();
+    assert_eq!(wakes.len(), 1);
+    assert_eq!(wakes[0].execution_id, "exec-scoped-wake");
+    assert_eq!(wakes[0].revision, 1);
+    assert_eq!(wakes[0].condition, condition);
+    assert!(
+        store
+            .pending_execution_wakes("user-1", "workspace-1", Some("other-thread"))
+            .unwrap()
+            .is_empty()
+    );
+
+    drop(store);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn wake_delivery_rolls_back_its_external_projection_callback() {
+    let (path, store) = file_store();
+    raw_connection(&path)
+        .execute_batch("CREATE TABLE wake_projection (value TEXT NOT NULL);")
+        .unwrap();
+    let condition = WakeCondition::User {
+        wait_ref: "wait-atomic".into(),
+    };
+    suspend_execution(&store, "exec-atomic-wake", condition.clone());
+
+    let result =
+        store.deliver_execution_wake_with(&condition, &json!({"answer": "continue"}), |tx| {
+            tx.execute("INSERT INTO wake_projection (value) VALUES ('written')", [])?;
+            Err(TaskRuntimeError::Store("projection rejected".into()))
+        });
+    assert!(matches!(result, Err(TaskRuntimeError::Store(_))));
+
+    let connection = raw_connection(&path);
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM wake_projection", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT status FROM execution_wakes WHERE execution_id = ?1",
+                ["exec-atomic-wake"],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+        "pending"
+    );
+    assert!(
+        store
+            .execution_revision("exec-atomic-wake", 2)
+            .unwrap()
+            .is_none()
+    );
+
+    drop(connection);
+    drop(store);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn wake_registration_failure_rolls_back_the_suspended_outcome() {
     let (path, store) = file_store();
     let contract = contract("exec-wake-registration-atomic");
@@ -1066,7 +1192,7 @@ fn v13_upgrade_adds_wake_evidence_to_an_authenticated_legacy_revision_start() {
     drop(connection);
 
     let migrated = TaskStore::open(&path).unwrap();
-    assert_eq!(migrated.schema_version().unwrap(), 14);
+    assert_eq!(migrated.schema_version().unwrap(), 15);
     assert_eq!(
         migrated
             .execution("exec-v13-wake-upgrade")

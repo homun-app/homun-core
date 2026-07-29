@@ -72,3 +72,23 @@ fn every_gateway_adapter_returns_only_the_canonical_outcome() {
         "non-chat adapters still expose a competing lifecycle contract: {violations:?}"
     );
 }
+
+#[test]
+fn channel_and_stream_markers_do_not_own_lifecycle() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    assert!(!main.contains("persist_legacy_hitl_wait_from_parts"));
+
+    let inbound = main
+        .split("async fn handle_channel_inbound")
+        .nth(1)
+        .expect("channel inbound handler")
+        .split("fn contact_handle")
+        .next()
+        .expect("channel inbound handler end");
+    assert!(inbound.contains("enqueue_chat_turn_core"));
+    assert!(inbound.contains("TurnApproval::Confirm"));
+    assert!(inbound.contains("TurnApproval::ReadOnly"));
+    assert!(!inbound.contains("run_agent_turn_into_message("));
+    assert!(!inbound.contains("finalize_assistant_message_with_delivery_state"));
+}

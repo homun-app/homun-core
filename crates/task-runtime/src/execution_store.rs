@@ -80,6 +80,25 @@ pub enum OutcomeCommit {
     Existing(ExecutionRecord),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ContinueAsNewCommit {
+    Inserted {
+        completed: ExecutionRecord,
+        continuation: ExecutionRecord,
+    },
+    Existing {
+        completed: ExecutionRecord,
+        continuation: ExecutionRecord,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingExecutionWake {
+    pub execution_id: String,
+    pub revision: u64,
+    pub condition: WakeCondition,
+}
+
 struct FoldedExecution {
     record: ExecutionRecord,
     outcome_committed_at: Option<i64>,
@@ -245,6 +264,21 @@ impl TaskStore {
         };
         tx.commit()?;
         Ok(Some(record))
+    }
+
+    pub fn execution_revision(
+        &self,
+        execution_id: &str,
+        revision: u64,
+    ) -> TaskRuntimeResult<Option<ExecutionRecord>> {
+        let execution_id = validated_text(execution_id, "execution id")?;
+        sqlite_integer(revision, "execution revision")?;
+        let Some((_, journal)) = load_validated_journal_on(&self.connection, execution_id)? else {
+            return Ok(None);
+        };
+        Ok(journal
+            .revision(revision)
+            .map(|folded| folded.record.clone()))
     }
 
     pub fn committed_executions(&self, limit: usize) -> TaskRuntimeResult<Vec<ExecutionRecord>> {
@@ -466,6 +500,142 @@ impl TaskStore {
         Ok(OutcomeCommit::Inserted(record))
     }
 
+    pub fn continue_execution_as_new(
+        &self,
+        completed: &ValidatedExecutionOutcome,
+        continuation: &ValidatedExecutionContract,
+    ) -> TaskRuntimeResult<ContinueAsNewCommit> {
+        let parent_id = completed.binding().execution_id();
+        let continuation_id = match completed.as_ref() {
+            ExecutionOutcome::Completed {
+                continuation: Some(continuation),
+                ..
+            } => continuation.execution_id.as_str(),
+            _ => {
+                return Err(TaskRuntimeError::InvalidTransition(
+                    "continue-as-new requires a completed outcome with a continuation".into(),
+                ));
+            }
+        };
+        let next = continuation.as_ref();
+        if continuation_id != next.execution_id
+            || next.execution_id == parent_id
+            || next.parent_execution_id.as_deref() != Some(parent_id)
+            || next.revision != 1
+            || next.wake.is_some()
+        {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "continue-as-new child identity or initial state is invalid".into(),
+            ));
+        }
+
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let (_, parent_journal) = load_validated_journal_on(&tx, parent_id)?
+            .ok_or_else(|| TaskRuntimeError::NotFound(format!("execution journal {parent_id}")))?;
+        let parent = parent_journal
+            .revision(completed.binding().revision())
+            .ok_or_else(|| {
+                TaskRuntimeError::InvalidTransition(
+                    "continue-as-new parent revision is unknown".into(),
+                )
+            })?;
+        let parent_contract = parent.record.contract.as_ref();
+        if !completed.binding().matches_persisted(
+            &parent_contract.execution_id,
+            sqlite_integer(parent_contract.revision, "execution revision")?,
+            &parent_contract.kind,
+            sqlite_integer(parent_contract.fencing_token, "execution fencing token")?,
+        ) || next.kind != parent_contract.kind
+            || next.scope != parent_contract.scope
+            || next.objective != parent_contract.objective
+            || next.policy != parent_contract.policy
+            || next.resources != parent_contract.resources
+            || next.budget != parent_contract.budget
+        {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "continue-as-new must preserve execution lineage and policy".into(),
+            ));
+        }
+
+        let canonical_outcome = serde_json::to_string(completed.as_ref())?;
+        if let Some(existing) = parent.record.outcome.as_ref() {
+            if serde_json::to_string(existing.as_ref())? != canonical_outcome {
+                return Err(TaskRuntimeError::InvalidTransition(
+                    "continue-as-new parent already has a conflicting outcome".into(),
+                ));
+            }
+            let (_, child_journal) =
+                load_validated_journal_on(&tx, continuation_id)?.ok_or_else(|| {
+                    TaskRuntimeError::Store(
+                        "continued parent has no atomically created child execution".into(),
+                    )
+                })?;
+            let child = child_journal.latest()?.record.clone();
+            if child.contract.as_ref() != next {
+                return Err(TaskRuntimeError::Conflict(
+                    "continue-as-new child contract conflicts with the existing lineage".into(),
+                ));
+            }
+            let completed = parent.record.clone();
+            tx.commit()?;
+            return Ok(ContinueAsNewCommit::Existing {
+                completed,
+                continuation: child,
+            });
+        }
+        if parent_journal.latest()?.record.contract.as_ref().revision
+            != completed.binding().revision()
+        {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "cannot continue-as-new from a stale execution revision".into(),
+            ));
+        }
+        if load_validated_journal_on(&tx, continuation_id)?.is_some()
+            || projection_exists_on(&tx, continuation_id)?
+        {
+            return Err(TaskRuntimeError::Conflict(
+                "continue-as-new child identity already exists".into(),
+            ));
+        }
+
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        append_journal_event_on(
+            &tx,
+            parent_id,
+            sqlite_integer(completed.binding().revision(), "execution revision")?,
+            &ExecutionJournalEvent::OutcomeCommitted {
+                version: JOURNAL_EVENT_VERSION,
+                outcome: completed.as_ref().clone(),
+                state: ExecutionState::Completed,
+            },
+            now,
+        )?;
+        let (_, parent_journal) = load_validated_journal_on(&tx, parent_id)?
+            .ok_or_else(|| TaskRuntimeError::Store("continued parent disappeared".into()))?;
+        let completed_record = parent_journal.latest()?.record.clone();
+        write_projection_on(&tx, parent_journal.latest()?)?;
+
+        append_journal_event_on(
+            &tx,
+            continuation_id,
+            sqlite_integer(next.revision, "execution revision")?,
+            &ExecutionJournalEvent::Created {
+                version: JOURNAL_EVENT_VERSION,
+                contract: next.clone(),
+            },
+            now,
+        )?;
+        let (_, child_journal) = load_validated_journal_on(&tx, continuation_id)?
+            .ok_or_else(|| TaskRuntimeError::Store("continued child disappeared".into()))?;
+        let child_record = child_journal.latest()?.record.clone();
+        write_projection_on(&tx, child_journal.latest()?)?;
+        tx.commit()?;
+        Ok(ContinueAsNewCommit::Inserted {
+            completed: completed_record,
+            continuation: child_record,
+        })
+    }
+
     pub fn wake_due_executions(
         &self,
         now: OffsetDateTime,
@@ -537,6 +707,97 @@ impl TaskStore {
         }
         tx.commit()?;
         Ok(delivered)
+    }
+
+    /// Delivers every pending receipt that exactly matches one typed wake condition.
+    ///
+    /// Retrying the same delivery is idempotent. A retry with a different payload
+    /// fails closed because the first durable delivery owns the resumed revision.
+    pub fn deliver_execution_wake(
+        &self,
+        condition: &WakeCondition,
+        payload: &Value,
+    ) -> TaskRuntimeResult<usize> {
+        self.deliver_execution_wake_with(condition, payload, |_| Ok(()))
+    }
+
+    /// Delivers an exact wake and persists its adapter projection in the same transaction.
+    pub fn deliver_execution_wake_with<F>(
+        &self,
+        condition: &WakeCondition,
+        payload: &Value,
+        project: F,
+    ) -> TaskRuntimeResult<usize>
+    where
+        F: FnOnce(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
+    {
+        let canonical_condition = serde_json::to_string(condition)?;
+        let decoded: WakeCondition = serde_json::from_str(&canonical_condition)?;
+        if decoded != *condition {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "wake condition is not canonical".into(),
+            ));
+        }
+
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let pending = load_pending_wake_receipts_on(&tx)?
+            .into_iter()
+            .filter(|receipt| receipt.condition == *condition)
+            .collect::<Vec<_>>();
+        let delivered_at = OffsetDateTime::now_utc().unix_timestamp();
+        let mut delivered = 0usize;
+        if !pending.is_empty() {
+            project(&tx)?;
+        }
+        for receipt in pending {
+            deliver_pending_wake_on(&tx, &receipt, payload.clone(), delivered_at)?;
+            delivered = delivered
+                .checked_add(1)
+                .ok_or_else(|| TaskRuntimeError::Store("delivered wake count exhausted".into()))?;
+        }
+        if delivered == 0 {
+            verify_delivered_exact_wake_on(&tx, condition, payload)?;
+        }
+        tx.commit()?;
+        Ok(delivered)
+    }
+
+    /// Lists pending wakes owned by one exact execution scope.
+    pub fn pending_execution_wakes(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: Option<&str>,
+    ) -> TaskRuntimeResult<Vec<PendingExecutionWake>> {
+        let user_id = validated_text(user_id, "wake scope user id")?;
+        let workspace_id = validated_text(workspace_id, "wake scope workspace id")?;
+        if thread_id.is_some_and(|value| value.trim().is_empty()) {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "wake scope thread id cannot be blank".into(),
+            ));
+        }
+        let mut scoped = Vec::new();
+        for receipt in load_pending_wake_receipts_on(&self.connection)? {
+            let (_, journal) = load_validated_journal_on(&self.connection, &receipt.execution_id)?
+                .ok_or_else(|| {
+                    TaskRuntimeError::Store(
+                        "pending wake has no authoritative execution journal".into(),
+                    )
+                })?;
+            let contract = journal.latest()?.record.contract.as_ref();
+            if contract.revision == receipt.revision
+                && contract.scope.user_id == user_id
+                && contract.scope.workspace_id == workspace_id
+                && contract.scope.thread_id.as_deref() == thread_id
+            {
+                scoped.push(PendingExecutionWake {
+                    execution_id: receipt.execution_id,
+                    revision: receipt.revision,
+                    condition: receipt.condition,
+                });
+            }
+        }
+        Ok(scoped)
     }
 
     /// Resolves an uncertain effect and delivers its matching wake atomically.
@@ -623,6 +884,97 @@ impl TaskStore {
         tx.commit()?;
         Ok(resolved)
     }
+
+    /// Marks an effect compensated only after its linked compensation execution completed.
+    pub fn mark_effect_compensated(
+        &self,
+        receipt_ref: &EffectReceiptRef,
+        compensation_execution_id: &str,
+    ) -> TaskRuntimeResult<ExecutionEffectReceipt> {
+        let compensation_execution_id =
+            validated_text(compensation_execution_id, "compensation execution id")?;
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let receipt = crate::store::load_effect_receipt_on(&tx, receipt_ref)?
+            .ok_or_else(|| TaskRuntimeError::NotFound(receipt_ref.as_ref().to_string()))?;
+        let existing_link = tx
+            .query_row(
+                "SELECT compensation_execution_id FROM execution_effect_compensations
+                 WHERE receipt_ref = ?1",
+                [receipt_ref.as_ref()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if receipt.status == EffectReceiptStatus::Compensated {
+            if existing_link.as_deref() != Some(compensation_execution_id) {
+                return Err(TaskRuntimeError::Conflict(
+                    "effect receipt was compensated by a different execution".into(),
+                ));
+            }
+            tx.commit()?;
+            return Ok(receipt);
+        }
+        if receipt.status != EffectReceiptStatus::Completed || receipt.compensation.is_none() {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "only a completed effect with a compensation recipe may be compensated".into(),
+            ));
+        }
+        if existing_link.is_some() {
+            return Err(TaskRuntimeError::Conflict(
+                "effect receipt already has compensation evidence".into(),
+            ));
+        }
+
+        let (_, compensation_journal) = load_validated_journal_on(&tx, compensation_execution_id)?
+            .ok_or_else(|| {
+                TaskRuntimeError::NotFound(format!(
+                    "compensation execution {compensation_execution_id}"
+                ))
+            })?;
+        let compensation = compensation_journal.latest()?;
+        if compensation
+            .record
+            .contract
+            .as_ref()
+            .parent_execution_id
+            .as_deref()
+            != Some(receipt.execution_id.as_str())
+            || !matches!(
+                compensation.record.outcome.as_ref().map(AsRef::as_ref),
+                Some(ExecutionOutcome::Completed { .. })
+            )
+        {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "compensation execution is not a completed child of the effect owner".into(),
+            ));
+        }
+
+        let compensated_at = OffsetDateTime::now_utc().unix_timestamp();
+        tx.execute(
+            "INSERT INTO execution_effect_compensations (
+                receipt_ref, compensation_execution_id, compensated_at
+             ) VALUES (?1, ?2, ?3)",
+            params![
+                receipt_ref.as_ref(),
+                compensation_execution_id,
+                compensated_at,
+            ],
+        )?;
+        let changed = tx.execute(
+            "UPDATE execution_effect_receipts
+             SET status = 'compensated', resolved_at = ?1
+             WHERE receipt_ref = ?2 AND status = 'completed'",
+            params![compensated_at, receipt_ref.as_ref()],
+        )?;
+        if changed != 1 {
+            return Err(TaskRuntimeError::Conflict(
+                "effect receipt was compensated concurrently".into(),
+            ));
+        }
+        let compensated = crate::store::load_effect_receipt_on(&tx, receipt_ref)?
+            .ok_or_else(|| TaskRuntimeError::Store("compensated receipt disappeared".into()))?;
+        tx.commit()?;
+        Ok(compensated)
+    }
 }
 
 fn receipt_resolution_matches(
@@ -677,6 +1029,65 @@ fn verify_delivered_effect_resolution_on(
         return Err(TaskRuntimeError::Conflict(
             "effect receipt was resolved with a different durable decision".into(),
         ));
+    }
+    Ok(())
+}
+
+fn verify_delivered_exact_wake_on(
+    connection: &Connection,
+    condition: &WakeCondition,
+    expected_payload: &Value,
+) -> TaskRuntimeResult<()> {
+    let canonical_condition = serde_json::to_string(condition)?;
+    let mut statement = connection.prepare(
+        "SELECT execution_id, revision, dedup_key, delivery_json, created_at, delivered_at
+         FROM execution_wakes
+         WHERE status = 'delivered' AND condition_json = ?1
+         ORDER BY execution_id, revision, dedup_key",
+    )?;
+    let rows = statement.query_map([canonical_condition], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, i64>(4)?,
+            row.get::<_, Option<i64>>(5)?,
+        ))
+    })?;
+    for row in rows {
+        let (execution_id, revision, dedup_key, delivery_json, created_at, delivered_at) = row?;
+        let delivery_json = delivery_json
+            .ok_or_else(|| TaskRuntimeError::Store("delivered wake has no delivery JSON".into()))?;
+        let delivered_at = delivered_at.ok_or_else(|| {
+            TaskRuntimeError::Store("delivered wake has no delivery timestamp".into())
+        })?;
+        let delivery: WakeDelivery = serde_json::from_str(&delivery_json)?;
+        if delivery.payload != *expected_payload {
+            return Err(TaskRuntimeError::Conflict(
+                "wake was already delivered with a different payload".into(),
+            ));
+        }
+        if dedup_key != condition.dedup_key()
+            || delivery_json != serde_json::to_string(&delivery)?
+            || delivery.condition != *condition
+            || delivery.dedup_key != dedup_key
+            || delivery.delivered_at_unix_seconds != delivered_at
+            || delivered_at < created_at
+        {
+            return Err(TaskRuntimeError::Store(
+                "stored delivered wake receipt is not canonical".into(),
+            ));
+        }
+        verify_delivered_receipt_journal_on(
+            connection,
+            &execution_id,
+            stored_u64(revision, "wake revision")?,
+            condition,
+            &delivery,
+            created_at,
+            delivered_at,
+        )?;
     }
     Ok(())
 }

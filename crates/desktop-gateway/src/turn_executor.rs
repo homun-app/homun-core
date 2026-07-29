@@ -9,8 +9,8 @@ use std::sync::{
 };
 
 use local_first_execution_protocol::{
-    CancelReason, CheckpointDataRef, CheckpointEnvelope, DurableDataRef, ExecutionFailure,
-    ExecutionOutcome, ValidatedExecutionContract, WakeCondition,
+    CancelReason, CheckpointDataRef, CheckpointEnvelope, DurableDataRef, EffectReceiptRef,
+    ExecutionFailure, ExecutionOutcome, ObjectiveRef, ValidatedExecutionContract, WakeCondition,
 };
 use local_first_task_runtime::{
     NewAgentRun, TaskRuntimeResult, TaskStatus, TaskStore, TurnEventKind, broker::CancelNotify,
@@ -18,7 +18,158 @@ use local_first_task_runtime::{
 use serde_json::Value;
 #[cfg(test)]
 use serde_json::json;
+use sha2::Digest;
 use tokio::sync::{Notify, broadcast};
+
+fn checkpoint_store_id(data_ref: &CheckpointDataRef) -> Option<&str> {
+    let encoded = match data_ref {
+        CheckpointDataRef::Public { record_ref } | CheckpointDataRef::Redacted { record_ref } => {
+            record_ref.as_ref()
+        }
+        CheckpointDataRef::Encrypted { .. } => return None,
+    };
+    encoded.strip_prefix("durable:v1:32:")
+}
+
+#[derive(Debug)]
+struct EffectiveChatAttemptInput {
+    prompt: String,
+    visible_prompt: String,
+    user_message_id: Option<String>,
+    images: Vec<String>,
+    attachments: Vec<local_first_desktop_gateway::AttachmentInput>,
+}
+
+fn effective_chat_attempt_input(
+    task: &local_first_task_runtime::TaskRecord,
+    wake: Option<&local_first_execution_protocol::WakeDelivery>,
+) -> Result<EffectiveChatAttemptInput, crate::LocalTaskExecutionError> {
+    let wake_payload = wake.map(|delivery| &delivery.payload);
+    let task_prompt = task
+        .input_json
+        .get("prompt")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| crate::LocalTaskExecutionError {
+            message: "chat_turn task missing prompt".to_string(),
+        })?;
+    let prompt = wake_payload
+        .and_then(|payload| payload.get("prompt"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(task_prompt)
+        .to_string();
+    let visible_prompt = wake_payload
+        .and_then(|payload| payload.get("visible_prompt"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            task.input_json
+                .get("visible_prompt")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+        })
+        .unwrap_or(&prompt)
+        .to_string();
+    let user_message_id = wake_payload
+        .and_then(|payload| payload.get("source_message_id"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            task.input_json
+                .get("request_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .map(|request_id| format!("local_user_{request_id}"))
+        });
+
+    let images_value = wake_payload
+        .and_then(|payload| payload.get("images"))
+        .or_else(|| task.input_json.get("images"));
+    let images = images_value
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|error| crate::LocalTaskExecutionError {
+            message: format!("chat_turn images are invalid: {error}"),
+        })?
+        .unwrap_or_default();
+    let attachments_value = wake_payload
+        .and_then(|payload| payload.get("attachments"))
+        .filter(|value| !value.is_null())
+        .or_else(|| task.input_json.get("attachments"));
+    let attachments = attachments_value
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|error| crate::LocalTaskExecutionError {
+            message: format!("chat_turn attachments are invalid: {error}"),
+        })?
+        .unwrap_or_default();
+
+    Ok(EffectiveChatAttemptInput {
+        prompt,
+        visible_prompt,
+        user_message_id,
+        images,
+        attachments,
+    })
+}
+
+fn agent_resume_state(
+    state: &crate::AppState,
+    task: &local_first_task_runtime::TaskRecord,
+    contract: &ValidatedExecutionContract,
+) -> Option<Value> {
+    let store = state.task_store.lock().ok()?;
+    if contract.as_ref().revision > 1 {
+        let prior = store
+            .execution_revision(
+                &contract.as_ref().execution_id,
+                contract.as_ref().revision - 1,
+            )
+            .ok()??;
+        let prior_outcome = prior.outcome?;
+        let data_ref = match prior_outcome.as_ref() {
+            ExecutionOutcome::Suspended { checkpoint, .. } => &checkpoint.data_ref,
+            _ => return None,
+        };
+        let checkpoint = store
+            .checkpoint(
+                checkpoint_store_id(data_ref)?,
+                &task.task_id,
+                &task.user_id,
+                &task.workspace_id,
+            )
+            .ok()??;
+        let agent_state = checkpoint.payload.get("agent_state")?.clone();
+        let expected = checkpoint
+            .payload
+            .get("agent_state_fingerprint")?
+            .as_str()?;
+        let actual = format!(
+            "{:x}",
+            sha2::Sha256::digest(serde_json::to_vec(&agent_state).ok()?)
+        );
+        return (actual == expected).then_some(agent_state);
+    }
+
+    store
+        .latest_resumable_checkpoint_for_turn(
+            task.task_id.as_str(),
+            task.user_id.as_str(),
+            task.workspace_id.as_str(),
+        )
+        .ok()?
+        .and_then(|checkpoint| {
+            let actual = format!(
+                "{:x}",
+                sha2::Sha256::digest(serde_json::to_vec(&checkpoint.state_json).ok()?)
+            );
+            (actual == checkpoint.fingerprint).then_some(checkpoint.state_json)
+        })
+}
 
 pub(crate) fn canonical_chat_outcome(
     execution_id: &str,
@@ -26,16 +177,19 @@ pub(crate) fn canonical_chat_outcome(
     producer_kind: &str,
     turn: &local_first_engine::TurnOutcome,
     checkpoint_ref: Option<CheckpointDataRef>,
+    objective: Option<ObjectiveRef>,
+    effect_receipts: Vec<EffectReceiptRef>,
 ) -> Result<ExecutionOutcome, crate::LocalTaskExecutionError> {
-    let suspended = |wake| {
+    let suspended = |wake: WakeCondition| {
         let data_ref = checkpoint_ref
             .clone()
             .ok_or_else(|| crate::LocalTaskExecutionError {
                 message: "suspended chat turn has no durable checkpoint reference".to_string(),
             })?;
         Ok(ExecutionOutcome::Suspended {
-            wake,
-            checkpoint: CheckpointEnvelope::new(execution_id, revision, producer_kind, 1, data_ref),
+            wake: wake.clone(),
+            checkpoint: CheckpointEnvelope::new(execution_id, revision, producer_kind, 1, data_ref)
+                .with_resume_context(objective.clone(), wake, effect_receipts.clone()),
         })
     };
 
@@ -278,20 +432,9 @@ pub fn execute_chat_turn_task(
         .ok_or_else(|| crate::LocalTaskExecutionError {
             message: "chat_turn task missing thread_id".to_string(),
         })?;
-    let prompt = task
-        .input_json
-        .get("prompt")
-        .and_then(|v| v.as_str())
-        .filter(|v| !v.trim().is_empty())
-        .ok_or_else(|| crate::LocalTaskExecutionError {
-            message: "chat_turn task missing prompt".to_string(),
-        })?;
-    let visible_prompt = task
-        .input_json
-        .get("visible_prompt")
-        .and_then(|value| value.as_str())
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or(prompt);
+    let effective = effective_chat_attempt_input(task, contract.as_ref().wake.as_ref())?;
+    let prompt = effective.prompt;
+    let visible_prompt = effective.visible_prompt;
     // Optional inputs with defaults.
     let approval = task
         .input_json
@@ -305,16 +448,7 @@ pub fn execute_chat_turn_task(
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| task.workspace_id.as_str())
         .to_string();
-    let request_id = task
-        .input_json
-        .get("request_id")
-        .and_then(|v| v.as_str())
-        .filter(|v| !v.trim().is_empty())
-        .map(str::to_string)
-        .or_else(|| turn_id.strip_prefix("turn_").map(str::to_string));
-    let preseeded_user_message_id = request_id
-        .as_ref()
-        .map(|request_id| format!("local_user_{request_id}"));
+    let preseeded_user_message_id = effective.user_message_id;
     let preseeded_assistant_message_id = task
         .input_json
         .get("assistant_message_id")
@@ -335,7 +469,7 @@ pub fn execute_chat_turn_task(
     let semantic_decision = crate::resolve_semantic_decision(
         state,
         Some(thread_id),
-        prompt,
+        &prompt,
         existing_objective.as_ref(),
         routing_binding.as_ref(),
     );
@@ -346,7 +480,7 @@ pub fn execute_chat_turn_task(
         thread_id,
         &workspace_id,
         project_root.as_deref(),
-        visible_prompt,
+        &visible_prompt,
     );
     let objective = state.task_store.lock().ok().and_then(|store| {
         store
@@ -400,20 +534,8 @@ pub fn execute_chat_turn_task(
     }
     // Legacy tasks have no attachment fields; defaulting keeps boot recovery
     // compatible while new broker turns retain their original composer input.
-    let images = task
-        .input_json
-        .get("images")
-        .cloned()
-        .and_then(|value| serde_json::from_value::<Vec<String>>(value).ok())
-        .unwrap_or_default();
-    let attachments = task
-        .input_json
-        .get("attachments")
-        .cloned()
-        .and_then(|value| {
-            serde_json::from_value::<Vec<local_first_desktop_gateway::AttachmentInput>>(value).ok()
-        })
-        .unwrap_or_default();
+    let images = effective.images;
+    let attachments = effective.attachments;
 
     // 2. Map `approval` → agent tool_policy. Unknown values fall back to the
     //    most capable policy (`full`) — matches the interactive default.
@@ -508,8 +630,8 @@ pub fn execute_chat_turn_task(
         &workspace_id,
         "interactive",
         None,
-        visible_prompt,
-        visible_prompt,
+        &visible_prompt,
+        &visible_prompt,
         preseeded_user_message_id.as_deref(),
         preseeded_assistant_message_id,
         // Advertise the broker turn id so any client with this thread open can attach to the
@@ -546,6 +668,7 @@ pub fn execute_chat_turn_task(
     // resurrecting an externally-cancelled task). Without this select the `notify_one()` had
     // no waiter in production and the turn always ran to completion, overwriting `Cancelled`.
     let cancel = broadcast.cancel.clone();
+    let resume_state = agent_resume_state(state, task, contract);
     let run = tokio::runtime::Handle::current().block_on(async {
         tokio::select! {
             biased;
@@ -553,7 +676,7 @@ pub fn execute_chat_turn_task(
             answer = crate::run_agent_turn_into_message_with_fanout(
                 state,
                 thread_id,
-                prompt,
+                &prompt,
                 tool_policy,
                 images,
                 attachments,
@@ -561,6 +684,7 @@ pub fn execute_chat_turn_task(
                 &visible_turn.assistant_message_id,
                 turn_id,
                 agent_run.as_ref().map(|(run_id, _)| run_id.as_str()),
+                resume_state,
                 local_first_desktop_gateway::MessageDeliveryState::Streaming,
             ) => Some(answer),
         }
@@ -584,7 +708,7 @@ pub fn execute_chat_turn_task(
         },
         Some(Ok(result)) => {
             let turn = result.outcome;
-            let checkpoint_ref = if matches!(
+            let (checkpoint_ref, effect_receipts) = if matches!(
                 turn.stop,
                 local_first_engine::TurnStop::SuspendedUser
                     | local_first_engine::TurnStop::SuspendedApproval
@@ -599,12 +723,24 @@ pub fn execute_chat_turn_task(
                     local_first_engine::TurnStop::Completed
                     | local_first_engine::TurnStop::Failed { .. } => unreachable!(),
                 };
-                let checkpoint = state
-                    .task_store
-                    .lock()
-                    .map_err(|error| crate::LocalTaskExecutionError {
-                        message: error.to_string(),
-                    })?
+                let store =
+                    state
+                        .task_store
+                        .lock()
+                        .map_err(|error| crate::LocalTaskExecutionError {
+                            message: error.to_string(),
+                        })?;
+                let agent_checkpoint = agent_run.as_ref().and_then(|(run_id, _)| {
+                    store
+                        .latest_agent_checkpoint(
+                            run_id,
+                            task.user_id.as_str(),
+                            task.workspace_id.as_str(),
+                        )
+                        .ok()
+                        .flatten()
+                });
+                let checkpoint = store
                     .append_checkpoint(
                         &task.task_id,
                         &task.user_id,
@@ -617,6 +753,8 @@ pub fn execute_chat_turn_task(
                             "user_message_id": visible_turn.user_message_id,
                             "agent_run_id": agent_run.as_ref().map(|(run_id, _)| run_id),
                             "objective_revision": objective.as_ref().map(|record| record.revision),
+                            "agent_state": agent_checkpoint.as_ref().map(|checkpoint| &checkpoint.state_json),
+                            "agent_state_fingerprint": agent_checkpoint.as_ref().map(|checkpoint| &checkpoint.fingerprint),
                             "awaiting_user": turn.awaiting_user,
                             "answer": turn.memory_answer,
                         }),
@@ -637,15 +775,28 @@ pub fn execute_chat_turn_task(
                     .map_err(|error| crate::LocalTaskExecutionError {
                         message: error.to_string(),
                     })?;
-                Some(CheckpointDataRef::Redacted {
-                    record_ref: DurableDataRef::from_store_id(&checkpoint.checkpoint_id).map_err(
-                        |error| crate::LocalTaskExecutionError {
-                            message: error.to_string(),
-                        },
-                    )?,
-                })
+                let receipts = store
+                    .list_effect_receipts_for_execution(
+                        &contract.as_ref().execution_id,
+                        contract.as_ref().revision,
+                    )
+                    .map_err(|error| crate::LocalTaskExecutionError {
+                        message: error.to_string(),
+                    })?
+                    .into_iter()
+                    .map(|receipt| receipt.receipt_ref)
+                    .collect();
+                (
+                    Some(CheckpointDataRef::Redacted {
+                        record_ref: DurableDataRef::from_store_id(&checkpoint.checkpoint_id)
+                            .map_err(|error| crate::LocalTaskExecutionError {
+                                message: error.to_string(),
+                            })?,
+                    }),
+                    receipts,
+                )
             } else {
-                None
+                (None, Vec::new())
             };
             canonical_chat_outcome(
                 contract.as_ref().execution_id.as_str(),
@@ -653,6 +804,8 @@ pub fn execute_chat_turn_task(
                 contract.as_ref().kind.as_str(),
                 &turn,
                 checkpoint_ref,
+                contract.as_ref().objective.clone(),
+                effect_receipts,
             )?
         }
     };
@@ -691,10 +844,11 @@ mod tests {
     use super::*;
     use crate::AppState;
     use local_first_execution_protocol::{
-        CheckpointDataRef, DurableDataRef, EffectReceiptRef, ExecutionOutcome, FailureClass,
+        CheckpointDataRef, DurableDataRef, EffectReceiptRef, ExecutionContract, ExecutionOutcome,
+        ExecutionScope, FailureClass, ValidatedExecutionContract, ValidatedExecutionOutcome,
         WakeCondition,
     };
-    use local_first_task_runtime::TaskStore;
+    use local_first_task_runtime::{TaskRecord, TaskStore, UserId, WorkspaceId};
 
     fn checkpoint_ref() -> CheckpointDataRef {
         CheckpointDataRef::Redacted {
@@ -740,9 +894,16 @@ mod tests {
                 memory_answer: "answer".to_string(),
                 ..Default::default()
             };
-            let outcome =
-                canonical_chat_outcome("turn-1", 1, "chat_turn", &turn, Some(checkpoint_ref()))
-                    .expect("typed stop maps");
+            let outcome = canonical_chat_outcome(
+                "turn-1",
+                1,
+                "chat_turn",
+                &turn,
+                Some(checkpoint_ref()),
+                None,
+                Vec::new(),
+            )
+            .expect("typed stop maps");
             match (expected, outcome) {
                 ("completed", ExecutionOutcome::Completed { output, .. }) => {
                     assert_eq!(output["answer"], "answer");
@@ -784,6 +945,131 @@ mod tests {
     }
 
     #[test]
+    fn resumed_revision_loads_the_exact_checkpoint_referenced_by_the_journal() {
+        let state = AppState::for_tests();
+        let user = UserId::new("user-1");
+        let workspace = WorkspaceId::new("workspace-1");
+        let task = TaskRecord::new(
+            "turn-resume",
+            user.clone(),
+            workspace.clone(),
+            "chat_turn",
+            "resume",
+            json!({"thread_id": "thread-1"}),
+        );
+        let contract = ValidatedExecutionContract::try_from(ExecutionContract::new(
+            "turn-resume",
+            "chat_turn",
+            ExecutionScope {
+                user_id: user.as_str().into(),
+                workspace_id: workspace.as_str().into(),
+                thread_id: Some("thread-1".into()),
+            },
+            serde_json::to_value(&task).unwrap(),
+        ))
+        .unwrap();
+        let agent_state = json!({"round": 4, "messages": ["committed"]});
+        let fingerprint = format!(
+            "{:x}",
+            sha2::Sha256::digest(serde_json::to_vec(&agent_state).unwrap())
+        );
+        let wake = WakeCondition::Signal {
+            kind: "resume.test".into(),
+            correlation_id: "signal-1".into(),
+        };
+
+        let resumed_contract = {
+            let store = state.task_store.lock().unwrap();
+            store.insert_task(&task).unwrap();
+            store.create_execution(&contract).unwrap();
+            let checkpoint = store
+                .append_checkpoint(
+                    &task.task_id,
+                    &task.user_id,
+                    &task.workspace_id,
+                    json!({
+                        "agent_state": agent_state,
+                        "agent_state_fingerprint": fingerprint,
+                    }),
+                    json!({"kind": "chat_turn"}),
+                )
+                .unwrap();
+            let outcome = ValidatedExecutionOutcome::new(
+                ExecutionOutcome::Suspended {
+                    wake: wake.clone(),
+                    checkpoint: CheckpointEnvelope::new(
+                        "turn-resume",
+                        1,
+                        "chat_turn",
+                        1,
+                        CheckpointDataRef::Redacted {
+                            record_ref: DurableDataRef::from_store_id(&checkpoint.checkpoint_id)
+                                .unwrap(),
+                        },
+                    )
+                    .with_resume_context(None, wake, Vec::new()),
+                },
+                &contract,
+            )
+            .unwrap();
+            store.commit_execution_outcome(&outcome).unwrap();
+            store
+                .deliver_execution_signal("resume.test", "signal-1", &json!({"ok": true}))
+                .unwrap();
+            store.execution("turn-resume").unwrap().unwrap().contract
+        };
+
+        assert_eq!(
+            agent_resume_state(&state, &task, &resumed_contract),
+            Some(json!({"round": 4, "messages": ["committed"]}))
+        );
+    }
+
+    #[test]
+    fn resumed_chat_attempt_uses_the_durable_wake_input() {
+        let task = TaskRecord::new(
+            "turn-input-resume",
+            UserId::new("user-1"),
+            WorkspaceId::new("workspace-1"),
+            "chat_turn",
+            "choose",
+            json!({
+                "prompt": "Choose A or B",
+                "visible_prompt": "Choose one",
+                "request_id": "initial",
+                "images": ["old-image"],
+                "attachments": [{"local_path": "/tmp/old.txt", "display_name": "old.txt"}],
+            }),
+        );
+        let delivery = local_first_execution_protocol::WakeDelivery {
+            condition: WakeCondition::User {
+                wait_ref: "wait-1".into(),
+            },
+            dedup_key: WakeCondition::User {
+                wait_ref: "wait-1".into(),
+            }
+            .dedup_key(),
+            payload: json!({
+                "type": "user",
+                "prompt": "A",
+                "visible_prompt": "A",
+                "request_id": "resume",
+                "source_message_id": "local_user_resume",
+                "images": ["new-image"],
+                "attachments": [{"local_path": "/tmp/new.txt", "display_name": "new.txt"}],
+            }),
+            delivered_at_unix_seconds: 1,
+        };
+
+        let input = effective_chat_attempt_input(&task, Some(&delivery)).unwrap();
+        assert_eq!(input.prompt, "A");
+        assert_eq!(input.visible_prompt, "A");
+        assert_eq!(input.user_message_id.as_deref(), Some("local_user_resume"));
+        assert_eq!(input.images, vec!["new-image"]);
+        assert_eq!(input.attachments[0].display_name, "new.txt");
+    }
+
+    #[test]
     fn completed_typed_stop_needs_no_task_status_reread() {
         let turn = local_first_engine::TurnOutcome {
             stop: local_first_engine::TurnStop::Completed,
@@ -791,8 +1077,9 @@ mod tests {
             ..Default::default()
         };
 
-        let outcome = canonical_chat_outcome("turn-stale", 2, "chat_turn", &turn, None)
-            .expect("completed outcome");
+        let outcome =
+            canonical_chat_outcome("turn-stale", 2, "chat_turn", &turn, None, None, Vec::new())
+                .expect("completed outcome");
 
         assert!(matches!(outcome, ExecutionOutcome::Completed { .. }));
     }

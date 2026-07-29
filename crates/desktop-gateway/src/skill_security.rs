@@ -472,7 +472,11 @@ mod tests {
             assert!(
                 !report.blocked,
                 "ordinary command must not be blocked: {command} ({:?})",
-                report.warnings.iter().map(|w| &w.description).collect::<Vec<_>>()
+                report
+                    .warnings
+                    .iter()
+                    .map(|w| &w.description)
+                    .collect::<Vec<_>>()
             );
         }
     }

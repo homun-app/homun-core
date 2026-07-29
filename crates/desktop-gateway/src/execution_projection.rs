@@ -83,8 +83,8 @@ pub(crate) async fn project_chat_execution(
     project_objective(state, task, thread_id, &metadata, outcome)?;
     project_human_wait(state, thread_id, assistant_message_id, &metadata, outcome).await?;
 
-    if let ExecutionOutcome::Completed { output, .. } = outcome {
-        let answer = output
+    if let ExecutionOutcome::Completed { .. } = outcome {
+        let answer = metadata
             .get("answer")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
@@ -131,11 +131,9 @@ pub(crate) async fn replay_committed_chat_projections(
         }
         let contract = record.contract;
         let scope = &contract.as_ref().scope;
-        let task_id =
-            local_first_task_runtime::TaskId::new(contract.as_ref().execution_id.clone());
+        let task_id = local_first_task_runtime::TaskId::new(contract.as_ref().execution_id.clone());
         let user_id = local_first_task_runtime::UserId::new(scope.user_id.clone());
-        let workspace_id =
-            local_first_task_runtime::WorkspaceId::new(scope.workspace_id.clone());
+        let workspace_id = local_first_task_runtime::WorkspaceId::new(scope.workspace_id.clone());
         let task = state
             .task_store
             .lock()
@@ -159,18 +157,36 @@ fn projection_metadata(
     task: &TaskRecord,
     outcome: &ExecutionOutcome,
 ) -> Result<serde_json::Value, crate::LocalTaskExecutionError> {
-    match outcome {
-        ExecutionOutcome::Completed { output, .. } => Ok(output.clone()),
-        ExecutionOutcome::Suspended { .. } => state
+    let checkpoint_metadata = || {
+        state
             .task_store
             .lock()
             .map_err(projection_lock_error)?
             .latest_checkpoint(&task.task_id, &task.user_id, &task.workspace_id)
             .map_err(projection_store_error)?
-            .map(|checkpoint| checkpoint.payload)
-            .ok_or_else(|| projection_error("suspended chat projection has no checkpoint")),
+            .map(|checkpoint| {
+                checkpoint
+                    .payload
+                    .get("state")
+                    .cloned()
+                    .unwrap_or(checkpoint.payload)
+            })
+            .ok_or_else(|| projection_error("visible execution projection has no checkpoint"))
+    };
+    match outcome {
+        ExecutionOutcome::Completed { output, .. }
+            if output
+                .get("assistant_message_id")
+                .and_then(serde_json::Value::as_str)
+                .is_some() =>
+        {
+            Ok(output.clone())
+        }
+        ExecutionOutcome::Completed { .. } | ExecutionOutcome::Suspended { .. } => {
+            checkpoint_metadata()
+        }
         ExecutionOutcome::Cancelled { .. } | ExecutionOutcome::Failed { .. } => {
-            Ok(task.input_json.clone())
+            checkpoint_metadata().or_else(|_| Ok(task.input_json.clone()))
         }
     }
 }
@@ -593,14 +609,16 @@ mod tests {
         replay_committed_chat_projections(&state, 100)
             .await
             .expect_err("projection must remain pending while the message is missing");
-        assert!(state
-            .task_store
-            .lock()
-            .expect("task store")
-            .read_turn_events(task.task_id.as_str(), 0)
-            .expect("events")
-            .iter()
-            .all(|event| event.payload["projection_ref"] != "turn-projection-1:1"));
+        assert!(
+            state
+                .task_store
+                .lock()
+                .expect("task store")
+                .read_turn_events(task.task_id.as_str(), 0)
+                .expect("events")
+                .iter()
+                .all(|event| event.payload["projection_ref"] != "turn-projection-1:1")
+        );
 
         state
             .chat_store
@@ -650,13 +668,8 @@ mod tests {
         let state = crate::AppState::for_tests();
         let outcome = ExecutionOutcome::completed(serde_json::json!({"answer": "done"}));
 
-        let error = project_message_state(
-            &state,
-            "missing-thread",
-            "missing-message",
-            &outcome,
-        )
-        .expect_err("missing completed message must keep projection pending");
+        let error = project_message_state(&state, "missing-thread", "missing-message", &outcome)
+            .expect_err("missing completed message must keep projection pending");
 
         assert!(error.message.contains("message"));
     }

@@ -1,4 +1,7 @@
-use crate::{model_registry::ProviderKind, usage_store::{ProviderSnapshotStatus, ProviderUsageSnapshot}};
+use crate::{
+    model_registry::ProviderKind,
+    usage_store::{ProviderSnapshotStatus, ProviderUsageSnapshot},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -50,7 +53,9 @@ fn decimal_json_to_microusd(value: &serde_json::Value) -> Option<u64> {
 
 fn decimal_to_scale(value: &str, scale: usize) -> Option<u64> {
     let value = value.trim();
-    if value.is_empty() || value.starts_with('-') { return None; }
+    if value.is_empty() || value.starts_with('-') {
+        return None;
+    }
     let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
     if !whole.bytes().all(|byte| byte.is_ascii_digit())
         || !fraction.bytes().all(|byte| byte.is_ascii_digit())
@@ -59,10 +64,17 @@ fn decimal_to_scale(value: &str, scale: usize) -> Option<u64> {
         return None;
     }
     let whole = whole.parse::<u128>().ok()?;
-    let fraction = if fraction.is_empty() { 0 } else {
+    let fraction = if fraction.is_empty() {
+        0
+    } else {
         fraction.parse::<u128>().ok()? * 10u128.checked_pow((scale - fraction.len()) as u32)?
     };
-    u64::try_from(whole.checked_mul(10u128.checked_pow(scale as u32)?)?.checked_add(fraction)?).ok()
+    u64::try_from(
+        whole
+            .checked_mul(10u128.checked_pow(scale as u32)?)?
+            .checked_add(fraction)?,
+    )
+    .ok()
 }
 
 fn status_snapshot(
@@ -98,10 +110,22 @@ pub async fn refresh_provider_usage(
     observed_at: i64,
 ) -> Vec<ProviderUsageSnapshot> {
     if adapter_capability(provider_id, kind) == AccountUsageCapability::UnsupportedWithStandardKey {
-        return vec![status_snapshot(user_id, provider_id, observed_at, ProviderSnapshotStatus::Unsupported, Some("unsupported_with_standard_key"))];
+        return vec![status_snapshot(
+            user_id,
+            provider_id,
+            observed_at,
+            ProviderSnapshotStatus::Unsupported,
+            Some("unsupported_with_standard_key"),
+        )];
     }
     let Some(api_key) = api_key.filter(|key| !key.trim().is_empty()) else {
-        return vec![status_snapshot(user_id, provider_id, observed_at, ProviderSnapshotStatus::Unauthorized, Some("missing_standard_key"))];
+        return vec![status_snapshot(
+            user_id,
+            provider_id,
+            observed_at,
+            ProviderSnapshotStatus::Unauthorized,
+            Some("missing_standard_key"),
+        )];
     };
     let trimmed = base_url.trim_end_matches('/');
     let endpoint = if trimmed.ends_with("/api/v1") {
@@ -111,26 +135,73 @@ pub async fn refresh_provider_usage(
     } else {
         format!("{trimmed}/api/v1/key")
     };
-    let response = match http.get(endpoint).bearer_auth(api_key).timeout(std::time::Duration::from_secs(20)).send().await {
+    let response = match http
+        .get(endpoint)
+        .bearer_auth(api_key)
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await
+    {
         Ok(response) => response,
-        Err(_) => return vec![status_snapshot(user_id, provider_id, observed_at, ProviderSnapshotStatus::Error, Some("transport"))],
+        Err(_) => {
+            return vec![status_snapshot(
+                user_id,
+                provider_id,
+                observed_at,
+                ProviderSnapshotStatus::Error,
+                Some("transport"),
+            )];
+        }
     };
     let status = response.status().as_u16();
     if matches!(status, 401 | 403) {
-        return vec![status_snapshot(user_id, provider_id, observed_at, ProviderSnapshotStatus::Unauthorized, Some("unauthorized"))];
+        return vec![status_snapshot(
+            user_id,
+            provider_id,
+            observed_at,
+            ProviderSnapshotStatus::Unauthorized,
+            Some("unauthorized"),
+        )];
     }
     if status == 404 {
-        return vec![status_snapshot(user_id, provider_id, observed_at, ProviderSnapshotStatus::Unsupported, Some("unsupported"))];
+        return vec![status_snapshot(
+            user_id,
+            provider_id,
+            observed_at,
+            ProviderSnapshotStatus::Unsupported,
+            Some("unsupported"),
+        )];
     }
     if !(200..300).contains(&status) {
-        return vec![status_snapshot(user_id, provider_id, observed_at, ProviderSnapshotStatus::Error, Some("provider_error"))];
+        return vec![status_snapshot(
+            user_id,
+            provider_id,
+            observed_at,
+            ProviderSnapshotStatus::Error,
+            Some("provider_error"),
+        )];
     }
     let body = match response.json::<serde_json::Value>().await {
         Ok(body) => body,
-        Err(_) => return vec![status_snapshot(user_id, provider_id, observed_at, ProviderSnapshotStatus::Error, Some("decode"))],
+        Err(_) => {
+            return vec![status_snapshot(
+                user_id,
+                provider_id,
+                observed_at,
+                ProviderSnapshotStatus::Error,
+                Some("decode"),
+            )];
+        }
     };
-    parse_openrouter_key_state(user_id, provider_id, observed_at, &body)
-        .unwrap_or_else(|_| vec![status_snapshot(user_id, provider_id, observed_at, ProviderSnapshotStatus::Error, Some("invalid_response"))])
+    parse_openrouter_key_state(user_id, provider_id, observed_at, &body).unwrap_or_else(|_| {
+        vec![status_snapshot(
+            user_id,
+            provider_id,
+            observed_at,
+            ProviderSnapshotStatus::Error,
+            Some("invalid_response"),
+        )]
+    })
 }
 
 #[cfg(test)]
@@ -150,6 +221,9 @@ mod tests {
 
     #[test]
     fn anthropic_standard_key_is_explicitly_unsupported_for_org_usage() {
-        assert_eq!(adapter_capability("anthropic", ProviderKind::Anthropic), AccountUsageCapability::UnsupportedWithStandardKey);
+        assert_eq!(
+            adapter_capability("anthropic", ProviderKind::Anthropic),
+            AccountUsageCapability::UnsupportedWithStandardKey
+        );
     }
 }

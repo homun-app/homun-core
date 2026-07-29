@@ -10,8 +10,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    clean_template_catalog_ref, imported_template_preview_ref,
-    parse_file_template_catalog_entry, TemplateCatalogEntry, TemplateCatalogProvider,
+    TemplateCatalogEntry, TemplateCatalogProvider, clean_template_catalog_ref,
+    imported_template_preview_ref, parse_file_template_catalog_entry,
 };
 
 /// Packaged: Electron sets HOMUN_BUNDLED_TEMPLATES_DIR to <resources>/templates.
@@ -40,7 +40,10 @@ impl BundledTemplatePackProvider {
             return Ok(Self { entries });
         }
         for item in std::fs::read_dir(root).map_err(|error| {
-            format!("could not read bundled template root {}: {error}", root.display())
+            format!(
+                "could not read bundled template root {}: {error}",
+                root.display()
+            )
         })? {
             let path = item
                 .map_err(|error| format!("could not read bundled template entry: {error}"))?
@@ -179,10 +182,16 @@ mod tests {
             .into_iter()
             .map(|entry| entry.id)
             .collect();
-        for id in ["homun/startup-pitch-clean-01", "homun/executive-update-board-01",
-                   "homun/cv-professional-01", "homun/cover-letter-01",
-                   "homun/product-catalog-01", "homun/sales-proposal-01",
-                   "homun/company-one-pager-01", "homun/customer-case-study-01"] {
+        for id in [
+            "homun/startup-pitch-clean-01",
+            "homun/executive-update-board-01",
+            "homun/cv-professional-01",
+            "homun/cover-letter-01",
+            "homun/product-catalog-01",
+            "homun/sales-proposal-01",
+            "homun/company-one-pager-01",
+            "homun/customer-case-study-01",
+        ] {
             assert!(ids.contains(&id.to_string()), "missing {id}");
         }
     }

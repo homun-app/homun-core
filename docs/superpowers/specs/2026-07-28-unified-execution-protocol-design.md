@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-28
 
-**Status:** Core and `chat_turn` implemented; remaining domains are migrating
+**Status:** Runtime path implemented; bounded legacy recovery bridges remain
 
 ## Purpose
 
@@ -31,29 +31,41 @@ The code currently guarantees:
   projection context;
 - the execution journal is authoritative per `(execution_id, revision)` and
   outcome commit is fenced;
-- timer and signal wake delivery reopens the same execution identity at revision
-  `N + 1` and is deduplicated;
+- timer, signal, user, approval, model and effect-resolution delivery reopen the
+  same execution identity at revision `N + 1`; exact delivery is deduplicated and
+  conflicting duplicate payloads fail closed;
 - `chat_turn` returns a canonical `ExecutionOutcome` directly from the engine stop;
+- non-chat adapters also return canonical outcomes; `TaskExecutionOutcome` and its
+  normalization bridge have been removed;
 - one idempotent projector owns task, agent-run, message, objective, HITL/approval,
   and terminal-event state for chat;
 - startup scans committed journal outcomes, rebuilds a missing execution read model,
   and replays incomplete chat projections before workers start;
-- marker parsing remains transport/UI compatibility, but the broker stream cannot
-  create chat lifecycle state from marker event parts;
+- channel and automation work enqueue the same broker contract; marker parsing is
+  presentation compatibility and cannot create lifecycle state;
+- effect dispatch uses the shared receipt state machine
+  `Prepared/Started/Completed/Failed/Uncertain/Compensated`; an interrupted
+  `Started` effect suspends until exact typed resolution;
+- generated checkpoints carry objective lineage, exact wake and effect receipt refs;
+- chat resume loads the exact checkpoint referenced by the prior journal revision,
+  not the latest checkpoint found by turn ID;
+- `continue_execution_as_new` atomically commits the parent and creates the linked
+  child journal; compensation plans are read in reverse effect order and require a
+  completed linked compensation execution before a receipt becomes compensated;
 - source guard tests reject lifecycle writes in `turn_executor.rs` and direct chat
   dispatch outside `ExecutionRuntime::execute`.
 
-The migration is not complete yet:
+Remaining bounded work:
 
-- non-chat adapters still return `TaskExecutionOutcome` internally and are normalized
-  by a bounded compatibility bridge;
-- browser, connector, sandbox, Vault, filesystem, and payment policy remain intact,
-  but their effect records do not yet share one end-to-end receipt state machine;
-- not every specialized checkpoint has moved under the canonical envelope;
-- channel/automation streaming still has a legacy marker-to-HITL compatibility path;
-- an external delivery whose remote result is unknown still needs a durable receipt
-  to prevent a duplicate send after a crash between delivery and projection marker;
-- `continue_as_new` and compensation are specified but not implemented.
+- old persisted `Parked` steering rows are still readable through a compatibility
+  recovery bridge; no current production path creates a new parked turn;
+- browser encrypted drafts remain an adapter codec referenced by the common
+  checkpoint envelope, by design; they must never move into generic JSON;
+- `continue-as-new` has an atomic store contract but each long-running adapter must
+  define its compaction threshold and child input before opting in;
+- compensation has durable reverse-order planning and completion evidence, but a
+  domain adapter must interpret its own compensation recipe and submit the child
+  execution; the runtime must not guess connector/browser rollback semantics.
 
 ## Non-negotiable invariants
 
@@ -211,8 +223,8 @@ global execution lifecycle.
 
 ## Durable journal and projection
 
-The canonical journal records contract creation, lease claims, checkpoints,
-effects, wake deliveries, and exactly one committed outcome per revision. The
+The canonical journal records contract creation, revision/fence transitions,
+checkpoints, effects, wake deliveries, and exactly one committed outcome per revision. The
 runtime commits the outcome first, then projects it idempotently to:
 
 - task status;
@@ -263,10 +275,18 @@ codec under this envelope rather than a separate lifecycle.
 
 ## History and long-running work
 
-Long histories use `continue_as_new`: a completed execution revision creates a
-new linked execution with a compacted checkpoint and preserved objective lineage.
-External multi-step workflows may register compensations on completed receipts;
-compensations run in reverse order through the same execution protocol.
+Long histories use `continue_as_new`: a completed execution atomically creates a
+new linked execution with a compacted input/checkpoint and preserved objective,
+scope, policy, resources and budget. The store rejects a child that changes those
+invariants, starts above revision one, carries a wake, or conflicts with an existing
+lineage. The adapter owns the compaction threshold because only it understands which
+domain state can be discarded.
+
+External multi-step workflows may register compensation recipes on completed
+receipts. The store returns them in reverse effect order. Each compensation is a
+child execution using the same protocol; a receipt becomes `Compensated` only after
+that exact linked child has a committed successful outcome. The runtime does not
+invent a generic undo for connector, browser, filesystem, payment or Vault effects.
 
 The runtime does not attempt Temporal-style deterministic replay of model calls.
 LLM and remote decisions are non-deterministic activities whose committed results,

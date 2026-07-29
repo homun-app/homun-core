@@ -428,6 +428,13 @@ impl TaskStore {
             CREATE INDEX IF NOT EXISTS idx_execution_effect_receipts_scope
                 ON execution_effect_receipts(user_id, workspace_id, thread_id, prepared_at DESC);
 
+            CREATE TABLE IF NOT EXISTS execution_effect_compensations (
+                receipt_ref TEXT PRIMARY KEY,
+                compensation_execution_id TEXT NOT NULL UNIQUE,
+                compensated_at INTEGER NOT NULL,
+                FOREIGN KEY(receipt_ref) REFERENCES execution_effect_receipts(receipt_ref) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS executions (
                 execution_id TEXT PRIMARY KEY,
                 parent_execution_id TEXT,
@@ -495,6 +502,7 @@ impl TaskStore {
         )?;
         crate::execution_store::migrate_execution_schema_v13(&self.connection)?;
         migrate_effect_receipts_v14(&self.connection)?;
+        migrate_effect_compensations_v15(&self.connection)?;
 
         // ── chat_turn columns (schema_version 4). Guarded: idempotent on existing DBs.
         // Indexed columns for chat turns. Remain NULL on non-chat_turn rows.
@@ -540,7 +548,7 @@ impl TaskStore {
             [],
         )?;
         self.connection.execute(
-            "UPDATE task_runtime_metadata SET value = '14' WHERE key = 'schema_version'",
+            "UPDATE task_runtime_metadata SET value = '15' WHERE key = 'schema_version'",
             [],
         )?;
         // Partial index: only chat_turn rows (thread_id IS NOT NULL). Indexes the
@@ -1963,6 +1971,44 @@ impl TaskStore {
         rows.map(|row| row.map_err(Into::into)).collect()
     }
 
+    pub fn list_effect_receipts_for_execution(
+        &self,
+        execution_id: &str,
+        revision: u64,
+    ) -> TaskRuntimeResult<Vec<ExecutionEffectReceipt>> {
+        let revision = i64::try_from(revision).map_err(|_| {
+            TaskRuntimeError::Store("effect receipt revision is out of range".into())
+        })?;
+        let mut stmt = self.connection.prepare(
+            "SELECT receipt_ref, execution_id, revision, idempotency_key, run_id, thread_id,
+                    user_id, workspace_id, effect_class, operation, arguments_hash, status,
+                    result_json, effects_json, error_json, compensation_json,
+                    prepared_at, started_at, resolved_at
+             FROM execution_effect_receipts
+             WHERE execution_id = ?1 AND revision = ?2
+             ORDER BY prepared_at ASC, idempotency_key ASC",
+        )?;
+        let rows = stmt.query_map(params![execution_id, revision], map_effect_receipt_row)?;
+        rows.map(|row| row.map_err(Into::into)).collect()
+    }
+
+    pub fn pending_compensations(
+        &self,
+        execution_id: &str,
+    ) -> TaskRuntimeResult<Vec<ExecutionEffectReceipt>> {
+        let mut stmt = self.connection.prepare(
+            "SELECT receipt_ref, execution_id, revision, idempotency_key, run_id, thread_id,
+                    user_id, workspace_id, effect_class, operation, arguments_hash, status,
+                    result_json, effects_json, error_json, compensation_json,
+                    prepared_at, started_at, resolved_at
+             FROM execution_effect_receipts
+             WHERE execution_id = ?1 AND status = 'completed' AND compensation_json IS NOT NULL
+             ORDER BY prepared_at DESC, idempotency_key DESC",
+        )?;
+        let rows = stmt.query_map([execution_id], map_effect_receipt_row)?;
+        rows.map(|row| row.map_err(Into::into)).collect()
+    }
+
     /// Reclaims free space. Call periodically, NOT on every delete.
     pub fn vacuum(&self) -> TaskRuntimeResult<()> {
         self.connection.execute_batch("VACUUM")?;
@@ -2538,6 +2584,55 @@ impl TaskStore {
                     })
                 },
             )
+            .transpose()
+    }
+
+    pub fn checkpoint(
+        &self,
+        checkpoint_id: &str,
+        task_id: &TaskId,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> TaskRuntimeResult<Option<TaskCheckpoint>> {
+        self.connection
+            .query_row(
+                "SELECT sequence, payload_json, redacted_payload_json, created_at
+                 FROM task_checkpoints
+                 WHERE checkpoint_id = ?1 AND task_id = ?2 AND user_id = ?3 AND workspace_id = ?4",
+                params![
+                    checkpoint_id,
+                    task_id.as_str(),
+                    user_id.as_str(),
+                    workspace_id.as_str(),
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, u32>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                },
+            )
+            .optional()?
+            .map(|(sequence, payload, redacted_payload, created_at)| {
+                Ok(TaskCheckpoint {
+                    checkpoint_id: checkpoint_id.to_string(),
+                    task_id: task_id.clone(),
+                    user_id: user_id.clone(),
+                    workspace_id: workspace_id.clone(),
+                    sequence,
+                    payload: serde_json::from_str(&payload)?,
+                    redacted_payload: serde_json::from_str(&redacted_payload)?,
+                    created_at: OffsetDateTime::from_unix_timestamp(created_at).map_err(
+                        |error| {
+                            TaskRuntimeError::Store(format!(
+                                "invalid checkpoint timestamp: {error}"
+                            ))
+                        },
+                    )?,
+                })
+            })
             .transpose()
     }
 
@@ -4104,6 +4199,15 @@ fn migrate_effect_receipts_v14(connection: &Connection) -> TaskRuntimeResult<()>
     Ok(())
 }
 
+fn migrate_effect_compensations_v15(connection: &Connection) -> TaskRuntimeResult<()> {
+    connection.execute(
+        "INSERT INTO task_runtime_metadata(key, value) VALUES ('schema_version', '15')
+         ON CONFLICT(key) DO UPDATE SET value = '15'",
+        [],
+    )?;
+    Ok(())
+}
+
 fn table_exists(conn: &Connection, table: &str) -> bool {
     conn.query_row(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -4145,7 +4249,7 @@ mod migration_tests {
         }
         // Re-running migrations must not panic (guarded ALTER).
         store.run_migrations().expect("idempotent re-run");
-        assert_eq!(store.schema_version().unwrap(), 14);
+        assert_eq!(store.schema_version().unwrap(), 15);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         assert!(table_exists(&store.connection, "runtime_plans"));
@@ -5923,7 +6027,7 @@ mod upgrade_tests {
         conn.execute_batch(&format!("VACUUM INTO '{}'", tmp.display()))
             .unwrap();
         let store = TaskStore::open(&tmp).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 14);
+        assert_eq!(store.schema_version().unwrap(), 15);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         for col in ["thread_id", "request_id", "source", "approval"] {

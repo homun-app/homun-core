@@ -164,6 +164,47 @@ fn mismatched_checkpoint_identity_cannot_become_a_validated_outcome() {
 }
 
 #[test]
+fn checkpoint_resume_context_must_match_the_outcome_and_contract() {
+    let mut raw_contract = valid_contract();
+    raw_contract.objective = Some(ObjectiveRef {
+        thread_id: "thread-1".into(),
+        revision: 3,
+    });
+    let contract = ValidatedExecutionContract::try_from(raw_contract).unwrap();
+    let wake = signal();
+    let checkpoint = checkpoint_for("exec-1", 1, "chat_turn").with_resume_context(
+        contract.as_ref().objective.clone(),
+        wake.clone(),
+        vec![EffectReceiptRef::from_store_id("11111111111111111111111111111111").unwrap()],
+    );
+    assert!(
+        ValidatedExecutionOutcome::new(suspended(wake.clone(), checkpoint.clone()), &contract)
+            .is_ok()
+    );
+
+    let wrong_wake = WakeCondition::User {
+        wait_ref: "wait-1".into(),
+    };
+    assert_eq!(
+        ValidatedExecutionOutcome::new(suspended(wrong_wake, checkpoint.clone()), &contract),
+        Err(ProtocolValidationError::CheckpointWakeMismatch)
+    );
+
+    let wrong_objective = checkpoint_for("exec-1", 1, "chat_turn").with_resume_context(
+        Some(ObjectiveRef {
+            thread_id: "thread-1".into(),
+            revision: 4,
+        }),
+        wake.clone(),
+        Vec::new(),
+    );
+    assert_eq!(
+        ValidatedExecutionOutcome::new(suspended(wake, wrong_objective), &contract),
+        Err(ProtocolValidationError::CheckpointObjectiveMismatch)
+    );
+}
+
+#[test]
 fn unsupported_checkpoint_protocol_schema_cannot_become_a_validated_outcome() {
     let contract = validated_contract();
     let mut checkpoint = checkpoint_for("exec-1", 1, "chat_turn");

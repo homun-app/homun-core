@@ -90,7 +90,7 @@ impl ExecutionRuntime {
         };
         if let Some((contract, outcome)) = recovered {
             validate_authoritative_contract(&task, &contract)?;
-            if should_project_chat(&task, outcome.as_ref()) {
+            if should_project_chat(state, &task, outcome.as_ref())? {
                 crate::execution_projection::project_chat_execution(
                     state,
                     &task,
@@ -203,7 +203,7 @@ impl ExecutionRuntime {
                 .map_err(runtime_store_error)?;
         }
 
-        if should_project_chat(&task, validated.as_ref()) {
+        if should_project_chat(state, &task, validated.as_ref())? {
             crate::execution_projection::project_chat_execution(
                 state,
                 &task,
@@ -222,9 +222,13 @@ impl ExecutionRuntime {
     }
 }
 
-fn should_project_chat(task: &TaskRecord, outcome: &ExecutionOutcome) -> bool {
-    task.kind == "chat_turn"
-        && (task
+fn should_project_chat(
+    state: &AppState,
+    task: &TaskRecord,
+    outcome: &ExecutionOutcome,
+) -> Result<bool, LocalTaskExecutionError> {
+    if task.kind == "chat_turn" {
+        return Ok(task
             .input_json
             .get("thread_id")
             .and_then(Value::as_str)
@@ -233,7 +237,25 @@ fn should_project_chat(task: &TaskRecord, outcome: &ExecutionOutcome) -> bool {
                 outcome,
                 ExecutionOutcome::Completed { output, .. }
                     if output.get("kind").and_then(Value::as_str) == Some("chat_turn")
-            ))
+            ));
+    }
+    let checkpoint = state
+        .task_store
+        .lock()
+        .map_err(runtime_lock_error)?
+        .latest_checkpoint(&task.task_id, &task.user_id, &task.workspace_id)
+        .map_err(runtime_store_error)?;
+    let metadata = checkpoint
+        .as_ref()
+        .and_then(|checkpoint| checkpoint.payload.get("state"));
+    Ok(metadata.is_some_and(|metadata| {
+        metadata.get("kind").and_then(Value::as_str) == Some("proactive_prompt")
+            && metadata.get("thread_id").and_then(Value::as_str).is_some()
+            && metadata
+                .get("assistant_message_id")
+                .and_then(Value::as_str)
+                .is_some()
+    }))
 }
 
 fn normalize_transient_failure(
@@ -277,21 +299,32 @@ fn normalize_transient_failure(
     };
     let record_ref = DurableDataRef::from_store_id(&checkpoint.checkpoint_id)
         .map_err(|error| runtime_error(error.to_string()))?;
+    let wake = WakeCondition::At {
+        unix_seconds: OffsetDateTime::now_utc()
+            .saturating_add(time::Duration::seconds(
+                contract.as_ref().budget.backoff_seconds,
+            ))
+            .unix_timestamp(),
+    };
+    let effect_receipts = store
+        .list_effect_receipts_for_execution(
+            &contract.as_ref().execution_id,
+            contract.as_ref().revision,
+        )
+        .map_err(runtime_store_error)?
+        .into_iter()
+        .map(|receipt| receipt.receipt_ref)
+        .collect();
     Ok(ExecutionOutcome::Suspended {
-        wake: WakeCondition::At {
-            unix_seconds: OffsetDateTime::now_utc()
-                .saturating_add(time::Duration::seconds(
-                    contract.as_ref().budget.backoff_seconds,
-                ))
-                .unix_timestamp(),
-        },
+        wake: wake.clone(),
         checkpoint: CheckpointEnvelope::new(
             contract.as_ref().execution_id.clone(),
             contract.as_ref().revision,
             contract.as_ref().kind.clone(),
             1,
             CheckpointDataRef::Redacted { record_ref },
-        ),
+        )
+        .with_resume_context(contract.as_ref().objective.clone(), wake, effect_receipts),
     })
 }
 
@@ -586,17 +619,36 @@ fn persist_task_execution_checkpoint(
 }
 
 fn checkpoint_envelope(
+    state: &AppState,
     contract: &ValidatedExecutionContract,
     checkpoint: &local_first_task_runtime::TaskCheckpoint,
+    wake: &WakeCondition,
 ) -> Result<CheckpointEnvelope, LocalTaskExecutionError> {
     let record_ref = DurableDataRef::from_store_id(&checkpoint.checkpoint_id)
         .map_err(|error| runtime_error(error.to_string()))?;
+    let effect_receipts = state
+        .task_store
+        .lock()
+        .map_err(runtime_lock_error)?
+        .list_effect_receipts_for_execution(
+            &contract.as_ref().execution_id,
+            contract.as_ref().revision,
+        )
+        .map_err(runtime_store_error)?
+        .into_iter()
+        .map(|receipt| receipt.receipt_ref)
+        .collect();
     Ok(CheckpointEnvelope::new(
         contract.as_ref().execution_id.clone(),
         contract.as_ref().revision,
         contract.as_ref().kind.clone(),
         1,
         CheckpointDataRef::Redacted { record_ref },
+    )
+    .with_resume_context(
+        contract.as_ref().objective.clone(),
+        wake.clone(),
+        effect_receipts,
     ))
 }
 
@@ -623,8 +675,8 @@ pub(crate) fn suspend_task_execution(
 ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
     let checkpoint = persist_task_execution_checkpoint(state, task, &presentation)?;
     Ok(ExecutionOutcome::Suspended {
-        wake,
-        checkpoint: checkpoint_envelope(contract, &checkpoint)?,
+        wake: wake.clone(),
+        checkpoint: checkpoint_envelope(state, contract, &checkpoint, &wake)?,
     })
 }
 

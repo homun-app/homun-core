@@ -49,7 +49,12 @@ impl AttemptGuard {
             now(),
         );
         recorder.record(started.clone());
-        Self { recorder, started, clock: Instant::now(), terminal: false }
+        Self {
+            recorder,
+            started,
+            clock: Instant::now(),
+            terminal: false,
+        }
     }
 
     fn completed(&mut self, body: &Value, estimated_input_chars: usize) {

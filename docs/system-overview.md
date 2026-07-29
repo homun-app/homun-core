@@ -181,6 +181,18 @@ gli eventi live sul **WebSocket unificato `/api/ws`**; NDJSON resta solo come bo
 (`…/turns/{id}/stream`) specchiato su WS. Il vecchio path NDJSON-diretto e il flag `HOMUN_TURN_BROKER` sono
 **rimossi** (grep = 0). Il task-runtime (`crates/task-runtime`) gestisce i job durevoli con heartbeat.
 
+Sotto il broker, ogni lavoro usa `ExecutionRuntime::execute(ExecutionContract)` e restituisce soltanto
+`Completed | Suspended | Cancelled | Failed`. Il journal per `(execution_id, revision)` è autorevole;
+task status, agent run, messaggio, objective e working island sono proiezioni idempotenti. Timer, signal,
+risposta utente, approval, disponibilità modello e risoluzione di un effetto consegnano un `WakeDelivery`
+e riaprono **lo stesso execution ID** alla revisione successiva con il checkpoint esatto.
+
+Le operazioni conseguenziali attraversano una receipt comune
+`Prepared -> Started -> Completed/Failed/Uncertain -> Compensated`. Un esito remoto incerto non viene
+ritentato automaticamente. Sandbox/Seatbelt/Landlock, Vault, payment one-use, browser action lattice e
+policy connector restano gate di dominio più restrittivi, ma non possiedono lifecycle o resume paralleli.
+Le automazioni e i canali sono sorgenti dello stesso contratto, non executor inline separati.
+
 ---
 
 ## 9. Deliverable — decks & documenti

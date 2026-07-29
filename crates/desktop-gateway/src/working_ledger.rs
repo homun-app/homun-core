@@ -256,11 +256,22 @@ mod tests {
             )
             .unwrap();
         store
-            .append_turn_steering("u", "w", "t", "turn-1", &local_first_task_runtime::NewTurnSteering {
-                source_message_id: "message-2".into(), prompt: "continue".into(),
-                visible_prompt: "continue".into(), images: vec![], attachments: serde_json::json!([]),
-                mode: None, model: None,
-            }, 1)
+            .append_turn_steering(
+                "u",
+                "w",
+                "t",
+                "turn-1",
+                &local_first_task_runtime::NewTurnSteering {
+                    source_message_id: "message-2".into(),
+                    prompt: "continue".into(),
+                    visible_prompt: "continue".into(),
+                    images: vec![],
+                    attachments: serde_json::json!([]),
+                    mode: None,
+                    model: None,
+                },
+                1,
+            )
             .unwrap();
 
         let markdown = render(&store, "u", "w", "t").unwrap();

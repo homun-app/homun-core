@@ -117,13 +117,11 @@ pub fn validate_apply_request(
             model_id: target_model.to_string(),
             thread_id: request.thread_id.clone(),
         }),
-        SuggestionActionScope::ChangeRolePreference => {
-            Ok(ApplyInstruction::ChangeRolePreference {
-                role: role.to_string(),
-                provider_id: target_provider.to_string(),
-                model_id: target_model.to_string(),
-            })
-        }
+        SuggestionActionScope::ChangeRolePreference => Ok(ApplyInstruction::ChangeRolePreference {
+            role: role.to_string(),
+            provider_id: target_provider.to_string(),
+            model_id: target_model.to_string(),
+        }),
     }
 }
 

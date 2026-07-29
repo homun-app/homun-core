@@ -1006,10 +1006,8 @@ mod recovery_tests {
         })
         .unwrap();
         let receipt = NewExecutionEffectReceipt {
-            receipt_ref: EffectReceiptRef::from_store_id(
-                "22222222222222222222222222222222",
-            )
-            .unwrap(),
+            receipt_ref: EffectReceiptRef::from_store_id("22222222222222222222222222222222")
+                .unwrap(),
             execution_id: "turn_stale".into(),
             revision: 1,
             idempotency_key: "write_file:abc".into(),

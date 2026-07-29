@@ -35,7 +35,12 @@ fn panic_message(info: &std::panic::PanicHookInfo<'_>) -> String {
 /// test would hijack every other parallel test's panic). Timestamps are epoch
 /// seconds on purpose: no chrono dependency in the workspace, and the
 /// shell-side logs already carry ISO timestamps.
-fn render_panic_entry(message: &str, location: &str, backtrace: &str, at_epoch_secs: u64) -> String {
+fn render_panic_entry(
+    message: &str,
+    location: &str,
+    backtrace: &str,
+    at_epoch_secs: u64,
+) -> String {
     format!(
         "=== panic at epoch {at_epoch_secs} ===\nmessage: {message}\nlocation: {location}\nbacktrace:\n{backtrace}\n"
     )

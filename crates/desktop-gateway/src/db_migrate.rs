@@ -7,18 +7,36 @@ use std::path::Path;
 
 /// Tables owned by the legacy chat_store (desktop-gateway.sqlite).
 const CHAT_TABLES: &[&str] = &[
-    "settings", "chat_threads", "chat_messages", "remote_approvals",
-    "task_thread_links", "channel_inbound_seen", "thread_attachments",
-    "tool_runs", "suggestions", "contacts", "contact_identities",
-    "contact_perimeters", "profiles", "contact_channel_profiles",
+    "settings",
+    "chat_threads",
+    "chat_messages",
+    "remote_approvals",
+    "task_thread_links",
+    "channel_inbound_seen",
+    "thread_attachments",
+    "tool_runs",
+    "suggestions",
+    "contacts",
+    "contact_identities",
+    "contact_perimeters",
+    "profiles",
+    "contact_channel_profiles",
     "contact_relationships",
 ];
 
 /// Tables owned by the legacy task_store (task-runtime.sqlite).
 const TASK_TABLES: &[&str] = &[
-    "task_runtime_metadata", "tasks", "task_dependencies", "resource_reservations",
-    "task_checkpoints", "task_approvals", "automations", "automation_runs",
-    "automation_event_dedup", "turn_events", "broker_meta",
+    "task_runtime_metadata",
+    "tasks",
+    "task_dependencies",
+    "resource_reservations",
+    "task_checkpoints",
+    "task_approvals",
+    "automations",
+    "automation_runs",
+    "automation_event_dedup",
+    "turn_events",
+    "broker_meta",
 ];
 
 /// Fuse the two legacy DBs into the unified target, if needed. Idempotent.
@@ -66,10 +84,22 @@ pub fn unify_databases_if_needed(
     let mut report = UnifyReport::default();
 
     if chat_exists {
-        copy_legacy_into_unified(&conn, "legacy_chat", legacy_chat_path, CHAT_TABLES, &mut report.chat_rows)?;
+        copy_legacy_into_unified(
+            &conn,
+            "legacy_chat",
+            legacy_chat_path,
+            CHAT_TABLES,
+            &mut report.chat_rows,
+        )?;
     }
     if task_exists {
-        copy_legacy_into_unified(&conn, "legacy_task", legacy_task_path, TASK_TABLES, &mut report.task_rows)?;
+        copy_legacy_into_unified(
+            &conn,
+            "legacy_task",
+            legacy_task_path,
+            TASK_TABLES,
+            &mut report.task_rows,
+        )?;
     }
 
     report.unified = true;
@@ -127,7 +157,9 @@ fn is_unified_populated(path: &Path) -> Result<bool, UnifyError> {
             continue;
         }
         let rows: i64 = conn
-            .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row.get(0))
+            .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
             .unwrap_or(0);
         if rows > 0 {
             return Ok(true);
@@ -145,10 +177,16 @@ pub struct UnifyReport {
 
 impl UnifyReport {
     fn already_unified() -> Self {
-        Self { unified: false, ..Default::default() }
+        Self {
+            unified: false,
+            ..Default::default()
+        }
     }
     fn fresh_install() -> Self {
-        Self { unified: false, ..Default::default() }
+        Self {
+            unified: false,
+            ..Default::default()
+        }
     }
 }
 
