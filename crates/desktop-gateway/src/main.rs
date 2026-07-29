@@ -27289,6 +27289,27 @@ fn canonical_json(value: serde_json::Value) -> serde_json::Value {
     }
 }
 
+fn effect_receipt_identity(
+    turn_id: &str,
+    operation: &str,
+    tool_call_id: &str,
+) -> Result<(String, local_first_execution_protocol::EffectReceiptRef), String> {
+    if turn_id.trim().is_empty() || operation.trim().is_empty() || tool_call_id.trim().is_empty() {
+        return Err(
+            "effect receipt requires execution, operation, and logical call identity".into(),
+        );
+    }
+    let idempotency_key = format!("tool_call:{operation}:{tool_call_id}");
+    let receipt_hash = format!(
+        "{:x}",
+        Sha256::digest(format!("{turn_id}:{idempotency_key}").as_bytes())
+    );
+    let receipt_ref =
+        local_first_execution_protocol::EffectReceiptRef::from_store_id(&receipt_hash[..32])
+            .map_err(|error| format!("effect receipt reference failed: {error}"))?;
+    Ok((idempotency_key, receipt_ref))
+}
+
 /// Does this tool name look effectful? `composio_writes` is the authoritative set for connector tools;
 /// the token list below is the fallback for everything else.
 ///
@@ -27590,15 +27611,8 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 "{:x}",
                 Sha256::digest(serde_json::to_vec(&args).unwrap_or_default())
             );
-            let idempotency_key = format!("{name}:{arguments_hash}");
-            let receipt_hash = format!(
-                "{:x}",
-                Sha256::digest(format!("{turn_id}:{idempotency_key}").as_bytes())
-            );
-            let receipt_ref = local_first_execution_protocol::EffectReceiptRef::from_store_id(
-                &receipt_hash[..32],
-            )
-            .map_err(|error| format!("effect receipt reference failed: {error}"))?;
+            let (mut idempotency_key, mut receipt_ref) =
+                effect_receipt_identity(turn_id, name, call_id)?;
             let store = self
                 .state
                 .task_store
@@ -27609,6 +27623,20 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 .map_err(|error| format!("effect execution lookup failed: {error}"))?
                 .map(|record| record.contract.as_ref().revision)
                 .unwrap_or(1);
+            let legacy_idempotency_key = format!("{name}:{arguments_hash}");
+            if let Some(legacy) = store
+                .list_effect_receipts_for_execution(turn_id, revision)
+                .map_err(|error| format!("effect receipt migration lookup failed: {error}"))?
+                .into_iter()
+                .find(|receipt| {
+                    receipt.idempotency_key == legacy_idempotency_key
+                        && receipt.operation == name
+                        && receipt.arguments_hash == arguments_hash
+                })
+            {
+                idempotency_key = legacy.idempotency_key;
+                receipt_ref = legacy.receipt_ref;
+            }
             let effect_class = match tool_effect_class(name, self.composio_writes) {
                 semantic_decision::EffectClass::Read => {
                     local_first_execution_protocol::EffectClass::Read
@@ -68191,6 +68219,24 @@ prs.save(Path({path:?}))
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn effect_receipt_identity_uses_the_logical_tool_call_not_argument_equality() {
+        let (first_key, first_ref) =
+            super::effect_receipt_identity("turn-1", "connector.send", "call-1")
+                .expect("first identity");
+        let (replayed_key, replayed_ref) =
+            super::effect_receipt_identity("turn-1", "connector.send", "call-1")
+                .expect("replayed identity");
+        let (second_key, second_ref) =
+            super::effect_receipt_identity("turn-1", "connector.send", "call-2")
+                .expect("second identity");
+
+        assert_eq!(first_key, replayed_key);
+        assert_eq!(first_ref, replayed_ref);
+        assert_ne!(second_key, "connector.send:call-1");
+        assert_ne!(second_ref, replayed_ref);
     }
 
     #[test]

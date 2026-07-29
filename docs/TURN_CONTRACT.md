@@ -101,7 +101,9 @@ resta leggibile soltanto nel bridge di recovery dei record steering precedenti.
    registrati e consegna all'adapter un `ExecutionAdapterContext`, mai `AppState`; il
    context entra nel dominio registrato senza esporre store o client generici.
 4. Ogni effetto non-read viene autorizzato e registrato prima del dispatch; replay,
-   esito incerto e compensazione usano la receipt, non il testo del modello.
+   esito incerto e compensazione usano la receipt, non il testo del modello. La
+   receipt è identificata dalla chiamata logica (`execution + operation + call_id`),
+   mentre l'hash degli argomenti verifica il payload ma non deduplica due intenti distinti.
 5. Il runtime valida e committa esattamente un outcome per la revisione.
 6. Il projector aggiorna task, run, messaggio, objective, HITL e UI. Se fallisce,
    startup/recovery lo rigioca dal journal senza rieseguire l'adapter.
