@@ -629,6 +629,16 @@ impl TaskStore {
                     current.outcome_committed_at,
                     current.wake_transition.as_ref(),
                 )?;
+                let committed_at = current.outcome_committed_at.ok_or_else(|| {
+                    TaskRuntimeError::Store(
+                        "committed execution outcome has no commit timestamp".into(),
+                    )
+                })?;
+                crate::projection_outbox::enqueue_projection_on(
+                    &tx,
+                    current.record.contract.as_ref(),
+                    committed_at,
+                )?;
                 let record = current.record.clone();
                 tx.commit()?;
                 return Ok(OutcomeCommit::Existing(record));
@@ -668,6 +678,7 @@ impl TaskStore {
             .ok_or_else(|| TaskRuntimeError::Store("committed journal disappeared".into()))?;
         let latest = journal.latest()?;
         write_projection_on(&tx, latest)?;
+        crate::projection_outbox::enqueue_projection_on(&tx, contract, now)?;
         let record = latest.record.clone();
         tx.commit()?;
         Ok(OutcomeCommit::Inserted(record))
@@ -787,6 +798,7 @@ impl TaskStore {
             .ok_or_else(|| TaskRuntimeError::Store("continued parent disappeared".into()))?;
         let completed_record = parent_journal.latest()?.record.clone();
         write_projection_on(&tx, parent_journal.latest()?)?;
+        crate::projection_outbox::enqueue_projection_on(&tx, parent_contract, now)?;
 
         append_journal_event_on(
             &tx,

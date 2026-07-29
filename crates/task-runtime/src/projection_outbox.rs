@@ -1,6 +1,8 @@
-use crate::{TaskRuntimeError, TaskRuntimeResult, TaskStore};
-use local_first_execution_protocol::EffectReceiptRef;
-use rusqlite::{Connection, OptionalExtension};
+use crate::{
+    TaskRuntimeError, TaskRuntimeResult, TaskStore, execution_store::ExecutionJournalEvent,
+};
+use local_first_execution_protocol::{EffectReceiptRef, ExecutionContract};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
 pub const CHAT_LIFECYCLE_PROJECTION: &str = "chat_lifecycle";
 
@@ -56,9 +58,7 @@ pub fn projection_ref(execution_id: &str, revision: u64, projection_kind: &str) 
     format!("{execution_id}:{revision}:{projection_kind}")
 }
 
-pub(crate) fn migrate_projection_outbox_v16(
-    connection: &Connection,
-) -> TaskRuntimeResult<()> {
+pub(crate) fn migrate_projection_outbox_v16(connection: &Connection) -> TaskRuntimeResult<()> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS execution_projection_outbox (
             projection_ref TEXT PRIMARY KEY,
@@ -100,6 +100,112 @@ pub(crate) fn migrate_projection_outbox_v16(
         CREATE INDEX IF NOT EXISTS idx_execution_projection_outbox_blocked
             ON execution_projection_outbox(blocked_on_ref, status);",
     )?;
+    backfill_projection_outbox_v16(connection)?;
+    Ok(())
+}
+
+pub(crate) fn enqueue_projection_on(
+    connection: &Connection,
+    contract: &ExecutionContract,
+    committed_at: i64,
+) -> TaskRuntimeResult<()> {
+    let Some(projection_kind) = projector_kind(&contract.kind) else {
+        return Ok(());
+    };
+    let reference = projection_ref(&contract.execution_id, contract.revision, projection_kind);
+    connection.execute(
+        "INSERT INTO execution_projection_outbox (
+            projection_ref, execution_id, revision, projection_kind, status,
+            attempt_count, claim_token, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, 'pending', 0, 0, ?5, ?5)
+         ON CONFLICT(projection_ref) DO NOTHING",
+        params![
+            reference,
+            contract.execution_id,
+            sqlite_u64(contract.revision, "projection revision")?,
+            projection_kind,
+            committed_at,
+        ],
+    )?;
+    let stored = connection.query_row(
+        "SELECT execution_id, revision, projection_kind
+         FROM execution_projection_outbox WHERE projection_ref = ?1",
+        [&reference],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        },
+    )?;
+    if stored
+        != (
+            contract.execution_id.clone(),
+            sqlite_u64(contract.revision, "projection revision")?,
+            projection_kind.to_string(),
+        )
+    {
+        return Err(TaskRuntimeError::Conflict(
+            "projection reference is bound to a different execution revision".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn projector_kind(execution_kind: &str) -> Option<&'static str> {
+    (execution_kind == "chat_turn").then_some(CHAT_LIFECYCLE_PROJECTION)
+}
+
+fn backfill_projection_outbox_v16(connection: &Connection) -> TaskRuntimeResult<()> {
+    let tx = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    let committed = {
+        let mut statement = tx.prepare(
+            "SELECT execution_id, revision, created_at
+             FROM execution_events
+             WHERE kind = 'outcome_committed'
+             ORDER BY created_at, execution_id, revision",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    for (execution_id, revision, committed_at) in committed {
+        let payload = tx
+            .query_row(
+                "SELECT payload_json
+                 FROM execution_events
+                 WHERE execution_id = ?1 AND revision = ?2
+                   AND kind IN ('execution_created', 'revision_started')
+                 ORDER BY seq
+                 LIMIT 1",
+                params![execution_id, revision],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .ok_or_else(|| {
+                TaskRuntimeError::Store(format!(
+                    "committed projection history has no revision contract: {execution_id}:{revision}"
+                ))
+            })?;
+        let event: ExecutionJournalEvent = serde_json::from_str(&payload)?;
+        let contract = match event {
+            ExecutionJournalEvent::Created { contract, .. }
+            | ExecutionJournalEvent::RevisionStarted { contract, .. } => contract,
+            _ => {
+                return Err(TaskRuntimeError::Store(format!(
+                    "projection backfill loaded a non-contract event: {execution_id}:{revision}"
+                )));
+            }
+        };
+        enqueue_projection_on(&tx, &contract, committed_at)?;
+    }
+    tx.commit()?;
     Ok(())
 }
 
@@ -159,6 +265,14 @@ fn integral_error(column: usize, value: i64) -> rusqlite::Error {
     rusqlite::Error::IntegralValueOutOfRange(column, value)
 }
 
-fn value_error(column: usize, error: impl std::error::Error + Send + Sync + 'static) -> rusqlite::Error {
+fn value_error(
+    column: usize,
+    error: impl std::error::Error + Send + Sync + 'static,
+) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(column, rusqlite::types::Type::Text, Box::new(error))
+}
+
+fn sqlite_u64(value: u64, field: &str) -> TaskRuntimeResult<i64> {
+    i64::try_from(value)
+        .map_err(|_| TaskRuntimeError::Store(format!("{field} exceeds SQLite integer range")))
 }
