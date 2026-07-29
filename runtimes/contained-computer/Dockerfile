@@ -55,16 +55,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # faster-whisper (CTranslate2 — no torch) in an isolated venv: powers on-device,
 # multilingual dictation. The model itself downloads at first use into ~/.cache
 # (a persistent volume), not baked into the image.
+COPY requirements-whisper.txt /tmp/requirements-whisper.txt
 RUN python3 -m venv /opt/whisper-venv \
     && /opt/whisper-venv/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/whisper-venv/bin/pip install --no-cache-dir faster-whisper
+    && /opt/whisper-venv/bin/pip install --no-cache-dir -r /tmp/requirements-whisper.txt
 
 # Deck renderer: turns a structured deck JSON into an on-brand HTML deck AND a NATIVE,
 # EDITABLE .pptx (python-pptx — real text boxes, not screenshots). Used by the
 # create-presentations skill, which writes deck.json then runs `deck-render deck.json`.
+COPY requirements-deck.txt /tmp/requirements-deck.txt
 RUN python3 -m venv /opt/deck-venv \
     && /opt/deck-venv/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/deck-venv/bin/pip install --no-cache-dir python-pptx
+    && /opt/deck-venv/bin/pip install --no-cache-dir -r /tmp/requirements-deck.txt
 COPY deck_render.py /opt/deck/deck_render.py
 COPY deck_qa.py /opt/deck/deck_qa.py
 RUN printf '#!/bin/sh\nexec /opt/deck-venv/bin/python /opt/deck/deck_render.py "$@"\n' \

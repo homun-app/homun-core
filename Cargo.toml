@@ -21,3 +21,11 @@ members = [
     "crates/process-skill",
 ]
 resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Fabio Cantone"]
+license = "FSL-1.1-ALv2"
+repository = "https://github.com/homun-app/homun-core"
+homepage = "https://homun.app"

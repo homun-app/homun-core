@@ -14,6 +14,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseDeveloperIdIdentity } from "./host-computer-signing.mjs";
+import { verifyLicenseResources } from "./verify-license-compliance.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -64,7 +65,22 @@ function electronBinaryPath(context) {
   return path.join(appOutDir, linExe);
 }
 
+/** Resolve the packaged resources directory per platform. */
+export function packagedResourcesPath(context) {
+  const { appOutDir, packager, electronPlatformName } = context;
+  if (electronPlatformName === "darwin") {
+    return path.join(
+      appOutDir,
+      `${packager.appInfo.productFilename}.app`,
+      "Contents",
+      "Resources",
+    );
+  }
+  return path.join(appOutDir, "resources");
+}
+
 export default async function afterPack(context) {
+  verifyLicenseResources(packagedResourcesPath(context));
   const electronBinary = electronBinaryPath(context);
   await flipFuses(electronBinary, {
     version: FuseVersion.V1,

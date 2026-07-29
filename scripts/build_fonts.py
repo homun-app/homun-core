@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Bundle the curated Google-Font set (latin woff2, OFL) from @fontsource into the
-contained-computer renderer AND generate the two manifests the renderer (Python)
-and the desktop UI (TS, base64) read. ONE source of truth for typography — run it
-whenever the curated set changes. Idempotent."""
+"""Bundle curated Google fonts and their actual license metadata from @fontsource.
+
+Generate the font files plus the Python and TypeScript manifests consumed by the
+contained renderer and desktop UI. ONE source of truth for typography — run it
+whenever the curated set changes. Idempotent.
+"""
 import base64, json, shutil
 from pathlib import Path
 
@@ -76,33 +78,108 @@ def _fonts_py_literal(py):
     lines.append("}")
     return "\n".join(lines)
 
-def main():
-    FONTS_DIR.mkdir(parents=True, exist_ok=True)
+def _repository_url(value):
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        url = value.get("url", "")
+        directory = value.get("directory")
+        return f"{url}#{directory}" if directory else url
+    return ""
+
+
+def _legal_files(package_dir):
+    prefixes = ("license", "copying", "notice", "copyright")
+    return sorted(
+        path
+        for path in package_dir.iterdir()
+        if path.is_file() and path.name.lower().startswith(prefixes)
+    )
+
+
+def bundle_fonts(node_root, fonts_dir, py_manifest, ts_manifest, curated=CURATED):
+    node_root = Path(node_root)
+    fonts_dir = Path(fonts_dir)
+    py_manifest = Path(py_manifest)
+    ts_manifest = Path(ts_manifest)
+    fonts_dir.mkdir(parents=True, exist_ok=True)
+    for existing in fonts_dir.glob("*.woff2"):
+        existing.unlink()
+    licenses_dir = fonts_dir / "licenses"
+    if licenses_dir.exists():
+        shutil.rmtree(licenses_dir)
+    licenses_dir.mkdir(parents=True)
+
     py = {}         # family -> {weight: filename}
     ts_faces = {}   # family -> [{weight, dataUri}]
     categories = {} # family -> category ("sans"|"serif"|"slab"|"mono")
-    for family, (pkg, weights, category) in CURATED.items():
+    notices = []
+    license_manifest = []
+    copied_packages = set()
+    for family, (pkg, weights, category) in curated.items():
+        package_dir = node_root / pkg
+        package_json = package_dir / "package.json"
+        if not package_json.exists():
+            raise SystemExit(f"missing Fontsource package metadata: {package_json}")
+        metadata = json.loads(package_json.read_text())
+        license_id = metadata.get("license")
+        if not isinstance(license_id, str) or not license_id.strip():
+            raise SystemExit(f"missing Fontsource license declaration: {package_json}")
+        legal_files = _legal_files(package_dir)
+        if not legal_files:
+            raise SystemExit(
+                f"missing Fontsource license text: {package_dir} ({license_id})"
+            )
+        if pkg not in copied_packages:
+            package_license_dir = licenses_dir / pkg
+            package_license_dir.mkdir(parents=True)
+            for legal_file in legal_files:
+                shutil.copyfile(legal_file, package_license_dir / legal_file.name)
+            copied_packages.add(pkg)
+        notices.append(
+            {
+                "family": family,
+                "package": metadata.get("name", f"@fontsource/{pkg}"),
+                "version": metadata.get("version", "unknown"),
+                "license": license_id,
+                "author": metadata.get("author", "not declared"),
+                "repository": _repository_url(metadata.get("repository")),
+            }
+        )
+
         categories[family] = category
         py[family] = {}
         ts_faces[family] = []
+        font_files = []
         for w in weights:
-            src = NODE / pkg / "files" / f"{pkg}-latin-{w}-normal.woff2"
+            src = package_dir / "files" / f"{pkg}-latin-{w}-normal.woff2"
             if not src.exists():
                 # Fail LOUD: a missing source woff2 is a setup bug — never ship a
                 # family that won't render (that reintroduces the very mismatch S3 fixes).
                 raise SystemExit(f"missing woff2: {src} (did `npm install` run?)")
             fname = f"{slug(family)}-{w}.woff2"
-            shutil.copyfile(src, FONTS_DIR / fname)
+            font_files.append(fname)
+            shutil.copyfile(src, fonts_dir / fname)
             py[family][w] = fname
-            b64 = base64.b64encode((FONTS_DIR / fname).read_bytes()).decode()
+            b64 = base64.b64encode((fonts_dir / fname).read_bytes()).decode()
             ts_faces[family].append({"weight": w, "dataUri": f"data:font/woff2;base64,{b64}"})
+        license_manifest.append(
+            {
+                "family": family,
+                "package": metadata.get("name", f"@fontsource/{pkg}"),
+                "version": metadata.get("version", "unknown"),
+                "license": license_id,
+                "fontFiles": font_files,
+                "licenseFiles": [f"licenses/{pkg}/{item.name}" for item in legal_files],
+            }
+        )
 
-    PY_MANIFEST.write_text(
+    py_manifest.write_text(
         "# GENERATED by scripts/build_fonts.py — do not edit by hand.\n"
         "# family -> {weight: woff2 filename (relative to fonts/)}\n"
         f"FONTS = {_fonts_py_literal(py)}\n"
     )
-    families = list(CURATED.keys())
+    families = list(curated.keys())
     ts = (
         "// GENERATED by scripts/build_fonts.py — do not edit by hand.\n"
         "export const FONT_FAMILIES: string[] = "
@@ -113,8 +190,38 @@ def main():
         "export const FONT_FACES: Record<string, FontFace[]> = "
         f"{json.dumps(ts_faces, ensure_ascii=False)};\n"
     )
-    TS_MANIFEST.write_text(ts)
+    ts_manifest.write_text(ts)
+    (fonts_dir / "LICENSE_MANIFEST.json").write_text(
+        json.dumps({"fonts": license_manifest}, indent=2, ensure_ascii=False) + "\n"
+    )
+
+    notice_lines = [
+        "# Bundled Font Licenses",
+        "",
+        "Generated from the installed Fontsource package metadata.",
+        "The corresponding license texts are stored under `licenses/<package>/`.",
+        "",
+        "| Family | Package | Version | License |",
+        "| --- | --- | --- | --- |",
+    ]
+    for notice in sorted(notices, key=lambda item: item["family"]):
+        notice_lines.append(
+            f"| {notice['family']} | {notice['package']} | {notice['version']} | {notice['license']} |"
+        )
+    notice_lines.extend(["", "## Attributions", ""])
+    for notice in sorted(notices, key=lambda item: item["family"]):
+        source = f" — {notice['repository']}" if notice["repository"] else ""
+        notice_lines.append(
+            f"- **{notice['family']}**: {notice['author']}{source}"
+        )
+    (fonts_dir / "THIRD_PARTY_NOTICES.md").write_text(
+        "\n".join(notice_lines) + "\n"
+    )
     print(f"bundled {sum(len(v) for v in py.values())} woff2 for {len(py)} families")
+
+
+def main():
+    bundle_fonts(NODE, FONTS_DIR, PY_MANIFEST, TS_MANIFEST)
 
 if __name__ == "__main__":
     main()

@@ -1,7 +1,11 @@
 [package]
 name = "local-first-desktop-gateway"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 # The crate ships a second helper binary (`homun-linux-sandbox`, the Linux Landlock
 # fence, ADR 0023). Without this, `cargo run -p local-first-desktop-gateway` (used by
 # apps/desktop/electron/main.cjs in dev) is ambiguous and fails with exit 101, so the
