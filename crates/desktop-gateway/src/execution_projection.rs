@@ -95,6 +95,13 @@ pub(crate) async fn project_chat_execution(
         ExecutionOutcome::Suspended { wake, .. } => wake_projection_fields(wake),
         _ => (None, None),
     };
+    let terminal_text = match outcome {
+        ExecutionOutcome::Completed { .. } => metadata
+            .get("answer")
+            .and_then(serde_json::Value::as_str)
+            .map(crate::strip_chat_markers),
+        _ => None,
+    };
     let payload = serde_json::json!({
         "projection_ref": projection_ref,
         "execution_id": contract.as_ref().execution_id,
@@ -102,6 +109,7 @@ pub(crate) async fn project_chat_execution(
         "assistant_message_id": assistant_message_id,
         "wake_kind": wake_kind,
         "scoped_ref": scoped_ref,
+        "text": terminal_text,
     });
     let store = state.task_store.lock().map_err(projection_lock_error)?;
     crate::turn_executor::emit_turn_event(
@@ -648,6 +656,14 @@ mod tests {
                 .filter(|event| event.payload["projection_ref"] == "turn-projection-1:1")
                 .count(),
             1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .find(|event| event.payload["projection_ref"] == "turn-projection-1:1")
+                .expect("terminal projection event")
+                .payload["text"],
+            "done"
         );
         drop(store);
         let message = state

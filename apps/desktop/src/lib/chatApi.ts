@@ -745,8 +745,11 @@ export interface QueuedTurnResponse {
   turn_id: string;
   thread_id: string;
   request_id: string;
-  status: "queued";
-  position_in_queue: number;
+  status: "queued" | "resumed";
+  position_in_queue?: number;
+  revision?: number;
+  /** Durable cursor immediately before the wake starts the resumed revision. */
+  stream_from_seq?: number;
 }
 
 export interface SteeringQueuedResponse {

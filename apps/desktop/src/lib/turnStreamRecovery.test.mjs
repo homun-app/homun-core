@@ -98,6 +98,7 @@ test("settles after a durable user-approval handoff with streamed content", asyn
         kind: "delta",
         payload: { text: "[PAYMENT_APPROVAL_REQUIRED]" },
       });
+      onEvent({ turn_id: "turn", seq: 2, kind: "suspended", payload: { revision: 1 } });
     },
     getStatus: async () => ({ status: "waiting_user_approval" }),
     sleep: async () => {},
@@ -105,6 +106,38 @@ test("settles after a durable user-approval handoff with streamed content", asyn
 
   assert.equal(result.status, "completed");
   assert.equal(result.text, "[PAYMENT_APPROVAL_REQUIRED]");
+});
+
+test("a resumed cursor does not settle on the previous durable handoff", async () => {
+  let connections = 0;
+  const result = await recoverTurnStream({
+    turnId: "turn",
+    initialState: {
+      turnId: "turn",
+      lastSeq: 16,
+      status: "running",
+      text: "",
+    },
+    connect: async ({ since, onEvent }) => {
+      connections += 1;
+      assert.equal(since, 16);
+      if (connections === 2) {
+        onEvent({ turn_id: "turn", seq: 17, kind: "delta", payload: { text: "old wait" } });
+        onEvent({
+          turn_id: "turn",
+          seq: 18,
+          kind: "done",
+          payload: { text: "SCELTA RIPRESA ALFA" },
+        });
+      }
+    },
+    getStatus: async () => ({ status: connections === 1 ? "waiting_user_approval" : "completed" }),
+    sleep: async () => {},
+  });
+
+  assert.equal(connections, 2);
+  assert.equal(result.text, "SCELTA RIPRESA ALFA");
+  assert.equal(result.status, "completed");
 });
 
 test("bounds an active turn that makes no durable stream progress", async () => {

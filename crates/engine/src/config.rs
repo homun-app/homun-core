@@ -115,6 +115,9 @@ pub struct TurnConfig {
     /// sub-turn) if the model there ever hallucinates that tool name, since none of those turns offer
     /// it as a real capability. `false` everywhere else.
     pub browser_subturn: bool,
+    /// The Free HITL wait resolved by the wake that started this revision. When
+    /// present, the loop must not hand ownership back for the same wait again.
+    pub resolved_hitl: Option<crate::hitl::ResolvedHitlGuard>,
 }
 
 #[cfg(test)]

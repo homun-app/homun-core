@@ -50,6 +50,8 @@ const MAX_PLAN_NUDGES: u32 = 8;
 const MAX_CHOICES_CARD_NUDGES: u32 = 1;
 /// One repair nudge when the model asks for free-text fields without a CLARIFY card.
 const MAX_CLARIFY_CARD_NUDGES: u32 = 1;
+/// One repair round when a resumed turn tries to reopen the wait that its wake just resolved.
+const MAX_RESOLVED_HITL_NUDGES: u32 = 1;
 
 /// Repeats of an identical round before the loop TELLS the model to change approach. Repetition means
 /// the model is stuck on one step, not that the task is impossible: the useful response is a specific
@@ -262,6 +264,8 @@ where
     let mut effect_resolution_receipt = None;
     let mut choices_card_nudges: u32 = 0;
     let mut clarify_card_nudges: u32 = 0;
+    let mut resolved_hitl_nudges: u32 = 0;
+    let mut protocol_failure = None;
     let turn_started_at = Instant::now();
     // The per-progress stall clock: reset to `now` on every real browser progress (see the
     // `browser_no_progress = 0` point below). The browser wall-clock budget is measured from THIS,
@@ -1235,6 +1239,38 @@ again to find the right control). Keep working on the task — do not stop and d
         };
         match hitl_class {
             NoToolsClassification::Await(envelope) => {
+                if let Some(resolved) = cfg.resolved_hitl.as_ref()
+                    && resolved.reopens(&envelope)
+                {
+                    if !is_final_round && resolved_hitl_nudges < MAX_RESOLVED_HITL_NUDGES {
+                        resolved_hitl_nudges += 1;
+                        turn_trace.record(crate::turn_trace::TurnEvent::Nudge {
+                            reason: "resolved_hitl_wait_reopened".into(),
+                            next_step: String::new(),
+                        });
+                        if !content.trim().is_empty() {
+                            ls.messages.push(
+                                serde_json::json!({ "role": "assistant", "content": content }),
+                            );
+                        }
+                        ls.messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": format!(
+                                "[RUNTIME PROTOCOL REJECTION]\nThe HITL wait you just emitted is already resolved with «{}». Do NOT emit or ask that wait again. Apply the accepted resolution and continue the same open work now. If no work remains, provide the final answer. Only create a different HITL wait for a genuinely new unresolved condition.",
+                                resolved.resolution.trim(),
+                            )
+                        }));
+                        continue;
+                    }
+                    protocol_failure =
+                        Some(local_first_execution_protocol::ExecutionFailure::permanent(
+                            "resolved_hitl_reopened",
+                            "The model repeatedly reopened a human wait that was already resolved",
+                        ));
+                    loop_exit = Some("resolved_hitl_reopened");
+                    final_done = true;
+                    break;
+                }
                 ls.accumulated.push_str(&content);
                 let final_answer = append_vault_reveal_marker_if_missing(
                     collapse_plan_markers(&ls.accumulated),
@@ -1833,9 +1869,10 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
     if let Some(ref envelope) = awaiting_envelope {
         memory_answer = ensure_free_hitl_marker_in_text(&memory_answer, envelope);
     }
-    let stop = match effect_resolution_receipt {
-        Some(receipt_ref) => crate::TurnStop::SuspendedEffect { receipt_ref },
-        None => crate::outcome::classify_turn_stop(
+    let stop = match (protocol_failure, effect_resolution_receipt) {
+        (Some(failure), _) => crate::TurnStop::Failed { failure },
+        (None, Some(receipt_ref)) => crate::TurnStop::SuspendedEffect { receipt_ref },
+        (None, None) => crate::outcome::classify_turn_stop(
             visible_answer_delivered || visible_answer(&memory_answer).is_some(),
             awaiting_envelope.as_ref(),
             None,
@@ -1900,6 +1937,39 @@ mod tests {
             on_delta: &(dyn Fn(&str) + Send + Sync),
         ) -> Result<ModelRoundOutput, ModelCallError> {
             let content = "‹‹PLAN››- [x] Deliver result‹‹/PLAN››\n‹‹ARTIFACT››report.md‹‹/ARTIFACT››\nFinal answer.";
+            on_delta(content);
+            Ok(ModelRoundOutput {
+                message: json!({ "role": "assistant", "content": content }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct ResolvedChoiceReplayThenAnswerModel {
+        calls: AtomicUsize,
+    }
+
+    impl ModelClient for ResolvedChoiceReplayThenAnswerModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let replay = self.calls.fetch_add(1, Ordering::SeqCst) == 0;
+            let content = if replay {
+                r#"‹‹CHOICES››{"question":"Choose the operational option:","multi":false,"options":["ALFA","BETA"]}‹‹/CHOICES››"#
+            } else {
+                "SCELTA RIPRESA ALFA"
+            };
             on_delta(content);
             Ok(ModelRoundOutput {
                 message: json!({ "role": "assistant", "content": content }),
@@ -3227,6 +3297,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             // sub-turn shape and expect the terminal to fire. Tests that need the OFF behavior
             // (non-subturn) override this field explicitly.
             browser_subturn: true,
+            resolved_hitl: None,
         }
     }
 
@@ -3306,6 +3377,68 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
                 .any(|e| matches!(e, GenerateStreamEvent::Done { .. })),
             "expected a Done event"
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn resumed_turn_rejects_same_wait_and_continues_to_terminal_answer() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "resume the resolved work" }),
+            json!({ "role": "user", "content": "ALFA" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let model = ResolvedChoiceReplayThenAnswerModel::default();
+        let mut turn_cfg = cfg();
+        turn_cfg.resolved_hitl = Some(crate::hitl::ResolvedHitlGuard {
+            envelope: crate::hitl::HitlEnvelope {
+                kind: crate::hitl::HitlKind::Choice,
+                hold_policy: crate::hitl::HoldPolicy::Free,
+                payload: json!({
+                    "question": "Which option should continue?",
+                    "multi": false,
+                    "options": ["ALFA", "BETA"]
+                }),
+                source_marker: "durable_resume".into(),
+            },
+            resolution: "ALFA".into(),
+        });
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "ALFA".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(model.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
+        assert!(outcome.awaiting_user.is_none());
+        assert_eq!(outcome.memory_answer, "SCELTA RIPRESA ALFA");
     }
 
     #[tokio::test(flavor = "current_thread")]

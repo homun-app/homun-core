@@ -2,7 +2,6 @@ import { applyTurnEvent, createTurnReplayState } from "./turnReplayState.mjs";
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const DURABLE_TERMINAL = new Set(["completed", "failed", "cancelled", "expired"]);
-const DURABLE_HANDOFF = new Set(["waiting_user_approval"]);
 const DEFAULT_DELAYS = [100, 250, 500, 1000, 2000];
 // A turn parked by the steering coordinator waits for the model to come back —
 // minutes, sometimes longer. It is a low-frequency WAIT state, not a stalled
@@ -82,10 +81,6 @@ export async function recoverTurnStream(options) {
       reconnects += 1;
       await sleep(delay);
       continue;
-    }
-
-    if (DURABLE_HANDOFF.has(durableStatus.status) && state.lastSeq > 0) {
-      return { ...state, status: "completed" };
     }
 
     if (DURABLE_TERMINAL.has(durableStatus.status)) {

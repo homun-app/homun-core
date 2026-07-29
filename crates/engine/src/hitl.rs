@@ -50,6 +50,75 @@ pub struct HitlEnvelope {
     pub source_marker: String,
 }
 
+/// A human wait that was already resolved before this turn started. The loop uses
+/// this machine-owned guard to reject an immediate semantic replay of that wait.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedHitlGuard {
+    pub envelope: HitlEnvelope,
+    pub resolution: String,
+}
+
+impl ResolvedHitlGuard {
+    pub fn reopens(&self, candidate: &HitlEnvelope) -> bool {
+        if self.envelope.kind != candidate.kind
+            || self.envelope.hold_policy != candidate.hold_policy
+        {
+            return false;
+        }
+        match candidate.kind {
+            HitlKind::Choice => {
+                payload_strings(&self.envelope.payload, "options")
+                    == payload_strings(&candidate.payload, "options")
+                    && payload_bool(&self.envelope.payload, "multi")
+                        == payload_bool(&candidate.payload, "multi")
+            }
+            HitlKind::Clarify => {
+                let resolved_fields = payload_strings(&self.envelope.payload, "fields");
+                let candidate_fields = payload_strings(&candidate.payload, "fields");
+                if resolved_fields.is_empty() || candidate_fields.is_empty() {
+                    normalized_question(&self.envelope.payload)
+                        == normalized_question(&candidate.payload)
+                } else {
+                    resolved_fields == candidate_fields
+                }
+            }
+            _ => self.envelope.payload == candidate.payload,
+        }
+    }
+}
+
+fn payload_strings(payload: &Value, key: &str) -> Vec<String> {
+    let mut values: Vec<String> = payload
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|value| value.trim().to_lowercase())
+                .collect()
+        })
+        .unwrap_or_default();
+    values.sort_unstable();
+    values.dedup();
+    values
+}
+
+fn payload_bool(payload: &Value, key: &str) -> bool {
+    payload.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn normalized_question(payload: &Value) -> String {
+    payload
+        .get("question")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
 impl HitlEnvelope {
     pub fn is_free(&self) -> bool {
         matches!(self.hold_policy, HoldPolicy::Free)
@@ -323,6 +392,52 @@ pub fn finalize_terminal_text_for_hitl(text: &str) -> (String, Option<HitlEnvelo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolved_choice_guard_rejects_reworded_replay_of_same_options() {
+        let guard = ResolvedHitlGuard {
+            envelope: HitlEnvelope {
+                kind: HitlKind::Choice,
+                hold_policy: HoldPolicy::Free,
+                payload: serde_json::json!({
+                    "question": "Which option should continue?",
+                    "multi": false,
+                    "options": ["ALFA", "BETA"]
+                }),
+                source_marker: "CHOICES".into(),
+            },
+            resolution: "ALFA".into(),
+        };
+        let replay = HitlEnvelope {
+            kind: HitlKind::Choice,
+            hold_policy: HoldPolicy::Free,
+            payload: serde_json::json!({
+                "question": "Choose the operational option:",
+                "multi": false,
+                "options": ["ALFA", "BETA"]
+            }),
+            source_marker: "CHOICES".into(),
+        };
+        let different = HitlEnvelope {
+            payload: serde_json::json!({
+                "question": "Choose the delivery format:",
+                "multi": false,
+                "options": ["PDF", "DOCX"]
+            }),
+            ..replay.clone()
+        };
+        let reordered = HitlEnvelope {
+            payload: serde_json::json!({
+                "question": "Pick one:",
+                "options": ["BETA", "ALFA"]
+            }),
+            ..replay.clone()
+        };
+
+        assert!(guard.reopens(&replay));
+        assert!(guard.reopens(&reordered));
+        assert!(!guard.reopens(&different));
+    }
 
     #[test]
     fn choices_legacy_normalizes_to_free_choice_envelope() {

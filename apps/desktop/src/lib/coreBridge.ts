@@ -613,7 +613,7 @@ export type CoreChatStreamEvent =
   | { type: "recall"; request_id: string; payload: RecallEventPayload }
   | { type: "diff"; request_id: string; payload: DiffEventPayload }
   | { type: "retry" | "aborted" | "queued"; request_id: string; payload: Record<string, unknown>; seq?: number }
-  | { type: "done"; request_id: string; seq?: number }
+  | { type: "done"; request_id: string; text?: string; seq?: number }
   | { type: "error"; request_id: string; message?: string; retryable?: boolean; seq?: number };
 
 export interface CorePromptExecutionPlan {
@@ -4715,6 +4715,7 @@ async function submitBrokerRuntimeChatPromptStream(
   keepDesktopAwake(true);
   try {
     replay = await replayBrokerTurnStream(turnId, requestId, {
+      since: enqueued.stream_from_seq,
       onFirstDelta: () => {
         if (firstTokenSeconds === undefined) {
           firstTokenSeconds = roundedSeconds((performance.now() - startedAt) / 1000);
@@ -4888,7 +4889,7 @@ async function replayBrokerTurnStream(
               kind: envelope.kind,
               payload: envelope.payload ?? {},
             });
-            if (["done", "error", "cancelled"].includes(envelope.kind)) break stream;
+            if (["done", "suspended", "error", "cancelled"].includes(envelope.kind)) break stream;
           }
         }
       } finally {
@@ -4913,7 +4914,12 @@ async function replayBrokerTurnStream(
         if (typeof payload.redacted_user_text === "string") {
           redactedUserText = payload.redacted_user_text;
         }
-        chatApi.notifyChatStreamEvent({ type: "done", request_id: requestId, seq: event.seq });
+        chatApi.notifyChatStreamEvent({
+          type: "done",
+          request_id: requestId,
+          text: typeof payload.text === "string" ? payload.text : undefined,
+          seq: event.seq,
+        });
       } else if (event.kind === "error") {
         errorMessage = String(payload.message ?? "Turn error");
         chatApi.notifyChatStreamEvent({

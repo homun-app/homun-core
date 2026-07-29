@@ -28371,6 +28371,7 @@ impl GatewayBrowseExecutor<'_> {
             // E2: THIS is the browse sub-turn — `browser_done` is its own completion signal, so the
             // engine's terminal must be armed here.
             browser_subturn: true,
+            resolved_hitl: None,
         };
 
         let outcome = local_first_engine::agent_loop::run_turn(
@@ -28535,6 +28536,7 @@ impl GatewayComputerExecutor<'_> {
                 // E2: this is the host-computer sub-turn, NOT the browse sub-turn — it never offers
                 // `browser_done` as a real tool, so the terminal must stay disarmed here.
                 browser_subturn: false,
+                resolved_hitl: None,
             },
             &usage_context,
             &model_client,
@@ -30407,6 +30409,24 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             // (`browser_registry_cached_tools`) deliberately excludes `browser_done` — reaching this
             // turn's dispatcher is a hallucination — so the terminal must stay disarmed here.
             browser_subturn: false,
+            resolved_hitl: hitl_choice_resume.as_ref().map(|ctx| {
+                local_first_engine::hitl::ResolvedHitlGuard {
+                    envelope: local_first_engine::hitl::HitlEnvelope {
+                        kind: match ctx.wait.kind {
+                            hitl_resume::HitlWaitKind::Choice => {
+                                local_first_engine::hitl::HitlKind::Choice
+                            }
+                            hitl_resume::HitlWaitKind::Clarify => {
+                                local_first_engine::hitl::HitlKind::Clarify
+                            }
+                        },
+                        hold_policy: local_first_engine::hitl::HoldPolicy::Free,
+                        payload: ctx.wait.payload.clone(),
+                        source_marker: "durable_resume".to_string(),
+                    },
+                    resolution: ctx.resolution.clone(),
+                }
+            }),
         };
         // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern, so it
         // runs HERE after the engine turn returns. Snapshot what it needs before the turn consumes the
@@ -39145,6 +39165,7 @@ fn enqueue_or_steer_chat_turn_core(
 struct ResumedChatTurn {
     execution_id: String,
     revision: u64,
+    stream_from_seq: i64,
 }
 
 fn resume_suspended_user_turn_core(
@@ -39188,6 +39209,11 @@ fn resume_suspended_user_turn_core(
             ),
         ));
     }
+    let stream_from_seq = store
+        .read_turn_events(&wake.execution_id, 0)?
+        .last()
+        .map(|event| event.seq)
+        .unwrap_or(0);
     let payload = serde_json::json!({
         "type": "user",
         "prompt": input.prompt,
@@ -39201,7 +39227,7 @@ fn resume_suspended_user_turn_core(
     });
     #[cfg(not(test))]
     let delivered = store.deliver_execution_wake_with(&wake.condition, &payload, |tx| {
-        insert_broker_steering_user_message(tx, input)
+        insert_broker_resume_user_message(tx, input, &wake.execution_id)
     })?;
     // Test AppState keeps chat and task stores on separate in-memory SQLite
     // connections, unlike production's shared homun.sqlite.
@@ -39234,6 +39260,7 @@ fn resume_suspended_user_turn_core(
     Ok(Some(ResumedChatTurn {
         execution_id: wake.execution_id,
         revision: wake.revision + 1,
+        stream_from_seq,
     }))
 }
 
@@ -39276,6 +39303,11 @@ fn resume_suspended_approval_turn_core(
             ),
         ));
     }
+    let stream_from_seq = store
+        .read_turn_events(&wake.execution_id, 0)?
+        .last()
+        .map(|event| event.seq)
+        .unwrap_or(0);
     let payload = serde_json::json!({
         "type": "approval",
         "approved": approved,
@@ -39296,6 +39328,7 @@ fn resume_suspended_approval_turn_core(
     Ok(Some(ResumedChatTurn {
         execution_id: wake.execution_id,
         revision: wake.revision + 1,
+        stream_from_seq,
     }))
 }
 
@@ -39334,6 +39367,25 @@ fn insert_broker_steering_user_message(
         visible_prompt,
         &now_epoch_secs().to_string(),
         &broker_turn_message_attachments(input),
+    )
+    .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))
+}
+
+#[cfg(not(test))]
+fn insert_broker_resume_user_message(
+    tx: &rusqlite::Transaction<'_>,
+    input: &local_first_task_runtime::broker::ChatTurnInput,
+    execution_id: &str,
+) -> local_first_task_runtime::TaskRuntimeResult<()> {
+    let visible_prompt = input.visible_prompt.as_deref().unwrap_or(&input.prompt);
+    ChatStore::insert_linked_resume_user_message(
+        tx,
+        &input.thread_id,
+        &format!("local_user_{}", input.request_id),
+        visible_prompt,
+        &now_epoch_secs().to_string(),
+        &broker_turn_message_attachments(input),
+        execution_id,
     )
     .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))
 }
@@ -39486,6 +39538,7 @@ async fn enqueue_turn(
                 "thread_id": input.thread_id,
                 "request_id": request_id,
                 "revision": resumed.revision,
+                "stream_from_seq": resumed.stream_from_seq,
                 "status": "resumed",
             })),
         ));
@@ -67037,6 +67090,13 @@ prs.save(Path({path:?}))
             store.insert_task(&task).unwrap();
             store.create_execution(&contract).unwrap();
             store.commit_execution_outcome(&outcome).unwrap();
+            store
+                .insert_turn_event(
+                    task.task_id.as_str(),
+                    local_first_task_runtime::TurnEventKind::Suspended,
+                    serde_json::json!({"revision": 1}),
+                )
+                .unwrap();
         }
         let mut assistant = super::channel_chat_message_with_id(
             "assistant",
@@ -67071,6 +67131,7 @@ prs.save(Path({path:?}))
 
         assert_eq!(resumed.execution_id, task.task_id.as_str());
         assert_eq!(resumed.revision, 2);
+        assert_eq!(resumed.stream_from_seq, 1);
         let store = state.task_store.lock().unwrap();
         assert_eq!(
             store

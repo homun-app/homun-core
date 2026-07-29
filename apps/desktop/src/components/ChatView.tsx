@@ -129,6 +129,7 @@ import {
 import {
   applyTurnEvent,
   createTurnReplayState,
+  prepareHitlResumeMessages,
   type TurnReplayState,
   type TurnReplayStatus,
 } from "../lib/turnReplayState";
@@ -826,11 +827,13 @@ export function ChatView({
     if (!hasActiveTurn) return null;
     return {
       phase: turnAwaitingUser
-        ? projectedActiveTurn?.blocked_reason?.trim() || t("chat.waitingForYou", {
+        ? t("chat.waitingForYou", {
             defaultValue: "Waiting for you",
           })
         : streamStatus?.title ?? t("chat.stillWorking"),
-      detail: streamStatus?.detail ?? projectedActiveTurn?.blocked_reason ?? undefined,
+      detail: turnAwaitingUser
+        ? streamStatus?.detail
+        : streamStatus?.detail ?? projectedActiveTurn?.blocked_reason ?? undefined,
       elapsedSeconds: activeTurnElapsedSeconds,
       attempt: projectedActiveTurn?.attempt ?? 1,
       activityCount: conversationActivity.length,
@@ -1242,6 +1245,7 @@ export function ChatView({
     mode?: string,
     branchFromId?: string,
     routingBinding?: RoutingBindingInput,
+    resumeAssistantMessageId?: string,
   ) {
     const text = prompt.trim();
     if (!text) return;
@@ -1272,7 +1276,10 @@ export function ChatView({
         ...(visibleAttachments ?? attachments.map(toMessageAttachment)),
       ],
     };
-    const promptMessages = [...conversationBase, userMessage];
+    const hitlResume = resumeAssistantMessageId
+      ? prepareHitlResumeMessages(conversationBase, resumeAssistantMessageId, userMessage)
+      : null;
+    const promptMessages = hitlResume?.promptMessages ?? [...conversationBase, userMessage];
     const requestId = `chat_stream_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const localTurnId = `turn_${requestId}`;
     activeTurnIdRef.current = localTurnId;
@@ -1287,7 +1294,7 @@ export function ChatView({
     });
     setOptimisticMessages(promptMessages);
     onMessagesChange(promptMessages);
-    const streamingMessage: ChatMessage = {
+    const streamingMessage: ChatMessage = hitlResume?.streamingMessage ?? {
       id: `local_assistant_${Date.now()}`,
       role: "assistant",
       text: "",
@@ -1396,6 +1403,12 @@ export function ChatView({
               : t("chat.promptReceived"),
             detail: String(payload.payload.reason ?? payload.payload.detail ?? ""),
           });
+          return;
+        }
+        if (payload.type === "done" && payload.text !== undefined) {
+          streamedText = payload.text;
+          streamEventParts = [];
+          scheduleStreamingMessage();
           return;
         }
         const part = chatEventPartFromStream(payload);
@@ -1732,6 +1745,12 @@ export function ChatView({
           });
           return;
         }
+        if (payload.type === "done" && payload.text !== undefined) {
+          streamedText = payload.text;
+          streamEventParts = [];
+          scheduleStreamingMessage();
+          return;
+        }
         const part = chatEventPartFromStream(payload);
         if (part) {
           streamEventParts = [...streamEventParts, part];
@@ -1865,11 +1884,17 @@ export function ChatView({
 
   // HITL Free wait (CHOICES / CLARIFY): clear live "still working" state and force a real
   // next turn so the answer never becomes steering into a lagging projected active turn.
-  async function submitChoiceAnswer(answer: string): Promise<boolean> {
+  async function submitChoiceAnswer(
+    answer: string,
+    assistantMessageId: string,
+  ): Promise<boolean> {
     setStreamingAssistantId(null);
     setStreamStatus(null);
     setProjectedActiveTurn(null);
-    return submitComposerPrompt(answer, [], { forceNewTurn: true });
+    return submitComposerPrompt(answer, [], {
+      forceNewTurn: true,
+      resumeAssistantMessageId: assistantMessageId,
+    });
   }
 
   async function submitComposerPrompt(
@@ -1883,6 +1908,7 @@ export function ChatView({
       images?: string[];
       /** HITL Free resolutions (Choice/Clarify) must never become mid-turn steering. */
       forceNewTurn?: boolean;
+      resumeAssistantMessageId?: string;
     },
   ): Promise<boolean> {
     const activeReplyContext = replyContext;
@@ -1979,9 +2005,24 @@ export function ChatView({
           images,
           undefined,
           mode,
+          undefined,
+          undefined,
+          options?.resumeAssistantMessageId,
         );
       } else {
-        void submitPrompt(prompt, attachments, undefined, undefined, model, images, undefined, mode);
+        void submitPrompt(
+          prompt,
+          attachments,
+          undefined,
+          undefined,
+          model,
+          images,
+          undefined,
+          mode,
+          undefined,
+          undefined,
+          options?.resumeAssistantMessageId,
+        );
       }
       return true;
     }
@@ -1996,7 +2037,19 @@ export function ChatView({
       "User request:",
       prompt,
     ].join("\n");
-    void submitPrompt(promptWithReplyContext, attachments, undefined, prompt, model, images, undefined, mode);
+    void submitPrompt(
+      promptWithReplyContext,
+      attachments,
+      undefined,
+      prompt,
+      model,
+      images,
+      undefined,
+      mode,
+      undefined,
+      undefined,
+      options?.resumeAssistantMessageId,
+    );
     return true;
   }
 
@@ -3030,7 +3083,7 @@ export function ChatView({
                       onChoose={(answer, purpose) =>
                         purpose
                           ? void handleProactiveAnswer(displayMessage.text, answer)
-                          : void submitChoiceAnswer(answer)
+                          : void submitChoiceAnswer(answer, displayMessage.id)
                       }
                     />
                   )}
@@ -3081,7 +3134,7 @@ export function ChatView({
                     onOpenArtifact={(artifact) => {
                       openArtifactTab(artifact);
                     }}
-                    onChoose={(answer) => void submitChoiceAnswer(answer)}
+                    onChoose={(answer) => void submitChoiceAnswer(answer, displayMessage.id)}
                   />
                 </>
               ) : (

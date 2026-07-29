@@ -3667,6 +3667,75 @@ impl ChatStore {
         Ok(())
     }
 
+    /// Inserts a user resolution immediately before the assistant message owned by
+    /// the suspended turn. The assistant id remains stable across revisions, but
+    /// its final text must render after the resolution that allowed it to finish.
+    pub(crate) fn insert_linked_resume_user_message(
+        conn: &Connection,
+        thread_id: &str,
+        id: &str,
+        text: &str,
+        timestamp: &str,
+        attachments: &[serde_json::Value],
+        execution_id: &str,
+    ) -> rusqlite::Result<()> {
+        let message = ChatMessage {
+            id: id.to_string(),
+            role: "user".to_string(),
+            text: text.to_string(),
+            timestamp: timestamp.to_string(),
+            metadata: None,
+            metrics: None,
+            feedback: None,
+            saved_memory_ref: None,
+            linked_task_id: None,
+            linked_automation_ref: None,
+            attachments: attachments.to_vec(),
+            event_parts: Vec::new(),
+            memory_reuse: None,
+            delivery_state: MessageDeliveryState::Delivered,
+        };
+        let assistant: Option<(String, Option<String>)> = conn
+            .query_row(
+                "select id, parent_id from chat_messages
+                  where thread_id = ?1 and role = 'assistant' and linked_task_id = ?2
+                  order by rowid desc limit 1",
+                params![thread_id, execution_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((assistant_id, assistant_parent)) = assistant else {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "suspended turn assistant message is missing".to_string(),
+            ));
+        };
+        if Self::active_leaf_on(conn, thread_id)?.as_deref() != Some(assistant_id.as_str()) {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "suspended turn assistant is not the active transcript leaf".to_string(),
+            ));
+        }
+        if !Self::insert_message_on(conn, thread_id, &message, assistant_parent.as_deref())? {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "resume user message id collision".to_string(),
+            ));
+        }
+        let reparented = conn.execute(
+            "update chat_messages set parent_id = ?1, timestamp = ?2
+              where thread_id = ?3 and id = ?4 and role = 'assistant' and linked_task_id = ?5",
+            params![message.id, timestamp, thread_id, assistant_id, execution_id],
+        )?;
+        if reparented != 1 {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "suspended turn assistant could not be reparented".to_string(),
+            ));
+        }
+        conn.execute(
+            "update chat_threads set active_leaf_id = ?1 where thread_id = ?2",
+            params![assistant_id, thread_id],
+        )?;
+        Ok(())
+    }
+
     /// Materialize a claimed steering envelope exactly once in the visible branch.
     pub(crate) fn materialize_steering_message(
         &self,
@@ -6066,6 +6135,63 @@ mod tests {
             )
             .unwrap();
         assert_eq!(leaf.as_deref(), Some(assistant.id.as_str()));
+    }
+
+    #[test]
+    fn resumed_user_reply_is_inserted_before_the_reused_assistant() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let tid = thread.thread_id;
+        let seed_id = store.messages(&tid).unwrap().messages[0].id.clone();
+        let user = mk_message("local_user_initial", "user");
+        let mut assistant = mk_message("local_assistant_initial", "assistant");
+        assistant.linked_task_id = Some("turn_initial".to_string());
+
+        ChatStore::insert_linked_turn_messages(&store.conn, &tid, &user, &assistant).unwrap();
+        ChatStore::insert_linked_resume_user_message(
+            &store.conn,
+            &tid,
+            "local_user_resolution",
+            "ALFA",
+            "101",
+            &[],
+            "turn_initial",
+        )
+        .unwrap();
+
+        let ids: Vec<String> = store
+            .messages(&tid)
+            .unwrap()
+            .messages
+            .into_iter()
+            .map(|message| message.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                seed_id,
+                user.id,
+                "local_user_resolution".to_string(),
+                assistant.id,
+            ]
+        );
+        let leaf: Option<String> = store
+            .conn
+            .query_row(
+                "select active_leaf_id from chat_threads where thread_id = ?1",
+                params![tid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(leaf.as_deref(), Some("local_assistant_initial"));
+        assert_eq!(
+            store
+                .message(&tid, "local_assistant_initial")
+                .unwrap()
+                .unwrap()
+                .timestamp,
+            "101"
+        );
     }
 
     #[test]

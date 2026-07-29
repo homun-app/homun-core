@@ -421,7 +421,10 @@ pub(crate) fn hitl_resume_harness_slot(
     };
     format!(
         "HITL RESUME ({kind_label} wait_id={wait_id}): {detail}. \
-Continue the SAME open work — this is NOT a new objective.\n{browser_line}{url}{contract}{remaining_plan}",
+WAIT IS RESOLVED: the resolution above is authoritative input already accepted by the runtime. \
+You MUST NOT emit the same wait again, ask the resolved question again, or stop before applying \
+the resolution. Continue the SAME open work after that wait — this is NOT a new objective. \
+Only open a new HITL wait for a different, genuinely unresolved condition.\n{browser_line}{url}{contract}{remaining_plan}",
         wait_id = wait.wait_id,
         detail = detail,
         browser_line = browser_line,
@@ -686,6 +689,8 @@ mod tests {
         let wait = sample_choice_wait(&["A"]);
         let warm = hitl_resume_harness_slot(&wait, "A", true);
         assert!(warm.contains("HITL RESUME"));
+        assert!(warm.contains("WAIT IS RESOLVED"));
+        assert!(warm.contains("MUST NOT emit the same wait again"));
         assert!(warm.contains("WARM"));
         assert!(warm.contains("suggest_capabilities"));
         let gone = hitl_resume_harness_slot(&wait, "A", false);

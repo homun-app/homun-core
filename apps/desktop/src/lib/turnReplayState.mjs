@@ -26,6 +26,12 @@ export function applyTurnEvent(state, event) {
       next.status = "running";
       break;
     case "done":
+      if (typeof event.payload?.text === "string") {
+        next.text = event.payload.text;
+      }
+      next.status = "completed";
+      break;
+    case "suspended":
       next.status = "completed";
       break;
     case "error":
@@ -45,4 +51,21 @@ export function applyTurnEvent(state, event) {
       break;
   }
   return next;
+}
+
+export function prepareHitlResumeMessages(messages, assistantMessageId, userMessage) {
+  const assistant = messages.find((message) => message.id === assistantMessageId);
+  if (!assistant) return null;
+  return {
+    promptMessages: [
+      ...messages.filter((message) => message.id !== assistantMessageId),
+      userMessage,
+    ],
+    streamingMessage: {
+      ...assistant,
+      text: "",
+      timestamp: userMessage.timestamp ?? assistant.timestamp,
+      eventParts: [],
+    },
+  };
 }

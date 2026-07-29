@@ -27,3 +27,11 @@ export const applyTurnEvent = implementation.applyTurnEvent as (
   state: TurnReplayState,
   event: SequencedTurnEvent,
 ) => TurnReplayState;
+
+export const prepareHitlResumeMessages = implementation.prepareHitlResumeMessages as <
+  T extends { id: string; text: string; timestamp?: string; eventParts?: unknown[] },
+>(
+  messages: T[],
+  assistantMessageId: string,
+  userMessage: T,
+) => { promptMessages: T[]; streamingMessage: T } | null;
