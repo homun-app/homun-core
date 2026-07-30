@@ -1,4 +1,5 @@
 use crate::{SecretError, SecretMaterial, SecretMetadata, SecretRef, SecretResult, SecretStore};
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
 pub struct SystemKeychainSecretStore {
