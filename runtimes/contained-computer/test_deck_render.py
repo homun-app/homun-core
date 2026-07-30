@@ -273,6 +273,39 @@ class DeckQaOverflow(unittest.TestCase):
                 handle.write("43127\n/devtools/browser/id\n")
             self.assertEqual(deck_qa._read_devtools_active_port(tmp), 43127)
 
+    def test_qa_retries_only_transient_browser_failures(self):
+        original = deck_qa._run_qa_once
+        calls = []
+
+        def transient_then_pass(*args):
+            calls.append(args)
+            if len(calls) < 3:
+                raise deck_qa.ChromiumQaInfrastructureError("browser unavailable")
+            return {"ok": True}
+
+        try:
+            deck_qa._run_qa_once = transient_then_pass
+            self.assertEqual(deck_qa.run_qa(__file__, "chromium"), {"ok": True})
+        finally:
+            deck_qa._run_qa_once = original
+        self.assertEqual(len(calls), 3)
+
+    def test_qa_does_not_retry_semantic_failures(self):
+        original = deck_qa._run_qa_once
+        calls = []
+
+        def fail(*args):
+            calls.append(args)
+            raise RuntimeError("unexpected QA result")
+
+        try:
+            deck_qa._run_qa_once = fail
+            with self.assertRaisesRegex(RuntimeError, "unexpected QA result"):
+                deck_qa.run_qa(__file__, "chromium")
+        finally:
+            deck_qa._run_qa_once = original
+        self.assertEqual(len(calls), 1)
+
     @unittest.skipUnless(CHROMIUM, "no chromium/chrome binary found")
     def test_hero_art_bleed_not_flagged_as_overflow(self):
         # End-to-end: the real renderer output for a hero_art cover must pass the

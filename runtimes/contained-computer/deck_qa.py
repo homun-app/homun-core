@@ -12,14 +12,20 @@ import base64
 import hashlib
 import json
 import os
+import signal
 import socket
 import struct
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
+
+
+class ChromiumQaInfrastructureError(RuntimeError):
+    pass
 
 
 def _read_http(url, timeout=5):
@@ -34,7 +40,7 @@ def _ws_connect(ws_url):
     path = parsed.path
     if parsed.query:
         path += "?" + parsed.query
-    sock = socket.create_connection((host, port), timeout=5)
+    sock = socket.create_connection((host, port), timeout=10)
     key = base64.b64encode(os.urandom(16)).decode("ascii")
     request = (
         f"GET {path} HTTP/1.1\r\n"
@@ -310,7 +316,51 @@ def _read_log_tail(path, limit=2000):
     return content[-limit:].strip()
 
 
-def run_qa(path, chromium="chromium", mode="deck"):
+def _stop_chromium(proc):
+    if os.name == "posix":
+        group_id = proc.pid
+        try:
+            os.killpg(group_id, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pass
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(group_id, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.05)
+        try:
+            os.killpg(group_id, signal.SIGKILL)
+        except ProcessLookupError:
+            return
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(group_id, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.05)
+        return
+
+    if proc.poll() is None:
+        proc.terminate()
+    try:
+        proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=3)
+
+
+def _run_qa_once(path, chromium, mode):
     abs_path = os.path.abspath(path)
     if not os.path.isfile(abs_path):
         raise RuntimeError(f"HTML file not found: {path}")
@@ -325,6 +375,13 @@ def run_qa(path, chromium="chromium", mode="deck"):
                     "--no-sandbox",
                     "--disable-gpu",
                     "--disable-dev-shm-usage",
+                    "--disable-background-networking",
+                    "--disable-component-update",
+                    "--disable-extensions",
+                    "--disable-sync",
+                    "--metrics-recording-only",
+                    "--no-default-browser-check",
+                    "--no-first-run",
                     "--remote-debugging-address=127.0.0.1",
                     "--remote-debugging-port=0",
                     f"--user-data-dir={profile_dir}",
@@ -334,10 +391,11 @@ def run_qa(path, chromium="chromium", mode="deck"):
                 stdout=subprocess.DEVNULL,
                 stderr=log_handle,
                 text=True,
+                start_new_session=os.name == "posix",
             )
         try:
             port = None
-            deadline = time.monotonic() + 15
+            deadline = time.monotonic() + 20
             while time.monotonic() < deadline:
                 port = _read_devtools_active_port(profile_dir)
                 if port is not None:
@@ -345,12 +403,16 @@ def run_qa(path, chromium="chromium", mode="deck"):
                 if proc.poll() is not None:
                     detail = _read_log_tail(log_path)
                     suffix = f": {detail}" if detail else ""
-                    raise RuntimeError(f"chromium exited before DevTools became available{suffix}")
+                    raise ChromiumQaInfrastructureError(
+                        f"chromium exited before DevTools became available{suffix}"
+                    )
                 time.sleep(0.05)
             if port is None:
                 detail = _read_log_tail(log_path)
                 suffix = f": {detail}" if detail else ""
-                raise RuntimeError(f"chromium did not expose DevTools within 15s{suffix}")
+                raise ChromiumQaInfrastructureError(
+                    f"chromium did not expose DevTools within 20s{suffix}"
+                )
             base = f"http://127.0.0.1:{port}"
             page_ws = None
             for _ in range(40):
@@ -363,7 +425,7 @@ def run_qa(path, chromium="chromium", mode="deck"):
                     break
                 time.sleep(0.1)
             if not page_ws:
-                raise RuntimeError("no Chromium page target found")
+                raise ChromiumQaInfrastructureError("no Chromium page target found")
             sock = _ws_connect(page_ws)
             try:
                 _cdp_call(sock, "Runtime.enable", msg_id=1)
@@ -382,12 +444,27 @@ def run_qa(path, chromium="chromium", mode="deck"):
                 raise RuntimeError(f"unexpected QA result: {result}")
             return value
         finally:
-            proc.terminate()
-            try:
-                proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=2)
+            _stop_chromium(proc)
+
+
+def run_qa(path, chromium="chromium", mode="deck"):
+    transient_errors = (
+        ChromiumQaInfrastructureError,
+        TimeoutError,
+        ConnectionError,
+        urllib.error.URLError,
+    )
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            return _run_qa_once(path, chromium, mode)
+        except transient_errors as error:
+            last_error = error
+            if attempt < 3:
+                time.sleep(0.25 * attempt)
+    raise ChromiumQaInfrastructureError(
+        f"chromium QA infrastructure failed after 3 attempts: {last_error}"
+    ) from last_error
 
 
 def main():
