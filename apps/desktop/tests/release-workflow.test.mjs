@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 const workflowPath = path.resolve(import.meta.dirname, "../../../.github/workflows/build.yml");
+const ciWorkflowPath = path.resolve(import.meta.dirname, "../../../.github/workflows/ci.yml");
 
 test("installer matrix depends on same-run release readiness", async () => {
   const workflow = await readFile(workflowPath, "utf8");
@@ -28,4 +29,16 @@ test("every platform publishes a deterministic checksum manifest", async () => {
   assert.match(workflow, /SHA256SUMS-\$\{\{ matrix\.platform \}\}\.txt/);
   assert.match(workflow, /gh release upload/);
   assert.match(workflow, /dist-installers\/SHA256SUMS-\*\.txt/);
+});
+
+test("CI and packaging use the same supported Node runtime", async () => {
+  const workflows = await Promise.all([
+    readFile(workflowPath, "utf8"),
+    readFile(ciWorkflowPath, "utf8"),
+  ]);
+
+  for (const workflow of workflows) {
+    assert.doesNotMatch(workflow, /node-version:\s*(?:"?20"?)/);
+    assert.match(workflow, /node-version:\s*24/);
+  }
 });
