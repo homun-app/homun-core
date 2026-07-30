@@ -196,8 +196,15 @@ test("package preparation installs Electron notices before compliance staging", 
   );
 });
 
-test("Cargo dependency discovery is locked and offline", async () => {
+test("Cargo dependency discovery prefetches the lockfile before offline metadata", async () => {
   const source = await readFile(modulePath, "utf8");
+  const fetchIndex = source.indexOf('["fetch", "--locked", "--manifest-path"');
+  const metadataIndex = source.indexOf(
+    '["metadata", "--locked", "--offline", "--format-version"',
+  );
+  assert.ok(fetchIndex >= 0, "Cargo dependencies must be prefetched from Cargo.lock");
+  assert.ok(metadataIndex >= 0, "Cargo metadata must remain locked and offline");
+  assert.ok(fetchIndex < metadataIndex, "prefetch must happen before offline metadata");
   assert.match(
     source,
     /\["metadata", "--locked", "--offline", "--format-version"/,

@@ -120,7 +120,21 @@ export function licenseIds(expression) {
   return { ids: [...ids].sort(), exceptions: [...exceptions].sort() };
 }
 
+function fetchCargoDependencies(manifestPath) {
+  const result = spawnSync(
+    "cargo",
+    ["fetch", "--locked", "--manifest-path", manifestPath],
+    { encoding: "utf8", maxBuffer: 128 * 1024 * 1024 },
+  );
+  if (result.status !== 0) {
+    throw new Error(
+      `cargo fetch failed for ${manifestPath}\n${result.stderr || result.stdout}`,
+    );
+  }
+}
+
 function runCargoMetadata(manifestPath) {
+  fetchCargoDependencies(manifestPath);
   const result = spawnSync(
     "cargo",
     ["metadata", "--locked", "--offline", "--format-version", "1", "--manifest-path", manifestPath],
