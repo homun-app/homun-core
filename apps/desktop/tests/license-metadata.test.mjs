@@ -49,6 +49,11 @@ test("the canonical product license has the audited FSL text", async () => {
   assert.equal(sha256(await read("LICENSE.md")), expectedLicenseSha256);
 });
 
+test("the canonical product license keeps LF bytes on every platform", async () => {
+  const attributes = await read(".gitattributes");
+  assert.match(attributes, /^LICENSE\.md text eol=lf$/m);
+});
+
 test("desktop package metadata uses the FSL SPDX identifier", async () => {
   const packageJson = JSON.parse(await read("apps/desktop/package.json"));
   const packageLock = JSON.parse(await read("apps/desktop/package-lock.json"));

@@ -16,12 +16,21 @@ const helperBuildDir = join(appRoot, ".package", "host-computer-build");
 let helperBundle = join(helperBuildDir, "HomunComputerService.app");
 
 function run(command, args, cwd) {
-  const result = spawnSync(command, args, {
+  let executable = command;
+  let executableArgs = args;
+  if (process.platform === "win32" && command === "npm") {
+    const npmCli = process.env.npm_execpath;
+    if (!npmCli) {
+      throw new Error("npm_execpath is required to invoke npm safely on Windows");
+    }
+    executable = process.execPath;
+    executableArgs = [npmCli, ...args];
+  } else if (process.platform === "win32" && command === "cargo") {
+    executable = "cargo.exe";
+  }
+  const result = spawnSync(executable, executableArgs, {
     cwd,
     stdio: "inherit",
-    // On Windows `npm`/`cargo` are `npm.cmd`/`cargo.exe`; without a shell
-    // spawnSync can't resolve them (PATHEXT) and fails with status: null.
-    shell: process.platform === "win32",
   });
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed with ${result.status}`);

@@ -196,6 +196,16 @@ test("package preparation installs Electron notices before compliance staging", 
   );
 });
 
+test("package preparation invokes Windows CLIs without a command shell", async () => {
+  const source = await readFile(
+    path.join(appRoot, "scripts", "prepare-package.mjs"),
+    "utf8",
+  );
+  assert.doesNotMatch(source, /shell:\s*process\.platform === "win32"/);
+  assert.match(source, /process\.env\.npm_execpath/);
+  assert.match(source, /"cargo\.exe"/);
+});
+
 test("Cargo dependency discovery prefetches the lockfile before offline metadata", async () => {
   const source = await readFile(modulePath, "utf8");
   const fetchIndex = source.indexOf('["fetch", "--locked", "--manifest-path"');
