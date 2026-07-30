@@ -6,13 +6,14 @@ pipeline, the secrets, and how to verify a build passes Gatekeeper.
 ## How releases are built
 
 `.github/workflows/build.yml` ("Build installers"):
+- **Ogni run** parte da `Release readiness`: format, Clippy workspace con warning negati,
+  audit npm, suite deterministiche complete e RustSec devono essere verdi sullo stesso SHA prima
+  che inizi la matrice. Ogni piattaforma produce anche un `SHA256SUMS-<platform>.txt`.
 - **Push a `v*` tag** → the tag (minus the `v`) is stamped into `package.json` (single source of
-  truth for the version), then mac (arm64) + win + linux installers are built. **Only the
-  signed + notarized macOS build is published** — with its `latest-mac.yml` auto-update
-  metadata — to a **draft release in the public `homun-releases` repo** (`--publish always`,
-  `GH_TOKEN=RELEASES_TOKEN`). Review that draft and publish it; that release is the auto-update
-  feed (see below). Windows + Linux build as artifacts only (they're unsigned — see "platform
-  scope" below).
+  truth for the version), then mac (arm64) + win + linux installers are built and uploaded to a
+  **draft release in the public `homun-releases` repo**. The draft is not visible to downloads or
+  auto-update clients until it is explicitly published. Review it with the complete
+  [release candidate matrix](testing/release-candidate-matrix.md) before publishing.
 - **Run manually** (Actions tab → *Build installers* → *Run workflow*, i.e. `workflow_dispatch`)
   → builds + uploads artifacts only (`--publish never`, no token issued). Use this to verify the
   pipeline before tagging.
@@ -33,9 +34,11 @@ only valid for the OS/arch that produced it.
 | `APPLE_APP_SPECIFIC_PASSWORD` | `APPLE_APP_SPECIFIC_PASSWORD` | notarization |
 | `APPLE_TEAM_ID` | `APPLE_TEAM_ID` | notarization |
 
-The mac job builds **signed + notarized** (`electron-builder --mac -c.mac.notarize=true`) when
-`MAC_CSC_LINK` is non-empty, else it falls back to an **unsigned** build. The presence check
-runs in a shell step (`steps.signing.outputs.has_cert`) that logs the cert state explicitly.
+The mac tag job builds **signed + notarized**
+(`electron-builder --mac -c.mac.notarize=true`) when `MAC_CSC_LINK` is non-empty and fails closed
+otherwise. Only manual dispatch and pull-request runs may fall back to an unsigned mac artifact.
+The presence check runs in a shell step (`steps.signing.outputs.has_cert`) that logs the cert state
+explicitly.
 
 > **Status (2026-06-16): working.** Verified end-to-end on run 27623629097 — `signing …
 > type=distribution` → `notarization successful` → `Homun-0.1.0-arm64.dmg`. Two issues were
@@ -81,27 +84,25 @@ Two one-time prerequisites:
    gh secret set RELEASES_TOKEN --repo homun-app/homun-core   # paste the PAT
    ```
 
-After that, every `v*` tag publishes the **signed macOS** installer **and** its `latest-mac.yml`
-to a draft release in `homun-releases`. **Publish that draft** for clients to see the update (a
-draft is invisible to electron-updater). The `.yml` is what makes the update discoverable — a
-hand-made release with only a `.dmg` would never trigger an update.
+After that, every `v*` tag uploads macOS, Windows and Linux installers, update metadata and
+SHA-256 manifests to a draft release in `homun-releases`. **Publish that draft** for clients to see
+the update (a draft is invisible to electron-updater). The `.yml` files make the update
+discoverable; a hand-made release containing only installers would not trigger the client flow.
 
 > Updates only flow **between published releases newer than the running build**. You can't test
 > the in-app card until at least one release is published in `homun-releases` and a client is
 > running an older version. In dev (`app.isPackaged === false`) the check is a deliberate no-op.
 
-### Platform scope (why only macOS auto-updates today)
+### Platform scope
 
-Auto-update silently downloads and **executes** a binary (`quitAndInstall`), so only a **signed**
-build may feed the channel — an unsigned update breaks electron-updater's signature anchor and is
-a silent-code-execution risk. Currently only macOS is signed (Developer ID + notarized), so it's
-the only platform that publishes. **Windows + Linux build as downloadable artifacts but do not
-publish** (`--publish never`). To turn on a platform later:
+Auto-update can silently download and **execute** a binary (`quitAndInstall`), so Homun enables
+automatic installation only on signed and notarized macOS builds. Windows and Linux clients are
+notify-only: they open the release page for a manual download.
 
-- **Windows**: add a code-signing cert (`win.certificateFile`/`certificateSubjectName` or an HSM)
-  + set `win.publisherName`, then flip its step to `--publish` on tag like the mac step.
-- **Linux**: AppImage updates rely on the `latest-linux.yml` `sha512` rather than an OS signature;
-  enable it consciously if you accept that model.
+- **Windows**: CI attempts Certum SimplySign signing. If signing is unavailable, the workflow may
+  place an unsigned download-only EXE in the draft; the release matrix must record that fact.
+- **Linux**: AppImage and DEB are unsigned download-only assets. `latest-linux.yml` still provides
+  the updater hash, but Homun does not auto-install the binary.
 
 ### Versioning (tags drive it)
 
@@ -155,4 +156,5 @@ Unsigned pipeline check (no creds): `CSC_IDENTITY_AUTO_DISCOVERY=false npm run d
 - **Launching the gateway** needs `disable-library-validation` + `allow-dyld-environment-variables`
   (in the plist) since the app spawns it with env vars.
 - **First notarization is slow** (minutes); electron-builder polls notarytool — don't cancel.
-- **Windows/Linux** are built but unsigned (Windows distribution needs its own code-signing cert).
+- **Windows/Linux** are manual-download platforms; Windows signing is best-effort and Linux is
+  unsigned.

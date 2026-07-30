@@ -57,6 +57,9 @@ Homun ha il difetto sistemico di **due implementazioni per cosa**, la canonica d
   fixture per-provider per la normalizzazione).
 - Gate locali noti: `cargo test -p <crate>`, `npm run test:ui-contract`, `npm run build`,
   `python3 scripts/pre_release_gate.py`.
+- Per una release, il gate locale non basta: seguire la
+  [release candidate matrix](testing/release-candidate-matrix.md). Packaging GitHub, checksum,
+  upgrade isolato e app installata devono essere verificati prima di pubblicare il draft.
 
 ### 6. Disciplina di sessione (continuità / anti-compattazione)
 - **A inizio sessione**: leggere CAPISALDI + METHODOLOGY + STATO + il piano corrente. La memoria
@@ -83,6 +86,7 @@ Homun ha il difetto sistemico di **due implementazioni per cosa**, la canonica d
 
 ## Vincoli operativi del progetto
 
-- Commit diretti su `main`; **no** trailer `Co-Authored-By`. Release = commit + tag → CI builda
-  draft (non pubblicata finché non si pubblica esplicitamente). Vedi i vincoli in STATO.md.
+- Modifiche pre-release su branch verificata, poi convergenza su `main`; **no** trailer
+  `Co-Authored-By`. Release = commit verificato + tag → CI builda un draft, che resta non
+  pubblicato finché la matrice installata non e' verde. Vedi i vincoli in STATO.md.
 - Build/test locali e log: vedi [DEVELOPMENT.md](DEVELOPMENT.md) e STATO.md.
