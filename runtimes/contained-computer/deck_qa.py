@@ -16,6 +16,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -288,80 +289,105 @@ def build_qa_js(mode):
     return "const MODE = %r;\n" % mode + QA_JS
 
 
+def _read_devtools_active_port(profile_dir):
+    path = os.path.join(profile_dir, "DevToolsActivePort")
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            lines = [line.strip() for line in handle.readlines()]
+    except (FileNotFoundError, OSError):
+        return None
+    if not lines or not lines[0].isdigit():
+        return None
+    return int(lines[0])
+
+
+def _read_log_tail(path, limit=2000):
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            content = handle.read()
+    except OSError:
+        return ""
+    return content[-limit:].strip()
+
+
 def run_qa(path, chromium="chromium", mode="deck"):
     abs_path = os.path.abspath(path)
     if not os.path.isfile(abs_path):
         raise RuntimeError(f"HTML file not found: {path}")
     url = "file://" + urllib.parse.quote(abs_path)
-    proc = subprocess.Popen(
-        [
-            chromium,
-            "--headless=new",
-            "--no-sandbox",
-            "--disable-gpu",
-            "--disable-dev-shm-usage",
-            "--remote-debugging-port=0",
-            "--window-size=1280,720",
-            url,
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        browser_ws = None
-        deadline = time.time() + 10
-        while time.time() < deadline:
-            line = proc.stderr.readline()
-            if "DevTools listening on " in line:
-                browser_ws = line.strip().split("DevTools listening on ", 1)[1]
-                break
-            if proc.poll() is not None:
-                raise RuntimeError("chromium exited before DevTools became available")
-        if not browser_ws:
-            raise RuntimeError("chromium did not expose DevTools")
-        parsed = urllib.parse.urlparse(browser_ws)
-        base = f"http://{parsed.hostname}:{parsed.port}"
-        page_ws = None
-        for _ in range(40):
-            pages = json.loads(_read_http(base + "/json/list"))
-            for page in pages:
-                if page.get("type") == "page":
-                    page_ws = page.get("webSocketDebuggerUrl")
-                    break
-            if page_ws:
-                break
-            time.sleep(0.1)
-        if not page_ws:
-            raise RuntimeError("no Chromium page target found")
-        sock = _ws_connect(page_ws)
-        try:
-            _cdp_call(sock, "Runtime.enable", msg_id=1)
-            _cdp_call(sock, "Page.enable", msg_id=2)
-            time.sleep(0.4)
-            result = _cdp_call(
-                sock,
-                "Runtime.evaluate",
-                {"expression": build_qa_js(mode), "returnByValue": True, "awaitPromise": True},
-                msg_id=3,
+    with tempfile.TemporaryDirectory(prefix="homun-deck-qa-") as profile_dir:
+        log_path = os.path.join(profile_dir, "chromium.log")
+        with open(log_path, "w", encoding="utf-8") as log_handle:
+            proc = subprocess.Popen(
+                [
+                    chromium,
+                    "--headless=new",
+                    "--no-sandbox",
+                    "--disable-gpu",
+                    "--disable-dev-shm-usage",
+                    "--remote-debugging-address=127.0.0.1",
+                    "--remote-debugging-port=0",
+                    f"--user-data-dir={profile_dir}",
+                    "--window-size=1280,720",
+                    url,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=log_handle,
+                text=True,
             )
-        finally:
-            sock.close()
-        value = result.get("result", {}).get("value")
-        if not isinstance(value, dict):
-            raise RuntimeError(f"unexpected QA result: {result}")
-        return value
-    finally:
-        proc.terminate()
         try:
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        # Close the stderr pipe explicitly: the CLI path exits and the OS reaps it,
-        # but callers that invoke run_qa in-process (e.g. tests) would otherwise
-        # leak the fd until GC and emit a ResourceWarning.
-        if proc.stderr:
-            proc.stderr.close()
+            port = None
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                port = _read_devtools_active_port(profile_dir)
+                if port is not None:
+                    break
+                if proc.poll() is not None:
+                    detail = _read_log_tail(log_path)
+                    suffix = f": {detail}" if detail else ""
+                    raise RuntimeError(f"chromium exited before DevTools became available{suffix}")
+                time.sleep(0.05)
+            if port is None:
+                detail = _read_log_tail(log_path)
+                suffix = f": {detail}" if detail else ""
+                raise RuntimeError(f"chromium did not expose DevTools within 15s{suffix}")
+            base = f"http://127.0.0.1:{port}"
+            page_ws = None
+            for _ in range(40):
+                pages = json.loads(_read_http(base + "/json/list"))
+                for page in pages:
+                    if page.get("type") == "page":
+                        page_ws = page.get("webSocketDebuggerUrl")
+                        break
+                if page_ws:
+                    break
+                time.sleep(0.1)
+            if not page_ws:
+                raise RuntimeError("no Chromium page target found")
+            sock = _ws_connect(page_ws)
+            try:
+                _cdp_call(sock, "Runtime.enable", msg_id=1)
+                _cdp_call(sock, "Page.enable", msg_id=2)
+                time.sleep(0.4)
+                result = _cdp_call(
+                    sock,
+                    "Runtime.evaluate",
+                    {"expression": build_qa_js(mode), "returnByValue": True, "awaitPromise": True},
+                    msg_id=3,
+                )
+            finally:
+                sock.close()
+            value = result.get("result", {}).get("value")
+            if not isinstance(value, dict):
+                raise RuntimeError(f"unexpected QA result: {result}")
+            return value
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=2)
 
 
 def main():

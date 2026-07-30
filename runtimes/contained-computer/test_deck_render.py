@@ -262,6 +262,17 @@ class DeckQaOverflow(unittest.TestCase):
         self.assertIn("hero-art", deck_qa.QA_JS)
         self.assertIn("pointerEvents", deck_qa.QA_JS)
 
+    def test_devtools_active_port_parser_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(deck_qa._read_devtools_active_port(tmp))
+            marker = os.path.join(tmp, "DevToolsActivePort")
+            with open(marker, "w", encoding="utf-8") as handle:
+                handle.write("not-a-port\n/devtools/browser/id\n")
+            self.assertIsNone(deck_qa._read_devtools_active_port(tmp))
+            with open(marker, "w", encoding="utf-8") as handle:
+                handle.write("43127\n/devtools/browser/id\n")
+            self.assertEqual(deck_qa._read_devtools_active_port(tmp), 43127)
+
     @unittest.skipUnless(CHROMIUM, "no chromium/chrome binary found")
     def test_hero_art_bleed_not_flagged_as_overflow(self):
         # End-to-end: the real renderer output for a hero_art cover must pass the
