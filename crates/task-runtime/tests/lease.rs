@@ -1,6 +1,6 @@
 use local_first_task_runtime::{
-    LeaseManager, ResourceClass, ResourceGovernor, ResourceLimits, ResourceRequirement, TaskId,
-    TaskRecord, TaskStatus, TaskStore, UserId, WorkspaceId,
+    LeaseManager, LeaseOwnership, ResourceClass, ResourceGovernor, ResourceLimits,
+    ResourceRequirement, TaskId, TaskRecord, TaskStatus, TaskStore, UserId, WorkspaceId,
 };
 use serde_json::json;
 use time::{Duration, OffsetDateTime};
@@ -51,8 +51,7 @@ fn lease_manager_acquires_and_heartbeats_a_task() {
             &TaskId::new("task_1"),
             &user,
             &workspace,
-            "worker_a",
-            fencing_token,
+            LeaseOwnership::new("worker_a", fencing_token),
             now + Duration::minutes(1),
         )
         .unwrap();
@@ -114,8 +113,7 @@ fn stale_same_owner_cannot_heartbeat_a_reacquired_lease() {
             &TaskId::new("task_1"),
             &user,
             &workspace,
-            "worker_a",
-            first_fence,
+            LeaseOwnership::new("worker_a", first_fence),
             first_at + Duration::minutes(8),
         )
         .expect_err("old lease generation must not renew the replacement");

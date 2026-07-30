@@ -2844,18 +2844,21 @@ impl TaskStore {
             TurnEventKind::Done | TurnEventKind::Error | TurnEventKind::Cancelled
         ) && let Some(mut existing) = first_terminal_event_on(&tx, turn_id)?
         {
-            let may_adopt_legacy_error = kind == TurnEventKind::Error
-                && existing.kind == TurnEventKind::Error
+            let may_adopt_matching_legacy_terminal = existing.kind == kind
                 && existing
                     .payload
                     .get("projection_ref")
                     .and_then(Value::as_str)
                     .is_none();
-            if may_adopt_legacy_error {
+            if may_adopt_matching_legacy_terminal {
                 let changed = tx.execute(
                     "UPDATE turn_events SET payload_json = ?1
-                     WHERE event_id = ?2 AND kind = 'error'",
-                    params![serde_json::to_string(&payload)?, existing.event_id],
+                     WHERE event_id = ?2 AND kind = ?3",
+                    params![
+                        serde_json::to_string(&payload)?,
+                        existing.event_id,
+                        existing.kind.as_str()
+                    ],
                 )?;
                 if changed != 1 {
                     return Err(TaskRuntimeError::Store(

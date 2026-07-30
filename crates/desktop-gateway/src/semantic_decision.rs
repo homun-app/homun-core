@@ -723,10 +723,11 @@ pub(crate) fn objective_contract_projection_for_request(
 ) -> ObjectiveContractProjection {
     const MAX_OBJECTIVE_CHARS: usize = 16 * 1024;
     let decision = &validated.decision;
-    let objective = if matches!(
+    let continues_active_objective = matches!(
         decision.relationship_to_active_objective,
         ObjectiveRelationship::SameObjective | ObjectiveRelationship::CompatibleExtension
-    ) {
+    );
+    let objective = if continues_active_objective {
         active
             .map(|record| record.objective.clone())
             .unwrap_or_else(|| decision.objective.clone())
@@ -738,6 +739,11 @@ pub(crate) fn objective_contract_projection_for_request(
             request.chars().take(MAX_OBJECTIVE_CHARS).collect()
         }
     };
+    let mode = if continues_active_objective {
+        active.map(|record| record.mode).unwrap_or(decision.mode)
+    } else {
+        decision.mode
+    };
     let allowed_actions = decision
         .allowed_effect_classes
         .iter()
@@ -745,7 +751,7 @@ pub(crate) fn objective_contract_projection_for_request(
         .collect::<Vec<_>>();
     ObjectiveContractProjection {
         objective,
-        mode: decision.mode,
+        mode,
         scope_json: serde_json::json!({
             "thread_id": thread_id,
             "workspace_id": workspace_id,
@@ -1045,6 +1051,55 @@ mod tests {
         );
 
         assert_eq!(projection.objective, active.objective);
+    }
+
+    #[test]
+    fn same_objective_projection_keeps_the_active_mode_across_a_narrower_resume() {
+        let active = ObjectiveContractRecord {
+            user_id: "u".to_string(),
+            workspace_id: "w".to_string(),
+            thread_id: "t".to_string(),
+            source_message_id: "m".to_string(),
+            objective: "Fill a browser field, wait for a choice, then verify it".to_string(),
+            mode: ObjectiveMode::Mixed,
+            scope_json: serde_json::json!({}),
+            allowed_actions_json: serde_json::json!(["read", "external_write"]),
+            completion_json: serde_json::json!({}),
+            status: "active".to_string(),
+            revision: 7,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let mut decision = read_only_decision();
+        decision.relationship_to_active_objective = ObjectiveRelationship::SameObjective;
+        decision.objective = "Verify the field after the user chose ALFA".to_string();
+        let validated = validate_decision(decision, &registry(), Some(&active)).unwrap();
+
+        let projection = objective_contract_projection_for_request(
+            &validated,
+            Some(&active),
+            "t",
+            "w",
+            None,
+            "ALFA",
+        );
+
+        assert_eq!(projection.objective, active.objective);
+        assert_eq!(projection.mode, active.mode);
+        assert!(
+            projection
+                .allowed_actions_json
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("read"))
+        );
+        assert!(
+            !projection
+                .allowed_actions_json
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("external_write"))
+        );
     }
 
     #[test]

@@ -37,6 +37,7 @@ struct EffectiveChatAttemptInput {
     wake_input: Option<Value>,
     visible_prompt: String,
     user_message_id: Option<String>,
+    model: Option<String>,
     images: Vec<String>,
     attachments: Vec<local_first_desktop_gateway::AttachmentInput>,
 }
@@ -83,6 +84,18 @@ fn effective_chat_attempt_input(
                 .map(|request_id| format!("local_user_{request_id}"))
         });
 
+    let model = wake_payload
+        .and_then(|payload| payload.get("model"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            task.input_json
+                .get("model")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+        })
+        .map(str::to_string);
+
     let images_value = match wake_payload {
         Some(payload) => payload.get("images").filter(|value| !value.is_null()),
         None => task
@@ -119,6 +132,7 @@ fn effective_chat_attempt_input(
         wake_input,
         visible_prompt,
         user_message_id,
+        model,
         images,
         attachments,
     })
@@ -606,6 +620,7 @@ pub fn execute_chat_turn_task(
     let prompt = effective.prompt;
     let wake_input = effective.wake_input;
     let visible_prompt = effective.visible_prompt;
+    let model_override = effective.model;
     let resume = agent_resume_state(state, task, contract)?;
     let checkpoint_input = resume
         .as_ref()
@@ -862,6 +877,7 @@ pub fn execute_chat_turn_task(
                 agent_run.as_ref().map(|(run_id, _)| run_id.as_str()),
                 resume_state,
                 checkpoint_input,
+                model_override.as_deref(),
                 local_first_desktop_gateway::MessageDeliveryState::Streaming,
             ) => Some(answer),
         }
@@ -1481,6 +1497,7 @@ mod tests {
                 "prompt": "Choose A or B",
                 "visible_prompt": "Choose one",
                 "request_id": "initial",
+                "model": "ollama-cloud::deepseek-v4-flash",
                 "images": ["old-image"],
                 "attachments": [{"local_path": "/tmp/old.txt", "display_name": "old.txt"}],
             }),
@@ -1510,6 +1527,10 @@ mod tests {
         assert_eq!(input.wake_input.as_ref(), Some(&delivery.payload));
         assert_eq!(input.visible_prompt, "A");
         assert_eq!(input.user_message_id.as_deref(), Some("local_user_resume"));
+        assert_eq!(
+            input.model.as_deref(),
+            Some("ollama-cloud::deepseek-v4-flash")
+        );
         assert_eq!(input.images, vec!["new-image"]);
         assert_eq!(input.attachments[0].display_name, "new.txt");
 

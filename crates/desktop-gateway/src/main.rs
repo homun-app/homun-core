@@ -207,10 +207,10 @@ use local_first_subagents::{
 };
 use local_first_task_runtime::{
     ApprovalGate, ApprovalPolicy, ApprovalRequest, Automation, AutomationSource, AutomationTrigger,
-    EventTrigger, ExecutorResult, LeaseManager, NewBrowserCheckpoint, ResourceClass,
-    ResourceGovernor, ResourceLimits, TaskExecutor, TaskId, TaskQueueSnapshot, TaskRecord,
-    TaskRuntimeError, TaskRuntimeResult, TaskScheduler, TaskStatus, TaskStore, TaskUiDetail,
-    TaskUiItem, TaskUiReadModel, UserId, WorkspaceId,
+    EventTrigger, ExecutorResult, LeaseManager, LeaseOwnership, NewBrowserCheckpoint,
+    ResourceClass, ResourceGovernor, ResourceLimits, TaskExecutor, TaskId, TaskQueueSnapshot,
+    TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskScheduler, TaskStatus, TaskStore,
+    TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId, WorkspaceId,
 };
 use local_first_vault::{
     LocalPinVerifier, PaymentApprovalSnapshot, SQLiteVaultStore, VaultCategory, VaultRecord,
@@ -1231,7 +1231,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "turn broker: recovery generation={process_generation} recovered={} turns",
             recovered.len()
         );
-        let recovered_tasks = recovered
+        recovered
             .iter()
             .filter_map(|task_id| {
                 store
@@ -1239,8 +1239,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .ok()
                     .flatten()
             })
-            .collect::<Vec<_>>();
-        recovered_tasks
+            .collect::<Vec<_>>()
     };
     // The broker has re-queued these tasks, but their visible placeholders are
     // owned by the chat store. Update them only after the task-store guard is
@@ -18044,6 +18043,54 @@ fn chat_role_config_for_thread(
     chat_openai_stream_config()
 }
 
+fn chat_model_config_for_turn(
+    state: &AppState,
+    thread_id: Option<&str>,
+    model_override: Option<&str>,
+) -> Result<(String, String, Option<String>), String> {
+    let Some(requested) = model_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return chat_role_config_for_thread(state, thread_id)
+            .ok_or_else(|| "chat role configuration is unavailable".to_string());
+    };
+
+    let registry = load_provider_registry();
+    let Some((provider_id, base_url, model)) =
+        resolve_composite_chat_model_override(&registry, requested)?
+    else {
+        let (base_url, _, api_key) = chat_role_config_for_thread(state, thread_id)
+            .ok_or_else(|| "chat role configuration is unavailable".to_string())?;
+        return Ok((base_url, requested.to_string(), api_key));
+    };
+    let api_key = provider_api_key(&provider_id).or_else(env_inference_api_key);
+    Ok((base_url, model, api_key))
+}
+
+fn resolve_composite_chat_model_override(
+    registry: &ProviderRegistry,
+    requested: &str,
+) -> Result<Option<(String, String, String)>, String> {
+    let Some((provider_id, model)) = requested.split_once("::") else {
+        return Ok(None);
+    };
+    let provider = registry
+        .get(provider_id)
+        .filter(|provider| provider.enabled)
+        .ok_or_else(|| format!("requested model provider is unavailable: {provider_id}"))?;
+    if model.trim().is_empty() || !provider.models.iter().any(|entry| entry.id == model) {
+        return Err(format!(
+            "requested model is unavailable for provider {provider_id}: {model}"
+        ));
+    }
+    Ok(Some((
+        provider_id.to_string(),
+        provider.base_url.clone(),
+        model.to_string(),
+    )))
+}
+
 /// Provider/model for the granular browser tools. With the OpenClaw-style rewrite
 /// the MAIN agent drives the browser, so a dedicated "browser" model only makes
 /// sense as an EXPLICIT per-role override: when the user has manually bound the
@@ -30422,9 +30469,11 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     }
 
     let mut model_text = prompt.clone();
-    let mut all_images = applies_new_input
-        .then(|| request.images.clone())
-        .unwrap_or_default();
+    let mut all_images = if applies_new_input {
+        request.images.clone()
+    } else {
+        Vec::new()
+    };
     let new_attachment_context = new_files
         .iter()
         .map(|file| chat_store::StoredAttachment {
@@ -30490,9 +30539,11 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         entry: stream_entry,
     };
     let orchestrator_is_local = provider_endpoint_is_local(&base_url) && !model_id_is_cloud(&model);
-    let privacy_prompt = applies_new_input
-        .then_some(request.prompt.as_str())
-        .unwrap_or_default();
+    let privacy_prompt = if applies_new_input {
+        request.prompt.as_str()
+    } else {
+        ""
+    };
     let deterministic_privacy_decision =
         privacy_guard::classify_sensitive_input_deterministic(privacy_prompt);
     let guarded_decision = if applies_new_input {
@@ -30678,9 +30729,11 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         .map(WorkspaceId::new)
         .unwrap_or_else(gateway_workspace_id);
     // Raw user message captured for post-turn memory extraction (M2).
-    let memory_user_message = applies_new_input
-        .then(|| request.prompt.clone())
-        .unwrap_or_default();
+    let memory_user_message = if applies_new_input {
+        request.prompt.clone()
+    } else {
+        String::new()
+    };
     // The assistant's most recent prior turn (the question a short "sì" would answer),
     // so the extractor can ground a confirmation into the fact it commits.
     let memory_prev_assistant = effective_context
@@ -31017,15 +31070,14 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
                     .ok()
                     .and_then(|id| id.clone()),
             )
-        {
-            if let Err(error) = persist_hitl_wait_from_outcome(
+            && let Err(error) = persist_hitl_wait_from_outcome(
                 &tail_state,
                 thread_id,
                 &assistant_message_id,
                 &outcome,
-            ) {
-                eprintln!("[hitl] legacy turn projection failed: {error}");
-            }
+            )
+        {
+            eprintln!("[hitl] legacy turn projection failed: {error}");
         }
         // Turn trace: the final record. `outcome.memory_answer` is the committed answer; `final_plan` is
         // the turn's last runtime plan (carried out for exactly this). The derived flags (incomplete
@@ -38197,10 +38249,11 @@ async fn run_agent_turn_into_message_with_fanout(
     agent_run_id: Option<&str>,
     agent_checkpoint: Option<serde_json::Value>,
     checkpoint_input: Option<serde_json::Value>,
+    model_override: Option<&str>,
     requested_delivery_state: local_first_desktop_gateway::MessageDeliveryState,
 ) -> Result<BrokerAgentTurnResult, String> {
-    let (base_url, model, api_key) = chat_role_config_for_thread(state, Some(thread_id))
-        .ok_or_else(|| "chat role configuration is unavailable".to_string())?;
+    let (base_url, model, api_key) =
+        chat_model_config_for_turn(state, Some(thread_id), model_override)?;
     let context = agent_turn_context(
         state,
         thread_id,
@@ -42584,8 +42637,7 @@ fn spawn_lease_watchdog(
                         &task_id,
                         &user_id,
                         &workspace_id,
-                        &worker_id,
-                        fencing_token,
+                        LeaseOwnership::new(&worker_id, fencing_token),
                         now,
                     ) {
                         Ok(()) => true,
@@ -77554,6 +77606,41 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert_eq!(refreshed.len(), 1);
         assert_eq!(refreshed[0].id, "deepseek-v4-pro:cloud");
         assert!(refreshed[0].reasoning);
+    }
+
+    #[test]
+    fn composite_chat_model_override_resolves_only_an_enabled_catalog_entry() {
+        let mut registry = super::model_registry::ProviderRegistry::default();
+        let mut provider = super::model_registry::ProviderEntry::new(
+            "cloud".into(),
+            "Cloud".into(),
+            super::model_registry::ProviderKind::OpenaiCompat,
+            "https://api.example.test/v1".into(),
+        );
+        provider.models = vec![super::model_registry::ModelEntry::inferred(
+            "deepseek-v4-flash",
+        )];
+        registry.upsert(provider);
+
+        let resolved =
+            super::resolve_composite_chat_model_override(&registry, "cloud::deepseek-v4-flash")
+                .unwrap()
+                .unwrap();
+        assert_eq!(resolved.0, "cloud");
+        assert_eq!(resolved.1, "https://api.example.test/v1");
+        assert_eq!(resolved.2, "deepseek-v4-flash");
+
+        assert!(
+            super::resolve_composite_chat_model_override(&registry, "cloud::missing")
+                .unwrap_err()
+                .contains("model is unavailable")
+        );
+        registry.get_mut("cloud").unwrap().enabled = false;
+        assert!(
+            super::resolve_composite_chat_model_override(&registry, "cloud::deepseek-v4-flash")
+                .unwrap_err()
+                .contains("provider is unavailable")
+        );
     }
 
     #[test]

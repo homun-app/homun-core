@@ -7,6 +7,21 @@ pub struct LeaseManager {
     lease_duration: Duration,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeaseOwnership<'a> {
+    owner: &'a str,
+    fencing_token: u64,
+}
+
+impl<'a> LeaseOwnership<'a> {
+    pub fn new(owner: &'a str, fencing_token: u64) -> Self {
+        Self {
+            owner,
+            fencing_token,
+        }
+    }
+}
+
 impl LeaseManager {
     pub fn new(lease_duration: Duration) -> Self {
         Self { lease_duration }
@@ -53,19 +68,19 @@ impl LeaseManager {
         task_id: &TaskId,
         user_id: &UserId,
         workspace_id: &WorkspaceId,
-        owner: &str,
-        expected_fencing_token: u64,
+        ownership: LeaseOwnership<'_>,
         now: OffsetDateTime,
     ) -> TaskRuntimeResult<()> {
         let mut task = store
             .get_task(task_id, user_id, workspace_id)?
             .ok_or_else(|| TaskRuntimeError::NotFound(task_id.as_str().to_string()))?;
-        if task.lease_owner.as_deref() != Some(owner)
-            || task.effective_lease_fencing_token() != Some(expected_fencing_token)
+        if task.lease_owner.as_deref() != Some(ownership.owner)
+            || task.effective_lease_fencing_token() != Some(ownership.fencing_token)
         {
             return Err(TaskRuntimeError::LeaseConflict(format!(
-                "task {} lease generation is not owned by {owner}",
+                "task {} lease generation is not owned by {}",
                 task_id.as_str(),
+                ownership.owner,
             )));
         }
 

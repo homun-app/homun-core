@@ -7,7 +7,7 @@
 > Recovery browser: [design](superpowers/specs/2026-07-28-browser-checkpoint-recovery-design.md)
 > e [checklist operativa/verifiche](superpowers/plans/2026-07-28-browser-checkpoint-recovery.md).
 
-**Ultimo aggiornamento: 2026-07-29 (EffectHost generale, browser/channel/tool receipt).**
+**Ultimo aggiornamento: 2026-07-30 (restart HITL/browser, terminal adoption, model override).**
 
 ---
 
@@ -95,6 +95,10 @@ resta leggibile soltanto nel bridge di recovery dei record steering precedenti.
 
 1. La sorgente (`interactive`, channel, automation, connector) costruisce lo stesso
    input e lo accoda al broker; prompt e placeholder visibile sono persistiti insieme.
+   L'eventuale override modello del composer fa parte dell'input durevole della execution:
+   ogni revisione lo conserva salvo un nuovo override esplicito nella wake. Un valore
+   `provider::model` deve risolvere un provider abilitato e una voce presente nel catalogo;
+   non modifica il binding di ruolo persistente.
    I task `proactive_prompt` ricevono gia alla creazione uno scope thread deterministico
    derivato da task id e sorgente; i record legacy senza scope vengono normalizzati nello
    stesso modo prima di costruire il contratto.
@@ -137,11 +141,14 @@ resta leggibile soltanto nel bridge di recovery dei record steering precedenti.
    gli eventi terminali; una proiezione parziale o già ackata converge
    idempotentemente senza rieseguire l'adapter.
    Gli errori del trasporto stream sono eventi `Activity`, non terminali logici. Solo
-   l'outcome canonico proietta `Error`; un vecchio `Error` stream privo di
-   `projection_ref` puo essere adottato atomicamente dalla corrispondente projection
-   `Error`, mentre terminali di tipo diverso restano conflitti di invariante.
-7. Un outcome sospeso registra un solo wake. La delivery atomica crea la revisione
-   successiva con checkpoint e payload; il worker richiama lo stesso `execute`.
+   l'outcome canonico proietta il terminale. Un vecchio terminale stream
+   `Done | Error | Cancelled` privo di `projection_ref` puo essere adottato atomicamente
+   soltanto dalla projection dello stesso kind; terminali di tipo diverso restano
+   conflitti di invariante.
+7. Un outcome sospeso registra un solo wake. La delivery atomica risolve anche la
+   projection `thread_hitl_waits` collegata al messaggio sorgente, crea la revisione
+   successiva con checkpoint e payload e richiama lo stesso `execute`. Il wait UI non
+   possiede un secondo percorso di resume e non puo restare aperto dopo la wake canonica.
 8. Dopo crash, una revisione senza outcome viene recuperata secondo lease/receipt;
    un effetto `Started` diventa `Uncertain`, mai un retry implicito.
    Per delivery canale e remote approval, la receipt completata o incerta conserva canale,
@@ -209,7 +216,10 @@ Il validator confronta ogni deliverable con la sua classe esatta:
 `external_action → external_write`, `artifact → artifact_creation`,
 `code_change → filesystem_write`. Una classe vietata non invalida una classe distinta
 esplicitamente consentita. Sul resume Choice/Clarify la decisione resta `same_objective`,
-mantiene la stessa revisione e non può sostituire l'obiettivo con il testo della risoluzione.
+mantiene obiettivo, mode e revisione del contratto e non può sostituire l'obiettivo con
+il testo della risoluzione. La lista `allowed_actions_json` della fase corrente può
+restringersi senza cambiare tale identità: non amplia la policy e non invalida checkpoint
+appartenenti allo stesso obiettivo.
 
 Il preflight semantico ritenta una sola volta un JSON troncato/invalido con budget
 compatibile con modelli reasoning. Una contraddizione tra ricerca memoria e il solo flag
@@ -273,6 +283,10 @@ sostitutiva, archive/delete thread, delete workspace e scadenza; la pulizia scad
 startup. Gli eventi del run registrano solo tier, generation, conteggi e reason tipizzata. Le pulizie
 senza un run proprietario usano tracing strutturato `browser_checkpoint_cleared`, evitando di creare
 un secondo owner terminale.
+
+Al riavvio il renderer monta gli effetti che leggono thread, messaggi, wait e activity solo dopo
+l'apertura del gate di autenticazione. Il backend resta la SoT: transcript e choice card vengono
+ricostruiti dalle projection, non mantenuti da stato React sopravvissuto al processo.
 
 ## Convergenza terminale
 

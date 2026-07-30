@@ -726,6 +726,48 @@ fn canonical_error_projection_adopts_a_legacy_unacknowledged_error() {
 }
 
 #[test]
+fn canonical_cancelled_projection_adopts_a_legacy_unacknowledged_cancellation() {
+    let store = TaskStore::open_in_memory().expect("store");
+    let legacy = store
+        .insert_terminal_event_once(
+            "turn-legacy-cancelled",
+            TurnEventKind::Cancelled,
+            serde_json::json!({"reason": "user_cancel"}),
+        )
+        .expect("legacy terminal");
+    let TerminalWrite::Inserted(legacy) = legacy else {
+        panic!("legacy terminal must be inserted");
+    };
+    let projection_ref = "turn-legacy-cancelled:1";
+
+    let adopted = store
+        .insert_turn_projection_event_once(
+            "turn-legacy-cancelled",
+            TurnEventKind::Cancelled,
+            projection_ref,
+            serde_json::json!({
+                "projection_ref": projection_ref,
+                "execution_id": "turn-legacy-cancelled",
+                "revision": 1
+            }),
+        )
+        .expect("canonical cancellation adopts legacy terminal");
+
+    let TerminalWrite::Inserted(adopted) = adopted else {
+        panic!("adopted canonical cancellation must be broadcast once");
+    };
+    assert_eq!(adopted.event_id, legacy.event_id);
+    assert_eq!(adopted.seq, legacy.seq);
+    assert_eq!(adopted.payload["projection_ref"], projection_ref);
+
+    let events = store
+        .read_turn_events("turn-legacy-cancelled", 0)
+        .expect("events");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].kind, TurnEventKind::Cancelled);
+}
+
+#[test]
 fn retry_waits_until_due_and_blocked_projection_never_auto_claims() {
     let store = TaskStore::open_in_memory().expect("store");
     commit_chat_projection(&store, "turn-retry-claim");

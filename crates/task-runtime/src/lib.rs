@@ -32,7 +32,7 @@ pub use execution_store::{
 };
 pub use executor::{ExecutorResult, FakeTaskExecutor, TaskExecutor};
 pub use facade::{RunReadySummary, TaskRuntime};
-pub use lease::LeaseManager;
+pub use lease::{LeaseManager, LeaseOwnership};
 pub use plan_context::TaskDependencyOutput;
 pub use projection_outbox::{
     EffectReceiptResolutionCommit, ProjectionClaim, ProjectionErrorEvidence,

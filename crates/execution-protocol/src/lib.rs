@@ -237,6 +237,10 @@ fn validate_optional_ref(
 /// [`ValidatedExecutionOutcome`] against its validated contract first.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the canonical public protocol keeps its four outcomes inline; boxing only Suspended would churn every adapter boundary for a bounded 272-byte value"
+)]
 pub enum ExecutionOutcome {
     /// Execution reached a successful terminal state.
     Completed {

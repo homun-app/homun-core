@@ -589,7 +589,7 @@ function fallbackTaskDetail(task: TaskItem): TaskDetailItem {
   };
 }
 
-export default function App() {
+function AuthenticatedApp() {
   const { t } = useTranslation();
   // System notifications opt-in (the SettingsView General pane wires permission).
   const [systemNotifEnabled] = useSetting<boolean>("general.systemNotifications", false);
@@ -1632,7 +1632,7 @@ export default function App() {
   }, []);
 
   return (
-    <LoginGate>
+    <>
       <Shell
       activeView={activeView}
       activeThreadId={activeThread.threadId}
@@ -1790,6 +1790,14 @@ export default function App() {
       {showOnboarding && (
         <OnboardingWizard onComplete={() => setShowOnboarding(false)} />
       )}
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <LoginGate>
+      <AuthenticatedApp />
     </LoginGate>
   );
 }

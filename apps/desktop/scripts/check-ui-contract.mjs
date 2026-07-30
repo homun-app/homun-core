@@ -104,6 +104,12 @@ assertNotContains("electron/preload.cjs", "windowAction", "renderer must not own
 assertContains("scripts/prepare-package.mjs", "local-first-desktop-gateway", "package preparation must copy the gateway binary");
 assertContains("scripts/electron-dev.mjs", "waitForDevServer", "Electron dev shell must wait for Vite before launch");
 assertContains("scripts/electron-dev.mjs", "stopGatewayOnPort", "Electron dev shell must clear stale gateway listeners before Electron owns lifecycle");
+assertContains("src/App.tsx", "function AuthenticatedApp()", "authenticated app effects must mount only after the login gate opens");
+assertMatches(
+  "src/App.tsx",
+  /export default function App\(\)\s*\{\s*return \(\s*<LoginGate>\s*<AuthenticatedApp \/>\s*<\/LoginGate>/,
+  "web login must gate the entire authenticated app mount",
+);
 assertContains("src/styles.css", "--window-drag-height", "Electron shell must reserve native window control space");
 assertContains("src/styles.css", "-webkit-app-region: drag", "Electron shell must expose a draggable titlebar region");
 assertContains("src/styles.css", "-webkit-app-region: no-drag", "interactive controls must remain clickable inside Electron");

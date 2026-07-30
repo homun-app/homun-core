@@ -1,15 +1,16 @@
 # Agent Loop — come funziona OGGI (mappa accurata)
 
-> Verificato vs codice 2026-07-09 (post ADR 0024 + 0025 completi; audit di riconciliazione).
+> Verificato vs codice 2026-07-30 (loop estratto, execution contract e recovery HITL/browser).
 > Reverse-engineered da `crates/engine/src/agent_loop.rs` (il loop canonico: `run_turn`,
 > costruito e invocato via `run_agent_rounds` in `crates/desktop-gateway/src/main.rs`, ancora
 > avvolto dall'outer `stream_chat_via_openai` → `run_agent_turn_into_message` /
 > `run_agent_turn_into_message_with_fanout`) e da `crates/orchestrator` (planner deliverable dormiente).
 > Questa pagina descrive la **realtà attuale**, incluse le **divergenze dai
 > [capisaldi](../CAPISALDI.md)**. Ownership del turno / HITL: contratto vivo in
-> [TURN_CONTRACT.md](../TURN_CONTRACT.md) (2026-07-27) — oggi solo
-> `pending_confirm`+`ACTIONABLE_CARD_MARKER_TAGS` fermano davvero; `CHOICES` è ancora
-> UI-only (convergenza in corso). È un punto fermo: ogni modifica al loop aggiorna questa
+> [TURN_CONTRACT.md](../TURN_CONTRACT.md) (2026-07-30): `HitlEnvelope` normalizza Choice,
+> Clarify, Confirm, Vault, Payment e PlanPropose nello stesso `Suspended + WakeDelivery`;
+> i marker legacy sono input di compatibilità, non owner alternativi. È un punto fermo:
+> ogni modifica al loop aggiorna questa
 > pagina + il diagramma. Decisione di fondo: [ADR 0016](../decisions/0016-harness-owned-task-engine-cross-model.md),
 > [0018](../decisions/0018-adaptive-harness-subagents-triggers.md),
 > [0020](../decisions/0020-converge-chat-loop-onto-orchestrator.md),

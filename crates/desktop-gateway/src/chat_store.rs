@@ -3747,6 +3747,11 @@ impl ChatStore {
             "update chat_threads set active_leaf_id = ?1 where thread_id = ?2",
             params![assistant_id, thread_id],
         )?;
+        conn.execute(
+            "update thread_hitl_waits set status = 'resolved', resolved_at = ?1
+              where thread_id = ?2 and source_message_id = ?3 and status = 'open'",
+            params![Self::now_secs(), thread_id, assistant_id],
+        )?;
         Ok(())
     }
 
@@ -6195,6 +6200,16 @@ mod tests {
         assistant.linked_task_id = Some("turn_initial".to_string());
 
         ChatStore::insert_linked_turn_messages(&store.conn, &tid, &user, &assistant).unwrap();
+        store
+            .set_open_hitl_wait(
+                "wait_initial",
+                &tid,
+                &assistant.id,
+                "choice",
+                r#"{"question":"Choose","options":["ALFA","BETA"]}"#,
+                "{}",
+            )
+            .unwrap();
         ChatStore::insert_linked_resume_user_message(
             &store.conn,
             &tid,
@@ -6239,6 +6254,7 @@ mod tests {
                 .timestamp,
             "101"
         );
+        assert!(store.open_hitl_wait(&tid).unwrap().is_none());
     }
 
     #[test]
