@@ -6,18 +6,17 @@ Starts the real gateway binary in an ISOLATED temporary data dir, then
 exercises the 5 broker routes via HTTP (the broker is now the only chat path):
 
   1. POST   /api/chat/turns          → 201 (enqueue)
-  2. POST   /api/chat/turns (same thread) → 409 (thread_busy)
+  2. POST   /api/chat/turns (same thread) → 202 (durable steering)
   3. GET    /api/chat/turns/{id}     → 200 (status check)
   4. GET    /api/chat/turns/{id}/events?since=0 → 200 (event replay)
   5. GET    /api/chat/turns/{id}/stream?since=0 → 200 NDJSON (live stream)
   6. DELETE /api/chat/turns/{id}     → 202 (cancel)
 
-NOTE: the gateway requires an LLM provider to actually run the agent loop.
-Without one, the executor's chat_role_config_for_thread returns None and the
-turn ends quickly (the executor returns "No reply generated." or the worker
-marks the turn Failed). This is EXPECTED in the test environment — we are
-verifying the BROKER WIRING (enqueue → Queued → pickup → executor runs →
-events emitted → terminal status), not LLM generation.
+NOTE: the gateway requires an LLM provider to complete the agent loop.
+Without one, a turn can fail or suspend in a durable waiting state. This is
+EXPECTED in the test environment — we are verifying the BROKER WIRING
+(enqueue → Queued → pickup → executor runs → events emitted → durable state),
+not LLM generation.
 
 Usage:
     python3 scripts/test-turn-broker-e2e.py [--keep-data-dir]
@@ -33,6 +32,7 @@ import json
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -44,7 +44,15 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BINARY = REPO_ROOT / "target" / "debug" / "local-first-desktop-gateway"
 GATEWAY_TOKEN = "test-broker-token-do-not-use-in-prod"
-GATEWAY_PORT = 18799  # unlikely to collide with a real running gateway
+
+
+def unused_loopback_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+GATEWAY_PORT = unused_loopback_port()
 BASE_URL = f"http://127.0.0.1:{GATEWAY_PORT}"
 
 
@@ -162,14 +170,12 @@ def create_thread() -> str:
     return thread_id
 
 
-def wait_for_terminal_status(turn_id: str, timeout_s: float = 15.0) -> str:
-    """Poll GET /turns/{id} until the turn leaves the queued state (worker picked it up).
+def wait_for_dispatch_status(turn_id: str, timeout_s: float = 15.0) -> str:
+    """Poll GET /turns/{id} until the turn leaves queued (the worker picked it up).
 
-    In the test environment there's no LLM provider, so the agent-loop returns None
-    quickly and the executor produces a non-completed outcome. The worker pool then
-    marks the turn as failed/waiting_external/retries. For THIS test we only care that
-    the worker SAW the turn and ran the executor — i.e. status moved away from
-    'queued'. Any non-queued status means the wiring works.
+    In this test environment there is no LLM provider, so execution can fail, retry,
+    or suspend in a durable waiting state. This helper proves only that the worker
+    saw the turn and dispatched it.
     """
     deadline = time.time() + timeout_s
     last_status = None
@@ -201,8 +207,8 @@ def run_tests():
         fail(f"unexpected turn_id in 201 response: {body}")
     log(f"  → 201, turn_id={turn_id}, status={body.get('status')}")
 
-    # --- Test 1b: atomicity — user message persisted in chat_messages together with the turn ---
-    log("TEST 1b: atomicity — user message persisted in chat_messages with the turn")
+    # --- Test 1b: atomicity — canonical user + assistant placeholders persisted with the turn ---
+    log("TEST 1b: atomicity — canonical user + assistant messages persisted with the turn")
     # Brief wait: the broker's atomic INSERT commits immediately, but the chat_store's
     # reader connection may lag by a WAL checkpoint. The other tests below already poll,
     # but for this atomicity check we want to read soon after enqueue without racing the
@@ -214,11 +220,15 @@ def run_tests():
     # The response shape is {"thread_id": "...", "messages": [...]}.
     messages = body.get("messages") if isinstance(body, dict) else body
     found = False
+    request_id = turn_id.removeprefix("turn_")
+    assistant_id = f"local_assistant_{request_id}"
+    matching_assistants = []
     if isinstance(messages, list):
         for msg in messages:
             if isinstance(msg, dict) and "hello broker" in (msg.get("text") or ""):
                 found = True
-                break
+            if isinstance(msg, dict) and msg.get("id") == assistant_id:
+                matching_assistants.append(msg)
     if not found:
         # Debug: print what we actually got back so the failure is diagnosable.
         msg_count = len(messages) if isinstance(messages, list) else "n/a"
@@ -229,21 +239,32 @@ def run_tests():
             f"ATOMICITY BROKEN: 'hello broker' not found in thread messages after "
             f"enqueue (got {msg_count} messages: {sample_texts})"
         )
-    log("  → user message 'hello broker' found in chat_messages ✓ (atomicity holds)")
+    if len(matching_assistants) != 1:
+        fail(
+            f"ATOMICITY BROKEN: expected exactly one canonical assistant placeholder "
+            f"{assistant_id}, found {len(matching_assistants)}"
+        )
+    log(
+        "  → user message and one canonical assistant placeholder found "
+        "in chat_messages ✓ (atomicity holds)"
+    )
 
-    # --- Test 2: second enqueue on same thread → 409 thread_busy ---
-    log("TEST 2: POST /api/chat/turns again on same thread → expect 409")
+    # --- Test 2: second interactive enqueue on the same thread becomes durable steering ---
+    log("TEST 2: POST /api/chat/turns again on same thread → expect 202 steering_queued")
     status, body, _ = http_request(
         "POST",
         "/api/chat/turns",
-        body={"thread_id": thread_id, "prompt": "second message should be rejected"},
-        expect=409,
+        body={"thread_id": thread_id, "prompt": "steer the active turn"},
+        expect=202,
     )
-    if not (isinstance(body, dict) and body.get("error") == "thread_busy"):
-        fail(f"409 body should have error=thread_busy, got: {body}")
+    if not (isinstance(body, dict) and body.get("status") == "steering_queued"):
+        fail(f"202 body should have status=steering_queued, got: {body}")
     if body.get("active_turn_id") != turn_id:
-        fail(f"409 active_turn_id should be {turn_id}, got {body.get('active_turn_id')}")
-    log(f"  → 409 thread_busy, active_turn_id={body.get('active_turn_id')} ✓")
+        fail(f"202 active_turn_id should be {turn_id}, got {body.get('active_turn_id')}")
+    steering = body.get("steering")
+    if not (isinstance(steering, dict) and steering.get("status") == "pending"):
+        fail(f"202 body should carry the pending durable steering row, got: {body}")
+    log(f"  → 202 steering_queued, active_turn_id={body.get('active_turn_id')} ✓")
 
     # --- Test 3: GET turn status ---
     log("TEST 3: GET /api/chat/turns/{id} → expect 200 with status field")
@@ -291,10 +312,10 @@ def run_tests():
     except Exception as e:
         log(f"  → stream read returned (acceptable): {e}")
 
-    # --- Wait for the turn to reach a terminal status ---
-    log("waiting for turn to reach terminal status (no LLM provider → expect failed or completed quickly)…")
-    final_status = wait_for_terminal_status(turn_id, timeout_s=20)
-    log(f"  → final status: {final_status}")
+    # --- Wait for the worker to dispatch the turn ---
+    log("waiting for the turn to leave queued (no LLM provider → failure or durable wait)…")
+    dispatch_status = wait_for_dispatch_status(turn_id, timeout_s=20)
+    log(f"  → dispatch status: {dispatch_status}")
 
     # --- Test 6: DELETE a second turn (cancel path) ---
     # Create a fresh thread + turn, then cancel it before/while it runs.
@@ -310,7 +331,7 @@ def run_tests():
     status, _, _ = http_request("DELETE", f"/api/chat/turns/{turn2}", expect=202)
     log(f"  → 202 (cancel accepted for {turn2})")
     # Verify it actually becomes cancelled
-    final = wait_for_terminal_status(turn2, timeout_s=5)
+    final = wait_for_dispatch_status(turn2, timeout_s=5)
     if final == "cancelled":
         log(f"  → turn status = cancelled ✓")
     else:
@@ -376,7 +397,7 @@ def run_tests():
     # We can't deterministically reproduce "A is mid-execution when B is dispatched" with
     # the no-LLM setup (turns fail in setup before reserving the browser), so this test
     # is a best-effort check: enqueue two on different threads in quick succession and
-    # verify that BOTH reach a terminal state and at least one emitted a `queued` event
+    # verify that BOTH leave resource wait and at least one emitted a `queued` event
     # at some point. If neither ever queues, the gating is either not engaged (bug) or
     # the timing window was missed (acceptable in a no-LLM test).
     log("TEST 9: browser gating — two concurrent turns on different threads")
@@ -403,16 +424,15 @@ def run_tests():
     if not queued_seen:
         log("  → NOTE: no `queued` event observed (turns may have failed before reserving the browser; acceptable in no-LLM test)")
 
-    # Both turns must eventually reach a terminal state (failed/completed/cancelled),
-    # never stuck in WaitingResource forever — the governor re-queues them when the
-    # slot frees, so they proceed even without the other turn completing successfully.
-    log("  waiting for both turns to reach terminal status…")
+    # Both turns must leave WaitingResource once capacity is available. A provider-less
+    # turn may then fail or suspend durably in WaitingTime; either proves resource release.
+    log("  waiting for both turns to leave queued/resource wait…")
     for tid in (turn_a, turn_b):
-        final = wait_for_terminal_status(tid, timeout_s=60)
+        final = wait_for_dispatch_status(tid, timeout_s=60)
         if final == "waitingresource":
             fail(f"turn {tid} stuck in WaitingResource (browser slot never freed) — governor requeue may be broken")
-        log(f"  → {tid} final: {final}")
-    log("  → TEST 9 ✓ (both turns reached terminal state; no permanent WaitingResource)")
+        log(f"  → {tid} status: {final}")
+    log("  → TEST 9 ✓ (both turns left resource wait; no permanent WaitingResource)")
 
     # --- Test 10: WebSocket /api/ws receives turn events ---
     log("TEST 10: WebSocket /api/ws receives turn events")

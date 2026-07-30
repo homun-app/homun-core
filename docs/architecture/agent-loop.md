@@ -74,6 +74,14 @@ claim ma prima di `complete`, `mark_uncertain` o `release_not_applied`, il drop 
 `Started` in `Uncertain`. Un recovery o retry con la stessa identita risolve quella receipt e non
 ripete mai la scrittura.
 
+Il gate di crash/restart del processo è ora anche coperto da un integration test del binario reale.
+Il test accoda il turno via HTTP, persiste un tentativo browser-capable con lease/fence, run,
+checkpoint agente, objective, checkpoint browser, reservation e placeholder streaming, poi termina
+il gateway senza shutdown e lo riavvia due volte sulla stessa directory isolata. La prova verifica
+requeue della stessa identità, rilascio risorse, abort del solo run precedente, conservazione dei
+checkpoint, riuso dell'assistant message e idempotenza del secondo restart. Non interpreta il
+checkpoint come conferma di un effetto remoto e non ripete azioni browser dall'esito incerto.
+
 Gli adapter di dominio sincroni vengono sempre isolati da `ExecutionRuntime` sul
 blocking pool di Tokio. Nessun adapter può quindi costruire client HTTP bloccanti,
 eseguire SQLite o guidare il loop sincrono dentro il contesto async del projector.
