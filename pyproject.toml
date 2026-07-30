@@ -7,7 +7,7 @@ dependencies = [
     "fastapi>=0.115",
     "mlx>=0.23",
     "mlx-vlm>=0.1",
-    "pillow>=10",
+    "pillow>=12.3.0",
     "pydantic>=2",
     "uvicorn[standard]>=0.30",
 ]

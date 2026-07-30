@@ -19,7 +19,8 @@ def font_face_css(families):
         for weight, fname in FONTS.get(fam, {}).items():
             path = os.path.join(_FONTS_DIR, fname)
             try:
-                b64 = base64.b64encode(open(path, "rb").read()).decode()
+                with open(path, "rb") as font_file:
+                    b64 = base64.b64encode(font_file.read()).decode()
             except OSError:
                 continue  # fail-open: never emit an @font-face with an empty src
             out.append(
