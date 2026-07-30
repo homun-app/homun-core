@@ -948,13 +948,14 @@ fn published_source_cannot_create_a_second_publication_and_approve_is_idempotent
 
     choose_create_new(&fixture.facade, &proposal.id);
 
+    let approved_from_version = publication_version(&fixture.facade, &proposal.id);
     let first = fixture
         .facade
-        .approve_publication_at_version(
-            &proposal.id,
-            OWNER,
-            publication_version(&fixture.facade, &proposal.id),
-        )
+        .approve_publication_at_version(&proposal.id, OWNER, approved_from_version)
+        .unwrap();
+    let stale_repeated = fixture
+        .facade
+        .approve_publication_at_version(&proposal.id, OWNER, approved_from_version)
         .unwrap();
     let repeated = fixture
         .facade
@@ -965,6 +966,10 @@ fn published_source_cannot_create_a_second_publication_and_approve_is_idempotent
             .facade
             .create_publication_proposal(&source, &fixture.personal_destination(), OWNER);
 
+    assert_eq!(
+        stale_repeated.destination.reference,
+        first.destination.reference
+    );
     assert_eq!(repeated.destination.reference, first.destination.reference);
     assert_eq!(fixture.personal_memories().len(), 1);
     assert_eq!(

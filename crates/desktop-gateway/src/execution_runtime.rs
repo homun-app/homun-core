@@ -1,4 +1,5 @@
 use crate::execution_adapter_context::ExecutionAdapterContext;
+use crate::execution_control::{ExecutionAttemptControl, ExecutionInterruption};
 use crate::execution_host::GatewayExecutionHost;
 use crate::task_registry::TaskExecutorRegistry;
 use crate::{
@@ -174,9 +175,17 @@ impl ExecutionRuntime {
         } else {
             match self.registry.resolve(&contract.as_ref().kind) {
                 Some(adapter) => {
+                    let control = Arc::new(ExecutionAttemptControl::default());
+                    let monitor = tokio::spawn(monitor_execution_attempt(
+                        state.clone(),
+                        task.clone(),
+                        contract.clone(),
+                        control.clone(),
+                    ));
                     let host = Arc::new(GatewayExecutionHost::new(state.clone()));
-                    let adapter_context = ExecutionAdapterContext::new(host, contract.clone());
-                    if let Err(error) = adapter_context.authorize_declared_effects() {
+                    let adapter_context =
+                        ExecutionAdapterContext::new(host, contract.clone(), control);
+                    let outcome = if let Err(error) = adapter_context.authorize_declared_effects() {
                         ExecutionOutcome::Failed {
                             failure: ExecutionFailure::permanent(
                                 "execution_policy_denied",
@@ -199,7 +208,10 @@ impl ExecutionRuntime {
                                 ),
                             },
                         }
-                    }
+                    };
+                    monitor.abort();
+                    let _ = monitor.await;
+                    outcome
                 }
                 None => ExecutionOutcome::Failed {
                     failure: ExecutionFailure::permanent(
@@ -247,6 +259,44 @@ impl ExecutionRuntime {
             projection,
             outcome: validated.as_ref().clone(),
         })
+    }
+}
+
+async fn monitor_execution_attempt(
+    state: AppState,
+    expected: TaskRecord,
+    contract: ValidatedExecutionContract,
+    control: Arc<ExecutionAttemptControl>,
+) {
+    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+
+    loop {
+        match current_task(&state, &expected) {
+            Ok(current) if current.status == TaskStatus::Cancelled => {
+                control.signal(ExecutionInterruption::Cancelled);
+                return;
+            }
+            Ok(current) if !same_lease_generation(&current, &expected) => {
+                control.signal(ExecutionInterruption::LeaseLost);
+                return;
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!(
+                    target: "execution::runtime",
+                    execution_id = %contract.as_ref().execution_id,
+                    error = %error.message,
+                    "attempt monitor could not verify lease ownership"
+                );
+                control.signal(ExecutionInterruption::LeaseLost);
+                return;
+            }
+        }
+        if contract_deadline_reached(&contract, OffsetDateTime::now_utc()) {
+            control.signal(ExecutionInterruption::DeadlineExceeded);
+            return;
+        }
+        tokio::time::sleep(POLL_INTERVAL).await;
     }
 }
 
@@ -928,6 +978,7 @@ gateway_adapter!(
 mod tests {
     use super::{ExecutionRuntime, GatewayExecutionAdapter};
     use crate::execution_adapter_context::ExecutionAdapterContext;
+    use crate::execution_control::{ExecutionAttemptControl, ExecutionInterruption};
     use crate::task_registry::TaskExecutorRegistry;
     use crate::{AppState, LocalTaskExecutionError, TaskRecord};
     use crate::{SurfaceKind, TaskExecutionPresentation, TaskResultSurfacing};
@@ -937,7 +988,10 @@ mod tests {
         WakeCondition,
     };
     use local_first_task_runtime::{ExecutionProjection, TaskStatus, UserId, WorkspaceId};
-    use std::sync::{Arc, Mutex};
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    };
     use time::{Duration, OffsetDateTime};
 
     struct RecordingAdapter {
@@ -1061,6 +1115,27 @@ mod tests {
     struct BlockingClientAdapter;
 
     struct LateSuccessAdapter;
+
+    struct CooperativeAdapter {
+        started: Arc<AtomicBool>,
+        stopped: Arc<AtomicBool>,
+    }
+
+    impl GatewayExecutionAdapter for CooperativeAdapter {
+        fn execute(
+            &self,
+            context: &ExecutionAdapterContext,
+        ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
+            self.started.store(true, Ordering::Release);
+            while !context.is_interrupted() {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            self.stopped.store(true, Ordering::Release);
+            Ok(ExecutionOutcome::completed(
+                serde_json::json!({"must_not_commit": true}),
+            ))
+        }
+    }
 
     impl GatewayExecutionAdapter for BlockingClientAdapter {
         fn execute(
@@ -1420,6 +1495,120 @@ mod tests {
             .expect("blocking adapter executes outside the async runtime context");
 
         assert_eq!(result.projection().task_status, TaskStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn running_adapter_observes_durable_task_cancellation() {
+        let started = Arc::new(AtomicBool::new(false));
+        let stopped = Arc::new(AtomicBool::new(false));
+        let mut registry = TaskExecutorRegistry::new();
+        registry.register(
+            "capability.*",
+            Arc::new(CooperativeAdapter {
+                started: started.clone(),
+                stopped: stopped.clone(),
+            }),
+        );
+        let runtime = ExecutionRuntime::new(registry);
+        let state = AppState::for_tests();
+        let contract = contract("capability.test", "cooperative-cancel-1");
+        insert_contract_task(&state, &contract);
+
+        let run_state = state.clone();
+        let run = tokio::spawn(async move { runtime.execute(&run_state, contract).await });
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while !started.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("adapter starts");
+        {
+            let store = state.task_store.lock().expect("task store");
+            let mut task = store
+                .get_task(
+                    &local_first_task_runtime::TaskId::new("cooperative-cancel-1"),
+                    &UserId::new("user-1"),
+                    &WorkspaceId::new("workspace-1"),
+                )
+                .expect("load task")
+                .expect("task exists");
+            task.status = TaskStatus::Cancelled;
+            store.insert_task(&task).expect("cancel task");
+        }
+
+        let result = tokio::time::timeout(std::time::Duration::from_secs(1), run)
+            .await
+            .expect("cooperative adapter stops promptly")
+            .expect("runtime task joins")
+            .expect("runtime commits cancellation");
+
+        assert!(stopped.load(Ordering::Acquire));
+        assert!(matches!(
+            result.outcome(),
+            ExecutionOutcome::Cancelled { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn attempt_monitor_signals_lease_generation_loss() {
+        let state = AppState::for_tests();
+        let contract = contract("capability.test", "cooperative-lease-1");
+        let expected = super::task_from_contract(&contract).expect("task from contract");
+        insert_contract_task(&state, &contract);
+        let control = Arc::new(ExecutionAttemptControl::default());
+        let monitor = tokio::spawn(super::monitor_execution_attempt(
+            state.clone(),
+            expected,
+            contract,
+            control.clone(),
+        ));
+        {
+            let store = state.task_store.lock().expect("task store");
+            let mut task = store
+                .get_task(
+                    &local_first_task_runtime::TaskId::new("cooperative-lease-1"),
+                    &UserId::new("user-1"),
+                    &WorkspaceId::new("workspace-1"),
+                )
+                .expect("load task")
+                .expect("task exists");
+            task.lease_owner = Some("replacement-worker".to_string());
+            store.insert_task(&task).expect("replace lease");
+        }
+
+        let interruption =
+            tokio::time::timeout(std::time::Duration::from_secs(1), control.interrupted())
+                .await
+                .expect("monitor observes lease loss");
+        monitor.await.expect("monitor joins");
+
+        assert_eq!(interruption, ExecutionInterruption::LeaseLost);
+    }
+
+    #[tokio::test]
+    async fn attempt_monitor_signals_contract_deadline() {
+        let state = AppState::for_tests();
+        let initial = contract("capability.test", "cooperative-deadline-1");
+        let mut task = super::task_from_contract(&initial).expect("task from contract");
+        task.deadline = Some(OffsetDateTime::now_utc() + Duration::seconds(1));
+        let contract = super::contract_for_acquired_task(&task).expect("deadline contract");
+        insert_contract_task(&state, &contract);
+        let control = Arc::new(ExecutionAttemptControl::default());
+        let monitor = tokio::spawn(super::monitor_execution_attempt(
+            state,
+            task,
+            contract,
+            control.clone(),
+        ));
+
+        let interruption =
+            tokio::time::timeout(std::time::Duration::from_secs(2), control.interrupted())
+                .await
+                .expect("monitor observes deadline");
+        monitor.await.expect("monitor joins");
+
+        assert_eq!(interruption, ExecutionInterruption::DeadlineExceeded);
     }
 
     #[tokio::test]

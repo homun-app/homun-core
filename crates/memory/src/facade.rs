@@ -2391,11 +2391,11 @@ impl MemoryFacade {
             .get_publication_proposal(id)?
             .ok_or_else(|| MemoryError::not_found("publication_not_found"))?;
         self.validate_publication_actor(&proposal, actor)?;
-        if proposal.proposal_version != expected_version {
-            return Err(MemoryError::policy("publication_conflict"));
-        }
         if proposal.status == MemoryPublicationStatus::Approved {
             return self.approved_publication_result(proposal);
+        }
+        if proposal.proposal_version != expected_version {
+            return Err(MemoryError::policy("publication_conflict"));
         }
         if proposal.status != MemoryPublicationStatus::Pending {
             return Err(MemoryError::policy("publication_not_pending"));

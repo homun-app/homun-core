@@ -104,6 +104,29 @@ fn execution_adapter_context_does_not_retain_unrestricted_app_state() {
 }
 
 #[test]
+fn execution_attempt_control_is_not_a_second_persisted_contract() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let control = production_source(&root.join("src/execution_control.rs"));
+    let forbidden = [
+        "AppState",
+        "TaskStore",
+        "ExecutionContract",
+        "ExecutionOutcome",
+        "Serialize",
+        "Deserialize",
+    ];
+
+    let violations = forbidden
+        .into_iter()
+        .filter(|pattern| control.contains(pattern))
+        .collect::<Vec<_>>();
+    assert!(
+        violations.is_empty(),
+        "attempt control must remain volatile and state-free: {violations:?}"
+    );
+}
+
+#[test]
 fn channel_and_stream_markers_do_not_own_lifecycle() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

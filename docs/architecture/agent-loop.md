@@ -59,10 +59,16 @@ migrazione e le lacune residue sono in
 Il confine adapter è composto da un solo contratto stabile: il runtime passa
 `ExecutionAdapterContext`, che contiene contratto validato e `ExecutionHost` ristretto.
 Solo l'implementazione gateway dell'host possiede `AppState`; gli adapter non possono
-leggere direttamente store, Vault, connettori o sandbox. Cancellazione, lease loss e
-deadline impediscono nuovi effect claim nella transazione della receipt. Un risultato
-adapter arrivato oltre deadline viene sostituito dal failure canonico prima del commit;
-un effetto già remoto resta invece governato dalla receipt e dall'eventuale stato `Uncertain`.
+leggere direttamente store, Vault, connettori o sandbox. Per ogni dispatch il runtime crea
+un `ExecutionAttemptControl` volatile e monitora lo stato autorevole: cancellazione, lease
+loss e deadline interrompono il turn future gia registrato; `proactive_prompt` seleziona sullo
+stesso segnale, quindi anche le automazioni fermano model e tool async. I processi shell sono
+configurati `kill_on_drop`. Capability e browser ricontrollano inoltre
+la cancellazione prima di ogni dispatch. Queste cause impediscono nuovi effect claim nella
+transazione della receipt. Il runtime aspetta comunque che l'adapter termini e ricontrolla
+l'autorita prima del commit. Un risultato adapter arrivato oltre deadline viene sostituito
+dal failure canonico; un effetto gia remoto resta governato dalla receipt e dall'eventuale
+stato `Uncertain`.
 
 Gli adapter di dominio sincroni vengono sempre isolati da `ExecutionRuntime` sul
 blocking pool di Tokio. Nessun adapter può quindi costruire client HTTP bloccanti,

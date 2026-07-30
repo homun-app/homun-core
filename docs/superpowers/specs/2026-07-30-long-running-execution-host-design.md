@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-30
 
-**Status:** Implemented and verified in the dev runtime.
+**Status:** Increments 1 and 2 implemented and verified in the dev runtime.
 
 ## Purpose
 
@@ -90,9 +90,34 @@ owns it.
 
 ## Follow-up
 
-Once this boundary is green in the live application, migrate model, browser, connector and sandbox
-activities to cooperative async cancellation tokens supplied by `ExecutionHost`. That follow-up
-changes scheduling latency, not lifecycle identity or effect ownership.
+The second increment adds one in-memory attempt control supplied through the existing
+`ExecutionAdapterContext`. It is not a persisted contract and it owns no lifecycle state. The
+runtime remains the only component that reads authoritative task cancellation, lease generation
+and deadline, then signals the control while an adapter is running.
+
+For chat execution, the host bridges that signal into the existing per-turn cancellation path.
+This drops the in-flight model/browser/connector/sandbox future, aborts the registered stream task
+and lets command subprocesses terminate through their existing `kill_on_drop` configuration.
+Capability dispatch also checks the same control before entering a tool, closing the race between
+an engine round and a newly observed interruption.
+
+`proactive_prompt` uses the same control directly in a `select` against its agent-turn future. Its
+stream request id is derived from the already durable assistant message id, so cancellation can
+abort the exact generation without creating another live-turn registry.
+
+The runtime still waits for the adapter thread to unwind. It never detaches effect-capable work.
+The durable terminal precedence remains cancellation, lease ownership, deadline, adapter result;
+the control only improves stop latency. If a remote effect has already crossed its dispatch
+boundary, its receipt remains Completed or Uncertain and is never rewritten as cancelled.
+
+Rejected for increment 2:
+
+1. Persisting a cancellation-token state machine, because task and execution journal already own
+   that state.
+2. Passing `AppState` or task-store handles into adapters, because it would reopen the ownership
+   boundary closed by increment 1.
+3. Returning immediately when the monitor fires, because `spawn_blocking` would continue detached
+   and could perform an untracked side effect.
 
 ## Implementation result
 
@@ -103,3 +128,7 @@ changes scheduling latency, not lifecycle identity or effect ownership.
 - A result returned after the contract deadline is normalized to the canonical permanent deadline
   failure before journal commit; authoritative cancellation still takes precedence.
 - The redundant consecutive pre-commit task reload was removed.
+- `ExecutionRuntime` now monitors cancellation, lease generation and deadline while the adapter is
+  running, then signals one volatile `ExecutionAttemptControl`.
+- Interactive and proactive agent turns consume that signal without adding a persisted lifecycle;
+  capability/browser dispatch retain their final pre-effect cancellation checks.

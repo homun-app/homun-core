@@ -1,3 +1,4 @@
+use crate::execution_control::ExecutionAttemptControl;
 use crate::{
     AppState, LocalTaskExecutionError, TaskRecord, execute_capability_browser_task,
     execute_capability_generic, execute_proactive_prompt_task, execute_shell_read_only_task,
@@ -31,11 +32,13 @@ pub(crate) trait ExecutionHost: Send + Sync {
     fn execute_proactive_prompt(
         &self,
         contract: &ValidatedExecutionContract,
+        control: std::sync::Arc<ExecutionAttemptControl>,
     ) -> Result<ExecutionOutcome, LocalTaskExecutionError>;
 
     fn execute_chat_turn(
         &self,
         contract: &ValidatedExecutionContract,
+        control: std::sync::Arc<ExecutionAttemptControl>,
     ) -> Result<ExecutionOutcome, LocalTaskExecutionError>;
 
     fn execute_shell_read_only(
@@ -117,23 +120,26 @@ impl ExecutionHost for GatewayExecutionHost {
     fn execute_proactive_prompt(
         &self,
         contract: &ValidatedExecutionContract,
+        control: std::sync::Arc<ExecutionAttemptControl>,
     ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
         let task = Self::task(contract)?;
-        execute_proactive_prompt_task(&self.state, &task, contract)
+        execute_proactive_prompt_task(&self.state, &task, contract, control)
     }
 
     fn execute_chat_turn(
         &self,
         contract: &ValidatedExecutionContract,
+        control: std::sync::Arc<ExecutionAttemptControl>,
     ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
         let task = Self::task(contract)?;
-        let outcome = crate::turn_executor::execute_chat_turn_task(&self.state, &task, contract)
-            .unwrap_or_else(|error| ExecutionOutcome::Failed {
-                failure: ExecutionFailure::permanent(
-                    "chat_execution_failed",
-                    crate::redact_sensitive_text(&error.message),
-                ),
-            });
+        let outcome =
+            crate::turn_executor::execute_chat_turn_task(&self.state, &task, contract, control)
+                .unwrap_or_else(|error| ExecutionOutcome::Failed {
+                    failure: ExecutionFailure::permanent(
+                        "chat_execution_failed",
+                        crate::redact_sensitive_text(&error.message),
+                    ),
+                });
         Ok(outcome)
     }
 

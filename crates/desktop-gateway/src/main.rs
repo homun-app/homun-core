@@ -20,6 +20,7 @@ mod db_migrate;
 mod document_content;
 mod effect_host;
 mod execution_adapter_context;
+mod execution_control;
 mod execution_host;
 mod execution_projection;
 mod execution_runtime;
@@ -28238,6 +28239,7 @@ struct GatewayBrowserExecutor<'a> {
     journal: agent_journal::GatewayJournal,
     execution_contract: Option<local_first_execution_protocol::ValidatedExecutionContract>,
     effect_run_id: Option<String>,
+    turn_id: Option<String>,
 }
 
 impl Drop for GatewayBrowserExecutor<'_> {
@@ -28259,6 +28261,16 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
         call_id: &str,
         ls: &mut local_first_engine::LoopState,
     ) -> local_first_engine::ToolOutcome {
+        if self
+            .turn_id
+            .as_deref()
+            .is_some_and(crate::turn_executor::turn_is_cancelled)
+        {
+            return local_first_engine::ToolOutcome {
+                result: "TURN CANCELLED: no browser action was executed.".to_string(),
+                effects: Default::default(),
+            };
+        }
         if name == "browser_done" {
             let payload =
                 serde_json::from_str::<local_first_engine::browse::BrowserDonePayload>(args_raw)
@@ -28779,6 +28791,10 @@ impl GatewayBrowseExecutor<'_> {
             journal: journal.clone(),
             execution_contract: self.execution_contract.clone(),
             effect_run_id: self.agent_run_id.clone(),
+            turn_id: self
+                .execution_contract
+                .as_ref()
+                .map(|contract| contract.as_ref().execution_id.clone()),
         };
         if let Some(hint_url) = request.hint_url.as_deref() {
             let nav_args = serde_json::json!({
@@ -31347,6 +31363,7 @@ async fn run_agent_rounds(
         journal: execution_journal.clone(),
         execution_contract: effect_contract.clone(),
         effect_run_id: effect_run_id.clone(),
+        turn_id: effect_turn_id.clone(),
     };
     let plan_progress = GatewayPlanProgress {
         state: state_owned.clone(),
@@ -38165,6 +38182,10 @@ async fn drain_agent_stream_into_message_with_fanout(
 /// Runs an agent turn for channel-originated work while keeping the owning chat
 /// visible: the inbound user message and assistant placeholder already exist,
 /// and this function streams deltas into that assistant message.
+fn agent_turn_stream_request_id(assistant_message_id: &str) -> String {
+    format!("agentturn-{assistant_message_id}")
+}
+
 async fn run_agent_turn_into_message(
     state: &AppState,
     thread_id: &str,
@@ -38182,7 +38203,7 @@ async fn run_agent_turn_into_message(
         &[source_user_message_id, assistant_message_id],
     )
     .ok_or_else(|| "chat context is unavailable".to_string())?;
-    let request_id = format!("agentturn-{thread_id}-{}", now_epoch_secs());
+    let request_id = agent_turn_stream_request_id(assistant_message_id);
     let request = ChatGenerateStreamRequest {
         request_id: request_id.clone(),
         agent_run_id: None,
@@ -43550,6 +43571,7 @@ fn execute_proactive_prompt_task(
     state: &AppState,
     task: &TaskRecord,
     contract: &local_first_execution_protocol::ValidatedExecutionContract,
+    control: std::sync::Arc<crate::execution_control::ExecutionAttemptControl>,
 ) -> Result<local_first_execution_protocol::ExecutionOutcome, LocalTaskExecutionError> {
     let goal = task.goal.clone();
     let thread_plan = proactive_thread_plan(task, &goal);
@@ -43602,15 +43624,31 @@ fn execute_proactive_prompt_task(
     // be persisted, fail closed instead of running invisible background work.
     let visible_turn = start_proactive_visible_turn(state, task, &thread_id, &thread_plan, &goal)?;
 
-    let result = tokio::runtime::Handle::current().block_on(run_agent_turn_into_message(
-        state,
-        &thread_id,
-        &goal,
-        policy,
-        &visible_turn.user_message_id,
-        &visible_turn.assistant_message_id,
-        local_first_desktop_gateway::MessageDeliveryState::Streaming,
-    ));
+    let request_id = agent_turn_stream_request_id(&visible_turn.assistant_message_id);
+    let result = tokio::runtime::Handle::current().block_on(async {
+        tokio::select! {
+            biased;
+            interruption = control.interrupted() => {
+                tracing::info!(
+                    target: "proactive::executor",
+                    execution_id = %contract.as_ref().execution_id,
+                    ?interruption,
+                    "runtime interruption reached proactive agent turn"
+                );
+                abort_stream_generation(&request_id);
+                Ok(None)
+            }
+            result = run_agent_turn_into_message(
+                state,
+                &thread_id,
+                &goal,
+                policy,
+                &visible_turn.user_message_id,
+                &visible_turn.assistant_message_id,
+                local_first_desktop_gateway::MessageDeliveryState::Streaming,
+            ) => result,
+        }
+    });
     let agent_result = result.ok().flatten();
     let waiting_action = agent_result
         .as_ref()

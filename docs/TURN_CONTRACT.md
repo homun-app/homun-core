@@ -7,7 +7,7 @@
 > Recovery browser: [design](superpowers/specs/2026-07-28-browser-checkpoint-recovery-design.md)
 > e [checklist operativa/verifiche](superpowers/plans/2026-07-28-browser-checkpoint-recovery.md).
 
-**Ultimo aggiornamento: 2026-07-30 (restart HITL/browser, terminal adoption, model override).**
+**Ultimo aggiornamento: 2026-07-30 (interruzione cooperativa dell'attempt).**
 
 ---
 
@@ -109,9 +109,14 @@ resta leggibile soltanto nel bridge di recovery dei record steering precedenti.
 3. Il runtime controlla il budget prima del dispatch e non registra retry il cui wake
    raggiunge o supera la deadline. Il registry risolve soltanto kind esatti o prefissi
    registrati e consegna all'adapter un `ExecutionAdapterContext`, mai `AppState`. Il
-   context conserva solo contratto validato e `Arc<dyn ExecutionHost>`; soltanto
+   context conserva solo contratto validato, `Arc<dyn ExecutionHost>` e un controllo
+   volatile dell'attempt; soltanto
    `GatewayExecutionHost` possiede lo stato applicativo e offre le operazioni delle famiglie
-   registrate, senza esporre store, Vault, connettori o client generici. Dopo il ritorno
+   registrate, senza esporre store, Vault, connettori o client generici. Mentre l'adapter
+   gira, il runtime monitora task cancellato, generazione della lease e deadline; il segnale
+   interrompe il future chat gia esistente; `proactive_prompt` seleziona sullo stesso segnale e
+   sull'agent turn pianificato. Entrambi chiudono model, browser, connector e sandbox sul loro
+   normale percorso di drop. Non e uno stato persistito e non decide l'outcome. Dopo il ritorno
    dell'adapter il runtime ricontrolla la deadline: cancellazione autorevole, deadline
    scaduta e outcome adapter sono applicati in quest'ordine prima del commit journal.
 4. Ogni effetto non-read viene autorizzato e registrato prima del dispatch; replay,
@@ -330,48 +335,51 @@ conversazione e non il lavoro in corso.
     effetto può reclamare una receipt e l'eventuale risultato tardivo non può diventare
     `Completed`. Un effetto remoto già partito conserva la propria receipt e non viene
     dichiarato annullato o ritentato senza evidenza.
-14. Una sospensione user non è proiettata finché payload HITL e `OpenWork` non sono
+14. Il controllo cooperativo dell'attempt accelera l'arresto ma non possiede stato:
+    l'adapter deve terminare e il runtime deve ancora verificare task, lease e deadline prima
+    del commit. Vietato restituire lasciando un `spawn_blocking` o un effetto staccato in background.
+15. Una sospensione user non è proiettata finché payload HITL e `OpenWork` non sono
     persistiti. Errori di store, lock o serializzazione mantengono la proiezione
     pendente e rigiocabile; non sono convertiti in snapshot vuoti.
-15. La risposta verso Telegram/WhatsApp è un `external_write` con receipt legata alla
+16. La risposta verso Telegram/WhatsApp è un `external_write` con receipt legata alla
     revisione di proiezione. Un replay riusa `Completed`; un invio interrotto diventa
     `Uncertain` e non viene ripetuto implicitamente. La proiezione resta senza ack
     terminale finché la receipt non viene risolta; il replay del projector la chiude
     solo dopo `Applied` o dopo un nuovo invio consentito da `NotApplied`.
-16. Il bootstrap non avvia worker su una migrazione DB fallita o su outcome committati
+17. Il bootstrap non avvia worker su una migrazione DB fallita o su outcome committati
     che il projector non riesce a rigiocare. Una wake `At` fuori dal range temporale
     fallisce la proiezione invece di perdere `not_before` e rendere subito eseguibile il task.
-17. Nessun call site gateway fuori da `effect_host.rs` può invocare direttamente
+18. Nessun call site gateway fuori da `effect_host.rs` può invocare direttamente
     `prepare_effect_receipt`, `claim_effect_receipt` o `complete_effect_receipt`.
     La delivery canale è ammessa come output dell'adapter solo per un contratto
     `chat_turn` con source `channel` e thread scope coincidente; non amplia i tool del modello.
-18. Timeout, join failure e trasporti falliti di un write connector sono
+19. Timeout, join failure e trasporti falliti di un write connector sono
     `UnknownRemoteOutcome`: la receipt diventa `Uncertain` e il loop si sospende. Telegram
     può fare rebind e retry solo su connect failure precedente al dispatch; timeout o risposta
     persa non vengono mai inviati una seconda volta nello stesso claim.
-19. Il resolver operativo usa `GET /api/effects/uncertain` e
+20. Il resolver operativo usa `GET /api/effects/uncertain` e
     `POST /api/effects/{receipt_ref}/resolve`. Verifica l'ownership utente, aggiorna
     receipt e wake nella stessa transazione quando il turno è sospeso, e rigioca le
     proiezioni terminali senza fabbricare una wake quando l'effetto appartiene all'output adapter.
     La risoluzione e il replay sono single-flight per receipt; un concorrente attende il leader
     e riceve `409` invece di reclamare di nuovo una receipt `Started`.
-20. `OutcomeCommitted` e projection outbox sono una sola transazione. Il worker non
+21. `OutcomeCommitted` e projection outbox sono una sola transazione. Il worker non
     scandisce più tutta la storia committata: reclama solo righe `pending` dovute o
     claim appartenenti a un process generation precedente.
-21. `pending → claimed → completed|pending|blocked` è l'unico lifecycle della delivery
+22. `pending → claimed → completed|pending|blocked` è l'unico lifecycle della delivery
     di proiezione. Un worker può completare, ritentare o bloccare solo con owner,
     generation e token del claim corrente. `blocked` non ha timeout automatico.
-22. `Applied` e `NotApplied` aggiornano receipt, wake e righe outbox bloccate nella
+23. `Applied` e `NotApplied` aggiornano receipt, wake e righe outbox bloccate nella
     stessa transazione. Il gateway può quindi osservare soltanto receipt incerta con
     projection bloccata oppure receipt risolta con projection nuovamente `pending`.
-23. Il commit canonico non attende il projector: notifica il worker e restituisce lo
+24. Il commit canonico non attende il projector: notifica il worker e restituisce lo
     stesso outcome anche se una proiezione propria o altrui deve essere ritentata. Al
     boot gli outcome già committed vengono proiettati prima di abortire i soli run
     rimasti senza outcome; un errore viene esposto in health e ripreso dal worker.
-24. Solo `chat_turn` possiede le transizioni lifecycle di task e agent run.
+25. Solo `chat_turn` possiede le transizioni lifecycle di task e agent run.
     `proactive_prompt` può riusare il projector per superfici visibili senza chiudere
     prematuramente lease o run del runner non-chat.
-25. Risposte di canale e notifiche di approvazione remota sono adapter output dello
+26. Risposte di canale e notifiche di approvazione remota sono adapter output dello
     stesso `EffectHost`. Un errore verificato prima dell'invio riporta la receipt a
     `Prepared`; timeout e risposte sidecar `5xx` sono esiti remoti ambigui e bloccano
     l'outbox su receipt fino a risoluzione. L'identità della notifica di approvazione

@@ -576,18 +576,22 @@ pub struct GatewayCancelNotify;
 
 impl CancelNotify for GatewayCancelNotify {
     fn notify_cancel(&self, turn_id: &str) {
-        if let Ok(map) = turn_broadcast_registry().lock()
-            && let Some(turn) = map.get(turn_id)
-        {
-            turn.cancel.cancel();
-            if let Ok(slot) = turn.engine_abort.lock()
-                && let Some(abort) = slot.as_ref()
-            {
-                abort.abort();
-            }
-        }
-        crate::abort_stream_generation(&format!("broker-{turn_id}"));
+        interrupt_live_turn(turn_id);
     }
+}
+
+pub(crate) fn interrupt_live_turn(turn_id: &str) {
+    if let Ok(map) = turn_broadcast_registry().lock()
+        && let Some(turn) = map.get(turn_id)
+    {
+        turn.cancel.cancel();
+        if let Ok(slot) = turn.engine_abort.lock()
+            && let Some(abort) = slot.as_ref()
+        {
+            abort.abort();
+        }
+    }
+    crate::abort_stream_generation(&format!("broker-{turn_id}"));
 }
 
 /// Executor for a `chat_turn` task. Sibling of `execute_proactive_prompt_task`
@@ -603,6 +607,7 @@ pub fn execute_chat_turn_task(
     state: &crate::AppState,
     task: &local_first_task_runtime::TaskRecord,
     contract: &ValidatedExecutionContract,
+    control: Arc<crate::execution_control::ExecutionAttemptControl>,
 ) -> Result<ExecutionOutcome, crate::LocalTaskExecutionError> {
     let turn_id = task.task_id.as_str();
     tracing::info!(target: "broker::executor", turn_id = %turn_id, "executor started");
@@ -788,6 +793,20 @@ pub fn execute_chat_turn_task(
     // 3. Register the live turn broadcast (Task 1a.2). Cancellation + the
     //    per-turn SSE/WS fan-out key off this. Always unregistered on exit.
     let broadcast = register_turn(turn_id);
+    let interruption_bridge = tokio::runtime::Handle::current().spawn({
+        let control = control.clone();
+        let turn_id = turn_id.to_string();
+        async move {
+            let interruption = control.interrupted().await;
+            tracing::info!(
+                target: "broker::executor",
+                turn_id = %turn_id,
+                ?interruption,
+                "runtime interruption reached live turn"
+            );
+            interrupt_live_turn(&turn_id);
+        }
+    });
     // A worker owns the resource reservation before it reaches register_turn. If the
     // user cancels inside that short window, the in-process notify has no receiver yet.
     // Re-read the durable status after registration: either this observes Cancelled,
@@ -837,6 +856,7 @@ pub fn execute_chat_turn_task(
             journal.close_and_flush();
             crate::agent_journal::unregister(run_id);
         }
+        interruption_bridge.abort();
         unregister_turn(turn_id);
         return Err(crate::LocalTaskExecutionError {
             message: "could not start a visible conversation turn".to_string(),
@@ -1028,6 +1048,7 @@ pub fn execute_chat_turn_task(
         }
         crate::agent_journal::unregister(run_id);
     }
+    interruption_bridge.abort();
     unregister_turn(turn_id);
     Ok(canonical)
 }
@@ -1438,7 +1459,13 @@ mod tests {
             .unwrap()
             .list_agent_runs_for_turn(task.task_id.as_str(), user.as_str(), workspace.as_str())
             .unwrap();
-        let error = execute_chat_turn_task(&state, &task, &contract).unwrap_err();
+        let error = execute_chat_turn_task(
+            &state,
+            &task,
+            &contract,
+            Arc::new(crate::execution_control::ExecutionAttemptControl::default()),
+        )
+        .unwrap_err();
         assert!(error.message.contains("fingerprint mismatch"));
         let runs_after = state
             .task_store
