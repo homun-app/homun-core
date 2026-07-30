@@ -10,6 +10,22 @@ single line so the site captures its full text; version delimiters are `## [x.y.
 
 ## [Unreleased]
 
+## [0.1.1094] — 2026-07-30
+
+A release candidate built around deterministic recovery, security gates and reproducible installers.
+
+## Highlights
+- **Hard restarts preserve one canonical turn.** Process fencing, durable checkpoints and lease recovery now converge tasks, runs and assistant messages without duplicate ownership after a gateway crash.
+- **Release builds fail closed.** GitHub produces installers only after formatting, warning-free Clippy, the complete deterministic test gate and dependency audits all pass on the same source commit.
+
+## Improvements
+- **Every installer carries a SHA-256 manifest.** macOS, Windows and Linux artifacts can be verified independently before a draft release is considered for publication.
+- **The inference surface matches the runtime.** The unused MistralRS transport and its unmaintained dependency tree have been removed; supported providers continue through the common inference contract.
+
+## Fixes
+- **Transient SQLite contention no longer loses a turn.** Atomic enqueue retries use fresh transactions, while startup recovery completes before any background database writer begins.
+- **Rendered document QA starts reliably in CI.** Each Chromium run uses an isolated profile, a bounded DevTools readiness contract and complete process cleanup.
+
 ## [0.1.1093] — 2026-07-26
 
 A browser that completes real tasks, and a noticeably smoother app.
@@ -39,4 +55,5 @@ A browser that completes real tasks, and a noticeably smoother app.
 - **The local model respects its timeout.** A stuck generation no longer keeps Homun busy indefinitely.
 
 [Unreleased]: https://github.com/homun-app/homun-releases/releases
+[0.1.1094]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1094
 [0.1.1093]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1093
