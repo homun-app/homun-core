@@ -26,7 +26,7 @@ class PreReleaseGateTests(unittest.TestCase):
         self.assertEqual(plan[-1].label, "live stability soak")
         self.assertEqual(
             plan[-1].command,
-            [gate.PYTHON, "scripts/stability_soak.py", "--restart"],
+            [gate.PYTHON, "scripts/stability_soak.py", "--hard-restart"],
         )
 
     def test_default_plan_runs_deterministic_local_checks_only(self):

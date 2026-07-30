@@ -4,6 +4,29 @@ from scripts.stability_soak import evaluate
 
 
 class StabilitySoakTest(unittest.TestCase):
+    def test_rejects_a_turn_without_canonical_terminal_evidence(self):
+        result = evaluate(
+            [{"thread": "b", "kind": "selected"}],
+            expected_selected="b",
+            expected_turn_ids={"a1"},
+        )
+
+        self.assertFalse(result["passed"])
+        self.assertIn("missing_terminal", result["violations"])
+
+    def test_rejects_a_terminal_without_one_assistant_identity(self):
+        result = evaluate(
+            [
+                {"thread": "b", "kind": "selected"},
+                {"thread": "a", "turn": "a1", "kind": "done"},
+            ],
+            expected_selected="b",
+            expected_turn_ids={"a1"},
+        )
+
+        self.assertFalse(result["passed"])
+        self.assertIn("missing_assistant", result["violations"])
+
     def test_rejects_focus_change_duplicate_terminal_and_reasoning(self):
         result = evaluate(
             [
@@ -18,6 +41,7 @@ class StabilitySoakTest(unittest.TestCase):
                 },
             ],
             expected_selected="b",
+            expected_turn_ids={"a"},
         )
         self.assertFalse(result["passed"])
         self.assertIn("focus_changed", result["violations"])
@@ -33,6 +57,7 @@ class StabilitySoakTest(unittest.TestCase):
                 {"thread": "b", "turn": "b1", "kind": "done", "assistant_id": "b-a"},
             ],
             expected_selected="b",
+            expected_turn_ids={"a1", "b1", "c1"},
         )
         self.assertTrue(result["passed"])
         self.assertEqual(result["violations"], [])

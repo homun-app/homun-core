@@ -30,7 +30,11 @@ TERMINAL_STATUSES = {"completed", "failed", "cancelled", "expired"}
 REASONING_MARKERS = ("‹‹reasoning››", "<think", "</think", "raw reasoning")
 
 
-def evaluate(events: list[dict[str, Any]], expected_selected: str) -> dict[str, Any]:
+def evaluate(
+    events: list[dict[str, Any]],
+    expected_selected: str,
+    expected_turn_ids: set[str] | None = None,
+) -> dict[str, Any]:
     """Evaluate UI-safe turn invariants over a normalized event list."""
     violations: set[str] = set()
     terminals: dict[str, int] = {}
@@ -49,10 +53,16 @@ def evaluate(events: list[dict[str, Any]], expected_selected: str) -> dict[str, 
         if any(marker in text for marker in REASONING_MARKERS):
             violations.add("reasoning_leak")
 
-    if any(count > 1 for count in terminals.values()) or any(
-        len(ids) > 1 for ids in assistants.values()
-    ):
+    if any(count > 1 for count in terminals.values()):
         violations.add("duplicate_terminal")
+    if any(len(ids) > 1 for ids in assistants.values()):
+        violations.add("duplicate_assistant")
+
+    for turn_id in expected_turn_ids or set():
+        if terminals.get(turn_id, 0) == 0:
+            violations.add("missing_terminal")
+        if len(assistants.get(turn_id, set())) == 0:
+            violations.add("missing_assistant")
 
     return {
         "passed": not violations,
@@ -135,14 +145,18 @@ class IsolatedGateway:
             stderr=subprocess.STDOUT,
         )
 
-    def stop(self) -> None:
+    def stop(self, hard: bool = False) -> None:
         if self.process is not None and self.process.poll() is None:
-            self.process.send_signal(signal.SIGTERM)
-            try:
-                self.process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
+            if hard:
                 self.process.kill()
                 self.process.wait(timeout=5)
+            else:
+                self.process.send_signal(signal.SIGTERM)
+                try:
+                    self.process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait(timeout=5)
         if self._log is not None:
             self._log.close()
             self._log = None
@@ -272,7 +286,7 @@ def run_soak(
     if active_thread != threads["B"]:
         normalized.append({"thread": active_thread, "kind": "selected"})
 
-    evaluation = evaluate(normalized, threads["B"])
+    evaluation = evaluate(normalized, threads["B"], set(turns))
     nonterminal = [
         turn_id for turn_id in turns if statuses.get(turn_id) not in TERMINAL_STATUSES
     ]
@@ -306,6 +320,11 @@ def run_soak(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--restart", action="store_true", help="restart the isolated gateway mid-soak")
+    parser.add_argument(
+        "--hard-restart",
+        action="store_true",
+        help="hard-kill and restart the isolated gateway mid-soak",
+    )
     parser.add_argument("--output", type=Path, help="write the bounded JSON report here")
     parser.add_argument("--timeout", type=float, default=90, help="terminal wait in seconds")
     parser.add_argument("--port", type=int, default=18798, help="isolated gateway port")
@@ -325,13 +344,14 @@ def main(argv: list[str] | None = None) -> int:
             client.wait_ready()
 
             def restart_gateway() -> None:
-                gateway.stop()
+                gateway.stop(hard=args.hard_restart)
                 # macOS can keep the just-closed loopback listener unavailable for a
                 # short interval even after the process has exited cleanly.
                 time.sleep(0.75)
                 gateway.start()
 
-            report = run_soak(client, restart_gateway if args.restart else None, args.timeout)
+            restart = restart_gateway if args.restart or args.hard_restart else None
+            report = run_soak(client, restart, args.timeout)
         except Exception as error:
             report = {
                 "schema_version": 1,

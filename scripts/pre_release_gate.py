@@ -141,7 +141,7 @@ def build_plan(env: dict[str, str]) -> list[Step]:
         plan.append(
             Step(
                 "live stability soak",
-                [PYTHON, "scripts/stability_soak.py", "--restart"],
+                [PYTHON, "scripts/stability_soak.py", "--hard-restart"],
             )
         )
     return plan
