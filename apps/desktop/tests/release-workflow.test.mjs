@@ -16,7 +16,7 @@ test("installer matrix depends on same-run release readiness", async () => {
   );
   assert.match(
     workflow,
-    /rustsec\/audit-check@69366f33c96575abad1ee0dba8212993eecbe998/,
+    /rustsec\/audit-check@858dc40f52ca2b8570b7a997c1c4e35c6fc9a432/,
   );
   assert.match(workflow, /^  build:\n    needs: validate$/m);
 });

@@ -68,7 +68,7 @@
 
 - [ ] Add workflow-contract assertions that the installer matrix has `needs: validate`, that validation runs the deterministic gate and RustSec audit, and that each platform uploads checksums.
 - [ ] Run the focused Electron workflow-contract test and confirm it fails on the missing validation job.
-- [ ] Add a `validate` job, pin RustSec audit-check to commit `69366f33c96575abad1ee0dba8212993eecbe998`, make the build matrix depend on it, and generate/upload checksum manifests for workflow artifacts and tag drafts.
+- [x] Add a `validate` job, pin the Node 24 RustSec audit-check to commit `858dc40f52ca2b8570b7a997c1c4e35c6fc9a432`, make the build matrix depend on it, and generate/upload checksum manifests for workflow artifacts and tag drafts.
 - [ ] Ensure publishing credentials remain scoped only to tag-only upload steps and draft creation remains unchanged.
 - [ ] Run Electron tests, YAML inspection tests, and `actionlint` when available.
 - [ ] Commit as `ci(release): gate installer matrix on kernel readiness`.
