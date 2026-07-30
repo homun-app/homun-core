@@ -680,6 +680,59 @@ mod tests {
     }
 
     #[test]
+    fn browser_action_process_loss_becomes_uncertain_and_never_executes_again() {
+        let store = Mutex::new(TaskStore::open_in_memory().expect("store"));
+        let contract = contract(
+            "execution-browser-process-loss",
+            vec![EffectClass::Read, EffectClass::ExternalWrite],
+        );
+        activate(&store, &contract);
+        let host = EffectHost::new(&store, &contract, Some("run-browser-process-loss"));
+        let browser_request = || {
+            EffectRequest::capability(
+                "browser_act",
+                "call-click-submit",
+                EffectClass::ExternalWrite,
+                json!({"target_id": "booking", "kind": "click", "ref": "e7"}),
+            )
+        };
+
+        let EffectDecision::Execute(lease) =
+            host.begin(browser_request()).expect("claim browser action")
+        else {
+            panic!("first browser action claim must execute");
+        };
+        let receipt_ref = lease.receipt_ref().clone();
+
+        // Model sidecar/process loss after dispatch and before acknowledgement.
+        drop(lease);
+
+        let receipt = store
+            .lock()
+            .expect("store")
+            .list_effect_receipts_for_execution("execution-browser-process-loss", 1)
+            .expect("load browser receipt")
+            .into_iter()
+            .find(|receipt| receipt.receipt_ref == receipt_ref)
+            .expect("browser receipt exists");
+        assert_eq!(
+            receipt.status,
+            local_first_execution_protocol::EffectReceiptStatus::Uncertain
+        );
+
+        let EffectDecision::Resolve(receipt) = host
+            .begin(browser_request())
+            .expect("reconcile browser action")
+        else {
+            panic!("an uncertain browser action must never execute again");
+        };
+        assert_eq!(
+            receipt.status,
+            local_first_execution_protocol::EffectReceiptStatus::Uncertain
+        );
+    }
+
+    #[test]
     fn uncertain_effect_keeps_dispatch_evidence() {
         let store = Mutex::new(TaskStore::open_in_memory().expect("store"));
         let contract = contract(

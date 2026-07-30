@@ -269,6 +269,12 @@ volta, in ordine:
 2. `draft_available`: target perso, URL riaperto e manifest opaco disponibile;
 3. `degraded_url_only`: URL riaperto senza draft utilizzabile.
 
+Questa ownership è coperta anche a livello di processo: il gate stdio avvia Chromium separatamente,
+esegue una vera `browser_act`, persiste il checkpoint, termina il sidecar con `SIGKILL` e richiede al
+processo sostitutivo di adottare lo stesso target CDP. La prova canonica è documentata nel
+[design](superpowers/specs/2026-07-30-browser-sidecar-crash-recovery-design.md) e nel relativo
+[piano verificato](superpowers/plans/2026-07-30-browser-sidecar-crash-recovery.md).
+
 Ogni recovery forza uno snapshot nuovo e generation monotona prima di qualsiasi altra azione. La
 RPC incerta che ha perso il client **non viene mai ritentata automaticamente**. Il recovery produce
 `NoProgress`: il modello deve osservare e decidere esplicitamente il passo successivo.
@@ -287,6 +293,10 @@ la receipt con `applied=false`. Le receipt browser non persistono snapshot o val
 form: conservano solo un replay notice e metriche non sensibili. Il browser restituisce
 lo stesso `ToolOutcome` generale delle altre capability: una receipt incerta sospende
 subito il loop e non viene ridotta a testo interpretabile dal modello.
+
+Il test browser-specific dell'effect host prova inoltre che la perdita del processo dopo il claim di
+`browser_act` porta la receipt a `Uncertain` e che lo stesso logical call può solo ottenere `Resolve`,
+mai una seconda autorizzazione `Execute`.
 
 Checkpoint e ciphertext vengono eliminati idempotentemente su terminal objective, revisione
 sostitutiva, archive/delete thread, delete workspace e scadenza; la pulizia scadenze parte anche a

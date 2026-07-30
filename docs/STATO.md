@@ -3,7 +3,27 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-27.**
+> **Ultimo aggiornamento: 2026-07-30.**
+
+## CHECKPOINT 2026-07-30 - Browser sidecar crash recovery process-level
+
+Chiuso il provider gate rimasto fuori dal gateway crash E2E senza modificare il runtime o aggiungere
+contratti. Il nuovo test stdio usa l'entrypoint reale `src/server.ts`, un Chromium CDP separato e una
+fixture locale: esegue snapshot/fill/checkpoint, termina il sidecar con `SIGKILL`, verifica il target
+ancora vivo direttamente su CDP e lo adotta da un secondo processo con `adopted_live_page`. Il draft
+resta presente, la generation avanza e la generation pre-crash viene respinta.
+
+L'effect host ha ora una prova `browser_act` specifica: una dispatch lease abbandonata dopo il claim
+diventa `Uncertain`; lo stesso logical call restituisce `Resolve` e non può essere eseguito due volte.
+Resta un solo percorso `ExecutionContract -> effect receipt -> ExecutionOutcome`, con risoluzione
+esplicita per gli esiti remoti ignoti.
+
+**Gate verdi:** browser sidecar 16 file / 88 test + typecheck; `cargo fmt --check`; clippy workspace
+con `-D warnings`; test Rust workspace; Electron 93/93; UI contract; desktop build; npm audit desktop e
+browser 0 vulnerabilità; cargo audit 0 vulnerabilità e le 3 eccezioni transitive unmaintained già
+allowlisted (`fxhash`, `number_prefix`, `paste`). Design e checklist:
+[browser-sidecar-crash-recovery-design.md](superpowers/specs/2026-07-30-browser-sidecar-crash-recovery-design.md),
+[browser-sidecar-crash-recovery.md](superpowers/plans/2026-07-30-browser-sidecar-crash-recovery.md).
 
 ## ⭐ CHECKPOINT 2026-07-27 (quinquies) — Always Contract HITL (un chokepoint)
 
