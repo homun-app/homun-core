@@ -670,12 +670,24 @@ struct ResourceUsageResponse {
     saturated: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+struct UncertainEffectResponse {
+    receipt_ref: String,
+    execution_id: String,
+    thread_id: Option<String>,
+    operation_family: &'static str,
+    status: &'static str,
+    evidence: Value,
+    uncertain_at: i64,
+}
+
 #[derive(Debug, Serialize)]
 struct TaskQueueResponse {
     queued: Vec<TaskItemResponse>,
     active: Vec<TaskItemResponse>,
     blocked: Vec<TaskItemResponse>,
     waiting_approvals: Vec<ApprovalItemResponse>,
+    uncertain_effects: Vec<UncertainEffectResponse>,
     recent_failures: Vec<TaskItemResponse>,
     resource_usage: Vec<ResourceUsageResponse>,
 }
@@ -41833,6 +41845,31 @@ async fn resolve_uncertain_effect_receipt(
     }))
 }
 
+fn retain_task_queue_scope(
+    response: &mut TaskQueueResponse,
+    allowed_task_ids: &std::collections::HashSet<String>,
+    thread_id: &str,
+) {
+    response
+        .queued
+        .retain(|item| allowed_task_ids.contains(&item.task_id));
+    response
+        .active
+        .retain(|item| allowed_task_ids.contains(&item.task_id));
+    response
+        .blocked
+        .retain(|item| allowed_task_ids.contains(&item.task_id));
+    response
+        .recent_failures
+        .retain(|item| allowed_task_ids.contains(&item.task_id));
+    response
+        .waiting_approvals
+        .retain(|item| allowed_task_ids.contains(&item.task_id));
+    response
+        .uncertain_effects
+        .retain(|item| item.thread_id.as_deref() == Some(thread_id));
+}
+
 async fn task_queue(
     State(state): State<AppState>,
     Query(query): Query<TaskQueueQuery>,
@@ -41858,15 +41895,7 @@ async fn task_queue(
             }
             ids
         };
-        response.queued.retain(|t| allowed.contains(&t.task_id));
-        response.active.retain(|t| allowed.contains(&t.task_id));
-        response.blocked.retain(|t| allowed.contains(&t.task_id));
-        response
-            .recent_failures
-            .retain(|t| allowed.contains(&t.task_id));
-        response
-            .waiting_approvals
-            .retain(|a| allowed.contains(&a.task_id));
+        retain_task_queue_scope(&mut response, &allowed, thread_id);
     }
     Ok(Json(response))
 }
@@ -59663,13 +59692,20 @@ fn task_queue_response_for_state(state: &AppState) -> Result<TaskQueueResponse, 
     let snapshot = TaskUiReadModel::new(&store)
         .queue_snapshot(&user, &workspace)
         .map_err(GatewayError::task)?;
+    let uncertain_effects = store
+        .uncertain_effect_receipts_for_user(user.as_str())
+        .map_err(GatewayError::task)?
+        .iter()
+        .map(uncertain_effect_response)
+        .collect();
     let limits = effective_task_resource_limits();
-    task_queue_response(snapshot, &limits)
+    task_queue_response(snapshot, &limits, uncertain_effects)
 }
 
 fn task_queue_response(
     snapshot: TaskQueueSnapshot,
     limits: &ResourceLimits,
+    uncertain_effects: Vec<UncertainEffectResponse>,
 ) -> Result<TaskQueueResponse, GatewayError> {
     let mut resource_usage = snapshot
         .resource_usage
@@ -59706,9 +59742,50 @@ fn task_queue_response(
             .into_iter()
             .map(approval_item_response)
             .collect::<Result<Vec<_>, _>>()?,
+        uncertain_effects,
         recent_failures: user_facing(snapshot.recent_failures)?,
         resource_usage,
     })
+}
+
+fn uncertain_effect_response(
+    receipt: &local_first_task_runtime::ExecutionEffectReceipt,
+) -> UncertainEffectResponse {
+    let operation_family = if receipt.operation.starts_with("browser") {
+        "browser"
+    } else if receipt.operation.starts_with("channel.") {
+        "channel"
+    } else if receipt.operation.starts_with("connector.")
+        || receipt.operation.starts_with("composio")
+        || receipt.operation.starts_with("mcp")
+    {
+        "connector"
+    } else {
+        "external_write"
+    };
+    let mut evidence = serde_json::Map::new();
+    if let Some(source) = receipt.effects_json.as_ref().and_then(Value::as_object) {
+        for key in [
+            "attempted",
+            "dispatch_started",
+            "request_dispatched",
+            "side_effect_started",
+            "unknown_remote_outcome",
+        ] {
+            if let Some(value @ Value::Bool(_)) = source.get(key) {
+                evidence.insert(key.to_string(), value.clone());
+            }
+        }
+    }
+    UncertainEffectResponse {
+        receipt_ref: receipt.receipt_ref.as_ref().to_string(),
+        execution_id: receipt.execution_id.clone(),
+        thread_id: receipt.thread_id.clone(),
+        operation_family,
+        status: receipt.status.as_str(),
+        evidence: Value::Object(evidence),
+        uncertain_at: receipt.started_at.unwrap_or(receipt.prepared_at),
+    }
 }
 
 fn task_detail_response(detail: TaskUiDetail) -> Result<TaskDetailResponse, GatewayError> {
@@ -83662,6 +83739,97 @@ data: [DONE]\n";
     }
 
     #[test]
+    fn uncertain_effect_projection_is_bounded_and_metadata_only() {
+        let receipt = local_first_task_runtime::ExecutionEffectReceipt {
+            receipt_ref: local_first_execution_protocol::EffectReceiptRef::from_store_id(
+                "11111111111111111111111111111111",
+            )
+            .unwrap(),
+            execution_id: "exec-1".to_string(),
+            revision: 3,
+            idempotency_key: "secret-idempotency-key".to_string(),
+            run_id: Some("run-1".to_string()),
+            thread_id: Some("thread-1".to_string()),
+            user_id: "user-1".to_string(),
+            workspace_id: "workspace-1".to_string(),
+            effect_class: local_first_execution_protocol::EffectClass::ExternalWrite,
+            operation: "channel.telegram.reply".to_string(),
+            arguments_hash: "secret-arguments-hash".to_string(),
+            status: local_first_execution_protocol::EffectReceiptStatus::Uncertain,
+            result_json: Some(serde_json::json!({
+                "recipient": "private-recipient"
+            })),
+            effects_json: Some(serde_json::json!({
+                "attempted": true,
+                "recipient_fingerprint": "private-recipient",
+                "payload": "private-payload"
+            })),
+            error_json: None,
+            compensation: None,
+            prepared_at: 100,
+            started_at: Some(120),
+            resolved_at: None,
+        };
+
+        let value = serde_json::to_value(super::uncertain_effect_response(&receipt)).unwrap();
+
+        assert_eq!(
+            value["receipt_ref"],
+            "effect:v1:32:11111111111111111111111111111111"
+        );
+        assert_eq!(value["operation_family"], "channel");
+        assert_eq!(value["uncertain_at"], 120);
+        assert_eq!(value["status"], "uncertain");
+        assert_eq!(value["evidence"], serde_json::json!({ "attempted": true }));
+        let encoded = value.to_string();
+        for forbidden in [
+            "secret-idempotency-key",
+            "secret-arguments-hash",
+            "private-recipient",
+            "private-payload",
+        ] {
+            assert!(
+                !encoded.contains(forbidden),
+                "projection leaked {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn task_queue_scope_retains_only_matching_uncertain_effects() {
+        let effect = |receipt_ref: &str, thread_id: &str| super::UncertainEffectResponse {
+            receipt_ref: receipt_ref.to_string(),
+            execution_id: format!("execution-{receipt_ref}"),
+            thread_id: Some(thread_id.to_string()),
+            operation_family: "browser",
+            status: "uncertain",
+            evidence: serde_json::json!({}),
+            uncertain_at: 100,
+        };
+        let mut response = super::TaskQueueResponse {
+            queued: Vec::new(),
+            active: Vec::new(),
+            blocked: Vec::new(),
+            waiting_approvals: Vec::new(),
+            uncertain_effects: vec![
+                effect("effect-1", "thread-1"),
+                effect("effect-2", "thread-2"),
+            ],
+            recent_failures: Vec::new(),
+            resource_usage: Vec::new(),
+        };
+
+        super::retain_task_queue_scope(
+            &mut response,
+            &std::collections::HashSet::new(),
+            "thread-1",
+        );
+
+        assert_eq!(response.uncertain_effects.len(), 1);
+        assert_eq!(response.uncertain_effects[0].receipt_ref, "effect-1");
+    }
+
+    #[test]
     fn task_queue_response_serializes_ui_read_model_for_renderer() {
         let user = UserId::new("local-user");
         let workspace = WorkspaceId::new("local-workspace");
@@ -83693,6 +83861,7 @@ data: [DONE]\n";
                 resource_usage,
             },
             &ResourceLimits::new().with_limit(ResourceClass::LlmInference, 4),
+            Vec::new(),
         )
         .unwrap();
 
