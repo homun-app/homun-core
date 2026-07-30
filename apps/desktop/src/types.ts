@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import type { PaymentApprovalSnapshot } from "./lib/coreBridge";
+import type { CoreUncertainEffect, PaymentApprovalSnapshot } from "./lib/coreBridge";
 
 export type ViewId =
   | "chat"
@@ -190,6 +190,16 @@ export interface TaskItem {
 export interface TaskResourceUsage {
   resourceClass: string;
   units: number;
+}
+
+export interface UncertainEffectItem {
+  id: string;
+  executionId: string;
+  threadId: string | null;
+  scopeLabel: string | null;
+  operationFamily: CoreUncertainEffect["operation_family"];
+  uncertainAt: number;
+  core: CoreUncertainEffect;
 }
 
 export interface TaskDetailItem {

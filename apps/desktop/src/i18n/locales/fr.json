@@ -862,7 +862,20 @@
     "rawPayload": "Charge utile brute",
     "blocked": "bloquée",
     "notExposed": "non exposé",
-    "block": "Bloquer"
+    "block": "Bloquer",
+    "verification": "à vérifier",
+    "effectVerificationAria": "Effets nécessitant une vérification du résultat",
+    "effectVerification": "Vérification du résultat",
+    "needsVerification": "résultat inconnu",
+    "effectFamilyBrowser": "Action du navigateur",
+    "effectFamilyChannel": "Message de canal",
+    "effectFamilyConnector": "Action du connecteur",
+    "effectFamilyExternalWrite": "Écriture externe",
+    "conversationScope": "Conversation",
+    "uncertainSince": "Incertain depuis",
+    "verifiedApplied": "Vérifié comme appliqué",
+    "verifiedNotApplied": "Vérifié comme non appliqué",
+    "effectResolutionError": "Échec de la résolution"
   },
   "approval": {
     "browserAction": "Action du navigateur en attente",

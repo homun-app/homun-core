@@ -862,7 +862,20 @@
     "rawPayload": "Roh-Payload",
     "blocked": "blockiert",
     "notExposed": "nicht offengelegt",
-    "block": "Blockieren"
+    "block": "Blockieren",
+    "verification": "zu prüfen",
+    "effectVerificationAria": "Effekte, deren Ergebnis geprüft werden muss",
+    "effectVerification": "Ergebnisprüfung",
+    "needsVerification": "Ergebnis unbekannt",
+    "effectFamilyBrowser": "Browser-Aktion",
+    "effectFamilyChannel": "Kanalnachricht",
+    "effectFamilyConnector": "Connector-Aktion",
+    "effectFamilyExternalWrite": "Externer Schreibvorgang",
+    "conversationScope": "Konversation",
+    "uncertainSince": "Ungewiss seit",
+    "verifiedApplied": "Als angewendet verifiziert",
+    "verifiedNotApplied": "Als nicht angewendet verifiziert",
+    "effectResolutionError": "Auflösung fehlgeschlagen"
   },
   "approval": {
     "browserAction": "Browser-Aktion ausstehend",

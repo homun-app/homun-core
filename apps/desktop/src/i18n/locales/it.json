@@ -882,7 +882,20 @@
     "rawPayload": "Payload raw",
     "blocked": "bloccato",
     "notExposed": "non esposto",
-    "block": "Blocco"
+    "block": "Blocco",
+    "verification": "da verificare",
+    "effectVerificationAria": "Effetti che richiedono verifica dell'esito",
+    "effectVerification": "Verifica dell'esito",
+    "needsVerification": "esito sconosciuto",
+    "effectFamilyBrowser": "Azione browser",
+    "effectFamilyChannel": "Messaggio su canale",
+    "effectFamilyConnector": "Azione connettore",
+    "effectFamilyExternalWrite": "Scrittura esterna",
+    "conversationScope": "Conversazione",
+    "uncertainSince": "Incerto dal",
+    "verifiedApplied": "Verificato come applicato",
+    "verifiedNotApplied": "Verificato come non applicato",
+    "effectResolutionError": "Risoluzione non riuscita"
   },
   "approval": {
     "browserAction": "Azione browser in attesa",

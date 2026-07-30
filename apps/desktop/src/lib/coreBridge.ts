@@ -316,11 +316,24 @@ export type ApprovelDecisionOptions = {
   browser_visibility?: "auto" | "visible" | "headless";
 };
 
+export interface CoreUncertainEffect {
+  receipt_ref: string;
+  execution_id: string;
+  thread_id: string | null;
+  operation_family: "browser" | "channel" | "connector" | "external_write";
+  status: "uncertain";
+  evidence: Record<string, boolean>;
+  uncertain_at: number;
+}
+
+export type CoreUncertainEffectOutcome = "applied" | "not_applied";
+
 export interface CoreTaskQueueSnapshot {
   queued: CoreTaskItem[];
   active: CoreTaskItem[];
   blocked: CoreTaskItem[];
   waiting_approvals: CoreApprovelItem[];
+  uncertain_effects: CoreUncertainEffect[];
   recent_failures: CoreTaskItem[];
   resource_usage: Array<{
     resource_class: string;
@@ -3613,6 +3626,10 @@ export const coreBridge = {
     chatApi.unarchiveChatThread(threadId),
   deleteChatThread: (threadId: string) => chatApi.deleteChatThread(threadId),
   taskQueue: (threadId?: string) => electronTaskQueue(threadId),
+  resolveUncertainEffect: (
+    effect: CoreUncertainEffect,
+    outcome: CoreUncertainEffectOutcome,
+  ) => electronResolveUncertainEffect(effect, outcome),
   taskExecutorStatus: () => electronTaskExecutorStatus(),
   taskDetail: (taskId: string) => electronTaskDetail(taskId),
   approveApprovel: (approvalId: string, options?: ApprovelDecisionOptions) =>
@@ -3906,6 +3923,7 @@ function emptyTaskQueue(): CoreTaskQueueSnapshot {
     active: [],
     blocked: [],
     waiting_approvals: [],
+    uncertain_effects: [],
     recent_failures: [],
     resource_usage: [],
   };
@@ -3924,6 +3942,37 @@ async function electronTaskQueue(threadId?: string): Promise<CoreTaskQueueSnapsh
   } catch {
     return emptyTaskQueue();
   }
+}
+
+async function electronResolveUncertainEffect(
+  effect: CoreUncertainEffect,
+  outcome: CoreUncertainEffectOutcome,
+): Promise<void> {
+  const resolution =
+    outcome === "applied"
+      ? {
+          type: "applied" as const,
+          result: {
+            verified: true,
+            source: "tasks_workbench",
+          },
+          effects: {
+            ...effect.evidence,
+            manually_verified: true,
+            source: "tasks_workbench",
+          },
+        }
+      : {
+          type: "not_applied" as const,
+          error: {
+            code: "verified_not_applied",
+            source: "tasks_workbench",
+          },
+        };
+  await gatewayPostJson(
+    `/api/effects/${encodeURIComponent(effect.receipt_ref)}/resolve`,
+    resolution,
+  );
 }
 
 async function electronTaskExecutorStatus(): Promise<CoreTaskExecutorStatus> {

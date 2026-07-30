@@ -1,6 +1,8 @@
 import {
   AlertCircle,
+  BadgeCheck,
   Check,
+  CircleX,
   Clock3,
   Globe2,
   Loader2,
@@ -14,15 +16,20 @@ import type {
   TaskDetailItem,
   TaskItem,
   TaskResourceUsage,
+  UncertainEffectItem,
 } from "../types";
+import type { CoreUncertainEffectOutcome } from "../lib/coreBridge";
 
 interface TasksViewProps {
   tasks: TaskItem[];
   approvals: ApprovelItem[];
+  uncertainEffects: UncertainEffectItem[];
   resourceUsage: TaskResourceUsage[];
   selectedTaskDetail: TaskDetailItem | null;
   taskDetailLoading: boolean;
   approvalBusyId: string | null;
+  effectResolutionBusyId: string | null;
+  effectResolutionError: string | null;
   selectedTaskId: string;
   onApproveApprovel: (
     approvalId: string,
@@ -32,19 +39,27 @@ interface TasksViewProps {
     },
   ) => void;
   onRejectApprovel: (approvalId: string) => void;
+  onResolveEffect: (
+    effect: UncertainEffectItem,
+    outcome: CoreUncertainEffectOutcome,
+  ) => void;
   onSelectTask: (taskId: string) => void;
 }
 
 export function TasksView({
   tasks,
   approvals,
+  uncertainEffects,
   resourceUsage,
   selectedTaskDetail,
   taskDetailLoading,
   approvalBusyId,
+  effectResolutionBusyId,
+  effectResolutionError,
   selectedTaskId,
   onApproveApprovel,
   onRejectApprovel,
+  onResolveEffect,
   onSelectTask,
 }: TasksViewProps) {
   const { t } = useTranslation();
@@ -59,6 +74,8 @@ export function TasksView({
           <span>{t("tasksView.running")}</span>
           <strong>{approvals.length}</strong>
           <span>{t("tasksView.approval")}</span>
+          <strong>{uncertainEffects.length}</strong>
+          <span>{t("tasksView.verification")}</span>
         </div>
       </header>
 
@@ -89,6 +106,66 @@ export function TasksView({
         </section>
 
         <section className="task-column" aria-label={t("tasksView.approvalCenterAria")}>
+          {uncertainEffects.length > 0 && (
+            <section
+              className="uncertain-effect-section"
+              aria-label={t("tasksView.effectVerificationAria")}
+            >
+              <h3>{t("tasksView.effectVerification")}</h3>
+              {effectResolutionError && (
+                <p className="uncertain-effect-error" role="alert">
+                  {t("tasksView.effectResolutionError")}: {effectResolutionError}
+                </p>
+              )}
+              {uncertainEffects.map((effect) => {
+                const resolvingThisEffect = effectResolutionBusyId === effect.id;
+                const busy = effectResolutionBusyId !== null;
+                return (
+                  <article className="uncertain-effect-card" key={effect.id}>
+                    <header className="uncertain-effect-header">
+                      <AlertCircle size={17} aria-hidden="true" />
+                      <strong>{effectFamilyLabel(effect.operationFamily, t)}</strong>
+                      <span>{t("tasksView.needsVerification")}</span>
+                    </header>
+                    <div className="uncertain-effect-meta">
+                      {effect.scopeLabel && (
+                        <span>
+                          {t("tasksView.conversationScope")} {effect.scopeLabel}
+                        </span>
+                      )}
+                      <time dateTime={new Date(effect.uncertainAt * 1_000).toISOString()}>
+                        {t("tasksView.uncertainSince")} {formatEffectTime(effect.uncertainAt)}
+                      </time>
+                    </div>
+                    <div className="uncertain-effect-actions">
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onResolveEffect(effect, "not_applied")}
+                      >
+                        <CircleX size={16} aria-hidden="true" />
+                        {t("tasksView.verifiedNotApplied")}
+                      </button>
+                      <button
+                        className="primary-button"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onResolveEffect(effect, "applied")}
+                      >
+                        {resolvingThisEffect ? (
+                          <Loader2 className="spin" size={16} aria-hidden="true" />
+                        ) : (
+                          <BadgeCheck size={16} aria-hidden="true" />
+                        )}
+                        {t("tasksView.verifiedApplied")}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </section>
+          )}
           <h3>{t("tasksView.approvalCenter")}</h3>
           {approvals.map((approval) => (
             <article className="approval-card" key={approval.id}>
@@ -153,6 +230,23 @@ export function TasksView({
       </div>
     </section>
   );
+}
+
+function effectFamilyLabel(
+  family: UncertainEffectItem["operationFamily"],
+  t: (key: string) => string,
+) {
+  if (family === "browser") return t("tasksView.effectFamilyBrowser");
+  if (family === "channel") return t("tasksView.effectFamilyChannel");
+  if (family === "connector") return t("tasksView.effectFamilyConnector");
+  return t("tasksView.effectFamilyExternalWrite");
+}
+
+function formatEffectTime(timestamp: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(timestamp * 1_000));
 }
 
 function TaskDetailPanel({

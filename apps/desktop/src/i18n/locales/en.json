@@ -882,7 +882,20 @@
     "rawPayload": "Raw payload",
     "blocked": "blocked",
     "notExposed": "not exposed",
-    "block": "Block"
+    "block": "Block",
+    "verification": "verification",
+    "effectVerificationAria": "Effects requiring outcome verification",
+    "effectVerification": "Outcome verification",
+    "needsVerification": "outcome unknown",
+    "effectFamilyBrowser": "Browser action",
+    "effectFamilyChannel": "Channel message",
+    "effectFamilyConnector": "Connector action",
+    "effectFamilyExternalWrite": "External write",
+    "conversationScope": "Conversation",
+    "uncertainSince": "Uncertain since",
+    "verifiedApplied": "Verified applied",
+    "verifiedNotApplied": "Verified not applied",
+    "effectResolutionError": "Resolution failed"
   },
   "approval": {
     "browserAction": "Browser action pending",

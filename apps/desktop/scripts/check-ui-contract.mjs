@@ -225,6 +225,81 @@ assertContains("src/components/UsageCalendar.tsx", "onFocus", "Keyboard focus mu
 assertContains("src/components/UsageCalendar.tsx", "dominant_provider", "Usage callouts must preserve provider provenance");
 assertNotContains("src/components/ChatView.tsx", "chat-hero-mark", "New chat must not keep the decorative brandmark");
 assertNotContains("src/components/ChatView.tsx", "chat.emptyHeroSub", "New chat must not keep the fixed subtitle");
+assertContains(
+  "src/lib/coreBridge.ts",
+  "uncertain_effects: CoreUncertainEffect[];",
+  "The task queue must carry the canonical uncertain-effect projection",
+);
+assertContains(
+  "src/lib/coreBridge.ts",
+  "/api/effects/${encodeURIComponent(effect.receipt_ref)}/resolve",
+  "Uncertain effects must use the existing canonical resolver endpoint",
+);
+assertContains(
+  "src/lib/coreBridge.ts",
+  'type: "applied" as const',
+  "Manual verification must submit the canonical applied resolution",
+);
+assertContains(
+  "src/lib/coreBridge.ts",
+  'type: "not_applied" as const',
+  "Manual verification must submit the canonical not-applied resolution",
+);
+assertNotContains(
+  "src/components/ChatView.tsx",
+  "uncertain-effect-card",
+  "Uncertain effects must not create a second chat-card resume path",
+);
+assertContains(
+  "src/App.tsx",
+  "await coreBridge.resolveUncertainEffect(effect.core, outcome);",
+  "Resolution must complete before refreshing canonical read models",
+);
+assertContains(
+  "src/App.tsx",
+  "await loadTaskQueue();",
+  "Resolution must refresh the canonical task queue",
+);
+assertContains(
+  "src/App.tsx",
+  "await refreshSelectedTaskDetail(selectedTaskId);",
+  "Resolution must refresh the selected task detail",
+);
+assertMatches(
+  "src/App.tsx",
+  /if \(effect\.threadId\) \{\s*await refreshChatReadModels\(effect\.threadId\);\s*\}/,
+  "Resolution must refresh its related thread without navigating",
+);
+assertNotContains(
+  "src/App.tsx",
+  "setUncertainEffectItems((current) => current.filter",
+  "Resolution must not optimistically remove an uncertain receipt",
+);
+assertContains(
+  "src/components/TasksView.tsx",
+  'className="uncertain-effect-card"',
+  "Tasks Workbench must render uncertain effects separately from approvals",
+);
+assertContains(
+  "src/components/TasksView.tsx",
+  't("tasksView.verifiedApplied")',
+  "Tasks Workbench must expose the verified-applied command",
+);
+assertContains(
+  "src/components/TasksView.tsx",
+  't("tasksView.verifiedNotApplied")',
+  "Tasks Workbench must expose the verified-not-applied command",
+);
+assertContains(
+  "src/components/TasksView.tsx",
+  "effectResolutionBusyId === effect.id",
+  "Both uncertain-effect actions must share one in-flight guard",
+);
+assertNotContains(
+  "src/components/TasksView.tsx",
+  "JSON.stringify(effect.core.evidence",
+  "Raw uncertain-effect evidence must not be rendered",
+);
 assertContains("src/components/ChatView.tsx", "selectGreetingKey", "New chat must select a stable curated greeting");
 assertContains("src/components/ChatView.tsx", "chat-hero-headline", "New chat must render the primary greeting separately");
 assertContains("src/components/ChatView.tsx", "chat-hero-prompt", "New chat must render the rotating prompt as secondary typography");

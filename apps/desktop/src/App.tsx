@@ -37,6 +37,8 @@ import {
   type CoreTaskDetail,
   type CoreTaskItem,
   type CoreTaskQueueSnapshot,
+  type CoreUncertainEffect,
+  type CoreUncertainEffectOutcome,
   type ProactivitySuggestion,
   type PluginState,
   type RoutingBindingInput,
@@ -70,6 +72,7 @@ import type {
   TaskItem,
   TaskResourceUsage,
   TaskStatus,
+  UncertainEffectItem,
   ViewId,
 } from "./types";
 
@@ -367,6 +370,18 @@ function mapCoreTask(task: CoreTaskItem): TaskItem {
   };
 }
 
+function mapCoreUncertainEffect(effect: CoreUncertainEffect): UncertainEffectItem {
+  return {
+    id: effect.receipt_ref,
+    executionId: effect.execution_id,
+    threadId: effect.thread_id,
+    scopeLabel: effect.thread_id ? effect.thread_id.slice(-8) : null,
+    operationFamily: effect.operation_family,
+    uncertainAt: effect.uncertain_at,
+    core: effect,
+  };
+}
+
 function mapCoreApprovel(approval: CoreApprovelItem): ApprovelItem {
   const isBrowserAction = approval.action === "browser.manual_action";
   const isPromptPlanAction = approval.action === "prompt_plan.approve_step";
@@ -619,6 +634,9 @@ function AuthenticatedApp() {
   });
   const [taskItems, setTaskItems] = useState<TaskItem[]>(tasks);
   const [approvalItems, setApprovelItems] = useState<ApprovelItem[]>(approvals);
+  const [uncertainEffectItems, setUncertainEffectItems] = useState<
+    UncertainEffectItem[]
+  >([]);
   const [automationItems, setAutomationItems] = useState<ManagedAutomation[]>([]);
   const [runtimeItems] = useState<RuntimeHealth[]>(runtimeHealth);
   const [memoryDashboard, setMemoryDashboard] =
@@ -630,6 +648,13 @@ function AuthenticatedApp() {
     useState<TaskDetailItem | null>(null);
   const [taskDetailLoading, setTaskDetailLoading] = useState(false);
   const [approvalBusyId, setApprovelBusyId] = useState<string | null>(null);
+  const [effectResolutionBusyId, setEffectResolutionBusyId] = useState<string | null>(
+    null,
+  );
+  const [effectResolutionError, setEffectResolutionError] = useState<{
+    receiptId: string;
+    message: string;
+  } | null>(null);
   const [pendingTemplateAutoSubmit, setPendingTemplateAutoSubmit] = useState<{
     id: string;
     threadId: string;
@@ -1170,7 +1195,14 @@ function AuthenticatedApp() {
     (p) => pluginStates.find((s) => s.id === p.id)?.enabled !== false,
   );
   const composedNavItems: NavItem[] = [
-    ...staticNavItems,
+    ...staticNavItems.map((item) => {
+      if (item.id !== "tasks") return item;
+      const attentionCount = approvalItems.length + uncertainEffectItems.length;
+      return {
+        ...item,
+        badge: attentionCount > 0 ? String(attentionCount) : undefined,
+      };
+    }),
     ...enabledPlugins.map((p) => ({
       id: p.id as ViewId,
       label: p.navLabel,
@@ -1343,6 +1375,15 @@ function AuthenticatedApp() {
         ? snapshot.waiting_approvals.map(mapCoreApprovel)
         : [],
     );
+    const nextUncertainEffects = (snapshot.uncertain_effects ?? []).map(
+      mapCoreUncertainEffect,
+    );
+    setUncertainEffectItems(nextUncertainEffects);
+    setEffectResolutionError((current) =>
+      current && nextUncertainEffects.some((effect) => effect.id === current.receiptId)
+        ? current
+        : null,
+    );
     setResourceUsage(
       snapshot.resource_usage
         .filter((usage) => usage.units > 0)
@@ -1493,6 +1534,29 @@ function AuthenticatedApp() {
       console.warn("approval_reject unavailable", error);
     } finally {
       setApprovelBusyId(null);
+    }
+  }
+
+  async function handleResolveUncertainEffect(
+    effect: UncertainEffectItem,
+    outcome: CoreUncertainEffectOutcome,
+  ) {
+    setEffectResolutionBusyId(effect.id);
+    setEffectResolutionError(null);
+    try {
+      await coreBridge.resolveUncertainEffect(effect.core, outcome);
+      await loadTaskQueue();
+      await refreshSelectedTaskDetail(selectedTaskId);
+      if (effect.threadId) {
+        await refreshChatReadModels(effect.threadId);
+      }
+    } catch (error) {
+      setEffectResolutionError({
+        receiptId: effect.id,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setEffectResolutionBusyId(null);
     }
   }
 
@@ -1714,13 +1778,17 @@ function AuthenticatedApp() {
             <TasksView
               tasks={taskItems}
               approvals={approvalItems}
+              uncertainEffects={uncertainEffectItems}
               resourceUsage={resourceUsage}
               selectedTaskDetail={selectedTaskDetail}
               taskDetailLoading={taskDetailLoading}
               approvalBusyId={approvalBusyId}
+              effectResolutionBusyId={effectResolutionBusyId}
+              effectResolutionError={effectResolutionError?.message ?? null}
               selectedTaskId={selectedTask.id}
               onApproveApprovel={handleApproveApprovel}
               onRejectApprovel={handleRejectApprovel}
+              onResolveEffect={handleResolveUncertainEffect}
               onSelectTask={setSelectedTaskId}
             />
           )}

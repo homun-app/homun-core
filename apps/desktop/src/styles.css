@@ -9793,7 +9793,8 @@ body.resizing-drawer {
 
 .page-actions,
 .summary-strip,
-.approval-actions {
+.approval-actions,
+.uncertain-effect-actions {
   gap: 8px;
   flex-wrap: wrap;
 }
@@ -9839,6 +9840,7 @@ body.resizing-drawer {
 .feature-card,
 .connector-row,
 .approval-card,
+.uncertain-effect-card,
 .stat-card,
 .connection-tile {
   border: 1px solid var(--line);
@@ -10691,6 +10693,74 @@ body.resizing-drawer {
 
 .approval-card {
   padding: 16px;
+}
+
+.uncertain-effect-section {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.uncertain-effect-section > h3 {
+  margin-bottom: 2px;
+}
+
+.uncertain-effect-card {
+  border-left: 3px solid var(--amber);
+  padding: 14px;
+}
+
+.uncertain-effect-header {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.uncertain-effect-header > svg {
+  color: var(--amber);
+}
+
+.uncertain-effect-header strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uncertain-effect-header span {
+  color: var(--amber);
+  font-size: 12px;
+}
+
+.uncertain-effect-meta {
+  margin: 12px 0 14px 26px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.uncertain-effect-actions {
+  justify-content: flex-end;
+}
+
+.uncertain-effect-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.uncertain-effect-error {
+  margin: 0;
+  border-left: 3px solid var(--danger);
+  padding: 8px 10px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 .approval-header,
@@ -11576,6 +11646,23 @@ body.resizing-drawer {
   .learning-overview,
   .learning-summary {
     grid-template-columns: 1fr;
+  }
+
+  .uncertain-effect-header {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .uncertain-effect-header span {
+    grid-column: 2;
+  }
+
+  .uncertain-effect-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .uncertain-effect-actions button {
+    width: 100%;
   }
 
   .learning-summary {
