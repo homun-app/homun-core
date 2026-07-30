@@ -50,4 +50,4 @@
 - [x] Run formatting, Clippy with denied warnings and all Rust workspace tests.
 - [x] Run Electron tests, UI contract, typecheck, build and dependency audits.
 - [x] Remove only dead code exposed by the implementation.
-- [ ] Commit and push `main`, restart dev, and verify ports `1420` and `18765` plus gateway health.
+- [x] Commit and push `main`, restart dev, and verify ports `1420` and `18765` plus gateway health.
