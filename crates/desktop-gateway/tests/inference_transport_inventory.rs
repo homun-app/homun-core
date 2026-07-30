@@ -5,7 +5,6 @@ const APPROVED: &[&str] = &[
     "crates/desktop-gateway/src/inference_transport.rs",
     "crates/inference/src/openai_compat.rs",
     "crates/inference/src/anthropic.rs",
-    "crates/inference/src/mistralrs_provider.rs",
 ];
 
 fn rust_files(root: &Path, out: &mut Vec<PathBuf>) {
@@ -60,5 +59,23 @@ fn inference_transport_inventory() {
         violations.is_empty(),
         "direct inference transports must use an approved adapter:\n{}",
         violations.join("\n")
+    );
+}
+
+#[test]
+fn retired_in_process_mistralrs_transport_stays_removed() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let manifest = std::fs::read_to_string(workspace.join("crates/inference/Cargo.toml")).unwrap();
+
+    assert!(!manifest.contains("mistralrs"));
+    assert!(
+        !workspace
+            .join("crates/inference/src/mistralrs_provider.rs")
+            .exists()
+    );
+    assert!(
+        !workspace
+            .join("crates/inference/examples/mistralrs_smoke.rs")
+            .exists()
     );
 }

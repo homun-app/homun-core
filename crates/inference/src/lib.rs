@@ -17,15 +17,9 @@ pub mod provider;
 pub mod router;
 pub mod streaming;
 
-#[cfg(feature = "local-mistralrs")]
-pub mod mistralrs_provider;
-
 pub use anthropic::{AnthropicProvider, parse_anthropic_message};
 pub use json_runtime_provider::JsonRuntimeProvider;
 pub use openai_compat::{OpenAiCompatProvider, parse_chat_completion, structured_response_format};
 pub use policy::PrivacyPolicy;
 pub use provider::{CapabilityDescriptor, InferenceProvider, Locality, Requirements};
 pub use router::ModelRouter;
-
-#[cfg(feature = "local-mistralrs")]
-pub use mistralrs_provider::{MistralRsError, MistralRsProvider};

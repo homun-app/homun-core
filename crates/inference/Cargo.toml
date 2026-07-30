@@ -14,17 +14,3 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
-
-# Optional in-process local engine (Rust-native, vision-capable). Heavy build,
-# so it is off by default; enable with `--features local-mistralrs`.
-mistralrs = { version = "0.8", optional = true }
-# `time` is what `tokio::time::timeout` needs to enforce the caller's request
-# bound; declared here rather than inherited from mistral.rs's own tokio
-# features, which are not ours to depend on.
-tokio = { version = "1", optional = true, features = ["rt-multi-thread", "time"] }
-
-[features]
-default = []
-local-mistralrs = ["dep:mistralrs", "dep:tokio"]
-# Apple Silicon GPU acceleration for the in-process mistral.rs engine.
-local-mistralrs-metal = ["local-mistralrs", "mistralrs/metal", "mistralrs/accelerate"]

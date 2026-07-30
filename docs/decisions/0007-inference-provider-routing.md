@@ -4,7 +4,8 @@ Date: 2026-05-28
 
 ## Status
 
-Accepted.
+Superseded by Decision 0028 for the concrete local engine. The provider and
+policy abstraction remains accepted.
 
 ## Context
 
