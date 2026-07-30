@@ -39,8 +39,7 @@
 use std::path::PathBuf;
 
 use landlock::{
-    ABI, Access, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr,
-    RulesetStatus,
+    ABI, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus,
 };
 
 /// Apply a Landlock workspace-write fence to the CURRENT process (and its future
