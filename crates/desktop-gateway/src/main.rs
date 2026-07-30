@@ -1175,14 +1175,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     backfill_contacts(&state);
     backfill_mentions(&state);
     unify_owner_identity(&state);
-    // One-time (flag-guarded): retire proactivity cards whose date already passed but
-    // that predate the `relevant_until` field (e.g. a 30 June trip card still on the
-    // board in July). Background — it makes one model call. New cards carry an expiry
-    // and auto-trash via gc_expired_suggestions, so this never re-runs after it settles.
-    {
-        let st = state.clone();
-        tokio::spawn(async move { sweep_stale_dated_suggestions_once(&st).await });
-    }
     // Homun retired as a proactive surface: its curiosities/onboarding now flow as
     // proactivity cards. Cancel any check-in still scheduled from a previous version
     // so the old "sfilza di domande" push stops (the thread stays as inert data).
@@ -1262,6 +1254,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     projection_worker::start(state.clone());
     steering_control::start(state.clone());
+    // One-time (flag-guarded): retire proactivity cards whose date already passed but
+    // that predate the `relevant_until` field. It may write the unified database, so it
+    // must start only after process fencing and lease-aware recovery have completed.
+    {
+        let st = state.clone();
+        tokio::spawn(async move { sweep_stale_dated_suggestions_once(&st).await });
+    }
     // Graph regeneration runs in the BACKGROUND so it never blocks the HTTP bind. Start it
     // only after the lease-aware broker recovery above has completed its critical write to
     // the unified database; starting it earlier can race bump_process_generation and make a

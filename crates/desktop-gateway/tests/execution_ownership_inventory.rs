@@ -145,3 +145,25 @@ fn channel_and_stream_markers_do_not_own_lifecycle() {
     assert!(!inbound.contains("run_agent_turn_into_message("));
     assert!(!inbound.contains("finalize_assistant_message_with_delivery_state"));
 }
+
+#[test]
+fn startup_background_writers_follow_process_fencing() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let fencing = main
+        .find(".bump_process_generation()")
+        .expect("startup process fencing");
+    let writers = [
+        "sweep_stale_dated_suggestions_once(&st).await",
+        "sweep_graph_on_startup(&st)",
+        "vacuum_all_stores(&st)",
+    ];
+
+    for writer in writers {
+        let position = main.find(writer).expect("known startup background writer");
+        assert!(
+            position > fencing,
+            "startup writer {writer} must not race process fencing and boot recovery"
+        );
+    }
+}
