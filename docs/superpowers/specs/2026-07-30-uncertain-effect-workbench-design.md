@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-30
 
-**Status:** Approved for implementation
+**Status:** Implemented and verified
 
 ## Purpose
 
@@ -103,3 +103,19 @@ verification may later produce `Applied` or `NotApplied`, but it must submit the
 3. **Automatic retry after timeout.** The remote mutation may already have happened.
 4. **Provider-specific recovery contracts.** Provider adapters may verify evidence, but all results
    must converge through `EffectReceiptResolution`.
+
+## Implementation Evidence
+
+- Backend queue projection and thread scope: `7eb8b22f`.
+- Desktop bridge, Tasks navigation, Workbench controls and locale parity: `582991f9`.
+- `cargo fmt --all -- --check` and gateway clippy with `-D warnings` passed.
+- `cargo test -p local-first-task-runtime` passed, including the twelve effect receipt tests and
+  three projection crash-recovery tests.
+- `cargo test -p local-first-desktop-gateway` passed: 1,076 gateway tests, six optional fixture
+  tests ignored, and every integration target green.
+- Desktop UI contract, all 93 Electron tests, TypeScript checking and the Vite production build
+  passed.
+- Playwright verified the queue card at desktop and 390x844 mobile sizes. A deliberately rejected
+  resolver request left the card present and surfaced the error instead of reporting success.
+- The restarted dev stack owns `127.0.0.1:1420` and `127.0.0.1:18765`; `/api/health` reports no
+  recovered store or projection worker error.

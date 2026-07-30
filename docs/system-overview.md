@@ -193,6 +193,12 @@ ritentato automaticamente. Sandbox/Seatbelt/Landlock, Vault, payment one-use, br
 policy connector restano gate di dominio più restrittivi, ma non possiedono lifecycle o resume paralleli.
 Le automazioni e i canali sono sorgenti dello stesso contratto, non executor inline separati.
 
+Il Tasks Workbench proietta le receipt `Uncertain` con metadati allowlisted e le mantiene distinte dalle
+approval. Le due decisioni manuali convergono sull'endpoint generale
+`POST /api/effects/{receipt_ref}/resolve`: `Applied` chiude la receipt senza redispatch, `NotApplied` la
+riporta a `Prepared` per il solo retry fenced già posseduto dall'effect host. La UI rilegge sempre la
+queue canonica e non possiede una rimozione, wake o ripresa alternativa.
+
 ---
 
 ## 9. Deliverable — decks & documenti

@@ -166,6 +166,10 @@ resta leggibile soltanto nel bridge di recovery dei record steering precedenti.
    questa evidenza non entra nell'identita stabile della chiamata.
    La risoluzione verificata `Applied` completa la receipt; `NotApplied` la riporta a
    `Prepared`, rendendo sicuro un nuovo dispatch con la stessa identità/idempotency key.
+   Il Tasks Workbench è soltanto la proiezione operativa di questa transizione: legge
+   `TaskQueueResponse.uncertain_effects`, mostra metadati allowlisted separati dalle approval e invia
+   entrambe le decisioni a `POST /api/effects/{receipt_ref}/resolve`. Non rimuove receipt localmente,
+   non crea card chat e non possiede un'altra wake o un altro resume.
 9. Storie troppo lunghe possono chiudere il parent e creare atomicamente un child
    `continue-as-new`; rollback di dominio usa child compensation in ordine inverso.
 

@@ -5,6 +5,26 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-30.**
 
+## CHECKPOINT 2026-07-30 - Uncertain effect recovery nel Tasks Workbench
+
+Gli effetti remoti con esito `Uncertain` sono ora operabili dalla UI senza introdurre un secondo
+lifecycle. `TaskQueueResponse.uncertain_effects` proietta soltanto receipt ref, execution, thread,
+famiglia operazione, timestamp e marker booleani allowlisted; recipient, payload, hash argomenti e
+idempotency key non raggiungono il renderer. La queue scoped per chat conserva solo receipt dello
+stesso thread.
+
+La voce Tasks è nuovamente raggiungibile e il badge somma approval pendenti ed effetti da verificare.
+Il Workbench mantiene approval e verifica post-dispatch separate: `Verificato come applicato` e
+`Verificato come non applicato` chiamano il resolver esistente, poi rileggono queue, task e thread.
+Nessuna rimozione ottimistica, card chat, wake, task kind o API provider è stata aggiunta.
+
+**Gate verdi:** clippy gateway `-D warnings`; task-runtime completo; gateway completo (1.076 pass,
+6 fixture opzionali ignored); Electron 93/93; UI contract; locale parity; TypeScript/Vite build;
+Playwright desktop/mobile e ramo resolver rifiutato. Dev attivo su `127.0.0.1:1420` e `:18765`, health
+senza store recuperati o errori projection worker. Design e piano:
+[uncertain-effect-workbench-design.md](superpowers/specs/2026-07-30-uncertain-effect-workbench-design.md),
+[uncertain-effect-workbench.md](superpowers/plans/2026-07-30-uncertain-effect-workbench.md).
+
 ## CHECKPOINT 2026-07-30 - Browser sidecar crash recovery process-level
 
 Chiuso il provider gate rimasto fuori dal gateway crash E2E senza modificare il runtime o aggiungere
