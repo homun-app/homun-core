@@ -48,6 +48,25 @@ def truthy(value: str | None) -> bool:
 
 def build_plan(env: dict[str, str]) -> list[Step]:
     plan = [
+        Step("rust format", ["cargo", "fmt", "--all", "--", "--check"]),
+        Step(
+            "rust clippy",
+            [
+                "cargo",
+                "clippy",
+                "--workspace",
+                "--all-targets",
+                "--locked",
+                "--",
+                "-D",
+                "warnings",
+            ],
+        ),
+        Step(
+            "desktop dependency audit",
+            ["npm", "audit", "--audit-level=high"],
+            cwd=DESKTOP,
+        ),
         Step(
             "capability tests",
             ["cargo", "test", "-p", "local-first-capabilities", "--", "--nocapture"],

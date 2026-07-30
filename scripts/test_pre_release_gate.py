@@ -8,6 +8,9 @@ class PreReleaseGateTests(unittest.TestCase):
     def test_stability_steps_are_required(self):
         labels = [step.label for step in gate.build_plan({})]
 
+        self.assertIn("rust format", labels)
+        self.assertIn("rust clippy", labels)
+        self.assertIn("desktop dependency audit", labels)
         self.assertIn("task runtime tests", labels)
         self.assertIn("engine tests", labels)
         self.assertIn("desktop attention tests", labels)
@@ -31,6 +34,28 @@ class PreReleaseGateTests(unittest.TestCase):
 
         labels = [step.label for step in plan]
 
+        self.assertEqual(
+            plan[0].command,
+            ["cargo", "fmt", "--all", "--", "--check"],
+        )
+        self.assertEqual(
+            plan[1].command,
+            [
+                "cargo",
+                "clippy",
+                "--workspace",
+                "--all-targets",
+                "--locked",
+                "--",
+                "-D",
+                "warnings",
+            ],
+        )
+        self.assertEqual(
+            plan[2].command,
+            ["npm", "audit", "--audit-level=high"],
+        )
+        self.assertEqual(plan[2].cwd, gate.DESKTOP)
         self.assertIn("capability tests", labels)
         self.assertIn("orchestrator tests", labels)
         self.assertIn("gateway tests", labels)
@@ -83,6 +108,9 @@ class PreReleaseGateTests(unittest.TestCase):
         self.assertEqual(
             calls,
             [
+                "rust format",
+                "rust clippy",
+                "desktop dependency audit",
                 "capability tests",
                 "orchestrator tests",
                 "task runtime tests",
