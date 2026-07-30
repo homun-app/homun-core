@@ -572,7 +572,10 @@ object matching the supplied schema. Distinguish an explicit request for an effe
 forbidden effect. A request to analyze and report in chat is read_only_analysis even when it says \
 'do not create or modify files'. Reading, browsing, and extracting are read effects. Selecting an \
 option or typing into an external form is external_write even when the user forbids the final submit, \
-purchase, confirmation, or payment; preparatory external changes remain effects. A multi-phase objective \
+purchase, confirmation, or payment; preparatory external changes remain effects. \
+Executing a contained or project command is filesystem_write in this authorization taxonomy, even \
+when the command only prints output or the user separately forbids creating persistent files; an explicit \
+request to execute that command must therefore allow filesystem_write while preserving narrower scope. A multi-phase objective \
 that combines research with any write effect uses mode=mixed and lists each required effect class. \
 Select workflow only when the user actually requests its complete \
 deliverable. Use agent_loop for investigation, analysis, multi-step work, authorization discovery, or \
@@ -933,6 +936,7 @@ mod tests {
         assert!(prompt.contains("selected_capability"));
         assert!(prompt.contains("standalone_choice_request"));
         assert!(prompt.contains("typing into an external form"));
+        assert!(prompt.contains("contained or project command"));
         assert!(prompt.contains("mode=mixed"));
     }
 

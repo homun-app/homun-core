@@ -402,19 +402,25 @@ async function createAiSnapshot(
   await enrichPageAccessibility(page);
   const timeout = Math.max(500, Math.min(60_000, Math.floor(options?.timeoutMs ?? 5_000)));
   const ariaSnapshot = await page.ariaSnapshot({ mode: "ai", timeout });
+  const title = (await page.title().catch(() => "")).replace(/\s+/g, " ").trim();
+  const metadata = title ? `title: ${title}\n` : "";
   // Computed once, before role filtering: the URL list is appended identically
   // to both the full-raw text (exposed as `rawSnapshot`, the delta basis) and
   // the display text below, so the two never diverge over whether links were
   // requested.
   const snapshotUrls = options?.urls ? await collectSnapshotUrls(page) : [];
-  const rawSnapshot = snapshotUrls.length ? appendSnapshotUrls(ariaSnapshot, snapshotUrls) : ariaSnapshot;
+  const rawSnapshotBody = snapshotUrls.length
+    ? appendSnapshotUrls(ariaSnapshot, snapshotUrls)
+    : ariaSnapshot;
+  const rawSnapshot = `${metadata}${rawSnapshotBody}`;
   const roleOptions = roleSnapshotOptions(options);
   const builtSnapshot = roleOptions
     ? buildRoleSnapshotFromAiSnapshot(ariaSnapshot, roleOptions)
     : { snapshot: ariaSnapshot, refs: refsFromAiSnapshot(ariaSnapshot) };
-  const displaySnapshot = snapshotUrls.length
+  const displaySnapshotBody = snapshotUrls.length
     ? appendSnapshotUrls(builtSnapshot.snapshot, snapshotUrls)
     : builtSnapshot.snapshot;
+  const displaySnapshot = `${metadata}${displaySnapshotBody}`;
   // Delta diffs full-raw against full-raw (options.previousSnapshot must be the
   // caller's retained `rawSnapshot` from the prior call, never a displayed
   // snapshot) so ordinary interact->delta / delta->delta sequences produce a

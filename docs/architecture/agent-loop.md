@@ -78,6 +78,26 @@ Gli adapter di dominio sincroni vengono sempre isolati da `ExecutionRuntime` sul
 blocking pool di Tokio. Nessun adapter può quindi costruire client HTTP bloccanti,
 eseguire SQLite o guidare il loop sincrono dentro il contesto async del projector.
 
+Workflow e capability atomiche condividono lo stesso registro semantico validato. Le
+capability atomiche native (`pdf_atomic`, `run_in_sandbox`) dichiarano effetto
+`filesystem_write`, vengono risolte con `native_atomic_by_key` e caricano lo schema del
+tool reale senza un percorso di esecuzione parallelo. Anche un comando contenuto che
+produce solo stdout conserva questo effetto autorizzativo: l'isolamento limita il danno,
+ma non trasforma l'esecuzione in una lettura implicita.
+
+Il contesto non autorizza implicitamente nuove letture. La decisione semantica produce
+un `MemoryIntent`: `recall_memory` entra nel toolset solo quando sono validati
+`search_personal`, `search_project` o `vault_value_requested`. Lo stesso booleano viene
+ricontrollato da `GatewayCapabilityExecutor` al dispatch, quindi un tool call inventato o
+riattivato dinamicamente fallisce chiuso. La memoria del thread corrente resta una
+categoria separata e non abilita il recall cross-thread.
+
+La compattazione dei messaggi resta best-effort per la narrazione, ma non affida più al
+modello la conservazione dei risultati tool: `render_compaction_tool_evidence` accoda una
+copia verbatim e limitata dei risultati strutturati. L'associazione nome/risultato è fatta
+in ordine di conversazione, perché provider come Ollama possono riusare lo stesso call id
+in round diversi.
+
 ## Come una richiesta entra e stream-a (TURN BROKER + WS unificato)
 
 Il **percorso della richiesta** oggi passa **sempre** dal **turn broker** (percorso di chat

@@ -43,6 +43,15 @@ afterEach(async () => {
 });
 
 describe("browser production methods", () => {
+  it("includes the document title in AI snapshots", async () => {
+    await manager.start();
+    await manager.open({ url: baseUrl, label: "advanced" });
+
+    const snapshot = await manager.snapshot({ targetId: "advanced" });
+
+    expect(snapshot.snapshot).toContain("title: Browser Automation Advanced Fixture");
+  });
+
   it("writes screenshots and pdf artifacts inside the artifact root", async () => {
     await manager.start();
     await manager.open({ url: baseUrl, label: "advanced" });

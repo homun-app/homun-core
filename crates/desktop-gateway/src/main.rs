@@ -4052,6 +4052,10 @@ fn memory_injection_policy(intent: &semantic_decision::MemoryIntent) -> MemoryIn
     }
 }
 
+fn memory_intent_allows_recall(intent: &semantic_decision::MemoryIntent) -> bool {
+    intent.search_personal || intent.search_project || intent.vault_value_requested
+}
+
 /// Auto-confirm policy (M2): only durable, high-confidence knowledge enters memory
 /// without asking. The ceiling is `Private` — NOT `Internal` — on purpose: the
 /// extractor tags ordinary personal facts (possessions, family, city) as `private`
@@ -8354,7 +8358,7 @@ fn native_workflow_capability_entries() -> Vec<CapabilityEntry> {
 }
 
 fn semantic_capability_registry() -> Vec<semantic_decision::CapabilitySemanticEntry> {
-    native_workflow_capabilities()
+    let mut registry = native_workflow_capabilities()
         .iter()
         .map(|capability| semantic_decision::CapabilitySemanticEntry {
             key: capability.tool_name.to_string(),
@@ -8365,7 +8369,16 @@ fn semantic_capability_registry() -> Vec<semantic_decision::CapabilitySemanticEn
             ],
             enabled: true,
         })
-        .collect()
+        .collect::<Vec<_>>();
+    registry.extend(native_atomic_capabilities().iter().map(|capability| {
+        semantic_decision::CapabilitySemanticEntry {
+            key: capability.key.to_string(),
+            description: capability.description.to_string(),
+            effects: vec![semantic_decision::EffectClass::FilesystemWrite],
+            enabled: true,
+        }
+    }));
+    registry
 }
 
 fn bounded_thread_context(state: &AppState, thread_id: Option<&str>) -> Option<String> {
@@ -9590,13 +9603,22 @@ fn template_catalog_capability_entries() -> Vec<CapabilityEntry> {
 }
 
 fn native_atomic_capabilities() -> &'static [NativeAtomicCapability] {
-    &[NativeAtomicCapability {
-        key: "pdf_atomic",
-        tool_name: "run_in_sandbox",
-        description: "Inspect, extract, merge, split, compress or convert existing PDF files as an atomic file operation.",
-        route_text: "pdf_atomic PDF extract estrai read leggi merge unisci combine combina split dividi convert converti compress comprimi text testo pages pagine images immagini existing file existing document",
-        schema: run_in_sandbox_tool_schema,
-    }]
+    &[
+        NativeAtomicCapability {
+            key: "pdf_atomic",
+            tool_name: "run_in_sandbox",
+            description: "Inspect, extract, merge, split, compress or convert existing PDF files as an atomic file operation.",
+            route_text: "pdf_atomic PDF extract estrai read leggi merge unisci combine combina split dividi convert converti compress comprimi text testo pages pagine images immagini existing file existing document",
+            schema: run_in_sandbox_tool_schema,
+        },
+        NativeAtomicCapability {
+            key: "run_in_sandbox",
+            tool_name: "run_in_sandbox",
+            description: "Execute one bounded command in the isolated contained computer and return its real stdout and stderr.",
+            route_text: "run_in_sandbox sandbox contained computer isolated command shell execute run stdout stderr verify test compile",
+            schema: run_in_sandbox_tool_schema,
+        },
+    ]
 }
 
 fn native_atomic_by_key(key: &str) -> Option<NativeAtomicCapability> {
@@ -9793,9 +9815,15 @@ fn route_capability_from_semantic(
             }
         }
         semantic_decision::ExecutionShape::AtomicCapability => {
-            if semantic.decision.selected_capability.as_deref() == Some("pdf_atomic") {
+            if let Some(capability_key) = semantic
+                .decision
+                .selected_capability
+                .as_deref()
+                .and_then(native_atomic_by_key)
+                .map(|capability| capability.key)
+            {
                 CapabilityRouteDecision::AtomicTool {
-                    capability_key: "pdf_atomic",
+                    capability_key,
                     reason: semantic.decision.rationale.clone(),
                 }
             } else {
@@ -16792,6 +16820,48 @@ fn render_slice_text(slice: &[serde_json::Value]) -> String {
     buf
 }
 
+fn render_compaction_tool_evidence(slice: &[serde_json::Value]) -> String {
+    let mut pending_tool_names = std::collections::BTreeMap::<String, String>::new();
+    let mut evidence = String::new();
+    for message in slice {
+        if let Some(calls) = message
+            .get("tool_calls")
+            .and_then(serde_json::Value::as_array)
+        {
+            for call in calls {
+                let Some(id) = call.get("id").and_then(serde_json::Value::as_str) else {
+                    continue;
+                };
+                let name = call
+                    .pointer("/function/name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown");
+                pending_tool_names.insert(id.to_string(), name.to_string());
+            }
+        }
+        if message["role"] != "tool" {
+            continue;
+        }
+        let Some(content) = message.get("content").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let call_id = message
+            .get("tool_call_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let name = pending_tool_names
+            .remove(call_id)
+            .unwrap_or_else(|| "unknown".to_string());
+        let content = content.chars().take(3_000).collect::<String>();
+        let entry = format!("tool {name}:\n{content}\n");
+        if evidence.chars().count() + entry.chars().count() > 8_000 {
+            break;
+        }
+        evidence.push_str(&entry);
+    }
+    evidence
+}
+
 /// Summarize a slice of conversation messages into ONE salience-preserving note via the
 /// "memory" role model. Shared by `compact_completed_step` (plan-step, F3) and
 /// `compact_for_context_budget` (token-budget, Fase 1.1). Preserves the task's raw data
@@ -16802,6 +16872,7 @@ async fn summarize_message_slice(
     slice: &[serde_json::Value],
 ) -> Option<String> {
     let buf = render_slice_text(slice);
+    let tool_evidence = render_compaction_tool_evidence(slice);
     if buf.trim().is_empty() {
         return None;
     }
@@ -16849,9 +16920,14 @@ No preamble, no headings.";
         .trim()
         .to_string();
     if summary.is_empty() {
-        None
-    } else {
+        return None;
+    }
+    if tool_evidence.is_empty() {
         Some(summary)
+    } else {
+        Some(format!(
+            "{summary}\n\n[Verbatim tool evidence retained by runtime]\n{tool_evidence}"
+        ))
     }
 }
 
@@ -18549,8 +18625,17 @@ fn browse_tool_schema() -> serde_json::Value {
                         "type": "object",
                         "description": "Structured result requirements derived semantically from the user's request. The model chooses these fields; the gateway validates shape and bounds only.",
                         "properties": {
-                            "kind": { "type": "string", "enum": ["list", "fact"] },
-                            "minimum_items": { "type": "integer", "minimum": 1, "maximum": 10 },
+                            "kind": {
+                                "type": "string",
+                                "enum": ["list", "fact"],
+                                "description": "Use fact for one entity/object with one or many requested fields. Use list only for repeated rows/options/entities. Several fields of one page or object are still one fact."
+                            },
+                            "minimum_items": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 10,
+                                "description": "Minimum repeated rows for kind=list. Counts result rows, never the number of requested fields. Omit for kind=fact."
+                            },
                             "fields": {
                                 "type": "array",
                                 "maxItems": 12,
@@ -18616,26 +18701,160 @@ payment control with another tool (say what is blocked instead).\n\
 to the user (one row per option + an optional Sources footer)."
 }
 
-fn browser_done_tool_schema() -> serde_json::Value {
+fn browser_done_tool_schema(
+    contract: Option<&local_first_engine::browse::BrowseResultContract>,
+) -> serde_json::Value {
+    let mut item_properties = serde_json::Map::new();
+    let mut required_item_fields = Vec::new();
+    if let Some(contract) = contract {
+        for field in &contract.fields {
+            item_properties.insert(
+                field.name.clone(),
+                serde_json::json!({
+                    "description": format!("Observed value for result-contract field `{}`.", field.name)
+                }),
+            );
+            if field.required {
+                required_item_fields.push(serde_json::Value::String(field.name.clone()));
+            }
+        }
+    }
+    let mut item_schema = serde_json::json!({
+        "type": "object",
+        "properties": item_properties,
+        "additionalProperties": true
+    });
+    if !required_item_fields.is_empty() {
+        item_schema["required"] = serde_json::Value::Array(required_item_fields);
+    }
+
     serde_json::json!({
         "type": "function",
         "function": {
             "name": "browser_done",
-            "description": "Terminate the browser sub-turn with grounded structured evidence. Use this as soon as the result contract is satisfied, partial, blocked, unavailable, or timed out. Do not write a normal prose answer instead.",
+            "description": "Terminate the browser sub-turn with grounded structured evidence. Put every observed result-contract field in items: one object for a fact, one object per row for a list. The answer is display text and does not satisfy required fields. Use this as soon as the result contract is satisfied, partial, blocked, unavailable, or timed out. Do not write a normal prose answer instead.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "status": { "type": "string", "enum": ["completed","partial","blocked","unavailable","timeout"] },
                     "answer": { "type": "string" },
-                    "items": { "type": "array", "items": { "type": "object" } },
+                    "items": { "type": "array", "items": item_schema },
                     "fields_missing": { "type": "array", "items": { "type": "string" } },
                     "sources": { "type": "array", "items": { "type": "string" } },
                     "evidence": { "type": "array", "items": { "type": "string" } }
                 },
-                "required": ["status", "answer"]
+                "required": ["status", "answer", "items", "fields_missing", "sources", "evidence"]
             }
         }
     })
+}
+
+fn provider_wrapped_text(value: &serde_json::Value) -> Option<String> {
+    if let Some(text) = value.as_str() {
+        return Some(text.to_string());
+    }
+    let object = value.as_object()?;
+    if let Some(text) = object.get("$text").and_then(provider_wrapped_text) {
+        return Some(text);
+    }
+    if object.len() == 1 {
+        return object.values().next().and_then(provider_wrapped_text);
+    }
+    None
+}
+
+fn parse_browser_done_payload(
+    args_raw: &str,
+) -> Result<local_first_engine::browse::BrowserDonePayload, String> {
+    let mut value = serde_json::from_str::<serde_json::Value>(args_raw)
+        .map_err(|error| format!("invalid JSON: {error}"))?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "browser_done arguments must be a JSON object".to_string())?;
+
+    for key in ["status", "answer"] {
+        let wrapped = object.get(key).and_then(provider_wrapped_text);
+        if let Some(wrapped) = wrapped {
+            object.insert(key.to_string(), serde_json::Value::String(wrapped));
+        }
+    }
+
+    if let Some(status) = object
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_ascii_lowercase)
+    {
+        let normalized = match status.as_str() {
+            "complete" | "done" | "success" => "completed",
+            "incomplete" => "partial",
+            other => other,
+        };
+        object.insert("status".to_string(), serde_json::json!(normalized));
+    }
+
+    match object.get_mut("items") {
+        Some(items @ serde_json::Value::Object(_)) => {
+            *items = serde_json::Value::Array(vec![items.take()]);
+        }
+        Some(items @ serde_json::Value::Null) => {
+            *items = serde_json::Value::Array(Vec::new());
+        }
+        None => {
+            object.insert("items".to_string(), serde_json::Value::Array(Vec::new()));
+        }
+        _ => {}
+    }
+    if let Some(items) = object
+        .get_mut("items")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for item in items {
+            let encoded = provider_wrapped_text(item);
+            if let Some(encoded) = encoded
+                && let Ok(parsed @ serde_json::Value::Object(_)) =
+                    serde_json::from_str::<serde_json::Value>(&encoded)
+            {
+                *item = parsed;
+            }
+        }
+    }
+    for key in ["fields_missing", "sources", "evidence"] {
+        let wrapped_scalar = object
+            .get(key)
+            .filter(|value| !value.is_array())
+            .and_then(provider_wrapped_text);
+        if let Some(wrapped_scalar) = wrapped_scalar {
+            object.insert(
+                key.to_string(),
+                serde_json::Value::Array(vec![serde_json::Value::String(wrapped_scalar)]),
+            );
+        }
+        match object.get_mut(key) {
+            Some(item @ serde_json::Value::String(_)) => {
+                *item = serde_json::Value::Array(vec![item.take()]);
+            }
+            Some(item @ serde_json::Value::Null) => {
+                *item = serde_json::Value::Array(Vec::new());
+            }
+            None => {
+                object.insert(key.to_string(), serde_json::Value::Array(Vec::new()));
+            }
+            _ => {}
+        }
+        if let Some(values) = object
+            .get_mut(key)
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            for value in values {
+                let wrapped = provider_wrapped_text(value);
+                if let Some(wrapped) = wrapped {
+                    *value = serde_json::Value::String(wrapped);
+                }
+            }
+        }
+    }
+
+    serde_json::from_value(value).map_err(|error| format!("invalid terminal shape: {error}"))
 }
 
 fn initial_manager_tool_schemas_for_test(
@@ -27803,6 +28022,7 @@ struct GatewayCapabilityExecutor<'a> {
     can_see_contacts: bool,
     can_see_calendar: bool,
     can_use_project_memory: bool,
+    memory_recall_allowed: bool,
     vault_value_requested: bool,
     autonomous: bool,
     composio_writes: &'a std::collections::BTreeSet<String>,
@@ -28009,6 +28229,13 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
         {
             return Ok(local_first_engine::ToolOutcome {
                 result: "TURN CANCELLED: no tool was executed.".to_string(),
+                effects: Default::default(),
+            });
+        }
+        if name == "recall_memory" && !self.memory_recall_allowed {
+            return Ok(local_first_engine::ToolOutcome {
+                result: "Long-term memory recall is not authorized for this objective. Use only current-thread context and current-turn tool evidence."
+                    .to_string(),
                 effects: Default::default(),
             });
         }
@@ -28374,13 +28601,16 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
             };
         }
         if name == "browser_done" {
-            let payload =
-                serde_json::from_str::<local_first_engine::browse::BrowserDonePayload>(args_raw)
-                    .unwrap_or_else(|_| local_first_engine::browse::BrowserDonePayload {
-                        status: local_first_engine::browse::BrowserDoneStatus::Partial,
-                        answer: "Browser stopped with an invalid terminal payload.".to_string(),
-                        ..Default::default()
-                    });
+            let payload = parse_browser_done_payload(args_raw).unwrap_or_else(|error| {
+                tracing::warn!(target: "browser::contract", %error, "browser_done payload rejected");
+                local_first_engine::browse::BrowserDonePayload {
+                    status: local_first_engine::browse::BrowserDoneStatus::Blocked,
+                    answer: "Browser stopped because its terminal result was structurally invalid."
+                        .to_string(),
+                    evidence: vec!["browser_done payload failed structural validation".to_string()],
+                    ..Default::default()
+                }
+            });
             let stop_reason = serde_json::to_string(&payload.status)
                 .unwrap_or_else(|_| "\"partial\"".to_string())
                 .trim_matches('"')
@@ -28516,9 +28746,9 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
 /// reasoning-floods / plan-JSON leaks it produces when handed the full orchestrator prompt.
 fn browse_subagent_system_prompt(allow_rehydrate: bool) -> String {
     let available_tools = if allow_rehydrate {
-        "browser_navigate, browser_snapshot, browser_act, browser_rehydrate, browser_screenshot, browser_tabs, browser_dialog"
+        "browser_navigate, browser_snapshot, browser_act, browser_rehydrate, browser_screenshot, browser_tabs, browser_dialog, browser_done"
     } else {
-        "browser_navigate, browser_snapshot, browser_act, browser_screenshot, browser_tabs, browser_dialog"
+        "browser_navigate, browser_snapshot, browser_act, browser_screenshot, browser_tabs, browser_dialog, browser_done"
     };
     format!(
         "You drive a REAL web browser to accomplish ONE information goal, then report the result. \
@@ -28578,19 +28808,23 @@ moment later and sit BELOW the visible part of the page. If the observation ends
 marker, or you simply do not see rows yet: scroll down and read again (and if needed wait once), then \
 take a browser_snapshot. Only report that nothing was found after you have actually read the results \
 area and it is genuinely empty.\n\
-6. STOP as soon as you have the answer: write it plainly with the real values. If the information is \
-genuinely unavailable after trying your sources, say so explicitly (e.g. \"not available on X\") — do \
-NOT invent it.",
+6. STOP as soon as you have the answer by calling browser_done. Put every observed result-contract field \
+in items: one object for a fact, one object per row for a list. The answer is display text only and does \
+not satisfy required fields. If information is genuinely unavailable after trying your sources, report \
+that status and the missing fields in browser_done. Do NOT invent values.",
         now = now_block(),
     )
 }
 
-fn browse_subagent_tool_schemas(read_only: bool) -> Vec<serde_json::Value> {
+fn browse_subagent_tool_schemas(
+    read_only: bool,
+    contract: Option<&local_first_engine::browse::BrowseResultContract>,
+) -> Vec<serde_json::Value> {
     let mut schemas = vec![
         browser_navigate_tool_schema(),
         browser_snapshot_tool_schema(),
         browser_act_tool_schema(),
-        browser_done_tool_schema(),
+        browser_done_tool_schema(contract),
         browser_screenshot_tool_schema(),
         browser_tabs_tool_schema(),
         browser_dialog_tool_schema(),
@@ -28824,7 +29058,7 @@ impl GatewayBrowseExecutor<'_> {
             &browse_subagent_system_prompt(!self.read_only),
             &user_goal,
         );
-        ls.tool_schemas = browse_subagent_tool_schemas(self.read_only);
+        ls.tool_schemas = browse_subagent_tool_schemas(self.read_only, request.contract.as_ref());
         ls.provider = local_first_engine::ProviderBinding {
             model,
             base_url,
@@ -29889,6 +30123,7 @@ save/export a file to a folder, call save_artifact(file, destination)."
         .as_ref()
         .map(|semantic| semantic.decision.memory_intent.clone())
         .unwrap_or_else(semantic_decision::MemoryIntent::safe_default);
+    let memory_recall_allowed = memory_intent_allows_recall(&memory_intent);
     let memory_injection = memory_injection_policy(&memory_intent);
     // Memory scope. Perimeter "contact_only" (the default for channel contacts) is a
     // HARD gate: the user's personal profile + RAG are NOT injected — the turn only
@@ -30189,6 +30424,13 @@ in-progress plan (some steps done, others not), CONTINUE it — re-emit the plan
 keeping the completed steps as done, and proceed from the first not-done step; do NOT restart \
 from scratch or re-propose."
     );
+    let system = if memory_recall_allowed {
+        system
+    } else {
+        format!(
+            "{system}\n\nMEMORY SCOPE FOR THIS OBJECTIVE: long-term recall and Vault lookup are not authorized. Use only current-thread context and current-turn tool evidence; do not call recall_memory."
+        )
+    };
     // LANGUAGE: the whole system prompt is in English, so without an explicit
     // directive coding-oriented models (e.g. kimi-*-code) reply in English even to an
     // Italian request — narration AND final answer. Pin it to the user's language.
@@ -30340,8 +30582,10 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // never offered to the manager. The mid-turn model-switch + the granular-tools-on-the-manager path
     // are retired — one canonical browser path.
     let mut base_tools = initial_manager_tool_schemas_for_test(read_only, contact_only);
+    if memory_recall_allowed {
+        base_tools.push(recall_memory_tool_schema());
+    }
     base_tools.extend([
-        recall_memory_tool_schema(),
         query_code_graph_tool_schema(),
         query_git_history_tool_schema(),
         github_search_tool_schema(),
@@ -31157,6 +31401,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             can_see_contacts,
             can_see_calendar,
             can_use_project_memory,
+            memory_recall_allowed,
             memory_intent.vault_value_requested,
             memory_user_message,
             memory_answer,
@@ -31348,6 +31593,7 @@ async fn run_agent_rounds(
     can_see_contacts: bool,
     can_see_calendar: bool,
     can_use_project_memory: bool,
+    memory_recall_allowed: bool,
     vault_value_requested: bool,
     memory_user_message: String,
     memory_answer: String,
@@ -31426,6 +31672,7 @@ async fn run_agent_rounds(
         can_see_contacts,
         can_see_calendar,
         can_use_project_memory,
+        memory_recall_allowed,
         vault_value_requested,
         autonomous,
         composio_writes: &composio_writes,
@@ -67063,6 +67310,47 @@ mod tests {
     }
 
     #[test]
+    fn compaction_evidence_retains_structured_tool_results_verbatim() {
+        let messages = vec![
+            serde_json::json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "ollama_call_0",
+                    "type": "function",
+                    "function": {"name": "find_capability", "arguments": "{}"}
+                }]
+            }),
+            serde_json::json!({
+                "role": "tool",
+                "tool_call_id": "ollama_call_0",
+                "content": "browse is now callable"
+            }),
+            serde_json::json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "ollama_call_0",
+                    "type": "function",
+                    "function": {"name": "browse", "arguments": "{}"}
+                }]
+            }),
+            serde_json::json!({
+                "role": "tool",
+                "tool_call_id": "ollama_call_0",
+                "content": "{\"found\":true,\"status\":\"partial\",\"answer\":\"Example Domain\"}"
+            }),
+        ];
+
+        let evidence = super::render_compaction_tool_evidence(&messages);
+
+        assert!(evidence.contains("tool find_capability:\nbrowse is now callable"));
+        assert!(evidence.contains("tool browse:\n{\"found\":true"));
+        assert!(evidence.contains("\"status\":\"partial\""));
+        assert!(evidence.contains("Example Domain"));
+    }
+
+    #[test]
     fn danger_mode_resolves_to_danger_full_access_but_the_os_fence_is_separate() {
         // The APP-LEVEL resolver yields DangerFullAccess under `danger`. This asserts the
         // app-level verdict ONLY — the OS kernel fence around subprocesses is resolved
@@ -67155,6 +67443,18 @@ mod tests {
         assert!(params.get("goal").is_some());
         assert!(params.get("hints").is_some());
         assert!(params.get("result_contract").is_some());
+        assert!(
+            params["result_contract"]["properties"]["kind"]["description"]
+                .as_str()
+                .is_some_and(|description| description.contains("Several fields"))
+        );
+        assert!(
+            params["result_contract"]["properties"]["minimum_items"]["description"]
+                .as_str()
+                .is_some_and(
+                    |description| description.contains("never the number of requested fields")
+                )
+        );
     }
 
     // A completed `browse` used to leave the manager with no rule for "and now book the first
@@ -67252,7 +67552,7 @@ mod tests {
 
     #[test]
     fn browser_done_schema_is_structured_terminal() {
-        let schema = super::browser_done_tool_schema();
+        let schema = super::browser_done_tool_schema(None);
         assert_eq!(
             schema
                 .pointer("/function/name")
@@ -67261,6 +67561,125 @@ mod tests {
         );
         assert!(schema.to_string().contains("completed"));
         assert!(schema.to_string().contains("fields_missing"));
+        let required = schema
+            .pointer("/function/parameters/required")
+            .and_then(serde_json::Value::as_array)
+            .expect("top-level browser_done fields are required");
+        for field in [
+            "status",
+            "answer",
+            "items",
+            "fields_missing",
+            "sources",
+            "evidence",
+        ] {
+            assert!(required.iter().any(|required| required == field));
+        }
+        assert!(
+            schema
+                .pointer("/function/description")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|description| description.contains("one object for a fact"))
+        );
+    }
+
+    #[test]
+    fn browser_done_schema_carries_required_contract_fields_into_items() {
+        let contract = local_first_engine::browse::BrowseResultContract {
+            kind: local_first_engine::browse::BrowseResultKind::Fact,
+            minimum_items: None,
+            fields: vec![
+                local_first_engine::browse::BrowseResultField {
+                    name: "document_title".into(),
+                    required: true,
+                },
+                local_first_engine::browse::BrowseResultField {
+                    name: "optional_note".into(),
+                    required: false,
+                },
+            ],
+            boundary: None,
+        };
+
+        let schema = super::browser_done_tool_schema(Some(&contract));
+        let item_schema = schema
+            .pointer("/function/parameters/properties/items/items")
+            .expect("items schema");
+        assert!(item_schema["properties"].get("document_title").is_some());
+        assert!(item_schema["properties"].get("optional_note").is_some());
+        assert_eq!(
+            item_schema["required"],
+            serde_json::json!(["document_title"])
+        );
+    }
+
+    #[test]
+    fn browser_done_parser_normalizes_equivalent_single_fact_shapes() {
+        let payload = super::parse_browser_done_payload(
+            r#"{
+                "status":"Completed",
+                "answer":"Example Domain",
+                "items":{"document_title":"Example Domain"},
+                "fields_missing":null,
+                "sources":"https://example.com/",
+                "evidence":"title: Example Domain"
+            }"#,
+        )
+        .expect("equivalent browser terminal shape");
+
+        assert_eq!(
+            payload.status,
+            local_first_engine::browse::BrowserDoneStatus::Completed
+        );
+        assert_eq!(payload.items.len(), 1);
+        assert_eq!(payload.sources, vec!["https://example.com/"]);
+        assert_eq!(payload.evidence, vec!["title: Example Domain"]);
+        assert!(payload.fields_missing.is_empty());
+    }
+
+    #[test]
+    fn browser_done_parser_unwraps_provider_text_wrapped_items() {
+        let payload = super::parse_browser_done_payload(
+            r#"{
+                "status":"completed",
+                "answer":"Example Domain",
+                "items":[{"$text":"{\"document_title\":\"Example Domain\",\"h1_text\":\"Example Domain\"}"}],
+                "sources":["https://example.com/"]
+            }"#,
+        )
+        .expect("provider-wrapped fact item");
+
+        assert_eq!(payload.items[0]["document_title"], "Example Domain");
+        assert_eq!(payload.items[0]["h1_text"], "Example Domain");
+    }
+
+    #[test]
+    fn browser_done_parser_unwraps_provider_text_wrapped_string_fields() {
+        let payload = super::parse_browser_done_payload(
+            r#"{
+                "status":{"$text":"completed","type":"string"},
+                "answer":{"$text":"Example Domain"},
+                "items":[{"document_title":"Example Domain"}],
+                "fields_missing":{"$text":"optional_price"},
+                "sources":{"$text":"https://example.com/"},
+                "evidence":[{"$text":"title: Example Domain","type":"string"}]
+            }"#,
+        )
+        .expect("provider-wrapped string fields");
+
+        assert_eq!(
+            payload.status,
+            local_first_engine::browse::BrowserDoneStatus::Completed
+        );
+        assert_eq!(payload.answer, "Example Domain");
+        assert_eq!(payload.fields_missing, vec!["optional_price"]);
+        assert_eq!(payload.sources, vec!["https://example.com/"]);
+        assert_eq!(payload.evidence, vec!["title: Example Domain"]);
+    }
+
+    #[test]
+    fn invalid_browser_done_payload_fails_closed() {
+        assert!(super::parse_browser_done_payload("not json").is_err());
     }
 
     #[test]
@@ -69763,8 +70182,16 @@ prs.save(Path({path:?}))
     }
 
     #[test]
+    fn browse_subagent_prompt_exposes_its_terminal_tool() {
+        let prompt = super::browse_subagent_system_prompt(false);
+        assert!(prompt.contains("ONLY these tools:"));
+        assert!(prompt.contains("browser_done"));
+        assert!(prompt.contains("calling browser_done"));
+    }
+
+    #[test]
     fn read_only_browse_subagent_does_not_see_rehydrate() {
-        let names = super::browse_subagent_tool_schemas(true)
+        let names = super::browse_subagent_tool_schemas(true, None)
             .iter()
             .filter_map(|schema| {
                 schema
@@ -69776,7 +70203,7 @@ prs.save(Path({path:?}))
         assert!(!names.iter().any(|name| name == "browser_rehydrate"));
         assert!(!super::browse_subagent_system_prompt(false).contains("browser_rehydrate"));
 
-        let writable_names = super::browse_subagent_tool_schemas(false)
+        let writable_names = super::browse_subagent_tool_schemas(false, None)
             .iter()
             .filter_map(|schema| {
                 schema
@@ -73261,6 +73688,44 @@ prs.save(Path({path:?}))
         assert_eq!(tool_name, Some("run_in_sandbox"));
         assert!(entry.text.contains("merge"));
         assert!(entry.text.contains("converti"));
+    }
+
+    #[test]
+    fn semantic_registry_exposes_native_atomic_capabilities_with_their_effects() {
+        let registry = super::semantic_capability_registry();
+        let sandbox = registry
+            .iter()
+            .find(|entry| entry.key == "run_in_sandbox")
+            .expect("sandbox atomic capability");
+
+        assert!(sandbox.enabled);
+        assert!(
+            sandbox
+                .effects
+                .contains(&super::semantic_decision::EffectClass::FilesystemWrite)
+        );
+        assert!(registry.iter().any(|entry| entry.key == "pdf_atomic"));
+    }
+
+    #[test]
+    fn semantic_atomic_sandbox_route_loads_the_registered_tool() {
+        let semantic = semantic_route_fixture(
+            super::semantic_decision::ExecutionShape::AtomicCapability,
+            Some("run_in_sandbox"),
+        );
+        let decision = super::route_capability_from_semantic(Some(&semantic));
+
+        assert!(matches!(
+            decision,
+            super::CapabilityRouteDecision::AtomicTool {
+                capability_key: "run_in_sandbox",
+                ..
+            }
+        ));
+        assert_eq!(
+            super::native_atomic_by_key("run_in_sandbox").map(|entry| entry.tool_name),
+            Some("run_in_sandbox")
+        );
     }
 
     #[test]
@@ -81346,6 +81811,23 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
         );
         intent.search_project = true;
         assert!(super::memory_injection_policy(&intent).include_cross_thread);
+    }
+
+    #[test]
+    fn memory_recall_requires_validated_cross_thread_or_vault_intent() {
+        let mut intent = super::semantic_decision::MemoryIntent::safe_default();
+        assert!(!super::memory_intent_allows_recall(&intent));
+
+        intent.search_personal = true;
+        assert!(super::memory_intent_allows_recall(&intent));
+
+        intent.search_personal = false;
+        intent.search_project = true;
+        assert!(super::memory_intent_allows_recall(&intent));
+
+        intent.search_project = false;
+        intent.vault_value_requested = true;
+        assert!(super::memory_intent_allows_recall(&intent));
     }
 
     #[test]

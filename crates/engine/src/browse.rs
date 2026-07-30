@@ -132,35 +132,63 @@ impl BrowseResult {
 }
 
 pub fn validate_browser_done_payload(
-    payload: BrowserDonePayload,
+    mut payload: BrowserDonePayload,
     contract: Option<&BrowseResultContract>,
 ) -> BrowseResult {
+    if contract.is_some_and(|contract| contract.kind == BrowseResultKind::Fact)
+        && !payload.items.is_empty()
+    {
+        let mut fact = serde_json::Map::new();
+        let all_name_value = payload.items.iter().all(|item| {
+            let Some(name) = item.get("name").and_then(Value::as_str) else {
+                return false;
+            };
+            let Some(value) = item.get("value").filter(|value| !value.is_null()) else {
+                return false;
+            };
+            fact.insert(name.to_string(), value.clone()).is_none()
+        });
+        if all_name_value && fact.len() == payload.items.len() {
+            payload.items = vec![Value::Object(fact)];
+        }
+    }
     let mut status = payload.status;
     let mut missing = payload.fields_missing.clone();
     if let Some(contract) = contract {
+        let mut contract_incomplete = false;
         if let Some(minimum_items) = contract.minimum_items
             && payload.items.len() < minimum_items
-            && status == BrowserDoneStatus::Completed
         {
-            status = BrowserDoneStatus::Partial;
+            contract_incomplete = true;
             push_unique(&mut missing, "minimum_items");
         }
         for field in contract.fields.iter().filter(|field| field.required) {
-            let has_field = payload.items.iter().any(|item| {
-                item.get(&field.name)
-                    .map(|value| {
-                        !value.is_null()
-                            && value
-                                .as_str()
-                                .map(|text| !text.trim().is_empty())
-                                .unwrap_or(true)
-                    })
-                    .unwrap_or(false)
-            });
-            if !has_field && status == BrowserDoneStatus::Completed {
-                status = BrowserDoneStatus::Partial;
+            let has_field_on_every_item = !payload.items.is_empty()
+                && payload.items.iter().all(|item| {
+                    item.get(&field.name)
+                        .map(|value| {
+                            !value.is_null()
+                                && value
+                                    .as_str()
+                                    .map(|text| !text.trim().is_empty())
+                                    .unwrap_or(true)
+                        })
+                        .unwrap_or(false)
+                });
+            if !has_field_on_every_item {
+                contract_incomplete = true;
                 push_unique(&mut missing, &field.name);
             }
+            if payload
+                .fields_missing
+                .iter()
+                .any(|missing| missing == &field.name)
+            {
+                contract_incomplete = true;
+            }
+        }
+        if contract_incomplete && status == BrowserDoneStatus::Completed {
+            status = BrowserDoneStatus::Partial;
         }
     }
     let found = matches!(
@@ -440,6 +468,127 @@ mod tests {
 
         assert_eq!(result.status, BrowserDoneStatus::Completed);
         assert!(result.fields_missing.contains(&"price".to_string()));
+    }
+
+    #[test]
+    fn browser_done_reports_every_missing_required_field() {
+        let contract = BrowseResultContract {
+            kind: BrowseResultKind::Fact,
+            minimum_items: None,
+            fields: vec![
+                BrowseResultField {
+                    name: "title".into(),
+                    required: true,
+                },
+                BrowseResultField {
+                    name: "heading".into(),
+                    required: true,
+                },
+                BrowseResultField {
+                    name: "target".into(),
+                    required: true,
+                },
+            ],
+            boundary: None,
+        };
+        let payload = BrowserDonePayload {
+            status: BrowserDoneStatus::Completed,
+            answer: "Only prose, no structured fields".into(),
+            ..Default::default()
+        };
+
+        let result = validate_browser_done_payload(payload, Some(&contract));
+
+        assert_eq!(result.status, BrowserDoneStatus::Partial);
+        assert_eq!(result.fields_missing, vec!["title", "heading", "target"]);
+    }
+
+    #[test]
+    fn browser_done_requires_fields_on_every_returned_item() {
+        let contract = BrowseResultContract {
+            kind: BrowseResultKind::List,
+            minimum_items: Some(2),
+            fields: vec![BrowseResultField {
+                name: "price".into(),
+                required: true,
+            }],
+            boundary: None,
+        };
+        let payload = BrowserDonePayload {
+            status: BrowserDoneStatus::Completed,
+            answer: "Two options".into(),
+            items: vec![
+                serde_json::json!({"price": "10 EUR"}),
+                serde_json::json!({"name": "Option without price"}),
+            ],
+            ..Default::default()
+        };
+
+        let result = validate_browser_done_payload(payload, Some(&contract));
+
+        assert_eq!(result.status, BrowserDoneStatus::Partial);
+        assert_eq!(result.fields_missing, vec!["price"]);
+    }
+
+    #[test]
+    fn browser_done_honors_declared_missing_required_fields() {
+        let contract = BrowseResultContract {
+            kind: BrowseResultKind::Fact,
+            minimum_items: Some(1),
+            fields: vec![BrowseResultField {
+                name: "title".into(),
+                required: true,
+            }],
+            boundary: None,
+        };
+        let payload = BrowserDonePayload {
+            status: BrowserDoneStatus::Completed,
+            answer: "Conflicting terminal payload".into(),
+            items: vec![serde_json::json!({"title": "Example Domain"})],
+            fields_missing: vec!["title".into()],
+            ..Default::default()
+        };
+
+        let result = validate_browser_done_payload(payload, Some(&contract));
+
+        assert_eq!(result.status, BrowserDoneStatus::Partial);
+        assert_eq!(result.fields_missing, vec!["title"]);
+    }
+
+    #[test]
+    fn browser_done_fact_normalizes_name_value_items() {
+        let contract = BrowseResultContract {
+            kind: BrowseResultKind::Fact,
+            minimum_items: None,
+            fields: vec![
+                BrowseResultField {
+                    name: "title".into(),
+                    required: true,
+                },
+                BrowseResultField {
+                    name: "heading".into(),
+                    required: true,
+                },
+            ],
+            boundary: None,
+        };
+        let payload = BrowserDonePayload {
+            status: BrowserDoneStatus::Completed,
+            answer: "Example Domain".into(),
+            items: vec![
+                serde_json::json!({"name": "title", "value": "Example Domain"}),
+                serde_json::json!({"name": "heading", "value": "Example Domain"}),
+            ],
+            ..Default::default()
+        };
+
+        let result = validate_browser_done_payload(payload, Some(&contract));
+
+        assert_eq!(result.status, BrowserDoneStatus::Completed);
+        assert!(result.fields_missing.is_empty());
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0]["title"], "Example Domain");
+        assert_eq!(result.items[0]["heading"], "Example Domain");
     }
 
     #[test]

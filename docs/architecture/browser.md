@@ -52,7 +52,8 @@ Flusso di un turno con browsing (lato gateway). Dopo ADR 0025 il browsing è a *
 il manager chiama `browse(goal)` (un solo tool); il gateway intercetta la call in
 `GatewayCapabilityExecutor::execute_tool` e la instrada a `GatewayBrowseExecutor`, che avvia un
 **sub-turno browser ricorsivo** — un secondo `engine::agent_loop::run_turn` con toolset
-browser-only (i 6 tool granulari, seminati in `ls.tool_schemas`) + il **modello browser**,
+browser-only (sette tool, piu `browser_rehydrate` nei turni mutabili, seminati in
+`ls.tool_schemas`) + il **modello browser**,
 isolato da un **drain-sink** (`drain_stream_sink`) così che snapshot/click/ragionamento del
 browser non inquinino il contesto del manager. Solo un `BrowseResult` compatto torna al manager
 (`browse_result_for_manager`). Dentro il sub-turno:
@@ -171,6 +172,15 @@ cablato in `base_tools`):
 |------|-------|--------|------|
 | `browse` (`browse_tool_schema`) | `goal` (req), `hints.url`, `hints.container` | `BrowseResult` compatto: `found`, `answer`, `sources[]`, `confidence` | delega a un sub-turno browser isolato; il manager non pilota mai le singole pagine |
 
+`result_contract.kind=fact` significa un solo oggetto con uno o piu campi richiesti;
+`kind=list` significa righe/opzioni ripetute. `minimum_items` conta esclusivamente le
+righe di una lista, non il numero di campi di un fatto. Il gateway valida ogni campo
+obbligatorio su ogni riga e normalizza le forme equivalenti prodotte dal provider
+(oggetto singolo, wrapper `$text`, coppie `name/value` per un fatto) prima della verifica.
+Lo schema di `browser_done.items` viene materializzato per ogni sub-turno con i nomi e i
+campi obbligatori del contratto; tutti i campi terminali restano presenti anche quando il
+risultato e parziale o bloccato.
+
 ### Tool del sub-turno browser (browser-only, NON visibili al manager)
 
 Schemi in `main.rs`, funzioni `browser_*_tool_schema()`. Seminati SOLO nel sub-turno
@@ -185,6 +195,7 @@ la superficie che il **modello browser** chiama dentro il sub-loop ricorsivo.
 | `browser_screenshot` (`browser_screenshot_tool_schema`) | `full_page`, `marks`, `target` | immagine (+ legenda set-of-marks se `marks`) | solo se la text-snapshot non basta |
 | `browser_tabs` (`browser_tabs_tool_schema`) | — | lista tab (id, url, titolo) | read-only |
 | `browser_dialog` (`browser_dialog_tool_schema`) | `accept`, `prompt_text` | dialog gestito | risponde a alert/confirm/prompt nativi |
+| `browser_done` (`browser_done_tool_schema`) | `status`, `answer`, `items[]`, `fields_missing[]`, `sources[]`, `evidence[]` | `BrowseResult` terminale validato | unico terminale del sub-turno; un oggetto per `fact`, una riga per item di `list` |
 
 ### Metodi del sidecar (stdio JSON-line)
 
@@ -201,7 +212,9 @@ response `{id, ok:true, result}` o `{id, ok:false, error:{code, message, retryab
 refs[], refLocators, refsMode: "aria"|"locator", snapshotFormat: "ai"|"legacy", stats:{lines,chars,refs} }`.
 
 - **`snapshot`** = testo accessibile (albero aria in modalità AI) con righe tipo
-  `- button "Cerca" [ref=e7]`. Costruito da `createAiSnapshot` (`snapshot.ts`) via
+  `title: Titolo pagina` e `- button "Cerca" [ref=e7]`. Il titolo osservato viene
+  anteposto sia alla vista del modello sia a `rawSnapshot`, cosi delta e fingerprint
+  usano la stessa base. Costruito da `createAiSnapshot` (`snapshot.ts`) via
   `page.ariaSnapshot({mode:"ai"})`, opzionalmente ridotto da
   `buildRoleSnapshotFromAiSnapshot` (`snapshot.ts`) secondo `INTERACTIVE_ROLES` /
   `STRUCTURAL_ROLES` (`snapshot.ts`).

@@ -105,6 +105,12 @@ non dal modello — e **oggi vive qui, in-path**, non in un servizio separato (l
 out-of-path è ADR 0022, *Proposed*). Cinque fasi: recall ibrido → briefing sempre-attivo →
 iniezione → estrazione post-turno → consolidamento in background.
 
+L'accesso on-demand non deriva dalla sola presenza del tool o da keyword. Il contratto
+semantico produce `MemoryIntent`; il gateway espone e accetta `recall_memory` soltanto per
+un intento validato di ricerca personale, ricerca progetto o richiesta Vault. Il controllo
+è duplicato nel toolset e nel dispatch dell'executor. Un turno che usa solo contesto corrente
+e prove dei tool non può quindi deviare verso memoria lunga o Vault durante un retry.
+
 ```mermaid
 flowchart TD
   P[prompt del turno] --> R[recall ibrido relevant_memory_for_prompt]
