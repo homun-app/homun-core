@@ -148,10 +148,10 @@ async fn runtime() -> Result<Arc<HostRuntime>, ApiError> {
     }
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     {
-        return Err(api_error(
+        Err(api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "unsupported_platform",
-        ));
+        ))
     }
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {

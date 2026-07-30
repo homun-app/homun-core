@@ -59,11 +59,6 @@ mod pdf_render;
 mod plugin_packages;
 mod privacy_guard;
 mod projection_worker;
-// Linux Landlock filesystem fence for `run_in_project` (ADR 0023 Linux enforcement;
-// the counterpart to `seatbelt`). Linux-only — the whole module is cfg-gated so it
-// never compiles on macOS/Windows (the `landlock` dep is Linux-only too).
-#[cfg(target_os = "linux")]
-mod landlock_fence;
 mod sandbox;
 mod setup_computer;
 // macOS Seatbelt (`sandbox-exec`) profile generator from a SandboxPolicy (ADR 0023,

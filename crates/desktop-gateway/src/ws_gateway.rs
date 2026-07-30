@@ -95,7 +95,7 @@ impl WsRegistry {
     /// Fan-out a message to all subscribers. Uses `try_send` (non-blocking).
     pub fn broadcast(&self, msg: ServerMessage) {
         if let Ok(subs) = self.subscribers.lock() {
-            for (_, tx) in subs.iter() {
+            for tx in subs.values() {
                 let _ = tx.try_send(msg.clone());
             }
         }
