@@ -1,11 +1,16 @@
-use local_first_execution_protocol::{EffectClass, EffectReceiptRef, ValidatedExecutionContract};
+use local_first_execution_protocol::{
+    EffectClass, EffectReceiptRef, EffectReceiptStatus, ValidatedExecutionContract,
+};
 use local_first_task_runtime::{
     EffectReceiptClaim, ExecutionEffectReceipt, NewExecutionEffectReceipt, ProjectionClaim,
     TaskRecord, TaskStore,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::sync::Mutex;
+use std::sync::{
+    Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EffectRequestKind {
@@ -54,20 +59,81 @@ impl EffectRequest {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct EffectLease {
+pub(crate) struct EffectLease<'a> {
     receipt_ref: EffectReceiptRef,
+    store: &'a Mutex<TaskStore>,
+    settled: AtomicBool,
 }
 
-impl EffectLease {
-    pub(crate) fn receipt_ref(&self) -> &EffectReceiptRef {
-        &self.receipt_ref
+impl std::fmt::Debug for EffectLease<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EffectLease")
+            .field("receipt_ref", &self.receipt_ref)
+            .finish_non_exhaustive()
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum EffectDecision {
-    Execute(EffectLease),
+impl EffectLease<'_> {
+    pub(crate) fn receipt_ref(&self) -> &EffectReceiptRef {
+        &self.receipt_ref
+    }
+
+    fn settle(&self) {
+        self.settled.store(true, Ordering::Release);
+    }
+}
+
+impl Drop for EffectLease<'_> {
+    fn drop(&mut self) {
+        if self.settled.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let result = self
+            .store
+            .lock()
+            .map_err(|_| "effect receipt drop store unavailable".to_string())
+            .and_then(|store| {
+                let receipt = store
+                    .effect_receipt(&self.receipt_ref)
+                    .map_err(|error| format!("effect receipt drop lookup failed: {error}"))?
+                    .ok_or_else(|| "effect receipt disappeared before drop".to_string())?;
+                if receipt.status != EffectReceiptStatus::Started {
+                    return Ok(());
+                }
+                match store.mark_effect_receipt_uncertain(
+                    &self.receipt_ref,
+                    &serde_json::json!({
+                        "code": "dispatch_interrupted_before_receipt_resolution"
+                    }),
+                ) {
+                    Ok(_) => Ok(()),
+                    Err(error) => {
+                        // Completion or explicit resolution may win between the
+                        // lookup and update. Any non-Started state is already safe.
+                        match store.effect_receipt(&self.receipt_ref) {
+                            Ok(Some(current)) if current.status != EffectReceiptStatus::Started => {
+                                Ok(())
+                            }
+                            _ => Err(format!("effect receipt drop resolution failed: {error}")),
+                        }
+                    }
+                }
+            });
+        if let Err(error) = result {
+            tracing::error!(
+                target: "execution::effect",
+                receipt_ref = %self.receipt_ref.as_ref(),
+                %error,
+                "abandoned effect dispatch could not be marked uncertain"
+            );
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum EffectDecision<'a> {
+    Execute(EffectLease<'a>),
     Replay(ExecutionEffectReceipt),
     Resolve(ExecutionEffectReceipt),
 }
@@ -106,7 +172,7 @@ impl<'a> EffectHost<'a> {
         }
     }
 
-    pub(crate) fn begin(&self, request: EffectRequest) -> Result<EffectDecision, String> {
+    pub(crate) fn begin(&self, request: EffectRequest) -> Result<EffectDecision<'a>, String> {
         self.authorize_request(&request)?;
         let contract = self.contract.as_ref();
         let request_kind = request.kind;
@@ -171,9 +237,11 @@ impl<'a> EffectHost<'a> {
         }
         .map_err(|error| format!("effect receipt claim failed: {error}"))?;
         match claim {
-            EffectReceiptClaim::Execute(_) => {
-                Ok(EffectDecision::Execute(EffectLease { receipt_ref }))
-            }
+            EffectReceiptClaim::Execute(_) => Ok(EffectDecision::Execute(EffectLease {
+                receipt_ref,
+                store: self.store,
+                settled: AtomicBool::new(false),
+            })),
             EffectReceiptClaim::Replay(receipt) => Ok(EffectDecision::Replay(receipt)),
             EffectReceiptClaim::Resolve(receipt) => Ok(EffectDecision::Resolve(receipt)),
         }
@@ -181,52 +249,63 @@ impl<'a> EffectHost<'a> {
 
     pub(crate) fn complete(
         &self,
-        lease: &EffectLease,
+        lease: &EffectLease<'_>,
         result: &Value,
         effects: &Value,
     ) -> Result<ExecutionEffectReceipt, String> {
         let result = crate::agent_journal::redact_json_value(result.clone());
         let effects = crate::agent_journal::redact_json_value(effects.clone());
-        self.store
+        let receipt = lease
+            .store
             .lock()
             .map_err(|_| "effect receipt completion store unavailable".to_string())?
             .complete_effect_receipt(lease.receipt_ref(), &result, &effects)
-            .map_err(|error| format!("effect receipt completion failed: {error}"))
+            .map_err(|error| format!("effect receipt completion failed: {error}"))?;
+        lease.settle();
+        Ok(receipt)
     }
 
     pub(crate) fn mark_uncertain(
         &self,
-        lease: &EffectLease,
+        lease: &EffectLease<'_>,
     ) -> Result<ExecutionEffectReceipt, String> {
-        match self
+        let store = lease
             .store
             .lock()
-            .map_err(|_| "effect receipt uncertainty store unavailable".to_string())?
-            .claim_effect_receipt(lease.receipt_ref())
-            .map_err(|error| format!("effect receipt uncertainty failed: {error}"))?
-        {
-            EffectReceiptClaim::Resolve(receipt) => Ok(receipt),
-            EffectReceiptClaim::Replay(_) => Err("completed effect cannot become uncertain".into()),
-            EffectReceiptClaim::Execute(_) => Err("effect receipt did not become uncertain".into()),
-        }
+            .map_err(|_| "effect receipt uncertainty store unavailable".to_string())?;
+        let receipt = match store.mark_effect_receipt_uncertain(
+            lease.receipt_ref(),
+            &serde_json::json!({"code": "remote_outcome_unknown"}),
+        ) {
+            Ok(receipt) => receipt,
+            Err(error) => match store.effect_receipt(lease.receipt_ref()) {
+                Ok(Some(receipt)) if receipt.status == EffectReceiptStatus::Uncertain => receipt,
+                _ => return Err(format!("effect receipt uncertainty failed: {error}")),
+            },
+        };
+        lease.settle();
+        Ok(receipt)
     }
 
     pub(crate) fn mark_uncertain_with_evidence(
         &self,
-        lease: &EffectLease,
+        lease: &EffectLease<'_>,
         evidence: &Value,
     ) -> Result<ExecutionEffectReceipt, String> {
         let evidence = crate::agent_journal::redact_json_value(evidence.clone());
-        self.store
+        let receipt = lease
+            .store
             .lock()
             .map_err(|_| "effect receipt uncertainty store unavailable".to_string())?
             .mark_effect_receipt_uncertain(lease.receipt_ref(), &evidence)
-            .map_err(|error| format!("effect receipt uncertainty failed: {error}"))
+            .map_err(|error| format!("effect receipt uncertainty failed: {error}"))?;
+        lease.settle();
+        Ok(receipt)
     }
 
     pub(crate) fn release_not_applied(
         &self,
-        lease: &EffectLease,
+        lease: &EffectLease<'_>,
         code: &str,
         detail: &str,
     ) -> Result<ExecutionEffectReceipt, String> {
@@ -234,11 +313,14 @@ impl<'a> EffectHost<'a> {
             "code": code,
             "detail": detail,
         }));
-        self.store
+        let receipt = lease
+            .store
             .lock()
             .map_err(|_| "effect receipt release store unavailable".to_string())?
             .release_effect_receipt_not_applied(lease.receipt_ref(), &evidence)
-            .map_err(|error| format!("effect receipt release failed: {error}"))
+            .map_err(|error| format!("effect receipt release failed: {error}"))?;
+        lease.settle();
+        Ok(receipt)
     }
 
     pub(crate) fn authorize_request(&self, request: &EffectRequest) -> Result<(), String> {
@@ -556,6 +638,48 @@ mod tests {
     }
 
     #[test]
+    fn abandoned_dispatch_guard_becomes_uncertain_immediately() {
+        let store = Mutex::new(TaskStore::open_in_memory().expect("store"));
+        let contract = contract(
+            "execution-abandoned-dispatch",
+            vec![EffectClass::Read, EffectClass::ExternalWrite],
+        );
+        activate(&store, &contract);
+        let host = EffectHost::new(&store, &contract, Some("run-abandoned"));
+        let EffectDecision::Execute(lease) = host.begin(request("call-abandoned")).expect("claim")
+        else {
+            panic!("first call must execute");
+        };
+
+        let receipt_ref = lease.receipt_ref().clone();
+        drop(lease);
+
+        let receipt = store
+            .lock()
+            .expect("store")
+            .list_effect_receipts_for_execution("execution-abandoned-dispatch", 1)
+            .expect("load abandoned receipt")
+            .into_iter()
+            .find(|receipt| receipt.receipt_ref == receipt_ref)
+            .expect("abandoned receipt exists");
+        assert_eq!(
+            receipt.status,
+            local_first_execution_protocol::EffectReceiptStatus::Uncertain
+        );
+
+        let EffectDecision::Resolve(receipt) = host
+            .begin(request("call-abandoned"))
+            .expect("resolve abandoned dispatch")
+        else {
+            panic!("an abandoned dispatch must never execute again");
+        };
+        assert_eq!(
+            receipt.status,
+            local_first_execution_protocol::EffectReceiptStatus::Uncertain
+        );
+    }
+
+    #[test]
     fn uncertain_effect_keeps_dispatch_evidence() {
         let store = Mutex::new(TaskStore::open_in_memory().expect("store"));
         let contract = contract(
@@ -579,6 +703,80 @@ mod tests {
             .expect("uncertain receipt");
 
         assert_eq!(receipt.effects_json, Some(evidence));
+    }
+
+    #[test]
+    fn verified_not_applied_release_stays_retryable_after_lease_drop() {
+        let store = Mutex::new(TaskStore::open_in_memory().expect("store"));
+        let contract = contract(
+            "execution-verified-not-applied",
+            vec![EffectClass::Read, EffectClass::ExternalWrite],
+        );
+        activate(&store, &contract);
+        let host = EffectHost::new(&store, &contract, Some("run-release"));
+        let EffectDecision::Execute(lease) = host.begin(request("call-release")).expect("claim")
+        else {
+            panic!("first call must execute");
+        };
+
+        let released = host
+            .release_not_applied(&lease, "connect_failed", "dispatch never reached remote")
+            .expect("release receipt");
+        assert_eq!(
+            released.status,
+            local_first_execution_protocol::EffectReceiptStatus::Prepared
+        );
+        drop(lease);
+
+        assert!(matches!(
+            host.begin(request("call-release")).expect("retry claim"),
+            EffectDecision::Execute(_)
+        ));
+    }
+
+    #[test]
+    fn concurrent_verified_not_applied_resolution_cannot_become_uncertain() {
+        let store = Mutex::new(TaskStore::open_in_memory().expect("store"));
+        let contract = contract(
+            "execution-concurrent-release",
+            vec![EffectClass::Read, EffectClass::ExternalWrite],
+        );
+        activate(&store, &contract);
+        let host = EffectHost::new(&store, &contract, Some("run-concurrent-release"));
+        let EffectDecision::Execute(lease) = host
+            .begin(request("call-concurrent-release"))
+            .expect("claim")
+        else {
+            panic!("first call must execute");
+        };
+        let receipt_ref = lease.receipt_ref().clone();
+        store
+            .lock()
+            .expect("store")
+            .release_effect_receipt_not_applied(
+                &receipt_ref,
+                &json!({"code": "verified_not_dispatched"}),
+            )
+            .expect("concurrent release");
+
+        assert!(host.mark_uncertain(&lease).is_err());
+        drop(lease);
+
+        let receipt = store
+            .lock()
+            .expect("store")
+            .effect_receipt(&receipt_ref)
+            .expect("load receipt")
+            .expect("receipt exists");
+        assert_eq!(
+            receipt.status,
+            local_first_execution_protocol::EffectReceiptStatus::Prepared
+        );
+        assert!(matches!(
+            host.begin(request("call-concurrent-release"))
+                .expect("retry claim"),
+            EffectDecision::Execute(_)
+        ));
     }
 
     #[test]

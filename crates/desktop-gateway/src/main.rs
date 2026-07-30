@@ -13845,6 +13845,111 @@ fn render_project_output(output: &std::process::Output) -> String {
     format!("[exit {code}]\n{body}")
 }
 
+#[cfg(unix)]
+struct CommandProcessGroupGuard {
+    process_group_id: Option<i32>,
+}
+
+#[cfg(unix)]
+impl CommandProcessGroupGuard {
+    fn prepare(command: &mut tokio::process::Command) {
+        use std::os::unix::process::CommandExt;
+        command.as_std_mut().process_group(0);
+    }
+
+    fn for_child(child: &tokio::process::Child) -> Self {
+        Self {
+            process_group_id: child.id().and_then(|pid| i32::try_from(pid).ok()),
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.process_group_id = None;
+    }
+}
+
+#[cfg(unix)]
+impl Drop for CommandProcessGroupGuard {
+    fn drop(&mut self) {
+        if let Some(process_group_id) = self.process_group_id.take() {
+            // Negative PID targets the complete process group. The command is
+            // group leader because `prepare` sets process_group(0) before spawn.
+            unsafe {
+                libc::kill(-process_group_id, libc::SIGKILL);
+            }
+        }
+    }
+}
+
+#[cfg(not(unix))]
+struct CommandProcessGroupGuard;
+
+#[cfg(not(unix))]
+impl CommandProcessGroupGuard {
+    fn prepare(_command: &mut tokio::process::Command) {}
+
+    fn for_child(_child: &tokio::process::Child) -> Self {
+        Self
+    }
+
+    fn disarm(&mut self) {}
+}
+
+enum CommandOutputError {
+    Io(std::io::Error),
+    TimedOut,
+}
+
+async fn command_output_with_timeout(
+    mut command: tokio::process::Command,
+    timeout: std::time::Duration,
+) -> Result<std::process::Output, CommandOutputError> {
+    use tokio::io::AsyncReadExt;
+
+    command
+        .kill_on_drop(true)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    CommandProcessGroupGuard::prepare(&mut command);
+    let mut child = command.spawn().map_err(CommandOutputError::Io)?;
+    let mut process_group = CommandProcessGroupGuard::for_child(&child);
+    let mut stdout = child.stdout.take().ok_or_else(|| {
+        CommandOutputError::Io(std::io::Error::other("command stdout pipe missing"))
+    })?;
+    let mut stderr = child.stderr.take().ok_or_else(|| {
+        CommandOutputError::Io(std::io::Error::other("command stderr pipe missing"))
+    })?;
+    let output = async {
+        let read_stdout = async {
+            let mut bytes = Vec::new();
+            stdout.read_to_end(&mut bytes).await?;
+            Ok::<_, std::io::Error>(bytes)
+        };
+        let read_stderr = async {
+            let mut bytes = Vec::new();
+            stderr.read_to_end(&mut bytes).await?;
+            Ok::<_, std::io::Error>(bytes)
+        };
+        let (stdout, stderr) = tokio::try_join!(read_stdout, read_stderr)?;
+        // Read pipes before wait so an exited leader remains an unreaped zombie.
+        // Its PID therefore cannot be reused while the process-group guard is armed.
+        let status = child.wait().await?;
+        Ok::<_, std::io::Error>(std::process::Output {
+            status,
+            stdout,
+            stderr,
+        })
+    };
+    match tokio::time::timeout(timeout, output).await {
+        Ok(Ok(output)) => {
+            process_group.disarm();
+            Ok(output)
+        }
+        Ok(Err(error)) => Err(CommandOutputError::Io(error)),
+        Err(_) => Err(CommandOutputError::TimedOut),
+    }
+}
+
 /// Run `command` as `bash -lc` in `root` (UNSANDBOXED), with the project timeout,
 /// returning the rendered `[exit N]\n{output}` string (or a timeout/spawn error).
 ///
@@ -13856,20 +13961,17 @@ async fn run_bash_unsandboxed_result(
     command: &str,
 ) -> Result<String, String> {
     let mut cmd = tokio::process::Command::new("bash");
-    cmd.arg("-lc")
-        .arg(command)
-        .current_dir(root)
-        .kill_on_drop(true);
-    match tokio::time::timeout(
+    cmd.arg("-lc").arg(command).current_dir(root);
+    match command_output_with_timeout(
+        cmd,
         std::time::Duration::from_secs(PROJECT_CMD_TIMEOUT_SECS),
-        cmd.output(),
     )
     .await
     {
-        Ok(Ok(output)) if output.status.success() => Ok(render_project_output(&output)),
-        Ok(Ok(output)) => Err(render_project_output(&output)),
-        Ok(Err(error)) => Err(format!("Could not run the command: {error}")),
-        Err(_) => Err(format!(
+        Ok(output) if output.status.success() => Ok(render_project_output(&output)),
+        Ok(output) => Err(render_project_output(&output)),
+        Err(CommandOutputError::Io(error)) => Err(format!("Could not run the command: {error}")),
+        Err(CommandOutputError::TimedOut) => Err(format!(
             "Command interrupted: exceeded the {PROJECT_CMD_TIMEOUT_SECS}s timeout (process terminated)."
         )),
     }
@@ -14052,14 +14154,14 @@ The command was not run unsandboxed."
             ));
         }
     };
-    cmd.current_dir(&root).kill_on_drop(true);
-    match tokio::time::timeout(
+    cmd.current_dir(&root);
+    match command_output_with_timeout(
+        cmd,
         std::time::Duration::from_secs(PROJECT_CMD_TIMEOUT_SECS),
-        cmd.output(),
     )
     .await
     {
-        Ok(Ok(output)) => {
+        Ok(output) => {
             let mut combined = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr);
             if !stderr.trim().is_empty() {
@@ -14080,7 +14182,7 @@ The command was not run unsandboxed."
             }
             RunProjectOutcome::Completed(render_project_output(&output))
         }
-        Ok(Err(error)) => {
+        Err(CommandOutputError::Io(error)) => {
             // Fail-closed: if the SANDBOXED spawn could not start (e.g. `sandbox-exec`
             // missing), never silently fall back to unsandboxed — surface a clear error.
             RunProjectOutcome::Completed(format!(
@@ -14088,7 +14190,7 @@ The command was not run unsandboxed."
 The command was not run unsandboxed."
             ))
         }
-        Err(_) => RunProjectOutcome::Completed(format!(
+        Err(CommandOutputError::TimedOut) => RunProjectOutcome::Completed(format!(
             "Command interrupted: exceeded the {PROJECT_CMD_TIMEOUT_SECS}s timeout (process terminated)."
         )),
     }
@@ -22877,12 +22979,12 @@ fn browser_effect_class(name: &str) -> Option<local_first_execution_protocol::Ef
         .then_some(local_first_execution_protocol::EffectClass::ExternalWrite)
 }
 
-fn begin_browser_effect(
-    ctx: &BrowserToolCtx<'_>,
+fn begin_browser_effect<'a>(
+    ctx: &BrowserToolCtx<'a>,
     operation: &str,
     call_id: &str,
     arguments: serde_json::Value,
-) -> Result<crate::effect_host::EffectDecision, String> {
+) -> Result<crate::effect_host::EffectDecision<'a>, String> {
     let contract = ctx.execution_contract.ok_or_else(|| {
         "Browser mutation blocked: no durable execution scope is available.".to_string()
     })?;
@@ -22916,7 +23018,7 @@ fn authorize_browser_effect(
 
 fn complete_browser_effect(
     ctx: &mut BrowserToolCtx<'_>,
-    lease: &crate::effect_host::EffectLease,
+    lease: &crate::effect_host::EffectLease<'_>,
     result: serde_json::Value,
     effects: serde_json::Value,
 ) -> Result<(), String> {
@@ -22940,7 +23042,7 @@ fn complete_browser_effect(
 
 fn mark_browser_effect_uncertain(
     ctx: &mut BrowserToolCtx<'_>,
-    lease: &crate::effect_host::EffectLease,
+    lease: &crate::effect_host::EffectLease<'_>,
 ) -> Result<local_first_task_runtime::ExecutionEffectReceipt, String> {
     let contract = ctx
         .execution_contract
@@ -63844,35 +63946,36 @@ mod tests {
     // collapse_plan_markers moved to the engine (5.D2); the gateway no longer uses it in prod,
     // only these unit tests do — import it here rather than re-exporting it at the crate root.
     use super::{
-        ActiveModelInputs, AppState, ChannelSettings, ConnectorErrorKind, InboundAction,
-        LegacyDirAction, MAX_PLAN_STALL_RESUMES, MemoryBenchIngestRequest, MemoryBenchMessage,
-        MemoryBenchSearchRequest, MemoryBenchSession, MemoryBenchStatusRequest, MemoryCandidate,
-        MemoryDataSensitivity, MemorySourceOverrideInput, MemorySourceUpsertRequest,
-        TASK_EXECUTOR_DEFAULT_WORKER_COUNT, ValidatedMemorySourceInput, WorkspaceRecord,
-        WorkspacesFile, active_llm_concurrency, adapt_skill_body,
+        ActiveModelInputs, AppState, ChannelSettings, CommandOutputError, ConnectorErrorKind,
+        InboundAction, LegacyDirAction, MAX_PLAN_STALL_RESUMES, MemoryBenchIngestRequest,
+        MemoryBenchMessage, MemoryBenchSearchRequest, MemoryBenchSession, MemoryBenchStatusRequest,
+        MemoryCandidate, MemoryDataSensitivity, MemorySourceOverrideInput,
+        MemorySourceUpsertRequest, TASK_EXECUTOR_DEFAULT_WORKER_COUNT, ValidatedMemorySourceInput,
+        WorkspaceRecord, WorkspacesFile, active_llm_concurrency, adapt_skill_body,
         aggregate_session_state_from_counts, authorize_managed_capability_tool, block_stalled_step,
         brain_budgets_for_context_window, browser_capability_action_refusal,
         browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
         browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_browse_goal,
         build_memory_source_grant, build_plan_markdown, capability_call_completed_outcome,
-        classify_connector_error, clawhub_origin, collect_member_counts, composio_tool_is_read,
-        connector_error_hint, default_browser_headless_value, delegated_browse_tool_outcome,
-        delete_workspace, earlier_browse_call_in_current_round, enforce_monotonic_plan_progress,
-        extract_source_urls, fonti_section, format_memory_block, gateway_memory_user_id,
-        humanize_task_kind, hybrid_memory_score, inbound_action, is_auto_confirmable,
-        is_internal_task_kind, is_low_value_source_url, is_semantic_duplicate, jail_in_root,
-        legacy_dir_action, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
-        mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days,
-        memory_bench_ingest, memory_bench_search, memory_bench_status, memory_facade,
-        memory_source_candidates_from_records, memory_source_facade_error,
-        memory_source_grant_views, memory_sources_flag, memorybench_workspace_id, merge_plan,
-        next_plan_stall, next_ready_task_across_workspaces, normalize_for_dedup, parse_plan_marker,
-        parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
-        plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
-        proactive_answer_memory_request, proactive_memory_request_for_suggestion_action,
-        project_filesystem_mcp_instruction, prune_browser_history, redact_sensitive_text,
-        requeue_waiting_resource_tasks, resolve_active_model, resolve_contained_computer_cdp,
-        resolve_contained_computer_novnc, response_language_instruction, rewrite_confirm_to_done,
+        classify_connector_error, clawhub_origin, collect_member_counts,
+        command_output_with_timeout, composio_tool_is_read, connector_error_hint,
+        default_browser_headless_value, delegated_browse_tool_outcome, delete_workspace,
+        earlier_browse_call_in_current_round, enforce_monotonic_plan_progress, extract_source_urls,
+        fonti_section, format_memory_block, gateway_memory_user_id, humanize_task_kind,
+        hybrid_memory_score, inbound_action, is_auto_confirmable, is_internal_task_kind,
+        is_low_value_source_url, is_semantic_duplicate, jail_in_root, legacy_dir_action,
+        llm_concurrency_view, mcp_error_hint, mcp_provider_slug, mcp_stdio_config_from_metadata,
+        mcp_stdio_config_to_metadata, memory_age_days, memory_bench_ingest, memory_bench_search,
+        memory_bench_status, memory_facade, memory_source_candidates_from_records,
+        memory_source_facade_error, memory_source_grant_views, memory_sources_flag,
+        memorybench_workspace_id, merge_plan, next_plan_stall, next_ready_task_across_workspaces,
+        normalize_for_dedup, parse_plan_marker, parse_review_suggestion, plan_done_count,
+        plan_incomplete_reason, plan_is_complete, plan_is_settled, plan_next_open,
+        plan_stall_exhausted, plan_step_status, proactive_answer_memory_request,
+        proactive_memory_request_for_suggestion_action, project_filesystem_mcp_instruction,
+        prune_browser_history, redact_sensitive_text, requeue_waiting_resource_tasks,
+        resolve_active_model, resolve_contained_computer_cdp, resolve_contained_computer_novnc,
+        response_language_instruction, rewrite_confirm_to_done, run_bash_unsandboxed_result,
         sanitize_dedup_key, sanitize_wiki_filename, scheduled_thread_sender_for_task_id,
         scheduled_thread_title, search_composio_catalog, should_try_tool_compatibility_fallback,
         skill_id_from_command, strip_json_fences, suggestion_choices_json, task_effective_goal,
@@ -63890,6 +63993,105 @@ mod tests {
     // 5.D1c.2: test-only engine helpers (not used by non-test gateway code, so imported here, not at
     // the crate top where they'd read as unused).
     use local_first_engine::browser::{PRUNED_SNAPSHOT_STUB, message_has_image_url};
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn aborting_project_command_kills_descendant_processes() {
+        let mut sentinel = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn external sentinel");
+        let sentinel_pid = i32::try_from(sentinel.id()).expect("sentinel pid");
+        let unique = format!(
+            "homun-command-cancel-{}-{}",
+            std::process::id(),
+            time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+        );
+        let root = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&root).expect("create command test root");
+        let child_pid_path = root.join("child.pid");
+        let command = format!(
+            "sh -c 'exec sleep 30' & child=$!; printf '%s' \"$child\" > '{}'; wait",
+            child_pid_path.display()
+        );
+        let run_root = root.clone();
+        let run =
+            tokio::spawn(async move { run_bash_unsandboxed_result(&run_root, &command).await });
+
+        let child_pid = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let Ok(raw) = std::fs::read_to_string(&child_pid_path)
+                    && let Ok(pid) = raw.trim().parse::<i32>()
+                {
+                    break pid;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("descendant pid is written");
+        assert_eq!(unsafe { libc::kill(child_pid, 0) }, 0, "child must start");
+
+        run.abort();
+        let _ = run.await;
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if unsafe { libc::kill(child_pid, 0) } == -1 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("aborting the command must terminate its descendants");
+        assert_eq!(
+            unsafe { libc::kill(sentinel_pid, 0) },
+            0,
+            "cancellation must not kill a process outside the command group"
+        );
+        let _ = sentinel.kill();
+        let _ = sentinel.wait();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn project_command_timeout_kills_descendant_processes() {
+        let unique = format!(
+            "homun-command-timeout-{}-{}",
+            std::process::id(),
+            time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+        );
+        let root = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&root).expect("create timeout test root");
+        let child_pid_path = root.join("child.pid");
+        let command = format!(
+            "sh -c 'exec sleep 30' & child=$!; printf '%s' \"$child\" > '{}'; wait",
+            child_pid_path.display()
+        );
+        let mut process = tokio::process::Command::new("bash");
+        process.arg("-lc").arg(command).current_dir(&root);
+
+        let result = command_output_with_timeout(process, std::time::Duration::from_secs(1)).await;
+        assert!(matches!(result, Err(CommandOutputError::TimedOut)));
+        let child_pid = std::fs::read_to_string(&child_pid_path)
+            .expect("descendant pid")
+            .trim()
+            .parse::<i32>()
+            .expect("numeric descendant pid");
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if unsafe { libc::kill(child_pid, 0) } == -1 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("timeout must terminate command descendants");
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn delivered_image_rejection_marks_outcome_delivered() {

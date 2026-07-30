@@ -62,13 +62,17 @@ Solo l'implementazione gateway dell'host possiede `AppState`; gli adapter non po
 leggere direttamente store, Vault, connettori o sandbox. Per ogni dispatch il runtime crea
 un `ExecutionAttemptControl` volatile e monitora lo stato autorevole: cancellazione, lease
 loss e deadline interrompono il turn future gia registrato; `proactive_prompt` seleziona sullo
-stesso segnale, quindi anche le automazioni fermano model e tool async. I processi shell sono
-configurati `kill_on_drop`. Capability e browser ricontrollano inoltre
+stesso segnale, quindi anche le automazioni fermano model e tool async. Su macOS/Linux i processi
+shell sono avviati in un process group dedicato: il drop del comando termina wrapper e discendenti,
+sia nel percorso sandbox sia in quello esplicitamente approvato senza sandbox. Capability e browser ricontrollano inoltre
 la cancellazione prima di ogni dispatch. Queste cause impediscono nuovi effect claim nella
 transazione della receipt. Il runtime aspetta comunque che l'adapter termini e ricontrolla
 l'autorita prima del commit. Un risultato adapter arrivato oltre deadline viene sostituito
 dal failure canonico; un effetto gia remoto resta governato dalla receipt e dall'eventuale
-stato `Uncertain`.
+stato `Uncertain`. La `EffectLease` e una guardia RAII: se la future viene interrotta dopo il
+claim ma prima di `complete`, `mark_uncertain` o `release_not_applied`, il drop converte subito
+`Started` in `Uncertain`. Un recovery o retry con la stessa identita risolve quella receipt e non
+ripete mai la scrittura.
 
 Gli adapter di dominio sincroni vengono sempre isolati da `ExecutionRuntime` sul
 blocking pool di Tokio. Nessun adapter può quindi costruire client HTTP bloccanti,

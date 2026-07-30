@@ -132,3 +132,26 @@ Rejected for increment 2:
   running, then signals one volatile `ExecutionAttemptControl`.
 - Interactive and proactive agent turns consume that signal without adding a persisted lifecycle;
   capability/browser dispatch retain their final pre-effect cancellation checks.
+- Effect leases now terminalize abandoned dispatches on drop. A cancelled connector, browser or
+  capability future cannot leave a claimed write in `Started`; it becomes `Uncertain` immediately
+  and the same logical call can only resolve it, never execute it again.
+- Project shell commands run in a dedicated Unix process group. Cancellation and timeout terminate
+  the complete command tree for both sandboxed and explicitly approved unsandboxed execution.
+
+## Deterministic recovery matrix
+
+The local suites exercise the production contracts with controlled adapters and transports:
+
+| Boundary | Deterministic evidence |
+| --- | --- |
+| model cancellation | live-turn notify aborts the attached engine task; durable task cancellation stops the runtime adapter |
+| browser/capability cancellation | dispatch checks the turn signal; sidecar teardown is bounded by its transport timeout; claimed writes become `Uncertain` and no later action is dispatched |
+| sandbox cancellation | aborting the command kills its process-group descendant, not only the shell wrapper |
+| connector interruption | abandoned `EffectLease` becomes `Uncertain` before any recovery claim and cannot execute again |
+| active deadline | monitor signals the attempt and a late success is replaced by `execution_deadline_exceeded` |
+| lease loss/restart | stale commit is rejected; a newer fence reclaims the running attempt; a committed outcome is recovered without re-running the adapter |
+| projection restart | pending/claimed outbox work and uncertain receipt resolution converge without duplicate acknowledgement |
+| proactive execution | the same `ExecutionAttemptControl` races the proactive agent future and aborts its exact stream request |
+
+These tests do not fabricate a real remote provider acknowledgement. Installed-app smoke remains the
+separate proof for provider transport, real browser/CDP state and connector delivery reconciliation.
