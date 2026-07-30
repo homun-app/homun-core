@@ -29,9 +29,47 @@ on:
 
 permissions:
   contents: read # publishing goes to homun-releases via RELEASES_TOKEN, not GITHUB_TOKEN
+  checks: write # RustSec reports dependency findings as a same-run release gate
 
 jobs:
+  validate:
+    name: Release readiness
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build deps
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+
+      - name: Install desktop dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Deterministic pre-release gate
+        run: python3 scripts/pre_release_gate.py
+
+      - name: Rust dependency audit
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   build:
+    needs: validate
     name: Build (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -231,6 +269,23 @@ jobs:
         env:
           GH_TOKEN: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.RELEASES_TOKEN || '' }}
 
+      - name: Create installer checksums
+        working-directory: apps/desktop
+        shell: bash
+        run: npm run release:checksums -- --directory dist-installers --output "dist-installers/SHA256SUMS-${{ matrix.platform }}.txt"
+
+      - name: Upload checksums to draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: apps/desktop
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            "dist-installers/SHA256SUMS-${{ matrix.platform }}.txt" \
+            --repo homun-app/homun-releases \
+            --clobber
+
       # Keep a copy of the raw installers as workflow artifacts too — useful for
       # inspecting dispatch (non-tag) runs that don't publish a release.
       - name: Upload artifacts
@@ -243,4 +298,5 @@ jobs:
             apps/desktop/dist-installers/*.exe
             apps/desktop/dist-installers/*.AppImage
             apps/desktop/dist-installers/*.deb
+            apps/desktop/dist-installers/SHA256SUMS-*.txt
           if-no-files-found: error
