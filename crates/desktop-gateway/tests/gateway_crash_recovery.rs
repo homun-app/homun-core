@@ -43,6 +43,27 @@ impl Drop for GatewayProcess {
     }
 }
 
+struct ReservedPort {
+    listener: TcpListener,
+    port: u16,
+}
+
+impl ReservedPort {
+    fn new() -> Self {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("reserve ephemeral port");
+        let port = listener.local_addr().expect("read reserved port").port();
+        Self { listener, port }
+    }
+
+    fn port(&self) -> u16 {
+        self.port
+    }
+
+    fn release(self) {
+        drop(self.listener);
+    }
+}
+
 struct IsolatedDir(PathBuf);
 
 impl IsolatedDir {
@@ -64,18 +85,20 @@ impl Drop for IsolatedDir {
     }
 }
 
-fn unused_port() -> u16 {
-    TcpListener::bind(("127.0.0.1", 0))
-        .expect("bind ephemeral port")
-        .local_addr()
-        .expect("read ephemeral port")
-        .port()
+fn bounded_gateway_log(path: &Path, max_bytes: usize) -> String {
+    let Ok(bytes) = fs::read(path) else {
+        return "<gateway log unavailable>".to_string();
+    };
+    let start = bytes.len().saturating_sub(max_bytes);
+    String::from_utf8_lossy(&bytes[start..]).into_owned()
 }
 
-fn start_gateway(data_dir: &Path, port: u16) -> GatewayProcess {
+fn start_gateway(data_dir: &Path, reservation: ReservedPort) -> GatewayProcess {
+    let port = reservation.port();
     let log =
         File::create(data_dir.join(format!("gateway-{port}.log"))).expect("create gateway log");
-    let child = Command::new(env!("CARGO_BIN_EXE_local-first-desktop-gateway"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_local-first-desktop-gateway"));
+    command
         .env("HOMUN_DATA_DIR", data_dir)
         .env("HOMUN_DESKTOP_GATEWAY_TOKEN", TOKEN)
         .env("HOMUN_DESKTOP_GATEWAY_PORT", port.to_string())
@@ -90,9 +113,9 @@ fn start_gateway(data_dir: &Path, port: u16) -> GatewayProcess {
         .env("RUST_LOG", "warn")
         .stdin(Stdio::null())
         .stdout(Stdio::from(log.try_clone().expect("clone gateway log")))
-        .stderr(Stdio::from(log))
-        .spawn()
-        .expect("start gateway binary");
+        .stderr(Stdio::from(log));
+    reservation.release();
+    let child = command.spawn().expect("start gateway binary");
     let mut process = GatewayProcess { child };
     wait_until_ready(&mut process, port, data_dir);
     process
@@ -114,8 +137,8 @@ fn wait_until_ready(process: &mut GatewayProcess, port: u16, data_dir: &Path) {
     while Instant::now() < deadline {
         if let Some(status) = process.child.try_wait().expect("poll gateway") {
             panic!(
-                "gateway exited before readiness with {status}; log: {}",
-                data_dir.join(format!("gateway-{port}.log")).display()
+                "gateway exited before readiness with {status}; log:\n{}",
+                bounded_gateway_log(&data_dir.join(format!("gateway-{port}.log")), 16 * 1024)
             );
         }
         if authorized(client().get(format!("http://127.0.0.1:{port}/api/chat/threads")))
@@ -127,8 +150,8 @@ fn wait_until_ready(process: &mut GatewayProcess, port: u16, data_dir: &Path) {
         thread::sleep(Duration::from_millis(100));
     }
     panic!(
-        "gateway did not become ready; log: {}",
-        data_dir.join(format!("gateway-{port}.log")).display()
+        "gateway did not become ready; log:\n{}",
+        bounded_gateway_log(&data_dir.join(format!("gateway-{port}.log")), 16 * 1024)
     );
 }
 
@@ -405,8 +428,9 @@ fn hard_restart_recovers_one_browser_capable_turn_without_duplicate_ownership() 
     let data_dir = IsolatedDir::new();
     let database = data_dir.path().join("homun.sqlite");
 
-    let first_port = unused_port();
-    let first = start_gateway(data_dir.path(), first_port);
+    let first_reservation = ReservedPort::new();
+    let first_port = first_reservation.port();
+    let first = start_gateway(data_dir.path(), first_reservation);
     let thread_id = create_thread(first_port);
     let turn_id = enqueue_turn(first_port, &thread_id);
     assert_eq!(turn_id, format!("turn_{REQUEST_ID}"));
@@ -414,13 +438,15 @@ fn hard_restart_recovers_one_browser_capable_turn_without_duplicate_ownership() 
     assert_eq!(turn(first_port, &turn_id)["status"], "running");
     first.hard_kill();
 
-    let second_port = unused_port();
-    let second = start_gateway(data_dir.path(), second_port);
+    let second_reservation = ReservedPort::new();
+    let second_port = second_reservation.port();
+    let second = start_gateway(data_dir.path(), second_reservation);
     assert_recovered(&database, second_port, &thread_id, &turn_id);
     second.hard_kill();
 
-    let third_port = unused_port();
-    let third = start_gateway(data_dir.path(), third_port);
+    let third_reservation = ReservedPort::new();
+    let third_port = third_reservation.port();
+    let third = start_gateway(data_dir.path(), third_reservation);
     assert_eq!(turn(third_port, &turn_id)["status"], "queued");
     let store = TaskStore::open(&database).expect("inspect second restart");
     assert_eq!(store.get_process_generation().expect("third generation"), 3);
@@ -432,4 +458,35 @@ fn hard_restart_recovers_one_browser_capable_turn_without_duplicate_ownership() 
         .count();
     assert_eq!(aborted_count, 1, "queued turns are not recovered twice");
     third.hard_kill();
+}
+
+#[test]
+fn reserved_port_remains_exclusive_until_gateway_spawn() {
+    let reservation = ReservedPort::new();
+    let port = reservation.port();
+
+    assert!(
+        TcpListener::bind(("127.0.0.1", port)).is_err(),
+        "the gateway port must remain reserved before spawn"
+    );
+
+    reservation.release();
+    TcpListener::bind(("127.0.0.1", port)).expect("released port can be rebound");
+}
+
+#[test]
+fn bounded_gateway_log_keeps_the_failure_tail() {
+    let data_dir = IsolatedDir::new();
+    let log_path = data_dir.path().join("gateway.log");
+    fs::write(
+        &log_path,
+        format!("discard-me:{}\nuseful failure tail", "x".repeat(32 * 1024)),
+    )
+    .expect("write gateway log fixture");
+
+    let output = bounded_gateway_log(&log_path, 4096);
+
+    assert!(output.len() <= 4096);
+    assert!(!output.contains("discard-me"));
+    assert!(output.ends_with("useful failure tail"));
 }
