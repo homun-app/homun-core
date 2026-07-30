@@ -20,6 +20,7 @@ mod db_migrate;
 mod document_content;
 mod effect_host;
 mod execution_adapter_context;
+mod execution_host;
 mod execution_projection;
 mod execution_runtime;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.

@@ -93,6 +93,17 @@ fn gateway_adapter_trait_does_not_receive_unrestricted_app_state() {
 }
 
 #[test]
+fn execution_adapter_context_does_not_retain_unrestricted_app_state() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let context = production_source(&root.join("src/execution_adapter_context.rs"));
+
+    assert!(
+        !context.contains("AppState"),
+        "the adapter context must retain only the validated contract and restricted host"
+    );
+}
+
+#[test]
 fn channel_and_stream_markers_do_not_own_lifecycle() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

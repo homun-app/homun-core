@@ -56,6 +56,14 @@ proiezione chat prima di avviare i worker. Il contratto completo, lo stato della
 migrazione e le lacune residue sono in
 [`2026-07-28-unified-execution-protocol-design.md`](../superpowers/specs/2026-07-28-unified-execution-protocol-design.md).
 
+Il confine adapter è composto da un solo contratto stabile: il runtime passa
+`ExecutionAdapterContext`, che contiene contratto validato e `ExecutionHost` ristretto.
+Solo l'implementazione gateway dell'host possiede `AppState`; gli adapter non possono
+leggere direttamente store, Vault, connettori o sandbox. Cancellazione, lease loss e
+deadline impediscono nuovi effect claim nella transazione della receipt. Un risultato
+adapter arrivato oltre deadline viene sostituito dal failure canonico prima del commit;
+un effetto già remoto resta invece governato dalla receipt e dall'eventuale stato `Uncertain`.
+
 Gli adapter di dominio sincroni vengono sempre isolati da `ExecutionRuntime` sul
 blocking pool di Tokio. Nessun adapter può quindi costruire client HTTP bloccanti,
 eseguire SQLite o guidare il loop sincrono dentro il contesto async del projector.

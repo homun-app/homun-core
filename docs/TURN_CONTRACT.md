@@ -108,8 +108,12 @@ resta leggibile soltanto nel bridge di recovery dei record steering precedenti.
    lease con fence maggiore.
 3. Il runtime controlla il budget prima del dispatch e non registra retry il cui wake
    raggiunge o supera la deadline. Il registry risolve soltanto kind esatti o prefissi
-   registrati e consegna all'adapter un `ExecutionAdapterContext`, mai `AppState`; il
-   context entra nel dominio registrato senza esporre store o client generici.
+   registrati e consegna all'adapter un `ExecutionAdapterContext`, mai `AppState`. Il
+   context conserva solo contratto validato e `Arc<dyn ExecutionHost>`; soltanto
+   `GatewayExecutionHost` possiede lo stato applicativo e offre le operazioni delle famiglie
+   registrate, senza esporre store, Vault, connettori o client generici. Dopo il ritorno
+   dell'adapter il runtime ricontrolla la deadline: cancellazione autorevole, deadline
+   scaduta e outcome adapter sono applicati in quest'ordine prima del commit journal.
 4. Ogni effetto non-read viene autorizzato e registrato prima del dispatch; replay,
    esito incerto e compensazione usano la receipt, non il testo del modello. La
    receipt è identificata dalla chiamata logica (`execution + operation + call_id`),
@@ -119,7 +123,8 @@ resta leggibile soltanto nel bridge di recovery dei record steering precedenti.
    entrano nello stesso host. Sandbox, Vault, connector gate, browser safety e payment
    approval restano gate di dominio più stretti, non protocolli alternativi.
    Per le capability, prepare e claim sono una sola transazione che verifica task running,
-   owner, generazione della lease, revisione e fencing token autorevoli. Gli output di projection sono invece
+   owner, generazione della lease, lease non scaduta, deadline/expiry non raggiunte,
+   revisione e fencing token autorevoli. Gli output di projection sono invece
    legati atomicamente alla revisione/fence e al claim outbox corrente, perché possono essere
    rigiocati dopo il terminal. `EffectHost` rifiuta un adapter output senza quel claim e la
    stessa transazione verifica il claim prima di preparare o reclamare la receipt.
@@ -321,7 +326,10 @@ conversazione e non il lavoro in corso.
     dispatch ogni classe dichiarata ma assente dalla policy autorevole.
 13. Una deadline scaduta termina come `Failed(permanent,
     execution_deadline_exceeded)` senza invocare l'adapter; un backoff non può creare
-    un wake alla deadline o oltre.
+    un wake alla deadline o oltre. Se scade durante un'attività già avviata, nessun nuovo
+    effetto può reclamare una receipt e l'eventuale risultato tardivo non può diventare
+    `Completed`. Un effetto remoto già partito conserva la propria receipt e non viene
+    dichiarato annullato o ritentato senza evidenza.
 14. Una sospensione user non è proiettata finché payload HITL e `OpenWork` non sono
     persistiti. Errori di store, lock o serializzazione mantengono la proiezione
     pendente e rigiocabile; non sono convertiti in snapshot vuoti.

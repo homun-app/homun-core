@@ -1,52 +1,24 @@
-use crate::{
-    AppState, LocalTaskExecutionError, TaskRecord, execute_capability_browser_task,
-    execute_capability_generic, execute_proactive_prompt_task, execute_shell_read_only_task,
-    execute_subagent_task,
-};
-use local_first_execution_protocol::{
-    ExecutionFailure, ExecutionOutcome, ValidatedExecutionContract,
-};
+use crate::LocalTaskExecutionError;
+use crate::execution_host::ExecutionHost;
+use local_first_execution_protocol::{ExecutionOutcome, ValidatedExecutionContract};
+use std::sync::Arc;
 
 /// Restricted host boundary available to execution adapters.
 ///
-/// The application state remains private to this module so adapter implementations
+/// The application state remains private to the host implementation so adapters
 /// can only enter the capability-specific dispatch paths exposed below.
 pub(crate) struct ExecutionAdapterContext {
-    state: AppState,
+    host: Arc<dyn ExecutionHost>,
     contract: ValidatedExecutionContract,
 }
 
 impl ExecutionAdapterContext {
-    pub(crate) fn new(state: AppState, contract: ValidatedExecutionContract) -> Self {
-        Self { state, contract }
+    pub(crate) fn new(host: Arc<dyn ExecutionHost>, contract: ValidatedExecutionContract) -> Self {
+        Self { host, contract }
     }
 
     pub(crate) fn authorize_declared_effects(&self) -> Result<(), LocalTaskExecutionError> {
-        let task = self.task()?;
-        let declared_policy = crate::execution_runtime::execution_policy_for_task(&task);
-        let denied = declared_policy
-            .allowed_effects
-            .iter()
-            .filter(|effect| {
-                matches!(
-                    effect,
-                    local_first_execution_protocol::EffectClass::FilesystemWrite
-                        | local_first_execution_protocol::EffectClass::ArtifactCreation
-                        | local_first_execution_protocol::EffectClass::ExternalWrite
-                ) && !self
-                    .contract
-                    .as_ref()
-                    .policy
-                    .allowed_effects
-                    .contains(effect)
-            })
-            .collect::<Vec<_>>();
-        if denied.is_empty() {
-            return Ok(());
-        }
-        Err(LocalTaskExecutionError {
-            message: format!("execution contract denies task-declared effect classes: {denied:?}"),
-        })
+        self.host.authorize_declared_effects(&self.contract)
     }
 
     #[cfg(test)]
@@ -57,57 +29,30 @@ impl ExecutionAdapterContext {
     pub(crate) fn execute_capability_browser(
         &self,
     ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
-        let task = self.task()?;
-        execute_capability_browser_task(&self.state, &task, &self.contract)
+        self.host.execute_capability_browser(&self.contract)
     }
 
     pub(crate) fn execute_capability(&self) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
-        let task = self.task()?;
-        execute_capability_generic(&self.state, &task, &self.contract)
+        self.host.execute_capability(&self.contract)
     }
 
     pub(crate) fn execute_subagent(&self) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
-        let task = self.task()?;
-        execute_subagent_task(&self.state, &task, &self.contract)
+        self.host.execute_subagent(&self.contract)
     }
 
     pub(crate) fn execute_proactive_prompt(
         &self,
     ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
-        let task = self.task()?;
-        execute_proactive_prompt_task(&self.state, &task, &self.contract)
+        self.host.execute_proactive_prompt(&self.contract)
     }
 
     pub(crate) fn execute_chat_turn(&self) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
-        let task = self.task()?;
-        let outcome =
-            crate::turn_executor::execute_chat_turn_task(&self.state, &task, &self.contract)
-                .unwrap_or_else(|error| ExecutionOutcome::Failed {
-                    failure: ExecutionFailure::permanent(
-                        "chat_execution_failed",
-                        crate::redact_sensitive_text(&error.message),
-                    ),
-                });
-        Ok(outcome)
+        self.host.execute_chat_turn(&self.contract)
     }
 
     pub(crate) fn execute_shell_read_only(
         &self,
     ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
-        let task = self.task()?;
-        execute_shell_read_only_task(&self.state, &task)
-    }
-
-    fn task(&self) -> Result<TaskRecord, LocalTaskExecutionError> {
-        serde_json::from_value(self.contract.as_ref().input.clone()).map_err(|error| {
-            LocalTaskExecutionError {
-                message: format!("invalid execution task input: {error}"),
-            }
-        })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn test_state(&self) -> &AppState {
-        &self.state
+        self.host.execute_shell_read_only(&self.contract)
     }
 }

@@ -1897,12 +1897,15 @@ impl TaskStore {
             .optional()?
             .ok_or_else(|| TaskRuntimeError::NotFound(new_receipt.execution_id.clone()))?;
         let task: TaskRecord = serde_json::from_str(&task_json)?;
+        let now = OffsetDateTime::now_utc();
         let lease_current = task.status == TaskStatus::Running
             && task.lease_owner.as_deref() == Some(expected_owner)
             && task.effective_lease_fencing_token() == Some(expected_fencing_token)
             && task
                 .lease_expires_at
-                .is_some_and(|expires_at| expires_at > OffsetDateTime::now_utc());
+                .is_some_and(|expires_at| expires_at > now)
+            && task.deadline.is_none_or(|deadline| deadline > now)
+            && task.expires_at.is_none_or(|expires_at| expires_at > now);
         let execution_current = tx.query_row(
             "SELECT COUNT(*) FROM executions
                  WHERE execution_id = ?1 AND revision = ?2 AND fencing_token = ?3

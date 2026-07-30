@@ -127,6 +127,52 @@ fn effect_claim_is_rejected_after_same_owner_reacquires_the_task() {
 }
 
 #[test]
+fn effect_claim_is_rejected_after_task_deadline() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let (contract, owner) = running_attempt(&store);
+    let fence = contract.as_ref().fencing_token;
+    let mut expired =
+        serde_json::from_value::<TaskRecord>(contract.as_ref().input.clone()).expect("task input");
+    expired.deadline = Some(OffsetDateTime::now_utc() - Duration::seconds(1));
+    store.insert_task(&expired).unwrap();
+
+    let error = store
+        .prepare_and_claim_effect_receipt(&new_receipt(), &owner, fence)
+        .expect_err("a task past its deadline must not dispatch an effect");
+
+    assert!(error.to_string().contains("stale execution attempt"));
+    assert!(
+        store
+            .list_effect_receipts_for_execution("execution-1", 1)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn effect_claim_is_rejected_after_task_expiry() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let (contract, owner) = running_attempt(&store);
+    let fence = contract.as_ref().fencing_token;
+    let mut expired =
+        serde_json::from_value::<TaskRecord>(contract.as_ref().input.clone()).expect("task input");
+    expired.expires_at = Some(OffsetDateTime::now_utc() - Duration::seconds(1));
+    store.insert_task(&expired).unwrap();
+
+    let error = store
+        .prepare_and_claim_effect_receipt(&new_receipt(), &owner, fence)
+        .expect_err("an expired task must not dispatch an effect");
+
+    assert!(error.to_string().contains("stale execution attempt"));
+    assert!(
+        store
+            .list_effect_receipts_for_execution("execution-1", 1)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
 fn completed_effect_replays_after_attempt_is_reclaimed() {
     let store = TaskStore::open_in_memory().unwrap();
     let (contract, owner) = running_attempt(&store);

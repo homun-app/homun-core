@@ -1,4 +1,5 @@
 use crate::execution_adapter_context::ExecutionAdapterContext;
+use crate::execution_host::GatewayExecutionHost;
 use crate::task_registry::TaskExecutorRegistry;
 use crate::{
     AppState, LocalTaskExecutionError, PendingExecutorApproval, SurfaceKind,
@@ -173,9 +174,8 @@ impl ExecutionRuntime {
         } else {
             match self.registry.resolve(&contract.as_ref().kind) {
                 Some(adapter) => {
-                    let adapter_state = state.clone();
-                    let adapter_context =
-                        ExecutionAdapterContext::new(adapter_state, contract.clone());
+                    let host = Arc::new(GatewayExecutionHost::new(state.clone()));
+                    let adapter_context = ExecutionAdapterContext::new(host, contract.clone());
                     if let Err(error) = adapter_context.authorize_declared_effects() {
                         ExecutionOutcome::Failed {
                             failure: ExecutionFailure::permanent(
@@ -213,13 +213,6 @@ impl ExecutionRuntime {
             }
         };
 
-        let pre_checkpoint_task = current_task(state, &task)?;
-        if pre_checkpoint_task.status != TaskStatus::Cancelled
-            && !same_lease_generation(&pre_checkpoint_task, &task)
-        {
-            return Err(runtime_error(LEASE_LOST_MESSAGE));
-        }
-
         let pre_commit_task = current_task(state, &task)?;
         if pre_commit_task.status != TaskStatus::Cancelled
             && !same_lease_generation(&pre_commit_task, &task)
@@ -232,6 +225,8 @@ impl ExecutionRuntime {
             ExecutionOutcome::Cancelled {
                 reason: CancelReason::User,
             }
+        } else if contract_deadline_reached(&contract, OffsetDateTime::now_utc()) {
+            deadline_exceeded_outcome("Execution deadline elapsed while the adapter was running.")
         } else {
             adapter_outcome
         };
@@ -957,6 +952,7 @@ mod tests {
 
     struct JournalStateRecordingAdapter {
         states: Arc<Mutex<Vec<ExecutionState>>>,
+        state: AppState,
     }
 
     impl GatewayExecutionAdapter for JournalStateRecordingAdapter {
@@ -965,8 +961,8 @@ mod tests {
             context: &ExecutionAdapterContext,
         ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
             let execution_id = context.contract().as_ref().execution_id.as_str();
-            let state = context
-                .test_state()
+            let state = self
+                .state
                 .task_store
                 .lock()
                 .expect("task store")
@@ -997,18 +993,19 @@ mod tests {
         }
     }
 
-    struct SuspendingCanonicalAdapter;
+    struct SuspendingCanonicalAdapter {
+        state: AppState,
+    }
 
     impl GatewayExecutionAdapter for SuspendingCanonicalAdapter {
         fn execute(
             &self,
             context: &ExecutionAdapterContext,
         ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
-            let state = context.test_state();
             let contract = context.contract();
             let task = super::task_from_contract(contract)?;
             super::suspend_task_execution(
-                state,
+                &self.state,
                 &task,
                 contract,
                 WakeCondition::At {
@@ -1033,18 +1030,19 @@ mod tests {
         }
     }
 
-    struct LeaseStealingAdapter;
+    struct LeaseStealingAdapter {
+        state: AppState,
+    }
 
     impl GatewayExecutionAdapter for LeaseStealingAdapter {
         fn execute(
             &self,
             context: &ExecutionAdapterContext,
         ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
-            let state = context.test_state();
             let contract = context.contract();
             let mut task = super::task_from_contract(contract).expect("task from contract");
             task.lease_owner = Some("replacement-worker".to_string());
-            state
+            self.state
                 .task_store
                 .lock()
                 .expect("task store")
@@ -1062,6 +1060,8 @@ mod tests {
 
     struct BlockingClientAdapter;
 
+    struct LateSuccessAdapter;
+
     impl GatewayExecutionAdapter for BlockingClientAdapter {
         fn execute(
             &self,
@@ -1070,6 +1070,18 @@ mod tests {
             drop(reqwest::blocking::Client::new());
             Ok(ExecutionOutcome::completed(
                 serde_json::json!({"blocking_adapter": "completed"}),
+            ))
+        }
+    }
+
+    impl GatewayExecutionAdapter for LateSuccessAdapter {
+        fn execute(
+            &self,
+            _context: &ExecutionAdapterContext,
+        ) -> Result<ExecutionOutcome, LocalTaskExecutionError> {
+            std::thread::sleep(std::time::Duration::from_millis(2_500));
+            Ok(ExecutionOutcome::completed(
+                serde_json::json!({"late": true}),
             ))
         }
     }
@@ -1413,15 +1425,16 @@ mod tests {
     #[tokio::test]
     async fn journal_attempt_is_running_while_the_adapter_executes() {
         let states = Arc::new(Mutex::new(Vec::new()));
+        let state = AppState::for_tests();
         let mut registry = TaskExecutorRegistry::new();
         registry.register(
             "capability.*",
             Arc::new(JournalStateRecordingAdapter {
                 states: states.clone(),
+                state: state.clone(),
             }),
         );
         let runtime = ExecutionRuntime::new(registry);
-        let state = AppState::for_tests();
         let contract = contract("capability.test", "running-attempt-1");
         insert_contract_task(&state, &contract);
 
@@ -1680,10 +1693,15 @@ mod tests {
 
     #[tokio::test]
     async fn suspended_outcome_references_the_persisted_task_checkpoint() {
-        let mut registry = TaskExecutorRegistry::new();
-        registry.register("capability.*", Arc::new(SuspendingCanonicalAdapter));
-        let runtime = ExecutionRuntime::new(registry);
         let state = AppState::for_tests();
+        let mut registry = TaskExecutorRegistry::new();
+        registry.register(
+            "capability.*",
+            Arc::new(SuspendingCanonicalAdapter {
+                state: state.clone(),
+            }),
+        );
+        let runtime = ExecutionRuntime::new(registry);
         let contract = contract("capability.test", "checkpoint-1");
         insert_contract_task(&state, &contract);
 
@@ -1735,10 +1753,15 @@ mod tests {
 
     #[tokio::test]
     async fn stolen_lease_cannot_commit_the_adapter_outcome() {
-        let mut registry = TaskExecutorRegistry::new();
-        registry.register("capability.*", Arc::new(LeaseStealingAdapter));
-        let runtime = ExecutionRuntime::new(registry);
         let state = AppState::for_tests();
+        let mut registry = TaskExecutorRegistry::new();
+        registry.register(
+            "capability.*",
+            Arc::new(LeaseStealingAdapter {
+                state: state.clone(),
+            }),
+        );
+        let runtime = ExecutionRuntime::new(registry);
         let contract = contract("capability.test", "stolen-lease-1");
         insert_contract_task(&state, &contract);
 
@@ -1899,6 +1922,31 @@ mod tests {
             .expect("elapsed deadline becomes a canonical failure");
 
         assert!(calls.lock().expect("calls").is_empty());
+        assert!(matches!(
+            result.outcome(),
+            ExecutionOutcome::Failed { failure }
+                if failure.code == "execution_deadline_exceeded"
+                    && failure.class == local_first_execution_protocol::FailureClass::Permanent
+        ));
+    }
+
+    #[tokio::test]
+    async fn adapter_success_returned_after_deadline_is_rejected() {
+        let mut registry = TaskExecutorRegistry::new();
+        registry.register("capability.*", Arc::new(LateSuccessAdapter));
+        let runtime = ExecutionRuntime::new(registry);
+        let state = AppState::for_tests();
+        let initial = contract("capability.test", "deadline-during-adapter-1");
+        let mut task = super::task_from_contract(&initial).expect("task from contract");
+        task.deadline = Some(OffsetDateTime::now_utc() + Duration::seconds(2));
+        let contract = super::contract_for_acquired_task(&task).expect("deadline contract");
+        insert_contract_task(&state, &contract);
+
+        let result = runtime
+            .execute(&state, contract)
+            .await
+            .expect("late success becomes a canonical deadline failure");
+
         assert!(matches!(
             result.outcome(),
             ExecutionOutcome::Failed { failure }
