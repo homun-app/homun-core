@@ -37,6 +37,17 @@ impl fmt::Display for TaskRuntimeError {
 
 impl std::error::Error for TaskRuntimeError {}
 
+impl TaskRuntimeError {
+    pub fn is_transient_store_contention(&self) -> bool {
+        let Self::Store(message) = self else {
+            return false;
+        };
+        message.contains("database is locked")
+            || message.contains("database is busy")
+            || message.contains("database table is locked")
+    }
+}
+
 impl From<rusqlite::Error> for TaskRuntimeError {
     fn from(error: rusqlite::Error) -> Self {
         TaskRuntimeError::Store(error.to_string())
@@ -46,5 +57,25 @@ impl From<rusqlite::Error> for TaskRuntimeError {
 impl From<serde_json::Error> for TaskRuntimeError {
     fn from(error: serde_json::Error) -> Self {
         TaskRuntimeError::Store(error.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TaskRuntimeError;
+
+    #[test]
+    fn only_sqlite_busy_and_locked_store_errors_are_transient() {
+        assert!(
+            TaskRuntimeError::Store("database is locked".into()).is_transient_store_contention()
+        );
+        assert!(TaskRuntimeError::Store("database is busy".into()).is_transient_store_contention());
+        assert!(
+            !TaskRuntimeError::Store("no such table: tasks".into()).is_transient_store_contention()
+        );
+        assert!(
+            !TaskRuntimeError::Conflict("database is locked".into())
+                .is_transient_store_contention()
+        );
     }
 }

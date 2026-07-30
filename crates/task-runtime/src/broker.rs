@@ -101,6 +101,25 @@ impl std::fmt::Display for EnqueueError {
 
 impl std::error::Error for EnqueueError {}
 
+const TRANSIENT_ENQUEUE_ATTEMPTS: u32 = 5;
+
+fn retry_transient_enqueue<T>(
+    mut operation: impl FnMut() -> Result<T, EnqueueError>,
+) -> Result<T, EnqueueError> {
+    for attempt in 1..=TRANSIENT_ENQUEUE_ATTEMPTS {
+        match operation() {
+            Err(EnqueueError::Store(error))
+                if error.is_transient_store_contention()
+                    && attempt < TRANSIENT_ENQUEUE_ATTEMPTS =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(u64::from(attempt) * 40));
+            }
+            result => return result,
+        }
+    }
+    unreachable!("the bounded enqueue retry loop always returns")
+}
+
 /// Result of a successful enqueue.
 #[derive(Debug, Clone)]
 pub struct EnqueuedTurn {
@@ -479,37 +498,40 @@ pub fn enqueue_chat_turn_atomic<F>(
     insert_turn_messages: F,
 ) -> Result<EnqueuedTurn, EnqueueError>
 where
-    F: FnOnce(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
+    F: FnMut(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
 {
-    // Pre-check (the tx below hardens against races).
-    if let Some(active) = store.active_chat_turn_for_thread(&input.thread_id)? {
-        return Err(EnqueueError::ThreadBusy {
-            thread_id: input.thread_id.clone(),
-            active_turn_id: active,
-        });
-    }
-
-    let task = queued_chat_turn_task(user_id, workspace_id, input);
-    let task_id = task.task_id.clone();
-    let active = store.with_transaction(|tx| {
-        if let Some(active) = active_chat_turn_on(tx, &input.thread_id)? {
-            return Ok(Some(active));
+    let mut insert_turn_messages = insert_turn_messages;
+    retry_transient_enqueue(|| {
+        // Pre-check (the tx below hardens against races).
+        if let Some(active) = store.active_chat_turn_for_thread(&input.thread_id)? {
+            return Err(EnqueueError::ThreadBusy {
+                thread_id: input.thread_id.clone(),
+                active_turn_id: active,
+            });
         }
-        insert_turn_messages(tx)?;
-        insert_chat_turn_on(tx, &task, input)?;
-        Ok(None)
-    })?;
-    if let Some(active_turn_id) = active {
-        return Err(EnqueueError::ThreadBusy {
-            thread_id: input.thread_id.clone(),
-            active_turn_id,
-        });
-    }
 
-    Ok(EnqueuedTurn {
-        task_id,
-        thread_id: input.thread_id.clone(),
-        position_in_queue: 0,
+        let task = queued_chat_turn_task(user_id, workspace_id, input);
+        let task_id = task.task_id.clone();
+        let active = store.with_transaction(|tx| {
+            if let Some(active) = active_chat_turn_on(tx, &input.thread_id)? {
+                return Ok(Some(active));
+            }
+            insert_turn_messages(tx)?;
+            insert_chat_turn_on(tx, &task, input)?;
+            Ok(None)
+        })?;
+        if let Some(active_turn_id) = active {
+            return Err(EnqueueError::ThreadBusy {
+                thread_id: input.thread_id.clone(),
+                active_turn_id,
+            });
+        }
+
+        Ok(EnqueuedTurn {
+            task_id,
+            thread_id: input.thread_id.clone(),
+            position_in_queue: 0,
+        })
     })
 }
 
@@ -525,89 +547,92 @@ pub fn enqueue_or_steer_chat_turn_atomic<F, G>(
     _insert_steering_user_message: G,
 ) -> Result<EnqueueTurnOutcome, EnqueueError>
 where
-    F: FnOnce(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
+    F: FnMut(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
     G: FnOnce(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
 {
-    let objective_revision = store
-        .load_objective_contract(user_id.as_str(), workspace_id.as_str(), &input.thread_id)?
-        .map(|objective| objective.revision)
-        .unwrap_or(0);
-    let source_message_id = format!("local_user_{}", input.request_id);
-    let steering_input = NewTurnSteering {
-        source_message_id: source_message_id.clone(),
-        prompt: input.prompt.clone(),
-        visible_prompt: input
-            .visible_prompt
-            .clone()
-            .unwrap_or_else(|| input.prompt.clone()),
-        images: input.images.clone(),
-        attachments: input
-            .attachments
-            .clone()
-            .unwrap_or_else(|| Value::Array(Vec::new())),
-        mode: input.mode.clone(),
-        model: input.model.clone(),
-    };
-    let now = OffsetDateTime::now_utc().unix_timestamp();
-    let task = queued_chat_turn_task(user_id, workspace_id, input);
-    let outcome = store.with_transaction(|tx| {
-        let Some(active_turn_id) = active_chat_turn_on(tx, &input.thread_id)? else {
-            insert_turn_messages(tx)?;
-            insert_chat_turn_on(tx, &task, input)?;
-            return Ok(EnqueueOrSteerTransactionOutcome::Outcome(
-                EnqueueTurnOutcome::Enqueued(EnqueuedTurn {
-                    task_id: task.task_id.clone(),
-                    thread_id: input.thread_id.clone(),
-                    position_in_queue: 0,
-                }),
-            ));
+    let mut insert_turn_messages = insert_turn_messages;
+    retry_transient_enqueue(|| {
+        let objective_revision = store
+            .load_objective_contract(user_id.as_str(), workspace_id.as_str(), &input.thread_id)?
+            .map(|objective| objective.revision)
+            .unwrap_or(0);
+        let source_message_id = format!("local_user_{}", input.request_id);
+        let steering_input = NewTurnSteering {
+            source_message_id: source_message_id.clone(),
+            prompt: input.prompt.clone(),
+            visible_prompt: input
+                .visible_prompt
+                .clone()
+                .unwrap_or_else(|| input.prompt.clone()),
+            images: input.images.clone(),
+            attachments: input
+                .attachments
+                .clone()
+                .unwrap_or_else(|| Value::Array(Vec::new())),
+            mode: input.mode.clone(),
+            model: input.model.clone(),
         };
-        if input.source != ChatTurnSource::Interactive {
-            return Ok(EnqueueOrSteerTransactionOutcome::ThreadBusy(active_turn_id));
-        }
-        tx.execute(
-            "INSERT INTO turn_steering (
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let task = queued_chat_turn_task(user_id, workspace_id, input);
+        let outcome = store.with_transaction(|tx| {
+            let Some(active_turn_id) = active_chat_turn_on(tx, &input.thread_id)? else {
+                insert_turn_messages(tx)?;
+                insert_chat_turn_on(tx, &task, input)?;
+                return Ok(EnqueueOrSteerTransactionOutcome::Outcome(
+                    EnqueueTurnOutcome::Enqueued(EnqueuedTurn {
+                        task_id: task.task_id.clone(),
+                        thread_id: input.thread_id.clone(),
+                        position_in_queue: 0,
+                    }),
+                ));
+            };
+            if input.source != ChatTurnSource::Interactive {
+                return Ok(EnqueueOrSteerTransactionOutcome::ThreadBusy(active_turn_id));
+            }
+            tx.execute(
+                "INSERT INTO turn_steering (
                 user_id, workspace_id, thread_id, active_turn_id, source_message_id,
                 content, payload_json, objective_revision, status, revision, created_at, updated_at
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 1, ?9, ?9)
              ON CONFLICT(user_id, workspace_id, thread_id, source_message_id) DO NOTHING",
-            rusqlite::params![
+                rusqlite::params![
+                    user_id.as_str(),
+                    workspace_id.as_str(),
+                    input.thread_id,
+                    active_turn_id,
+                    source_message_id,
+                    steering_input.prompt,
+                    serde_json::to_string(&steering_input)?,
+                    objective_revision as i64,
+                    now,
+                ],
+            )?;
+            let steering = crate::store::load_turn_steering_by_source_message(
+                tx,
                 user_id.as_str(),
                 workspace_id.as_str(),
-                input.thread_id,
-                active_turn_id,
-                source_message_id,
-                steering_input.prompt,
-                serde_json::to_string(&steering_input)?,
-                objective_revision as i64,
-                now,
-            ],
-        )?;
-        let steering = crate::store::load_turn_steering_by_source_message(
-            tx,
-            user_id.as_str(),
-            workspace_id.as_str(),
-            &input.thread_id,
-            &source_message_id,
-        )?
-        .ok_or_else(|| TaskRuntimeError::Store("steering disappeared after append".into()))?;
-        Ok(EnqueueOrSteerTransactionOutcome::Outcome(
-            EnqueueTurnOutcome::SteeringQueued {
-                thread_id: input.thread_id.clone(),
-                active_turn_id,
-                steering: Box::new(steering),
-            },
-        ))
-    })?;
-    match outcome {
-        EnqueueOrSteerTransactionOutcome::Outcome(outcome) => Ok(outcome),
-        EnqueueOrSteerTransactionOutcome::ThreadBusy(active_turn_id) => {
-            Err(EnqueueError::ThreadBusy {
-                thread_id: input.thread_id.clone(),
-                active_turn_id,
-            })
+                &input.thread_id,
+                &source_message_id,
+            )?
+            .ok_or_else(|| TaskRuntimeError::Store("steering disappeared after append".into()))?;
+            Ok(EnqueueOrSteerTransactionOutcome::Outcome(
+                EnqueueTurnOutcome::SteeringQueued {
+                    thread_id: input.thread_id.clone(),
+                    active_turn_id,
+                    steering: Box::new(steering),
+                },
+            ))
+        })?;
+        match outcome {
+            EnqueueOrSteerTransactionOutcome::Outcome(outcome) => Ok(outcome),
+            EnqueueOrSteerTransactionOutcome::ThreadBusy(active_turn_id) => {
+                Err(EnqueueError::ThreadBusy {
+                    thread_id: input.thread_id.clone(),
+                    active_turn_id,
+                })
+            }
         }
-    }
+    })
 }
 
 ///
@@ -1386,6 +1411,38 @@ mod atomic_tests {
             source: ChatTurnSource::Interactive,
             approval: TurnApproval::Full,
         }
+    }
+
+    #[test]
+    fn transient_enqueue_contention_retries_with_a_fresh_attempt() {
+        let mut attempts = 0;
+        let result = retry_transient_enqueue(|| {
+            attempts += 1;
+            if attempts < 3 {
+                Err(EnqueueError::Store(TaskRuntimeError::Store(
+                    "database is locked".into(),
+                )))
+            } else {
+                Ok("enqueued")
+            }
+        });
+
+        assert_eq!(result.unwrap(), "enqueued");
+        assert_eq!(attempts, 3);
+    }
+
+    #[test]
+    fn permanent_enqueue_errors_are_not_retried() {
+        let mut attempts = 0;
+        let result: Result<(), EnqueueError> = retry_transient_enqueue(|| {
+            attempts += 1;
+            Err(EnqueueError::Store(TaskRuntimeError::Store(
+                "no such table: tasks".into(),
+            )))
+        });
+
+        assert!(matches!(result, Err(EnqueueError::Store(_))));
+        assert_eq!(attempts, 1);
     }
 
     #[test]

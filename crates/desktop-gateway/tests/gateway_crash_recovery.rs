@@ -156,8 +156,10 @@ fn wait_until_ready(process: &mut GatewayProcess, port: u16, data_dir: &Path) {
 }
 
 fn checked_json(response: Response, expected: u16) -> Value {
-    assert_eq!(response.status().as_u16(), expected);
-    response.json().expect("decode JSON response")
+    let status = response.status().as_u16();
+    let body = response.text().expect("read JSON response body");
+    assert_eq!(status, expected, "unexpected gateway response: {body}");
+    serde_json::from_str(&body).expect("decode JSON response")
 }
 
 fn create_thread(port: u16) -> String {
