@@ -10,6 +10,7 @@ class PreReleaseGateTests(unittest.TestCase):
 
         self.assertIn("rust format", labels)
         self.assertIn("rust clippy", labels)
+        self.assertIn("desktop dependency install", labels)
         self.assertIn("desktop dependency audit", labels)
         self.assertIn("task runtime tests", labels)
         self.assertIn("engine tests", labels)
@@ -51,11 +52,10 @@ class PreReleaseGateTests(unittest.TestCase):
                 "warnings",
             ],
         )
-        self.assertEqual(
-            plan[2].command,
-            ["npm", "audit", "--audit-level=high"],
-        )
+        self.assertEqual(plan[2].command, ["npm", "ci"])
         self.assertEqual(plan[2].cwd, gate.DESKTOP)
+        self.assertEqual(plan[3].command, ["npm", "audit", "--audit-level=high"])
+        self.assertEqual(plan[3].cwd, gate.DESKTOP)
         self.assertIn("capability tests", labels)
         self.assertIn("orchestrator tests", labels)
         self.assertIn("gateway tests", labels)
@@ -110,6 +110,7 @@ class PreReleaseGateTests(unittest.TestCase):
             [
                 "rust format",
                 "rust clippy",
+                "desktop dependency install",
                 "desktop dependency audit",
                 "capability tests",
                 "orchestrator tests",

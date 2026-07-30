@@ -63,6 +63,11 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "desktop dependency install",
+            ["npm", "ci"],
+            cwd=DESKTOP,
+        ),
+        Step(
             "desktop dependency audit",
             ["npm", "audit", "--audit-level=high"],
             cwd=DESKTOP,

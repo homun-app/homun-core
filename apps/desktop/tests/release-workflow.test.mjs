@@ -10,6 +10,10 @@ test("installer matrix depends on same-run release readiness", async () => {
 
   assert.match(workflow, /^  validate:\n    name: Release readiness$/m);
   assert.match(workflow, /python3 scripts\/pre_release_gate\.py/);
+  assert.doesNotMatch(
+    workflow,
+    /- name: Install desktop dependencies\n        working-directory: apps\/desktop\n        run: npm ci/,
+  );
   assert.match(
     workflow,
     /rustsec\/audit-check@69366f33c96575abad1ee0dba8212993eecbe998/,
