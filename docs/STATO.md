@@ -1,6 +1,6 @@
 # Stato — Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-07-31 (P0 live + browser crash sidecar).**
+> **Ultimo aggiornamento: 2026-07-31 (P0 live + sandbox write allow/deny).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -46,34 +46,48 @@ Homun = gateway Rust + Electron/React + sidecar. Contratto unico
 | **Vault reveal + PIN** | PASS corretto; **FAIL chiuso** su PIN sbagliato (`invalid_vault_pin`) |
 | Smoke S3/S4 (marker dal modello) | **FAIL** — modello locale non emette `VAULT_REVEAL`/`VAULT_PROPOSE`; contratto API Vault comunque verde |
 | **Browser crash sidecar** | PASS (vedi sotto) |
+| **Sandbox write allow/deny** | PASS fence+config (vedi sotto); chat model-driven **PARTIAL** |
 
 ### Browser crash sidecar — evidenza
 
 | Gate | Esito |
 | --- | --- |
-| `runtimes/browser-automation` `crash_recovery_stdio.test.ts` | PASS — after hard kill, restore `adopted_live_page` + stale generation rejected |
+| `crash_recovery_stdio.test.ts` | PASS — restore `adopted_live_page` + stale generation rejected |
 | `effect_host::tests::browser_action_process_loss_becomes_uncertain_and_never_executes_again` | PASS — process loss → `Uncertain`, no second execute |
-| Live SIGKILL sotto gateway `23328` | PASS — trovato `npm run start --silent` (cwd runtime temp Electron), kill durante browse S6-like; turn `completed` (timeout browse), slot `browser_session` liberabile; **nessuna** card Uncertain browser (il kill ha colpito il wrapper npm intorno al sub-agent, non un lease `ExternalWrite` mid-act) |
+| Live SIGKILL sotto gateway | PASS — kill `npm run start` durante browse; turn completed; no Uncertain card mid-act |
 
-Nota operativa: coda task può restare satura su `browser_session` dopo smoke interrotti — cancellare via `POST /api/tasks/{turn_id}/cancel` prima di un nuovo browse.
+### Sandbox write allow/deny — evidenza
+
+| Gate | Esito |
+| --- | --- |
+| `seatbelt_fence_allows_in_root_denies_out_of_root` | PASS — `sandbox-exec` scrive in-root; fuori (`$HOME`) → `Operation not permitted`, file assente |
+| `seatbelt_fence_allows_per_project_extra_writable_folder` | PASS |
+| `tool_safety::tests` (26) incluso `write_under_workspace_write_allows_only_inside_roots` | PASS |
+| `project_path_jail_blocks_escapes` / `absolute_jail_accepts_nested…` | PASS |
+| Live `GET /api/runtime/settings` | PASS — `sandbox_mode=workspace-write` |
+| Live workspace + policy | PASS — create folder workspace, `POST …/policy` → `workspace-write` |
+| Live thread folder bind | PASS — `POST /api/chat/threads/{id}/folder` |
+| Live chat `write_file` allow/deny | **PARTIAL** — allow turn stuck senza eventi (~6 min, poi cancel); deny completed senza creare file fuori root ma il modello ha risposto “no write_file tool” (non ha esercitato il fence via tool) |
+
+Autorità del residuo: **fence OS + jail + shadow policy + config live**. Il path agent/chat resta model-dependent (stessa classe di S3/S4).
 
 ### Residuo live
 
-- Write sandbox allow/deny end-to-end
 - Approval + resolve `Uncertain` applicato (`applied` / `not_applied`)
 - Presentazioni template + automazioni `pending_verification`
 - Smoke UI (menu/sidebar/temi)
-- (Opzionale) S3/S4 con modello più capace per i marker in chat
+- (Opzionale) S3/S4 / write chat con modello più capace
 
 ### Debito noto
 
 - `main.rs` ~89k; `ChatView.tsx` ~10k
 - `HOMUN_MEMORY_SERVICE` default OFF; `OrchestratorBrain` ancora materializza task
 - Profilo locale ora ha PIN Vault QA e due record sintetici (CF + targa) — solo metadata in list
+- Workspace QA `sandbox-write-probe` creati in temp durante collaudo (pulibili)
 
 ## Prossimo lavoro
 
-1. Residuo live: sandbox write E2E / uncertain resolve / presentazioni-automazioni / UI smoke.
+1. Residuo live: uncertain resolve / presentazioni-automazioni / UI smoke.
 2. P1 rifinitura UI.
 3. RC draft dopo evidenza sullo stesso SHA.
 
@@ -81,7 +95,7 @@ Nota operativa: coda task può restare satura su `browser_session` dopo smoke in
 
 ```text
 Continuo Homun. Repo: /Users/fabio/Projects/Homun/app, branch main.
-Leggi docs/STATO.md. P0 gate + Vault API + browser crash sidecar OK;
-S3/S4 marker model-driven ancora FAIL sul modello locale.
-Prossimo: sandbox write E2E o uncertain resolve o presentazioni/UI. Non pubblicare.
+Leggi docs/STATO.md. P0 gate + Vault + browser crash + sandbox fence OK;
+chat model-driven (S3/S4/write_file) ancora debole sul modello locale.
+Prossimo: uncertain resolve o presentazioni/UI. Non pubblicare.
 ```
