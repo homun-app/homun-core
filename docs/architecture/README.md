@@ -10,6 +10,8 @@ Mappe riscritte dal codice del workspace Cargo e di `apps/desktop`.
 | [`execution.md`](execution.md) | `ExecutionContract`, effect host, outbox, lease |
 | [`memory.md`](memory.md) | `MemoryFacade`, SQLite, flag pool/service |
 | [`desktop-ui.md`](desktop-ui.md) | Superfici Electron, chat, island |
+| [`contained-computer.md`](contained-computer.md) | Docker computer + setup API |
+| [`host-computer-control.md`](host-computer-control.md) | Helper macOS (separato dal Docker) |
 | [`runtime-flags.md`](runtime-flags.md) | `HOMUN_*` con default verificati |
 
 Prima di aggiungere una nuova pagina: `rg` sul simbolo, poi scrivi. Niente
