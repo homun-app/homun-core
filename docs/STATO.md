@@ -1,6 +1,6 @@
 # Stato — Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-07-31 (P0 live + S6 browser form fill).**
+> **Ultimo aggiornamento: 2026-07-31 (P0 live + Vault API).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -30,51 +30,48 @@ Homun = gateway Rust + Electron/React + sidecar. Contratto unico
 - Mappe `contained-computer` / `host-computer-control` ripristinate as-built
 
 **`scripts/production_smoke.py`** migrato al broker (`POST /api/chat/threads` +
-`/api/chat/turns` + poll events). Path legacy `generate_stream` rimosso.
+`/api/chat/turns` + poll events).
 
 **Live `electron:dev` (1420 / 18765):**
 
 | Check | Esito |
 | --- | --- |
-| Health | `ok:true`, no recovery/projection error |
-| Turno semplice / memoria (S1, S2) | PASS via production_smoke broker |
-| Due chat concorrenti | entrambe `completed` |
-| Cancel | 202 → `cancelled` |
-| Task queue | 200 |
-| Vault API | pin status + records OK; nessun CF fixture in plaintext nella list |
-| Runtime sandbox | `sandbox_mode=workspace-write` (settings) |
-| Uncertain effects API | 200 lista |
-| Hard restart | `SIGKILL` gateway → watchdog ripristina; health pulita; enqueue OK |
-| Piano URL morta (S7) | PASS (~4 min) |
-| Browser form fill (S6) | PASS (~5 min) |
-| Vault propose (S4) | **FAIL** — nessun marker `VAULT_PROPOSE` (pin vault `configured:false` sul profilo) |
+| Health / cancel / concurrent / restart | PASS (incluso SIGKILL → watchdog) |
+| S1, S2, S6, S7 | PASS (broker smoke) |
+| Runtime sandbox | `workspace-write` |
+| Uncertain effects API | 200 |
+| **Vault PIN setup** | PASS — PIN QA sintetico `246810` sul profilo locale |
+| **Vault seed CF + targa** | PASS via `/api/vault/proposals/accept` |
+| **Vault list redacted** | PASS — no CF/targa in plaintext |
+| **Vault reveal + PIN** | PASS corretto; **FAIL chiuso** su PIN sbagliato (`invalid_vault_pin`) |
+| Smoke S3/S4 (marker dal modello) | **FAIL** — modello locale non emette `VAULT_REVEAL`/`VAULT_PROPOSE`; contratto API Vault comunque verde |
 
 ### Residuo live
 
-- Vault reveal/propose con PIN/fixture sintetici
-- Browser crash sidecar (oltre al form fill S6)
+- Browser crash sidecar
 - Write sandbox allow/deny end-to-end
 - Approval + resolve `Uncertain` applicato
 - Presentazioni template + automazioni `pending_verification`
-- Smoke UI (menu/sidebar/temi) sullo SHA attuale
-- `GET /api/workspaces/{id}/policy` è **POST-only** (405 in GET) — ok, mode già su settings/list
+- Smoke UI (menu/sidebar/temi)
+- (Opzionale) S3/S4 con modello più capace per i marker in chat
 
 ### Debito noto
 
 - `main.rs` ~89k; `ChatView.tsx` ~10k
 - `HOMUN_MEMORY_SERVICE` default OFF; `OrchestratorBrain` ancora materializza task
+- Profilo locale ora ha PIN Vault QA e due record sintetici (CF + targa) — solo metadata in list
 
 ## Prossimo lavoro
 
-1. Residuo live sopra (partire da Vault con PIN o crash sidecar).
+1. Residuo live: crash sidecar / sandbox write / uncertain resolve / presentazioni-automazioni.
 2. P1 rifinitura UI.
-3. RC draft (`testing/release-candidate-matrix.md`) dopo evidenza sullo stesso SHA.
+3. RC draft dopo evidenza sullo stesso SHA.
 
 ## Prompt di ripartenza
 
 ```text
 Continuo Homun. Repo: /Users/fabio/Projects/Homun/app, branch main.
-Leggi docs/STATO.md. P0 gate verde; production_smoke sul broker; hard restart OK.
-Prossimo: residuo live (Vault+PIN, crash sidecar, presentazioni/automazioni) o P1 UI.
-Non pubblicare.
+Leggi docs/STATO.md. P0 gate + Vault API (PIN/reveal/redaction) OK; S3/S4 marker
+model-driven ancora FAIL sul modello locale.
+Prossimo: crash sidecar o sandbox write E2E o P1 UI. Non pubblicare.
 ```
