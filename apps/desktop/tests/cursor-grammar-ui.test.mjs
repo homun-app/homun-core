@@ -77,6 +77,14 @@ const runtimeContextPanel = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const adaptiveWorkspaceIsland = await readFile(
+  new URL("../src/components/AdaptiveWorkspaceIsland.tsx", import.meta.url),
+  "utf8",
+);
+const workspaceIslandStyles = await readFile(
+  new URL("../src/styles/workspace-island.css", import.meta.url),
+  "utf8",
+);
 const chatApi = await readFile(new URL("../src/lib/chatApi.ts", import.meta.url), "utf8");
 const coreBridge = await readFile(new URL("../src/lib/coreBridge.ts", import.meta.url), "utf8");
 const composerStyles = await readFile(
@@ -297,6 +305,22 @@ test("runtime panel exposes only approved redacted categories", () => {
   assert.match(runtimeContextPanel, /composer\.runtime\.nextTurnModel/);
   assert.match(runtimeContextPanel, /value\.selectedNextModel\s*\?\?/);
   assert.match(runtimeContextPanel, /<section[\s\S]*?aria-labelledby=/);
+});
+
+test("the adaptive workspace island replaces every persistent status owner", () => {
+  assert.match(chatView, /<AdaptiveWorkspaceIsland/);
+  assert.match(chatView, /projectWorkspaceSections/);
+  assert.match(adaptiveWorkspaceIsland, /useState<WorkspaceSectionId\s*\|\s*null>\(null\)/);
+  assert.match(adaptiveWorkspaceIsland, /role="region"/);
+  assert.match(workspaceIslandStyles, /\.workspace-island-rail/);
+  assert.doesNotMatch(
+    chatView,
+    /from "\.\/WorkspaceIsland"|<WorkspaceIsland\b|chat-status-stack|islandOpen/,
+  );
+  assert.doesNotMatch(
+    legacyStyles,
+    /\.chat-status-stack|\.unified-status-panel|\.workspace-island-pill|\.workspace-island-panel|--island-reserve/,
+  );
 });
 
 test("legacy CSS cannot recreate message, activity, or generated-file surfaces", () => {

@@ -13,6 +13,7 @@ import "./styles/menus.css";
 import "./styles/sidebar.css";
 import "./styles/chat.css";
 import "./styles/composer.css";
+import "./styles/workspace-island.css";
 
 initTheme();
 initAccent();

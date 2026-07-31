@@ -57,7 +57,6 @@ import {
   Sparkles,
   Square,
   SquareTerminal,
-  PanelRight,
   ThumbsDown,
   ThumbsUp,
   WandSparkles,
@@ -194,13 +193,17 @@ import { MarkdownEditor } from "./MarkdownEditor";
 import { RichMessage } from "./RichMessage";
 import { CodeView, DiffView, diffStats } from "./CodeView";
 import { ChatComputerPanel } from "./ChatComputerPanel";
-import { WorkspaceIsland } from "./WorkspaceIsland";
+import { AdaptiveWorkspaceIsland } from "./AdaptiveWorkspaceIsland";
 import { ActiveTurnStatus } from "./ActiveTurnStatus";
 import { PendingSteeringQueue } from "./PendingSteeringQueue";
 import { ChatHeaderMenu } from "./ChatHeaderMenu";
 import { InspectorWorkspace } from "./InspectorWorkspace";
 import { MemoryUsagePopover } from "./MemoryUsagePopover";
 import { ComposerShell, type ComposerModeOption } from "./ComposerShell";
+import {
+  projectWorkspaceSections,
+  type WorkspaceSectionId,
+} from "../lib/workspaceIslandSections";
 import type {
   ChatMessage,
   ChatMessageMetrics,
@@ -548,11 +551,7 @@ export function ChatView({
   const [streamHasVisibleText, setStreamHasVisibleText] = useState(false);
   const [autoContinueMessageId, setAutoContinueMessageId] = useState<string | null>(null);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
-  // The compact working island remains available while the universal inspector is hidden.
-  // Inspector tabs and their ordering are isolated by thread; App keys ChatView by thread id,
-  // so each mount restores only the current activity's validated descriptors.
-  const [islandOpen, setIslandOpen] = useState(true);
-  // Bumped when the user asks for the activity list, so the island expands it even when already open.
+  // Bumped when the user asks for the activity list; the adaptive island opens that exact section.
   const [activityNonce, setActivityNonce] = useState(0);
   const [inspector, dispatchInspector] = useReducer(inspectorWorkspaceReducer,
     loadInspectorState(thread.threadId,
@@ -1681,7 +1680,6 @@ export function ChatView({
 
   function openActivityIsland() {
     dispatchInspector({ type: "hideWorkspace" });
-    setIslandOpen(true);
     setActivityNonce((n) => n + 1);
   }
 
@@ -2945,18 +2943,26 @@ export function ChatView({
   }, [t, threadMessages]);
   const headerToolPolicy = thread.source ? t("chat.readOnlyChannel") : t("chat.fullLocalTools");
 
-  // The island column reserves space only when it has something to show (else the chat takes
-  // the full width). Content = the thread has messages AND there's a plan/activity/sources/
-  // subagents/live-computer/streaming signal — mirrors the island's own visibility.
-  const islandHasContent =
-    threadMessages.length > 0 &&
-    (workspacePlanSteps.length > 0 ||
-      conversationActivity.length > 0 ||
-      islandSources.length > 0 ||
-      projectedSubagents.length > 0 ||
-      computerLiveStatus.active ||
-      hasActiveTurn);
-  const islandColumnVisible = !inspector.open && islandOpen && islandHasContent;
+  const islandArtifacts = islandSources.filter((source) => source.action === "artifact");
+  const islandFileSources = islandSources.filter((source) => source.action === "files");
+  const workspaceSections = projectWorkspaceSections({
+    planSteps: workspacePlanSteps,
+    activity: [
+      ...conversationActivity,
+      ...projectedSubagents.map((subagent) => `${subagent.name}:${subagent.status}`),
+    ],
+    streaming: workInProgress,
+    executionStatus: turnAwaitingUser ? "waiting_user" : projectedTurnStatus,
+    browser: {
+      active: computerLiveStatus.active,
+      snapshotVerified: Boolean(previewDataUrl),
+      failed: computerControlError !== null,
+    },
+    artifacts: islandArtifacts.map((source) => ({
+      id: `${source.artifactThread ?? thread.threadId}:${source.artifactName ?? source.name}`,
+    })),
+    sources: islandFileSources.map((source) => ({ id: source.name })),
+  });
   const activeAssistantMessageId = streamingAssistantId ?? (
     !isStreaming && projectedActiveTurn
       ? [...threadMessages].reverse().find((message) => message.role === "assistant")?.id ?? null
@@ -2969,7 +2975,7 @@ export function ChatView({
         inspector.focused ? " inspector-focused" : ""
       }${
         threadMessages.length === 0 ? " is-empty" : ""
-      }${islandColumnVisible ? "" : " island-collapsed"}`}
+      }`}
       aria-labelledby="chat-title"
     >
       <header className="task-topbar">
@@ -3001,18 +3007,6 @@ export function ChatView({
           </div>
         </div>
         <span className="task-header-actions">
-          {islandHasContent && (
-            <button
-              type="button"
-              className={`chat-header-menu-trigger${islandOpen ? " active" : ""}`}
-              title={t("chat.panel")}
-              aria-label={t("chat.panel")}
-              aria-pressed={islandOpen}
-              onClick={() => setIslandOpen((value) => !value)}
-            >
-              <PanelRight size={17} />
-            </button>
-          )}
           <ChatHeaderMenu
             onOpenInspector={openUtilityTab}
             onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
@@ -3020,46 +3014,122 @@ export function ChatView({
         </span>
       </header>
 
-      <div className="chat-status-stack" aria-label="Live workspace status">
-        {/* One fused cockpit. The separate ProjectContextPanel (objective + a verbose
-            "open loops" list) was retired: the island owns the objective, and the loop
-            list read as clutter. Everything the agent shows lives in this single card. */}
-        <div className="unified-status-panel">
-          <WorkspaceIsland
-            openActivityNonce={activityNonce}
-            threadId={thread.threadId}
-            objective={projectObjective}
-            activitySteps={conversationActivity}
-            computerActivity={computerLiveStatus.activity}
-            computerLive={computerLiveStatus.active}
-            planSteps={workspacePlanSteps}
-            sources={islandSources}
-            subagents={projectedSubagents}
-            streaming={workInProgress}
-            status={streamStatus}
-            threadHasMessages={threadMessages.length > 0}
-            columnMode
-            onCollapseColumn={() => setIslandOpen(false)}
-            onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
-            onExportChat={() => void exportChatMarkdown()}
-            onOpenInspector={openUtilityTab}
-          />
-          {browserBudgetMessage && !workInProgress && (
-            <div className="browser-budget-notice" role="status">
-              <AlertTriangle size={15} aria-hidden="true" />
-              <span>{browserBudgetMessage}</span>
-              <button
-                type="button"
-                disabled={!browserBudgetAssistantId}
-                onClick={() => {
-                  if (browserBudgetAssistantId) regenerateAnswer(browserBudgetAssistantId);
-                }}
-              >
-                {t("chat.browserBudget.retry")}
-              </button>
+      <AdaptiveWorkspaceIsland
+        threadId={thread.threadId}
+        sections={workspaceSections}
+        disabled={inspector.open}
+        openSectionRequest={{ section: "activity", nonce: activityNonce }}
+        renderSection={(section: WorkspaceSectionId) => {
+          if (section === "activity") {
+            return (
+              <div className="workspace-island-activity">
+                {projectObjective ? (
+                  <div className="workspace-island-objective">
+                    <span>{t("projectContext.objective")}</span>
+                    <p>{projectObjective}</p>
+                  </div>
+                ) : null}
+                {workspacePlanSteps.length > 0 ? (
+                  <div className="workspace-island-block">
+                    <div className="workspace-island-block-title">
+                      <span>{t("chat.activityProgress")}</span>
+                      <em>
+                        {workspacePlanSteps.filter((step) => step.status === "done").length}/
+                        {workspacePlanSteps.length}
+                      </em>
+                    </div>
+                    <ol className="workspace-island-list">
+                      {workspacePlanSteps.map((step, index) => (
+                        <li key={`${index}-${step.title}`} className={`status-${step.status}`}>
+                          <span className="workspace-island-state" aria-hidden="true" />
+                          <span>{step.title}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}
+                {projectedSubagents.length > 0 ? (
+                  <div className="workspace-island-block">
+                    <div className="workspace-island-block-title">
+                      <span>{t("chat.inspector.views.subagents")}</span>
+                      <em>{projectedSubagents.length}</em>
+                    </div>
+                    <ul className="workspace-island-list">
+                      {projectedSubagents.map((subagent, index) => (
+                        <li key={`${index}-${subagent.name}`} className={`status-${subagent.status}`}>
+                          <span className="workspace-island-state" aria-hidden="true" />
+                          <span>{subagent.name}</span>
+                          <em>{subagent.status}</em>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {conversationActivity.length > 0 ? (
+                  <div className="workspace-island-block">
+                    <div className="workspace-island-block-title">
+                      <span>{workInProgress ? t("chat.activity") : t("chat.lastActivity")}</span>
+                      <em>{conversationActivity.length}</em>
+                    </div>
+                    <ol className="workspace-island-activity-list">
+                      {conversationActivity.slice(-40).map((step, index) => (
+                        <li key={`${index}-${step.slice(0, 24)}`}>
+                          {step.replace(/^(?:\p{Extended_Pictographic}|️|‍|\s)+/u, "").trim()}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}
+                {browserBudgetMessage && !workInProgress ? (
+                  <div className="browser-budget-notice" role="status">
+                    <AlertTriangle size={15} aria-hidden="true" />
+                    <span>{browserBudgetMessage}</span>
+                    <button
+                      type="button"
+                      disabled={!browserBudgetAssistantId}
+                      onClick={() => {
+                        if (browserBudgetAssistantId) regenerateAnswer(browserBudgetAssistantId);
+                      }}
+                    >
+                      {t("chat.browserBudget.retry")}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            );
+          }
+          if (section === "browser") {
+            return (
+              <div className="workspace-island-browser">
+                {previewDataUrl ? (
+                  <img src={previewDataUrl} alt={computerSession.previewTitle} />
+                ) : null}
+                <button type="button" onClick={() => openUtilityTab("computer")}>
+                  <Monitor size={15} aria-hidden="true" />
+                  <span>{t("chat.inspector.views.computer")}</span>
+                </button>
+              </div>
+            );
+          }
+          const rows = section === "artifacts" ? islandArtifacts : islandFileSources;
+          return (
+            <div className="workspace-island-files">
+              {rows.map((source, index) => (
+                <button
+                  type="button"
+                  key={`${index}-${source.name}`}
+                  onClick={() => openUtilityTab(source.action === "artifact" ? "artifact" : "file")}
+                >
+                  {source.kind === "image" ? <FileImage size={15} /> : <FileText size={15} />}
+                  <span>{source.name}</span>
+                  {source.meta ? <em>{source.meta}</em> : null}
+                </button>
+              ))}
             </div>
-          )}
-        </div>
+          );
+        }}
+      />
+      <div className="chat-computer-runtime">
         <ChatComputerPanel threadId={thread.threadId} onLiveChange={setComputerLiveStatus} />
       </div>
 

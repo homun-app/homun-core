@@ -606,6 +606,12 @@
     "steeringApplying": "Aplicando",
     "steeringHeld": "Actividad detenida",
     "activity": "Actividad",
+    "workspaceIsland": {
+      "activity": "Actividad",
+      "browser": "Navegador",
+      "artifacts": "Artefactos",
+      "sources": "Fuentes"
+    },
     "lastActivity": "Última actividad",
     "sendNow": "Enviar ahora",
     "editInstruction": "Editar",

@@ -187,14 +187,14 @@ assertContains(
   "completion uses a fixed teal dot",
 );
 assertSource("src/components/ChatView.tsx", [
-  'function openActivityIsland() {\n    dispatchInspector({ type: "hideWorkspace" });\n    setIslandOpen(true);',
+  'function openActivityIsland() {\n    dispatchInspector({ type: "hideWorkspace" });\n    setActivityNonce((n) => n + 1);',
   "onOpenActivity={openActivityIsland}",
   'if (result.status === "queued")',
 ]);
 assertNotContains(
   "src/components/ChatView.tsx",
-  "onOpenActivity={() => setIslandOpen(true)}",
-  "Every Activity action must close the inspector before opening the Island",
+  "setIslandOpen",
+  "Activity must target the adaptive section instead of reviving a persistent panel owner",
 );
 assertContains("src/components/ComposerShell.tsx", "{props.streaming ? (", "Stop must remain available while the composer stays operational");
 assertContains("src/components/ComposerShell.tsx", ": canSend ? (", "Send must remain available independently from Stop");
@@ -348,10 +348,10 @@ assertMatches(
 assertContains("src/styles.css", ":root[data-theme=\"dark\"]", "dark surface theme must define CSS tokens");
 assertContains("src/styles.css", "color-scheme: dark", "dark surface theme must advertise dark controls to the browser");
 assertContains("src/components/SettingsView.tsx", "dark:", "Appearance picker previews must include literal dark swatch values");
-assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 94%, transparent);", "Workspace Island pill must inherit the active surface theme");
-assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 96%, transparent);", "Workspace Island panel/menu must inherit the active surface theme");
-assertContains("src/components/ChatView.tsx", "chat-status-stack", "Workspace and Computer islands must share one status stack");
-assertContains("src/styles.css", ".chat-status-stack", "Workspace and Computer islands must be laid out by one stack");
+assertContains("src/styles/workspace-island.css", "background: var(--surface);", "Adaptive workspace surfaces must inherit the active theme");
+assertContains("src/components/ChatView.tsx", "<AdaptiveWorkspaceIsland", "Chat must delegate factual sections to the adaptive island");
+assertNotContains("src/components/ChatView.tsx", "chat-status-stack", "The persistent status stack must stay retired");
+assertNotContains("src/styles.css", ".chat-status-stack", "Legacy status-stack geometry must stay retired");
 assertContains("src/styles.css", ".cc-dock {\n  position: relative;", "Computer dock must not use an independent absolute position that overlaps Workspace Island");
 assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 95%, transparent);", "Computer dock must inherit the active surface theme");
 assertNotContains("src/styles.css", "background: rgba(255, 255, 255, 0.98);", "Workspace Island pill must not force a light background");
@@ -726,47 +726,18 @@ assertMatches(
   /isStreamingMessage \? \([\s\S]*?<AssistantMessageBody[\s\S]*?\n\s+streaming\n[\s\S]*?\)/m,
   "streaming answers must keep rich markdown/progress parsing enabled while streaming",
 );
-assertContains("src/components/ChatView.tsx", "<WorkspaceIsland", "closed operational plan markers must feed the ambient workspace island");
-assertContains("src/components/ChatView.tsx", "workspacePlanSteps", "workspace island must derive progress from closed operational plan markers");
-assertContains("src/components/WorkspaceIsland.tsx", "Panel mode", "workspace island must expose its expand/collapse preference menu");
-assertContains("src/components/WorkspaceIsland.tsx", "wi-progress", "workspace island must render collapsible progress inside the island");
-assertContains("src/components/WorkspaceIsland.tsx", "if (!hasWorkspaceState && !hadWorkspaceState) return null", "workspace island must stay hidden when a thread has no real workspace state, while preserving completed state after a run");
-assertContains("src/components/ChatView.tsx", "threadHasMessages={threadMessages.length > 0}", "workspace island must not treat project memory artifacts as state for an empty new chat");
-assertContains("src/components/WorkspaceIsland.tsx", "(threadHasMessages || streaming || computerLive) &&", "workspace island must appear for thread-owned content, stream, or owned live computer work");
-assertContains("src/components/ChatView.tsx", "onOpenInspector={openUtilityTab}", "chat header and island must route views through the inspector reducer");
-// The redundant "Plan N/M" row was removed — Progress IS the plan (one section, not two).
-// Sources (artifacts + uploaded files) are fused into the island; each opens the Workbench.
-assertContains("src/components/WorkspaceIsland.tsx", "wi-sources", "workspace island must render the fused Sources section");
-// The activity row reveals its accumulated conversation steps INLINE. It used to open the
-// Workbench "activity" tab, but that tab renders background TASKS (activeTasks), not these
-// conversation activity steps — so clicking showed nothing. The island now owns the reveal.
-assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => setActivityOpen((value) => !value)}", "workspace island activity row must reveal its accumulated steps inline");
-assertContains("src/components/WorkspaceIsland.tsx", "wi-activity-list", "workspace island must render the inline activity list");
-// Cockpit redesign: one fused card — Objective → Progress (3-step window) → Activity →
-// Sources. Sources (artifacts + uploaded files) are fused back IN and open the Workbench;
-// Goals/Memory stay out. The separate ProjectContextPanel is retired (island owns the goal).
-assertContains(
-  "src/components/WorkspaceIsland.tsx",
-  "threeStepWindow",
-  "island plan must use the 3-step auto-focus window"
-);
-assertNotContains(
-  "src/components/WorkspaceIsland.tsx",
-  "onOpenWorkbench(\"goals\")",
-  "goals row must be removed from the island"
-);
-assertNotContains(
-  "src/components/WorkspaceIsland.tsx",
-  "onOpenWorkbench(\"memoria\")",
-  "memory row must be removed from the island"
-);
-// Task 4c: the objective sits at the top of the Objective → Plan → Activity hierarchy,
-// rendered as a text block (conditional — hidden when the workspace has no objective).
-assertContains(
-  "src/components/WorkspaceIsland.tsx",
-  "wi-goal",
-  "island must render the project objective as a text block"
-);
+assertContains("src/components/ChatView.tsx", "workspacePlanSteps", "adaptive activity must derive progress from the durable plan projection");
+assertContains("src/components/ChatView.tsx", "projectWorkspaceSections({", "island visibility must use the pure factual projection");
+assertContains("src/components/ChatView.tsx", "snapshotVerified: Boolean(previewDataUrl)", "inactive browser visibility requires a verified preview");
+assertContains("src/components/ChatView.tsx", "openSectionRequest={{ section: \"activity\", nonce: activityNonce }}", "Activity actions must target the adaptive activity section");
+assertContains("src/components/AdaptiveWorkspaceIsland.tsx", "useState<WorkspaceSectionId | null>(null)", "adaptive island must be collapsed by default");
+assertContains("src/components/AdaptiveWorkspaceIsland.tsx", "setActiveSection(null);\n  }, [threadId]);", "adaptive island state must reset per thread");
+assertContains("src/components/AdaptiveWorkspaceIsland.tsx", "role=\"region\"", "adaptive content must expose region semantics");
+assertContains("src/components/AdaptiveWorkspaceIsland.tsx", "aria-pressed={activeSection === section.id}", "rail buttons must expose their selected section");
+assertContains("src/lib/workspaceIslandSections.mjs", "const sections = [];", "workspace capabilities must be projected from factual input");
+assertNotContains("src/lib/workspaceIslandSections.mjs", 'id: "terminal"', "terminal must not appear before the capability exists");
+assertNotContains("src/components/ChatView.tsx", "<WorkspaceIsland", "legacy workspace island must stay retired");
+assertNotContains("src/styles.css", ".workspace-island-panel", "legacy island panel geometry must stay retired");
 // Task 5: the rows dropped from the island (artifacts/files/activity) resurface behind
 // a header kebab menu that reopens the docked Workbench on the right tab.
 assertContains(
@@ -806,7 +777,8 @@ assertContains("src/styles.css", ".inspector-tab-panel {\n  min-width: 0;\n  min
 assertContains("src/styles.css", ".inspector-tab-panel .artifacts-preview-body {\n  overflow: visible;", "embedded artifact documents must use the tab scroll owner");
 assertContains("src/styles.css", ".inspector-tab-panel .workbench-files {\n  overflow: visible;", "inspector lists must use the tab scroll owner");
 assertContains("src/styles.css", "grid-template-columns: minmax(420px, 1fr) minmax(420px, var(--inspector-width));", "chat and inspector must be real sibling columns");
-assertContains("src/styles.css", ".active-task-layout.inspector-open > .chat-status-stack", "the working island must not create a third column");
+assertContains("src/components/ChatView.tsx", "disabled={inspector.open}", "the adaptive island must yield to the inspector column");
+assertContains("src/styles.css", "--workspace-current-reserve: 0px;", "the inspector column must clear the adaptive island reserve");
 assertNotContains("src/styles.css", ".workbench {\n  position: absolute", "legacy workbench must not float above the chat");
 assertContains("src/components/ChatView.tsx", "useReducer(inspectorWorkspaceReducer", "chat must use one inspector reducer");
 assertContains("src/components/ChatView.tsx", "loadInspectorState(thread.threadId", "inspector state must be scoped by thread");
