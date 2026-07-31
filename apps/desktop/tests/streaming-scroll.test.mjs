@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const chatView = readFileSync(join(here, "..", "src", "components", "ChatView.tsx"), "utf8");
 const styles = readFileSync(join(here, "..", "src", "styles.css"), "utf8");
+const chatStyles = readFileSync(join(here, "..", "src", "styles", "chat.css"), "utf8");
 
 test("the streaming auto-scroll is instant, never animated", () => {
   // `behavior: "auto"` RESOLVES to the element's computed scroll-behavior. With
@@ -37,14 +38,19 @@ test("the explicit jump-to-bottom button stays smooth", () => {
  * start. Matching the whole selector list (not a substring) keeps these
  * assertions from passing vacuously against some other rule in a 17k-line sheet.
  */
-function ruleBody(selector) {
+function ruleBody(css, selector) {
   const marker = `\n${selector} {`;
-  const start = styles.indexOf(marker);
+  const start = css.indexOf(marker);
   if (start < 0) return null;
   const open = start + marker.length;
-  const end = styles.indexOf("}", open);
-  return end < 0 ? null : styles.slice(open, end);
+  const end = css.indexOf("}", open);
+  return end < 0 ? null : css.slice(open, end);
 }
+
+const visibleTranscriptRows =
+  ".thread-message-list > .thread-message-row:last-child,\n" +
+  ".thread-message-list > .thread-message-row:has(.message-action-menu),\n" +
+  ".thread-message-list > .thread-message-row:has(.memory-usage-popover)";
 
 test("off-screen transcript rows are skipped by the renderer", () => {
   // content-visibility lets the compositor skip layout/paint/style for rows
@@ -52,7 +58,7 @@ test("off-screen transcript rows are skipped by the renderer", () => {
   // The selector must be the REAL row element: `.message` is an <article>
   // nested inside `.thread-message-row`, so `.thread-message-list > .message`
   // would match nothing at all and the win would be silently zero.
-  const body = ruleBody(".thread-message-list > .thread-message-row");
+  const body = ruleBody(chatStyles, ".thread-message-list > .thread-message-row");
   assert.ok(body, "the transcript row must declare skippable content");
   assert.match(body, /content-visibility:\s*auto/);
   // `auto <size>`: the placeholder height is only the first guess — the browser
@@ -64,7 +70,7 @@ test("off-screen transcript rows are skipped by the renderer", () => {
 test("the streaming row is never skipped", () => {
   // The last row is the one being written into: a placeholder height fighting
   // its real, growing height would make the bottom-pinned scroll oscillate.
-  const body = ruleBody(".thread-message-list > .thread-message-row:last-child");
+  const body = ruleBody(chatStyles, visibleTranscriptRows);
   assert.ok(body, "the last row must opt out of skipping");
   assert.match(body, /content-visibility:\s*visible/);
   assert.match(body, /contain-intrinsic-size:\s*none/);
@@ -79,10 +85,7 @@ test("a row with an open overlay is not paint-contained", () => {
   // row, so containment would shear them off. Both are rendered only while
   // open, which is exactly what `:has()` keys on: the exemption costs one row,
   // and only while it actually has an overlay up.
-  const body = ruleBody(
-    ".thread-message-list > .thread-message-row:has(.message-action-menu),\n" +
-      ".thread-message-list > .thread-message-row:has(.memory-usage-popover)",
-  );
+  const body = ruleBody(chatStyles, visibleTranscriptRows);
   assert.ok(body, "a row with an open menu or popover must drop the containment");
   assert.match(body, /content-visibility:\s*visible/);
 });

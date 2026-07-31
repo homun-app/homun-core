@@ -501,6 +501,29 @@
     "learning": "Apprentissage",
     "contacts": "Contacts"
   },
+  "composer": {
+    "add": "Ajouter",
+    "model": "Modèle",
+    "mode": "Mode",
+    "environment": "Environnement",
+    "runtimeContext": "Exécution et contexte",
+    "searchAdd": "Rechercher des actions...",
+    "auto": "Auto",
+    "nextTurnOnly": "S'applique uniquement au prochain tour",
+    "cloud": "Cloud",
+    "local": "Local",
+    "remove": "Supprimer",
+    "removeCapability": "Supprimer la capacité",
+    "attachment": "Joindre un fichier",
+    "files": "Fichiers liés",
+    "models": "Modèles",
+    "capabilities": "Capacités",
+    "connectors": "Connecteurs",
+    "openRuntimeContext": "Ouvrir les détails d'exécution et de contexte",
+    "projectEnvironment": "Projet",
+    "localEnvironment": "Local",
+    "toolsCount": "{{count}} outils"
+  },
   "chat": {
     "hostComputer": {
       "computer": "Ordinateur", "mac": "Mac", "macApps": "Apps Mac", "live": "direct",

@@ -196,8 +196,8 @@ assertNotContains(
   "onOpenActivity={() => setIslandOpen(true)}",
   "Every Activity action must close the inspector before opening the Island",
 );
-assertContains("src/components/ChatView.tsx", "{streaming && (", "Stop must remain available while the composer stays operational");
-assertContains("src/components/ChatView.tsx", "{(value.trim() || composerImages.length > 0) && (", "Send must remain available independently from Stop");
+assertContains("src/components/ComposerShell.tsx", "{props.streaming ? (", "Stop must remain available while the composer stays operational");
+assertContains("src/components/ComposerShell.tsx", ": canSend ? (", "Send must remain available independently from Stop");
 assertContains("src/lib/chatApi.ts", "res.status === 201 || res.status === 202", "Turn enqueue must accept steering responses");
 assertContains("src/components/UsageSuggestion.tsx", "usage-suggestion-confirm", "Suggestion changes must use an explicit confirmation surface");
 assertContains("src/components/UsageSuggestion.tsx", "confirmed: true", "Apply request must be explicitly confirmed");
@@ -504,7 +504,7 @@ assertContains("src/plugins/proattivita/index.tsx", "navSection: \"work\"", "pro
 assertContains("src/components/ChatView.tsx", "{sidebarCollapsed && (", "chat header must render the reopen/search controls when the sidebar is collapsed");
 assertContains("src/components/Shell.tsx", "{drawerOpen && !isSettings && (", "main drawer must render when open");
 assertContains("src/components/Sidebar.tsx", "drawer-profile", "open drawer footer must show the user profile + settings");
-assertContains("src/components/ChatView.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
+assertContains("src/components/ComposerShell.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
 assertContains("src/components/ChatView.tsx", "local-computer-card", "active task must expose a local computer activity card");
 assertContains("src/components/ChatView.tsx", "timelineCollapsed", "computer timeline must keep collapsed state");
 assertContains("src/components/ChatView.tsx", "computerCardCollapsed", "local computer card must be collapsible after answers");
@@ -835,8 +835,8 @@ assertContains("src/components/InspectorWorkspace.tsx", "aria-valuenow", "inspec
 assertContains("src/components/InspectorWorkspace.tsx", "aria-valuemin={minPercent}", "inspector separator must expose its reachable minimum");
 assertContains("src/components/InspectorWorkspace.tsx", "aria-valuemax={maxPercent}", "inspector separator must expose its reachable maximum");
 assertContains("src/components/ChatView.tsx", "fileLoadGenerationRef", "file revalidation must ignore stale authorization responses");
-assertContains("src/styles.css", ".active-task-layout.inspector-focused > .composer-surface", "focused inspector must hide the current composer surface");
-assertNotContains("src/styles.css", ".active-task-layout.inspector-focused > .composer-shell", "focused inspector must not target the removed composer shell class");
+assertContains("src/styles/composer.css", ".active-task-layout.inspector-focused > .composer-stack", "focused inspector must hide the current composer surface");
+assertNotContains("src/styles.css", ".active-task-layout.inspector-focused > .composer-stack", "focused inspector composer ownership must not remain in legacy styles");
 assertNotContains("src/components/ChatView.tsx", "panel-menu-wrap--corner", "chat topbar must not expose a second workbench launcher");
 assertNotContains("src/styles.css", ".panel-menu-wrap--corner", "chat topbar workbench launcher must not compete with the workspace island");
 assertNotContains("src/styles.css", "z-index: 220;", "chat header workspace/review menu must not overlay native window controls");
@@ -859,7 +859,7 @@ assertNotContains("src/components/ChatView.tsx", "streamingTextRef", "chat strea
 assertContains("src/components/ChatView.tsx", "messageContentKind", "message actions must derive from response content type");
 assertContains("src/components/ChatView.tsx", "onExplainCode", "code responses must expose code-specific contextual actions");
 assertContains("src/components/ChatView.tsx", "onImproveCode", "code responses must expose code improvement action");
-assertContains("src/components/ChatView.tsx", "reply-context-card", "composer must show the active reply context before submit");
+assertContains("src/components/ComposerShell.tsx", "reply-context-card", "composer must show the active reply context before submit");
 assertContains("src/components/ChatView.tsx", "message-action-menu", "secondary message actions must stay behind a compact menu");
 assertContains("src/components/ChatView.tsx", "runMessageMenuAction", "message overflow actions must close the menu before running");
 assertContains("src/components/ChatView.tsx", "message-latency-summary", "message metrics must be visible without dominating the answer");
@@ -874,16 +874,16 @@ assertContains("src/components/ChatView.tsx", "d3ReheatSimulation", "memory grap
 assertContains("src/styles.css", ".memory-graph-canvas canvas", "memory graph must size the ForceGraph canvas, not only an svg");
 assertNotContains("src/components/ChatView.tsx", "canCreateteTask={assistantTextMessage}", "message action menu must not advertise unverified task creation for every assistant text");
 assertNotContains("src/components/ChatView.tsx", "canCreateteAutomation={assistantTextMessage}", "message action menu must not advertise unverified automation creation for every assistant text");
-assertNotContains("src/components/ChatView.tsx", "\"Use a skill\"", "composer add menu must expose user-facing capabilities, not implementation terms");
-assertNotContains("src/components/ChatView.tsx", "t(\"chat.searchSkill\")", "composer capability picker must not expose skill terminology");
-assertContains("src/components/ChatView.tsx", "t(\"chat.searchCapability\")", "composer capability picker must search capabilities");
-assertContains("src/components/ChatView.tsx", "t(\"chat.noCapabilities\")", "composer capability picker must use capability empty state");
-assertContains("src/components/ChatView.tsx", "t(\"chat.forcedCapabilityNextMessage\")", "forced capability chip must use user-facing capability terminology");
-assertContains("src/components/ChatView.tsx", "{m.desc && <small>{m.desc}</small>}", "composer mode picker must explain what each mode does");
-assertContains("src/components/ChatView.tsx", "!m.projectOnly || linkedFolder != null", "composer must hide project-only modes without a linked project folder");
+assertNotContains("src/components/ComposerShell.tsx", "\"Use a skill\"", "composer add menu must expose user-facing capabilities, not implementation terms");
+assertNotContains("src/components/ComposerShell.tsx", "t(\"chat.searchSkill\")", "composer capability picker must not expose skill terminology");
+assertContains("src/components/ComposerShell.tsx", "t(\"chat.searchCapability\")", "composer capability picker must search capabilities");
+assertContains("src/components/ComposerShell.tsx", "t(\"chat.noCapabilities\")", "composer capability picker must use capability empty state");
+assertContains("src/components/ComposerShell.tsx", "t(\"chat.forcedCapabilityNextMessage\")", "forced capability chip must use user-facing capability terminology");
+assertContains("src/components/ComposerShell.tsx", "<small>{option.description}</small>", "composer mode picker must explain what each mode does");
+assertContains("src/components/ChatView.tsx", "available: !option.projectOnly || linkedFolder != null", "composer must hide project-only modes without a linked project folder");
 assertContains("src/i18n/locales/en.json", "\"searchCapability\"", "English chat locale must include capability search label");
 assertContains("src/i18n/locales/it.json", "\"searchCapability\"", "Italian chat locale must include capability search label");
-assertContains("src/components/ChatView.tsx", "value.trim() && (", "composer improve prompt action must only render when there is prompt text to improve");
+assertContains("src/components/ComposerShell.tsx", "props.value.trim() && matchesAdd", "composer improve prompt action must only render when there is prompt text to improve");
 assertNotContains("src/components/ChatView.tsx", "/^fn\\s+", "code-specific message actions must not rely on fragile plain-text Rust heuristics");
 assertNotContains("src/components/ChatView.tsx", "/^let\\s+", "code-specific message actions must not rely on fragile plain-text variable heuristics");
 assertContains("src/components/ChatView.tsx", "cancelStreamingRequestRef", "chat must allow users to stop a visible streaming response");

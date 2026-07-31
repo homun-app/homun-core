@@ -501,6 +501,29 @@
     "learning": "Learning",
     "contacts": "Contacts"
   },
+  "composer": {
+    "add": "Add",
+    "model": "Model",
+    "mode": "Mode",
+    "environment": "Environment",
+    "runtimeContext": "Runtime & Context",
+    "searchAdd": "Search actions...",
+    "auto": "Auto",
+    "nextTurnOnly": "Applies to the next turn only",
+    "cloud": "Cloud",
+    "local": "Local",
+    "remove": "Remove",
+    "removeCapability": "Remove capability",
+    "attachment": "Attach file",
+    "files": "Linked files",
+    "models": "Models",
+    "capabilities": "Capabilities",
+    "connectors": "Connectors",
+    "openRuntimeContext": "Open runtime and context details",
+    "projectEnvironment": "Project",
+    "localEnvironment": "Local",
+    "toolsCount": "{{count}} tools"
+  },
   "chat": {
     "hostComputer": {
       "computer": "Computer", "mac": "Mac", "macApps": "Mac Apps", "live": "live",

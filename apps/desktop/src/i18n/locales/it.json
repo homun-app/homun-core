@@ -501,6 +501,29 @@
     "learning": "Apprendimento",
     "contacts": "Contatti"
   },
+  "composer": {
+    "add": "Aggiungi",
+    "model": "Modello",
+    "mode": "Modalità",
+    "environment": "Ambiente",
+    "runtimeContext": "Runtime e contesto",
+    "searchAdd": "Cerca azioni...",
+    "auto": "Auto",
+    "nextTurnOnly": "Si applica solo al prossimo turno",
+    "cloud": "Cloud",
+    "local": "Locale",
+    "remove": "Rimuovi",
+    "removeCapability": "Rimuovi capacità",
+    "attachment": "Allega file",
+    "files": "File collegati",
+    "models": "Modelli",
+    "capabilities": "Capacità",
+    "connectors": "Connettori",
+    "openRuntimeContext": "Apri dettagli runtime e contesto",
+    "projectEnvironment": "Progetto",
+    "localEnvironment": "Locale",
+    "toolsCount": "{{count}} strumenti"
+  },
   "chat": {
     "hostComputer": {
       "computer": "Computer", "mac": "Mac", "macApps": "App Mac", "live": "live",

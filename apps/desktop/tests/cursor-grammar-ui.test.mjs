@@ -62,6 +62,20 @@ const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.
     throw error;
   },
 );
+const composerShell = await readFile(
+  new URL("../src/components/ComposerShell.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
+const composerStyles = await readFile(
+  new URL("../src/styles/composer.css", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const reducedMotion = foundation.match(
   /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\n\}/,
 )?.[0] ?? "";
@@ -283,6 +297,70 @@ test("legacy CSS cannot recreate message, activity, or generated-file surfaces",
   assert.match(
     chatStyles,
     /\.chat-message-agent,[\s\S]*?\.chat-message-system\s*\{[\s\S]*?border:\s*0;[\s\S]*?background:\s*transparent;/,
+  );
+});
+
+test("ChatView delegates the prompt surface to the thin ComposerShell boundary", () => {
+  assert.match(
+    chatView,
+    /import\s+\{[^}]*\bComposerShell\b[^}]*\}\s+from\s+"\.\/ComposerShell"/s,
+  );
+  assert.match(chatView, /<ComposerShell\b/);
+  assert.doesNotMatch(
+    chatView,
+    /\b(?:addMenuOpen|fileMenuOpen|skillMenuOpen|modelMenuOpen)\b/,
+  );
+  assert.doesNotMatch(chatView, /composer-pop/);
+
+  for (const token of [
+    "layeredMenuState",
+    "MenuSurface",
+    "IconButton",
+    "composer-metadata-row",
+    'chainId="composer"',
+  ]) {
+    assert.match(composerShell, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  for (const label of ["add", "model", "mode", "environment", "runtimeContext"]) {
+    assert.match(composerShell, new RegExp(`composer\\.${label}`));
+  }
+  for (const layer of ["add", "model", "mode", "runtime", "files", "capabilities", "connectors", "models"]) {
+    assert.match(composerShell, new RegExp(`[\"']${layer}[\"']`));
+  }
+});
+
+test("composer.css exclusively owns the compact prompt geometry", () => {
+  assert.match(
+    main,
+    /import "\.\/styles\/chat\.css";\s*import "\.\/styles\/composer\.css";/,
+  );
+  for (const selector of [
+    ".composer-surface",
+    ".composer-prompt-row",
+    ".composer-metadata-row",
+    ".composer-model-button",
+  ]) {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    assert.match(composerStyles, new RegExp(escaped));
+    assert.doesNotMatch(
+      legacyStyles,
+      new RegExp(`(?:^|[},])\\s*${escaped}\\s*(?=[,{])`, "m"),
+    );
+  }
+  assert.match(composerStyles, /min-height:\s*44px/);
+  assert.match(composerStyles, /border-radius:\s*(?:var\([^)]*10[^)]*\)|10px)/);
+  assert.match(composerStyles, /text-overflow:\s*ellipsis/);
+  assert.equal((`${legacyStyles}\n${composerStyles}`.match(/\.composer-model-button\s*\{/g) ?? []).length, 1);
+});
+
+test("composer keeps prior effective-model provenance separate from the next-turn override", () => {
+  assert.match(chatView, /lastAssistantEffectiveModel/);
+  assert.match(chatView, /threadMessages[\s\S]*?role\s*===\s*"assistant"[\s\S]*?\.model/);
+  assert.match(composerShell, /selectedNextTurnModel/);
+  assert.match(composerShell, /effectiveModelLabel/);
+  assert.doesNotMatch(
+    composerShell,
+    /effectiveModelLabel\s*=\s*[^\n]*selectedNextTurnModel/,
   );
 });
 

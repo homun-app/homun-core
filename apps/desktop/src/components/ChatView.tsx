@@ -194,6 +194,7 @@ import { PendingSteeringQueue } from "./PendingSteeringQueue";
 import { ChatHeaderMenu } from "./ChatHeaderMenu";
 import { InspectorWorkspace } from "./InspectorWorkspace";
 import { MemoryUsagePopover } from "./MemoryUsagePopover";
+import { ComposerShell, type ComposerModeOption } from "./ComposerShell";
 import type {
   ChatMessage,
   ChatMessageMetrics,
@@ -2908,6 +2909,15 @@ export function ChatView({
   const headerModelMeta = activeModelInfo
     ? `${activeModelInfo.locality} · ${formatContextTokens(activeModelInfo.context_window)}`
     : t("chat.active");
+  const lastAssistantEffectiveModel = useMemo(() => {
+    for (let index = threadMessages.length - 1; index >= 0; index -= 1) {
+      const message = threadMessages[index];
+      if (message.role === "assistant" && message.model) {
+        return shortModelName(message.model);
+      }
+    }
+    return headerModelLabel;
+  }, [headerModelLabel, threadMessages]);
   const headerToolPolicy = thread.source ? t("chat.readOnlyChannel") : t("chat.fullLocalTools");
 
   // The island column reserves space only when it has something to show (else the chat takes
@@ -3462,6 +3472,7 @@ export function ChatView({
         <Composer
           activeWork={workInProgress}
           disabled={false}
+          effectiveModelLabel={lastAssistantEffectiveModel}
           error={promptError}
           replyContext={replyContext}
           seed={composerSeed}
@@ -9537,6 +9548,7 @@ function ChatEmptyHero({
 function Composer({
   activeWork,
   disabled,
+  effectiveModelLabel,
   error,
   replyContext,
   seed,
@@ -9551,6 +9563,7 @@ function Composer({
 }: {
   activeWork: boolean;
   disabled: boolean;
+  effectiveModelLabel: string;
   error: string | null;
   replyContext: ReplyContext | null;
   seed: { text: string; nonce: number } | null;
@@ -9583,9 +9596,6 @@ function Composer({
   }, [seed?.nonce]);
   const [linkedFolder, setLinkedFolder] = useState<string | null>(null);
   const [folderBusy, setFolderBusy] = useState(false);
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [fileMenuOpen, setFileMenuOpen] = useState(false);
-  const [fileQuery, setFileQuery] = useState("");
   const [fileResults, setFileResults] = useState<string[]>([]);
   const [folderPathInput, setFolderPathInput] = useState("");
   const [folderError, setFolderError] = useState<string | null>(null);
@@ -9603,11 +9613,9 @@ function Composer({
   useEffect(() => {
     if (suggestedModel?.value) setSelectedModel(suggestedModel.value);
   }, [suggestedModel?.nonce, suggestedModel?.value]);
-  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   // Interaction mode (composer pill, Cursor-style): agent | plan | ask | debug.
   // Debug is offered only when a project folder is linked (coding context).
   const [chatMode, setChatMode] = useState<ChatMode>("agent");
-  const [modelQuery, setModelQuery] = useState("");
 
   // Refetches the model list + default resolved for THIS thread + per-provider groups.
   // Called on mount and when the menu opens, so a Settings change reflects without an
@@ -9647,25 +9655,11 @@ function Composer({
   }
   const [skills, setSkillss] = useState<SkillsSummary[]>([]);
   const [forcedSkills, setForcedSkills] = useState<SkillsSummary | null>(null);
-  const [skillMenuOpen, setSkillsMenuOpen] = useState(false);
-  const [skillQuery, setSkillsQuery] = useState("");
+  const [composerConnectors, setComposerConnectors] = useState<
+    Awaited<ReturnType<typeof coreBridge.mcpConnected>>
+  >([]);
   const [improving, setImproving] = useState(false);
   const [improveError, setImproveError] = useState<string | null>(null);
-  // Click outside the toolbar closes any open composer menu (⊕ add / folder / skill /
-  // model). Clicks INSIDE .composer-toolbar are left to the buttons' own toggles.
-  useEffect(() => {
-    if (!addMenuOpen && !fileMenuOpen && !skillMenuOpen && !modelMenuOpen) return;
-    const onDown = (event: MouseEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target && target.closest(".composer-toolbar")) return;
-      setAddMenuOpen(false);
-      setFileMenuOpen(false);
-      setSkillsMenuOpen(false);
-      setModelMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [addMenuOpen, fileMenuOpen, skillMenuOpen, modelMenuOpen]);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [dictationError, setDictationError] = useState<string | null>(null);
@@ -9734,6 +9728,12 @@ function Composer({
         setSkillss((response.skills ?? []).filter((skill) => skill.enabled));
       } catch {
         /* skills unavailable → picker hidden */
+      }
+      try {
+        const connected = await coreBridge.mcpConnected();
+        if (!cancelled) setComposerConnectors(connected);
+      } catch {
+        if (!cancelled) setComposerConnectors([]);
       }
     })();
     return () => {
@@ -9806,8 +9806,7 @@ function Composer({
   useEffect(() => {
     let cancelled = false;
     setContextFiles([]);
-    setFileMenuOpen(false);
-    setFileQuery("");
+    setFileResults([]);
     void (async () => {
       try {
         const { path } = await coreBridge.threadFolder(threadId);
@@ -9821,25 +9820,14 @@ function Composer({
     };
   }, [threadId]);
 
-  // Search files in the linked folder as the query changes (while the @ menu is open).
-  useEffect(() => {
-    if (!fileMenuOpen || !linkedFolder) return;
-    let cancelled = false;
-    const handle = setTimeout(() => {
-      void (async () => {
-        try {
-          const files = await coreBridge.searchThreadFiles(threadId, fileQuery);
-          if (!cancelled) setFileResults(files);
-        } catch {
-          if (!cancelled) setFileResults([]);
-        }
-      })();
-    }, 140);
-    return () => {
-      cancelled = true;
-      clearTimeout(handle);
-    };
-  }, [fileMenuOpen, fileQuery, linkedFolder, threadId]);
+  async function searchContextFiles(query: string) {
+    if (!linkedFolder) return;
+    try {
+      setFileResults(await coreBridge.searchThreadFiles(threadId, query));
+    } catch {
+      setFileResults([]);
+    }
+  }
 
   async function linkFolderPath(path: string) {
     const trimmed = path.trim();
@@ -9879,13 +9867,12 @@ function Composer({
   function unlinkFolder() {
     void coreBridge.setThreadFolder(threadId, null).catch(() => undefined);
     setLinkedFolder(null);
-    setFileMenuOpen(false);
     setContextFiles([]);
+    setFileResults([]);
   }
 
   async function addContextFile(path: string) {
     if (contextFiles.some((file) => file.path === path)) {
-      setFileMenuOpen(false);
       return;
     }
     try {
@@ -9894,8 +9881,6 @@ function Composer({
     } catch {
       /* unreadable file → ignore */
     }
-    setFileMenuOpen(false);
-    setFileQuery("");
     textareaRef.current?.focus();
   }
 
@@ -9907,20 +9892,6 @@ function Composer({
     });
     return `Context from files attached from the linked folder:\n\n${blocks.join("\n\n")}`;
   }
-
-  const folderName = linkedFolder
-    ? linkedFolder.replace(/\/+$/, "").split("/").pop() || linkedFolder
-    : null;
-
-  const filteredSkillss = skills.filter((skill) => {
-    const q = skillQuery.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      skill.name.toLowerCase().includes(q) ||
-      skill.id.toLowerCase().includes(q) ||
-      skill.description.toLowerCase().includes(q)
-    );
-  });
 
   async function handleImprovePrompt() {
     const draft = value.trim();
@@ -10091,554 +10062,89 @@ function Composer({
     setDragOver(false);
   }
 
+  const modeOptions: ComposerModeOption[] = CHAT_MODES.map((option) => ({
+    key: option.key,
+    label: option.label,
+    description: option.desc,
+    icon: option.icon,
+    available: !option.projectOnly || linkedFolder != null,
+  }));
+
   return (
-    <form
-      className={`composer-surface${dragOver ? " drag-over" : ""}`}
-      aria-label={t("chat.operationalPrompt")}
+    <ComposerShell
+      value={value}
+      disabled={disabled}
+      activeWork={activeWork}
+      streaming={streaming}
+      submitting={submitBusy}
+      dragOver={dragOver}
+      textareaRef={textareaRef}
+      fileInputRef={fileInputRef}
+      reply={replyContext
+        ? {
+            label: `Reply to ${messageRoleLabel(replyContext.role)}`,
+            preview: replyContext.preview,
+          }
+        : null}
+      attachments={attachments}
+      images={composerImages}
+      contextFiles={contextFiles}
+      forcedCapability={forcedSkills}
+      capabilities={skills}
+      connectors={composerConnectors}
+      linkedFolder={linkedFolder}
+      folderBusy={folderBusy}
+      folderError={folderError}
+      fileResults={fileResults}
+      models={models}
+      modelGroups={modelGroups}
+      selectedNextTurnModel={selectedModel}
+      effectiveModelLabel={effectiveModelLabel}
+      mode={chatMode}
+      modeOptions={modeOptions}
+      environmentLabel={linkedFolder ? t("composer.projectEnvironment") : t("composer.localEnvironment")}
+      recording={recording}
+      transcribing={transcribing}
+      improving={improving}
+      errors={[error, improveError, composerAttachmentError, dictationError]}
       onSubmit={handleSubmit}
+      onValueChange={handleValueChange}
+      onKeyDown={handleKeyDown}
+      onPaste={handleComposerPaste}
       onDrop={handleComposerDrop}
-      onDragOver={(event) => {
-        if (Array.from(event.dataTransfer?.items ?? []).some((item) => item.kind === "file")) {
-          event.preventDefault();
-          setDragOver(true);
-        }
+      onDragOverChange={setDragOver}
+      onAttachmentSelect={handleAttachmentSelect}
+      onRemoveReply={onClearReply}
+      onRemoveAttachment={removeAttachment}
+      onRemoveImage={removeComposerImage}
+      onRemoveContextFile={(path) =>
+        setContextFiles((current) => current.filter((item) => item.path !== path))
+      }
+      onRemoveCapability={() => setForcedSkills(null)}
+      onSelectCapability={(capability) => {
+        setForcedSkills(capability);
+        textareaRef.current?.focus();
       }}
-      onDragLeave={(event) => {
-        if (event.currentTarget === event.target) setDragOver(false);
+      onSearchFiles={(query) => void searchContextFiles(query)}
+      onSelectContextFile={(path) => void addContextFile(path)}
+      onBrowseFolder={() => void browseFolder()}
+      onLinkFolder={(path) => void linkFolderPath(path)}
+      onUnlinkFolder={unlinkFolder}
+      onRefreshModels={() => void refreshModels()}
+      onSelectModel={(model) => {
+        onManualModelSelection();
+        setSelectedModel(model);
       }}
-    >
-      {replyContext && (
-        <div className="reply-context-card" aria-label={t("chat.quotedMessage")}>
-          <Reply size={14} />
-          <div>
-            <strong>Reply to {messageRoleLabel(replyContext.role)}</strong>
-            <span>{replyContext.preview}</span>
-          </div>
-          <button type="button" aria-label={t("chat.removeQuote")} onClick={onClearReply}>
-            <X size={14} />
-          </button>
-        </div>
-      )}
-      <textarea
-        aria-label={t("chat.requestForAssistant")}
-        disabled={disabled}
-        onChange={handleValueChange}
-        onKeyDown={handleKeyDown}
-        onPaste={handleComposerPaste}
-        placeholder="Send a message or add task instructions"
-        ref={textareaRef}
-        value={value}
-      />
-      {composerImages.length > 0 && (
-        <div className="composer-image-tray" aria-label={t("chat.attachedImages")}>
-          {composerImages.map((image) => (
-            <span className="composer-image-thumb" key={image.id}>
-              <img src={image.dataUrl} alt={image.name} />
-              <button
-                type="button"
-                aria-label={`Remove ${image.name}`}
-                onClick={() => removeComposerImage(image.id)}
-              >
-                <X size={12} />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-      {attachments.length > 0 && (
-        <div className="composer-attachment-tray" aria-label={t("chat.selectedAttachments")}>
-          {attachments.map((attachment) => (
-            <span className="composer-attachment-item" key={attachment.id}>
-              <Paperclip size={13} />
-              <span>{attachment.name}</span>
-              <small>{formatFileSize(attachment.size)}</small>
-              {!attachment.localPath && <small>{t("chat.pathUnavailable")}</small>}
-              <button
-                type="button"
-                aria-label={`Remove ${attachment.name}`}
-                onClick={() => removeAttachment(attachment.id)}
-              >
-                <X size={13} />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-      {forcedSkills && (
-        <div className="composer-forced-skill" aria-label={t("chat.forcedCapabilityNextMessage")}>
-          <Puzzle size={13} />
-          <span>{forcedSkills.name}</span>
-          <button type="button" aria-label="Remove capability" onClick={() => setForcedSkills(null)}>
-            <X size={12} />
-          </button>
-        </div>
-      )}
-      {contextFiles.length > 0 && (
-        <div className="composer-context-files" aria-label={t("chat.filesAttachedAsContext")}>
-          {contextFiles.map((file) => (
-            <span className="composer-file-chip" key={file.path} title={file.path}>
-              <AtSign size={12} />
-              <span>{file.path.split("/").pop()}</span>
-              <button
-                type="button"
-                aria-label={`Remove ${file.path}`}
-                onClick={() =>
-                  setContextFiles((current) => current.filter((item) => item.path !== file.path))
-                }
-              >
-                <X size={11} />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-      {improveError && <span className="composer-error">{improveError}</span>}
-      <div className="composer-toolbar">
-        <div className="composer-actions">
-          <input
-            hidden
-            multiple
-            ref={fileInputRef}
-            type="file"
-            onChange={handleAttachmentSelect}
-          />
-          {/* One add menu gathers every input action while keeping the composer compact.
-              Folder and capability popovers stay anchored to this same wrap. */}
-          <div className="composer-pop-wrap">
-            <button
-              className={`composer-add-button${
-                addMenuOpen || contextFiles.length > 0 || linkedFolder || forcedSkills
-                  ? " active"
-                  : ""
-              }`}
-              type="button"
-              disabled={disabled}
-              aria-label="Add"
-              aria-expanded={addMenuOpen}
-              title={t("chat.addMenuTitle")}
-              onClick={() => {
-                setAddMenuOpen((open) => !open);
-                setFileMenuOpen(false);
-                setSkillsMenuOpen(false);
-                setModelMenuOpen(false);
-              }}
-            >
-              <Plus size={18} />
-            </button>
-            {addMenuOpen && (
-              <div className="composer-pop composer-add-pop" role="menu">
-                <div className="composer-add-eyebrow">
-                  {t("chat.addContextCapabilities")}
-                </div>
-                {CHAT_MODES.filter((m) => !m.projectOnly || linkedFolder != null).map((m) => {
-                  const I = m.icon;
-                  const active = m.key === chatMode;
-                  return (
-                    <button
-                      key={m.key}
-                      type="button"
-                      role="menuitem"
-                      className={active ? "active" : ""}
-                      onClick={() => {
-                        setChatMode(m.key);
-                        setAddMenuOpen(false);
-                      }}
-                    >
-                      <I size={16} />
-                      <span className="composer-mode-text">
-                        <strong>{m.label}</strong>
-                        {m.desc && <small>{m.desc}</small>}
-                      </span>
-                      {active && <Check size={14} className="composer-add-check" />}
-                    </button>
-                  );
-                })}
-                <div className="composer-add-divider" />
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setAddMenuOpen(false);
-                    fileInputRef.current?.click();
-                  }}
-                >
-                  <Paperclip size={16} />
-                  <span>Attach file</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className={contextFiles.length > 0 || linkedFolder ? "active" : ""}
-                  onClick={() => {
-                    setAddMenuOpen(false);
-                    setFileMenuOpen(true);
-                  }}
-                >
-                  <AtSign size={16} />
-                  <span>{linkedFolder ? "Mention a file" : "Link a folder"}</span>
-                </button>
-                {skills.length > 0 && (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={forcedSkills ? "active" : ""}
-                    onClick={() => {
-                      setAddMenuOpen(false);
-                      setSkillsMenuOpen(true);
-                    }}
-                  >
-                    <Puzzle size={16} />
-                    <span>{forcedSkills ? `Capability · ${forcedSkills.name}` : t("chat.useCapability")}</span>
-                  </button>
-                )}
-                {value.trim() && (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={improving}
-                    onClick={() => {
-                      setAddMenuOpen(false);
-                      void handleImprovePrompt();
-                    }}
-                  >
-                    {improving ? (
-                      <Loader2 size={16} className="composer-spin" />
-                    ) : (
-                      <WandSparkles size={16} />
-                    )}
-                    <span>{t("chat.improvePrompt")}</span>
-                  </button>
-                )}
-              </div>
-            )}
-            {fileMenuOpen && !linkedFolder && (
-              <div className="composer-pop composer-skill-pop" role="menu">
-                <div className="composer-pop-link">
-                  <p className="composer-pop-link-title">
-                    Link a folder to this conversation
-                  </p>
-                  <p className="composer-pop-link-hint">
-                    Then you can mention its files with <strong>@</strong>.
-                  </p>
-                  <button
-                    type="button"
-                    className="composer-link-browse"
-                    disabled={folderBusy}
-                    onClick={() => void browseFolder()}
-                  >
-                    {folderBusy ? <Loader2 size={14} className="composer-spin" /> : <Search size={14} />}
-                    {t("chat.browse")}
-                  </button>
-                  <div className="composer-pop-search">
-                    <input
-                      type="text"
-                      placeholder={t("chat.orPastePath")}
-                      value={folderPathInput}
-                      onChange={(event) => setFolderPathInput(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          void linkFolderPath(folderPathInput);
-                        }
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="composer-link-confirm"
-                      disabled={folderBusy || !folderPathInput.trim()}
-                      onClick={() => void linkFolderPath(folderPathInput)}
-                    >
-                      {t("chat.link")}
-                    </button>
-                  </div>
-                  {folderError && <p className="composer-pop-error">{folderError}</p>}
-                </div>
-              </div>
-            )}
-            {fileMenuOpen && linkedFolder && (
-              <div className="composer-pop composer-skill-pop" role="menu">
-                <div className="composer-pop-folder">
-                  <span title={linkedFolder}>📁 {folderName}</span>
-                  <button type="button" onClick={unlinkFolder} title={t("chat.unlinkFolder")}>
-                    {t("chat.unlink")}
-                  </button>
-                </div>
-                <div className="composer-pop-search">
-                  <Search size={14} />
-                  <input
-                    autoFocus
-                    type="text"
-                    placeholder={t("chat.searchFiles")}
-                    value={fileQuery}
-                    onChange={(event) => setFileQuery(event.target.value)}
-                  />
-                </div>
-                <div className="composer-pop-list">
-                  {fileResults.length === 0 ? (
-                    <p className="composer-pop-empty">{t("chat.noFiles")}</p>
-                  ) : (
-                    fileResults.map((file) => (
-                      <button
-                        key={file}
-                        type="button"
-                        role="menuitem"
-                        onClick={() => void addContextFile(file)}
-                      >
-                        <strong>{file.split("/").pop()}</strong>
-                        <small>{file}</small>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-          {skills.length > 0 && (
-            <div className="composer-pop-wrap composer-skill-anchor">
-              {skillMenuOpen && (
-                <div className="composer-pop composer-skill-pop" role="menu">
-                  <div className="composer-pop-search">
-                    <Search size={14} />
-                    <input
-                      autoFocus
-                      type="text"
-                      placeholder={t("chat.searchCapability")}
-                      value={skillQuery}
-                      onChange={(event) => setSkillsQuery(event.target.value)}
-                    />
-                  </div>
-                  <div className="composer-pop-list">
-                    {filteredSkillss.length === 0 ? (
-                      <p className="composer-pop-empty">{t("chat.noCapabilities")}</p>
-                    ) : (
-                      filteredSkillss.map((skill) => (
-                        <button
-                          key={skill.id}
-                          type="button"
-                          role="menuitem"
-                          className={forcedSkills?.id === skill.id ? "active" : ""}
-                          onClick={() => {
-                            setForcedSkills(skill);
-                            setSkillsMenuOpen(false);
-                            setSkillsQuery("");
-                            textareaRef.current?.focus();
-                          }}
-                        >
-                          <strong>{skill.name}</strong>
-                          <small>{skill.description}</small>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-          {(models.length > 0 || activeModel) && (
-            <div className="composer-pop-wrap">
-              <button
-                className="composer-model-button"
-                type="button"
-                aria-label={t("chat.chooseModel")}
-                aria-expanded={modelMenuOpen}
-                onClick={() => {
-                  setModelMenuOpen((open) => {
-                    if (!open) void refreshModels();
-                    return !open;
-                  });
-                  setModelQuery("");
-                  setSkillsMenuOpen(false);
-                }}
-              >
-                <span className="composer-model-chip-dot" aria-hidden="true" />
-                <span>
-                  {selectedModel
-                    ? shortModelName(selectedModel.split("::").pop() ?? selectedModel)
-                    : activeModel
-                      ? shortModelName(activeModel)
-                      : "Auto"}
-                </span>
-                <ChevronDown size={14} />
-              </button>
-              {modelMenuOpen && (
-                <div className="composer-pop composer-model-pop" role="menu">
-                  <input
-                    className="composer-model-search"
-                    type="text"
-                    autoFocus
-                    placeholder={t("chat.searchModels")}
-                    value={modelQuery}
-                    onChange={(event) => setModelQuery(event.target.value)}
-                  />
-                  <div className="composer-pop-list">
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={`composer-model-auto ${selectedModel === null ? "active" : ""}`}
-                      onClick={() => {
-                        onManualModelSelection();
-                        setSelectedModel(null);
-                        setModelMenuOpen(false);
-                        setModelQuery("");
-                      }}
-                    >
-                      {selectedModel === null ? (
-                        <Check size={14} />
-                      ) : (
-                        <span className="composer-model-dot" />
-                      )}
-                      <span className="composer-model-auto-text">
-                        <strong>Auto</strong>
-                        <small>
-                          {t("chat.balancedQualitySpeed")}
-                          {activeModel ? ` · ${shortModelName(activeModel)}` : ""}
-                        </small>
-                      </span>
-                    </button>
-                    {(() => {
-                      const q = modelQuery.trim().toLowerCase();
-                      const source =
-                        modelGroups.length > 0
-                          ? modelGroups
-                          : [{ provider_id: "", label: t("chat.models"), models }];
-                      const groups = source
-                        .map((group) => ({
-                          ...group,
-                          models: q
-                            ? group.models.filter(
-                                (m) =>
-                                  m.toLowerCase().includes(q) ||
-                                  group.label.toLowerCase().includes(q),
-                              )
-                            : group.models,
-                        }))
-                        .filter((group) => group.models.length > 0);
-                      if (groups.length === 0) {
-                        return <p className="composer-pop-empty">{t("chat.noModels")}</p>;
-                      }
-                      return groups.map((group) => (
-                        <div
-                          key={group.provider_id || group.label}
-                          className="composer-model-group"
-                        >
-                          <div className="composer-model-group-label">{group.label}</div>
-                          {group.models.map((modelId) => {
-                            const value = group.provider_id
-                              ? `${group.provider_id}::${modelId}`
-                              : modelId;
-                            const picked = selectedModel === value;
-                            return (
-                              <button
-                                key={value}
-                                type="button"
-                                role="menuitem"
-                                className={picked ? "active" : ""}
-                                onClick={() => {
-                                  onManualModelSelection();
-                                  setSelectedModel(value);
-                                  setModelMenuOpen(false);
-                                  setModelQuery("");
-                                }}
-                              >
-                                {picked ? (
-                                  <Check size={14} />
-                                ) : (
-                                  <span className="composer-model-dot" />
-                                )}
-                                <span className="composer-model-name">{modelId}</span>
-                                {(() => {
-                                  const cloud = modelIsCloud(group.base_url, modelId);
-                                  const base = (group.base_url ?? "").toLowerCase();
-                                  const localEndpoint =
-                                    base.includes("127.0.0.1") ||
-                                    base.includes("localhost") ||
-                                    base.includes("0.0.0.0");
-                                  const localProxyCloud = cloud && localEndpoint;
-                                  return (
-                                    <span
-                                      className={`composer-model-loc ${cloud ? "cloud" : "local"}${
-                                        localProxyCloud ? " proxy" : ""
-                                      }`}
-                                      title={
-                                        localProxyCloud
-                                          ? "Cloud model routed through local Ollama"
-                                          : cloud
-                                            ? "Runs in the cloud"
-                                            : "Runs on this machine"
-                                      }
-                                      aria-label={
-                                        localProxyCloud ? "cloud via local Ollama" : cloud ? "cloud" : "local"
-                                      }
-                                    >
-                                      {localProxyCloud ? "☁ via local" : cloud ? "☁️" : "💻"}
-                                    </span>
-                                  );
-                                })()}
-                                {modelId === activeModel && <small>default</small>}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ));
-                    })()}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        <div className="composer-actions">
-          {/* Voice dictation needs the local microphone + whisper bridge — desktop only. */}
-          {IS_DESKTOP && (
-            <button
-              className={`icon-button${recording ? " recording" : ""}`}
-              type="button"
-              aria-label={recording ? t("chat.stopDictation") : t("chat.voiceDictation")}
-              title={recording ? t("chat.stopAndTranscribe") : t("chat.voiceDictationMultilingual")}
-              disabled={transcribing}
-              onClick={() => (recording ? stopDictation() : void startDictation())}
-            >
-              {transcribing ? (
-                <Loader2 size={17} className="composer-spin" />
-              ) : recording ? (
-                <span className="composer-stop-square" aria-hidden="true" />
-              ) : (
-                <Mic size={17} />
-              )}
-            </button>
-          )}
-          {error && <span className="composer-error">{error}</span>}
-          {composerAttachmentError && (
-            <span className="composer-error">{composerAttachmentError}</span>
-          )}
-          {dictationError && <span className="composer-error">{dictationError}</span>}
-          {streaming && (
-            <button
-              className="composer-stop-button"
-              type="button"
-              aria-label={t("chat.interruptResponse")}
-              onClick={onCancelStreaming}
-            >
-              <X size={17} />
-            </button>
-          )}
-          {(value.trim() || composerImages.length > 0) && (
-            <button
-              className="send-button"
-              disabled={disabled || submitBusy || (!value.trim() && composerImages.length === 0)}
-              type="submit"
-              aria-label={activeWork ? t("chat.queueInstruction") : t("chat.send")}
-              title={activeWork ? t("chat.queueInstruction") : t("chat.send")}
-            >
-              {submitBusy ? <Loader2 size={18} className="composer-spin" /> : <ArrowUp size={18} />}
-            </button>
-          )}
-        </div>
-      </div>
-    </form>
+      onSelectMode={(mode) => setChatMode(mode as ChatMode)}
+      onImprovePrompt={() => void handleImprovePrompt()}
+      onVoice={() => (recording ? stopDictation() : void startDictation())}
+      onStop={onCancelStreaming}
+      onOpenRuntimeContext={() => {
+        window.dispatchEvent(new CustomEvent("homun:open-runtime-context"));
+      }}
+    />
   );
 }
-
 interface ResumeMarker {
   requestId: string;
   userText: string;
