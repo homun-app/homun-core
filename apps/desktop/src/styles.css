@@ -29,21 +29,6 @@
   --danger: #c4452f;
   --shadow-soft: 0 18px 60px rgba(20, 22, 30, 0.1);
   --shadow-menu: 0 16px 46px rgba(20, 22, 30, 0.18);
-  /* Radii — differentiated by role. */
-  --radius: 8px;
-  --radius-control: 9px;
-  --radius-card: 14px;
-  --radius-lg: 18px;
-  --radius-pill: 999px;
-  /* Spacing scale — one rhythm across the product. */
-  --s1: 4px;
-  --s2: 8px;
-  --s3: 12px;
-  --s4: 16px;
-  --s5: 20px;
-  --s6: 24px;
-  --s7: 32px;
-  --s8: 40px;
   /* Type scale. */
   --text-xs: 12px;
   --text-sm: 13px;
@@ -52,22 +37,12 @@
   --text-lg: 20px;
   --text-xl: 28px;
   --text-hero: 34px;
-  /* Fonts: Hanken Grotesk (UI) + JetBrains Mono (eyebrow/label/timestamp/kbd).
-     Self-hosted (@fontsource, imported in main.tsx) — no CDN, offline-safe.
-     --font-serif aliases the sans stack (the new design uses no serif). */
-  --font-sans: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --font-serif: var(--font-sans);
   /* Header aligned to the very top (Linear/Cursor): NO reserved drag band — content
      starts at y=0 and the header rows themselves (sidebar top, .task-topbar, settings
      header strip) are the drag region. 0 collapses every `calc(100vh - var)` to full
      height. Full-width top drag is achieved by marking those header rows app-region:drag,
      not by pushing content down. */
   --window-drag-height: 0px;
-  font-family: var(--font-sans);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
 }
 
 /* ── Surface themes — neutrals only; the brand accent is independent (orthogonal
@@ -144,17 +119,6 @@ svg.lucide {
   stroke-width: 1.7;
 }
 
-/* Focus policy: show a ring only for keyboard navigation (focus-visible), never on
-   mouse click — kills the stray accent outline that lingered after clicking. */
-:focus:not(:focus-visible) {
-  outline: none;
-}
-:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-
 html,
 body,
 #root {
@@ -196,7 +160,6 @@ h2 {
   margin-bottom: 0;
   font-size: 22px;
   font-weight: 650;
-  letter-spacing: 0;
 }
 
 h3 {
@@ -11429,17 +11392,6 @@ body.resizing-drawer {
   to {
     opacity: 1;
     transform: translateX(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
   }
 }
 
