@@ -29,6 +29,9 @@ test("unarchive routes the owning workspace and isolates nonactive project snaps
   assert.match(sidebar, /mergeSidebarUnarchiveResult/);
   assert.match(app, /const ownerIsActive = sidebarWorkspaceIsActive\(/);
   assert.match(app, /if \(ownerIsActive\) \{\s*await applyThreadSnapshot/);
+  assert.match(app, /appliedToActive: ownerIsActive/);
+  assert.match(sidebar, /if \(result\.appliedToActive\) return/);
+  assert.doesNotMatch(sidebar, /const ownerIsActive = sidebarWorkspaceIsActive/);
 });
 
 test("computed thread projections do not expose chat-row drag persistence", () => {

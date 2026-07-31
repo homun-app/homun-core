@@ -30,7 +30,7 @@ interface ShellProps {
   onUnarchiveChatThread: (
     threadId: string,
     workspaceId: string,
-  ) => Promise<ChatThread[] | null>;
+  ) => Promise<{ threads: ChatThread[] | null; appliedToActive: boolean }>;
   settingsSection: SettingsSectionId;
   settingsSub: string;
   // While a full-window modal (onboarding) is up, drop the window-drag strips:

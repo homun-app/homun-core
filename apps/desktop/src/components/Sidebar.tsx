@@ -62,7 +62,6 @@ import {
 import {
   mergeSidebarUnarchiveResult,
   readSidebarThreadFilter,
-  sidebarWorkspaceIsActive,
   writeSidebarThreadFilter,
 } from "../lib/sidebarFilterState";
 import { ProjectAccessDialog } from "./ProjectAccessDialog";
@@ -201,7 +200,7 @@ interface ProjectsNavProps {
   onUnarchiveChatThread: (
     threadId: string,
     workspaceId: string,
-  ) => Promise<ChatThread[] | null>;
+  ) => Promise<{ threads: ChatThread[] | null; appliedToActive: boolean }>;
   onSelectThread: (threadId: string) => void;
   onThreadAttention: (rows: CoreThreadAttention[]) => void;
   onCreateteChatThread: (workspaceId?: string) => void;
@@ -540,13 +539,9 @@ function ProjectsNav({
   }
 
   async function unarchiveSidebarThread(workspaceId: string, threadId: string) {
-    const ownerIsActive = sidebarWorkspaceIsActive(
-      workspaceId,
-      activeWorkspaceId,
-      PERSONAL_WORKSPACE_ID,
-    );
-    const snapshotThreads = await onUnarchiveChatThread(threadId, workspaceId);
-    if (ownerIsActive) return;
+    const result = await onUnarchiveChatThread(threadId, workspaceId);
+    if (result.appliedToActive) return;
+    const snapshotThreads = result.threads;
     if (workspaceId === PERSONAL_WORKSPACE_ID) {
       setPersonalThreads((current) => mergeSidebarUnarchiveResult(
         { [workspaceId]: current },
@@ -1001,7 +996,7 @@ interface NavDrawerProps {
   onUnarchiveChatThread: (
     threadId: string,
     workspaceId: string,
-  ) => Promise<ChatThread[] | null>;
+  ) => Promise<{ threads: ChatThread[] | null; appliedToActive: boolean }>;
 }
 
 export function NavDrawer({

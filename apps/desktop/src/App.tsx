@@ -1310,7 +1310,10 @@ function AuthenticatedApp() {
       if (ownerIsActive) {
         await applyThreadSnapshot(snapshot);
       }
-      return snapshot.threads.map(mapCoreChatThread);
+      return {
+        threads: snapshot.threads.map(mapCoreChatThread),
+        appliedToActive: ownerIsActive,
+      };
     } catch (error) {
       if (ownerIsActive) {
         setChatThreads((current) =>
@@ -1327,7 +1330,7 @@ function AuthenticatedApp() {
         }
       }
       console.warn("chat_thread_unarchive unavailable", error);
-      return null;
+      return { threads: null, appliedToActive: ownerIsActive };
     }
   }
 
