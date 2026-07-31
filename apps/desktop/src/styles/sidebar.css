@@ -572,14 +572,26 @@ body.resizing-drawer .drawer-resizer::after {
 .drawer-project {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
+  margin-bottom: 6px;
 }
 
 .drawer-project-row {
-  min-height: 28px;
+  min-height: 30px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 26px 26px;
   align-items: center;
+  border-radius: 7px;
+}
+
+.drawer-project-row:hover,
+.drawer-project-row:focus-within {
+  background: var(--surface-hover);
+}
+
+.drawer-project-row:hover .drawer-project-name,
+.drawer-project-row:focus-within .drawer-project-name {
+  background: transparent;
 }
 
 .drawer-link {
@@ -640,7 +652,7 @@ body.resizing-drawer .drawer-resizer::after {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin: 2px 0;
+  margin: 1px 0 2px;
   padding-left: 0;
 }
 
@@ -671,21 +683,33 @@ body.resizing-drawer .drawer-resizer::after {
 .drawer-thread-row {
   position: relative;
   min-width: 0;
+  min-height: 30px;
   display: grid;
   border-radius: 7px;
 }
 
 .drawer-thread-main {
   width: 100%;
-  padding-right: 10px;
+  min-height: 30px;
+  padding: 0 8px;
   color: var(--text);
   background: transparent;
   text-align: left;
 }
 
 .drawer-thread-row.active .drawer-thread-main {
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--surface-hover) 88%, var(--text) 4%);
   font-weight: 560;
+}
+
+.drawer-thread-row:hover .drawer-thread-main,
+.drawer-thread-row:focus-within .drawer-thread-main {
+  background: var(--surface-hover);
+}
+
+.drawer-thread-row.active:hover .drawer-thread-main,
+.drawer-thread-row.active:focus-within .drawer-thread-main {
+  background: color-mix(in srgb, var(--surface-hover) 88%, var(--text) 4%);
 }
 
 .drawer-thread-time {
@@ -699,15 +723,15 @@ body.resizing-drawer .drawer-resizer::after {
 .drawer-thread-actions {
   position: absolute;
   top: 50%;
-  right: 3px;
+  right: 5px;
   display: inline-flex;
   align-items: center;
   gap: 1px;
-  padding: 2px;
+  padding: 0;
   transform: translateY(-50%);
   border-radius: 7px;
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--line) 70%, transparent);
+  background: transparent;
+  box-shadow: none;
   opacity: 0;
   pointer-events: none;
 }

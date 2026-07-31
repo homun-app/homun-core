@@ -489,6 +489,56 @@ test("composer.css exclusively owns the compact prompt geometry", () => {
   assert.equal((`${legacyStyles}\n${composerStyles}`.match(/\.composer-model-button\s*\{/g) ?? []).length, 1);
 });
 
+test("shared menus keep compact commands separate from descriptive rows", () => {
+  assert.match(
+    menus,
+    /\.menu-surface\s*\{[\s\S]*?padding:\s*6px;/,
+  );
+  assert.match(
+    menus,
+    /\.menu-item\s*\{[\s\S]*?height:\s*32px;[\s\S]*?min-height:\s*32px;/,
+  );
+  assert.match(
+    composerStyles,
+    /\.composer-menu-list \.menu-item:has\(\.menu-item__label small\)\s*\{[\s\S]*?height:\s*auto;[\s\S]*?min-height:\s*44px;/,
+  );
+  assert.match(
+    composerStyles,
+    /\.composer-menu-list \.menu-item__label small\s*\{[\s\S]*?line-height:\s*1\.3;/,
+  );
+});
+
+test("sidebar hover and active states share one stable full-row surface", () => {
+  assert.match(
+    sidebarStyles,
+    /\.drawer-thread-row:hover \.drawer-thread-main,[\s\S]*?\.drawer-thread-row:focus-within \.drawer-thread-main\s*\{[\s\S]*?background:\s*var\(--surface-hover\);/,
+  );
+  assert.match(
+    sidebarStyles,
+    /\.drawer-thread-actions\s*\{[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;/,
+  );
+  assert.match(
+    sidebarStyles,
+    /\.drawer-thread-row\s*\{[\s\S]*?min-height:\s*30px;/,
+  );
+  assert.match(
+    sidebarStyles,
+    /\.drawer-project-row:hover,[\s\S]*?\.drawer-project-row:focus-within\s*\{/,
+  );
+  assert.doesNotMatch(sidebarStyles, /\.drawer-project:focus-within/);
+});
+
+test("composer spacing keeps prompt and metadata compact but distinct", () => {
+  assert.match(
+    composerStyles,
+    /\.composer-surface\s*\{[\s\S]*?margin:\s*6px auto 10px;[\s\S]*?gap:\s*8px;/,
+  );
+  assert.match(
+    composerStyles,
+    /\.composer-metadata-row\s*\{[\s\S]*?padding:\s*0 4px;/,
+  );
+});
+
 test("composer keeps prior effective-model provenance separate from the next-turn override", () => {
   assert.match(chatView, /lastAssistantEffectiveModel/);
   assert.match(chatView, /threadMessages[\s\S]*?role\s*===\s*"assistant"[\s\S]*?\.model/);
