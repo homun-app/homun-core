@@ -1,6 +1,6 @@
 # Stato — Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-07-31 (P0 gates + live broker + restart).**
+> **Ultimo aggiornamento: 2026-07-31 (P0 live + S6 browser form fill).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -46,12 +46,13 @@ Homun = gateway Rust + Electron/React + sidecar. Contratto unico
 | Uncertain effects API | 200 lista |
 | Hard restart | `SIGKILL` gateway → watchdog ripristina; health pulita; enqueue OK |
 | Piano URL morta (S7) | PASS (~4 min) |
+| Browser form fill (S6) | PASS (~5 min) |
 | Vault propose (S4) | **FAIL** — nessun marker `VAULT_PROPOSE` (pin vault `configured:false` sul profilo) |
 
 ### Residuo live
 
 - Vault reveal/propose con PIN/fixture sintetici
-- Browser form fill / crash sidecar (S6)
+- Browser crash sidecar (oltre al form fill S6)
 - Write sandbox allow/deny end-to-end
 - Approval + resolve `Uncertain` applicato
 - Presentazioni template + automazioni `pending_verification`
@@ -65,7 +66,7 @@ Homun = gateway Rust + Electron/React + sidecar. Contratto unico
 
 ## Prossimo lavoro
 
-1. Residuo live sopra (partire da Vault con PIN o S6 browser).
+1. Residuo live sopra (partire da Vault con PIN o crash sidecar).
 2. P1 rifinitura UI.
 3. RC draft (`testing/release-candidate-matrix.md`) dopo evidenza sullo stesso SHA.
 
@@ -74,6 +75,6 @@ Homun = gateway Rust + Electron/React + sidecar. Contratto unico
 ```text
 Continuo Homun. Repo: /Users/fabio/Projects/Homun/app, branch main.
 Leggi docs/STATO.md. P0 gate verde; production_smoke sul broker; hard restart OK.
-Prossimo: residuo live (Vault+PIN, browser S6, presentazioni/automazioni) o P1 UI.
+Prossimo: residuo live (Vault+PIN, crash sidecar, presentazioni/automazioni) o P1 UI.
 Non pubblicare.
 ```
