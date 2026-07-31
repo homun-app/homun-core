@@ -103,6 +103,7 @@ import {
   modelIsCloud,
   type ProviderModelsGroup,
   type RoutingBindingInput,
+  type RuntimeContextResponse,
   type SkillsSummary,
   type VaultProposalAcceptResult,
 } from "../lib/coreBridge";
@@ -502,6 +503,9 @@ export function ChatView({
   const [projectedSubagents, setProjectedSubagents] = useState<SubagentInfo[]>([]);
   const [projectedActiveTurn, setProjectedActiveTurn] =
     useState<ActiveTurnProjection | null>(null);
+  const [runtimeContext, setRuntimeContext] = useState<RuntimeContextResponse | null>(null);
+  const [runtimeContextLoading, setRuntimeContextLoading] = useState(true);
+  const [runtimeContextError, setRuntimeContextError] = useState(false);
   const [activeTurnElapsedSeconds, setActiveTurnElapsedSeconds] = useState(0);
   const [pendingSteering, setPendingSteering] = useState<SteeringQueueState>(() =>
     createSteeringQueueState(),
@@ -922,6 +926,30 @@ export function ChatView({
     // the previous turn's activity. (The message COUNT is stable: the assistant placeholder is
     // updated in place, so it can't be the trigger.)
   }, [thread.threadId, isStreaming, islandRefreshNonce]);
+  const runtimeContextRefreshKey = `${thread.threadId}:${isStreaming ? "active" : "rest"}:${islandRefreshNonce}`;
+  useEffect(() => {
+    if (isStreaming) return;
+    let cancelled = false;
+    setRuntimeContext(null);
+    setRuntimeContextLoading(true);
+    setRuntimeContextError(false);
+    coreBridge.runtimeContext(thread.threadId)
+      .then((context) => {
+        if (!cancelled) setRuntimeContext(context);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRuntimeContext(null);
+          setRuntimeContextError(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRuntimeContextLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [thread.threadId, isStreaming, islandRefreshNonce, runtimeContextRefreshKey]);
   // Files the user uploaded in THIS conversation (e.g. the patente PDF), derived
   // from message attachments — the chat-context "File" tab of the Workbench.
   const uploadedFiles = useMemo(() => {
@@ -3474,6 +3502,9 @@ export function ChatView({
           disabled={false}
           effectiveModelLabel={lastAssistantEffectiveModel}
           error={promptError}
+          runtimeContext={runtimeContext}
+          runtimeContextLoading={runtimeContextLoading}
+          runtimeContextError={runtimeContextError}
           replyContext={replyContext}
           seed={composerSeed}
           suggestedModel={usageSuggestedModel}
@@ -9551,6 +9582,9 @@ function Composer({
   effectiveModelLabel,
   error,
   replyContext,
+  runtimeContext,
+  runtimeContextLoading,
+  runtimeContextError,
   seed,
   suggestedModel,
   streaming,
@@ -9566,6 +9600,9 @@ function Composer({
   effectiveModelLabel: string;
   error: string | null;
   replyContext: ReplyContext | null;
+  runtimeContext: RuntimeContextResponse | null;
+  runtimeContextLoading: boolean;
+  runtimeContextError: boolean;
   seed: { text: string; nonce: number } | null;
   suggestedModel: { value: string; nonce: number } | null;
   streaming: boolean;
@@ -10102,6 +10139,9 @@ function Composer({
       effectiveModelLabel={effectiveModelLabel}
       mode={chatMode}
       modeOptions={modeOptions}
+      runtimeContext={runtimeContext}
+      runtimeContextLoading={runtimeContextLoading}
+      runtimeContextError={runtimeContextError}
       environmentLabel={linkedFolder ? t("composer.projectEnvironment") : t("composer.localEnvironment")}
       recording={recording}
       transcribing={transcribing}
@@ -10139,9 +10179,6 @@ function Composer({
       onImprovePrompt={() => void handleImprovePrompt()}
       onVoice={() => (recording ? stopDictation() : void startDictation())}
       onStop={onCancelStreaming}
-      onOpenRuntimeContext={() => {
-        window.dispatchEvent(new CustomEvent("homun:open-runtime-context"));
-      }}
     />
   );
 }

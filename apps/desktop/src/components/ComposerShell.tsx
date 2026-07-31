@@ -37,9 +37,12 @@ import * as layeredMenuState from "../lib/layeredMenuState";
 import type {
   McpConnectedServer,
   ProviderModelsGroup,
+  RuntimeContextResponse,
   SkillsSummary,
 } from "../lib/coreBridge";
 import { modelIsCloud } from "../lib/coreBridge";
+import { runtimeContextView } from "../lib/runtimeContext";
+import { RuntimeContextPanel } from "./RuntimeContextPanel";
 import { IconButton } from "./ui/IconButton";
 import { MenuSurface } from "./ui/MenuSurface";
 
@@ -92,6 +95,9 @@ export interface ComposerShellProps {
   modelGroups: ProviderModelsGroup[];
   selectedNextTurnModel: string | null;
   effectiveModelLabel: string;
+  runtimeContext: RuntimeContextResponse | null;
+  runtimeContextLoading: boolean;
+  runtimeContextError: boolean;
   mode: string;
   modeOptions: ComposerModeOption[];
   environmentLabel: string;
@@ -123,7 +129,6 @@ export interface ComposerShellProps {
   onImprovePrompt: () => void;
   onVoice: () => void;
   onStop: () => void;
-  onOpenRuntimeContext: () => void;
 }
 
 type MenuAction =
@@ -226,6 +231,7 @@ export function ComposerShell(props: ComposerShellProps) {
   const modeLabel = availableModes.find((option) => option.key === props.mode)?.label ?? props.mode;
   const canSend = Boolean(props.value.trim() || props.images.length > 0);
   const hasModels = props.models.length > 0 || props.modelGroups.some((group) => group.models.length > 0);
+  const runtimeView = runtimeContextView(props.runtimeContext, props.selectedNextTurnModel);
 
   const selectModel = (model: string | null) => {
     props.onSelectModel(model);
@@ -415,7 +421,13 @@ export function ComposerShell(props: ComposerShellProps) {
 
       <MenuSurface id="composer-model-menu" chainId="composer" label={t("composer.model")} open={rootOpen("model")} anchorRef={modelRef} search={{ value: modelQuery, onChange: setModelQuery, placeholder: t("chat.searchModels") }} onCloseCurrent={closeCurrent} onCloseAll={closeAll}>{renderModelRows()}</MenuSurface>
 
-      <MenuSurface id="composer-runtime-menu" chainId="composer" label={t("composer.runtimeContext")} open={rootOpen("runtime")} anchorRef={runtimeRef} onCloseCurrent={closeCurrent} onCloseAll={closeAll}><div className="composer-menu-list"><button type="button" role="menuitem" className="menu-item" onClick={() => { closeAll(); props.onOpenRuntimeContext(); }}><span className="menu-item__leading"><Monitor size={14} /></span><span className="menu-item__label">{t("composer.openRuntimeContext")}</span><span className="menu-item__trailing" /></button></div></MenuSurface>
+      <MenuSurface id="composer-runtime-menu" chainId="composer" label={t("composer.runtimeContext")} open={rootOpen("runtime")} anchorRef={runtimeRef} onCloseCurrent={closeCurrent} onCloseAll={closeAll}>
+        <RuntimeContextPanel
+          value={runtimeView}
+          loading={props.runtimeContextLoading}
+          error={props.runtimeContextError}
+        />
+      </MenuSurface>
 
       <MenuSurface id="composer-files-menu" chainId="composer" parentId="composer-add-menu" label={t("composer.files")} open={rootOpen("add") && layerOpen("files")} anchorRef={filesRef} search={props.linkedFolder ? { value: fileQuery, onChange: (value) => { setFileQuery(value); props.onSearchFiles(value); }, placeholder: t("chat.searchFiles") } : undefined} onCloseCurrent={closeCurrent} onCloseAll={closeAll}>
         <div className="composer-menu-list">{props.linkedFolder ? <><div className="composer-folder-row"><span title={props.linkedFolder}>{folderName}</span><button type="button" onClick={props.onUnlinkFolder}>{t("chat.unlink")}</button></div>{props.fileResults.map((file) => <button key={file} type="button" role="menuitem" className="menu-item" onClick={() => { props.onSelectContextFile(file); closeAll(); }}><span className="menu-item__leading"><AtSign size={14} /></span><span className="menu-item__label"><strong>{file.split("/").pop()}</strong><small>{file}</small></span><span className="menu-item__trailing" /></button>)}{props.fileResults.length === 0 ? <p className="composer-menu-empty">{t("chat.noFiles")}</p> : null}</> : <div className="composer-link-folder"><button type="button" role="menuitem" className="menu-item" onClick={props.onBrowseFolder}><span className="menu-item__leading">{props.folderBusy ? <Loader2 size={14} className="composer-spin" /> : <Search size={14} />}</span><span className="menu-item__label">{t("chat.browse")}</span><span className="menu-item__trailing" /></button><label><span>{t("chat.orPastePath")}</span><div><input value={folderPath} onChange={(event) => setFolderPath(event.currentTarget.value)} /><button type="button" disabled={!folderPath.trim() || props.folderBusy} onClick={() => props.onLinkFolder(folderPath)}>{t("chat.link")}</button></div></label>{props.folderError ? <p className="composer-error">{props.folderError}</p> : null}</div>}</div>

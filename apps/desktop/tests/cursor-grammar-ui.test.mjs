@@ -69,6 +69,15 @@ const composerShell = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const runtimeContextPanel = await readFile(
+  new URL("../src/components/RuntimeContextPanel.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
+const chatApi = await readFile(new URL("../src/lib/chatApi.ts", import.meta.url), "utf8");
+const coreBridge = await readFile(new URL("../src/lib/coreBridge.ts", import.meta.url), "utf8");
 const composerStyles = await readFile(
   new URL("../src/styles/composer.css", import.meta.url),
   "utf8",
@@ -236,6 +245,40 @@ test("chat.css exclusively owns the migrated transcript grammar", () => {
   assert.match(
     main,
     /import "\.\/styles\/foundation\.css";\s*import "\.\/styles\/menus\.css";\s*import "\.\/styles\/sidebar\.css";\s*import "\.\/styles\/chat\.css";/,
+  );
+});
+
+test("runtime context is fetched through the scoped thread endpoint", () => {
+  assert.match(chatApi, /runtimeContext\(threadId:\s*string\)/);
+  assert.match(chatApi, /threads\/\$\{encodeURIComponent\(threadId\)\}\/runtime-context/);
+  assert.match(coreBridge, /runtimeContext:\s*\(threadId:\s*string\)/);
+});
+
+test("composer runtime uses the exclusive menu chain and renders factual context inline", () => {
+  assert.match(composerShell, /rootOpen\("runtime"\)/);
+  assert.match(composerShell, /<RuntimeContextPanel/);
+  assert.doesNotMatch(composerShell, /homun:open-runtime-context/);
+  assert.match(chatView, /runtimeContextRefreshKey/);
+  assert.match(chatView, /thread\.threadId,\s*isStreaming,\s*islandRefreshNonce/);
+});
+
+test("runtime panel exposes only approved redacted categories", () => {
+  for (const field of [
+    "effectiveModel",
+    "provider",
+    "locality",
+    "role",
+    "contextWindow",
+    "usedTokens",
+    "percent",
+    "contributions",
+    "compacted",
+  ]) {
+    assert.match(runtimeContextPanel, new RegExp(`\\b${field}\\b`));
+  }
+  assert.doesNotMatch(
+    runtimeContextPanel,
+    /value\.(?:prompt|path|memoryContent|price|hash|baseUrl)|base_url/i,
   );
 });
 

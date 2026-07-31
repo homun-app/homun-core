@@ -41,6 +41,35 @@ export interface CoreBridgeStatus {
   }>;
 }
 
+export type RuntimeContextProvenance =
+  | "provider_reported"
+  | "prompt_snapshot_estimate"
+  | "unavailable";
+
+export interface RuntimeContextContribution {
+  estimated_tokens: number;
+  source: RuntimeContextProvenance;
+}
+
+export interface RuntimeContextResponse {
+  run_id: string | null;
+  turn_id: string | null;
+  role: string | null;
+  effective_model: string | null;
+  provider: string | null;
+  locality: string | null;
+  context_window: number | null;
+  used_input_tokens: number | null;
+  compacted: boolean;
+  contributions: {
+    conversation: RuntimeContextContribution | null;
+    compacted_summary: RuntimeContextContribution | null;
+    files_artifacts: RuntimeContextContribution | null;
+    authorized_memory: RuntimeContextContribution | null;
+    system_tools: RuntimeContextContribution | null;
+  };
+}
+
 export type UsageWindow = "7d" | "30d" | "all";
 
 export interface UsageCostBreakdown {
@@ -3339,6 +3368,7 @@ function electronSetProviderUsagePolicy(
 
 export const coreBridge = {
   status: () => Promise.resolve(electronCoreStatus()),
+  runtimeContext: (threadId: string) => chatApi.runtimeContext(threadId),
   runtimeModel: () => electronRuntimeModel(),
   runtimeModels: (threadId?: string) => electronRuntimeModels(threadId),
   setRuntimeModel: (model: string) => electronSetRuntimeModel(model),

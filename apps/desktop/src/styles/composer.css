@@ -354,6 +354,30 @@
   font-size: 12px;
 }
 
+.composer-runtime-row {
+  height: auto;
+  min-height: 28px;
+  padding-block: 5px;
+  cursor: default;
+}
+
+.composer-runtime-row:hover {
+  background: transparent;
+}
+
+.composer-runtime-row .menu-item__trailing {
+  flex-direction: column;
+  align-items: flex-end;
+  height: auto;
+  text-align: right;
+}
+
+.composer-runtime-row .menu-item__trailing small {
+  max-width: 150px;
+  color: var(--muted);
+  white-space: normal;
+}
+
 .composer-model-group + .composer-model-group {
   margin-top: 4px;
 }
