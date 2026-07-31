@@ -9,6 +9,7 @@ import "./i18n";
 import { registerPluginI18n } from "./plugins/registry";
 import "./styles.css";
 import "./styles/foundation.css";
+import "./styles/menus.css";
 
 initTheme();
 initAccent();

@@ -1,9 +1,33 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createServer } from "vite";
 
 const main = await readFile(new URL("../src/main.tsx", import.meta.url), "utf8");
+const legacyStyles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 const foundation = await readFile(new URL("../src/styles/foundation.css", import.meta.url), "utf8").catch(
+  (error) => {
+    if (error.code === "ENOENT") return "";
+    throw error;
+  },
+);
+const iconButton = await readFile(
+  new URL("../src/components/ui/IconButton.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
+const menuSurface = await readFile(
+  new URL("../src/components/ui/MenuSurface.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
+const menus = await readFile(new URL("../src/styles/menus.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
     throw error;
@@ -15,7 +39,143 @@ const reducedMotion = foundation.match(
 
 test("the desktop entrypoint uses the compact visual foundation", () => {
   assert.doesNotMatch(main, /@fontsource\/hanken-grotesk/);
-  assert.match(main, /import "\.\/styles\.css";\s*import "\.\/styles\/foundation\.css";/);
+  assert.match(
+    main,
+    /import "\.\/styles\.css";\s*import "\.\/styles\/foundation\.css";\s*import "\.\/styles\/menus\.css";/,
+  );
+});
+
+test("IconButton exposes its label and semantic tooltip", () => {
+  assert.match(iconButton, /aria-label=\{label\}/);
+  assert.match(iconButton, /role="tooltip"/);
+  assert.match(iconButton, /className="ui-tooltip"/);
+  assert.match(menus, /\.ui-icon-button:focus\s*>\s*\.ui-tooltip/);
+});
+
+test("IconButton static markup composes descriptions and exposes badge context once", async () => {
+  const server = await createServer({
+    server: { middlewareMode: true },
+    appType: "custom",
+    logLevel: "silent",
+  });
+  try {
+    const { IconButton } = await server.ssrLoadModule("/src/components/ui/IconButton.tsx");
+    const withoutPressed = renderToStaticMarkup(React.createElement(
+      IconButton,
+      { label: "Models" },
+      "M",
+    ));
+    assert.doesNotMatch(withoutPressed, /aria-pressed=/);
+
+    const markup = renderToStaticMarkup(React.createElement(
+      IconButton,
+      {
+        label: "Models",
+        pressed: false,
+        tooltip: "Choose model",
+        badge: "2",
+        badgeLabel: "2 models need attention",
+        "aria-describedby": "external-description",
+      },
+      "M",
+    ));
+    assert.match(markup, /aria-label="Models"/);
+    assert.match(markup, /aria-pressed="false"/);
+    assert.match(markup, /class="ui-icon-button__badge" aria-hidden="true">2<\/span>/);
+
+    const describedBy = markup.match(/aria-describedby="([^"]+)"/)?.[1].split(" ") ?? [];
+    const tooltipId = markup.match(/role="tooltip" class="ui-tooltip" id="([^"]+)"/)?.[1];
+    const badgeDescriptionId = markup.match(
+      /id="([^"]+)" class="ui-visually-hidden">2 models need attention<\/span>/,
+    )?.[1];
+    assert.deepEqual(describedBy, ["external-description", tooltipId, badgeDescriptionId]);
+
+    const derivedBadgeMarkup = renderToStaticMarkup(React.createElement(
+      IconButton,
+      { label: "Notifications", badge: 3 },
+      "N",
+    ));
+    assert.match(derivedBadgeMarkup, /class="ui-visually-hidden">3<\/span>/);
+    assert.match(derivedBadgeMarkup, /aria-describedby="[^"]+"/);
+  } finally {
+    await server.close();
+  }
+});
+
+test("IconButton badge text meets small-text contrast in every theme", () => {
+  const danger = legacyStyles.match(/--danger:\s*(#[0-9a-f]{6});/i)?.[1];
+  const badge = menus.match(/\.ui-icon-button__badge\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+  const foreground = badge.match(/color:\s*(#[0-9a-f]{3,6});/i)?.[1];
+  assert.ok(danger && foreground, "badge foreground and danger colors must be explicit");
+
+  const luminance = (hex) => {
+    const normalized = hex.length === 4
+      ? hex.slice(1).split("").map((digit) => digit.repeat(2)).join("")
+      : hex.slice(1);
+    const channels = normalized.match(/../g).map((value) => Number.parseInt(value, 16) / 255);
+    const linear = channels.map((value) => (
+      value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+    ));
+    return (0.2126 * linear[0]) + (0.7152 * linear[1]) + (0.0722 * linear[2]);
+  };
+  const contrast = (Math.max(luminance(danger), luminance(foreground)) + 0.05)
+    / (Math.min(luminance(danger), luminance(foreground)) + 0.05);
+  assert.ok(contrast >= 4.5, `expected at least 4.5:1 contrast, received ${contrast.toFixed(2)}:1`);
+});
+
+test("MenuSurface portals a labeled same-chain menu", () => {
+  assert.match(menuSurface, /createPortal/);
+  assert.match(menuSurface, /data-menu-chain=\{chainId\}/);
+  assert.match(menuSurface, /role="menu"/);
+  assert.match(menuSurface, /aria-label=\{label\}/);
+});
+
+test("MenuSurface delegates interaction and placement decisions to tested helpers", () => {
+  for (const helper of [
+    "computeMenuPlacement",
+    "enabledMenuItemIndexes",
+    "createPlacementRefreshScheduler",
+    "getMenuKeyboardAction",
+    "getRovingTabIndexes",
+    "initialMenuFocusTarget",
+    "menuPlacementChanged",
+    "menuPlacementEvents",
+    "observeGeometryChanges",
+    "observeSubtreeContentChanges",
+    "shouldAssignInitialMenuFocus",
+    "shouldDismissMenuPointer",
+    "shouldRenderMenu",
+    "shouldRestoreMenuFocus",
+  ]) {
+    assert.match(menuSurface, new RegExp(`\\b${helper}\\b`));
+  }
+});
+
+test("MenuSurface re-establishes roving state before search focus after every render", () => {
+  const focusEffect = menuSurface.match(
+    /useLayoutEffect\(\(\) => \{\s*if \(!open \|\| placement\.visibility !== "visible"\)[\s\S]*?\n  \}\);/,
+  )?.[0] ?? "";
+  assert.match(focusEffect, /applyRovingTabIndexes\(allItems, items, tabIndexes\);/);
+  assert.doesNotMatch(focusEffect, /\.focus\(\)/);
+  assert.match(menuSurface, /tabIndex=\{-1\}/);
+});
+
+test("MenuSurface measures unclipped content when recomputing placement", () => {
+  assert.match(menuSurface, /const menuHeight = menu\.scrollHeight;/);
+  assert.match(menuSurface, /placementRefresh\.refresh\(\);/);
+  assert.match(menuSurface, /placementRefresh\.cancel\(\);/);
+  assert.match(menuSurface, /document\.getElementById\(parentId\)/);
+  assert.match(menuSurface, /\[anchorRef\.current, menuRef\.current, parentMenu\]/);
+  assert.match(menuSurface, /observeGeometryChanges/);
+  assert.match(menuSurface, /observeSubtreeContentChanges/);
+  assert.match(menuSurface, /menuPlacementChanged/);
+});
+
+test("IconButton keeps child tooltips fixed, measured, and non-interactive", () => {
+  assert.match(iconButton, /computeTooltipPlacement/);
+  assert.match(iconButton, /observeGeometryChanges/);
+  assert.match(menus, /\.ui-tooltip\s*\{[\s\S]*position:\s*fixed;/);
+  assert.match(menus, /\.ui-tooltip\s*\{[\s\S]*pointer-events:\s*none;/);
 });
 
 test("the foundation uses native typography and the compact spacing scale", () => {
