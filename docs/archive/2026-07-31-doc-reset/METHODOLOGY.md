@@ -1,8 +1,9 @@
 # Metodologia di lavoro — Homun
 
-> **Leggimi all'inizio di OGNI sessione**, insieme a [CAPISALDI.md](CAPISALDI.md) (i principi
-> che non si violano) e [STATO.md](STATO.md) (dove siamo adesso). Questo file è l'**operating
-> manual**: COME si lavora. È durevole e cambia di rado. Data: 2026-06-27.
+> ⚠️ **2026-07-31:** per ripartire una sessione usa solo [`STATO.md`](STATO.md) (e se serve
+> [`HANDOFF-2026-07-31.md`](HANDOFF-2026-07-31.md)). Questo file e CAPISALDI restano principi
+> utili, ma non sono più la checklist d’ingresso obbligatoria finché la doc non viene
+> riscritta. Data originale: 2026-06-27.
 
 ## Perché esiste
 

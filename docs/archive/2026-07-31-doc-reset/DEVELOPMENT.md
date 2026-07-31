@@ -1,17 +1,10 @@
-# Homun — Sviluppo (hub vivo)
+# Homun — Sviluppo (hub — STORICO / NON AFFIDABILE)
 
-> **Punto d'ingresso unico.** Da qui si parte e si torna. Questo file è SEMPRE
-> aggiornato: se cambia una scelta importante, si aggiorna qui (o nel doc linkato).
-> Ultimo aggiornamento: 2026-07-06.
->
-> **SEI QUI (2026-07-06):** lo **stato vivo** è in [STATO.md](STATO.md), riscritto da zero contro
-> il codice reale (reset chirurgico della doc). In sintesi: mergiata su `main` la fase
-> **turn-queue-broker + unified WebSocket** (broker default-on = path chat unico; un solo `/api/ws`).
-> Il **motore** è il single guarded loop ReAct (ADR 0021) e vive **in `main.rs`** (≈58.9k righe):
-> `crates/engine` **non esiste ancora** (ADR 0024 = *Proposed*), e neppure il memory-service
-> (`HOMUN_MEMORY_SERVICE`, ADR 0022 = *Proposed*). Non fidarti di riferimenti a quei crate/flag:
-> verifica sempre col codice. Il blocco "Stato esecuzione" più in basso è un **changelog storico
-> superato** (snapshot pre-reset in [archive/2026-07-06-pre-reset/](archive/2026-07-06-pre-reset/)).
+> ⚠️ **Non usare come stato corrente (2026-07-31).** Questo file è fermo al 2026-07-06 e
+> contiene affermazioni false (es. `crates/engine` “non esiste”, ADR 0024 “Proposed”).
+> **Documento vivo:** [`STATO.md`](STATO.md). Prompt lungo agent:
+> [`HANDOFF-2026-07-31.md`](HANDOFF-2026-07-31.md). Il resto del contenuto sotto resta
+> come archivio di comandi/contesto; verificare sempre nel codice.
 
 ## North Star
 

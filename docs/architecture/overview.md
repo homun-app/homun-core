@@ -1,56 +1,67 @@
-# Architettura — quadro d'insieme
+# Quadro d’insieme (as-built)
 
-> ⚠️ **Freschezza (2026-07-09):** queste mappe sono reverse-engineered a giugno 2026 e **precedono**
-> la fase *turn-broker + unified WebSocket* (ora su `main`): il **path di richiesta** reale oggi è
-> coda-turni + executor + `/api/ws`, che qui NON è ancora disegnato. Nel frattempo sono atterrate
-> **ADR 0024 (estrazione del motore, 2026-07-08)** — il singolo loop guardato vive ora in
-> `crates/engine` (`engine::agent_loop::run_turn`), non più inline in `main.rs`, senza flag — e
-> **ADR 0025 (browse-as-recursion, 2026-07-09)**: un solo `browse(goal)` che ricorre in un sub-turno
-> del motore. Inoltre molti riferimenti a
-> riga (`main.rs:NNNN`) sono **stantii** (main.rs ≈58.9k righe, riscritto spesso): **ri-grep il
-> simbolo, non fidarti del numero**. Le mappe restano utili per la *forma* dei sottosistemi; la
-> ri-verifica contro il codice post-broker/WS è lavoro aperto (vedi [STATO.md](../STATO.md)).
->
-> Diagramma vivo (aggiornato 2026-06-22). Sostituisce il vecchio poster SVG
-> (`Desktop/homun-architecture.svg`, datato: MLX/Gemma-fallback, loop non
-> cross-modello). Dettagli: [agent-loop](agent-loop.md) · [memory](memory.md) ·
-> [plugins](plugins.md) · [system-map](system-map.md). Un poster SVG rifinito si
-> rigenera su richiesta. Host Computer Control, aggiunto dopo questa mappa, è
-> documentato separatamente in [host-computer-control](host-computer-control.md).
+Verificato 2026-07-31 contro `Cargo.toml`, `crates/*`, `apps/desktop`.
+
+## Forma del prodotto
+
+- **UI:** Electron + React in `apps/desktop` (Vite `:1420` in dev).
+- **Gateway:** crate `local-first-desktop-gateway` — HTTP/WS su `127.0.0.1:18765`
+  (`HOMUN_DESKTOP_GATEWAY_HOST` / `_PORT`).
+- **Motore agentico:** crate `local-first-engine` — unico loop
+  `agent_loop::run_turn` (ADR 0024 completa).
+- **Esecuzione durevole:** `local-first-execution-protocol` + `local-first-task-runtime`
+  + host/effect/projection nel gateway.
+- **Memoria:** `local-first-memory` → di default `{HOMUN_DATA_DIR|~/.homun}/memory.sqlite`.
+- **Sidecar:** `runtimes/browser-automation`, `contained-computer`, canali, ecc.
 
 ```mermaid
-flowchart TD
-  subgraph SURF[Superfici & Canali · client su HTTP]
-    APP[App desktop · Electron + React]
-    CH[Canali · WhatsApp wa-rs · Telegram]
-  end
-  subgraph MOD[Modelli · Provider Registry + Ruoli · capable-first]
-    R[ruoli: orchestrator · browser · memory · coding · image]
-    P[provider OpenAI-compat:<br/>Ollama locale/cloud · GLM · Kimi · DeepSeek · …]
-  end
-  SURF --> GW
-  MOD --> GW
-  GW[Desktop Gateway · Rust · 127.0.0.1<br/>token 0600 + CORS + read-model redatti + lifecycle sidecar]
-  GW --> ENG[Agent engine · loop ReAct guardato unico · ADR 0021 crates/engine<br/>recall → act → verify → advance · tool-calling nativo · plan come tool]
-  ENG --> CAP[Tool / Capability<br/>browser · sandbox · skills · MCP/Composio · artifacts · make_deck]
-  ENG --> MEM[Memoria 3 livelli<br/>SQL + grafo + markdown · local-first]
-  ENG --> TASK[Durable Task Runtime<br/>queue · checkpoint · scheduler/proattività]
-  GW --> SAFE[Approval & Safety<br/>browser_safety · tool policy read-only · approval gate]
-  CAP --> SIDE[Sidecar<br/>browser-automation · canali · Contained Computer]
-  ENG -.direzione.-> ADDON[Ecosistema Addon · ADR 0011<br/>Process Skill · contratto personalizzazione]
-  GW -.opzionale.-> CLOUD[Cloud always-on<br/>single-tenant / self-hostable · NON SaaS]
+flowchart LR
+  UI[apps/desktop Electron] -->|HTTP /api/chat/turns<br/>WS /api/ws| GW[desktop-gateway]
+  GW --> RT[task-runtime broker/lease]
+  GW --> ENG[engine run_turn]
+  ENG --> CAP[capabilities / tools]
+  ENG --> MEM[memory MemoryFacade]
+  GW --> EFF[effect_host]
+  GW --> PROJ[projection_worker]
+  CAP --> SIDE[browser-automation sidecar]
 ```
 
-## Bande (cosa fa ciascuna)
+## Workspace Cargo (`local-first-*`)
 
-- **Superfici & Canali**: client su HTTP verso il gateway; canali offline-resilient.
-- **Modelli**: registry + **ruoli** (binding auto/esplicito), qualunque API
-  OpenAI-compatibile; **local-first** (daemon Ollama) e cloud come *scelta*.
-- **Gateway** (Rust, loopback): sicurezza (token, CORS, read-model redatti), spawn +
-  lifecycle dei sidecar.
-- **Agent engine** ([agent-loop](agent-loop.md)): il motore cross-modello — uno solo,
-  condiviso da chat/canali/automazioni.
-- **Capability / Tool** ([plugins](plugins.md)): cosa l'agente può fare.
-- **Memoria** ([memory](memory.md)): il differenziatore, 3 livelli.
-- **Task Runtime · Safety · Sidecar · Addon · Cloud**: esecuzione durevole, governo,
-  contenimento, estensibilità, always-on opzionale.
+| Crate path | Package name | Ruolo osservato |
+| --- | --- | --- |
+| `execution-protocol` | `local-first-execution-protocol` | DTO contract/outcome/receipt |
+| `engine` | `local-first-engine` | Loop ReAct + HITL + browse contract |
+| `task-runtime` | `local-first-task-runtime` | Queue, store, lease, outbox |
+| `desktop-gateway` | `local-first-desktop-gateway` | HTTP, WS, host, tools, monolite `main.rs` |
+| `memory` | `local-first-memory` | Store + facade + recall/learn |
+| `capabilities` | `local-first-capabilities` | Registry/policy capability |
+| `orchestrator` | `local-first-orchestrator` | Brain ancora usato per materializzare task (non è il chat loop) |
+| `vault` / `secrets` | … | Vault / secret storage |
+| `inference` / `inference-usage` | … | Provider / usage |
+| `browser-automation` | … | Binding Rust verso sidecar |
+| `host-computer` | … | Helper macOS host |
+| `skill-runtime` / `process-skill` | … | Skills |
+| `subagents` / `context-compression` / `process-manager` / `local-computer-session` | … | Supporto |
+
+`main.rs` del gateway è ancora ~89k righe: pezzi estratti in moduli
+(`execution_host`, `effect_host`, `turn_executor`, `projection_worker`, …) ma il
+file resta il centro di massa.
+
+## Porte e versione
+
+| Cosa | Valore |
+| --- | --- |
+| Gateway | `127.0.0.1:18765` |
+| Vite | `:1420` |
+| Versione UI | `apps/desktop/package.json` → `0.1.1094` (al reset) |
+| Workspace Cargo version | `0.1.0` in root `Cargo.toml` |
+
+## Invariante runtime
+
+Un solo protocollo di esecuzione tipizzato:
+
+`ExecutionContract` → `ExecutionHost` / adapter → `ExecutionOutcome`
+
+(+ effect receipt + projection outbox). Niente secondo agent loop per la chat.
+Vedi [`execution.md`](execution.md) e [`agent-loop.md`](agent-loop.md).
