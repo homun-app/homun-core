@@ -1,6 +1,6 @@
 # Stato — Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-07-31 (P0 live + Vault API).**
+> **Ultimo aggiornamento: 2026-07-31 (P0 live + browser crash sidecar).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -45,12 +45,22 @@ Homun = gateway Rust + Electron/React + sidecar. Contratto unico
 | **Vault list redacted** | PASS — no CF/targa in plaintext |
 | **Vault reveal + PIN** | PASS corretto; **FAIL chiuso** su PIN sbagliato (`invalid_vault_pin`) |
 | Smoke S3/S4 (marker dal modello) | **FAIL** — modello locale non emette `VAULT_REVEAL`/`VAULT_PROPOSE`; contratto API Vault comunque verde |
+| **Browser crash sidecar** | PASS (vedi sotto) |
+
+### Browser crash sidecar — evidenza
+
+| Gate | Esito |
+| --- | --- |
+| `runtimes/browser-automation` `crash_recovery_stdio.test.ts` | PASS — after hard kill, restore `adopted_live_page` + stale generation rejected |
+| `effect_host::tests::browser_action_process_loss_becomes_uncertain_and_never_executes_again` | PASS — process loss → `Uncertain`, no second execute |
+| Live SIGKILL sotto gateway `23328` | PASS — trovato `npm run start --silent` (cwd runtime temp Electron), kill durante browse S6-like; turn `completed` (timeout browse), slot `browser_session` liberabile; **nessuna** card Uncertain browser (il kill ha colpito il wrapper npm intorno al sub-agent, non un lease `ExternalWrite` mid-act) |
+
+Nota operativa: coda task può restare satura su `browser_session` dopo smoke interrotti — cancellare via `POST /api/tasks/{turn_id}/cancel` prima di un nuovo browse.
 
 ### Residuo live
 
-- Browser crash sidecar
 - Write sandbox allow/deny end-to-end
-- Approval + resolve `Uncertain` applicato
+- Approval + resolve `Uncertain` applicato (`applied` / `not_applied`)
 - Presentazioni template + automazioni `pending_verification`
 - Smoke UI (menu/sidebar/temi)
 - (Opzionale) S3/S4 con modello più capace per i marker in chat
@@ -63,7 +73,7 @@ Homun = gateway Rust + Electron/React + sidecar. Contratto unico
 
 ## Prossimo lavoro
 
-1. Residuo live: crash sidecar / sandbox write / uncertain resolve / presentazioni-automazioni.
+1. Residuo live: sandbox write E2E / uncertain resolve / presentazioni-automazioni / UI smoke.
 2. P1 rifinitura UI.
 3. RC draft dopo evidenza sullo stesso SHA.
 
@@ -71,7 +81,7 @@ Homun = gateway Rust + Electron/React + sidecar. Contratto unico
 
 ```text
 Continuo Homun. Repo: /Users/fabio/Projects/Homun/app, branch main.
-Leggi docs/STATO.md. P0 gate + Vault API (PIN/reveal/redaction) OK; S3/S4 marker
-model-driven ancora FAIL sul modello locale.
-Prossimo: crash sidecar o sandbox write E2E o P1 UI. Non pubblicare.
+Leggi docs/STATO.md. P0 gate + Vault API + browser crash sidecar OK;
+S3/S4 marker model-driven ancora FAIL sul modello locale.
+Prossimo: sandbox write E2E o uncertain resolve o presentazioni/UI. Non pubblicare.
 ```
