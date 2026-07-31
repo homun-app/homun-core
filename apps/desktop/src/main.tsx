@@ -11,6 +11,7 @@ import "./styles.css";
 import "./styles/foundation.css";
 import "./styles/menus.css";
 import "./styles/sidebar.css";
+import "./styles/chat.css";
 
 initTheme();
 initAccent();

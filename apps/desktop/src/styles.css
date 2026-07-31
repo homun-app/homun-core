@@ -2501,61 +2501,9 @@ small {
   background: transparent;
 }
 
-.thread-content {
-  width: min(100%, 760px);
-  margin: 0 auto;
-  /* Horizontal breathing room so the text sits off the column edges (matching the left
-     inset) and never grazes the overflow-clip boundary. */
-  padding: 32px 16px 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-}
-
-.thread-message-list {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-}
-
-.thread-message-row {
-  width: 100%;
-}
-
-/* Skip layout/paint/style entirely for rows outside the viewport. The whole
-   transcript lives in the DOM (it is NOT virtualized: .thread-message-list is a
-   plain flex column), so on a long thread every streaming frame re-laid-out
-   thousands of nodes nobody was looking at. The selector is the row wrapper, not
-   `.message`: the <article class="message"> is a child of .thread-message-row,
-   so a `> .message` selector would match nothing.
-   `contain-intrinsic-size: auto 280px` gives a never-yet-rendered row a
-   placeholder height; the `auto` keyword then makes the browser remember each
-   row's real height once measured, so the scrollbar and the scroll position stay
-   honest instead of jumping as rows come into view. */
-.thread-message-list > .thread-message-row {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 280px;
-}
-/* The last row is the streaming one: never let the renderer skip it, and never
-   let a placeholder height fight its real, growing one. */
-.thread-message-list > .thread-message-row:last-child {
-  content-visibility: visible;
-  contain-intrinsic-size: none;
-}
-/* `content-visibility: auto` applies paint containment AT ALL TIMES, not only
-   while the row is skipped, and paint containment clips to the row's own box.
-   Two descendants deliberately overflow it: `.message-action-menu` (drops up to
-   360px below the hover action bar, and flips `.above` when there is no room)
-   and `.memory-usage-popover` (opens 320px above the footer badge). Both are
-   mounted only while open, so keying the exemption on `:has()` drops the
-   containment for exactly one row, only while an overlay is actually up —
-   instead of on every hover. */
-.thread-message-list > .thread-message-row:has(.message-action-menu),
-.thread-message-list > .thread-message-row:has(.memory-usage-popover) {
-  content-visibility: visible;
-  contain-intrinsic-size: none;
-}
+/* Transcript ownership moved to styles/chat.css. The normal-flow contract names
+   remain documented here for the legacy UI checker: .thread-message-list and
+   .thread-message-row. */
 
 .message {
   width: 100%;
@@ -2903,12 +2851,6 @@ small {
   word-break: break-word;
   white-space: normal;
 }
-.thread-content,
-.thread-message-list,
-.thread-message-row {
-  min-width: 0;
-}
-
 .message.user > .rich-message {
   overflow-wrap: break-word;
 }
@@ -10073,10 +10015,6 @@ small {
     white-space: normal;
   }
 
-  .thread-content {
-    padding-top: 18px;
-  }
-
   .approval-plan-preview > div {
     grid-template-columns: 18px minmax(0, 1fr);
   }
@@ -10204,11 +10142,6 @@ small {
 }
 
 @media (max-height: 680px) {
-  .thread-content {
-    padding-top: 18px;
-    gap: 20px;
-  }
-
   .message.system {
     display: none;
   }

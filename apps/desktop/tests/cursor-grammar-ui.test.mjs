@@ -52,6 +52,16 @@ const sidebarFilterState = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatView = await readFile(
+  new URL("../src/components/ChatView.tsx", import.meta.url),
+  "utf8",
+);
+const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
+  (error) => {
+    if (error.code === "ENOENT") return "";
+    throw error;
+  },
+);
 const reducedMotion = foundation.match(
   /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\n\}/,
 )?.[0] ?? "";
@@ -173,6 +183,45 @@ test("sidebar styles load after shared menus and own sidebar selectors", () => {
   const retiredFilters = /filter-chip|filter-segments|sidebar-filter-panel|drawer-filter-bar/;
   assert.doesNotMatch(sidebarStyles, retiredFilters);
   assert.doesNotMatch(legacyStyles, retiredFilters);
+});
+
+test("the transcript uses the flat role and operational message grammar", () => {
+  for (const className of [
+    "chat-message-agent",
+    "chat-message-user-band",
+    "chat-message-meta",
+    "chat-message-actions-slot",
+    "chat-operational-row",
+  ]) {
+    assert.match(chatView, new RegExp(`\\b${className}\\b`));
+  }
+  assert.match(chatView, /<details\s+className="chat-operational-row"/);
+  assert.match(chatView, /<summary>/);
+  assert.doesNotMatch(chatView, /message-bubble\s+user|user\s+message-bubble/);
+});
+
+test("chat.css exclusively owns the migrated transcript grammar", () => {
+  for (const selector of [
+    ".thread-content",
+    ".thread-message-list",
+    ".thread-message-row",
+    ".chat-message-agent",
+    ".chat-message-user-band",
+    ".chat-message-meta",
+    ".chat-message-actions-slot",
+    ".chat-operational-row",
+  ]) {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    assert.match(chatStyles, new RegExp(escaped));
+    assert.doesNotMatch(
+      legacyStyles,
+      new RegExp(`(?:^|[},])\\s*${escaped}\\s*(?=[,{])`, "m"),
+    );
+  }
+  assert.match(
+    main,
+    /import "\.\/styles\/foundation\.css";\s*import "\.\/styles\/menus\.css";\s*import "\.\/styles\/sidebar\.css";\s*import "\.\/styles\/chat\.css";/,
+  );
 });
 
 test("IconButton exposes its label and semantic tooltip", () => {

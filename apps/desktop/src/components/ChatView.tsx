@@ -3051,13 +3051,19 @@ export function ChatView({
             const assistantOperationalMessage =
               displayMessage.role === "assistant" && contentKind !== "system";
             const incompleteMessage = isLikelyIncompleteMessage(displayMessage);
+            const messageSurfaceClass =
+              displayMessage.role === "assistant"
+                ? "message assistant chat-message-agent"
+                : displayMessage.role === "user"
+                  ? "message user chat-message-user-band"
+                  : "message system chat-message-system";
 
             return (
             <div
               className="thread-message-row"
               key={displayMessage.id}
             >
-            <article className={`message ${displayMessage.role}`}>
+            <article className={messageSurfaceClass}>
               {displayMessage.role === "system" && (
                 <header className="assistant-label system-label">
                   <Clock3 size={15} />
@@ -3157,62 +3163,6 @@ export function ChatView({
                     <span>{t("chat.autoCompleting")}</span>
                   </div>
                 )}
-                <MessageActionBar
-                  contentKind={contentKind}
-                  copied={copiedMessageId === displayMessage.id}
-                  canContinue={
-                    assistantMessage && Boolean(displayMessage.text) && incompleteMessage
-                  }
-                  canRegenerate={
-                    displayMessage.role === "assistant" &&
-                    Boolean(previousUserMessageIndex.get(displayMessage.id))
-                  }
-                  canReply={displayMessage.role !== "system" && Boolean(displayMessage.text)}
-                  canEdit={displayMessage.role === "user" && Boolean(displayMessage.text)}
-                  canExpand={assistantTextMessage}
-                  canSaveToMemory={assistantOperationalMessage}
-                  canSaveAsGoal={assistantOperationalMessage && threadIsProject}
-                  feedback={displayMessage.feedback}
-                  metrics={displayMessage.metrics}
-                  savedToMemory={Boolean(displayMessage.savedMemoryRef)}
-                  onCopy={() => copyMessageText(displayMessage)}
-                  onContinue={() => continueAssistantResponse(displayMessage.id)}
-                  onExpand={() => expandAssistantResponse(displayMessage.id)}
-                  onExplainCode={() =>
-                    askAboutAssistantResponse(
-                      displayMessage.id,
-                      "Explain code",
-                      "Explain the previous code briefly and operationally.",
-                    )
-                  }
-                  onExplainDiagram={() =>
-                    askAboutAssistantResponse(
-                      displayMessage.id,
-                      "Explain diagram",
-                      "Explain the previous diagram briefly and operationally.",
-                    )
-                  }
-                  onFeedback={(feedback) => void setMessageFeedback(displayMessage, feedback)}
-                  onImproveCode={() =>
-                    askAboutAssistantResponse(
-                      displayMessage.id,
-                      "Improve code",
-                      "Improve the previous code keeping it short and including a fenced markdown block.",
-                    )
-                  }
-                  onReply={() => replyToMessage(displayMessage)}
-                  onEdit={() => startEditMessage(displayMessage)}
-                  onRegenerate={() => regenerateAnswer(displayMessage.id)}
-                  onReviseDiagram={() =>
-                    askAboutAssistantResponse(
-                      displayMessage.id,
-                      "Edit diagram",
-                      "Propose an improved version of the previous diagram in a fenced mermaid markdown block.",
-                    )
-                  }
-                  onSaveToMemory={() => void saveMessageToMemory(displayMessage)}
-                  onSaveAsGoal={() => saveMessageAsGoal(displayMessage.text)}
-                />
                 </>
               )}
               {!isStreamingMessage &&
@@ -3276,12 +3226,14 @@ export function ChatView({
               {displayMessage.attachments && displayMessage.attachments.length > 0 && (
                 <MessageAttachmentList attachments={displayMessage.attachments} />
               )}
-              <footer>
-                <span>{formatMessageTimestamp(displayMessage.timestamp)}</span>
+              <footer className="chat-message-meta">
+                <div className="chat-message-meta-copy">
+                  <span>{formatMessageTimestamp(displayMessage.timestamp)}</span>
+                  {displayMessage.model && <span>{displayMessage.model}</span>}
                 {displayMessage.role === "assistant" ? (
                   <>
-                    {/* Model label intentionally hidden (override verified via
-                        x-effective-model). Duration+tokens are robust: the cloud path
+                    {/* Model provenance comes from the message-scoped effective model.
+                        Duration+tokens are robust: the cloud path
                         leaves elapsed_seconds=0 but total_elapsed_seconds is the real
                         wall-clock; tokens are estimated from text when not provided. */}
                     {(() => {
@@ -3323,6 +3275,67 @@ export function ChatView({
                     <span>{visibleMessageMetadata(displayMessage.metadata)}</span>
                   )
                 )}
+                </div>
+                <div className="chat-message-actions-slot">
+                  {displayMessage.text && !isStreamingMessage && (
+                    <MessageActionBar
+                      contentKind={contentKind}
+                      copied={copiedMessageId === displayMessage.id}
+                      canContinue={
+                        assistantMessage && Boolean(displayMessage.text) && incompleteMessage
+                      }
+                      canRegenerate={
+                        displayMessage.role === "assistant" &&
+                        Boolean(previousUserMessageIndex.get(displayMessage.id))
+                      }
+                      canReply={displayMessage.role !== "system" && Boolean(displayMessage.text)}
+                      canEdit={displayMessage.role === "user" && Boolean(displayMessage.text)}
+                      canExpand={assistantTextMessage}
+                      canSaveToMemory={assistantOperationalMessage}
+                      canSaveAsGoal={assistantOperationalMessage && threadIsProject}
+                      feedback={displayMessage.feedback}
+                      metrics={displayMessage.metrics}
+                      savedToMemory={Boolean(displayMessage.savedMemoryRef)}
+                      onCopy={() => copyMessageText(displayMessage)}
+                      onContinue={() => continueAssistantResponse(displayMessage.id)}
+                      onExpand={() => expandAssistantResponse(displayMessage.id)}
+                      onExplainCode={() =>
+                        askAboutAssistantResponse(
+                          displayMessage.id,
+                          "Explain code",
+                          "Explain the previous code briefly and operationally.",
+                        )
+                      }
+                      onExplainDiagram={() =>
+                        askAboutAssistantResponse(
+                          displayMessage.id,
+                          "Explain diagram",
+                          "Explain the previous diagram briefly and operationally.",
+                        )
+                      }
+                      onFeedback={(feedback) => void setMessageFeedback(displayMessage, feedback)}
+                      onImproveCode={() =>
+                        askAboutAssistantResponse(
+                          displayMessage.id,
+                          "Improve code",
+                          "Improve the previous code keeping it short and including a fenced markdown block.",
+                        )
+                      }
+                      onReply={() => replyToMessage(displayMessage)}
+                      onEdit={() => startEditMessage(displayMessage)}
+                      onRegenerate={() => regenerateAnswer(displayMessage.id)}
+                      onReviseDiagram={() =>
+                        askAboutAssistantResponse(
+                          displayMessage.id,
+                          "Edit diagram",
+                          "Propose an improved version of the previous diagram in a fenced mermaid markdown block.",
+                        )
+                      }
+                      onSaveToMemory={() => void saveMessageToMemory(displayMessage)}
+                      onSaveAsGoal={() => saveMessageAsGoal(displayMessage.text)}
+                    />
+                  )}
+                </div>
               </footer>
             </article>
             </div>
@@ -3332,7 +3345,7 @@ export function ChatView({
 
           {promptSubmitting && !streamingAssistantId && !chatTurnState && (
             <div className="thread-message-row">
-              <article className="message assistant pending" aria-live="polite">
+              <article className="message assistant chat-message-agent pending" aria-live="polite">
                 <header className="assistant-label">
                   <Sparkles size={17} />
                   <strong>assistant</strong>
@@ -4481,19 +4494,26 @@ function MessageArtifacts({
   if (artifacts.length === 0) return null;
 
   return (
-    <div className="msg-artifacts" aria-label={t("chat.generatedFiles")}>
-      {artifacts.map((artifact) => (
-        <ArtifactCardRow
-          key={artifact.name}
-          artifact={artifact}
-          expanded={expanded === artifact.name}
-          onToggle={() =>
-            setExpanded((current) => (current === artifact.name ? null : artifact.name))
-          }
-          onOpen={() => onOpen(artifact)}
-        />
-      ))}
-    </div>
+    <details className="chat-operational-row msg-artifacts">
+      <summary>
+        <FileText size={14} aria-hidden="true" />
+        <span>{t("chat.generatedFiles")}</span>
+        <small>{artifacts.length}</small>
+      </summary>
+      <div className="chat-operational-content" aria-label={t("chat.generatedFiles")}>
+        {artifacts.map((artifact) => (
+          <ArtifactCardRow
+            key={artifact.name}
+            artifact={artifact}
+            expanded={expanded === artifact.name}
+            onToggle={() =>
+              setExpanded((current) => (current === artifact.name ? null : artifact.name))
+            }
+            onOpen={() => onOpen(artifact)}
+          />
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -7034,46 +7054,38 @@ function ArtifactCsvTable({ text }: { text: string }) {
  *  step count. Expanding reveals every step. Keeps the answer in focus. */
 function MessageActivity({ text, live = false }: { text: string; live?: boolean }) {
   const steps = useMemo(() => parseActivitySteps(text), [text]);
-  const [open, setOpen] = useState(false);
   if (steps.length === 0) return null;
   const countLabel = `Activity · ${steps.length} ${steps.length === 1 ? "passo" : "passi"}`;
   const collapsedLabel = live ? steps[steps.length - 1] : countLabel;
   return (
-    <div className={`msg-activity${open ? " open" : ""}${live ? " live" : ""}`}>
-      <button
-        type="button"
-        className="msg-activity-toggle"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        {live && !open ? (
+    <details className={`chat-operational-row msg-activity${live ? " live" : ""}`} open={live}>
+      <summary>
+        {live ? (
           <span className="msg-activity-dot" aria-hidden="true" />
         ) : (
           <SquareTerminal size={13} className="msg-activity-icon" />
         )}
-        <span className="msg-activity-label">{open ? countLabel : collapsedLabel}</span>
+        <span className="msg-activity-label">{collapsedLabel}</span>
         <ChevronDown size={13} className="msg-activity-caret" />
-      </button>
-      {open && (
-        <ol className="msg-activity-steps">
-          {steps.map((step, index) => {
-            // Per-step status, inferred without backend lifecycle data: the gateway's
-            // problem markers (⏳ retry / ↩ fallback / ⏹ stop / 🔧 fix) → "warn"; in a
-            // LIVE turn the last announced step is the one in progress; the rest are done.
-            const status = /^(?:⏳|↩|⏹|🔧)/u.test(step)
-              ? "warn"
-              : live && index === steps.length - 1
-                ? "doing"
-                : "done";
-            return (
-              <li key={`${index}-${step.slice(0, 24)}`} data-status={status}>
-                {step.replace(/^(?:\p{Extended_Pictographic}|️|‍|\s)+/u, "")}
-              </li>
-            );
-          })}
-        </ol>
-      )}
-    </div>
+      </summary>
+      <ol className="msg-activity-steps">
+        {steps.map((step, index) => {
+          // Per-step status, inferred without backend lifecycle data: the gateway's
+          // problem markers (⏳ retry / ↩ fallback / ⏹ stop / 🔧 fix) → "warn"; in a
+          // LIVE turn the last announced step is the one in progress; the rest are done.
+          const status = /^(?:⏳|↩|⏹|🔧)/u.test(step)
+            ? "warn"
+            : live && index === steps.length - 1
+              ? "doing"
+              : "done";
+          return (
+            <li key={`${index}-${step.slice(0, 24)}`} data-status={status}>
+              {step.replace(/^(?:\p{Extended_Pictographic}|️|‍|\s)+/u, "")}
+            </li>
+          );
+        })}
+      </ol>
+    </details>
   );
 }
 
@@ -7385,10 +7397,16 @@ const AssistantMessageBody = memo(
       {readable && <RichMessage text={readable} streaming={streaming} />}
       {!streaming && onOpenArtifact && <MessageArtifacts text={text} onOpen={onOpenArtifact} />}
       {doneTool && !streaming && (
-        <div className="cmp-confirm done">
-          <ShieldCheck size={15} />
-          <span>Action completed: {humanizeToolName(doneTool)}</span>
-        </div>
+        <details className="chat-operational-row">
+          <summary>
+            <ShieldCheck size={14} aria-hidden="true" />
+            <span>{humanizeToolName(doneTool)}</span>
+          </summary>
+          <div className="chat-operational-content cmp-confirm done">
+            <ShieldCheck size={15} />
+            <span>Action completed: {humanizeToolName(doneTool)}</span>
+          </div>
+        </details>
       )}
       {action && !streaming && (
         <ComposioConfirmCard action={action} messageId={messageId} threadId={threadId} />
