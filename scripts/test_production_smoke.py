@@ -33,6 +33,20 @@ class ProductionSmokeTests(unittest.TestCase):
 
         self.assertEqual([scenario.id for scenario in selected], ["S1", "S3"])
 
+    def test_broker_helpers_are_exported(self):
+        # Guard the live path: smoke must use turns broker, not generate_stream.
+        source = smoke.__file__
+        self.assertTrue(source)
+        with open(source, encoding="utf-8") as handle:
+            text = handle.read()
+        self.assertIn("/api/chat/turns", text)
+        self.assertIn("/api/chat/threads", text)
+        body = text.split('"""', 2)[-1]
+        self.assertNotIn("/api/chat/generate_stream", body)
+        self.assertTrue(callable(smoke.create_thread))
+        self.assertTrue(callable(smoke.enqueue_turn))
+        self.assertTrue(callable(smoke.run_turn_via_broker))
+
 
 if __name__ == "__main__":
     unittest.main()
