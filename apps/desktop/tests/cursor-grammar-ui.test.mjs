@@ -198,6 +198,7 @@ test("the transcript uses the flat role and operational message grammar", () => 
   assert.match(chatView, /<details\s+className="chat-operational-row"/);
   assert.match(chatView, /<summary>/);
   assert.doesNotMatch(chatView, /message-bubble\s+user|user\s+message-bubble/);
+  assert.doesNotMatch(chatView, /"message\s+(?:user|assistant|system)\b/);
 });
 
 test("chat.css exclusively owns the migrated transcript grammar", () => {
@@ -221,6 +222,67 @@ test("chat.css exclusively owns the migrated transcript grammar", () => {
   assert.match(
     main,
     /import "\.\/styles\/foundation\.css";\s*import "\.\/styles\/menus\.css";\s*import "\.\/styles\/sidebar\.css";\s*import "\.\/styles\/chat\.css";/,
+  );
+});
+
+test("legacy CSS cannot recreate message, activity, or generated-file surfaces", () => {
+  const selectors = new Set(
+    Array.from(legacyStyles.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{/g))
+      .flatMap((match) => match[1].trim().startsWith("@") ? [] : match[1].split(","))
+      .map((selector) => selector.trim()),
+  );
+  const migratedMessageSelectors = new Set([
+    ".message",
+    ".message.user",
+    ".message.user > p",
+    ".message.user > .rich-message",
+    ".message.assistant",
+    ".message.system",
+    ".message.assistant p",
+    ".message.system p",
+    ".message.assistant .rich-message",
+    ".message.system .rich-message",
+    ".message.pending p",
+    ".message footer",
+  ]);
+  const duplicateSurfaces = [...selectors].filter((selector) => (
+    migratedMessageSelectors.has(selector)
+    || selector.startsWith(".message.user > .rich-message ")
+    || selector.startsWith(".message.user ")
+    || selector.startsWith(".message.assistant")
+    || selector.startsWith(".message.system")
+    || selector.startsWith(".msg-activity")
+    || selector === ".msg-artifacts"
+  ));
+
+  assert.deepEqual(duplicateSurfaces, []);
+  assert.doesNotMatch(legacyStyles, /@keyframes\s+(?:message-in|msg-activity-pulse)\b/);
+  assert.doesNotMatch(
+    legacyStyles,
+    /\.message\.user\s*>\s*(?:p|\.rich-message)\s*\{[\s\S]*?(?:border-radius:\s*18px|padding:\s*12px 16px|background:\s*var\(--surface-muted\))/,
+  );
+
+  for (const selector of [
+    ".message",
+    ".chat-message-agent",
+    ".chat-message-user-band",
+    ".chat-message-system",
+    ".message.pending p",
+    ".chat-message-meta",
+    ".msg-activity",
+    ".msg-artifacts",
+  ]) {
+    assert.match(chatStyles, new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.match(chatStyles, /@keyframes\s+message-in\b/);
+  assert.match(chatStyles, /@keyframes\s+msg-activity-pulse\b/);
+  assert.match(
+    chatStyles,
+    /\.chat-message-user-band\s*\{[\s\S]*?width:\s*fit-content;[\s\S]*?border:\s*1px solid[\s\S]*?background:\s*color-mix/,
+  );
+  assert.match(
+    chatStyles,
+    /\.chat-message-agent,[\s\S]*?\.chat-message-system\s*\{[\s\S]*?border:\s*0;[\s\S]*?background:\s*transparent;/,
   );
 });
 

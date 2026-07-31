@@ -3053,10 +3053,10 @@ export function ChatView({
             const incompleteMessage = isLikelyIncompleteMessage(displayMessage);
             const messageSurfaceClass =
               displayMessage.role === "assistant"
-                ? "message assistant chat-message-agent"
+                ? "message chat-message-agent"
                 : displayMessage.role === "user"
-                  ? "message user chat-message-user-band"
-                  : "message system chat-message-system";
+                  ? "message chat-message-user-band"
+                  : "message chat-message-system";
 
             return (
             <div
@@ -3345,7 +3345,7 @@ export function ChatView({
 
           {promptSubmitting && !streamingAssistantId && !chatTurnState && (
             <div className="thread-message-row">
-              <article className="message assistant chat-message-agent pending" aria-live="polite">
+              <article className="message chat-message-agent pending" aria-live="polite">
                 <header className="assistant-label">
                   <Sparkles size={17} />
                   <strong>assistant</strong>
