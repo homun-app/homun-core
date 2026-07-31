@@ -33,6 +33,25 @@ const menus = await readFile(new URL("../src/styles/menus.css", import.meta.url)
     throw error;
   },
 );
+const sidebarFilters = await readFile(
+  new URL("../src/components/SidebarFilters.tsx", import.meta.url),
+  "utf8",
+);
+const sidebar = await readFile(new URL("../src/components/Sidebar.tsx", import.meta.url), "utf8");
+const sidebarStyles = await readFile(
+  new URL("../src/styles/sidebar.css", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
+const sidebarFilterState = await readFile(
+  new URL("../src/lib/sidebarFilterState.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const reducedMotion = foundation.match(
   /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\n\}/,
 )?.[0] ?? "";
@@ -43,6 +62,117 @@ test("the desktop entrypoint uses the compact visual foundation", () => {
     main,
     /import "\.\/styles\.css";\s*import "\.\/styles\/foundation\.css";\s*import "\.\/styles\/menus\.css";/,
   );
+});
+
+test("the sidebar uses the canonical persisted thread filter projection", () => {
+  assert.match(sidebarFilterState, /homun\.sidebar\.threadFilter\.v2/);
+  assert.match(sidebar, /readSidebarThreadFilter/);
+  assert.match(sidebar, /writeSidebarThreadFilter/);
+  assert.match(sidebar, /projectThreads/);
+  assert.match(sidebar, /PERSONAL_WORKSPACE_ID/);
+  assert.match(sidebar, /Date\.now\(\)/);
+  assert.match(sidebar, /workspaceId:\s*thread\.workspace_id/);
+  assert.doesNotMatch(sidebar, /\bthreadMatchesFilter\b/);
+  assert.doesNotMatch(sidebar, /\brequiresAttention\b/);
+  assert.doesNotMatch(`${sidebar}\n${sidebarFilters}`, /\battentionOnly\b/);
+  assert.doesNotMatch(sidebarFilters, /filter\.(?:date|sources)\b/);
+});
+
+test("SidebarFilters is a compact hierarchical MenuSurface chain", () => {
+  for (const token of [
+    "ListFilter",
+    "IconButton",
+    "MenuSurface",
+    'role="menuitemradio"',
+    'role="menuitemcheckbox"',
+    't("filters.clear")',
+    'chainId="sidebar-filters"',
+  ]) {
+    assert.match(sidebarFilters, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  for (const staleToken of [
+    "SlidersHorizontal",
+    "sidebar-filter-panel",
+    "filter-chip",
+    "filter-segments",
+  ]) {
+    assert.doesNotMatch(sidebarFilters, new RegExp(staleToken));
+  }
+  assert.match(sidebarFilters, /SIDEBAR_FILTER_ROOT_ROWS\.map/);
+  assert.match(sidebarFilters, /toggleAttentionFilterStates/);
+  assert.match(sidebarFilters, /sidebarFilterBadgeModel/);
+  assert.match(sidebarFilters, /freshSidebarThreadFilter/);
+});
+
+test("sidebar styles load after shared menus and own sidebar selectors", () => {
+  assert.match(main, /import "\.\/styles\/menus\.css";\s*import "\.\/styles\/sidebar\.css";/);
+  const cssSelectors = (css) => new Set(
+    Array.from(css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{/g))
+      .flatMap((match) => match[1].trim().startsWith("@") ? [] : match[1].split(","))
+      .map((selector) => selector.trim()),
+  );
+  const cssClasses = (selectors) => new Set(
+    [...selectors].flatMap((selector) => selector.match(/\.[A-Za-z_][\w-]*/g) ?? []),
+  );
+  const sidebarClasses = cssClasses(cssSelectors(sidebarStyles));
+  const legacySelectors = cssSelectors(legacyStyles);
+  const legacyClasses = cssClasses(legacySelectors);
+  const ownedFamilies = [
+    { label: "nav drawer", matches: (name) => name === ".nav-drawer" },
+    {
+      label: "navigation rail",
+      matches: (name) => name === ".navigation-rail" || name.startsWith(".rail-"),
+    },
+    { label: "settings drawer", matches: (name) => name === ".settings-drawer" },
+    { label: "settings navigation", matches: (name) => name.startsWith(".set-nav-") },
+    { label: "settings subnavigation", matches: (name) => name.startsWith(".set-subnav-") },
+    { label: "drawer resizer", matches: (name) => name === ".drawer-resizer" },
+    ...[
+      "titlebar",
+      "topbar",
+      "nav",
+      "scroll",
+      "footer",
+      "profile",
+      "thread",
+      "project",
+      "chats",
+      "section",
+      "row",
+      "eyebrow",
+    ].map((family) => ({
+      label: `drawer ${family}`,
+      matches: (name) => name.startsWith(`.drawer-${family}`),
+    })),
+    { label: "sidebar filters", matches: (name) => name.startsWith(".sidebar-filter") },
+    { label: "thread status", matches: (name) => name === ".thread-status-dot" },
+  ];
+  for (const family of ownedFamilies) {
+    const owned = [...sidebarClasses].filter(family.matches);
+    assert.ok(owned.length > 0, `${family.label} selectors must exist in sidebar.css`);
+    assert.deepEqual(
+      [...legacyClasses].filter(family.matches),
+      [],
+      `${family.label} selectors must not remain in styles.css`,
+    );
+  }
+
+  // These selectors coordinate sidebar state with global workspace chrome and intentionally stay.
+  const legacySidebarAllowlist = [
+    ".app-shell.drawer-closed .cc-dock.full",
+    ".app-shell.drawer-closed .task-topbar",
+    ".app-shell.drawer-closed::before",
+    ".app-shell.drawer-open::before",
+  ];
+  assert.deepEqual(
+    [...legacySelectors]
+      .filter((selector) => selector.includes(".drawer-open") || selector.includes(".drawer-closed"))
+      .sort(),
+    legacySidebarAllowlist,
+  );
+  const retiredFilters = /filter-chip|filter-segments|sidebar-filter-panel|drawer-filter-bar/;
+  assert.doesNotMatch(sidebarStyles, retiredFilters);
+  assert.doesNotMatch(legacyStyles, retiredFilters);
 });
 
 test("IconButton exposes its label and semantic tooltip", () => {
@@ -149,6 +279,8 @@ test("MenuSurface delegates interaction and placement decisions to tested helper
   ]) {
     assert.match(menuSurface, new RegExp(`\\b${helper}\\b`));
   }
+  assert.match(menuSurface, /shouldRestoreMenuFocus\(parentId, portalIds\)/);
+  assert.doesNotMatch(menuSurface, /!open \|\| parentId != null/);
 });
 
 test("MenuSurface re-establishes roving state before search focus after every render", () => {

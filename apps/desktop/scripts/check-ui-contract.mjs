@@ -182,7 +182,7 @@ assertContains(
   "non-selection thread actions must preserve the user-owned active task",
 );
 assertContains(
-  "src/styles.css",
+  "src/styles/sidebar.css",
   ".thread-status-dot.completed-unread",
   "completion uses a fixed teal dot",
 );
@@ -207,8 +207,8 @@ assertContains("src/components/ChatUsageOverview.tsx", ".slice(0, 1)", "Home mus
 assertContains("src/styles.css", ".chat-usage-infographic", "New-chat usage must provide a dedicated infographic layout");
 assertContains("src/styles.css", ".usage-calendar-grid", "Usage calendar must use a shared compact grid");
 assertContains("src/styles.css", ".usage-calendar-tooltip", "Usage calendar must provide an unclipped callout");
-assertContains("src/styles.css", ".app-shell.drawer-open > .workspace {\n    grid-column: 1;", "Narrow Settings content must stay in the visible grid column");
-assertContains("src/styles.css", ".app-shell.drawer-open > .settings-workspace {\n    padding-left: calc(min(var(--drawer-width, 292px), 292px) + 24px);", "Narrow Settings content must clear the overlay navigation");
+assertContains("src/styles/sidebar.css", ".app-shell.drawer-open > .workspace {\n    grid-column: 1;", "Narrow Settings content must stay in the visible grid column");
+assertContains("src/styles/sidebar.css", ".app-shell.drawer-open > .settings-workspace {\n    padding-left: calc(min(var(--drawer-width, 268px), 268px) + 24px);", "Narrow Settings content must clear the overlay navigation");
 assertContains("src/styles.css", ".active-task-layout.is-empty {\n  grid-template-rows: 58px minmax(0, 1fr) auto;", "Empty chat must keep the composer in the same bottom row as active conversations");
 assertNotContains("src/styles.css", "grid-template-rows: 58px 1fr auto 1fr", "Empty chat must not vertically center the composer with spacer rows");
 assertContains("src/styles.css", ".active-task-layout.is-empty .thread-content {\n  width: min(100%, 960px);", "Empty chat must give the six-month heatmap enough desktop width");
@@ -398,19 +398,19 @@ assertNotContains("src/components/Shell.tsx", "drawer-edge-hotspot", "collapsed 
 assertContains("src/components/ChatView.tsx", "task-collapsed-controls", "collapsed sidebar's reopen + search must live in the chat header (no-drag), not a fixed overlay");
 assertContains("src/components/ChatView.tsx", "onExpandSidebar", "collapsed sidebar's in-header opener must reopen the drawer");
 assertNotContains("src/components/Shell.tsx", "transientDrawerOpen", "collapsed sidebar must not maintain hover-open transient drawer state");
-assertContains("src/styles.css", "--drawer-island-gap", "sidebar must be laid out as a floating island with stable margins");
+assertContains("src/styles/sidebar.css", "--drawer-island-gap", "sidebar must be laid out as a floating island with stable margins");
 assertContains("src/styles.css", ".window-chrome", "custom window chrome must own the top drag/header strip");
 assertNotContains("src/styles.css", ".window-light", "custom window chrome must not draw fake traffic lights");
 assertContains("src/styles.css", "pointer-events: none", "custom window chrome wrapper must not sit as a click-blocking overlay");
 assertContains("src/styles.css", ".window-drag-strip", "custom window chrome must use explicit drag strips instead of dragging over controls");
 assertContains("src/styles.css", ".task-collapsed-controls", "collapsed reopen/search controls styled in the chat header");
 assertContains("src/styles.css", ".task-collapsed-action svg", "sidebar toggle icon must not intercept pointer events from the button");
-assertContains("src/styles.css", ".app-shell.drawer-open > .nav-drawer", "open sidebar and Settings nav must use the same island styling");
+assertContains("src/styles/sidebar.css", ".app-shell.drawer-open > .nav-drawer", "open sidebar and Settings nav must use the same island styling");
 assertContains("src/components/Sidebar.tsx", "drawer-titlebar-action", "expanded sidebar toggle + search must live in the top titlebar row");
 assertNotContains("src/components/Sidebar.tsx", "drawer-new-action", "sidebar search row must not include a global new-chat plus button");
 assertNotContains("src/components/Sidebar.tsx", "the gear becomes a back-to-app arrow", "Settings nav must not keep a duplicate footer back action");
-assertContains("src/styles.css", "overflow-y: auto;\n  overflow-x: hidden;", "expanded project trees must scroll inside the sidebar middle region instead of covering footer actions");
-assertContains("src/styles.css", ".drawer-scroll::-webkit-scrollbar", "sidebar middle scrollbars must stay visually minimal");
+assertContains("src/styles/sidebar.css", "overflow-x: hidden;\n  overflow-y: auto;", "expanded project trees must scroll inside the sidebar middle region instead of covering footer actions");
+assertContains("src/styles/sidebar.css", ".drawer-scroll::-webkit-scrollbar", "sidebar middle scrollbars must stay visually minimal");
 assertContains("src/styles.css", "z-index: 200", "custom window chrome must stay above the sidebar island");
 assertContains("src/styles.css", ".app-shell.drawer-closed .task-topbar", "closed sidebar header must clear the top-left toggle/search controls");
 assertNotContains("src/components/Shell.tsx", "drawer-floating-host", "collapsed sidebar must not render a hover-only transient island");
@@ -915,8 +915,8 @@ assertContains("src/components/ChatComputerPanel.tsx", "setView(fullscreen ? \"e
 assertContains("src/components/ChatComputerPanel.tsx", "fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />", "Computer dock enlarge/contract control must use fullscreen/minimize icons");
 assertContains("src/styles.css", ".cc-dock,\n.cc-scrim {\n  pointer-events: auto;", "Computer dock controls must be clickable inside the non-interactive status stack");
 assertContains("src/styles.css", ".cc-dock.full {\n  position: fixed;", "Computer fullscreen dock must escape the status stack and anchor inside the chat viewport");
-assertContains("src/styles.css", "left: calc(var(--drawer-island-gap) + var(--drawer-width, 292px) + 24px);", "Computer fullscreen dock must start to the right of the sidebar island");
-assertContains("src/styles.css", "width: min(1040px, calc(100vw - var(--drawer-width, 292px) - 72px));", "Computer fullscreen must be large but bounded by the chat area");
+assertContains("src/styles.css", "left: calc(var(--drawer-island-gap) + var(--drawer-width, 268px) + 24px);", "Computer fullscreen dock must start to the right of the sidebar island");
+assertContains("src/styles.css", "width: min(1040px, calc(100vw - var(--drawer-width, 268px) - 72px));", "Computer fullscreen must be large but bounded by the chat area");
 assertContains("src/lib/chatVisibleContent.mjs", "STRAY_REASONING_MARKER", "streaming renderer must strip stray or malformed reasoning markers from the visible answer body");
 assertContains("src/components/ChatView.tsx", "VAULT_PROPOSE_RE", "chat renderer must parse vault proposal markers");
 assertContains("src/components/ChatView.tsx", "VaultProposeCard", "chat renderer must render sensitive-data vault proposal cards");

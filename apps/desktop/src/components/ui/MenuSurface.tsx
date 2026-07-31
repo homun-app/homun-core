@@ -221,12 +221,12 @@ export function MenuSurface({
   }, [anchorRef, chainId, onCloseAll, open, parentId]);
 
   useEffect(() => {
-    if (!open || parentId != null) return;
+    if (!open) return;
 
     return () => {
       window.requestAnimationFrame(() => {
         const portalIds = chainPortals(chainId).map((portal) => portal.id);
-        if (shouldRestoreMenuFocus(null, portalIds)) {
+        if (shouldRestoreMenuFocus(parentId, portalIds)) {
           anchorRef.current?.focus();
         }
       });

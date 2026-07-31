@@ -10,6 +10,7 @@ import { registerPluginI18n } from "./plugins/registry";
 import "./styles.css";
 import "./styles/foundation.css";
 import "./styles/menus.css";
+import "./styles/sidebar.css";
 
 initTheme();
 initAccent();

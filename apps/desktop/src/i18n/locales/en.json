@@ -113,7 +113,43 @@
   },
   "filters": {
     "label": "Filter",
+    "groupBy": "Group by",
+    "orderBy": "Order by",
+    "state": "State",
+    "requiresAttention": "Requires attention",
     "type": "Type",
+    "period": "Period",
+    "project": "Project",
+    "channel": "Channel",
+    "showArchived": "Show archived",
+    "groupByOption": {
+      "none": "None",
+      "project": "Project",
+      "channel": "Channel",
+      "period": "Period"
+    },
+    "orderOption": {
+      "updated_desc": "Recently updated",
+      "updated_asc": "Least recently updated",
+      "title_asc": "Title A-Z"
+    },
+    "stateOption": {
+      "working": "Working",
+      "completed_unread": "Completed, unread",
+      "waiting_user": "Waiting for you",
+      "failed": "Failed"
+    },
+    "typeOption": {
+      "chat": "Chat",
+      "project": "Project"
+    },
+    "periodOption": {
+      "all": "Any time",
+      "today": "Today",
+      "7d": "Last 7 days",
+      "30d": "Last 30 days",
+      "older": "Older"
+    },
     "date": "Updated",
     "dateOption": {
       "all": "Any",

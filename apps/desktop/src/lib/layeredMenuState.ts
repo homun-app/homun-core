@@ -165,7 +165,7 @@ export const computeTooltipPlacement = implementation.computeTooltipPlacement as
 ) => ComputedTooltipPlacement;
 
 export const shouldRestoreMenuFocus = implementation.shouldRestoreMenuFocus as (
-  parentId: string | null,
+  parentId: string | null | undefined,
   openPortalIds: string[],
 ) => boolean;
 

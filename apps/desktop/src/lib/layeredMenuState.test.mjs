@@ -364,8 +364,17 @@ test("tooltip placement stays inside the viewport and flips above when needed", 
   });
 });
 
-test("only a root with no remaining same-chain portal restores focus", () => {
-  assert.equal(shouldRestoreMenuFocus("add-menu", ["add-menu"]), false);
+test("nested selection followed by Escape restores the parent row before root Escape", () => {
+  const firstEscape = getMenuKeyboardAction("Escape", 5, 0, false);
+  assert.deepEqual(firstEscape, { type: "close-current" });
+  assert.equal(shouldRestoreMenuFocus("sidebar-filters-menu", ["sidebar-filters-menu"]), true);
+
+  const secondEscape = getMenuKeyboardAction("Escape", 8, 2, false);
+  assert.deepEqual(secondEscape, { type: "close-current" });
+  assert.equal(shouldRestoreMenuFocus(null, []), true);
+});
+
+test("focus restoration requires the destination menu chain to remain available", () => {
   assert.equal(shouldRestoreMenuFocus("add-menu", []), false);
   assert.equal(shouldRestoreMenuFocus(null, ["add-menu"]), false);
   assert.equal(shouldRestoreMenuFocus(null, []), true);

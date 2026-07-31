@@ -113,7 +113,43 @@
   },
   "filters": {
     "label": "Filtrar",
+    "groupBy": "Agrupar por",
+    "orderBy": "Ordenar por",
+    "state": "Estado",
+    "requiresAttention": "Requiere atencion",
     "type": "Tipo",
+    "period": "Período",
+    "project": "Proyecto",
+    "channel": "Canal",
+    "showArchived": "Mostrar archivados",
+    "groupByOption": {
+      "none": "Ninguno",
+      "project": "Proyecto",
+      "channel": "Canal",
+      "period": "Período"
+    },
+    "orderOption": {
+      "updated_desc": "Actualizados recientemente",
+      "updated_asc": "Menos recientes",
+      "title_asc": "Título A-Z"
+    },
+    "stateOption": {
+      "working": "En curso",
+      "completed_unread": "Completado, sin leer",
+      "waiting_user": "Esperando tu respuesta",
+      "failed": "Fallido"
+    },
+    "typeOption": {
+      "chat": "Chat",
+      "project": "Proyecto"
+    },
+    "periodOption": {
+      "all": "Cualquier momento",
+      "today": "Hoy",
+      "7d": "Últimos 7 días",
+      "30d": "Últimos 30 días",
+      "older": "Anteriores"
+    },
     "date": "Actualizado",
     "dateOption": {
       "all": "Cualquiera",

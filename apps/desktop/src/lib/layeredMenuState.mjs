@@ -240,7 +240,8 @@ export function computeTooltipPlacement({
 }
 
 export function shouldRestoreMenuFocus(parentId, openPortalIds) {
-  return parentId == null && openPortalIds.length === 0;
+  if (parentId != null) return openPortalIds.includes(parentId);
+  return openPortalIds.length === 0;
 }
 
 export function optionalAriaPressed(pressed) {

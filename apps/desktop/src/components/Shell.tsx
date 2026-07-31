@@ -177,7 +177,7 @@ export function Shell({
 }
 
 const DRAWER_WIDTH_KEY = "ui.drawerWidth";
-const DRAWER_DEFAULT_WIDTH = 292;
+const DRAWER_DEFAULT_WIDTH = 268;
 const DRAWER_MIN_WIDTH = 240;
 const DRAWER_MAX_WIDTH = 560;
 
