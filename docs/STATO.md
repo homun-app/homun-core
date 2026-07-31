@@ -1,91 +1,83 @@
 # Stato — Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-07-31 (doc reset).**
+> **Ultimo aggiornamento: 2026-07-31 (P0 gates + live broker smoke).**
 >
-> Unico documento di sessione da aggiornare a ogni passo. Hub:
-> [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
->
-> Storico STATO pre-reset:
-> [`archive/STATO-history-pre-2026-07-31.md`](archive/STATO-history-pre-2026-07-31.md).
-> Doc stantia spostata in
-> [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
-> `CLAUDE.md` rimosso. Prompt lungo opzionale:
-> [`HANDOFF-2026-07-31.md`](HANDOFF-2026-07-31.md).
+> Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
+> Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
+> Prompt lungo: [`HANDOFF-2026-07-31.md`](HANDOFF-2026-07-31.md).
 
-## Identità Git (verificare a inizio sessione)
+## Identità Git
 
-| Campo | Valore all’ultimo aggiornamento |
+| Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| HEAD tipico | baseline UI `9d2788e8`; handoff doc `f5d6fb6d` (+ commit doc reset dopo) |
-| Versione prodotto | `0.1.1094` (`apps/desktop/package.json`) |
-| Worktree | pulito prima di gate/release |
-
-```bash
-git status --short && git log -5 --oneline
-```
+| HEAD collaudo P0 | `75418ba8` (`fix(deps): bump wasmtime…`; doc reset `3a82de4a`) |
+| Versione | `0.1.1094` |
+| Worktree | pulito dopo i commit doc/deps |
 
 ## Dove siamo
 
-Homun = gateway Rust + Electron/React + sidecar. Runtime durevole su **un**
-contratto: `ExecutionContract → execute → ExecutionOutcome`
-(`execution-protocol` + `task-runtime` + host gateway). Un loop:
-`crates/engine::agent_loop::run_turn`. Niente secondo HITL, store memoria, o
-dashboard Tasks.
+Homun = gateway Rust + Electron/React + sidecar. Contratto unico
+`ExecutionContract → execute → ExecutionOutcome`. Loop unico
+`engine::agent_loop::run_turn`. Vedi [`architecture/overview.md`](architecture/overview.md).
 
-Dettaglio as-built: [`architecture/overview.md`](architecture/overview.md).
+### P0 — fatto su questo HEAD
 
-### Fatto (codice)
+**Gate deterministici (ALL GREEN):**
 
-- Engine estratto (ADR 0024); flag `HOMUN_ENGINE_CRATE` / `HOMUN_TURN_BROKER` assenti.
-- Effect host + receipt tipizzati; `Uncertain` senza auto-rerun.
-- Projection outbox + crash recovery; lease/heartbeat/park/resume/cancel.
-- Browser sub-turno + sidecar checkpoint/generation.
-- HITL in `engine/hitl.rs`; Tasks UI rimossa; attenzione in chat.
-- Sandbox `SandboxMode` (`HOMUN_SANDBOX_MODE`); no `HOMUN_TOOL_SAFETY`.
-- Memoria: pool default ON; `HOMUN_MEMORY_SERVICE` ancora OFF.
-- UI fase 1: grammatica compatta, island adattiva, spacing rifinito.
+- `cargo fmt --all -- --check`
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- `python3 scripts/pre_release_gate.py` → **ALL GREEN** (capabilities → gateway →
+  electron 155 → UI contract → Vite build → deck/doc render…)
+- `cargo audit` — verde dopo bump `wasmtime` 45 → **46.0.2** (`RUSTSEC-2026-0222`)
+- `npm --prefix apps/desktop audit --audit-level=high` — 0 vuln
 
-### Non ancora prova di release
+**Fix durante il gate:** ripristinate mappe as-built
+`architecture/contained-computer.md` + `host-computer-control.md` (test Electron
+leggevano i path dopo il doc reset).
 
-Gate/smoke su `9d2788e8` (grammar/Electron/UI/Vite/health) **non** equivalgono a
-collaudo installer sullo SHA attuale. Matrice:
-[`testing/release-candidate-matrix.md`](testing/release-candidate-matrix.md).
+**Live `electron:dev` (porte 1420 / 18765, PID gateway sul worktree):**
+
+| Check | Esito |
+| --- | --- |
+| Vite HTTP | 200 |
+| `GET /api/health` | `ok:true`, `recovered_stores:[]`, `projection_worker_error:null` (anche dopo i turni) |
+| Enqueue `POST /api/chat/turns` su thread creato | 201 → `completed` (events≥2) |
+| Due thread concorrenti | entrambi `completed` |
+| `DELETE /api/chat/turns/{id}` | 202 → stato `cancelled` |
+| `GET /api/tasks/queue` | 200 (projection attenzione ancora raggiungibile) |
+
+Nota: `scripts/production_smoke.py` punta ancora a `/api/chat/generate_stream` → **404**
+(path legacy rimosso). Il collaudo live ha usato il broker (`/api/chat/turns`).
+
+### Non ancora collaudato live in questa sessione
+
+Matrice HANDOFF ancora aperta: hard restart gateway, browser crash/sidecar,
+approval/`Uncertain`, sandbox allow/deny, Vault plaintext, linked memory,
+connector on/off, presentazioni template, automazioni `pending_verification`,
+smoke UI Electron (menu/sidebar/temi) sullo SHA attuale.
 
 ### Debito noto
 
-- `desktop-gateway/src/main.rs` ~89k; `ChatView.tsx` ~10k.
-- `OrchestratorBrain` ancora per materializzare task (`HOMUN_BRAIN_MATERIALIZE`).
-- Dual path memoria service opt-in.
+- `main.rs` ~89k; `ChatView.tsx` ~10k.
+- `HOMUN_MEMORY_SERVICE` default OFF; `OrchestratorBrain` ancora per materializzare task.
+- `production_smoke.py` da aggiornare al broker.
 
 ## Prossimo lavoro
 
-### P0
-
-1. Gate su HEAD: `cargo fmt --check`, `clippy -D warnings`, `pre_release_gate.py`,
-   `cargo audit`, `npm --prefix apps/desktop audit --audit-level=high`.
-2. Collaudo Electron **dev** (porte 1420/18765) + verifica journal/receipt/DB
-   (turni, wait/resume, cancel/restart, browser, approval/uncertain, sandbox,
-   Vault, memoria, connector, presentazioni, automazioni).
-
-### P1
-
-3. Rifinitura UI di dettaglio con contract test.
-4. RC multipiattaforma draft (no publish) dopo gate verdi.
+1. Completare collaudo live residuo (browser/Vault/sandbox/presentazioni/automazioni +
+   restart) e/o aggiornare `production_smoke.py` al path turns.
+2. P1 rifinitura UI dettaglio.
+3. RC multipiattaforma draft dopo evidenza sullo stesso SHA (`testing/release-candidate-matrix.md`).
 
 ## Prompt di ripartenza
 
 ```text
 Continuo Homun. Repo: /Users/fabio/Projects/Homun/app, branch main.
+HEAD P0 verde: 75418ba8. Leggi docs/README.md → docs/STATO.md → docs/architecture/.
 
-Leggi docs/README.md → docs/STATO.md → docs/architecture/ (as-built).
-Principi: docs/CAPISALDI.md. ADR solo come storia: docs/decisions/.
-Archive e vecchie mappe NON sono specifica. Codice = verità.
-
-Invarianti: ExecutionContract→execute→ExecutionOutcome; un loop
-engine::run_turn; nessun secondo HITL/store/Tasks UI.
-
-Prossimo: P0 gate + collaudo Electron reale. Poi P1 UI / RC draft.
-Non pubblicare. Non reimplementare il kernel già presente.
+P0 gate + smoke broker fatti. Prossimo: collaudo live residuo (browser, Vault,
+sandbox, presentazioni, automazioni, hard restart) e/o fix production_smoke.py
+al broker; poi P1 UI / RC draft. Non pubblicare.
 ```
