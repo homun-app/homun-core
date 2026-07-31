@@ -263,6 +263,8 @@ interface ChatViewProps {
   /** Bumped by App on a `thread.updated` for this open thread → the working-island re-fetches
    *  its durable projection (so a BACKGROUND channel turn's finished activity folds in). */
   islandRefreshNonce?: number;
+  /** Monotonic id of the latest durable terminal event for this thread. */
+  runtimeContextRevision: number;
   /** Set by App on a `thread.turn_started` for this open thread that this client did NOT
    *  launch (a channel/scheduled reply, or a turn from another window). ChatView attaches to
    *  its live stream so the island + transcript update in real time, identical to an in-app
@@ -466,6 +468,7 @@ export function ChatView({
   onMessagesChange,
   islandRefreshNonce,
   incomingBackgroundTurn,
+  runtimeContextRevision,
   onOpenTasks,
   onApproveApprovel,
   onRejectApprovel,
@@ -931,9 +934,7 @@ export function ChatView({
     // the previous turn's activity. (The message COUNT is stable: the assistant placeholder is
     // updated in place, so it can't be the trigger.)
   }, [thread.threadId, isStreaming, islandRefreshNonce]);
-  const runtimeContextRefreshKey = `${thread.threadId}:${isStreaming ? "active" : "rest"}:${islandRefreshNonce}`;
   useEffect(() => {
-    if (isStreaming) return;
     let cancelled = false;
     setRuntimeContext(null);
     setRuntimeContextLoading(true);
@@ -954,7 +955,7 @@ export function ChatView({
     return () => {
       cancelled = true;
     };
-  }, [thread.threadId, isStreaming, islandRefreshNonce, runtimeContextRefreshKey]);
+  }, [thread.threadId, runtimeContextRevision]);
   // Files the user uploaded in THIS conversation (e.g. the patente PDF), derived
   // from message attachments — the chat-context "File" tab of the Workbench.
   const uploadedFiles = useMemo(() => {

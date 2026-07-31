@@ -56,6 +56,7 @@ const chatView = await readFile(
   new URL("../src/components/ChatView.tsx", import.meta.url),
   "utf8",
 );
+const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -254,17 +255,30 @@ test("runtime context is fetched through the scoped thread endpoint", () => {
   assert.match(coreBridge, /runtimeContext:\s*\(threadId:\s*string\)/);
 });
 
-test("composer runtime uses the exclusive menu chain and renders factual context inline", () => {
+test("runtime context refresh follows the durable terminal cursor", () => {
+  assert.match(
+    app,
+    /runtimeContextRevision=\{\s*threadAttention\.terminalEventIds\[activeThread\.threadId\]\s*\?\?\s*0\s*\}/,
+  );
+  assert.match(chatView, /runtimeContextRevision:\s*number/);
+  assert.match(chatView, /\[thread\.threadId,\s*runtimeContextRevision\]/);
+  assert.doesNotMatch(chatView, /runtimeContextRefreshKey/);
+});
+
+test("composer runtime uses the exclusive dialog chain and renders factual context inline", () => {
   assert.match(composerShell, /rootOpen\("runtime"\)/);
   assert.match(composerShell, /<RuntimeContextPanel/);
   assert.doesNotMatch(composerShell, /homun:open-runtime-context/);
-  assert.match(chatView, /runtimeContextRefreshKey/);
-  assert.match(chatView, /thread\.threadId,\s*isStreaming,\s*islandRefreshNonce/);
+  assert.match(composerShell, /id="composer-runtime-trigger"[\s\S]*?aria-haspopup="dialog"/);
+  assert.match(composerShell, /id="composer-runtime-menu"[\s\S]*?surfaceRole="dialog"/);
+  assert.match(menuSurface, /surfaceRole\?:\s*"menu"\s*\|\s*"dialog"/);
+  assert.match(menuSurface, /role=\{surfaceRole\}/);
 });
 
 test("runtime panel exposes only approved redacted categories", () => {
   for (const field of [
     "effectiveModel",
+    "selectedNextModel",
     "provider",
     "locality",
     "role",
@@ -280,6 +294,9 @@ test("runtime panel exposes only approved redacted categories", () => {
     runtimeContextPanel,
     /value\.(?:prompt|path|memoryContent|price|hash|baseUrl)|base_url/i,
   );
+  assert.match(runtimeContextPanel, /composer\.runtime\.nextTurnModel/);
+  assert.match(runtimeContextPanel, /value\.selectedNextModel\s*\?\?/);
+  assert.match(runtimeContextPanel, /<section[\s\S]*?aria-labelledby=/);
 });
 
 test("legacy CSS cannot recreate message, activity, or generated-file surfaces", () => {
@@ -521,10 +538,11 @@ test("IconButton badge text meets small-text contrast in every theme", () => {
   assert.ok(contrast >= 4.5, `expected at least 4.5:1 contrast, received ${contrast.toFixed(2)}:1`);
 });
 
-test("MenuSurface portals a labeled same-chain menu", () => {
+test("MenuSurface portals a labeled same-chain surface with menu semantics by default", () => {
   assert.match(menuSurface, /createPortal/);
   assert.match(menuSurface, /data-menu-chain=\{chainId\}/);
-  assert.match(menuSurface, /role="menu"/);
+  assert.match(menuSurface, /surfaceRole\s*=\s*"menu"/);
+  assert.match(menuSurface, /role=\{surfaceRole\}/);
   assert.match(menuSurface, /aria-label=\{label\}/);
 });
 

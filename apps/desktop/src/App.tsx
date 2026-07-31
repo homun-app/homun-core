@@ -1771,6 +1771,9 @@ function AuthenticatedApp() {
                 handleMessagesChange(activeThread.threadId, messages)
               }
               islandRefreshNonce={islandRefreshNonce}
+              runtimeContextRevision={
+                threadAttention.terminalEventIds[activeThread.threadId] ?? 0
+              }
               incomingBackgroundTurn={incomingBackgroundTurn}
               autoSubmit={
                 pendingTemplateAutoSubmit?.threadId === activeThread.threadId

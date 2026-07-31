@@ -44,6 +44,7 @@ export interface MenuSurfaceProps {
   anchorRef: RefObject<HTMLElement | null>;
   parentId?: string;
   search?: MenuSearchProps;
+  surfaceRole?: "menu" | "dialog";
   onCloseCurrent: () => void;
   onCloseAll: () => void;
   children: ReactNode;
@@ -102,6 +103,7 @@ export function MenuSurface({
   anchorRef,
   parentId,
   search,
+  surfaceRole = "menu",
   onCloseCurrent,
   onCloseAll,
   children,
@@ -268,7 +270,7 @@ export function MenuSurface({
       id={id}
       data-menu-chain={chainId}
       data-parent-menu={parentId}
-      role="menu"
+      role={surfaceRole}
       aria-label={label}
       className="menu-surface"
       tabIndex={-1}

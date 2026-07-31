@@ -525,7 +525,7 @@
     "toolsCount": "{{count}} tools",
     "runtime": {
       "unavailable": "Unavailable", "loading": "Loading runtime context...", "error": "Runtime context is temporarily unavailable.",
-      "effectiveModel": "Effective model", "provider": "Provider", "locality": "Locality", "role": "Role", "contextWindow": "Context window", "usedInput": "Used input", "usedInputValue": "{{tokens}} tokens ({{percent}}%)", "compaction": "Compaction", "applied": "Applied", "notApplied": "Not applied",
+      "effectiveModel": "Effective model", "nextTurnModel": "Next-turn model", "provider": "Provider", "locality": "Locality", "role": "Role", "contextWindow": "Context window", "usedInput": "Used input", "usedInputValue": "{{tokens}} tokens ({{percent}}%)", "compaction": "Compaction", "applied": "Applied", "notApplied": "Not applied",
       "contributions": "Context contributions", "conversation": "Conversation", "compactedSummary": "Compacted summary", "filesArtifacts": "Files and artifacts", "authorizedMemory": "Authorized memory", "systemTools": "System and tools", "promptEstimate": "Estimated from model-visible prompt", "providerReported": "Provider reported"
     }
   },

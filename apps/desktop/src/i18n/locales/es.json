@@ -525,7 +525,7 @@
     "toolsCount": "{{count}} herramientas",
     "runtime": {
       "unavailable": "No disponible", "loading": "Cargando ejecución y contexto...", "error": "La ejecución y el contexto no están disponibles temporalmente.",
-      "effectiveModel": "Modelo efectivo", "provider": "Proveedor", "locality": "Localidad", "role": "Rol", "contextWindow": "Ventana de contexto", "usedInput": "Entrada usada", "usedInputValue": "{{tokens}} tokens ({{percent}}%)", "compaction": "Compactación", "applied": "Aplicada", "notApplied": "No aplicada",
+      "effectiveModel": "Modelo efectivo", "nextTurnModel": "Modelo del próximo turno", "provider": "Proveedor", "locality": "Localidad", "role": "Rol", "contextWindow": "Ventana de contexto", "usedInput": "Entrada usada", "usedInputValue": "{{tokens}} tokens ({{percent}}%)", "compaction": "Compactación", "applied": "Aplicada", "notApplied": "No aplicada",
       "contributions": "Contribuciones al contexto", "conversation": "Conversación", "compactedSummary": "Resumen compactado", "filesArtifacts": "Archivos y artefactos", "authorizedMemory": "Memoria autorizada", "systemTools": "Sistema y herramientas", "promptEstimate": "Estimado desde el prompt visible para el modelo", "providerReported": "Declarado por el proveedor"
     }
   },

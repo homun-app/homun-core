@@ -525,7 +525,7 @@
     "toolsCount": "{{count}} Werkzeuge",
     "runtime": {
       "unavailable": "Nicht verfügbar", "loading": "Laufzeitkontext wird geladen...", "error": "Der Laufzeitkontext ist vorübergehend nicht verfügbar.",
-      "effectiveModel": "Effektives Modell", "provider": "Anbieter", "locality": "Ausführungsort", "role": "Rolle", "contextWindow": "Kontextfenster", "usedInput": "Verwendete Eingabe", "usedInputValue": "{{tokens}} Token ({{percent}}%)", "compaction": "Kompaktierung", "applied": "Angewendet", "notApplied": "Nicht angewendet",
+      "effectiveModel": "Effektives Modell", "nextTurnModel": "Modell für den nächsten Turn", "provider": "Anbieter", "locality": "Ausführungsort", "role": "Rolle", "contextWindow": "Kontextfenster", "usedInput": "Verwendete Eingabe", "usedInputValue": "{{tokens}} Token ({{percent}}%)", "compaction": "Kompaktierung", "applied": "Angewendet", "notApplied": "Nicht angewendet",
       "contributions": "Kontextbeiträge", "conversation": "Konversation", "compactedSummary": "Kompaktierte Zusammenfassung", "filesArtifacts": "Dateien und Artefakte", "authorizedMemory": "Autorisierter Speicher", "systemTools": "System und Tools", "promptEstimate": "Aus dem modellsichtbaren Prompt geschätzt", "providerReported": "Vom Anbieter gemeldet"
     }
   },

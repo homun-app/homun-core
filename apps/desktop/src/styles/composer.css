@@ -355,14 +355,14 @@
 }
 
 .composer-runtime-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18px, max-content);
+  gap: var(--space-2);
+  align-items: center;
   height: auto;
   min-height: 28px;
   padding-block: 5px;
   cursor: default;
-}
-
-.composer-runtime-row:hover {
-  background: transparent;
 }
 
 .composer-runtime-row .menu-item__trailing {

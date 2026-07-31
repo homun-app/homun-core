@@ -23,6 +23,7 @@ export function RuntimeContextPanel({ value, loading, error }: RuntimeContextPan
   ] as const;
   const facts = [
     [t("composer.runtime.effectiveModel"), value.effectiveModel],
+    [t("composer.runtime.nextTurnModel"), value.selectedNextModel ?? t("composer.auto")],
     [t("composer.runtime.provider"), value.provider],
     [t("composer.runtime.locality"), value.locality],
     [t("composer.runtime.role"), value.role],
@@ -44,13 +45,19 @@ export function RuntimeContextPanel({ value, loading, error }: RuntimeContextPan
   ] as const;
 
   return (
-    <div className="composer-runtime-panel composer-menu-list" aria-live="polite">
+    <section
+      className="composer-runtime-panel composer-menu-list"
+      aria-labelledby="runtime-context-title"
+      aria-live="polite"
+    >
+      <h2 id="runtime-context-title" className="composer-model-group-label">
+        {t("composer.runtimeContext")}
+      </h2>
       {loading ? <p className="composer-menu-empty">{t("composer.runtime.loading")}</p> : null}
       {error ? <p className="composer-error">{t("composer.runtime.error")}</p> : null}
       <dl>
         {facts.map(([label, content]) => (
-          <div className="menu-item composer-runtime-row" key={label}>
-            <span className="menu-item__leading" aria-hidden="true" />
+          <div className="composer-runtime-row" key={label}>
             <dt className="menu-item__label">{label}</dt>
             <dd className="menu-item__trailing">{content ?? unavailable}</dd>
           </div>
@@ -59,8 +66,7 @@ export function RuntimeContextPanel({ value, loading, error }: RuntimeContextPan
       <div className="composer-model-group-label">{t("composer.runtime.contributions")}</div>
       <dl>
         {contributionRows.map(([key, label, contribution]) => (
-          <div className="menu-item composer-runtime-row" key={key}>
-            <span className="menu-item__leading" aria-hidden="true" />
+          <div className="composer-runtime-row" key={key}>
             <dt className="menu-item__label">{label}</dt>
             <dd className="menu-item__trailing">
               {contribution ? (
@@ -77,6 +83,6 @@ export function RuntimeContextPanel({ value, loading, error }: RuntimeContextPan
           </div>
         ))}
       </dl>
-    </div>
+    </section>
   );
 }

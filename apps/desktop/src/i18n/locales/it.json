@@ -525,7 +525,7 @@
     "toolsCount": "{{count}} strumenti",
     "runtime": {
       "unavailable": "Non disponibile", "loading": "Caricamento runtime e contesto...", "error": "Runtime e contesto sono temporaneamente non disponibili.",
-      "effectiveModel": "Modello effettivo", "provider": "Provider", "locality": "Località", "role": "Ruolo", "contextWindow": "Finestra di contesto", "usedInput": "Input usato", "usedInputValue": "{{tokens}} token ({{percent}}%)", "compaction": "Compattazione", "applied": "Applicata", "notApplied": "Non applicata",
+      "effectiveModel": "Modello effettivo", "nextTurnModel": "Modello del prossimo turno", "provider": "Provider", "locality": "Località", "role": "Ruolo", "contextWindow": "Finestra di contesto", "usedInput": "Input usato", "usedInputValue": "{{tokens}} token ({{percent}}%)", "compaction": "Compattazione", "applied": "Applicata", "notApplied": "Non applicata",
       "contributions": "Contributi al contesto", "conversation": "Conversazione", "compactedSummary": "Riepilogo compattato", "filesArtifacts": "File e artefatti", "authorizedMemory": "Memoria autorizzata", "systemTools": "Sistema e strumenti", "promptEstimate": "Stima dal prompt visibile al modello", "providerReported": "Dichiarato dal provider"
     }
   },

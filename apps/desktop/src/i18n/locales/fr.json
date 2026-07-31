@@ -525,7 +525,7 @@
     "toolsCount": "{{count}} outils",
     "runtime": {
       "unavailable": "Indisponible", "loading": "Chargement de l’exécution et du contexte...", "error": "L’exécution et le contexte sont temporairement indisponibles.",
-      "effectiveModel": "Modèle effectif", "provider": "Fournisseur", "locality": "Localité", "role": "Rôle", "contextWindow": "Fenêtre de contexte", "usedInput": "Entrée utilisée", "usedInputValue": "{{tokens}} jetons ({{percent}}%)", "compaction": "Compaction", "applied": "Appliquée", "notApplied": "Non appliquée",
+      "effectiveModel": "Modèle effectif", "nextTurnModel": "Modèle du prochain tour", "provider": "Fournisseur", "locality": "Localité", "role": "Rôle", "contextWindow": "Fenêtre de contexte", "usedInput": "Entrée utilisée", "usedInputValue": "{{tokens}} jetons ({{percent}}%)", "compaction": "Compaction", "applied": "Appliquée", "notApplied": "Non appliquée",
       "contributions": "Contributions au contexte", "conversation": "Conversation", "compactedSummary": "Résumé compacté", "filesArtifacts": "Fichiers et artefacts", "authorizedMemory": "Mémoire autorisée", "systemTools": "Système et outils", "promptEstimate": "Estimé depuis le prompt visible par le modèle", "providerReported": "Déclaré par le fournisseur"
     }
   },
