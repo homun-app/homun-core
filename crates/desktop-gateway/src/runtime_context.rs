@@ -112,6 +112,14 @@ pub fn project_runtime_context(
 
 fn snapshot_contributions(snapshot: &Value) -> Option<RuntimeContextContributions> {
     let messages = snapshot.get("messages")?.as_array()?;
+    let omitted_messages = snapshot
+        .get("omitted_messages")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let omitted_tools = snapshot
+        .get("omitted_tools")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
     let conversation_chars = messages
         .iter()
         .filter(|message| message.get("role").and_then(Value::as_str) != Some("system"))
@@ -130,8 +138,9 @@ fn snapshot_contributions(snapshot: &Value) -> Option<RuntimeContextContribution
         .filter_map(|tool| tool.get("chars").and_then(Value::as_u64))
         .sum::<u64>();
     Some(RuntimeContextContributions {
-        conversation: Some(prompt_estimate(conversation_chars)),
-        system_tools: Some(prompt_estimate(system_chars.saturating_add(tool_chars))),
+        conversation: (omitted_messages == 0).then(|| prompt_estimate(conversation_chars)),
+        system_tools: (omitted_messages == 0 && omitted_tools == 0)
+            .then(|| prompt_estimate(system_chars.saturating_add(tool_chars))),
         ..RuntimeContextContributions::default()
     })
 }
@@ -334,6 +343,40 @@ mod tests {
                 "leaked {forbidden}: {encoded}"
             );
         }
+    }
+
+    #[test]
+    fn runtime_context_keeps_only_unaffected_categories_when_tools_were_omitted() {
+        let mut partial = snapshot();
+        partial["truncated"] = json!(true);
+        partial["omitted_messages"] = json!(0);
+        partial["omitted_tools"] = json!(1);
+
+        let response =
+            project_runtime_context(Some(&run()), Some(&partial), false, None, &registry());
+
+        assert_eq!(
+            response.contributions.conversation,
+            Some(RuntimeContextContribution {
+                estimated_tokens: 25,
+                source: RuntimeContextProvenance::PromptSnapshotEstimate,
+            })
+        );
+        assert_eq!(response.contributions.system_tools, None);
+    }
+
+    #[test]
+    fn runtime_context_marks_message_affected_categories_unavailable() {
+        let mut omitted = snapshot();
+        omitted["truncated"] = json!(true);
+        omitted["omitted_messages"] = json!(1);
+        omitted["omitted_tools"] = json!(0);
+
+        let response =
+            project_runtime_context(Some(&run()), Some(&omitted), false, None, &registry());
+
+        assert_eq!(response.contributions.conversation, None);
+        assert_eq!(response.contributions.system_tools, None);
     }
 
     #[test]

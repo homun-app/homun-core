@@ -6,6 +6,8 @@ pub mod linked_memory_repair;
 pub mod model_registry;
 pub mod project_graph_commit;
 pub mod provider_usage;
+#[cfg(test)]
+mod runtime_context;
 pub mod usage_pricing;
 pub mod usage_store;
 pub mod usage_suggestions;

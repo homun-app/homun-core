@@ -17166,17 +17166,17 @@ async fn compact_completed_step(
     http: &reqwest::Client,
     messages: &mut Vec<serde_json::Value>,
     start: &mut usize,
-) {
+) -> bool {
     if *start >= messages.len() {
-        return;
+        return false;
     }
     let slice = &messages[*start..];
     // Not worth a summarizer round-trip for a tiny step.
     if slice.len() < 6 {
-        return;
+        return false;
     }
     let Some(summary) = summarize_message_slice(http, slice).await else {
-        return;
+        return false;
     };
     // Replace the slice with one compact assistant note (valid OpenAI-compat: an
     // assistant message with content and no tool_calls). The user-facing answer
@@ -17188,6 +17188,7 @@ async fn compact_completed_step(
         "content": format!("[Earlier plan steps — context compacted]\n{summary}"),
     }));
     *start = messages.len();
+    true
 }
 
 /// Token-budget auto-compaction (Fase 1.1). The durable transcript and execution journal
@@ -17199,13 +17200,13 @@ async fn compact_for_context_budget(
     context_window: Option<usize>,
     _thread_id: Option<&str>,
     _memory_reads: &local_first_engine::events::TurnMemoryReadSet,
-) {
+) -> bool {
     if !needs_context_compaction(
         estimate_tokens(messages),
         context_window,
         CONTEXT_COMPACTION_THRESHOLD,
     ) {
-        return;
+        return false;
     }
     let roles: Vec<&str> = messages
         .iter()
@@ -17216,13 +17217,13 @@ async fn compact_for_context_budget(
         CONTEXT_COMPACTION_KEEP_HEAD,
         CONTEXT_COMPACTION_KEEP_TAIL,
     ) else {
-        return;
+        return false;
     };
     let slice: Vec<serde_json::Value> = messages[from..to].to_vec();
     // Salience-preserving summary replaces the span in-context. Best-effort: on failure
     // leave messages intact; nothing durable depends on this projection.
     let Some(summary) = summarize_message_slice(&state.http, &slice).await else {
-        return;
+        return false;
     };
     let note = serde_json::json!({
         "role": "assistant",
@@ -17231,6 +17232,7 @@ async fn compact_for_context_budget(
         ),
     });
     messages.splice(from..to, std::iter::once(note));
+    true
 }
 
 /// Whether the active orchestrator provider runs locally (loopback base_url).
@@ -29779,7 +29781,9 @@ impl local_first_engine::PlanProgress for NoPlanProgress {
 struct NoContextCompactor;
 
 impl local_first_engine::ContextCompactor for NoContextCompactor {
-    async fn compact(&self, _messages: &mut Vec<serde_json::Value>, _start: &mut usize) {}
+    async fn compact(&self, _messages: &mut Vec<serde_json::Value>, _start: &mut usize) -> bool {
+        false
+    }
 }
 
 /// Open `TurnPolicy` for the browse sub-turn (ADR 0025): nothing is route-blocked (the manager already
@@ -40212,8 +40216,8 @@ pub(crate) struct GatewayContextCompactor {
 }
 
 impl local_first_engine::ContextCompactor for GatewayContextCompactor {
-    async fn compact(&self, messages: &mut Vec<serde_json::Value>, start: &mut usize) {
-        compact_completed_step(&self.state.http, messages, start).await;
+    async fn compact(&self, messages: &mut Vec<serde_json::Value>, start: &mut usize) -> bool {
+        compact_completed_step(&self.state.http, messages, start).await
     }
 
     async fn compact_for_budget(
@@ -40221,7 +40225,7 @@ impl local_first_engine::ContextCompactor for GatewayContextCompactor {
         messages: &mut Vec<serde_json::Value>,
         context_window: Option<usize>,
         memory_reads: &local_first_engine::events::TurnMemoryReadSet,
-    ) {
+    ) -> bool {
         compact_for_context_budget(
             &self.state,
             messages,
@@ -40229,7 +40233,7 @@ impl local_first_engine::ContextCompactor for GatewayContextCompactor {
             self.thread_id.as_deref(),
             memory_reads,
         )
-        .await;
+        .await
     }
 }
 

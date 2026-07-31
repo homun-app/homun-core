@@ -539,7 +539,7 @@ impl UsageStore {
                 "SELECT provider_id, model_id, locality
                  FROM inference_usage_events
                  WHERE user_id = ?1 AND workspace_id = ?2 AND run_id = ?3
-                   AND event_kind != 'attempt_started'
+                   AND event_kind IN ('attempt_completed', 'attempt_failed', 'attempt_aborted')
                  ORDER BY recorded_at DESC, rowid DESC
                  LIMIT 1",
                 params![user_id, workspace_id, run_id],
@@ -569,7 +569,7 @@ impl UsageStore {
                 COUNT(CASE WHEN usage_provenance = 'provider_reported' THEN cache_write_tokens END)
              FROM inference_usage_events
              WHERE user_id = ?1 AND workspace_id = ?2 AND run_id = ?3
-               AND event_kind != 'attempt_started'",
+               AND event_kind IN ('attempt_completed', 'attempt_failed', 'attempt_aborted')",
             params![user_id, workspace_id, run_id],
             |row| {
                 let metric = |sum_index, count_index| -> rusqlite::Result<Option<u64>> {
@@ -2203,6 +2203,32 @@ mod tests {
         assert_eq!(usage.model_id.as_deref(), Some("model-b"));
         assert_eq!(usage.locality.as_deref(), Some("local"));
         assert_eq!(usage.input_tokens, Some(240));
+    }
+
+    #[test]
+    fn run_token_usage_ignores_unknown_future_event_kinds() {
+        let store = UsageStore::open_in_memory().unwrap();
+        let accepted =
+            completed_run_fixture("accepted-terminal", "accepted-attempt", "u", "w", "run");
+        let mut future =
+            completed_run_fixture("future-terminal", "future-attempt", "u", "w", "run");
+        future.provider_id = Some("future-provider".into());
+        future.model_id = Some("future-model".into());
+        future.input_tokens = Some(9_999);
+        store.append(&accepted).unwrap();
+        store.append(&future).unwrap();
+        store
+            .conn
+            .execute(
+                "UPDATE inference_usage_events SET event_kind = 'attempt_future' WHERE event_id = ?1",
+                rusqlite::params![future.event_id],
+            )
+            .unwrap();
+
+        let usage = store.run_token_usage("u", "w", "run").unwrap().unwrap();
+        assert_eq!(usage.provider_id.as_deref(), Some("provider-a"));
+        assert_eq!(usage.model_id.as_deref(), Some("model-a"));
+        assert_eq!(usage.input_tokens, Some(120));
     }
 
     #[test]

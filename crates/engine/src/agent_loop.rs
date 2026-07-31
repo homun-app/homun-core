@@ -390,24 +390,19 @@ gathered‹‹/ACT››"
         // F3: a step was verified last round → collapse its ls.messages into a summary
         // now (safe boundary: all prior tool results are flushed). Keeps a long
         // multi-step turn from overflowing the context window.
-        if ls.pending_compaction {
-            ls.pending_compaction = false;
-            execution_journal.record(AgentExecutionEvent::ContextCompacted {
-                round,
-                reason: "verified_step_boundary".to_string(),
-            });
-            compactor
-                .compact(&mut ls.messages, &mut ls.step_messages_start)
-                .await;
-        }
+        apply_context_compaction_at_round_boundary(
+            &mut ls,
+            compactor,
+            execution_journal,
+            round,
+            cfg.context_window,
+        )
+        .await;
         // Fase 1.1: token-budget auto-compaction (the memory-checkpoint path) — independent of
         // plan steps. Fires when the conversation approaches the model's context window, flushing
         // the older span to the memory engine and collapsing it in-context. Same safe round
         // boundary as the step compaction; fail-open (unknown window → no-op) so a turn without a
         // known window keeps exactly today's round-based hygiene.
-        compactor
-            .compact_for_budget(&mut ls.messages, cfg.context_window, &ls.memory_reads)
-            .await;
         execution_journal.checkpoint(crate::LoopCheckpoint::from_state(round, &ls));
         // On the LAST allowed round, forbid tools so the model MUST synthesize
         // a final answer from what it already gathered — otherwise it can burn
@@ -1892,6 +1887,36 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
     }
 }
 
+async fn apply_context_compaction_at_round_boundary(
+    ls: &mut LoopState,
+    compactor: &impl ContextCompactor,
+    execution_journal: &impl ExecutionJournal,
+    round: usize,
+    context_window: Option<usize>,
+) {
+    if ls.pending_compaction {
+        ls.pending_compaction = false;
+        if compactor
+            .compact(&mut ls.messages, &mut ls.step_messages_start)
+            .await
+        {
+            execution_journal.record(AgentExecutionEvent::ContextCompacted {
+                round,
+                reason: "verified_step_boundary".to_string(),
+            });
+        }
+    }
+    if compactor
+        .compact_for_budget(&mut ls.messages, context_window, &ls.memory_reads)
+        .await
+    {
+        execution_journal.record(AgentExecutionEvent::ContextCompacted {
+            round,
+            reason: "context_budget".to_string(),
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3322,20 +3347,25 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
     }
     struct NoCompact;
     impl ContextCompactor for NoCompact {
-        async fn compact(&self, _m: &mut Vec<Value>, _s: &mut usize) {}
+        async fn compact(&self, _m: &mut Vec<Value>, _s: &mut usize) -> bool {
+            false
+        }
     }
     #[derive(Default)]
     struct ReadRecordingCompactor(Mutex<Vec<TurnMemoryReadSet>>);
     impl ContextCompactor for ReadRecordingCompactor {
-        async fn compact(&self, _m: &mut Vec<Value>, _s: &mut usize) {}
+        async fn compact(&self, _m: &mut Vec<Value>, _s: &mut usize) -> bool {
+            false
+        }
 
         async fn compact_for_budget(
             &self,
             _messages: &mut Vec<Value>,
             _context_window: Option<usize>,
             memory_reads: &TurnMemoryReadSet,
-        ) {
+        ) -> bool {
             self.0.lock().unwrap().push(memory_reads.clone());
+            false
         }
     }
     struct OpenPolicy;
@@ -3367,6 +3397,91 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         fn checkpoint(&self, checkpoint: crate::LoopCheckpoint) {
             self.1.lock().unwrap().push(checkpoint);
         }
+    }
+
+    struct ReportingCompactor {
+        step_mutates: bool,
+        budget_mutates: bool,
+    }
+
+    impl ContextCompactor for ReportingCompactor {
+        async fn compact(&self, messages: &mut Vec<Value>, _start: &mut usize) -> bool {
+            if self.step_mutates {
+                messages.push(json!({"role": "assistant", "content": "step summary"}));
+            }
+            self.step_mutates
+        }
+
+        async fn compact_for_budget(
+            &self,
+            messages: &mut Vec<Value>,
+            _context_window: Option<usize>,
+            _memory_reads: &TurnMemoryReadSet,
+        ) -> bool {
+            if self.budget_mutates {
+                messages.push(json!({"role": "assistant", "content": "budget summary"}));
+            }
+            self.budget_mutates
+        }
+    }
+
+    #[derive(Default)]
+    struct ContextEventJournal(Mutex<Vec<(String, Value)>>);
+
+    impl crate::ExecutionJournal for ContextEventJournal {
+        fn record(&self, event: crate::AgentExecutionEvent) {
+            let (kind, _, payload) = event.into_parts();
+            self.0.lock().unwrap().push((kind.to_string(), payload));
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn compaction_journal_records_only_actual_mutations_for_both_paths() {
+        let mut state = LoopState::new();
+        state.messages = vec![json!({"role": "user", "content": "request"})];
+        state.pending_compaction = true;
+        let journal = ContextEventJournal::default();
+
+        apply_context_compaction_at_round_boundary(
+            &mut state,
+            &ReportingCompactor {
+                step_mutates: false,
+                budget_mutates: false,
+            },
+            &journal,
+            3,
+            Some(8_192),
+        )
+        .await;
+        assert!(!state.pending_compaction);
+        assert!(journal.0.lock().unwrap().is_empty());
+
+        state.pending_compaction = true;
+        apply_context_compaction_at_round_boundary(
+            &mut state,
+            &ReportingCompactor {
+                step_mutates: true,
+                budget_mutates: true,
+            },
+            &journal,
+            4,
+            Some(8_192),
+        )
+        .await;
+
+        assert_eq!(
+            *journal.0.lock().unwrap(),
+            vec![
+                (
+                    "context_compacted".to_string(),
+                    json!({"reason": "verified_step_boundary"}),
+                ),
+                (
+                    "context_compacted".to_string(),
+                    json!({"reason": "context_budget"}),
+                ),
+            ]
+        );
     }
 
     fn cfg() -> TurnConfig {
