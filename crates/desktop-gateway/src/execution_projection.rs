@@ -611,6 +611,7 @@ mod tests {
                 thread_id: thread.thread_id.clone(),
                 user_id: task.user_id.as_str().to_string(),
                 workspace_id: task.workspace_id.as_str().to_string(),
+                role: None,
                 model: None,
                 provider: None,
                 prompt_fingerprint: None,

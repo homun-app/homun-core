@@ -594,6 +594,20 @@ pub(crate) fn interrupt_live_turn(turn_id: &str) {
     crate::abort_stream_generation(&format!("broker-{turn_id}"));
 }
 
+fn resolved_agent_run_role(
+    model_override: Option<&str>,
+    has_project_root: bool,
+    has_explicit_coding_binding: bool,
+) -> &'static str {
+    if model_override.is_some_and(|model| !model.trim().is_empty()) {
+        "manual"
+    } else if has_project_root && has_explicit_coding_binding {
+        "coding"
+    } else {
+        "orchestrator"
+    }
+}
+
 /// Executor for a `chat_turn` task. Sibling of `execute_proactive_prompt_task`
 /// (in `main.rs`): reads `thread_id`/`prompt`/`approval`/`workspace_id` from
 /// `task.input_json` (where `broker::enqueue_chat_turn` put them), opens a
@@ -671,6 +685,13 @@ pub fn execute_chat_turn_task(
         routing_binding.as_ref(),
     );
     let project_root = crate::effective_thread_folder(thread_id);
+    let agent_run_role = resolved_agent_run_role(
+        model_override.as_deref(),
+        project_root.is_some(),
+        crate::load_provider_registry()
+            .manual_binding("coding")
+            .is_some(),
+    );
     let projection = crate::semantic_decision::objective_contract_projection_for_request(
         &semantic_decision,
         existing_objective.as_ref(),
@@ -756,6 +777,7 @@ pub fn execute_chat_turn_task(
                 thread_id: thread_id.to_string(),
                 user_id: task.user_id.as_str().to_string(),
                 workspace_id: task.workspace_id.as_str().to_string(),
+                role: Some(agent_run_role.to_string()),
                 model: None,
                 provider: None,
                 prompt_fingerprint: None,
@@ -1064,6 +1086,18 @@ mod tests {
     };
     use local_first_task_runtime::{TaskRecord, TaskStore, UserId, WorkspaceId};
 
+    #[test]
+    fn agent_run_role_uses_only_explicit_execution_facts() {
+        assert_eq!(
+            resolved_agent_run_role(Some("provider::model"), false, false),
+            "manual"
+        );
+        assert_eq!(resolved_agent_run_role(None, true, true), "coding");
+        assert_eq!(resolved_agent_run_role(None, true, false), "orchestrator");
+        assert_eq!(resolved_agent_run_role(None, false, true), "orchestrator");
+        assert_eq!(resolved_agent_run_role(Some("   "), true, true), "coding");
+    }
+
     fn checkpoint_ref() -> CheckpointDataRef {
         CheckpointDataRef::Redacted {
             record_ref: DurableDataRef::from_store_id("0123456789abcdef0123456789abcdef")
@@ -1211,6 +1245,7 @@ mod tests {
                     thread_id: "thread-1".into(),
                     user_id: user.as_str().into(),
                     workspace_id: workspace.as_str().into(),
+                    role: None,
                     model: None,
                     provider: None,
                     prompt_fingerprint: None,
@@ -1284,6 +1319,7 @@ mod tests {
                     thread_id: "thread-1".into(),
                     user_id: user.as_str().into(),
                     workspace_id: workspace.as_str().into(),
+                    role: None,
                     model: None,
                     provider: None,
                     prompt_fingerprint: None,
@@ -1330,6 +1366,7 @@ mod tests {
                     thread_id: "thread-1".into(),
                     user_id: user.as_str().into(),
                     workspace_id: workspace.as_str().into(),
+                    role: None,
                     model: None,
                     provider: None,
                     prompt_fingerprint: None,
@@ -1426,6 +1463,7 @@ mod tests {
                     thread_id: "thread-1".into(),
                     user_id: user.as_str().into(),
                     workspace_id: workspace.as_str().into(),
+                    role: None,
                     model: None,
                     provider: None,
                     prompt_fingerprint: None,

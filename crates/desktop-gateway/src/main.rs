@@ -28,6 +28,7 @@ mod execution_runtime;
 mod inference_transport;
 mod model_client;
 mod provider_usage;
+mod runtime_context;
 mod usage_pricing;
 mod usage_store;
 mod usage_suggestions;
@@ -300,6 +301,10 @@ pub(crate) struct AppState {
 #[cfg(test)]
 mod agent_run_api_tests {
     use super::*;
+    use local_first_inference_usage::{
+        InferencePurpose, Locality as UsageLocality, NormalizedUsage, UsageAttemptEvent,
+        UsageContext, UsageProvenance,
+    };
     use local_first_task_runtime::NewAgentRun;
 
     fn seed_run(state: &AppState, run_id: &str, turn_id: &str, user_id: &str) {
@@ -311,6 +316,7 @@ mod agent_run_api_tests {
                 thread_id: "thread-test".to_string(),
                 user_id: user_id.to_string(),
                 workspace_id: gateway_workspace_id().as_str().to_string(),
+                role: None,
                 model: None,
                 provider: None,
                 prompt_fingerprint: None,
@@ -390,6 +396,215 @@ mod agent_run_api_tests {
             .await
             .unwrap_err();
         assert_eq!(error.status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn runtime_context_handler_is_stable_without_a_run_and_rejects_unknown_threads() {
+        let state = AppState::for_tests();
+        let thread = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .create_thread("workspace-runtime")
+            .unwrap();
+
+        let response =
+            get_thread_runtime_context(Path(thread.thread_id.clone()), State(state.clone()))
+                .await
+                .unwrap()
+                .0;
+        let value = serde_json::to_value(response).unwrap();
+        assert!(value["run_id"].is_null());
+        assert!(value["effective_model"].is_null());
+        assert!(value["used_input_tokens"].is_null());
+        assert_eq!(value["compacted"], false);
+        assert!(value["contributions"]["conversation"].is_null());
+
+        {
+            state
+                .task_store
+                .lock()
+                .unwrap()
+                .create_agent_run(&NewAgentRun {
+                    run_id: "foreign-runtime-run".into(),
+                    turn_id: "foreign-runtime-turn".into(),
+                    thread_id: thread.thread_id.clone(),
+                    user_id: "foreign-user".into(),
+                    workspace_id: "workspace-runtime".into(),
+                    role: None,
+                    model: None,
+                    provider: None,
+                    prompt_fingerprint: None,
+                })
+                .unwrap();
+        }
+        let foreign_run_error =
+            get_thread_runtime_context(Path(thread.thread_id.clone()), State(state.clone()))
+                .await
+                .unwrap_err();
+        assert_eq!(foreign_run_error.status, StatusCode::NOT_FOUND);
+
+        let foreign_workspace_thread = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .create_thread("workspace-runtime-b")
+            .unwrap();
+        state
+            .task_store
+            .lock()
+            .unwrap()
+            .create_agent_run(&NewAgentRun {
+                run_id: "foreign-workspace-run".into(),
+                turn_id: "foreign-workspace-turn".into(),
+                thread_id: foreign_workspace_thread.thread_id.clone(),
+                user_id: gateway_user_id().as_str().into(),
+                workspace_id: "other-workspace".into(),
+                role: None,
+                model: None,
+                provider: None,
+                prompt_fingerprint: None,
+            })
+            .unwrap();
+        let foreign_workspace_error = get_thread_runtime_context(
+            Path(foreign_workspace_thread.thread_id),
+            State(state.clone()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(foreign_workspace_error.status, StatusCode::NOT_FOUND);
+
+        let error = get_thread_runtime_context(Path("foreign-thread".to_string()), State(state))
+            .await
+            .unwrap_err();
+        assert_eq!(error.status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn runtime_context_handler_uses_scoped_canonical_sources_without_leaking_payloads() {
+        let state = AppState::for_tests();
+        let thread = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .create_thread("workspace-runtime")
+            .unwrap();
+        {
+            let store = state.task_store.lock().unwrap();
+            store
+                .create_agent_run(&NewAgentRun {
+                    run_id: "runtime-run".into(),
+                    turn_id: "runtime-turn".into(),
+                    thread_id: thread.thread_id.clone(),
+                    user_id: gateway_user_id().as_str().into(),
+                    workspace_id: "workspace-runtime".into(),
+                    role: Some("coding".into()),
+                    model: Some("run-model".into()),
+                    provider: Some("internal-provider-value".into()),
+                    prompt_fingerprint: Some("private-run-hash".into()),
+                })
+                .unwrap();
+            store
+                .append_agent_run_event(
+                    "runtime-run",
+                    2,
+                    Some(1),
+                    "prompt_snapshot",
+                    &serde_json::json!({
+                        "model": "snapshot-model",
+                        "provider": "https://private.example/v1",
+                        "messages": [
+                            {"role": "system", "chars": 40, "content": "system-secret"},
+                            {"role": "user", "chars": 80, "content": "user-secret"}
+                        ],
+                        "tools": [{"chars": 20, "schema": {"api_key": "secret"}}],
+                        "fingerprint": "private-snapshot-hash",
+                        "packets": [{"path": "/private/path", "memory": "private-memory"}]
+                    }),
+                )
+                .unwrap();
+            store
+                .append_agent_run_event(
+                    "runtime-run",
+                    3,
+                    Some(1),
+                    "context_compacted",
+                    &serde_json::json!({"reason": "private-reason"}),
+                )
+                .unwrap();
+        }
+        {
+            let mut context = UsageContext::new(
+                "runtime-call",
+                InferencePurpose::ChatResponse,
+                gateway_user_id().as_str(),
+            );
+            context.workspace_id = Some("workspace-runtime".into());
+            context.thread_id = Some(thread.thread_id.clone());
+            context.turn_id = Some("runtime-turn".into());
+            context.run_id = Some("runtime-run".into());
+            let started = UsageAttemptEvent::started(
+                context,
+                "runtime-attempt",
+                "usage-provider",
+                "usage-model",
+                UsageLocality::Cloud,
+                10,
+            );
+            let mut completed = started.completed(
+                20,
+                NormalizedUsage {
+                    input_tokens: Some(321),
+                    ..NormalizedUsage::default()
+                },
+            );
+            completed.usage_provenance = UsageProvenance::ProviderReported;
+            state
+                .usage_store
+                .lock()
+                .unwrap()
+                .append(&completed)
+                .unwrap();
+        }
+
+        let response = get_thread_runtime_context(Path(thread.thread_id), State(state))
+            .await
+            .unwrap()
+            .0;
+        let encoded = serde_json::to_string(&response).unwrap();
+        let value = serde_json::to_value(response).unwrap();
+        assert_eq!(value["effective_model"], "snapshot-model");
+        assert_eq!(value["provider"], "usage-provider");
+        assert_eq!(value["locality"], "cloud");
+        assert_eq!(value["used_input_tokens"], 321);
+        assert_eq!(value["compacted"], true);
+        assert_eq!(
+            value["contributions"]["conversation"]["estimated_tokens"],
+            20
+        );
+        assert_eq!(
+            value["contributions"]["system_tools"]["estimated_tokens"],
+            15
+        );
+        for forbidden in [
+            "system-secret",
+            "user-secret",
+            "api_key",
+            "private-run-hash",
+            "private-snapshot-hash",
+            "/private/path",
+            "private-memory",
+            "https://private.example/v1",
+            "base_url",
+            "\"messages\":",
+            "\"tools\":",
+            "\"packets\":",
+        ] {
+            assert!(
+                !encoded.contains(forbidden),
+                "leaked {forbidden}: {encoded}"
+            );
+        }
     }
 
     #[test]
@@ -1889,6 +2104,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/api/chat/threads/{thread_id}/runtime-plan",
             get(get_thread_runtime_plan),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/runtime-context",
+            get(get_thread_runtime_context),
         )
         .route(
             "/api/chat/threads/{thread_id}/ledger",
@@ -40962,7 +41181,20 @@ struct TurnSinceQuery {
 }
 
 fn execution_thread_workspace(state: &AppState, thread_id: &str) -> Result<String, GatewayError> {
-    lock_store(state)?
+    let store = lock_store(state)?;
+    let exists = store.thread(thread_id).map_err(|_| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "agent_thread_not_found",
+        message: "thread not found".to_string(),
+    })?;
+    if exists.is_none() {
+        return Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "agent_thread_not_found",
+            message: "thread not found".to_string(),
+        });
+    }
+    store
         .workspace_for_thread(thread_id)
         .map_err(|_| GatewayError {
             status: StatusCode::NOT_FOUND,
@@ -41018,6 +41250,72 @@ async fn get_thread_runtime_plan(
         .load_runtime_plan(gateway_user_id().as_str(), &workspace, &thread_id)
         .map_err(GatewayError::task)?;
     Ok(Json(serde_json::to_value(plan).unwrap_or(Value::Null)))
+}
+
+async fn get_thread_runtime_context(
+    Path(thread_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<runtime_context::RuntimeContextResponse>, GatewayError> {
+    let workspace = execution_thread_workspace(&state, &thread_id)?;
+    let user_id = gateway_user_id();
+    let (run, prompt_snapshot, compacted) = {
+        let store = lock_task_store(&state)?;
+        let run = store
+            .list_agent_runs_for_thread(&thread_id, user_id.as_str(), &workspace)
+            .map_err(GatewayError::task)?
+            .into_iter()
+            .next();
+        let Some(run) = run else {
+            if store
+                .has_agent_runs_for_thread(&thread_id)
+                .map_err(GatewayError::task)?
+            {
+                return Err(GatewayError {
+                    status: StatusCode::NOT_FOUND,
+                    code: "runtime_context_not_found",
+                    message: "runtime context not found".to_string(),
+                });
+            }
+            return Ok(Json(runtime_context::RuntimeContextResponse::unavailable()));
+        };
+        let prompt_snapshot = store
+            .latest_agent_prompt_snapshot(&run.run_id, user_id.as_str(), &workspace)
+            .map_err(GatewayError::task)?
+            .map(|event| event.payload);
+        let compacted = store
+            .list_agent_run_events(&run.run_id, user_id.as_str(), &workspace, None)
+            .map_err(GatewayError::task)?
+            .iter()
+            .any(|event| event.kind == "context_compacted");
+        (Some(run), prompt_snapshot, compacted)
+    };
+    let usage = state
+        .usage_store
+        .lock()
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "runtime_context_usage_lock",
+            message: format!("lock: {error}"),
+        })?
+        .run_token_usage(
+            user_id.as_str(),
+            &workspace,
+            run.as_ref()
+                .map(|run| run.run_id.as_str())
+                .unwrap_or_default(),
+        )
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "runtime_context_usage",
+            message: error.to_string(),
+        })?;
+    Ok(Json(runtime_context::project_runtime_context(
+        run.as_ref(),
+        prompt_snapshot.as_ref(),
+        compacted,
+        usage.as_ref(),
+        &load_provider_registry(),
+    )))
 }
 
 async fn get_thread_working_ledger(
@@ -81631,6 +81929,7 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
                 thread_id: thread.thread_id.clone(),
                 user_id: user.as_str().to_string(),
                 workspace_id: "journal-workspace".to_string(),
+                role: None,
                 model: None,
                 provider: None,
                 prompt_fingerprint: None,

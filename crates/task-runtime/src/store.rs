@@ -308,6 +308,7 @@ impl TaskStore {
                 workspace_id TEXT NOT NULL,
                 attempt INTEGER NOT NULL,
                 status TEXT NOT NULL,
+                role TEXT,
                 model TEXT,
                 provider TEXT,
                 prompt_fingerprint TEXT,
@@ -544,6 +545,11 @@ impl TaskStore {
         migrate_effect_receipts_v14(&self.connection)?;
         migrate_effect_compensations_v15(&self.connection)?;
         crate::projection_outbox::migrate_projection_outbox_v16(&self.connection)?;
+
+        if !column_exists(&self.connection, "agent_runs", "role") {
+            self.connection
+                .execute("ALTER TABLE agent_runs ADD COLUMN role TEXT", [])?;
+        }
 
         // ── chat_turn columns (schema_version 4). Guarded: idempotent on existing DBs.
         // Indexed columns for chat turns. Remain NULL on non-chat_turn rows.
@@ -2931,8 +2937,8 @@ impl TaskStore {
         tx.execute(
             "INSERT INTO agent_runs (
                 run_id, turn_id, thread_id, user_id, workspace_id, attempt, status,
-                model, provider, prompt_fingerprint, started_at, schema_version
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'running', ?7, ?8, ?9, ?10, 1)",
+                role, model, provider, prompt_fingerprint, started_at, schema_version
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'running', ?7, ?8, ?9, ?10, ?11, 1)",
             params![
                 run.run_id,
                 run.turn_id,
@@ -2940,6 +2946,7 @@ impl TaskStore {
                 run.user_id,
                 run.workspace_id,
                 attempt,
+                run.role,
                 run.model,
                 run.provider,
                 run.prompt_fingerprint,
@@ -2967,6 +2974,7 @@ impl TaskStore {
             workspace_id: run.workspace_id.clone(),
             attempt,
             status: AgentRunStatus::Running,
+            role: run.role.clone(),
             model: run.model.clone(),
             provider: run.provider.clone(),
             prompt_fingerprint: run.prompt_fingerprint.clone(),
@@ -3058,7 +3066,7 @@ impl TaskStore {
     ) -> TaskRuntimeResult<Vec<AgentRun>> {
         let mut stmt = self.connection.prepare(
             "SELECT run_id, turn_id, thread_id, user_id, workspace_id, attempt, status,
-                    model, provider, prompt_fingerprint, started_at, completed_at,
+                    role, model, provider, prompt_fingerprint, started_at, completed_at,
                     terminal_reason, schema_version
              FROM agent_runs
              WHERE turn_id = ?1 AND user_id = ?2 AND workspace_id = ?3
@@ -3076,10 +3084,11 @@ impl TaskStore {
                 row.get::<_, Option<String>>(7)?,
                 row.get::<_, Option<String>>(8)?,
                 row.get::<_, Option<String>>(9)?,
-                row.get::<_, i64>(10)?,
-                row.get::<_, Option<i64>>(11)?,
-                row.get::<_, Option<String>>(12)?,
-                row.get::<_, u32>(13)?,
+                row.get::<_, Option<String>>(10)?,
+                row.get::<_, i64>(11)?,
+                row.get::<_, Option<i64>>(12)?,
+                row.get::<_, Option<String>>(13)?,
+                row.get::<_, u32>(14)?,
             ))
         })?;
         let mut runs = Vec::new();
@@ -3092,6 +3101,7 @@ impl TaskStore {
                 workspace_id,
                 attempt,
                 status,
+                role,
                 model,
                 provider,
                 prompt_fingerprint,
@@ -3110,6 +3120,7 @@ impl TaskStore {
                 status: AgentRunStatus::parse(&status).ok_or_else(|| {
                     TaskRuntimeError::Store(format!("unknown agent run status: {status}"))
                 })?,
+                role,
                 model,
                 provider,
                 prompt_fingerprint,
@@ -3130,11 +3141,11 @@ impl TaskStore {
     ) -> TaskRuntimeResult<Vec<AgentRun>> {
         let mut stmt = self.connection.prepare(
             "SELECT run_id, turn_id, thread_id, user_id, workspace_id, attempt, status,
-                    model, provider, prompt_fingerprint, started_at, completed_at,
+                    role, model, provider, prompt_fingerprint, started_at, completed_at,
                     terminal_reason, schema_version
              FROM agent_runs
              WHERE thread_id = ?1 AND user_id = ?2 AND workspace_id = ?3
-             ORDER BY started_at DESC, attempt DESC",
+             ORDER BY started_at DESC, rowid DESC, attempt DESC",
         )?;
         let rows = stmt.query_map(params![thread_id, user_id, workspace_id], |row| {
             let status: String = row.get(6)?;
@@ -3147,13 +3158,14 @@ impl TaskStore {
                     workspace_id: row.get(4)?,
                     attempt: row.get(5)?,
                     status: AgentRunStatus::parse(&status).unwrap_or(AgentRunStatus::Failed),
-                    model: row.get(7)?,
-                    provider: row.get(8)?,
-                    prompt_fingerprint: row.get(9)?,
-                    started_at: row.get(10)?,
-                    completed_at: row.get(11)?,
-                    terminal_reason: row.get(12)?,
-                    schema_version: row.get(13)?,
+                    role: row.get(7)?,
+                    model: row.get(8)?,
+                    provider: row.get(9)?,
+                    prompt_fingerprint: row.get(10)?,
+                    started_at: row.get(11)?,
+                    completed_at: row.get(12)?,
+                    terminal_reason: row.get(13)?,
+                    schema_version: row.get(14)?,
                 },
                 status,
             ))
@@ -3169,6 +3181,14 @@ impl TaskStore {
             runs.push(run);
         }
         Ok(runs)
+    }
+
+    pub fn has_agent_runs_for_thread(&self, thread_id: &str) -> TaskRuntimeResult<bool> {
+        Ok(self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_runs WHERE thread_id = ?1)",
+            params![thread_id],
+            |row| row.get::<_, bool>(0),
+        )?)
     }
 
     pub fn workspace_for_agent_run(
@@ -4610,6 +4630,57 @@ mod migration_tests {
     }
 
     #[test]
+    fn agent_run_role_migrates_old_rows_as_unknown() {
+        let database = std::env::temp_dir().join(format!(
+            "homun-agent-run-role-migration-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        {
+            let connection = Connection::open(&database).expect("open pre-role database");
+            connection
+                .execute_batch(
+                    "CREATE TABLE agent_runs (
+                        run_id TEXT PRIMARY KEY,
+                        turn_id TEXT NOT NULL,
+                        thread_id TEXT NOT NULL,
+                        user_id TEXT NOT NULL,
+                        workspace_id TEXT NOT NULL,
+                        attempt INTEGER NOT NULL,
+                        status TEXT NOT NULL,
+                        model TEXT,
+                        provider TEXT,
+                        prompt_fingerprint TEXT,
+                        started_at INTEGER NOT NULL,
+                        completed_at INTEGER,
+                        terminal_reason TEXT,
+                        schema_version INTEGER NOT NULL DEFAULT 1,
+                        UNIQUE(turn_id, attempt)
+                    );
+                    INSERT INTO agent_runs (
+                        run_id, turn_id, thread_id, user_id, workspace_id, attempt, status,
+                        model, provider, prompt_fingerprint, started_at, schema_version
+                    ) VALUES (
+                        'old-run', 'old-turn', 'old-thread', 'user', 'workspace', 1, 'completed',
+                        NULL, NULL, NULL, 1, 1
+                    );",
+                )
+                .expect("seed pre-role schema");
+        }
+
+        let store = TaskStore::open(&database).expect("migrate pre-role database");
+        store.run_migrations().expect("idempotent role migration");
+        let runs = store
+            .list_agent_runs_for_thread("old-thread", "user", "workspace")
+            .expect("read migrated run");
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].role, None);
+        assert!(column_exists(&store.connection, "agent_runs", "role"));
+        drop(store);
+        let _ = std::fs::remove_file(database);
+    }
+
+    #[test]
     fn chat_turn_index_exists() {
         let store = TaskStore::open_in_memory().expect("open");
         assert!(index_exists(
@@ -5433,10 +5504,26 @@ mod agent_control_state_tests {
             thread_id: "thread".into(),
             user_id: "user".into(),
             workspace_id: "workspace".into(),
+            role: None,
             model: None,
             provider: None,
             prompt_fingerprint: None,
         }
+    }
+
+    #[test]
+    fn agent_run_role_round_trips() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let mut new_run = run("run-with-role");
+        new_run.role = Some("coding".to_string());
+
+        let created = store.create_agent_run(&new_run).unwrap();
+        let loaded = store
+            .list_agent_runs_for_turn("turn", "user", "workspace")
+            .unwrap();
+
+        assert_eq!(created.role.as_deref(), Some("coding"));
+        assert_eq!(loaded[0].role.as_deref(), Some("coding"));
     }
 
     #[test]
@@ -5817,10 +5904,46 @@ mod agent_run_tests {
             thread_id: "thread-1".to_string(),
             user_id: user_id.to_string(),
             workspace_id: workspace_id.to_string(),
+            role: None,
             model: Some("test-model".to_string()),
             provider: Some("test-provider".to_string()),
             prompt_fingerprint: None,
         }
+    }
+
+    #[test]
+    fn agent_run_json_without_role_remains_compatible() {
+        let run: AgentRun = serde_json::from_value(json!({
+            "run_id": "legacy-run",
+            "turn_id": "legacy-turn",
+            "thread_id": "legacy-thread",
+            "user_id": "u",
+            "workspace_id": "w",
+            "attempt": 1,
+            "status": "completed",
+            "model": null,
+            "provider": null,
+            "prompt_fingerprint": null,
+            "started_at": 1,
+            "completed_at": 2,
+            "terminal_reason": null,
+            "schema_version": 1
+        }))
+        .unwrap();
+        let new_run: NewAgentRun = serde_json::from_value(json!({
+            "run_id": "legacy-run",
+            "turn_id": "legacy-turn",
+            "thread_id": "legacy-thread",
+            "user_id": "u",
+            "workspace_id": "w",
+            "model": null,
+            "provider": null,
+            "prompt_fingerprint": null
+        }))
+        .unwrap();
+
+        assert_eq!(run.role, None);
+        assert_eq!(new_run.role, None);
     }
 
     #[test]
@@ -5884,6 +6007,26 @@ mod agent_run_tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn thread_runs_use_insertion_order_when_start_timestamps_tie() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store
+            .create_agent_run(&new_run("run-old", "turn-old", "u", "w"))
+            .unwrap();
+        store
+            .create_agent_run(&new_run("run-new", "turn-new", "u", "w"))
+            .unwrap();
+        store
+            .connection
+            .execute("UPDATE agent_runs SET started_at = 1", [])
+            .unwrap();
+
+        let runs = store
+            .list_agent_runs_for_thread("thread-1", "u", "w")
+            .unwrap();
+        assert_eq!(runs[0].run_id, "run-new");
     }
 
     #[test]

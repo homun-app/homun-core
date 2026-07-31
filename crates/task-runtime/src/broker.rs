@@ -1019,6 +1019,7 @@ mod recovery_tests {
             thread_id: "t1".into(),
             user_id: "u".into(),
             workspace_id: "w".into(),
+            role: None,
             model: None,
             provider: None,
             prompt_fingerprint: None,

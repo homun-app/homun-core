@@ -255,6 +255,7 @@ fn seed_active_attempt(database: &Path, thread_id: &str, turn_id: &str) -> u64 {
             thread_id: thread_id.into(),
             user_id: USER_ID.into(),
             workspace_id: WORKSPACE_ID.into(),
+            role: None,
             model: Some("provider-before-crash".into()),
             provider: Some("test-observation".into()),
             prompt_fingerprint: Some("sha256:before-crash".into()),

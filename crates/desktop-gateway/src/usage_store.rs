@@ -234,6 +234,18 @@ pub struct ModelUsageFacts {
     pub cost_provenance: CostProvenance,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct RunTokenUsage {
+    pub provider_id: Option<String>,
+    pub model_id: Option<String>,
+    pub locality: Option<String>,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub reasoning_tokens: Option<u64>,
+    pub cache_read_tokens: Option<u64>,
+    pub cache_write_tokens: Option<u64>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum UsageBreakdownDimension {
     Provider,
@@ -513,6 +525,79 @@ impl UsageStore {
                 .query_map(params![user_id], event_from_row)?
                 .collect()
         }
+    }
+
+    pub fn run_token_usage(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        run_id: &str,
+    ) -> rusqlite::Result<Option<RunTokenUsage>> {
+        let metadata = self
+            .conn
+            .query_row(
+                "SELECT provider_id, model_id, locality
+                 FROM inference_usage_events
+                 WHERE user_id = ?1 AND workspace_id = ?2 AND run_id = ?3
+                   AND event_kind != 'attempt_started'
+                 ORDER BY recorded_at DESC, rowid DESC
+                 LIMIT 1",
+                params![user_id, workspace_id, run_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((provider_id, model_id, locality)) = metadata else {
+            return Ok(None);
+        };
+        let metrics = self.conn.query_row(
+            "SELECT
+                SUM(CASE WHEN usage_provenance = 'provider_reported' THEN input_tokens END),
+                COUNT(CASE WHEN usage_provenance = 'provider_reported' THEN input_tokens END),
+                SUM(CASE WHEN usage_provenance = 'provider_reported' THEN output_tokens END),
+                COUNT(CASE WHEN usage_provenance = 'provider_reported' THEN output_tokens END),
+                SUM(CASE WHEN usage_provenance = 'provider_reported' THEN reasoning_tokens END),
+                COUNT(CASE WHEN usage_provenance = 'provider_reported' THEN reasoning_tokens END),
+                SUM(CASE WHEN usage_provenance = 'provider_reported' THEN cache_read_tokens END),
+                COUNT(CASE WHEN usage_provenance = 'provider_reported' THEN cache_read_tokens END),
+                SUM(CASE WHEN usage_provenance = 'provider_reported' THEN cache_write_tokens END),
+                COUNT(CASE WHEN usage_provenance = 'provider_reported' THEN cache_write_tokens END)
+             FROM inference_usage_events
+             WHERE user_id = ?1 AND workspace_id = ?2 AND run_id = ?3
+               AND event_kind != 'attempt_started'",
+            params![user_id, workspace_id, run_id],
+            |row| {
+                let metric = |sum_index, count_index| -> rusqlite::Result<Option<u64>> {
+                    if row.get::<_, i64>(count_index)? == 0 {
+                        Ok(None)
+                    } else {
+                        optional_u64_from_row(row, sum_index)
+                    }
+                };
+                Ok((
+                    metric(0, 1)?,
+                    metric(2, 3)?,
+                    metric(4, 5)?,
+                    metric(6, 7)?,
+                    metric(8, 9)?,
+                ))
+            },
+        )?;
+        Ok(Some(RunTokenUsage {
+            provider_id,
+            model_id,
+            locality: Some(locality),
+            input_tokens: metrics.0,
+            output_tokens: metrics.1,
+            reasoning_tokens: metrics.2,
+            cache_read_tokens: metrics.3,
+            cache_write_tokens: metrics.4,
+        }))
     }
 
     pub fn abort_orphaned_attempts(&self, now: i64) -> rusqlite::Result<usize> {
@@ -1888,6 +1973,39 @@ mod tests {
         event
     }
 
+    fn completed_run_fixture(
+        event_id: &str,
+        attempt_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+        run_id: &str,
+    ) -> UsageAttemptEvent {
+        let mut context = UsageContext::new("call-run", InferencePurpose::ChatResponse, user_id);
+        context.workspace_id = Some(workspace_id.to_string());
+        context.run_id = Some(run_id.to_string());
+        let started = UsageAttemptEvent::started(
+            context,
+            attempt_id,
+            "provider-a",
+            "model-a",
+            Locality::Cloud,
+            100,
+        );
+        let mut completed = started.completed(
+            120,
+            NormalizedUsage {
+                input_tokens: Some(120),
+                output_tokens: Some(30),
+                reasoning_tokens: Some(8),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+            },
+        );
+        completed.event_id = event_id.to_string();
+        completed.usage_provenance = UsageProvenance::ProviderReported;
+        completed
+    }
+
     fn snapshot(snapshot_id: &str, provider_id: &str, observed_at: i64) -> ProviderUsageSnapshot {
         ProviderUsageSnapshot {
             snapshot_id: snapshot_id.to_string(),
@@ -1999,6 +2117,92 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn run_token_usage_is_scoped_and_preserves_unknown_metrics() {
+        let store = UsageStore::open_in_memory().unwrap();
+        store
+            .append(&completed_run_fixture(
+                "owned-terminal",
+                "owned-attempt",
+                "u",
+                "w",
+                "run-1",
+            ))
+            .unwrap();
+        store
+            .append(&completed_run_fixture(
+                "foreign-terminal",
+                "foreign-attempt",
+                "other",
+                "w",
+                "run-1",
+            ))
+            .unwrap();
+
+        assert_eq!(
+            store.run_token_usage("u", "w", "run-1").unwrap(),
+            Some(RunTokenUsage {
+                provider_id: Some("provider-a".into()),
+                model_id: Some("model-a".into()),
+                locality: Some("cloud".into()),
+                input_tokens: Some(120),
+                output_tokens: Some(30),
+                reasoning_tokens: Some(8),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+            })
+        );
+        assert_eq!(
+            store.run_token_usage("other-user", "w", "run-1").unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn run_token_usage_ignores_non_provider_reported_token_estimates() {
+        let store = UsageStore::open_in_memory().unwrap();
+        let mut estimated = completed_run_fixture(
+            "estimated-terminal",
+            "estimated-attempt",
+            "u",
+            "w",
+            "estimated-run",
+        );
+        estimated.usage_provenance = UsageProvenance::HomunEstimated;
+        store.append(&estimated).unwrap();
+
+        let usage = store
+            .run_token_usage("u", "w", "estimated-run")
+            .unwrap()
+            .unwrap();
+        assert_eq!(usage.input_tokens, None);
+        assert_eq!(usage.output_tokens, None);
+        assert_eq!(usage.reasoning_tokens, None);
+    }
+
+    #[test]
+    fn run_token_usage_uses_newest_terminal_route_metadata() {
+        let store = UsageStore::open_in_memory().unwrap();
+        let first =
+            completed_run_fixture("z-first-terminal", "first-attempt", "u", "w", "multi-run");
+        let mut newest =
+            completed_run_fixture("a-newest-terminal", "newest-attempt", "u", "w", "multi-run");
+        newest.provider_id = Some("provider-b".into());
+        newest.model_id = Some("model-b".into());
+        newest.locality = Locality::Local;
+        store.append(&first).unwrap();
+        store.append(&newest).unwrap();
+
+        let usage = store
+            .run_token_usage("u", "w", "multi-run")
+            .unwrap()
+            .unwrap();
+        assert_eq!(usage.provider_id.as_deref(), Some("provider-b"));
+        assert_eq!(usage.model_id.as_deref(), Some("model-b"));
+        assert_eq!(usage.locality.as_deref(), Some("local"));
+        assert_eq!(usage.input_tokens, Some(240));
     }
 
     #[test]
