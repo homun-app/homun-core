@@ -953,10 +953,9 @@ assertContains(
   "per-turn activity must be rendered inline in each assistant message"
 );
 
-assertNotContains(
+assertMissing(
   "src/components/ProjectContextPanel.tsx",
-  "pcp-objective",
-  "objective is owned by the working island; the project panel must not duplicate it"
+  "project context must not create a second persistent status owner"
 );
 
 console.log("UI contract checks passed");

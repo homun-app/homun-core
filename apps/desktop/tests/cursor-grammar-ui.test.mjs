@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
 
 const main = await readFile(new URL("../src/main.tsx", import.meta.url), "utf8");
+const packageManifest = await readFile(new URL("../package.json", import.meta.url), "utf8");
 const legacyStyles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 const foundation = await readFile(new URL("../src/styles/foundation.css", import.meta.url), "utf8").catch(
   (error) => {
@@ -321,6 +322,57 @@ test("the adaptive workspace island replaces every persistent status owner", () 
     legacyStyles,
     /\.chat-status-stack|\.unified-status-panel|\.workspace-island-pill|\.workspace-island-panel|--island-reserve/,
   );
+});
+
+test("phase one has one visual owner and no retired runtime surface", async () => {
+  const styleOwners = [
+    foundation,
+    menus,
+    sidebarStyles,
+    chatStyles,
+    composerStyles,
+    workspaceIslandStyles,
+    legacyStyles,
+  ];
+  for (const selector of [
+    ".menu-surface",
+    ".sidebar-filters",
+    ".chat-message-user-band",
+    ".composer-surface",
+    ".workspace-island-rail",
+  ]) {
+    assert.equal(
+      styleOwners.filter((styles) => styles.replace(/\/\*[\s\S]*?\*\//g, "").includes(selector)).length,
+      1,
+      `${selector} must occur in exactly one style module`,
+    );
+  }
+
+  assert.doesNotMatch(packageManifest, /@fontsource\/hanken-grotesk/);
+  assert.doesNotMatch(
+    `${chatView}\n${sidebar}\n${sidebarFilters}\n${composerShell}\n${legacyStyles}`,
+    /composer-pop|sidebar-filter-panel|filter-chip|filter-segments|chat-status-stack|unified-status-panel|workspace-island-pill|addMenuOpen|fileMenuOpen|skillMenuOpen|modelMenuOpen/,
+  );
+  await assert.rejects(
+    readFile(new URL("../src/components/ProjectContextPanel.tsx", import.meta.url), "utf8"),
+    { code: "ENOENT" },
+  );
+});
+
+test("phase one transient controls keep named anchors and escape ownership", () => {
+  assert.match(menuSurface, /getMenuKeyboardAction\(event\.key/);
+  assert.match(menuSurface, /action\.type === "none"[\s\S]*?onCloseCurrent\(\)/);
+  assert.match(menuSurface, /anchorRef\.current\?\.focus/);
+  for (const source of [sidebarFilters, composerShell]) {
+    const surfaces = source.match(/<MenuSurface[\s\S]*?(?:\/>|<\/MenuSurface>)/g) ?? [];
+    assert.ok(surfaces.length > 0);
+    for (const surface of surfaces) {
+      assert.match(surface, /\bid=(?:"[^"]+"|\{[^}]+\})/);
+      assert.match(surface, /\blabel=\{/);
+      assert.match(surface, /\banchorRef=\{/);
+      assert.match(surface, /\bonCloseCurrent=\{/);
+    }
+  }
 });
 
 test("legacy CSS cannot recreate message, activity, or generated-file surfaces", () => {
