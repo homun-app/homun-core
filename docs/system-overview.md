@@ -61,6 +61,19 @@ che la UI consuma.
 > limiti** di progetto (soft 1500 / hard 2500) e sono i target di split incrementale. Non è un rischio
 > di correttezza; è debito di manutenibilità dichiarato.
 
+### Shell desktop verificata il 2026-07-31
+
+La chat resta la superficie proprietaria del lavoro. Sidebar, filtri, trascrizione e composer usano
+moduli CSS separati con una grammatica compatta; `MenuSurface` possiede menu, sottomenu, focus ed Escape.
+Il composer espone selezione del prossimo modello e un dialogo `Runtime & Context`, ma mostra solo dati
+redatti provati dal journal/usage ledger: i valori non disponibili restano tali.
+
+Lo stato laterale non è una dashboard parallela: `AdaptiveWorkspaceIsland` proietta esclusivamente le
+capability fattuali presenti (`activity`, browser attivo o snapshot verificato, artefatti, fonti). Parte
+chiusa, cambia sezione direttamente, si resetta per conversazione e cede spazio all'inspector. Terminale
+e superfici future non vengono anticipate. Il contratto e il collaudo riproducibile sono in
+`docs/testing/cursor-grammar-phase-1-qa.md`.
+
 ---
 
 ## 3. Il motore canonico — un solo loop guardato

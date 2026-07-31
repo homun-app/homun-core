@@ -3,9 +3,36 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-30.**
+> **Ultimo aggiornamento: 2026-07-31.**
 
-## CHECKPOINT 2026-07-30 - Uncertain effect recovery nel Tasks Workbench
+## CHECKPOINT 2026-07-31 - Grammatica desktop compatta e collaudo dev
+
+Completata la prima fase di pulizia visuale senza cambiare ownership del runtime: sidebar e filtri
+gerarchici, trascrizione piatta, composer sottile, metadati runtime fattuali e isola adattiva per
+Activity/Browser/Artifacts/Sources. L'isola parte chiusa, non inventa capability, si resetta per chat e
+cede all'inspector. Rimossi `WorkspaceIsland`, `ProjectContextPanel`, i relativi selettori morti e la
+dipendenza Hanken non caricata.
+
+Gate verdi: 92 test cursor-grammar, 152 Electron, typecheck, due build Vite, package preparation,
+`cargo fmt`, task-runtime, engine e gateway (1088 test gateway, 6 live fixture ignorate). Il riavvio
+reale dev ha dato health `200` senza recovery/projection error; verificati Activity/Artifacts, inspector,
+Runtime & Context, menu Add/Models con Escape nidificato, filtri gerarchici e temi Cold/Dark. Evidenza:
+[`cursor-grammar-phase-1-qa.md`](testing/cursor-grammar-phase-1-qa.md).
+
+## CHECKPOINT 2026-07-31 - Task runtime invisibile, attenzione nella conversazione
+
+La dashboard Tasks è stata rimossa senza rimuovere task runtime, lease, queue, approval, receipt o
+recovery. Ogni intervento viene proiettato sulla conversazione proprietaria: giallo per attesa utente,
+rosso per failure, stato operativo per lavoro in corso e unread terminale separato. Approval ed esito
+incerto sono card inline; il filtro `Richiede attenzione` raccoglie wait e failure e le notifiche di
+sistema si attivano solo sulle nuove transizioni, senza riprodurre attese storiche al lancio.
+
+Il resolver mantiene il controllo autorevole journal/wake. Per receipt storiche rimaste senza journal
+esiste un recupero esplicito che accetta solo una receipt persistita senza journal e senza wake; il
+gateway lo usa esclusivamente dopo il `NotFound` dell'esecuzione proprietaria. Nessun esito viene
+inventato o scelto automaticamente dalla UI.
+
+## CHECKPOINT 2026-07-30 - Uncertain effect recovery nel Tasks Workbench (UI superata)
 
 Gli effetti remoti con esito `Uncertain` sono ora operabili dalla UI senza introdurre un secondo
 lifecycle. `TaskQueueResponse.uncertain_effects` proietta soltanto receipt ref, execution, thread,
