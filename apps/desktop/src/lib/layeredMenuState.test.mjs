@@ -57,10 +57,28 @@ test("nested opening is idempotent and nullish restore targets preserve the exis
     restoreFocusId: "composer-add",
   });
   assert.deepEqual(modelsOpenedAgain, modelsOpen);
+  assert.equal(modelsOpenedAgain, modelsOpen);
   assert.deepEqual(rootReplacement, {
     chain: ["settings"],
     restoreFocusId: "composer-add",
   });
+});
+
+test("opening an Add child replaces its sibling in both directions", () => {
+  const addOpen = openLayer(closedState, "add", "composer-add");
+  const filesOpen = openLayer(addOpen, "files", null, true);
+  const modelsAfterFiles = openLayer(filesOpen, "models", null, true);
+  const filesAfterModels = openLayer(modelsAfterFiles, "files", null, true);
+
+  assert.deepEqual(modelsAfterFiles, {
+    chain: ["add", "models"],
+    restoreFocusId: "composer-add",
+  });
+  assert.deepEqual(filesAfterModels, {
+    chain: ["add", "files"],
+    restoreFocusId: "composer-add",
+  });
+  assert.deepEqual(escapeLayer(filesAfterModels).chain, ["add"]);
 });
 
 test("closing all layers retains the restore target", () => {

@@ -1,8 +1,10 @@
 export function openLayer(state, id, restoreFocusId, nested = false) {
   const chain = nested
-    ? state.chain.includes(id)
+    ? state.chain.length === 2 && state.chain[1] === id
       ? state.chain
-      : [...state.chain, id]
+      : state.chain.length > 0
+        ? [state.chain[0], id]
+        : [id]
     : [id];
   const nextRestoreFocusId = restoreFocusId ?? state.restoreFocusId;
   if (chain === state.chain && nextRestoreFocusId === state.restoreFocusId) return state;

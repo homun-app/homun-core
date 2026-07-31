@@ -157,6 +157,11 @@ import {
   type InspectorTabKind,
 } from "../lib/inspectorWorkspace";
 import { reconcileMemoryArtifacts } from "../lib/uiSnapshot";
+import {
+  effectiveModelFromGateway,
+  latestAssistantEffectiveModel,
+  selectedModelAfterSubmission,
+} from "../lib/composerTurnContract";
 // Transcript indexes live in a plain .mjs sibling so `node --test` can exercise
 // them without a build step, which is why they carry no type declaration.
 // @ts-expect-error JavaScript sibling intentionally has no declaration file.
@@ -1544,13 +1549,9 @@ export function ChatView({
       setComputerSession(mapCoreComputerSession(result.computer_session));
       setComputerCardCollapsed(true);
       setTimelineCollapsed(!result.plan);
-      // Model that produced THIS turn. Prefer the gateway's authoritative
-      // x-effective-model (via result.effective_model) — it reflects what ACTUALLY ran
-      // (the chat role default is NOT the global activeModelInfo). Fall back to the
-      // picked override's model, then the global default.
-      const turnModel =
-        result.effective_model ??
-        (model ? model.split("::").pop() ?? model : activeModelInfo?.model ?? undefined);
+      // Only gateway evidence may identify the model that produced this turn.
+      // The requested override remains next-turn input, not execution provenance.
+      const turnModel = effectiveModelFromGateway(result.effective_model) ?? undefined;
       const finalAssistantMessage: ChatMessage = {
         ...withChatMetrics(
           chatMessageFromAssistantResult(result, result.assistant_message.text || streamedText),
@@ -2938,14 +2939,9 @@ export function ChatView({
     ? `${activeModelInfo.locality} · ${formatContextTokens(activeModelInfo.context_window)}`
     : t("chat.active");
   const lastAssistantEffectiveModel = useMemo(() => {
-    for (let index = threadMessages.length - 1; index >= 0; index -= 1) {
-      const message = threadMessages[index];
-      if (message.role === "assistant" && message.model) {
-        return shortModelName(message.model);
-      }
-    }
-    return headerModelLabel;
-  }, [headerModelLabel, threadMessages]);
+    const model = latestAssistantEffectiveModel(threadMessages);
+    return model ? shortModelName(model) : t("composer.runtime.unavailable");
+  }, [t, threadMessages]);
   const headerToolPolicy = thread.source ? t("chat.readOnlyChannel") : t("chat.fullLocalTools");
 
   // The island column reserves space only when it has something to show (else the chat takes
@@ -9999,8 +9995,8 @@ function Composer({
     }).catch(() => false);
     setSubmitBusy(false);
     if (activeWork && accepted) clearSubmittedEnvelope();
+    setSelectedModel((current) => selectedModelAfterSubmission(current, accepted));
     if (accepted && suggestedModel && modelOverride === suggestedModel.value) {
-      setSelectedModel(null);
       onSuggestedModelConsumed();
     }
   }

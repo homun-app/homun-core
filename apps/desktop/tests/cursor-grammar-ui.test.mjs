@@ -407,6 +407,42 @@ test("composer keeps prior effective-model provenance separate from the next-tur
   );
 });
 
+test("composer reducer delegates Add children to exclusive nested-layer state", () => {
+  assert.match(
+    composerShell,
+    /action\.type === "open-nested"[\s\S]*?openLayer\(state, action\.id, null, true\)/,
+  );
+  assert.match(composerShell, /openNested\("files"\)/);
+  assert.match(composerShell, /openNested\("models"\)/);
+  assert.match(
+    composerShell,
+    /const childOpen = \(id: string\) => menuState\.chain\[1\] === id/,
+  );
+  for (const child of ["files", "capabilities", "connectors", "models"]) {
+    assert.match(
+      composerShell,
+      new RegExp(`open=\\{rootOpen\\(\"add\"\\) && childOpen\\(\"${child}\"\\)\\}`),
+    );
+  }
+});
+
+test("accepted submissions reset every next-turn model while rejected submissions retain it", () => {
+  assert.match(chatView, /selectedModelAfterSubmission\(current, accepted\)/);
+  assert.doesNotMatch(
+    chatView,
+    /if \(accepted && suggestedModel && modelOverride === suggestedModel\.value\) \{\s*setSelectedModel\(null\)/,
+  );
+});
+
+test("assistant model provenance uses only gateway effective_model evidence", () => {
+  assert.match(chatView, /effectiveModelFromGateway\(result\.effective_model\)/);
+  assert.match(chatView, /latestAssistantEffectiveModel\(threadMessages\)/);
+  assert.doesNotMatch(
+    chatView,
+    /result\.effective_model \?\?[\s\S]*?activeModelInfo\?\.model/,
+  );
+});
+
 test("IconButton exposes its label and semantic tooltip", () => {
   assert.match(iconButton, /aria-label=\{label\}/);
   assert.match(iconButton, /role="tooltip"/);
