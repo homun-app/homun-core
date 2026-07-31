@@ -206,11 +206,15 @@ ritentato automaticamente. Sandbox/Seatbelt/Landlock, Vault, payment one-use, br
 policy connector restano gate di dominio più restrittivi, ma non possiedono lifecycle o resume paralleli.
 Le automazioni e i canali sono sorgenti dello stesso contratto, non executor inline separati.
 
-Il Tasks Workbench proietta le receipt `Uncertain` con metadati allowlisted e le mantiene distinte dalle
-approval. Le due decisioni manuali convergono sull'endpoint generale
+La UI non espone una seconda dashboard Tasks: il task runtime resta infrastruttura e proietta sulla
+conversazione proprietaria soltanto `working | waiting_user | failed | completed_unread`. Approval ed
+esiti `Uncertain` sono card inline distinte; un filtro `Richiede attenzione` raccoglie wait e failure.
+Le due decisioni manuali sugli esiti incerti convergono sull'endpoint generale
 `POST /api/effects/{receipt_ref}/resolve`: `Applied` chiude la receipt senza redispatch, `NotApplied` la
 riporta a `Prepared` per il solo retry fenced già posseduto dall'effect host. La UI rilegge sempre la
-queue canonica e non possiede una rimozione, wake o ripresa alternativa.
+queue canonica e non possiede una rimozione, wake o ripresa alternativa. Una receipt storica il cui
+journal sia stato potato resta risolvibile solo tramite il recupero esplicito che richiede assenza sia
+del journal sia di qualunque wake; il percorso normale non viene allentato.
 
 ---
 

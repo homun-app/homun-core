@@ -58,6 +58,11 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 1420,
     strictPort: true,
+    watch: {
+      // Packaging stages thousands of generated resources under the app root.
+      // They are never renderer source and must not trigger HMR/full reloads.
+      ignored: ["**/.package/**"],
+    },
   },
   preview: {
     host: "127.0.0.1",

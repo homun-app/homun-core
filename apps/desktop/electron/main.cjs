@@ -9,6 +9,8 @@ const { pathToFileURL } = require("node:url");
 const { createLogWriter, resolveLogsDir, pipeChildStream } = require("./lib/logging.cjs");
 const { nextRestartDelay } = require("./lib/watchdog.cjs");
 const { performFactoryReset } = require("./lib/factory-reset.cjs");
+const { resolveAppVersion } = require("./app-version.cjs");
+const desktopPackage = require("../package.json");
 
 // Shell-side diagnostics (~/.homun/logs/desktop.log). Created eagerly so even
 // a failure during startup leaves a trail.
@@ -22,6 +24,11 @@ const GATEWAY_URL =
 const GATEWAY_TOKEN =
   process.env.HOMUN_DESKTOP_GATEWAY_TOKEN ?? randomBytes(32).toString("hex");
 const GATEWAY_STARTUP_TIMEOUT_MS = app.isPackaged ? 60_000 : 180_000;
+const HOMUN_VERSION = resolveAppVersion({
+  isPackaged: app.isPackaged,
+  electronVersion: app.getVersion(),
+  packageVersion: desktopPackage.version,
+});
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 const RESOURCES_ROOT =
   process.env.HOMUN_DESKTOP_RESOURCES_DIR ??
@@ -90,7 +97,7 @@ const RELEASES_URL = "https://github.com/homun-app/homun-releases/releases";
 // build they're running — the single source of the "am I on 1019?" truth.
 app.setAboutPanelOptions({
   applicationName: "Homun",
-  applicationVersion: app.getVersion(),
+  applicationVersion: HOMUN_VERSION,
   copyright: "© 2026 Homun",
   website: RELEASES_URL,
 });
@@ -294,6 +301,18 @@ function spawnGateway() {
     HOMUN_DESKTOP_GATEWAY_TOKEN: GATEWAY_TOKEN,
     HOMUN_WORKSPACE_ROOT: workspaceRoot,
   };
+
+  if (!env.HOMUN_PDFIUM_LIB) {
+    const bundledPdfium = path.join(RESOURCES_ROOT, "pdfium");
+    const pdfiumLibrary = process.platform === "win32"
+      ? "pdfium.dll"
+      : process.platform === "darwin"
+        ? "libpdfium.dylib"
+        : "libpdfium.so";
+    if (fs.existsSync(path.join(bundledPdfium, pdfiumLibrary))) {
+      env.HOMUN_PDFIUM_LIB = bundledPdfium;
+    }
+  }
 
   // Point the gateway at the bundled contained-computer build context so the
   // "local computer" can start from an installed app (up.sh builds the image
@@ -725,7 +744,7 @@ ipcMain.handle("lfpa:feedback-bundle", async () => {
     }
     const report = {
       generatedAt: new Date().toISOString(),
-      appVersion: app.getVersion(),
+      appVersion: HOMUN_VERSION,
       packaged: app.isPackaged,
       platform: process.platform,
       arch: process.arch,
@@ -882,7 +901,7 @@ autoUpdater.autoInstallOnAppQuit = true;
 // The version of THIS running build (set from the git tag at CI time). The
 // renderer shows it in Settings → Account so "which build am I on?" is never a
 // guess. Works in dev too (returns the dev package.json version).
-ipcMain.handle("lfpa:app-version", () => app.getVersion());
+ipcMain.handle("lfpa:app-version", () => HOMUN_VERSION);
 
 // Machine specs for the onboarding "system requirements" step: total RAM and
 // core count drive which local model we recommend. From Node `os` in the main
@@ -919,7 +938,7 @@ const CAN_AUTO_INSTALL =
   process.platform === "darwin" || process.platform === "win32";
 
 ipcMain.handle("lfpa:update-check", async () => {
-  const current = app.getVersion();
+  const current = HOMUN_VERSION;
   if (!app.isPackaged)
     return { available: false, version: null, current, canAutoInstall: CAN_AUTO_INSTALL };
   try {

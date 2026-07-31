@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Bolt,
   ChevronDown,
@@ -92,7 +92,7 @@ export function AutomationsView({
   // reminders ("ricordami…") that have no Automazione rule behind them and would
   // otherwise be invisible/undeletable. Listed here so there's one place to cancel any.
   const [scheduled, setScheduled] = useState<CoreTaskItem[]>([]);
-  const reloadScheduled = () => {
+  const reloadScheduled = useCallback(() => {
     void coreBridge.taskQueue().then((q) => {
       setScheduled(
         [...(q.queued ?? []), ...(q.active ?? [])].filter(
@@ -100,10 +100,10 @@ export function AutomationsView({
         ),
       );
     });
-  };
+  }, []);
   useEffect(() => {
     reloadScheduled();
-  }, []);
+  }, [automations, reloadScheduled]);
   const cancelScheduled = (taskId: string) => {
     void coreBridge.cancelTask(taskId).then(() => reloadScheduled());
   };

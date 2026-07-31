@@ -245,10 +245,10 @@ assertContains(
   'type: "not_applied" as const',
   "Manual verification must submit the canonical not-applied resolution",
 );
-assertNotContains(
+assertContains(
   "src/components/ChatView.tsx",
-  "uncertain-effect-card",
-  "Uncertain effects must not create a second chat-card resume path",
+  "function InlineUncertainEffectPanel",
+  "Uncertain effects must be resolved in their owning conversation",
 );
 assertContains(
   "src/App.tsx",
@@ -260,11 +260,6 @@ assertContains(
   "await loadTaskQueue();",
   "Resolution must refresh the canonical task queue",
 );
-assertContains(
-  "src/App.tsx",
-  "await refreshSelectedTaskDetail(selectedTaskId);",
-  "Resolution must refresh the selected task detail",
-);
 assertMatches(
   "src/App.tsx",
   /if \(effect\.threadId\) \{\s*await refreshChatReadModels\(effect\.threadId\);\s*\}/,
@@ -275,28 +270,37 @@ assertNotContains(
   "setUncertainEffectItems((current) => current.filter",
   "Resolution must not optimistically remove an uncertain receipt",
 );
-assertContains(
+assertMissing(
   "src/components/TasksView.tsx",
+  "The task runtime must not create a separate user-facing workspace",
+);
+assertNotContains(
+  "src/App.tsx",
+  'activeView === "tasks"',
+  "Tasks must not remain a desktop route",
+);
+assertContains(
+  "src/components/ChatView.tsx",
   'className="uncertain-effect-card"',
-  "Tasks Workbench must render uncertain effects separately from approvals",
+  "The owning conversation must render uncertain effects separately from approvals",
 );
 assertContains(
-  "src/components/TasksView.tsx",
-  't("tasksView.verifiedApplied")',
-  "Tasks Workbench must expose the verified-applied command",
+  "src/components/ChatView.tsx",
+  't("chat.verifiedApplied")',
+  "The conversation must expose the verified-applied command",
 );
 assertContains(
-  "src/components/TasksView.tsx",
-  't("tasksView.verifiedNotApplied")',
-  "Tasks Workbench must expose the verified-not-applied command",
+  "src/components/ChatView.tsx",
+  't("chat.verifiedNotApplied")',
+  "The conversation must expose the verified-not-applied command",
 );
 assertContains(
-  "src/components/TasksView.tsx",
-  "effectResolutionBusyId === effect.id",
+  "src/components/ChatView.tsx",
+  "busyId === effect.id",
   "Both uncertain-effect actions must share one in-flight guard",
 );
 assertNotContains(
-  "src/components/TasksView.tsx",
+  "src/components/ChatView.tsx",
   "JSON.stringify(effect.core.evidence",
   "Raw uncertain-effect evidence must not be rendered",
 );
@@ -505,9 +509,9 @@ assertContains("src/components/ChatView.tsx", "{sidebarCollapsed && (", "chat he
 assertContains("src/components/Shell.tsx", "{drawerOpen && !isSettings && (", "main drawer must render when open");
 assertContains("src/components/Sidebar.tsx", "drawer-profile", "open drawer footer must show the user profile + settings");
 assertContains("src/components/ComposerShell.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
-assertContains("src/components/ChatView.tsx", "local-computer-card", "active task must expose a local computer activity card");
+assertContains("src/components/ChatView.tsx", "function ComputerDetailPanel", "active task must expose local computer activity through the inspector");
 assertContains("src/components/ChatView.tsx", "timelineCollapsed", "computer timeline must keep collapsed state");
-assertContains("src/components/ChatView.tsx", "computerCardCollapsed", "local computer card must be collapsible after answers");
+assertContains("src/components/ChatView.tsx", 'view.key === "computer"', "local computer activity must remain discoverable as an inspector view");
 assertContains("src/components/SettingsView.tsx", "secret_value: manualSecretValue.trim()", "Vault manual entry must send raw secret material through the encrypted gateway path");
 assertContains("src/components/SettingsView.tsx", "pin: manualSecretPin", "Vault manual entry must require the local PIN when saving secret material");
 assertContains("src/components/SettingsView.tsx", "setManualSecretValue(\"\")", "Vault manual entry must clear the raw secret from renderer state after saving");

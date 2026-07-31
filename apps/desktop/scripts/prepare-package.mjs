@@ -4,6 +4,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildHostComputerHelper } from "./build-host-computer-helper.mjs";
 import { stageLicenseCompliance } from "./license-compliance.mjs";
+import { stagePdfiumRuntime } from "./pdfium-runtime.mjs";
 
 const appRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const repoRoot = resolve(appRoot, "../..");
@@ -59,6 +60,12 @@ if (!skipBuild) {
 
 rmSync(resourcesDir, { recursive: true, force: true });
 mkdirSync(join(resourcesDir, "bin"), { recursive: true });
+
+// PDF preview and PDF attachment ingestion share one native renderer. Package a
+// checksum-pinned runtime for the current release target so installed builds do
+// not silently fall back to Chromium's unauthorizable blob PDF iframe.
+const pdfiumTarget = join(resourcesDir, "pdfium");
+await stagePdfiumRuntime({ destination: pdfiumTarget });
 
 if (process.platform === "darwin") {
   if (!existsSync(helperBundle)) {
@@ -186,6 +193,7 @@ await stageLicenseCompliance({ repoRoot, resourcesDir });
 console.log(`Prepared Electron resources at ${resourcesDir}`);
 console.log(`Gateway: ${relative(repoRoot, gatewayTarget)}`);
 console.log(`Contained computer: ${relative(repoRoot, ccTarget)}`);
+console.log(`PDFium: ${relative(repoRoot, pdfiumTarget)}`);
 if (existsSync(skillsTarget)) {
   console.log(`Default skills: ${relative(repoRoot, skillsTarget)}`);
 }

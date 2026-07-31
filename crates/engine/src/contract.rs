@@ -398,6 +398,13 @@ pub trait TurnPolicy {
     /// surface (and skip the tool), or `None` when the tool is allowed.
     fn route_blocked(&self, tool: &str) -> Option<String>;
 
+    /// Whether a route block means the deterministic workflow has already produced its one result.
+    /// In that state retrying or switching tools cannot make progress, so the loop exits to its
+    /// bounded no-tools synthesis instead of feeding the rejection back for another tool round.
+    fn route_block_ends_turn(&self) -> bool {
+        false
+    }
+
     /// Can the CURRENT provider accept an image part? Gates the browser-screenshot vision injection;
     /// defaults to `true` for undetected/cloud providers (only a confidently non-vision model is skipped).
     fn supports_vision(&self, base_url: &str, model: &str) -> bool;

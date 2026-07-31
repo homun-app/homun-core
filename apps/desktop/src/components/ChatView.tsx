@@ -1,10 +1,12 @@
 import {
   ArrowUp,
   AlertCircle,
+  BadgeCheck,
   AtSign,
   BookMarked,
   ClipboardList,
   Check,
+  CircleX,
   CalendarClock,
   ChevronDown,
   ChevronLeft,
@@ -87,6 +89,7 @@ import {
   type CoreComputerSessionSnapshot,
   type CorePromptSubmissionResult,
   type CoreTaskQueueSnapshot,
+  type CoreUncertainEffectOutcome,
   type ProjectGoalsData,
   type FsEntry,
   type FsFilePayload,
@@ -161,6 +164,9 @@ import {
   latestAssistantEffectiveModel,
   selectedModelAfterSubmission,
 } from "../lib/composerTurnContract";
+// Persisted artifact rows need a storage-aware projection before previewing.
+// @ts-expect-error JavaScript sibling intentionally has no declaration file.
+import * as artifactProjection from "../lib/artifactProjection.mjs";
 // Transcript indexes live in a plain .mjs sibling so `node --test` can exercise
 // them without a build step, which is why they carry no type declaration.
 // @ts-expect-error JavaScript sibling intentionally has no declaration file.
@@ -215,6 +221,7 @@ import type {
   ApprovelItem,
   RuntimeHealth,
   TaskItem,
+  UncertainEffectItem,
   DiffEventPayload,
 } from "../types";
 
@@ -225,6 +232,11 @@ const buildPreviousUserMessageIndex = messageIndex.buildPreviousUserMessageIndex
 const buildBranchIndex = messageIndex.buildBranchIndex as (
   branches: CoreBranchPoint[],
 ) => Map<string, CoreBranchPoint>;
+
+const projectMemoryArtifact = artifactProjection.projectMemoryArtifact as (
+  artifact: MemoryArtifactView,
+  currentThread: string,
+) => ParsedArtifact;
 
 const CHAT_VIEW_SESSION_ID =
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -240,6 +252,9 @@ interface ChatViewProps {
   onOpenUsageSettings: () => void;
   approvals: ApprovelItem[];
   approvalBusyId: string | null;
+  uncertainEffects: UncertainEffectItem[];
+  effectResolutionBusyId: string | null;
+  effectResolutionError: string | null;
   computerSessionId: string;
   messages: ChatMessage[];
   health: RuntimeHealth[];
@@ -249,7 +264,10 @@ interface ChatViewProps {
     messages: ChatMessage[],
     options?: { advanceActivity?: boolean },
   ) => void;
-  onOpenTasks: () => void;
+  onResolveEffect: (
+    effect: UncertainEffectItem,
+    outcome: CoreUncertainEffectOutcome,
+  ) => void;
   onApproveApprovel: (
     approvalId: string,
     options?: {
@@ -463,6 +481,9 @@ export function ChatView({
   onOpenUsageSettings,
   approvals,
   approvalBusyId,
+  uncertainEffects,
+  effectResolutionBusyId,
+  effectResolutionError,
   computerSessionId,
   messages,
   health,
@@ -470,9 +491,9 @@ export function ChatView({
   thread,
   onMessagesChange,
   islandRefreshNonce,
-  incomingBackgroundTurn,
   runtimeContextRevision,
-  onOpenTasks,
+  incomingBackgroundTurn,
+  onResolveEffect,
   onApproveApprovel,
   onRejectApprovel,
   onRuntimeChanged,
@@ -489,10 +510,6 @@ export function ChatView({
   const [activeSurface, setActiveSurface] = useState<ComputerSurfaceKind>(
     computerSession.activeSurface,
   );
-  const [smokeTestRunning, setSmokeTestRunning] = useState(false);
-  const [smokeTestError, setSmokeTestError] = useState<string | null>(null);
-  const [planStepRunning, setPlanStepRunning] = useState(false);
-  const [planStepError, setPlanStepError] = useState<string | null>(null);
   const [computerControlBusy, setComputerControlBusy] = useState(false);
   const [computerControlError, setComputerControlError] = useState<string | null>(null);
   const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
@@ -546,7 +563,6 @@ export function ChatView({
   const [modelOpen, setModelOpen] = useState(false);
   const [activeModelInfo, setActiveModelInfo] = useState<ActiveModelInfo | null>(null);
   const [timelineCollapsed, setTimelineCollapsed] = useState(true);
-  const [computerCardCollapsed, setComputerCardCollapsed] = useState(true);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[] | null>(null);
   const [streamHasVisibleText, setStreamHasVisibleText] = useState(false);
   const [autoContinueMessageId, setAutoContinueMessageId] = useState<string | null>(null);
@@ -732,15 +748,7 @@ export function ChatView({
       const displayName = artifact.project_relative_path || artifact.name;
       if (!displayName || seen.has(displayName)) continue;
       seen.add(displayName);
-      out.push({
-        name: displayName,
-        thread: thread.threadId,
-        size: artifact.size,
-        updated: artifact.updated,
-        source: "project",
-        projectPath: artifact.project_path ?? undefined,
-        projectRelativePath: artifact.project_relative_path ?? displayName,
-      });
+      out.push(projectMemoryArtifact(artifact, thread.threadId));
     }
     return out;
   }, [conversationArtifacts, memoryArtifacts, thread.threadId]);
@@ -1215,44 +1223,6 @@ export function ChatView({
     scrollConversationToBottomIfPinned("instant");
   }
 
-  async function runLocalSmokeTest() {
-    setSmokeTestRunning(true);
-    setSmokeTestError(null);
-    setComputerCardCollapsed(false);
-    try {
-      const snapshot =
-        await coreBridge.runLocalComputerSmokeTest(computerSessionId);
-      setComputerSession(mapCoreComputerSession(snapshot));
-      await onRuntimeChanged();
-    } catch (error) {
-      setSmokeTestError(describeBridgeError(error));
-    } finally {
-      setSmokeTestRunning(false);
-    }
-  }
-
-  async function runPromptPlanNextStep() {
-    setPlanStepRunning(true);
-    setPlanStepError(null);
-    setComputerCardCollapsed(false);
-    try {
-      const result = await coreBridge.runPromptPlanReadySteps(
-        computerSessionId,
-        4,
-      );
-      const snapshot = await coreBridge.localComputerSession(computerSessionId);
-      if (snapshot) {
-        setComputerSession(mapCoreComputerSession(snapshot));
-      }
-      await onRuntimeChanged();
-      await onThreadChanged();
-    } catch (error) {
-      setPlanStepError(describeBridgeError(error));
-    } finally {
-      setPlanStepRunning(false);
-    }
-  }
-
   async function runComputerControl(
     action: (sessionId: string) => Promise<CoreComputerSessionSnapshot>,
   ) {
@@ -1547,7 +1517,6 @@ export function ChatView({
         return;
       }
       setComputerSession(mapCoreComputerSession(result.computer_session));
-      setComputerCardCollapsed(true);
       setTimelineCollapsed(!result.plan);
       // Only gateway evidence may identify the model that produced this turn.
       // The requested override remains next-turn input, not execution provenance.
@@ -2333,7 +2302,6 @@ export function ChatView({
       if (cancelledStreamIdsRef.current.has(requestId)) return;
       cancelScheduledStreamingFrame();
       setComputerSession(mapCoreComputerSession(result.computer_session));
-      setComputerCardCollapsed(true);
       setTimelineCollapsed(!result.plan);
       // The new answer is now a sibling in the tree; resync the real path + switcher.
       await refreshAfterChatSubmit();
@@ -2671,7 +2639,6 @@ export function ChatView({
         item.id === message.id ? updatedMessage : item,
       );
       setComputerSession(mapCoreComputerSession(result.computer_session));
-      setComputerCardCollapsed(true);
       setTimelineCollapsed(!result.plan);
       setOptimisticMessages(nextMessages);
       onMessagesChange(nextMessages, { advanceActivity: true });
@@ -3468,6 +3435,12 @@ export function ChatView({
             onApprove={onApproveApprovel}
             onReject={onRejectApprovel}
           />
+          <InlineUncertainEffectPanel
+            effects={uncertainEffects}
+            busyId={effectResolutionBusyId}
+            hasError={effectResolutionError !== null}
+            onResolve={onResolveEffect}
+          />
         </div>
       </div>
 
@@ -3568,10 +3541,10 @@ export function ChatView({
           activeWork={workInProgress}
           disabled={false}
           effectiveModelLabel={lastAssistantEffectiveModel}
-          error={promptError}
           runtimeContext={runtimeContext}
           runtimeContextLoading={runtimeContextLoading}
           runtimeContextError={runtimeContextError}
+          error={promptError}
           replyContext={replyContext}
           seed={composerSeed}
           suggestedModel={usageSuggestedModel}
@@ -4794,14 +4767,14 @@ async function projectArtifactBlob(artifact: ParsedArtifact): Promise<Blob> {
 }
 
 type ArtifactPreview =
-  | { kind: "image" | "pdf"; url: string; ext: string }
+  | { kind: "image"; url: string; ext: string }
   | { kind: "html"; url: string; ext: string }
   | { kind: "pdf-images"; pages: string[]; ext: string }
   | { kind: "markdown" | "code" | "csv" | "text"; text: string; ext: string }
   | { kind: "binary" | "missing" | "denied" | "error"; ext: string };
 
-/** Fetches an artifact and builds a renderable preview by type. For image/pdf it
- *  creates an object URL the caller must revoke (preview.url). */
+/** Fetches an artifact and builds a renderable preview by type. Image/HTML
+ *  previews create an object URL the caller must revoke (preview.url). */
 async function buildArtifactPreview(
   artifact: ParsedArtifact,
   version?: number,
@@ -4821,19 +4794,20 @@ async function buildArtifactPreview(
     if (ext === "txt" || ext === "log" || ext === "") return { kind: "text", text: payload.text, ext };
     return { kind: "text", text: payload.text, ext };
   }
-  const blob = await coreBridge.downloadArtifact(artifact.thread, artifact.name, version);
-  if (ARTIFACT_IMAGE_EXT.includes(ext)) return { kind: "image", url: URL.createObjectURL(blob), ext };
   if (ext === "pdf") {
-    // Prefer a clean document-style preview: render the pages to images server-side
-    // (pdfium). Fall back to the native PDF viewer iframe if that's unavailable.
+    // Render through the gateway's packaged PDFium runtime. Chromium's native
+    // PDF viewer cannot reliably authorize renderer-created blob URLs in an
+    // iframe and reports a misleading permission error.
     try {
       const pages = await coreBridge.artifactPdfPages(artifact.thread, artifact.name, version);
       if (pages.length > 0) return { kind: "pdf-images", pages, ext };
     } catch {
-      /* pdfium unavailable → native viewer */
+      return { kind: "error", ext };
     }
-    return { kind: "pdf", url: URL.createObjectURL(blob), ext };
+    return { kind: "error", ext };
   }
+  const blob = await coreBridge.downloadArtifact(artifact.thread, artifact.name, version);
+  if (ARTIFACT_IMAGE_EXT.includes(ext)) return { kind: "image", url: URL.createObjectURL(blob), ext };
   if (ext === "html" || ext === "htm") {
     // Render the deck/page inline (self-contained HTML — decks inline their images).
     // Re-blob as text/html so the iframe renders rather than downloads.
@@ -7034,14 +7008,6 @@ function ArtifactPreviewBody({
             />
           ))}
         </div>
-      );
-    case "pdf":
-      return (
-        <iframe
-          className="artifact-preview-frame"
-          src={`${preview.url}#toolbar=0&navpanes=0&view=FitH`}
-          title="Preview PDF"
-        />
       );
     case "html":
       // Inline render of an HTML deck/page (e.g. an on-brand presentation). Sandboxed:
@@ -9255,199 +9221,93 @@ function InlineApprovelPanel({
   );
 }
 
-function LocalComputerCard({
-  approvalsCount,
-  collapsed,
-  onOpen,
-  onOpenTasks,
-  onRunPlanStep,
-  onRunSmokeTest,
-  onToggleCollapsed,
-  planStepError,
-  planStepRunning,
-  previewDataUrl,
-  session,
-  smokeTestError,
-  smokeTestRunning,
-  task,
+function InlineUncertainEffectPanel({
+  effects,
+  busyId,
+  hasError,
+  onResolve,
 }: {
-  approvalsCount: number;
-  collapsed: boolean;
-  onOpen: () => void;
-  onOpenTasks: () => void;
-  onRunPlanStep: () => void;
-  onRunSmokeTest: () => void;
-  onToggleCollapsed: () => void;
-  planStepError: string | null;
-  planStepRunning: boolean;
-  previewDataUrl: string | null;
-  session: ComputerSession;
-  smokeTestError: string | null;
-  smokeTestRunning: boolean;
-  task: TaskItem;
+  effects: UncertainEffectItem[];
+  busyId: string | null;
+  hasError: boolean;
+  onResolve: (
+    effect: UncertainEffectItem,
+    outcome: CoreUncertainEffectOutcome,
+  ) => void;
 }) {
   const { t } = useTranslation();
-  const surfaceLabel =
-    session.activeSurface === "browser"
-      ? "Browser"
-      : session.activeSurface === "shell"
-        ? "Terminal"
-        : "Computer";
-  const activityLabel =
-    planStepRunning || smokeTestRunning ? "running" : "ready";
-  const hasApprovel = approvalsCount > 0;
-  const hasWaitingStep = session.timeline.some((item) => item.status === "waiting");
+  if (effects.length === 0) return null;
 
   return (
-    <article className={`local-computer-card ${collapsed ? "collapsed" : ""}`}>
-      <div className="computer-card-toolbar">
-        <button
-          className="computer-toolbar-main"
-          type="button"
-          onClick={onOpen}
-        >
-          <Monitor size={15} />
-          <strong>Local computer</strong>
-          <span className="computer-live-badge">
-            <span className="computer-live-dot" aria-hidden="true" />
-            {activityLabel === "running" ? t("chat.liveView") : surfaceLabel}
-          </span>
-        </button>
-        <div className="computer-toolbar-meta">
-          <span className="computer-card-source">
-            {session.activeSurface === "browser"
-              ? t("chat.noVncRealBrowser")
-              : session.activeSurface === "shell"
-                ? t("chat.realShell")
-                : t("chat.realComputer")}
-          </span>
-          <span>
-            {session.progressCurrent} / {session.progressTotal}
-          </span>
-          {hasApprovel ? (
-            <button
-              className="computer-inline-action attention"
-              type="button"
-              onClick={onOpenTasks}
-            >
-              {t("chat.confirmRequest")}
-            </button>
-          ) : (
-            <button
-              className="computer-inline-action"
-              disabled={planStepRunning || !hasWaitingStep}
-              type="button"
-              onClick={onRunPlanStep}
-            >
-              {planStepRunning
-                ? t("chat.running")
-                : hasWaitingStep
-                  ? t("chat.action.continue")
-                  : t("chat.noAction")}
-            </button>
-          )}
-          <button
-            className="computer-collapse-button"
-            type="button"
-            aria-expanded={!collapsed}
-            aria-label={collapsed ? t("chat.showLocalComputer") : t("chat.hideLocalComputer")}
-            onClick={onToggleCollapsed}
-          >
-            <ChevronDown
-              className={collapsed ? "" : "computer-collapse-icon-open"}
-              size={15}
-            />
-          </button>
-        </div>
-      </div>
-
-      {!collapsed && (
-        <>
-          <button className="computer-card-main" type="button" onClick={onOpen}>
-            <div className="computer-preview" aria-hidden="true">
-              {previewDataUrl ? (
-                <img
-                  className="computer-preview-image"
-                  alt=""
-                  src={previewDataUrl}
-                />
-              ) : (
-                <>
-                  <div className="browser-chrome">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                  <div className="browser-lines">
-                    <i />
-                    <i />
-                    <i />
-                  </div>
-                  <div className="terminal-preview">
-                    <span>$ date</span>
-                    <span>CEST · local</span>
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="computer-card-copy">
-              <div className="computer-card-title">
-                <strong>{session.previewTitle}</strong>
-                <span>{session.elapsed}</span>
-              </div>
-              <p>{session.subtitle}</p>
-              <small>{session.previewDetail}</small>
-            </div>
-            <div className="computer-card-progress">
-              <span>Open details</span>
-              <ChevronDown size={16} />
-            </div>
-          </button>
-
-          <div className="computer-card-footer">
-            <span className="status-line">
-              <Play size={14} />
-              {task.title}
-            </span>
-            <div className="computer-card-actions">
-              {(smokeTestError || planStepError) && (
-                <span>{smokeTestError ?? planStepError}</span>
-              )}
-              <button
-                className="smoke-test-button"
-                disabled={planStepRunning || !hasWaitingStep}
-                type="button"
-                onClick={onRunPlanStep}
-              >
-                {planStepRunning
-                  ? t("chat.running")
-                  : hasWaitingStep
-                    ? t("chat.runPlan")
-                    : t("chat.planStopped")}
-              </button>
-              {hasApprovel && (
-                <button
-                  className="smoke-test-button attention"
-                  type="button"
-                  onClick={onOpenTasks}
-                >
-                  {t("chat.openApproval")}
-                </button>
-              )}
-              <button
-                className="smoke-test-button"
-                disabled={smokeTestRunning}
-                type="button"
-                onClick={onRunSmokeTest}
-              >
-                {smokeTestRunning ? t("chat.runningEllipsis") : t("chat.realTest")}
-              </button>
-            </div>
-          </div>
-        </>
+    <section
+      className="inline-effect-verification"
+      aria-label={t("chat.effectVerificationAria")}
+    >
+      {hasError && (
+        <p className="uncertain-effect-error" role="alert">
+          {t("chat.effectResolutionError")}
+        </p>
       )}
-    </article>
+      {effects.map((effect) => {
+        const resolving = busyId === effect.id;
+        const disabled = busyId !== null;
+        return (
+          <article className="uncertain-effect-card" key={effect.id}>
+            <header className="uncertain-effect-header">
+              <AlertCircle size={17} aria-hidden="true" />
+              <strong>{effectFamilyLabel(effect.operationFamily, t)}</strong>
+              <span>{t("chat.needsVerification")}</span>
+            </header>
+            <p className="inline-effect-copy">{t("chat.effectVerificationPrompt")}</p>
+            <time dateTime={new Date(effect.uncertainAt * 1_000).toISOString()}>
+              {t("chat.uncertainSince", { time: formatEffectTime(effect.uncertainAt) })}
+            </time>
+            <div className="uncertain-effect-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={disabled}
+                onClick={() => onResolve(effect, "not_applied")}
+              >
+                <CircleX size={16} aria-hidden="true" />
+                {t("chat.verifiedNotApplied")}
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={disabled}
+                onClick={() => onResolve(effect, "applied")}
+              >
+                {resolving ? (
+                  <Loader2 className="spin" size={16} aria-hidden="true" />
+                ) : (
+                  <BadgeCheck size={16} aria-hidden="true" />
+                )}
+                {t("chat.verifiedApplied")}
+              </button>
+            </div>
+          </article>
+        );
+      })}
+    </section>
   );
+}
+
+function effectFamilyLabel(
+  family: UncertainEffectItem["operationFamily"],
+  t: (key: string) => string,
+) {
+  if (family === "browser") return t("chat.effectFamilyBrowser");
+  if (family === "channel") return t("chat.effectFamilyChannel");
+  if (family === "connector") return t("chat.effectFamilyConnector");
+  return t("chat.effectFamilyExternalWrite");
+}
+
+function formatEffectTime(timestamp: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(timestamp * 1_000));
 }
 
 function ComputerDetailPanel({
@@ -9647,11 +9507,11 @@ function Composer({
   activeWork,
   disabled,
   effectiveModelLabel,
-  error,
-  replyContext,
   runtimeContext,
   runtimeContextLoading,
   runtimeContextError,
+  error,
+  replyContext,
   seed,
   suggestedModel,
   streaming,
@@ -9665,11 +9525,11 @@ function Composer({
   activeWork: boolean;
   disabled: boolean;
   effectiveModelLabel: string;
-  error: string | null;
-  replyContext: ReplyContext | null;
   runtimeContext: RuntimeContextResponse | null;
   runtimeContextLoading: boolean;
   runtimeContextError: boolean;
+  error: string | null;
+  replyContext: ReplyContext | null;
   seed: { text: string; nonce: number } | null;
   suggestedModel: { value: string; nonce: number } | null;
   streaming: boolean;
@@ -10204,11 +10064,11 @@ function Composer({
       modelGroups={modelGroups}
       selectedNextTurnModel={selectedModel}
       effectiveModelLabel={effectiveModelLabel}
-      mode={chatMode}
-      modeOptions={modeOptions}
       runtimeContext={runtimeContext}
       runtimeContextLoading={runtimeContextLoading}
       runtimeContextError={runtimeContextError}
+      mode={chatMode}
+      modeOptions={modeOptions}
       environmentLabel={linkedFolder ? t("composer.projectEnvironment") : t("composer.localEnvironment")}
       recording={recording}
       transcribing={transcribing}

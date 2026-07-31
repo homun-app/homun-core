@@ -4,7 +4,6 @@ import type { CoreUncertainEffect, PaymentApprovalSnapshot } from "./lib/coreBri
 export type ViewId =
   | "chat"
   | "learning"
-  | "tasks"
   | "memory"
   | "connections"
   | "automations"
@@ -187,11 +186,6 @@ export interface TaskItem {
   blockedReason?: string;
 }
 
-export interface TaskResourceUsage {
-  resourceClass: string;
-  units: number;
-}
-
 export interface UncertainEffectItem {
   id: string;
   executionId: string;
@@ -200,18 +194,6 @@ export interface UncertainEffectItem {
   operationFamily: CoreUncertainEffect["operation_family"];
   uncertainAt: number;
   core: CoreUncertainEffect;
-}
-
-export interface TaskDetailItem {
-  taskId: string;
-  kind: string;
-  goal: string;
-  status: TaskStatus;
-  priority: Priority;
-  blockedReason?: string;
-  checkpointSummary: string;
-  metadataSummary: string;
-  exposesRawInput: boolean;
 }
 
 export type ComputerSurfaceKind = "browser" | "shell" | "files" | "logs";
@@ -263,6 +245,7 @@ export interface ComputerSession {
 
 export interface ApprovelItem {
   id: string;
+  taskId: string;
   title: string;
   reason: string;
   action: string;

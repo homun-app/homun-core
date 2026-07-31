@@ -67,9 +67,9 @@ CORE tools (not behind find_capability), with Jaccard-dedup. UI: `AutomationsVie
 per service; the poll tool is auto-chosen, the technical filter/key are free-form/auto).
 
 **7. Queue hygiene.** `is_internal_task_kind` hides `capability.*`/`subagent.*` from the queue;
-`humanize_task_kind` for labels. "Pianificato" was removed from the nav (the rule is the
-first-class object; runs surface in their threads). The TasksView remains reachable via approval
-affordances (`onOpenTasks`).
+`humanize_task_kind` for labels. "Pianificato" and Tasks are absent from navigation: automations are
+first-class rules, while runs, approvals, failures and outcome verification surface in their owning
+conversation. The durable task runtime remains infrastructure, not a separate user workspace.
 
 ## Status: verified vs pending
 

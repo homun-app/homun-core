@@ -30,6 +30,9 @@ async function completeResources() {
     "third-party-licenses/python-runtime/inventory.json",
     "third-party-licenses/python-runtime/NOTICE.md",
     "third-party-licenses/spdx/MIT.txt",
+    "pdfium/LICENSE",
+    "pdfium/VERSION",
+    "pdfium/licenses/pdfium.txt",
     "contained-computer/fonts/demo-400.woff2",
   ]) {
     const contents = relativePath === "third-party-licenses/fonts/LICENSE_MANIFEST.json"
@@ -109,6 +112,9 @@ test("names each required missing license artifact", async (t) => {
     "third-party-licenses/python-runtime/inventory.json",
     "third-party-licenses/python-runtime/NOTICE.md",
     "third-party-licenses/spdx",
+    "pdfium/LICENSE",
+    "pdfium/VERSION",
+    "pdfium/licenses",
   ];
   for (const relativePath of required) {
     const resources = await completeResources();

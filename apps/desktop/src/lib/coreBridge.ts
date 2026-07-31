@@ -1709,6 +1709,7 @@ export interface MemoryArtifactView {
   title: string;
   artifact_type: string;
   source: string;
+  storage?: "managed" | "project";
   project_relative_path?: string | null;
   project_path?: string | null;
   managed_path?: string | null;

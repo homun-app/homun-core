@@ -2,7 +2,8 @@
 
 **Date:** 2026-07-30
 
-**Status:** Implemented and verified
+**Status:** Superseded on 2026-07-31 by the conversation-attention projection. The durable receipt
+contract below remains current; references to a Tasks Workbench describe the retired UI only.
 
 ## Purpose
 
@@ -19,8 +20,8 @@ the transition.
 
 ## Decision
 
-Project unresolved effect receipts into the existing task queue read model and render them in the
-Tasks Workbench as a distinct operational section. They are not approvals: approving an operation
+Project unresolved effect receipts into the existing task queue read model and render them inline in
+the owning conversation. They are not approvals: approving an operation
 authorizes a future dispatch, while resolving uncertainty records verified evidence about a dispatch
 that may already have happened.
 

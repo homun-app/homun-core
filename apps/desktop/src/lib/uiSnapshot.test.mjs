@@ -26,6 +26,7 @@ function artifact(overrides = {}) {
     title: "Report",
     artifact_type: "markdown",
     source: "project",
+    storage: "project",
     project_relative_path: "docs/report.md",
     project_path: "/project/docs/report.md",
     managed_path: null,

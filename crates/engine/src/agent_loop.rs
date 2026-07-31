@@ -30,8 +30,7 @@ use crate::hitl::{
 };
 use crate::markers::{
     append_vault_reveal_marker_if_missing, extract_vault_reveal_marker,
-    preserved_display_marker_blocks, prose_asks_clarify_without_card,
-    prose_asks_closed_choice_without_card, text_awaits_user, visible_answer,
+    preserved_display_marker_blocks, strip_display_markers, text_awaits_user, visible_answer,
 };
 use crate::model_normalize;
 use crate::plan::{
@@ -130,32 +129,50 @@ fn complete_drained_steering<M: ModelClient>(
 ///
 /// Expressed over the seams (`PlanProgress` for verify/record/persist + the steps→Value bridge,
 /// `EventSink` for the card, `TurnConfig` for the flags) — no `AppState`/transport/`ExecutionPlan`.
-pub async fn try_advance_frontier_from_evidence(
+#[derive(Clone, Copy)]
+struct EvidenceVerification {
+    round: usize,
+    force: bool,
+}
+
+async fn try_advance_frontier_from_evidence(
     ls: &mut LoopState,
     plan_progress: &impl PlanProgress,
     execution_journal: &impl ExecutionJournal,
     event_sink: &impl EventSink,
     cfg: &TurnConfig,
     thread_id: Option<&str>,
-    round: usize,
+    verification: EvidenceVerification,
 ) {
     if !cfg.autoadvance_from_evidence || !cfg.step_verification {
         return;
     }
     // Evidence stride: only re-check after a few new tool outcomes since the last attempt.
     const EVIDENCE_STRIDE: usize = 3;
-    if ls.step_evidence.len() < ls.progress_verify_anchor.saturating_add(EVIDENCE_STRIDE) {
+    if !verification.force
+        && ls.step_evidence.len() < ls.progress_verify_anchor.saturating_add(EVIDENCE_STRIDE)
+    {
         return;
     }
     ls.progress_verify_anchor = ls.step_evidence.len();
-    let batch_evidence = ls.step_evidence.join("\n");
+    let batch_evidence = if verification.force {
+        let mut prioritized = Vec::new();
+        if let Some(candidate) = ls.step_evidence.last() {
+            prioritized.push(candidate.clone());
+        }
+        prioritized.extend(ls.step_evidence.iter().rev().skip(1).take(8).cloned());
+        prioritized.join("\n")
+    } else {
+        ls.step_evidence.join("\n")
+    };
     if batch_evidence.is_empty() {
         return;
     }
-    // Advance as many consecutive frontier steps as this evidence window confirms — bounded so a
-    // single evidence window can never sweep the whole plan to done (that's the delivery reconcile's
-    // job, not a mid-turn judge call).
-    for _ in 0..2u8 {
+    // Normal tool-result checks remain conservative. A candidate final answer can contain several
+    // analytical deliverables, so verify up to four steps individually before deciding to nudge.
+    // This is not a delivery sweep: every step still passes the fail-closed F2 judge.
+    let max_advances = if verification.force { 4 } else { 2 };
+    for _ in 0..max_advances {
         let plan_steps = plan_value_steps(&ls.plan);
         let Some(idx) = plan_steps
             .iter()
@@ -169,10 +186,13 @@ pub async fn try_advance_frontier_from_evidence(
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let (ok, _reason) = plan_progress
+        let (ok, reason) = plan_progress
             .verify_step_complete(&title, &criterion, &batch_evidence)
             .await;
         if !ok {
+            if cfg.verbose {
+                eprintln!("[plan] F2 kept step open: «{title}» — {reason}");
+            }
             return; // frontier step not proven done yet → leave it doing
         }
         let mut plan_steps = plan_steps;
@@ -184,7 +204,7 @@ pub async fn try_advance_frontier_from_evidence(
             .record_step_outcome(thread_id, &verified_step, &ls.step_evidence)
             .await;
         ls.plan = plan_progress.plan_value_from_steps(&plan_steps);
-        ls.progress_anchor_round = round; // F1: real progress → reset the stall guard
+        ls.progress_anchor_round = verification.round; // F1: real progress → reset the stall guard
         event_sink
             .emit(GenerateStreamEvent::Delta {
                 text: format!(
@@ -201,13 +221,51 @@ pub async fn try_advance_frontier_from_evidence(
             .await;
         plan_progress.persist_plan(thread_id, &plan_steps).await;
         execution_journal.record(AgentExecutionEvent::PlanUpdated {
-            round,
+            round: verification.round,
             source: "verified_evidence".to_string(),
         });
         // This evidence window was consumed by the advance — reset it + the stride anchor.
         ls.step_evidence.clear();
         ls.progress_verify_anchor = 0;
     }
+}
+
+fn candidate_answer_evidence(content: &str) -> Option<String> {
+    let visible = strip_display_markers(content).trim().to_string();
+    if visible.chars().count() < 40 {
+        return None;
+    }
+    Some(format!(
+        "assistant_candidate_output (direct evidence only for an analytical deliverable; never proof that an external action or command ran) → {}",
+        visible.chars().take(3200).collect::<String>()
+    ))
+}
+
+fn evidence_argument_provenance(name: &str, args_raw: &str) -> Option<String> {
+    if name == "run_in_sandbox" {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_str(args_raw).ok()?;
+    const SAFE_KEYS: [&str; 5] = ["path", "url", "goal", "query", "intent"];
+    let mut fields = Vec::new();
+    for key in SAFE_KEYS {
+        let Some(raw) = value.get(key).and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let normalized = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+        if normalized.is_empty() {
+            continue;
+        }
+        fields.push(format!(
+            "{key}={}",
+            normalized.chars().take(240).collect::<String>()
+        ));
+    }
+    (!fields.is_empty()).then(|| fields.join(", "))
+}
+
+fn is_plan_bookkeeping_tool(name: &str) -> bool {
+    matches!(name, "update_plan" | "step_advance")
 }
 
 /// Run ONE agent turn: the bounded guarded ReAct loop + forced synthesis. GENERIC over the seams so
@@ -679,10 +737,19 @@ again to find the right control). Keep working on the task — do not stop and d
             }
             // Echo the assistant's tool-call turn, then append each tool result.
             // Content is sanitized so a leaked text tool-call doesn't pollute the
-            // conversation history.
+            // conversation history. A model may emit the analytical deliverable in
+            // the same message as update_plan; retain that prose as candidate evidence
+            // before dispatch so the plan verifier can judge the actual output.
+            let sanitized_content = model_normalize::sanitize_model_text(&raw_content);
+            if let Some(answer_evidence) = candidate_answer_evidence(&sanitized_content) {
+                ls.step_evidence.insert(0, answer_evidence);
+                if ls.step_evidence.len() > 60 {
+                    ls.step_evidence.pop();
+                }
+            }
             ls.messages.push(serde_json::json!({
                 "role": "assistant",
-                "content": model_normalize::sanitize_model_text(&raw_content),
+                "content": sanitized_content,
                 "tool_calls": calls,
             }));
             // Set when a write tool needs confirmation: we stop the loop and let
@@ -691,6 +758,7 @@ again to find the right control). Keep working on the task — do not stop and d
             let mut stop_for_no_progress = false;
             let mut nudge_no_progress = false;
             let mut control_after_tools = None;
+            let mut terminal_route_block = false;
             // Bundle the turn-level state the dispatch loop touches into `ctx` so
             // the loop body addresses it via `ctx.<field>` (the seam a later refactor
             // extracts into a function). Built once per round; its block ends right
@@ -780,6 +848,10 @@ again to find the right control). Keep working on the task — do not stop and d
                             if let Some(dir) = trace_dir.as_deref() {
                                 crate::trace::append(dir, &rec);
                             }
+                        }
+                        if turn_policy.route_block_ends_turn() {
+                            terminal_route_block = true;
+                            break;
                         }
                         continue;
                     }
@@ -1033,9 +1105,13 @@ again to find the right control). Keep working on the task — do not stop and d
                     // F2: record this tool's outcome as evidence for the current plan
                     // step (the verifier's input). Skip the plan tool itself so the
                     // evidence reflects the actual WORK, not the bookkeeping. Bounded.
-                    if name != "update_plan" {
+                    if !is_plan_bookkeeping_tool(name) {
                         let snippet: String = result.chars().take(400).collect();
-                        ls.step_evidence.push(format!("{name} → {snippet}"));
+                        let evidence_name = evidence_argument_provenance(name, args_raw)
+                            .map(|provenance| format!("{name}({provenance})"))
+                            .unwrap_or_else(|| name.to_string());
+                        ls.step_evidence
+                            .push(format!("{evidence_name} → {snippet}"));
                         if ls.step_evidence.len() > 60 {
                             ls.step_evidence.remove(0);
                         }
@@ -1048,7 +1124,10 @@ again to find the right control). Keep working on the task — do not stop and d
                             event_sink,
                             &cfg,
                             thread_id,
-                            round,
+                            EvidenceVerification {
+                                round,
+                                force: false,
+                            },
                         )
                         .await;
                     }
@@ -1106,6 +1185,10 @@ again to find the right control). Keep working on the task — do not stop and d
                     }
                 }
             } // end ctx scope → borrows freed before the post-loop reads below
+            if terminal_route_block {
+                loop_exit = Some("workflow_result_ready_for_synthesis");
+                break 'rounds;
+            }
             if let Some(control) = control_after_tools {
                 match control.disposition {
                     TurnControlDisposition::ReplanCurrentWork => continue 'rounds,
@@ -1218,7 +1301,7 @@ again to find the right control). Keep working on the task — do not stop and d
         // No tool call → normally the final answer. Sanitize any leaked model
         // control tokens (e.g. minimax `]<]minimax[>[` / `<tool_call>` text) so
         // the user never sees raw template markup.
-        let mut content = model_normalize::sanitize_model_text(
+        let content = model_normalize::sanitize_model_text(
             message
                 .get("content")
                 .and_then(|c| c.as_str())
@@ -1334,8 +1417,42 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
                 // Fall through to plan / deliver paths.
             }
         }
+        // A synthesis/table/report step produces its evidence in the candidate answer itself, not
+        // in a work tool result. Verify that output before nudging the model to repeat it. The
+        // provenance label tells the strict judge that this can prove an analytical deliverable but
+        // can never prove an external action; command/action steps still require their tool evidence.
+        if !is_final_round
+            && !plan_value_steps(&ls.plan).is_empty()
+            && let Some(answer_evidence) = candidate_answer_evidence(&content)
+        {
+            let done_before = plan_value_steps(&ls.plan)
+                .iter()
+                .filter(|step| plan_step_status(step) == "done")
+                .count();
+            ls.step_evidence.push(answer_evidence);
+            if ls.step_evidence.len() > 60 {
+                ls.step_evidence.remove(0);
+            }
+            try_advance_frontier_from_evidence(
+                &mut ls,
+                plan_progress,
+                execution_journal,
+                event_sink,
+                &cfg,
+                thread_id,
+                EvidenceVerification { round, force: true },
+            )
+            .await;
+            let done_after = plan_value_steps(&ls.plan)
+                .iter()
+                .filter(|step| plan_step_status(step) == "done")
+                .count();
+            if done_after > done_before {
+                plan_nudges = 0;
+            }
+        }
         if !is_final_round && plan_nudges < MAX_PLAN_NUDGES {
-            let mut plan_steps = plan_value_steps(&ls.plan);
+            let plan_steps = plan_value_steps(&ls.plan);
             if let Some(step) = plan_next_open(&plan_steps) {
                 // F5 over-running guard: when only the LAST step is still open AND the
                 // model already wrote a substantial answer, it almost certainly FINISHED
@@ -1383,38 +1500,8 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
                         .await;
                     continue;
                 }
-                // Prose user-ask without a card (nudge already spent): never auto-reconcile
-                // the open "collect data / choose" step to done — that steals ownership.
-                if prose_asks_closed_choice_without_card(&content)
-                    || prose_asks_clarify_without_card(&content)
-                {
-                    // Fall through to deliver without marking plan steps done.
-                } else if cfg.reconcile_on_delivery
-                    && let Some(open_index) = plan_steps
-                        .iter()
-                        .position(|s| plan_step_status(s) != "done")
-                {
-                    // Turn trace: count open steps at DECISION time (before this reconcile closes
-                    // one) and the delivered size — the inputs the reconcile fired on.
-                    let reconcile_open_before = plan_steps
-                        .iter()
-                        .filter(|s| plan_step_status(s) != "done")
-                        .count();
-                    let reconcile_delivered = content.trim().chars().count();
-                    plan_steps[open_index]["status"] = serde_json::json!("done");
-                    content = replace_latest_plan_marker(&content, &plan_steps);
-                    plan_progress.persist_plan(thread_id, &plan_steps).await;
-                    if std::env::var("HOMUN_DEBUG").is_ok() {
-                        eprintln!("[plan] reconciled last open step to done on delivery: «{step}»");
-                    }
-                    turn_trace.record(crate::turn_trace::TurnEvent::Reconcile {
-                        fired: true,
-                        step: step.clone(),
-                        open_steps: reconcile_open_before,
-                        delivered_chars: reconcile_delivered,
-                        threshold: crate::plan::MIN_DELIVERED_CHARS_TO_CONCLUDE,
-                    });
-                }
+                // Delivery is not evidence. Keep every still-open step unchanged; only verified
+                // tool evidence or an explicitly verified plan update may close it.
             } else if plan_steps.is_empty()
                 && turn_used_tools
                 && completion_judge
@@ -3339,6 +3426,23 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             Value::Null
         }
     }
+    #[derive(Default)]
+    struct RecordingPlan(Mutex<Vec<Vec<Value>>>);
+    impl PlanProgress for RecordingPlan {
+        async fn persist_plan(&self, _t: Option<&str>, steps: &[Value]) {
+            self.0.lock().unwrap().push(steps.to_vec());
+        }
+        async fn record_step_outcome(&self, _t: Option<&str>, _s: &Value, _e: &[String]) {}
+        async fn verify_step_complete(&self, _t: &str, _c: &str, _e: &str) -> (bool, String) {
+            (false, String::new())
+        }
+        fn reconcile_on_delivery(&self, _p: &Value, _d: &str) -> Option<Vec<Value>> {
+            None
+        }
+        fn plan_value_from_steps(&self, steps: &[Value]) -> Value {
+            json!({"steps": steps})
+        }
+    }
     struct DoneJudge;
     impl TurnCompletionJudge for DoneJudge {
         async fn task_appears_incomplete(&self, _r: &str, _w: &str) -> bool {
@@ -3516,6 +3620,54 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             local_first_inference_usage::InferencePurpose::ChatResponse,
             "test-user",
         )
+    }
+
+    #[test]
+    fn evidence_provenance_keeps_read_scope_and_drops_commands_and_secrets() {
+        assert_eq!(
+            evidence_argument_provenance(
+                "mcp__project-files__read_text_file",
+                r#"{"path":"/Users/fabio/Projects/Homun/app/README.md"}"#,
+            )
+            .as_deref(),
+            Some("path=/Users/fabio/Projects/Homun/app/README.md")
+        );
+        assert!(
+            evidence_argument_provenance("run_in_sandbox", r#"{"command":"cat /secret"}"#)
+                .is_none()
+        );
+        assert!(
+            evidence_argument_provenance(
+                "connector_call",
+                r#"{"api_key":"sk-secret","token":"private"}"#,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn plan_bookkeeping_never_counts_as_completion_evidence() {
+        assert!(is_plan_bookkeeping_tool("update_plan"));
+        assert!(is_plan_bookkeeping_tool("step_advance"));
+        assert!(!is_plan_bookkeeping_tool("run_in_project"));
+    }
+
+    #[test]
+    fn analytical_candidate_answer_becomes_labeled_bounded_evidence() {
+        let content = format!(
+            "## Contract table\n{}",
+            (0..1200)
+                .map(|index| format!("grounded-row-{index}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        let evidence = candidate_answer_evidence(&content).expect("substantial answer evidence");
+
+        assert!(evidence.contains("assistant_candidate_output"));
+        assert!(evidence.contains("Contract table"));
+        assert!(evidence.chars().count() < 3400);
+        assert!(candidate_answer_evidence(&"Repeated grounded row. ".repeat(20)).is_some());
+        assert!(candidate_answer_evidence("Short answer").is_none());
     }
 
     // ⭐ The FIRST actual execution of `run_turn` (everything else is compile-time): drive a full turn
@@ -4203,6 +4355,88 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         }
     }
 
+    #[derive(Default)]
+    struct WorkflowThenBlockedFallbackModel {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+    impl ModelClient for WorkflowThenBlockedFallbackModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            let message = match index {
+                0 => json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "workflow_call",
+                        "type": "function",
+                        "function": { "name": "make_document", "arguments": "{}" },
+                    }],
+                }),
+                1 => json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "blocked_fallback",
+                        "type": "function",
+                        "function": { "name": "update_plan", "arguments": "{}" },
+                    }],
+                }),
+                _ => {
+                    on_delta("Document delivered from the first workflow result.");
+                    json!({
+                        "role": "assistant",
+                        "content": "Document delivered from the first workflow result."
+                    })
+                }
+            };
+            Ok(ModelRoundOutput {
+                message,
+                provider,
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct TerminalWorkflowPolicy {
+        workflow_calls: std::sync::atomic::AtomicUsize,
+    }
+    impl TurnPolicy for TerminalWorkflowPolicy {
+        fn route_blocked(&self, tool: &str) -> Option<String> {
+            if tool == "make_document"
+                && self
+                    .workflow_calls
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                    == 0
+            {
+                return None;
+            }
+            Some(format!("workflow route blocked {tool}"))
+        }
+
+        fn route_block_ends_turn(&self) -> bool {
+            self.workflow_calls
+                .load(std::sync::atomic::Ordering::SeqCst)
+                > 0
+        }
+
+        fn supports_vision(&self, _base_url: &str, _model: &str) -> bool {
+            true
+        }
+    }
+
     // ⭐ Final-review fix C1 (CRITICAL): forcing `tool_choice` must be ONE-SHOT within the turn.
     // Before the fix, `cfg.forced_tool` was passed on EVERY round's model call — since a forced
     // tool_choice contractually MUST come back with a tool call, the loop could never terminate
@@ -4300,6 +4534,72 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             done_count, 1,
             "expected exactly one Done event (clean termination)"
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn blocked_fallback_after_workflow_forces_one_final_synthesis() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "make the document" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let model = WorkflowThenBlockedFallbackModel::default();
+        let tool = CountingTool::default();
+        let policy = TerminalWorkflowPolicy::default();
+        let mut turn_cfg = cfg();
+        turn_cfg.forced_tool = Some("make_document".to_string());
+        turn_cfg.hard_round_ceiling = 8;
+        turn_cfg.max_rounds = 8;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &tool,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &policy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "make the document".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(
+            tool.make_document_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        assert_eq!(
+            model.calls.load(std::sync::atomic::Ordering::SeqCst),
+            3,
+            "one workflow call, one blocked fallback, one final synthesis"
+        );
+        assert!(
+            outcome
+                .memory_answer
+                .contains("Document delivered from the first workflow result")
+        );
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
     }
 
     #[derive(Default)]
@@ -5770,6 +6070,96 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             !events.iter().any(|e| e.contains("ForcedSynthesis")),
             "forced synthesis must not run over AwaitingUser: {events:?}"
         );
+    }
+
+    struct LongBlockedAnswerModel;
+
+    impl ModelClient for LongBlockedAnswerModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let content = format!(
+                "‹‹PLAN››- [-] **Open the second source** (`s2`): pending‹‹/PLAN››\n\
+                 The second source was not opened, so this step is still blocked. {}",
+                "No evidence was produced for this step. ".repeat(30)
+            );
+            on_delta(&content);
+            Ok(ModelRoundOutput {
+                message: json!({ "role": "assistant", "content": content }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn substantial_blocked_answer_never_marks_an_unverified_step_done() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "open two sources" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        ls.plan = json!({
+            "steps": [
+                {"id":"s1","title":"Open the first source","status":"done","detail":"ok"},
+                {"id":"s2","title":"Open the second source","status":"doing","detail":"pending"},
+            ]
+        });
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let plan = RecordingPlan::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 2;
+        turn_cfg.reconcile_on_delivery = true;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &LongBlockedAnswerModel,
+            &NoTools,
+            &mut browser,
+            &plan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "open two sources".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let persisted = plan.0.lock().unwrap();
+        assert!(persisted.iter().all(|steps| {
+            steps.iter().all(|step| {
+                step.get("id").and_then(Value::as_str) != Some("s2")
+                    || plan_step_status(step) != "done"
+            })
+        }));
+        let _ = outcome;
     }
 
     /// Model that answers once with a valid CLARIFY card while the plan still has open steps.

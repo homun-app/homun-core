@@ -174,6 +174,7 @@ fn parse_xml_parameters(block: &str) -> String {
 /// not in the loop — keeps every way a call can arrive (structured or leaked-as-text) on
 /// the one canonical boundary (ADR 0019). Handles the two common leaked formats:
 ///   - Hermes/Qwen JSON:   `<tool_call>{"name":"X","arguments":{...}}</tool_call>`
+///   - Named XML wrapper:  `<tool_calls><tool_call name="X">{...}</tool_calls>`
 ///   - Claude/MiniMax XML: `<invoke name="X"><parameter name="p">v</parameter></invoke>`
 ///
 /// Returns `(name, arguments_json)`, filtered to `known` tool names so prose that merely
@@ -196,16 +197,36 @@ pub fn parse_text_tool_calls(text: &str, known: &[String]) -> Vec<(String, Strin
         }
         rest = &after[close + "</invoke>".len()..];
     }
-    // 2) Hermes/Qwen JSON tool_calls (only if no XML invokes were found).
+    // 2) Hermes/Qwen JSON and named XML tool_calls (only if no XML invokes were found).
     if out.is_empty() {
         let mut rest = cleaned.as_str();
-        while let Some(pos) = rest.find("<tool_call>") {
-            let after = &rest[pos + "<tool_call>".len()..];
-            let Some(close) = after.find("</tool_call>") else {
-                break;
+        while let Some(pos) = rest.find("<tool_call") {
+            let tag = &rest[pos..];
+            // Skip the plural wrapper and continue searching inside it.
+            if tag.as_bytes().get("<tool_call".len()) == Some(&b's') {
+                rest = &tag["<tool_call".len()..];
+                continue;
+            }
+            let Some(open_end) = tag.find('>') else { break };
+            let opening = &tag[..=open_end];
+            let body = &tag[open_end + 1..];
+            let singular_close = body.find("</tool_call>");
+            let wrapper_close = body.find("</tool_calls>");
+            let (close, close_len) = match (singular_close, wrapper_close) {
+                (Some(a), Some(b)) if a <= b => (a, "</tool_call>".len()),
+                (Some(_), Some(b)) => (b, "</tool_calls>".len()),
+                (Some(a), None) => (a, "</tool_call>".len()),
+                (None, Some(b)) => (b, "</tool_calls>".len()),
+                (None, None) => break,
             };
-            let inner = after[..close].trim();
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(inner)
+            let inner = body[..close].trim();
+            if let Some(name) = xml_attr_value(opening, "name") {
+                if known.iter().any(|known_name| known_name == &name)
+                    && let Ok(arguments) = serde_json::from_str::<serde_json::Value>(inner)
+                {
+                    out.push((name, arguments.to_string()));
+                }
+            } else if let Ok(value) = serde_json::from_str::<serde_json::Value>(inner)
                 && let Some(name) = value.get("name").and_then(|n| n.as_str())
                 && known.iter().any(|k| k == name)
             {
@@ -215,7 +236,33 @@ pub fn parse_text_tool_calls(text: &str, known: &[String]) -> Vec<(String, Strin
                     .unwrap_or_else(|| "{}".to_string());
                 out.push((name.to_string(), args));
             }
-            rest = &after[close + "</tool_call>".len()..];
+            rest = &body[close + close_len..];
+        }
+    }
+    // 3) Some OpenAI-compatible models leak a direct XML function envelope for
+    // `use_skill` instead of either canonical format above. Treat it as the same
+    // tool contract, not as user-visible prose.
+    if out.is_empty() && known.iter().any(|name| name == "use_skill") {
+        let mut rest = cleaned.as_str();
+        while let Some(pos) = rest.find("<use_skill>") {
+            let after = &rest[pos + "<use_skill>".len()..];
+            let Some(close) = after.find("</use_skill>") else {
+                break;
+            };
+            let block = &after[..close];
+            if let Some(skill_start) = block.find("<skill_id>") {
+                let value = &block[skill_start + "<skill_id>".len()..];
+                if let Some(skill_end) = value.find("</skill_id>") {
+                    let skill_id = value[..skill_end].trim();
+                    if !skill_id.is_empty() {
+                        out.push((
+                            "use_skill".to_string(),
+                            serde_json::json!({ "skill_id": skill_id }).to_string(),
+                        ));
+                    }
+                }
+            }
+            rest = &after[close + "</use_skill>".len()..];
         }
     }
     out
@@ -289,9 +336,11 @@ fn strip_fullwidth_bar_tokens(s: &str) -> String {
 pub fn sanitize_model_text(text: &str) -> String {
     let mut s = strip_fullwidth_bar_tokens(&text.replace("]<]minimax[>[", ""));
     for (open, close) in [
+        ("<tool_calls>", "</tool_calls>"),
         ("<tool_call>", "</tool_call>"),
         ("<invoke", "</invoke>"),
         ("<function_calls>", "</function_calls>"),
+        ("<use_skill>", "</use_skill>"),
         ("<think>", "</think>"),
         ("<thinking>", "</thinking>"),
     ] {
@@ -300,6 +349,8 @@ pub fn sanitize_model_text(text: &str) -> String {
     for stray in [
         "<tool_call>",
         "</tool_call>",
+        "<tool_calls>",
+        "</tool_calls>",
         "</invoke>",
         "<parameter>",
         "</parameter>",
@@ -565,6 +616,49 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&calls[0].1).unwrap()["city"],
             "London"
+        );
+    }
+
+    #[test]
+    fn parse_text_tool_calls_extracts_named_xml_call_closed_by_wrapper() {
+        let known = vec!["make_deck".to_string()];
+        let text = r#"<tool_calls>
+<tool_call name="make_deck">{"brief":"Three slides"}
+</tool_calls>"#;
+
+        let calls = parse_text_tool_calls(text, &known);
+
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "make_deck");
+        assert_eq!(calls[0].1, r#"{"brief":"Three slides"}"#);
+    }
+
+    #[test]
+    fn sanitize_strips_tool_calls_wrapper() {
+        assert_eq!(
+            sanitize_model_text("before<tool_calls><tool_call name=\"x\">{}</tool_calls>after"),
+            "beforeafter"
+        );
+        assert_eq!(sanitize_model_text("<tool_calls>\n\n</tool_calls>"), "");
+    }
+
+    #[test]
+    fn parse_text_tool_calls_extracts_direct_use_skill_xml() {
+        let known = vec!["use_skill".to_string()];
+        let calls = parse_text_tool_calls(
+            "<use_skill>\n<skill_id>create-presentations</skill_id>\n</use_skill>",
+            &known,
+        );
+        assert_eq!(
+            calls,
+            vec![(
+                "use_skill".to_string(),
+                r#"{"skill_id":"create-presentations"}"#.to_string(),
+            )]
+        );
+        assert_eq!(
+            sanitize_model_text("<use_skill><skill_id>create-presentations</skill_id></use_skill>"),
+            ""
         );
     }
 

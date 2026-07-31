@@ -103,7 +103,7 @@ Eseguire sulla build installata, non su Vite:
 | Cancellazione | task/run/message convergono a `cancelled`; nessun processo orfano |
 | Gateway hard kill | lease recuperata; nessun terminale o assistant duplicato |
 | Browser sidecar kill | checkpoint adottato oppure failure terminale esplicita |
-| Effetto incerto | nessuna riesecuzione automatica; card Tasks presente |
+| Effetto incerto | nessuna riesecuzione automatica; pallino giallo e card inline nella chat proprietaria |
 | Risoluzione effetto | `applied`/`not_applied` seguito da rilettura canonica |
 | Long-running | progresso/checkpoint persistiti; stop e resume deterministici |
 | Sandbox | write fuori root negata su macOS/Linux; escalation esplicita |

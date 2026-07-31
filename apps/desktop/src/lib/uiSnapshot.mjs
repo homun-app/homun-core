@@ -25,6 +25,7 @@ function sameMemoryArtifact(left, right) {
     left.title === right.title &&
     left.artifact_type === right.artifact_type &&
     left.source === right.source &&
+    left.storage === right.storage &&
     left.project_relative_path === right.project_relative_path &&
     left.project_path === right.project_path &&
     left.managed_path === right.managed_path &&

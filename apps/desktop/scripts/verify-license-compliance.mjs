@@ -13,6 +13,8 @@ const requiredFiles = [
   "third-party-licenses/default-skills/LICENSE.md",
   "third-party-licenses/python-runtime/inventory.json",
   "third-party-licenses/python-runtime/NOTICE.md",
+  "pdfium/LICENSE",
+  "pdfium/VERSION",
 ];
 
 const requiredDirectories = [
@@ -20,6 +22,7 @@ const requiredDirectories = [
   "third-party-licenses/npm",
   "third-party-licenses/fonts/licenses",
   "third-party-licenses/spdx",
+  "pdfium/licenses",
 ];
 
 function containsNonEmptyFile(directory) {

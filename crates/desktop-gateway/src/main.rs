@@ -5615,9 +5615,8 @@ async fn emit_rendered_deck_artifacts(
     thread_slug: &str,
     producer: &str,
     quality_metadata: Option<&serde_json::Value>,
-    // Generalized for F2-T8 (make_document templated path): the deck call
-    // sites pass the fixed ["deck.pptx","deck.html","deck.pdf"] (behavior
-    // unchanged — same list, same order), documents pass their own
+    // Generalized for F2-T8 (make_document templated path): deck call sites
+    // pass `DECK_ARTIFACT_NAMES`, documents pass their own
     // {stem}-prefixed names. Missing files are silently skipped either way,
     // which is exactly what lets the make_document degraded-render branch
     // reuse this same helper: pass all 3 expected names, only the ones that
@@ -5660,6 +5659,8 @@ async fn emit_rendered_deck_artifacts(
     }
     produced
 }
+
+const DECK_ARTIFACT_NAMES: &[&str] = &["deck.pptx", "deck.html", "deck.pdf", "deck.json"];
 
 fn remember_project_file_artifact_memory(
     state: &AppState,
@@ -10989,6 +10990,42 @@ fn merge_plan(plan: &mut Vec<serde_json::Value>, sent: &[serde_json::Value]) -> 
     claims
 }
 
+fn plan_tool_sent(name: &str, args_raw: &str) -> Result<Vec<serde_json::Value>, String> {
+    let args: serde_json::Value = serde_json::from_str(args_raw)
+        .map_err(|_| format!("{name} requires valid JSON arguments"))?;
+    if name == "step_advance" {
+        let id = ["id", "step_id", "step"]
+            .into_iter()
+            .find_map(|key| args.get(key).and_then(serde_json::Value::as_str))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                "Invalid step_advance: provide the stable step `id` from the current Plan card. The plan was not changed."
+                    .to_string()
+            })?;
+        let status = match args
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("doing")
+        {
+            "complete" | "completed" => "done",
+            "in_progress" | "in-progress" => "doing",
+            "pending" => "todo",
+            status => status,
+        };
+        return Ok(vec![serde_json::json!({
+            "id": id,
+            "status": status,
+            "detail": args.get("detail").and_then(serde_json::Value::as_str).unwrap_or(""),
+        })]);
+    }
+    Ok(args
+        .get("steps")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default())
+}
+
 /// Formats the agent's plan steps into the exact Markdown the Workbench "Piano" panel
 /// parses (`- [m] **Title** (\`id\`): detail`).
 /// Read-only query over the active project's CODE graph (imported by the project-map
@@ -11589,14 +11626,62 @@ fn materialize_automation_task(
 }
 
 /// Stop an automation's driving task (cancel all future occurrences). Best-effort.
-fn cancel_automation_task(store: &TaskStore, task_id: &str) {
-    let _ = store.update_task_status(
-        &local_first_task_runtime::TaskId::new(task_id),
-        &gateway_user_id(),
-        &gateway_workspace_id(),
-        TaskStatus::Cancelled,
-        Some("automation disabled or deleted"),
-    );
+fn cancel_automation_tasks(
+    store: &TaskStore,
+    automation_id: &str,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+    reason: &str,
+) -> TaskRuntimeResult<usize> {
+    let mut cancelled = 0;
+    for task in store.list_tasks(user_id, workspace_id)? {
+        let belongs_to_automation =
+            task.input_json.get("automation_id").and_then(Value::as_str) == Some(automation_id);
+        let terminal = matches!(
+            task.status,
+            TaskStatus::Completed
+                | TaskStatus::Failed
+                | TaskStatus::Cancelled
+                | TaskStatus::Expired
+        );
+        if !belongs_to_automation || terminal {
+            continue;
+        }
+        store.update_task_status(
+            &task.task_id,
+            user_id,
+            workspace_id,
+            TaskStatus::Cancelled,
+            Some(reason),
+        )?;
+        cancelled += 1;
+    }
+    Ok(cancelled)
+}
+
+fn insert_next_recurrence_if_active(
+    store: &TaskStore,
+    completed: &TaskRecord,
+    now: OffsetDateTime,
+) -> TaskRuntimeResult<Option<TaskId>> {
+    if let Some(automation_id) = completed
+        .input_json
+        .get("automation_id")
+        .and_then(Value::as_str)
+    {
+        let enabled = store
+            .get_automation(automation_id, &completed.user_id, &completed.workspace_id)?
+            .is_some_and(|automation| automation.enabled);
+        if !enabled {
+            return Ok(None);
+        }
+    }
+    let Some(next) = TaskScheduler::new().next_recurrence(completed, now) else {
+        return Ok(None);
+    };
+    let next_id = next.task_id.clone();
+    store.insert_task(&next)?;
+    Ok(Some(next_id))
 }
 
 fn create_automation_tool_schema() -> serde_json::Value {
@@ -11735,8 +11820,17 @@ fn update_automation_from_chat(
         return "Nothing to change — give a new title, prompt, or recurrence.".to_string();
     }
     automation.updated_at = OffsetDateTime::now_utc();
-    if let Some(old) = automation.task_id.take() {
-        cancel_automation_task(&store, &old);
+    automation.task_id.take();
+    if cancel_automation_tasks(
+        &store,
+        &automation.id,
+        &automation.user_id,
+        &automation.workspace_id,
+        "automation updated",
+    )
+    .is_err()
+    {
+        return "Failed to stop the automation's previous schedule.".to_string();
     }
     if automation.enabled {
         match materialize_automation_task(&store, &automation) {
@@ -12776,9 +12870,19 @@ async fn automation_update(
     automation.updated_at = OffsetDateTime::now_utc();
     // Re-sync the driving task: drop the old occurrence schedule and, for an enabled
     // schedule automation, materialize a fresh one carrying the new trigger + prompt.
-    if let Some(old) = automation.task_id.take() {
-        cancel_automation_task(&store, &old);
-    }
+    automation.task_id.take();
+    cancel_automation_tasks(
+        &store,
+        &automation.id,
+        &automation.user_id,
+        &automation.workspace_id,
+        "automation updated",
+    )
+    .map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "automation_cancel_schedule",
+        message: e.to_string(),
+    })?;
     if automation.enabled {
         automation.task_id =
             materialize_automation_task(&store, &automation).map_err(|msg| GatewayError {
@@ -12841,9 +12945,22 @@ async fn automation_toggle(
                     message: msg,
                 })?;
         }
-    } else if let Some(tid) = automation.task_id.take() {
-        // Disable: stop the recurring task (set task_id back to None so re-enable is fresh).
-        cancel_automation_task(&store, &tid);
+    } else {
+        // Disable every pending occurrence, not only the original driving task. Completed runs
+        // enqueue suffixed `@occ@...` records, so `task_id` alone is not authoritative.
+        automation.task_id.take();
+        cancel_automation_tasks(
+            &store,
+            &automation.id,
+            &automation.user_id,
+            &automation.workspace_id,
+            "automation disabled or deleted",
+        )
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "automation_cancel_schedule",
+            message: e.to_string(),
+        })?;
     }
     store
         .upsert_automation(&automation)
@@ -12867,11 +12984,27 @@ async fn automation_delete(
         code: "task_store",
         message: "task store unavailable".into(),
     })?;
-    // Stop the driving task (if any) before removing the rule.
-    if let Ok(Some(existing)) = store.get_automation(&id, &gateway_user_id(), &workspace)
-        && let Some(tid) = existing.task_id.as_deref()
+    // Stop every pending occurrence before removing the rule.
+    if let Some(existing) = store
+        .get_automation(&id, &gateway_user_id(), &workspace)
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "automation_get",
+            message: e.to_string(),
+        })?
     {
-        cancel_automation_task(&store, tid);
+        cancel_automation_tasks(
+            &store,
+            &existing.id,
+            &existing.user_id,
+            &existing.workspace_id,
+            "automation disabled or deleted",
+        )
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "automation_cancel_schedule",
+            message: e.to_string(),
+        })?;
     }
     store
         .delete_automation(&id, &gateway_user_id(), &workspace)
@@ -16767,8 +16900,8 @@ fn orchestration_judge_response_format(name: &str) -> serde_json::Value {
 /// F2 verification gate: an independent LLM-judge deciding whether a plan step is
 /// ACTUALLY complete, from the step title, its done-criterion, and the EVIDENCE (tool
 /// calls + results gathered while the step ran). Cheap, non-streaming, on the fast
-/// `memory` role. FAIL-OPEN: returns `(true, "")` on any infra failure — the gate only
-/// ADDS confidence, it must never become a new way for a real task to stall.
+/// `memory` role. FAIL-CLOSED: infrastructure failure leaves the step open rather than
+/// manufacturing completion without evidence.
 async fn verify_step_complete(
     http: &reqwest::Client,
     step_title: &str,
@@ -16776,12 +16909,15 @@ async fn verify_step_complete(
     evidence: &str,
 ) -> (bool, String) {
     let Some((base_url, model, api_key)) = role_openai_config("memory") else {
-        return (true, String::new());
+        return (false, "completion verifier is not configured".to_string());
     };
     let system = "You are a STRICT completion verifier for an autonomous agent. Given a task \
 STEP, its CRITERION, and the EVIDENCE of what the agent actually did, decide if the step is \
 genuinely complete. Be skeptical: a claim with no supporting evidence is NOT complete, and a \
-failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, no prose: \
+failed or error-laden tool result is NOT complete. A labelled assistant candidate output is direct \
+evidence only when the step itself is to produce analytical text (for example a table, explanation, \
+or risk synthesis); it is never evidence that a command or external action ran. The evidence target must match the exact requested \
+path, URL, entity, account, or scope; success on a different target is NOT completion. Reply with STRICT JSON only, no prose: \
 {\"complete\": true|false, \"reason\": \"one short sentence\"}.";
     let user = format!(
         "STEP: {step_title}\nCRITERION: {}\n\nEVIDENCE (tool calls + results during this step):\n{}",
@@ -16793,14 +16929,13 @@ failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, 
         evidence.chars().take(6000).collect::<String>()
     );
     // Generous ceiling for REASONING models on the `memory` role: they spend the
-    // budget "thinking" before emitting `content`, so 200 tokens can be burned
-    // mid-thought, returning empty content — which fails OPEN here (the step is
-    // trusted, the gate silently no-ops). A high ceiling costs nothing for instruct
+    // budget "thinking" before emitting `content`, so a small budget can be burned
+    // mid-thought, returning empty content. A high ceiling costs nothing for instruct
     // models (they stop at the short JSON). See the note on `generate_thread_title`.
     let payload = serde_json::json!({
         "model": model,
         "temperature": 0,
-        "max_tokens": 2000,
+        "max_tokens": 8192,
         "response_format": orchestration_judge_response_format("step_completion"),
         "messages": [
             { "role": "system", "content": system },
@@ -16813,7 +16948,7 @@ failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, 
         &model,
         api_key.as_deref(),
         &payload,
-        std::time::Duration::from_secs(45),
+        std::time::Duration::from_secs(90),
         local_first_inference_usage::InferencePurpose::Evaluation,
         "step_completion",
         system.chars().count().saturating_add(user.chars().count()),
@@ -16825,9 +16960,9 @@ failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, 
             tracing::warn!(
                 target: "orchestration::verify_step",
                 model = %model, %base_url,
-                "step-verify LLM request errored — passing the step (fail-open)"
+                "step-verify LLM request errored — leaving the step open (fail-closed)"
             );
-            return (true, String::new());
+            return (false, "completion verifier unavailable".to_string());
         }
     };
     if !(200..300).contains(&response.status) {
@@ -16836,9 +16971,9 @@ failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, 
         tracing::warn!(
             target: "orchestration::verify_step",
             %status, model = %model, %base_url, body = %body,
-            "step-verify LLM call failed — passing the step (fail-open)"
+            "step-verify LLM call failed — leaving the step open (fail-closed)"
         );
-        return (true, String::new());
+        return (false, "completion verifier returned an error".to_string());
     }
     let body = response.body;
     let content = body
@@ -16853,14 +16988,14 @@ failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, 
             tracing::warn!(
                 target: "orchestration::verify_step",
                 model = %model, %base_url, body = %snippet,
-                "step-verify LLM returned no JSON object (e.g. reasoning-budget starvation) — passing the step (fail-open)"
+                "step-verify LLM returned no JSON object — leaving the step open (fail-closed)"
             );
-            return (true, String::new());
+            return (false, "completion verifier returned no verdict".to_string());
         }
     };
     match serde_json::from_str::<serde_json::Value>(json_slice) {
         Ok(v) => {
-            let complete = v.get("complete").and_then(|b| b.as_bool()).unwrap_or(true);
+            let complete = v.get("complete").and_then(|b| b.as_bool()).unwrap_or(false);
             let reason = v
                 .get("reason")
                 .and_then(|r| r.as_str())
@@ -16868,7 +17003,10 @@ failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, 
                 .to_string();
             (complete, reason)
         }
-        Err(_) => (true, String::new()),
+        Err(_) => (
+            false,
+            "completion verifier returned invalid JSON".to_string(),
+        ),
     }
 }
 
@@ -20485,12 +20623,49 @@ fn deck_content_schema() -> serde_json::Value {
                         "bullets": { "type": "array", "items": { "type": "string" } },
                         "notes": { "type": "string" },
                         "want_image": { "type": "boolean" },
-                        "eyebrow": { "type": "string", "description": "Optional small-caps kicker above the COVER title only; refine the pack default to fit the brief (e.g. \"SERIES A · 2026\"). Leave \"\" on non-cover slides." }
+                        "eyebrow": { "type": "string", "description": "Optional small-caps kicker above the COVER title only. Use only text grounded in the brief; never copy template placeholders. Leave \"\" when no grounded label exists and on non-cover slides." }
                     }
                 }
             }
         }
     })
+}
+
+fn deck_brief_is_closed_world(brief: &str) -> bool {
+    let normalized = brief.to_ascii_lowercase();
+    [
+        "usa solo questi dati",
+        "usa esclusivamente questi dati",
+        "non inventare",
+        "use only this data",
+        "use only these data",
+        "do not invent",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+}
+
+fn deck_grounding_directive(brief: &str) -> &'static str {
+    if deck_brief_is_closed_world(brief) {
+        "STRICT CLOSED-WORLD BRIEF: the brief is the complete evidence set. Do not add any result, status, interpretation, metric, product capability, process detail, or next step that is absent from it. A topic label is not proof of an outcome. When a requested topic has no supplied detail, keep the neutral topic label without asserting specifics."
+    } else {
+        "GROUNDING: do not invent factual results, metrics, customers, dates, product capabilities, or completed work that the brief does not provide."
+    }
+}
+
+fn apply_deck_grounding_contract(deck: &mut serde_json::Value, brief: &str) {
+    if !deck_brief_is_closed_world(brief) {
+        return;
+    }
+    let Some(slides) = deck
+        .get_mut("slides")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    for slide in slides {
+        slide["notes"] = serde_json::json!("");
+    }
 }
 
 /// Pull the deck object out of a model response that may be wrapped or noisy.
@@ -20534,6 +20709,78 @@ fn deck_slide_bullets(slide: &serde_json::Value) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn deck_notes_as_bullets(notes: &str) -> Vec<String> {
+    notes
+        .split(['\n', '.', '!', '?'])
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .take(4)
+        .map(ToString::to_string)
+        .collect()
+}
+
+/// Some OpenAI-compatible providers accept the JSON schema request but omit
+/// required empty-array fields. Preserve their authored content by promoting
+/// speaker notes into visible bullets when a substantive slide has no bullets.
+/// A genuinely empty slide remains empty and is rejected by the semantic gate.
+fn normalize_deck_model_content(deck: &mut serde_json::Value) {
+    let deck_title = deck
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let deck_subtitle = deck
+        .get("subtitle")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let Some(slides) = deck
+        .get_mut("slides")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    if let (Some(title), Some(cover)) = (deck_title, slides.first_mut())
+        && cover.get("layout").and_then(serde_json::Value::as_str) == Some("cover")
+    {
+        let prior_title = cover
+            .get("title")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && *value != title)
+            .map(ToString::to_string);
+        cover["title"] = serde_json::json!(title);
+        let subtitle_is_empty = cover
+            .get("subtitle")
+            .and_then(serde_json::Value::as_str)
+            .is_none_or(|value| value.trim().is_empty());
+        if subtitle_is_empty && let Some(subtitle) = deck_subtitle.or(prior_title) {
+            cover["subtitle"] = serde_json::json!(subtitle);
+        }
+    }
+    for slide in slides {
+        let layout = slide
+            .get("layout")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("bullets");
+        if matches!(layout, "cover" | "section" | "closing")
+            || !deck_slide_bullets(slide).is_empty()
+        {
+            continue;
+        }
+        let bullets = slide
+            .get("notes")
+            .and_then(serde_json::Value::as_str)
+            .map(deck_notes_as_bullets)
+            .unwrap_or_default();
+        if !bullets.is_empty() {
+            slide["bullets"] = serde_json::json!(bullets);
+        }
+    }
 }
 
 fn deck_component_target_indices(deck: &serde_json::Value) -> Vec<usize> {
@@ -20604,15 +20851,10 @@ fn apply_deck_design_components(deck: &mut serde_json::Value, components: &[Stri
                 let kpi = bullets
                     .iter()
                     .find(|bullet| bullet.chars().any(|char| char.is_ascii_digit()))
-                    .cloned()
-                    .or_else(|| bullets.first().cloned())
-                    .unwrap_or_else(|| {
-                        slide
-                            .get("title")
-                            .and_then(|value| value.as_str())
-                            .unwrap_or("Key metric")
-                            .to_string()
-                    });
+                    .cloned();
+                let Some(kpi) = kpi else {
+                    continue;
+                };
                 let label = slide
                     .get("title")
                     .and_then(|value| value.as_str())
@@ -20630,20 +20872,19 @@ fn apply_deck_design_components(deck: &mut serde_json::Value, components: &[Stri
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
                     .map(ToString::to_string)
-                    .or_else(|| bullets.first().cloned())
-                    .unwrap_or_else(|| {
-                        slide
-                            .get("title")
-                            .and_then(|value| value.as_str())
-                            .unwrap_or("Key principle")
-                            .to_string()
-                    });
+                    .or_else(|| bullets.first().cloned());
+                let Some(quote) = quote else {
+                    continue;
+                };
                 slide["layout"] = serde_json::json!("quote");
                 slide["quote"] = serde_json::json!(quote);
                 slide["author"] = serde_json::json!("");
                 slide["want_image"] = serde_json::json!(false);
             }
             "timeline" => {
+                if bullets.len() < 2 {
+                    continue;
+                }
                 let (left, right) =
                     split_component_bullets(&bullets, "Current phase", "Next phase");
                 slide["layout"] = serde_json::json!("two_column");
@@ -20654,6 +20895,9 @@ fn apply_deck_design_components(deck: &mut serde_json::Value, components: &[Stri
                 slide["want_image"] = serde_json::json!(false);
             }
             "comparison_table" => {
+                if bullets.len() < 2 {
+                    continue;
+                }
                 let (left, right) = split_component_bullets(&bullets, "Option A", "Option B");
                 slide["layout"] = serde_json::json!("two_column");
                 slide["columns"] = serde_json::json!([
@@ -20663,6 +20907,9 @@ fn apply_deck_design_components(deck: &mut serde_json::Value, components: &[Stri
                 slide["want_image"] = serde_json::json!(false);
             }
             "process_steps" => {
+                if bullets.len() < 2 {
+                    continue;
+                }
                 let midpoint = bullets.len().max(2).div_ceil(2);
                 let first = bullets.iter().take(midpoint).cloned().collect::<Vec<_>>();
                 let second = bullets.iter().skip(midpoint).cloned().collect::<Vec<_>>();
@@ -20674,6 +20921,9 @@ fn apply_deck_design_components(deck: &mut serde_json::Value, components: &[Stri
                 slide["want_image"] = serde_json::json!(false);
             }
             "risks_table" => {
+                if bullets.len() < 2 {
+                    continue;
+                }
                 let (left, right) = split_component_bullets(&bullets, "Risk", "Mitigation");
                 slide["layout"] = serde_json::json!("two_column");
                 slide["columns"] = serde_json::json!([
@@ -20883,6 +21133,88 @@ fn apply_deck_quality_guardrails(deck: &mut serde_json::Value) -> Vec<String> {
     issues
 }
 
+fn deck_semantic_quality_errors(deck: &serde_json::Value) -> Vec<String> {
+    let Some(slides) = deck.get("slides").and_then(serde_json::Value::as_array) else {
+        return vec!["deck has no slides".to_string()];
+    };
+    let placeholders = [
+        "option a",
+        "option b",
+        "step 1",
+        "expected outcome",
+        "current phase",
+        "next phase",
+        "key metric",
+    ];
+    let mut errors = Vec::new();
+    for (index, slide) in slides.iter().enumerate() {
+        let serialized = serde_json::to_string(slide)
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        for placeholder in placeholders {
+            if serialized.contains(&format!("\"{placeholder}\"")) {
+                errors.push(format!(
+                    "slide {} contains placeholder `{placeholder}`",
+                    index + 1
+                ));
+            }
+        }
+        let layout = slide
+            .get("layout")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("bullets");
+        if matches!(layout, "cover" | "section") {
+            continue;
+        }
+        let has_content = match layout {
+            "closing" => {
+                !deck_slide_bullets(slide).is_empty()
+                    || slide
+                        .get("title")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|value| !value.trim().is_empty())
+            }
+            "bullets" | "image_right" => !deck_slide_bullets(slide).is_empty(),
+            "kpi" => slide
+                .get("kpi")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty()),
+            "quote" => slide
+                .get("quote")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty()),
+            "two_column" => slide
+                .get("columns")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|columns| {
+                    columns
+                        .iter()
+                        .any(|column| !deck_slide_bullets(column).is_empty())
+                }),
+            "timeline" => slide
+                .get("items")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|items| !items.is_empty()),
+            "comparison" => slide
+                .get("rows")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|rows| !rows.is_empty()),
+            "team_grid" => slide
+                .get("members")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|members| !members.is_empty()),
+            _ => !deck_slide_bullets(slide).is_empty(),
+        };
+        if !has_content {
+            errors.push(format!(
+                "slide {} has no substantive content for layout `{layout}`",
+                index + 1
+            ));
+        }
+    }
+    errors
+}
+
 fn rendered_deck_qa_result(render_output: &str) -> Option<serde_json::Value> {
     render_output.lines().find_map(|line| {
         line.strip_prefix("DECK_QA_JSON:")
@@ -21033,11 +21365,9 @@ fn deck_template_pack(entry: Option<&TemplateCatalogEntry>) -> Option<&TemplateC
         .then_some(entry)
 }
 
-/// Carry the pack's curated editorial chrome onto the model-generated deck:
-/// hero_art is DETERMINISTIC (the model never produces it) and taken from the
-/// pack's cover/section slides; eyebrow is REFINABLE — a non-empty model eyebrow
-/// wins (adapts to the brief), otherwise the pack default is used. This makes the
-/// generated deck match the preview (both sourced from example.json). Fail-open:
+/// Carry the pack's non-textual editorial chrome onto the model-generated deck.
+/// Template examples are visual references, never a source of user-visible text:
+/// an eyebrow must come from generated content grounded in the brief. Fail-open:
 /// a missing slides array or absent chrome leaves the deck untouched.
 fn apply_deck_template_chrome(deck: &mut serde_json::Value, example: &serde_json::Value) {
     let pack_slides = example.get("slides").and_then(|s| s.as_array());
@@ -21065,15 +21395,6 @@ fn apply_deck_template_chrome(deck: &mut serde_json::Value, example: &serde_json
         // hero_art: deterministic — always from the pack.
         if let Some(art) = pack.get("hero_art").cloned() {
             slide["hero_art"] = art;
-        }
-        // eyebrow: keep a non-empty model value (refinement), else the pack default.
-        let model_eyebrow_blank = slide
-            .get("eyebrow")
-            .and_then(|v| v.as_str())
-            .map(|v| v.trim().is_empty())
-            .unwrap_or(true);
-        if model_eyebrow_blank && let Some(eyebrow) = pack.get("eyebrow").cloned() {
-            slide["eyebrow"] = eyebrow;
         }
     }
 }
@@ -21110,7 +21431,6 @@ async fn generate_deck_content(
     design_theme: Option<&str>,
     design_profile: Option<&str>,
     design_components: &[String],
-    cover_eyebrow_default: Option<&str>,
 ) -> Result<serde_json::Value, String> {
     // Use the CURRENT turn's model (what the chat is actually running), NOT a
     // fresh orchestrator-role resolution. Hit the OpenAI-compat endpoint DIRECTLY
@@ -21142,23 +21462,23 @@ async fn generate_deck_content(
         deliverable_design_theme_directive(design_theme, "deck").unwrap_or_default();
     let component_directives =
         deliverable_design_component_directives(design_components, "deck").join(" ");
-    // The cover eyebrow is REFINABLE (unlike hero_art, which stays deterministic from
-    // the pack): tell the model the pack's curated default so it can adapt the label
-    // to the brief instead of inventing one from scratch or leaving it generic.
-    let eyebrow_directive = match cover_eyebrow_default {
-        Some(d) if !d.trim().is_empty() => format!(
-            " The cover slide's `eyebrow` defaults to «{}»; keep it unless the brief clearly implies a more specific label.",
-            d.trim()
-        ),
-        _ => String::new(),
+    let grounding_directive = deck_grounding_directive(brief);
+    let notes_directive = if deck_brief_is_closed_world(brief) {
+        "Set `notes` to an empty string on every slide."
+    } else {
+        "Write speaker `notes` for the substantive slides."
     };
     let system = format!(
         "You are a senior presentation designer. Output ONLY JSON matching the schema. \
-Design a tight, on-brand deck of about {slides} slides in {lang}. Rules: the FIRST slide layout \
+Design a tight, on-brand deck of EXACTLY {slides} slides in {lang}. Every slide object MUST contain \
+exactly these keys: layout, title, bullets, notes, want_image, eyebrow. `bullets` MUST be a JSON array; \
+for every slide except cover and section it MUST contain 1-4 non-empty strings. Never leave visible \
+slide content only in `notes`. Rules: the FIRST slide layout \
 must be \"cover\" and the LAST \"closing\"; use \"section\" only as an occasional divider; every \
-other slide is \"bullets\".{eyebrow_directive} Headline titles of at most 6 words. At most 4 bullets per slide, \
-numbers over adjectives, one idea per slide. Write speaker `notes` for the substantive slides. \
+other slide is \"bullets\". Leave `eyebrow` empty unless the user's brief explicitly supplies or implies a grounded label. Headline titles of at most 6 words. At most 4 bullets per slide, \
+numbers over adjectives, one idea per slide. {notes_directive} \
 Set want_image=true on the cover and on AT MOST two of the most visual slides (false on the rest). \
+{grounding_directive} \
 {design_directive} \
 {template_directive} \
 {theme_directive} \
@@ -21300,6 +21620,20 @@ any other key such as \"presentation\" or \"deck\", and add no extra top-level k
         .unwrap_or("")
         .to_string();
     Ok(serde_json::json!({ "title": title, "subtitle": subtitle, "slides": slides }))
+}
+
+fn enforce_deck_slide_count(deck: &mut serde_json::Value, expected: usize) -> Result<(), String> {
+    let slides = deck
+        .get_mut("slides")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or_else(|| "deck content produced no slides".to_string())?;
+    if slides.len() != expected {
+        return Err(format!(
+            "deck content produced {} slides instead of the requested {expected}",
+            slides.len()
+        ));
+    }
+    Ok(())
 }
 
 fn make_deck_content_failure_message(
@@ -26269,12 +26603,12 @@ available tools (for data from the web use the browser: browser_navigate on the 
                 let container_out = sandbox::container_output_dir(&thread_slug);
                 let cmd = format!(
                     "cd '{container_out}' && deck-render deck.json --prefix deck && \
-                     chromium --headless --no-sandbox --disable-gpu \
+                     chromium --headless --no-sandbox --disable-gpu --no-pdf-header-footer \
                      --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1 && \
                      qa=$(deck-qa deck.html --json 2>&1); qa_code=$?; \
                      echo \"DECK_QA_JSON:$qa\"; \
                      if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \
-                     ls -la deck.pptx deck.html deck.pdf 2>&1"
+                     ls -la deck.pptx deck.html deck.pdf deck.json 2>&1"
                 );
                 sandbox_begin(cmd.clone(), ctx.thread_id.map(|s| s.to_string()));
                 let render = tokio::task::spawn_blocking(move || sandbox::run_command(&cmd, None))
@@ -26301,7 +26635,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                     &thread_slug,
                     "render_deck",
                     quality_metadata.as_ref(),
-                    &["deck.pptx", "deck.html", "deck.pdf"],
+                    DECK_ARTIFACT_NAMES,
                 )
                 .await;
                 effects.append_output.push(deck_out);
@@ -26318,7 +26652,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                 } else {
                     if produced.iter().any(|fname| fname == "deck.pptx") {
                         format!(
-                            "Deck rendered: {}. The .pptx is editable; .html/.pdf are previews. The deck is DONE — mark the plan complete and give the user a one-line summary.",
+                            "Deck rendered: {}. The .pptx is editable; .html/.pdf are previews; .json is the source contract. The deck is DONE — mark the plan complete and give the user a one-line summary.",
                             produced.join(", ")
                         )
                     } else {
@@ -26446,21 +26780,6 @@ available tools (for data from the web use the browser: browser_navigate on the 
             let brand = tokio::task::spawn_blocking(load_brand_kit)
                 .await
                 .unwrap_or_default();
-            // Seed the pack's cover eyebrow as a REFINABLE default (unlike hero_art,
-            // which apply_deck_template_chrome overlays deterministically): the model
-            // sees it in the prompt and can adapt it to the brief instead of the
-            // overlay silently clobbering whatever the model wrote.
-            let cover_eyebrow_default = deck_template_pack(catalog_template.as_ref())
-                .and_then(|pack| document_content::load_pack_example(pack).ok())
-                .and_then(|ex| {
-                    ex["slides"].as_array().and_then(|sl| {
-                        sl.iter()
-                            .find(|s| s.get("layout").and_then(|l| l.as_str()) == Some("cover"))
-                            .and_then(|c| {
-                                c.get("eyebrow").and_then(|e| e.as_str()).map(String::from)
-                            })
-                    })
-                });
             // 2) slide content — schema-enforced model call (the floor).
             match generate_deck_content(
                 &ctx.state.http,
@@ -26475,7 +26794,6 @@ available tools (for data from the web use the browser: browser_navigate on the 
                 design_theme.as_deref(),
                 design_profile.as_deref(),
                 &design_components,
-                cover_eyebrow_default.as_deref(),
             )
             .await
             {
@@ -26487,10 +26805,20 @@ available tools (for data from the web use the browser: browser_navigate on the 
                     ctx.model,
                 ),
                 Ok(mut deck) => {
+                    if let Err(error) = enforce_deck_slide_count(&mut deck, slides) {
+                        return GatewayToolDispatch {
+                            result: format!(
+                                "MAKE_DECK_CONTENT_INVALID: {error}. No presentation was rendered; retry with a working content model."
+                            ),
+                            effects,
+                            effect_status,
+                        };
+                    }
+                    normalize_deck_model_content(&mut deck);
+                    apply_deck_grounding_contract(&mut deck, &brief);
                     apply_deck_design_components(&mut deck, &design_components);
                     apply_deck_design_theme(&mut deck, design_theme.as_deref(), &brand);
-                    // Carry the pack's curated editorial chrome (hero_art deterministic,
-                    // eyebrow refinable) so the generated deck matches the preview.
+                    // Carry only non-textual template chrome into generated content.
                     // Fail-open when the template is not a bundled presentation pack or
                     // its example.json is unreadable.
                     if let Some(pack) = deck_template_pack(catalog_template.as_ref())
@@ -26510,6 +26838,17 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             },
                         )
                         .await;
+                    }
+                    let semantic_errors = deck_semantic_quality_errors(&deck);
+                    if !semantic_errors.is_empty() {
+                        return GatewayToolDispatch {
+                            result: format!(
+                                "MAKE_DECK_CONTENT_INVALID: {}. No presentation was rendered; retry with a working content model.",
+                                semantic_errors.join("; ")
+                            ),
+                            effects,
+                            effect_status,
+                        };
                     }
                     // 3) images for want_image slides (cap 3, cover first).
                     let accent = brand.accent_color.clone();
@@ -26622,12 +26961,12 @@ available tools (for data from the web use the browser: browser_navigate on the 
                         let container_out = sandbox::container_output_dir(&thread_slug);
                         let cmd = format!(
                             "cd '{container_out}' && deck-render deck.json --prefix deck{template_render_arg} && \
-                             chromium --headless --no-sandbox --disable-gpu \
+                             chromium --headless --no-sandbox --disable-gpu --no-pdf-header-footer \
                              --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1 && \
                              qa=$(deck-qa deck.html --json 2>&1); qa_code=$?; \
                              echo \"DECK_QA_JSON:$qa\"; \
                              if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \
-                             ls -la deck.pptx deck.html deck.pdf 2>&1"
+                             ls -la deck.pptx deck.html deck.pdf deck.json 2>&1"
                         );
                         sandbox_begin(cmd.clone(), ctx.thread_id.map(|s| s.to_string()));
                         let render =
@@ -26662,7 +27001,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             &thread_slug,
                             "make_deck",
                             artifact_metadata_ref,
-                            &["deck.pptx", "deck.html", "deck.pdf"],
+                            DECK_ARTIFACT_NAMES,
                         )
                         .await;
                         effects.append_output.push(deck_out);
@@ -26688,7 +27027,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 // make_deck (the gateway executor clears the store).
                                 effects.clear_routing_binding = true;
                                 format!(
-                                    "Deck created via workflow {}: {} ({slide_count} slides, {made} images). The .pptx is editable; .html/.pdf are previews. The deck is DONE — give the user a one-line summary.",
+                                    "Deck created via workflow {}: {} ({slide_count} slides, {made} images). The .pptx is editable; .html/.pdf are previews; .json is the source contract. The deck is DONE — give the user a one-line summary.",
                                     workflow_plan
                                         .steps
                                         .first()
@@ -27150,23 +27489,18 @@ an uncertain date.",
             .await
             .unwrap_or_else(|e| format!("Execution error: {e}"))
     } else if name == "update_plan" || name == "step_advance" {
-        let args_val: serde_json::Value =
-            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
         // `step_advance` reports progress on a SINGLE step by id (no need to
         // re-send the whole plan → weak-model-proof, no ballooning). It maps to
         // a one-element `sent` and rides the exact same merge + F2-verify path.
-        let sent = if name == "step_advance" {
-            vec![serde_json::json!({
-                "id": args_val.get("id").and_then(|v| v.as_str()).unwrap_or(""),
-                "status": args_val.get("status").and_then(|v| v.as_str()).unwrap_or("doing"),
-                "detail": args_val.get("detail").and_then(|v| v.as_str()).unwrap_or(""),
-            })]
-        } else {
-            args_val
-                .get("steps")
-                .and_then(|s| s.as_array())
-                .cloned()
-                .unwrap_or_default()
+        let sent = match plan_tool_sent(name, args_raw) {
+            Ok(sent) => sent,
+            Err(result) => {
+                return GatewayToolDispatch {
+                    result,
+                    effects,
+                    effect_status,
+                };
+            }
         };
         // 5d.1b: work on a LOCAL copy of the plan (merge mutates in place, and the arm rereads it
         // below); the final plan is returned as an effect (`effects.plan`) and applied after the call.
@@ -28587,15 +28921,6 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
         // engine dispatch sees `browse` as a plain non-browser tool → it arrives here; the recursion runs
         // entirely gateway-side and returns a compact BrowseResult the manager reads.
         if name == "browse" {
-            if ls.browse_calls_completed > 0 {
-                return Ok(local_first_engine::ToolOutcome {
-                    result: "found: false\nnote: A browse result was already returned in this turn. Use that evidence; ask the user before retrying.".to_string(),
-                    effects: local_first_engine::ToolEffects {
-                        outcome_hint: Some(local_first_engine::ToolOutcomeHint::NoProgress),
-                        ..Default::default()
-                    },
-                });
-            }
             if earlier_browse_call_in_current_round(&ls.messages, call_id) {
                 let deferred = local_first_engine::BrowseResult::not_found(
                     "browse deferred: another browse call already ran in this model round; inspect its result before deciding whether another source is needed",
@@ -28607,6 +28932,26 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 return Ok(local_first_engine::ToolOutcome {
                     result: "browse needs a non-empty `goal`.".to_string(),
                     effects: Default::default(),
+                });
+            }
+            if browse_goal_was_already_requested(&ls.messages, call_id, &request.goal) {
+                return Ok(local_first_engine::ToolOutcome {
+                    result: "found: false\nnote: This exact browse goal already returned in this turn. Reuse its evidence or choose a materially different source goal.".to_string(),
+                    effects: local_first_engine::ToolEffects {
+                        outcome_hint: Some(local_first_engine::ToolOutcomeHint::NoProgress),
+                        ..Default::default()
+                    },
+                });
+            }
+            if !browse_call_within_turn_cap(ls.browse_calls_completed) {
+                return Ok(local_first_engine::ToolOutcome {
+                    result: format!(
+                        "found: false\nnote: The per-turn browse cap ({MAX_DISTINCT_BROWSE_CALLS_PER_TURN}) was reached. Synthesize from the collected evidence and leave any unverified plan steps open."
+                    ),
+                    effects: local_first_engine::ToolEffects {
+                        outcome_hint: Some(local_first_engine::ToolOutcomeHint::NoProgress),
+                        ..Default::default()
+                    },
                 });
             }
             let browse_executor = GatewayBrowseExecutor {
@@ -29186,6 +29531,88 @@ fn earlier_browse_call_in_current_round(
         return false;
     }
     false
+}
+
+const MAX_DISTINCT_BROWSE_CALLS_PER_TURN: usize = 4;
+
+fn normalized_browse_goal(goal: &str) -> String {
+    goal.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
+}
+
+fn browse_target_key(request: &ParsedBrowseRequest) -> String {
+    let url = request.hint_url.as_deref().or_else(|| {
+        request.goal.split_whitespace().find_map(|token| {
+            let candidate = token.trim_matches(|c: char| {
+                matches!(
+                    c,
+                    '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | ';' | '"' | '\''
+                )
+            });
+            (candidate.starts_with("https://") || candidate.starts_with("http://"))
+                .then_some(candidate)
+        })
+    });
+    match url {
+        Some(url) => format!("url:{}", url.trim_end_matches('/')),
+        None => format!("goal:{}", normalized_browse_goal(&request.goal)),
+    }
+}
+
+fn browse_goal_was_already_requested(
+    messages: &[serde_json::Value],
+    current_call_id: &str,
+    goal: &str,
+) -> bool {
+    let wanted_request = ParsedBrowseRequest {
+        goal: goal.to_string(),
+        hint_url: None,
+        contract: None,
+    };
+    let wanted = browse_target_key(&wanted_request);
+    if wanted == "goal:" {
+        return false;
+    }
+    let mut skipped_current_assistant = false;
+    for message in messages.iter().rev() {
+        let Some(calls) = message
+            .get("tool_calls")
+            .and_then(serde_json::Value::as_array)
+        else {
+            continue;
+        };
+        if !skipped_current_assistant
+            && calls.iter().any(|call| {
+                call.get("id").and_then(serde_json::Value::as_str) == Some(current_call_id)
+            })
+        {
+            skipped_current_assistant = true;
+            continue;
+        }
+        if calls.iter().any(|call| {
+            if call
+                .pointer("/function/name")
+                .and_then(serde_json::Value::as_str)
+                != Some("browse")
+            {
+                return false;
+            }
+            let args = call
+                .pointer("/function/arguments")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("{}");
+            browse_target_key(&parse_browse_request(args)) == wanted
+        }) {
+            return true;
+        }
+    }
+    false
+}
+
+fn browse_call_within_turn_cap(completed: usize) -> bool {
+    completed < MAX_DISTINCT_BROWSE_CALLS_PER_TURN
 }
 
 /// Preserve the readable `BrowseResult` contract for the manager while passing
@@ -31952,6 +32379,7 @@ async fn run_agent_rounds(
     };
     let turn_policy = GatewayTurnPolicy {
         route: capability_route_for_runtime,
+        workflow_tool_calls: std::sync::atomic::AtomicUsize::new(0),
     };
     let completion_judge = GatewayTurnCompletionJudge {
         state: state_owned.clone(),
@@ -39105,6 +39533,7 @@ struct MemoryArtifactView {
     title: String,
     artifact_type: String,
     source: String,
+    storage: String,
     project_relative_path: Option<String>,
     project_path: Option<String>,
     managed_path: Option<String>,
@@ -39613,11 +40042,12 @@ async fn memory_artifacts(
     Query(query): Query<MemoryArtifactsQuery>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let user = gateway_memory_user_id();
-    let workspace = if let Some(thread_id) = query
+    let requested_thread = query
         .thread
         .as_deref()
         .filter(|value| !value.trim().is_empty())
-    {
+        .map(str::to_string);
+    let workspace = if let Some(thread_id) = requested_thread.as_deref() {
         lock_store(&state)
             .ok()
             .and_then(|store| store.workspace_for_thread(thread_id).ok())
@@ -39640,6 +40070,9 @@ async fn memory_artifacts(
                     memory.status,
                     MemoryStatus::Confirmed | MemoryStatus::Candidate
                 )
+        })
+        .filter(|memory| {
+            artifact_memory_matches_thread(&memory.metadata, requested_thread.as_deref())
         })
         .filter_map(|memory| {
             let metadata = &memory.metadata;
@@ -39666,17 +40099,13 @@ async fn memory_artifacts(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(str::to_string);
-            let path_exists = project_path
-                .as_deref()
-                .or(managed_path.as_deref())
-                .map(|path| std::path::Path::new(path).is_file())
-                .unwrap_or(true);
-            if !path_exists {
+            let selected =
+                existing_artifact_storage(project_path.as_deref(), managed_path.as_deref());
+            if (project_path.is_some() || managed_path.is_some()) && selected.is_none() {
                 return None;
             }
-            let fs_size = project_path
-                .as_deref()
-                .or(managed_path.as_deref())
+            let fs_size = selected
+                .map(|(path, _)| path)
                 .and_then(|path| std::fs::metadata(path).ok())
                 .map(|metadata| metadata.len());
             let size = fs_size
@@ -39698,6 +40127,10 @@ async fn memory_artifacts(
                     .get("producer")
                     .and_then(|value| value.as_str())
                     .unwrap_or("memory")
+                    .to_string(),
+                storage: selected
+                    .map(|(_, storage)| storage)
+                    .unwrap_or("project")
                     .to_string(),
                 project_relative_path: metadata
                     .get("project_relative_path")
@@ -39724,6 +40157,35 @@ async fn memory_artifacts(
         "workspace": workspace.as_str(),
         "artifacts": artifacts,
     })))
+}
+
+fn artifact_memory_matches_thread(
+    metadata: &serde_json::Value,
+    requested_thread: Option<&str>,
+) -> bool {
+    let Some(requested_thread) = requested_thread else {
+        return true;
+    };
+    ["thread_id", "thread_slug"].iter().any(|key| {
+        metadata
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| value == requested_thread)
+    })
+}
+
+fn existing_artifact_storage<'a>(
+    project_path: Option<&'a str>,
+    managed_path: Option<&'a str>,
+) -> Option<(&'a str, &'static str)> {
+    managed_path
+        .filter(|path| std::path::Path::new(path).is_file())
+        .map(|path| (path, "managed"))
+        .or_else(|| {
+            project_path
+                .filter(|path| std::path::Path::new(path).is_file())
+                .map(|path| (path, "project"))
+        })
 }
 
 async fn delete_memory_artifact(
@@ -40242,11 +40704,35 @@ impl local_first_engine::ContextCompactor for GatewayContextCompactor {
 /// vision capability (reads the cached `ollama_capabilities`). Constructed live in run_agent_rounds.
 pub(crate) struct GatewayTurnPolicy {
     pub route: CapabilityRouteDecision,
+    workflow_tool_calls: std::sync::atomic::AtomicUsize,
 }
 
 impl local_first_engine::TurnPolicy for GatewayTurnPolicy {
     fn route_blocked(&self, tool: &str) -> Option<String> {
+        if let CapabilityRouteDecision::Workflow {
+            workflow_id,
+            tool_name,
+            ..
+        } = &self.route
+            && tool == *tool_name
+            && self
+                .workflow_tool_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                > 0
+        {
+            return Some(format!(
+                "WORKFLOW_ROUTE_ALREADY_CALLED: workflow `{workflow_id}` already called `{tool_name}` in this turn. Do not retry or change parameters. Report the first result accurately and stop."
+            ));
+        }
         workflow_route_blocked_tool_message(&self.route, tool)
+    }
+
+    fn route_block_ends_turn(&self) -> bool {
+        matches!(self.route, CapabilityRouteDecision::Workflow { .. })
+            && self
+                .workflow_tool_calls
+                .load(std::sync::atomic::Ordering::Relaxed)
+                > 0
     }
 
     fn supports_vision(&self, base_url: &str, model: &str) -> bool {
@@ -42090,7 +42576,7 @@ async fn resolve_uncertain_effect_receipt(
             message: error.to_string(),
         })?;
     let user = gateway_user_id();
-    {
+    let receipt_owner_execution_id = {
         let store = lock_task_store(&state)?;
         let receipt = store
             .effect_receipt(&receipt_ref)
@@ -42107,7 +42593,8 @@ async fn resolve_uncertain_effect_receipt(
                 message: "Effect receipt not found.".to_string(),
             });
         }
-    }
+        receipt.execution_id
+    };
     let _resolution_guard = match begin_effect_resolution(receipt_ref.as_ref()) {
         Ok(guard) => guard,
         Err(resolution_lock) => {
@@ -42122,9 +42609,15 @@ async fn resolve_uncertain_effect_receipt(
     };
     let resolution_commit = {
         let store = lock_task_store(&state)?;
-        store
-            .resolve_effect_receipt(&receipt_ref, &resolution)
-            .map_err(GatewayError::task)?
+        match store.resolve_effect_receipt(&receipt_ref, &resolution) {
+            Ok(commit) => commit,
+            Err(TaskRuntimeError::NotFound(missing)) if missing == receipt_owner_execution_id => {
+                store
+                    .resolve_orphaned_effect_receipt(&receipt_ref, &resolution)
+                    .map_err(GatewayError::task)?
+            }
+            Err(error) => return Err(GatewayError::task(error)),
+        }
     };
     projection_worker::notify();
     let receipt = resolution_commit.receipt;
@@ -42985,11 +43478,12 @@ fn run_next_task_once(
         record_subagent_task_step_outcome(state, &task, &outcome);
         mark_task_completed(state, &mut task)?;
         record_automation_run_for_task(state, &task, true, "");
-        // Proactivity: a recurring task enqueues its next occurrence on completion.
-        if let Some(next) = TaskScheduler::new().next_recurrence(&task, OffsetDateTime::now_utc()) {
-            let store = lock_task_store(state)?;
-            store.insert_task(&next).map_err(GatewayError::task)?;
-        }
+        // Proactivity: check the owning automation and enqueue atomically under the task-store
+        // lock. A disabled/deleted rule must never revive itself after an in-flight run ends.
+        let store = lock_task_store(state)?;
+        insert_next_recurrence_if_active(&store, &task, OffsetDateTime::now_utc())
+            .map_err(GatewayError::task)?;
+        drop(store);
         sync_session_for_task_run(state, &task, SessionStatus::Completed, 3, None)?;
     } else if canonical_projection.task_status == TaskStatus::WaitingUserApproval {
         let approval = outcome
@@ -43635,10 +44129,9 @@ fn handle_failed_task_run(
     );
     record_automation_run_for_task(state, task, false, reason);
     notify_automation_failure(state, task, reason);
-    if let Some(next) = TaskScheduler::new().next_recurrence(task, OffsetDateTime::now_utc()) {
-        let store = lock_task_store(state)?;
-        store.insert_task(&next).map_err(GatewayError::task)?;
-    }
+    let store = lock_task_store(state)?;
+    insert_next_recurrence_if_active(&store, task, OffsetDateTime::now_utc())
+        .map_err(GatewayError::task)?;
     Ok(())
 }
 
@@ -68131,6 +68624,57 @@ mod tests {
     }
 
     #[test]
+    fn browse_goal_dedup_is_scoped_to_the_normalized_goal() {
+        let messages = vec![
+            serde_json::json!({
+                "role":"assistant",
+                "tool_calls":[{
+                    "id":"ollama_call_0",
+                    "function":{
+                        "name":"browse",
+                        "arguments":"{\"goal\":\"Open https://example.com\"}"
+                    }
+                }]
+            }),
+            serde_json::json!({"role":"tool","tool_call_id":"ollama_call_0","content":"done"}),
+            serde_json::json!({
+                "role":"assistant",
+                "tool_calls":[{
+                    "id":"ollama_call_0",
+                    "function":{
+                        "name":"browse",
+                        "arguments":"{\"goal\":\"Open example.org\"}"
+                    }
+                }]
+            }),
+        ];
+
+        assert!(super::browse_goal_was_already_requested(
+            &messages,
+            "current_call",
+            " open   https://example.com "
+        ));
+        assert!(!super::browse_goal_was_already_requested(
+            &messages,
+            "current_call",
+            "Open example.net"
+        ));
+        assert!(super::browse_goal_was_already_requested(
+            &messages,
+            "current_call",
+            "Read the title from https://example.com/ and return it"
+        ));
+    }
+
+    #[test]
+    fn browse_turn_cap_allows_multiple_distinct_sources_but_stays_bounded() {
+        assert!(super::browse_call_within_turn_cap(0));
+        assert!(super::browse_call_within_turn_cap(1));
+        assert!(super::browse_call_within_turn_cap(3));
+        assert!(!super::browse_call_within_turn_cap(4));
+    }
+
+    #[test]
     fn browse_round_budget_scales_with_contract_shape() {
         use local_first_engine::browse::{
             BrowseResultContract, BrowseResultField, BrowseResultKind,
@@ -76327,6 +76871,91 @@ prs.save(Path({path:?}))
     }
 
     #[test]
+    fn deck_slide_count_must_match_the_request_exactly() {
+        let mut deck = serde_json::json!({
+            "slides": [
+                { "id": "cover" },
+                { "id": "one" },
+                { "id": "two" },
+                { "id": "three" },
+                { "id": "closing" }
+            ]
+        });
+
+        assert!(super::enforce_deck_slide_count(&mut deck, 3).is_err());
+
+        let mut too_short = serde_json::json!({ "slides": [{}, {}] });
+        assert!(super::enforce_deck_slide_count(&mut too_short, 3).is_err());
+
+        let mut exact = serde_json::json!({ "slides": [{}, {}, {}] });
+        super::enforce_deck_slide_count(&mut exact, 3).unwrap();
+    }
+
+    #[test]
+    fn deck_grounding_contract_detects_closed_world_briefs() {
+        let strict = super::deck_grounding_directive(
+            "Usa solo questi dati, nessun web o connettore, non inventare nulla.",
+        );
+        let ordinary = super::deck_grounding_directive("Create a product overview deck.");
+
+        assert!(strict.contains("STRICT CLOSED-WORLD BRIEF"), "{strict}");
+        assert!(strict.contains("topic label is not proof"), "{strict}");
+        assert!(!ordinary.contains("STRICT CLOSED-WORLD BRIEF"));
+        assert!(ordinary.contains("do not invent factual results"));
+    }
+
+    #[test]
+    fn deck_closed_world_contract_removes_unsourced_speaker_notes() {
+        let mut deck = serde_json::json!({
+            "slides": [
+                { "layout": "cover", "title": "Homun", "notes": "" },
+                {
+                    "layout": "bullets",
+                    "title": "Tre componenti",
+                    "bullets": ["Agent loop", "Sandbox", "Vault"],
+                    "notes": "I tre componenti fondamentali da verificare."
+                }
+            ]
+        });
+
+        super::apply_deck_grounding_contract(
+            &mut deck,
+            "Usa solo questi dati e non inventare altri contenuti.",
+        );
+
+        assert_eq!(deck["slides"][1]["notes"], "");
+        assert_eq!(deck["slides"][1]["bullets"][0], "Agent loop");
+    }
+
+    #[test]
+    fn artifact_catalog_is_thread_scoped_and_uses_an_existing_fallback_path() {
+        let metadata = serde_json::json!({
+            "thread_id": "thread-current",
+            "thread_slug": "managed-current"
+        });
+        assert!(super::artifact_memory_matches_thread(
+            &metadata,
+            Some("thread-current")
+        ));
+        assert!(!super::artifact_memory_matches_thread(
+            &metadata,
+            Some("thread-other")
+        ));
+        assert!(super::artifact_memory_matches_thread(&metadata, None));
+
+        let executable = std::env::current_exe().unwrap();
+        let executable = executable.to_str().unwrap();
+        assert_eq!(
+            super::existing_artifact_storage(Some(executable), Some(executable)),
+            Some((executable, "managed"))
+        );
+        assert_eq!(
+            super::existing_artifact_storage(Some(executable), Some("/path/that/does/not/exist")),
+            Some((executable, "project"))
+        );
+    }
+
+    #[test]
     fn deck_design_components_materialize_renderer_supported_layouts() {
         let mut deck = serde_json::json!({
             "title": "Homun",
@@ -76361,6 +76990,87 @@ prs.save(Path({path:?}))
         assert_eq!(slides[3]["columns"][0]["title"], "Now");
         assert_eq!(slides[3]["columns"][1]["title"], "Next");
         assert_eq!(slides[4]["layout"], "closing");
+    }
+
+    #[test]
+    fn deck_design_components_never_invent_placeholder_content() {
+        let mut deck = serde_json::json!({
+            "slides": [
+                { "layout": "cover", "title": "QA" },
+                { "layout": "bullets", "title": "No evidence", "bullets": [] },
+                { "layout": "closing", "title": "Next", "bullets": ["Run gates"] }
+            ]
+        });
+
+        super::apply_deck_design_components(&mut deck, &["comparison_table".to_string()]);
+
+        assert_eq!(deck["slides"][1]["layout"], "bullets");
+        assert!(deck["slides"][1].get("columns").is_none());
+    }
+
+    #[test]
+    fn deck_semantic_gate_rejects_placeholders_and_empty_slides() {
+        let deck = serde_json::json!({
+            "slides": [
+                { "layout": "cover", "title": "QA" },
+                {
+                    "layout": "two_column",
+                    "title": "Metrics",
+                    "columns": [
+                        { "title": "Option A", "bullets": ["Option A"] },
+                        { "title": "Option B", "bullets": ["Option B"] }
+                    ]
+                },
+                { "layout": "bullets", "title": "Empty", "bullets": [] },
+                { "layout": "closing", "title": "Next", "bullets": [] }
+            ]
+        });
+
+        let errors = super::deck_semantic_quality_errors(&deck);
+
+        assert!(errors.iter().any(|error| error.contains("placeholder")));
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("no substantive content"))
+        );
+        assert!(!errors.iter().any(|error| error.starts_with("slide 4 ")));
+    }
+
+    #[test]
+    fn deck_model_normalization_promotes_notes_without_filling_empty_slides() {
+        let mut deck = serde_json::json!({
+            "title": "Homun Release QA 2",
+            "subtitle": "Collaudo del percorso di release",
+            "slides": [
+                { "layout": "cover", "title": "Objective", "notes": "" },
+                {
+                    "layout": "bullets",
+                    "title": "Contracts",
+                    "notes": "Agent loop verified. Sandbox isolated. Vault remains closed."
+                },
+                { "layout": "bullets", "title": "No evidence", "notes": "" },
+                { "layout": "closing", "title": "Next gate", "notes": "Do not promote me" }
+            ]
+        });
+
+        super::normalize_deck_model_content(&mut deck);
+
+        assert_eq!(deck["slides"][0]["title"], "Homun Release QA 2");
+        assert_eq!(
+            deck["slides"][0]["subtitle"],
+            "Collaudo del percorso di release"
+        );
+        assert_eq!(
+            deck["slides"][1]["bullets"],
+            serde_json::json!([
+                "Agent loop verified",
+                "Sandbox isolated",
+                "Vault remains closed"
+            ])
+        );
+        assert!(deck["slides"][2].get("bullets").is_none());
+        assert!(deck["slides"][3].get("bullets").is_none());
     }
 
     #[test]
@@ -76794,16 +77504,25 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     }
 
     #[test]
-    fn deck_template_chrome_uses_pack_eyebrow_when_model_blank_and_is_failopen() {
+    fn deck_template_chrome_never_inherits_visible_pack_text_and_is_failopen() {
         let example = serde_json::json!({"slides": [
             {"layout": "cover", "title": "Kite", "eyebrow": "PITCH", "hero_art": "rings"}]});
         let mut deck = serde_json::json!({"slides": [{"layout": "cover", "title": "Real"}]});
         super::apply_deck_template_chrome(&mut deck, &example);
-        assert_eq!(deck["slides"][0]["eyebrow"], "PITCH"); // pack default when model blank
+        assert!(deck["slides"][0].get("eyebrow").is_none());
+        assert_eq!(deck["slides"][0]["hero_art"], "rings");
         // fail-open: example with no slides / no cover chrome does nothing, no panic
         let mut deck2 = serde_json::json!({"slides": [{"layout": "cover", "title": "R"}]});
         super::apply_deck_template_chrome(&mut deck2, &serde_json::json!({}));
         assert!(deck2["slides"][0].get("hero_art").is_none());
+    }
+
+    #[test]
+    fn deck_artifact_contract_includes_editable_previews_and_source() {
+        assert_eq!(
+            super::DECK_ARTIFACT_NAMES,
+            &["deck.pptx", "deck.html", "deck.pdf", "deck.json"]
+        );
     }
 
     #[test]
@@ -77498,6 +78217,27 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             super::workflow_route_blocked_tool_message(&generic, "mcp__filesystem__create")
                 .is_none(),
             "generic agent-loop turns keep normal tools"
+        );
+    }
+
+    #[test]
+    fn workflow_route_allows_exactly_one_matching_tool_call_per_turn() {
+        let workflow_semantic = semantic_route_fixture(
+            super::semantic_decision::ExecutionShape::Workflow,
+            Some("make_deck"),
+        );
+        let policy = super::GatewayTurnPolicy {
+            route: super::route_capability_from_semantic(Some(&workflow_semantic)),
+            workflow_tool_calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+
+        assert!(local_first_engine::TurnPolicy::route_blocked(&policy, "make_deck").is_none());
+        let blocked = local_first_engine::TurnPolicy::route_blocked(&policy, "make_deck")
+            .expect("the second workflow call must be blocked");
+
+        assert!(
+            blocked.contains("WORKFLOW_ROUTE_ALREADY_CALLED"),
+            "{blocked}"
         );
     }
 
@@ -79129,6 +79869,19 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         ];
         assert!(plan_is_complete(&complete));
         assert!(plan_incomplete_reason(&complete).is_none());
+    }
+
+    #[test]
+    fn step_advance_requires_a_target_and_normalizes_common_adapter_aliases() {
+        assert!(super::plan_tool_sent("step_advance", "{}").is_err());
+        let sent = super::plan_tool_sent(
+            "step_advance",
+            r#"{"step_id":"s2","status":"completed","detail":"tests pass"}"#,
+        )
+        .unwrap();
+        assert_eq!(sent[0]["id"], "s2");
+        assert_eq!(sent[0]["status"], "done");
+        assert_eq!(sent[0]["detail"], "tests pass");
     }
 
     #[test]
@@ -85502,6 +86255,127 @@ data: [DONE]\n";
         );
         assert_eq!(task.retry_policy.max_attempts, 3);
         assert_eq!(task.retry_policy.backoff_seconds, 120);
+    }
+
+    #[test]
+    fn cancelling_automation_cancels_every_open_occurrence_only() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let user = UserId::new("user_auto");
+        let workspace = WorkspaceId::new("workspace_auto");
+        let automation_id = "auto_sched";
+
+        let mut completed = TaskRecord::new(
+            "autorun_sched",
+            user.clone(),
+            workspace.clone(),
+            "proactive_prompt",
+            "Completed occurrence",
+            serde_json::json!({"automation_id": automation_id}),
+        );
+        completed.status = TaskStatus::Completed;
+        let queued = TaskRecord::new(
+            "autorun_sched@occ@200",
+            user.clone(),
+            workspace.clone(),
+            "proactive_prompt",
+            "Future occurrence",
+            serde_json::json!({"automation_id": automation_id}),
+        );
+        let unrelated = TaskRecord::new(
+            "autorun_other",
+            user.clone(),
+            workspace.clone(),
+            "proactive_prompt",
+            "Other automation",
+            serde_json::json!({"automation_id": "auto_other"}),
+        );
+        store.insert_task(&completed).unwrap();
+        store.insert_task(&queued).unwrap();
+        store.insert_task(&unrelated).unwrap();
+
+        let cancelled = super::cancel_automation_tasks(
+            &store,
+            automation_id,
+            &user,
+            &workspace,
+            "automation disabled or deleted",
+        )
+        .unwrap();
+
+        assert_eq!(cancelled, 1);
+        assert_eq!(
+            store
+                .get_task(&completed.task_id, &user, &workspace)
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::Completed
+        );
+        assert_eq!(
+            store
+                .get_task(&queued.task_id, &user, &workspace)
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::Cancelled
+        );
+        assert_eq!(
+            store
+                .get_task(&unrelated.task_id, &user, &workspace)
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::Queued
+        );
+    }
+
+    #[test]
+    fn recurring_automation_requeues_only_while_rule_is_enabled() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let now = time::OffsetDateTime::now_utc();
+        let mut automation = Automation {
+            id: "auto_sched".to_string(),
+            user_id: UserId::new("user_auto"),
+            workspace_id: WorkspaceId::new("workspace_auto"),
+            title: "Daily check".to_string(),
+            trigger: AutomationTrigger::Schedule {
+                recurrence: "every 1d".to_string(),
+                tz: None,
+            },
+            prompt: "Check the project".to_string(),
+            approval: ApprovalPolicy::Confirm,
+            enabled: false,
+            source: AutomationSource::Manual,
+            task_id: Some("autorun_sched".to_string()),
+            created_at: now,
+            updated_at: now,
+            last_fired_at: None,
+            state: None,
+        };
+        store.upsert_automation(&automation).unwrap();
+        let mut completed = TaskRecord::new(
+            "autorun_sched",
+            automation.user_id.clone(),
+            automation.workspace_id.clone(),
+            "proactive_prompt",
+            &automation.prompt,
+            serde_json::json!({"automation_id": automation.id}),
+        );
+        completed.status = TaskStatus::Completed;
+        completed.recurrence = Some("every 1d".to_string());
+
+        assert!(
+            super::insert_next_recurrence_if_active(&store, &completed, now)
+                .unwrap()
+                .is_none()
+        );
+
+        automation.enabled = true;
+        store.upsert_automation(&automation).unwrap();
+        let next = super::insert_next_recurrence_if_active(&store, &completed, now)
+            .unwrap()
+            .expect("enabled automation must enqueue the next occurrence");
+        assert!(next.as_str().starts_with("autorun_sched@occ@"));
     }
 
     #[test]

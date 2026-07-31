@@ -1046,31 +1046,7 @@ impl TaskStore {
         }
 
         let resolved_at = OffsetDateTime::now_utc().unix_timestamp();
-        let changed = match resolution {
-            EffectReceiptResolution::Applied { result, effects } => tx.execute(
-                "UPDATE execution_effect_receipts
-                 SET status = 'completed', result_json = ?1, effects_json = ?2,
-                     error_json = NULL, resolved_at = ?3
-                 WHERE receipt_ref = ?4 AND status = 'uncertain'",
-                params![
-                    serde_json::to_string(result)?,
-                    serde_json::to_string(effects)?,
-                    resolved_at,
-                    receipt_ref.as_ref(),
-                ],
-            )?,
-            EffectReceiptResolution::NotApplied { error } => tx.execute(
-                "UPDATE execution_effect_receipts
-                 SET status = 'prepared', result_json = NULL, effects_json = NULL,
-                     error_json = ?1, resolved_at = ?2
-                 WHERE receipt_ref = ?3 AND status = 'uncertain'",
-                params![
-                    serde_json::to_string(error)?,
-                    resolved_at,
-                    receipt_ref.as_ref(),
-                ],
-            )?,
-        };
+        let changed = apply_effect_resolution_on(&tx, receipt_ref, resolution, resolved_at)?;
         if changed != 1 {
             return Err(TaskRuntimeError::Conflict(
                 "effect receipt was resolved concurrently".into(),
@@ -1085,6 +1061,50 @@ impl TaskStore {
             &tx,
             receipt_ref,
             resolved_at,
+        )?;
+        tx.commit()?;
+        Ok(crate::EffectReceiptResolutionCommit {
+            receipt: resolved,
+            requeued_projections,
+        })
+    }
+
+    /// Resolves a durable receipt whose execution journal has already been pruned.
+    ///
+    /// This is intentionally separate from `resolve_effect_receipt`: callers may
+    /// use it only after the strict path proves the journal is missing. A receipt
+    /// with a journal or any matching wake must stay on the normal ownership path.
+    pub fn resolve_orphaned_effect_receipt(
+        &self,
+        receipt_ref: &EffectReceiptRef,
+        resolution: &EffectReceiptResolution,
+    ) -> TaskRuntimeResult<crate::EffectReceiptResolutionCommit> {
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let receipt = crate::store::load_effect_receipt_on(&tx, receipt_ref)?
+            .ok_or_else(|| TaskRuntimeError::NotFound(receipt_ref.as_ref().to_string()))?;
+        verify_orphaned_effect_owner_on(&tx, &receipt)?;
+
+        if !receipt_resolution_matches(&receipt, resolution) {
+            if receipt.status != EffectReceiptStatus::Uncertain {
+                return Err(TaskRuntimeError::InvalidTransition(
+                    "only an uncertain orphaned effect receipt may be resolved".into(),
+                ));
+            }
+            let resolved_at = OffsetDateTime::now_utc().unix_timestamp();
+            let changed = apply_effect_resolution_on(&tx, receipt_ref, resolution, resolved_at)?;
+            if changed != 1 {
+                return Err(TaskRuntimeError::Conflict(
+                    "orphaned effect receipt was resolved concurrently".into(),
+                ));
+            }
+        }
+
+        let resolved = crate::store::load_effect_receipt_on(&tx, receipt_ref)?
+            .ok_or_else(|| TaskRuntimeError::Store("resolved effect receipt disappeared".into()))?;
+        let requeued_projections = crate::projection_outbox::requeue_blocked_projections_on(
+            &tx,
+            receipt_ref,
+            OffsetDateTime::now_utc().unix_timestamp(),
         )?;
         tx.commit()?;
         Ok(crate::EffectReceiptResolutionCommit {
@@ -1203,6 +1223,69 @@ fn receipt_resolution_matches(
                 && receipt.error_json.as_ref() == Some(error)
         }
     }
+}
+
+fn apply_effect_resolution_on(
+    connection: &Connection,
+    receipt_ref: &EffectReceiptRef,
+    resolution: &EffectReceiptResolution,
+    resolved_at: i64,
+) -> TaskRuntimeResult<usize> {
+    match resolution {
+        EffectReceiptResolution::Applied { result, effects } => Ok(connection.execute(
+            "UPDATE execution_effect_receipts
+             SET status = 'completed', result_json = ?1, effects_json = ?2,
+                 error_json = NULL, resolved_at = ?3
+             WHERE receipt_ref = ?4 AND status = 'uncertain'",
+            params![
+                serde_json::to_string(result)?,
+                serde_json::to_string(effects)?,
+                resolved_at,
+                receipt_ref.as_ref(),
+            ],
+        )?),
+        EffectReceiptResolution::NotApplied { error } => Ok(connection.execute(
+            "UPDATE execution_effect_receipts
+             SET status = 'prepared', result_json = NULL, effects_json = NULL,
+                 error_json = ?1, resolved_at = ?2
+             WHERE receipt_ref = ?3 AND status = 'uncertain'",
+            params![
+                serde_json::to_string(error)?,
+                resolved_at,
+                receipt_ref.as_ref(),
+            ],
+        )?),
+    }
+}
+
+fn verify_orphaned_effect_owner_on(
+    connection: &Connection,
+    receipt: &ExecutionEffectReceipt,
+) -> TaskRuntimeResult<()> {
+    if load_validated_journal_on(connection, &receipt.execution_id)?.is_some() {
+        return Err(TaskRuntimeError::InvalidTransition(
+            "effect receipt still has an authoritative execution journal".into(),
+        ));
+    }
+    let condition = WakeCondition::EffectResolution {
+        receipt_ref: receipt.receipt_ref.clone(),
+    };
+    let wake_count = connection.query_row(
+        "SELECT COUNT(*) FROM execution_wakes
+         WHERE execution_id = ?1 AND revision = ?2 AND dedup_key = ?3",
+        params![
+            receipt.execution_id,
+            sqlite_integer_from_store(receipt.revision, "wake revision")?,
+            condition.dedup_key(),
+        ],
+        |row| row.get::<_, i64>(0),
+    )?;
+    if wake_count != 0 {
+        return Err(TaskRuntimeError::InvalidTransition(
+            "orphaned effect receipt still owns a resolution wake".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn verify_effect_resolution_owner_on(

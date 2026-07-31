@@ -34,7 +34,6 @@ import {
   type CoreThreadAttention,
   type CoreCapabilitySnapshot,
   type CoreMemoryDashboard,
-  type CoreTaskDetail,
   type CoreTaskItem,
   type CoreTaskQueueSnapshot,
   type CoreUncertainEffect,
@@ -56,6 +55,10 @@ import {
   type ThreadAttentionState,
   type ThreadAttentionStatus,
 } from "./lib/threadAttentionState";
+import {
+  attentionRequiredThreadIds,
+  mergeConversationAttention,
+} from "./lib/conversationAttention";
 import { sidebarWorkspaceIsActive } from "./lib/sidebarFilterState";
 import type {
   ApprovelItem,
@@ -69,9 +72,7 @@ import type {
   Priority,
   RuntimeHealth,
   SettingsSectionId,
-  TaskDetailItem,
   TaskItem,
-  TaskResourceUsage,
   TaskStatus,
   UncertainEffectItem,
   ViewId,
@@ -91,9 +92,6 @@ const ContainedComputerView = lazy(() =>
 );
 const SettingsView = lazy(() =>
   import("./components/SettingsView").then((m) => ({ default: m.SettingsView })),
-);
-const TasksView = lazy(() =>
-  import("./components/TasksView").then((m) => ({ default: m.TasksView })),
 );
 const LearningView = lazy(() =>
   import("./components/LearningView").then((m) => ({ default: m.LearningView })),
@@ -396,6 +394,7 @@ function mapCoreApprovel(approval: CoreApprovelItem): ApprovelItem {
         : "";
   return {
     id: approval.approval_id,
+    taskId: approval.task_id,
     title: isBrowserAction
       ? i18n.t("approval.browserAction")
       : isPromptPlanAction
@@ -462,67 +461,6 @@ function humanizeTaskBlockedReasonKey(reason: string | null): string | null {
     return "task.blocked.approval";
   }
   return null;
-}
-
-function summarizeSafeValue(value: unknown): string {
-  if (value === null || value === undefined) {
-    return "No redacted data available";
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  if (typeof value === "string") {
-    return value.toLowerCase().includes("redacted")
-      ? "Redacted payload"
-      : "Redacted data available";
-  }
-  if (Array.isArray(value)) {
-    return `Redacted list (${value.length})`;
-  }
-  if (typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const recovery = record.desktop_recovery as Record<string, unknown> | undefined;
-    if (recovery?.state === "requeued_after_restart") {
-      return "Recovered after restart · resources released";
-    }
-    const approval = record.approval as Record<string, unknown> | undefined;
-    if (approval?.decision) {
-      return `Approvel ${String(approval.decision)} · ${String(
-        approval.action ?? i18n.t("common.redactedAction"),
-      )}`;
-    }
-    const prompt = record.prompt as Record<string, unknown> | undefined;
-    if (prompt?.state) {
-      return `Prompt · ${String(prompt.state)}`;
-    }
-    const step = record.step as Record<string, unknown> | undefined;
-    if (step?.title) {
-      return `Step · ${String(step.title)}`;
-    }
-    const visibleKeys = Object.keys(record)
-      .filter((key) => !/raw|payload|input|content|secret/i.test(key))
-      .slice(0, 4);
-    return visibleKeys.length
-      ? `Redacted JSON · ${visibleKeys.join(", ")}`
-      : "Redacted JSON available";
-  }
-  return "Redacted data available";
-}
-
-function mapCoreTaskDetail(detail: CoreTaskDetail): TaskDetailItem {
-  return {
-    taskId: detail.task_id,
-    kind: detail.kind,
-    goal: detail.goal,
-    status: mapCoreTaskStatus(detail.status),
-    priority: mapCoreTaskPriority(detail.priority),
-    blockedReason: humanizeTaskBlockedReasonKey(detail.blocked_reason)
-      ? i18n.t(humanizeTaskBlockedReasonKey(detail.blocked_reason)!)
-      : detail.blocked_reason ?? undefined,
-    checkpointSummary: summarizeSafeValue(detail.latest_checkpoint),
-    metadataSummary: summarizeSafeValue(detail.runtime_metadata),
-    exposesRawInput: detail.exposes_raw_input,
-  };
 }
 
 function mapCoreMemoryDashboard(dashboard: CoreMemoryDashboard): MemorySummary {
@@ -593,20 +531,6 @@ function connectionDescription(providerId: string): string {
   return "Local connector registered in the capability registry.";
 }
 
-function fallbackTaskDetail(task: TaskItem): TaskDetailItem {
-  return {
-    taskId: task.id,
-    kind: task.kind,
-    goal: task.title,
-    status: task.status,
-    priority: task.priority,
-    blockedReason: task.blockedReason,
-    checkpointSummary: "Local read model not yet connected to the gateway",
-    metadataSummary: "Open the desktop app for real core detail",
-    exposesRawInput: false,
-  };
-}
-
 function AuthenticatedApp() {
   const { t } = useTranslation();
   // System notifications opt-in (the SettingsView General pane wires permission).
@@ -646,10 +570,6 @@ function AuthenticatedApp() {
     useState<MemorySummary>(memorySummary);
   const [connectionItems, setConnectionItems] =
     useState<ConnectionItem[]>(connections);
-  const [resourceUsage, setResourceUsage] = useState<TaskResourceUsage[]>([]);
-  const [selectedTaskDetail, setSelectedTaskDetail] =
-    useState<TaskDetailItem | null>(null);
-  const [taskDetailLoading, setTaskDetailLoading] = useState(false);
   const [approvalBusyId, setApprovelBusyId] = useState<string | null>(null);
   const [effectResolutionBusyId, setEffectResolutionBusyId] = useState<string | null>(
     null,
@@ -688,6 +608,7 @@ function AuthenticatedApp() {
   } | null>(null);
   const pendingLocalMessageThreadIdsRef = useRef<Set<string>>(new Set());
   const busyThreadIdsRef = useRef<Set<string>>(new Set());
+  const notifiedAttentionThreadIdsRef = useRef<Set<string> | null>(null);
   // Thread ids generating in the BACKGROUND (a chat left mid-answer while another is
   // on screen). Polled from the gateway's resume registry so the sidebar dots light
   // up on every working chat, not only the active one.
@@ -708,6 +629,10 @@ function AuthenticatedApp() {
       defaultChatThread,
     [activeThreadId, chatThreads],
   );
+  const activeUncertainEffects = useMemo(
+    () => uncertainEffectItems.filter((effect) => effect.threadId === activeThread.threadId),
+    [activeThread.threadId, uncertainEffectItems],
+  );
   const automationWorkspaceId = activeThread.workspaceId ?? undefined;
   // Threads "busy": a real-time streaming signal (from ChatView, sub-poll) UNION
   // the taskQueue snapshot (running/queued tasks linked to a thread). The union
@@ -726,6 +651,10 @@ function AuthenticatedApp() {
   useEffect(() => {
     busyThreadIdsRef.current = busyThreadIds;
   }, [busyThreadIds]);
+  const pendingAttentionThreadIds = useMemo(
+    () => attentionRequiredThreadIds(chatThreads, approvalItems, uncertainEffectItems),
+    [approvalItems, chatThreads, uncertainEffectItems],
+  );
   const attentionByThread = useMemo(() => {
     const attention: Record<string, ThreadAttentionStatus> = {
       ...threadAttention.byThread,
@@ -735,8 +664,8 @@ function AuthenticatedApp() {
         attention[threadId] = "working";
       }
     }
-    return attention;
-  }, [busyThreadIds, threadAttention.byThread]);
+    return mergeConversationAttention(attention, pendingAttentionThreadIds);
+  }, [busyThreadIds, pendingAttentionThreadIds, threadAttention.byThread]);
   const selectedTask = useMemo(
     () =>
       taskItems.find((task) => task.id === selectedTaskId) ?? {
@@ -867,6 +796,26 @@ function AuthenticatedApp() {
       console.warn("select_chat_thread unavailable", error);
     }
   }
+
+  useEffect(() => {
+    const previous = notifiedAttentionThreadIdsRef.current;
+    notifiedAttentionThreadIdsRef.current = new Set(pendingAttentionThreadIds);
+    // Seed from persisted state without replaying old notifications on every launch.
+    if (previous === null) return;
+    if (!systemNotifEnabled || !document.hidden || notificationPermission() !== "granted") {
+      return;
+    }
+    for (const threadId of pendingAttentionThreadIds) {
+      if (previous.has(threadId)) continue;
+      const owner = chatThreads.find((thread) => thread.threadId === threadId);
+      void showSystemNotification({
+        title: t("notifications.requiresAttention"),
+        body: owner?.title ?? t("notifications.openConversation"),
+        tag: `attention:${threadId}`,
+        onClick: () => void handleSelectThread(threadId),
+      });
+    }
+  }, [chatThreads, pendingAttentionThreadIds, systemNotifEnabled, t]);
 
   async function refreshThreadInBackground(
     threadId: string,
@@ -1198,14 +1147,7 @@ function AuthenticatedApp() {
     (p) => pluginStates.find((s) => s.id === p.id)?.enabled !== false,
   );
   const composedNavItems: NavItem[] = [
-    ...staticNavItems.map((item) => {
-      if (item.id !== "tasks") return item;
-      const attentionCount = approvalItems.length + uncertainEffectItems.length;
-      return {
-        ...item,
-        badge: attentionCount > 0 ? String(attentionCount) : undefined,
-      };
-    }),
+    ...staticNavItems,
     ...enabledPlugins.map((p) => ({
       id: p.id as ViewId,
       label: p.navLabel,
@@ -1402,14 +1344,6 @@ function AuthenticatedApp() {
         ? current
         : null,
     );
-    setResourceUsage(
-      snapshot.resource_usage
-        .filter((usage) => usage.units > 0)
-        .map((usage) => ({
-          resourceClass: usage.resource_class,
-          units: usage.units,
-        })),
-    );
   }
 
   async function loadTaskQueue() {
@@ -1485,15 +1419,8 @@ function AuthenticatedApp() {
     }
   }
 
-  async function refreshRuntimeReadModels(taskId = selectedTaskId) {
+  async function refreshRuntimeReadModels() {
     await loadTaskQueue();
-    if (taskId) {
-      try {
-        await refreshSelectedTaskDetail(taskId);
-      } catch (error) {
-        console.warn("task_detail unavailable after runtime change", error);
-      }
-    }
   }
 
   async function refreshChatReadModels(preferredThreadId = activeThreadId) {
@@ -1513,11 +1440,6 @@ function AuthenticatedApp() {
     applyThreadAttentionRows(await coreBridge.threadAttentions());
   }
 
-  async function refreshSelectedTaskDetail(taskId: string) {
-    const detail = await coreBridge.taskDetail(taskId);
-    setSelectedTaskDetail(detail ? mapCoreTaskDetail(detail) : null);
-  }
-
   async function handleApproveApprovel(
     approvalId: string,
     options?: {
@@ -1528,8 +1450,7 @@ function AuthenticatedApp() {
     setApprovelBusyId(approvalId);
     try {
       applyTaskQueueSnapshot(await coreBridge.approveApprovel(approvalId, options));
-      await refreshSelectedTaskDetail(selectedTaskId);
-      await refreshRuntimeReadModels(activeThread.taskId);
+      await refreshRuntimeReadModels();
       await refreshChatReadModels(activeThread.threadId);
     } catch (error) {
       console.warn("approval_approve unavailable", error);
@@ -1547,7 +1468,6 @@ function AuthenticatedApp() {
           "Rejected by the user from the desktop UI.",
         ),
       );
-      await refreshSelectedTaskDetail(selectedTaskId);
     } catch (error) {
       console.warn("approval_reject unavailable", error);
     } finally {
@@ -1564,7 +1484,6 @@ function AuthenticatedApp() {
     try {
       await coreBridge.resolveUncertainEffect(effect.core, outcome);
       await loadTaskQueue();
-      await refreshSelectedTaskDetail(selectedTaskId);
       if (effect.threadId) {
         await refreshChatReadModels(effect.threadId);
       }
@@ -1614,9 +1533,6 @@ function AuthenticatedApp() {
       if (!activeThreadId) return;
       try {
         await loadTaskQueue();
-        if (selectedTaskId) {
-          await refreshSelectedTaskDetail(selectedTaskId);
-        }
         if (!cancelled) {
           await refreshChatReadModels(activeThreadId);
         }
@@ -1632,38 +1548,7 @@ function AuthenticatedApp() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [activeThreadId, selectedTaskId]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadSelectedTaskDetail() {
-      if (!selectedTaskId) {
-        setSelectedTaskDetail(null);
-        return;
-      }
-      setTaskDetailLoading(true);
-      try {
-        if (!cancelled) {
-          await refreshSelectedTaskDetail(selectedTaskId);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setSelectedTaskDetail(fallbackTaskDetail(selectedTask));
-        }
-        console.warn("task_detail unavailable", error);
-      } finally {
-        if (!cancelled) {
-          setTaskDetailLoading(false);
-        }
-      }
-    }
-
-    void loadSelectedTaskDetail();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedTask, selectedTaskId]);
+  }, [activeThreadId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1762,6 +1647,16 @@ function AuthenticatedApp() {
               }}
               approvals={approvalItems}
               approvalBusyId={approvalBusyId}
+              uncertainEffects={activeUncertainEffects}
+              effectResolutionBusyId={effectResolutionBusyId}
+              effectResolutionError={
+                effectResolutionError &&
+                activeUncertainEffects.some(
+                  (effect) => effect.id === effectResolutionError.receiptId,
+                )
+                  ? effectResolutionError.message
+                  : null
+              }
               computerSessionId={activeThread.computerSessionId}
               messages={activeMessages}
               health={runtimeItems}
@@ -1785,32 +1680,14 @@ function AuthenticatedApp() {
                   current?.id === id ? null : current,
                 )
               }
-              onOpenTasks={() => setActiveView("tasks")}
+              onResolveEffect={handleResolveUncertainEffect}
               onApproveApprovel={handleApproveApprovel}
               onRejectApprovel={handleRejectApprovel}
-              onRuntimeChanged={() => refreshRuntimeReadModels(activeThread.taskId)}
+              onRuntimeChanged={refreshRuntimeReadModels}
               onThreadChanged={() => refreshChatReadModels(activeThread.threadId)}
               onStreamingChange={(busy) =>
                 setStreamingThreadId(busy ? activeThread.threadId : null)
               }
-            />
-          )}
-          {activeView === "tasks" && (
-            <TasksView
-              tasks={taskItems}
-              approvals={approvalItems}
-              uncertainEffects={uncertainEffectItems}
-              resourceUsage={resourceUsage}
-              selectedTaskDetail={selectedTaskDetail}
-              taskDetailLoading={taskDetailLoading}
-              approvalBusyId={approvalBusyId}
-              effectResolutionBusyId={effectResolutionBusyId}
-              effectResolutionError={effectResolutionError?.message ?? null}
-              selectedTaskId={selectedTask.id}
-              onApproveApprovel={handleApproveApprovel}
-              onRejectApprovel={handleRejectApprovel}
-              onResolveEffect={handleResolveUncertainEffect}
-              onSelectTask={setSelectedTaskId}
             />
           )}
           {activeView === "learning" && (

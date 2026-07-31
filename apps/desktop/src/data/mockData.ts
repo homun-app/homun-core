@@ -10,7 +10,6 @@ import {
   GalleryVerticalEnd,
   Globe2,
   KeyRound,
-  ListTodo,
   MessageSquare,
   Monitor,
   MonitorPlay,
@@ -43,7 +42,6 @@ import type {
 // l'addon ne fa sparire la voce di nav.
 export const navItems: NavItem[] = [
   { id: "chat", label: "chat.newTask", icon: MessageSquare },
-  { id: "tasks", label: "nav.tasks", icon: ListTodo },
   // Memory lives ONLY in Settings → Memory (rendered there as <MemoryView embedded />).
   // The top-level nav entry (ADR 0022 Piano UI A4) was removed: it duplicated the exact
   // same MemoryView already reachable from Settings.
@@ -213,6 +211,7 @@ export const tasks: TaskItem[] = [
 export const approvals: ApprovelItem[] = [
   {
     id: "approval_acme",
+    taskId: "task_prompt_session",
     title: "Send summary to Acme",
     reason: "write_with_confirmation action toward messaging connector.",
     action: "connector.write_with_confirmation",

@@ -40,10 +40,9 @@ famiglia operazione, timestamp e marker booleani allowlisted; recipient, payload
 idempotency key non raggiungono il renderer. La queue scoped per chat conserva solo receipt dello
 stesso thread.
 
-La voce Tasks è nuovamente raggiungibile e il badge somma approval pendenti ed effetti da verificare.
-Il Workbench mantiene approval e verifica post-dispatch separate: `Verificato come applicato` e
-`Verificato come non applicato` chiamano il resolver esistente, poi rileggono queue, task e thread.
-Nessuna rimozione ottimistica, card chat, wake, task kind o API provider è stata aggiunta.
+Questa prima soluzione rendeva Tasks raggiungibile e sommava approval ed effetti nel badge. Il
+checkpoint del 31 luglio ne ha mantenuto il contratto runtime, spostando però entrambe le operazioni
+nella conversazione proprietaria ed eliminando la dashboard duplicata.
 
 **Gate verdi:** clippy gateway `-D warnings`; task-runtime completo; gateway completo (1.076 pass,
 6 fixture opzionali ignored); Electron 93/93; UI contract; locale parity; TypeScript/Vite build;
