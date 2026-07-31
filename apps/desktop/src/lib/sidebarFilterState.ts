@@ -1,3 +1,4 @@
+import type { ChatThread } from "../types";
 import type { ThreadFilter, ThreadState } from "./threadFilter";
 
 // Node contract tests and the desktop application share this dependency-free implementation.
@@ -49,8 +50,27 @@ export const toggleAttentionFilterStates = implementation.toggleAttentionFilterS
 
 export const sidebarFilterBadgeModel = implementation.sidebarFilterBadgeModel as (
   count: number,
-  label: string,
+  localizedLabel: string,
 ) => SidebarFilterBadgeModel;
+
+export const sidebarChannelOptions = implementation.sidebarChannelOptions as (
+  availableChannels: string[],
+  selectedChannels: string[],
+) => string[];
+
+export const sidebarWorkspaceIsActive = implementation.sidebarWorkspaceIsActive as (
+  ownerWorkspaceId: string | null | undefined,
+  activeWorkspaceId: string | null | undefined,
+  personalWorkspaceId: string,
+) => boolean;
+
+export const mergeSidebarUnarchiveResult = implementation.mergeSidebarUnarchiveResult as (
+  projectThreadsById: Record<string, ChatThread[]>,
+  ownerWorkspaceId: string,
+  threadId: string,
+  snapshotThreads: ChatThread[] | null,
+  ownerIsActive: boolean,
+) => Record<string, ChatThread[]>;
 
 export const canReorderSidebarThreads = implementation.canReorderSidebarThreads as (
   filter: ThreadFilter,

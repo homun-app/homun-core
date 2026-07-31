@@ -14,6 +14,7 @@ import {
 import {
   SIDEBAR_FILTER_ROOT_ROWS,
   freshSidebarThreadFilter,
+  sidebarChannelOptions,
   sidebarFilterBadgeModel,
   toggleAttentionFilterStates,
   type SidebarFilterRootRowId,
@@ -199,7 +200,7 @@ export function SidebarFilters({
   const [rootOpen, setRootOpen] = useState(false);
   const [submenu, setSubmenu] = useState<Submenu | null>(null);
   const count = threadFilterCount(filter);
-  const badgeModel = sidebarFilterBadgeModel(count, t("filters.label"));
+  const badgeModel = sidebarFilterBadgeModel(count, t("filters.activeCount", { count }));
   const rootId = "sidebar-filters-menu";
 
   const closeAll = () => {
@@ -256,10 +257,12 @@ export function SidebarFilters({
     value: project.id,
     label: project.name,
   }));
-  const channelOptions = availableChannels.map((channel) => ({
-    value: channel,
-    label: sourceLabel(channel),
-  }));
+  const channelOptions = sidebarChannelOptions(availableChannels, filter.channels).map(
+    (channel) => ({
+      value: channel,
+      label: sourceLabel(channel),
+    }),
+  );
   const attentionSelected = filter.states.includes("waiting_user") && filter.states.includes("failed");
   const renderRootRow = (row: SidebarFilterRootRowId) => {
     switch (row) {

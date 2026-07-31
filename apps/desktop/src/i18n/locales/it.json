@@ -113,6 +113,8 @@
   },
   "filters": {
     "label": "Filtra",
+    "activeCount_one": "{{count}} filtro attivo",
+    "activeCount_other": "{{count}} filtri attivi",
     "groupBy": "Raggruppa per",
     "orderBy": "Ordina per",
     "state": "Stato",

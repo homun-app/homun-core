@@ -56,6 +56,7 @@ import {
   type ThreadAttentionState,
   type ThreadAttentionStatus,
 } from "./lib/threadAttentionState";
+import { sidebarWorkspaceIsActive } from "./lib/sidebarFilterState";
 import type {
   ApprovelItem,
   ChatAttachment,
@@ -109,6 +110,8 @@ const defaultChatThread: ChatThread = {
   updatedAt: currentTimestampSeconds(),
   messageCount: chatMessages.length,
 };
+
+const PERSONAL_WORKSPACE_ID = "local-workspace";
 
 function mapCoreChatThread(thread: CoreChatThread): ChatThread {
   return {
@@ -1296,23 +1299,35 @@ function AuthenticatedApp() {
     }
   }
 
-  async function handleUnarchiveChatThread(threadId: string) {
+  async function handleUnarchiveChatThread(threadId: string, workspaceId: string) {
+    const ownerIsActive = sidebarWorkspaceIsActive(
+      workspaceId,
+      activeThread.workspaceId,
+      PERSONAL_WORKSPACE_ID,
+    );
     try {
-      await applyThreadSnapshot(await coreBridge.unarchiveChatThread(threadId));
+      const snapshot = await coreBridge.unarchiveChatThread(threadId);
+      if (ownerIsActive) {
+        await applyThreadSnapshot(snapshot);
+      }
+      return snapshot.threads.map(mapCoreChatThread);
     } catch (error) {
-      setChatThreads((current) =>
-        current.map((thread) =>
-          thread.threadId === threadId
-            ? { ...thread, status: "active" as const }
-            : thread,
-        ),
-      );
-      setActiveThreadId(threadId);
-      const restoredThread = chatThreads.find((thread) => thread.threadId === threadId);
-      if (restoredThread) {
-        setSelectedTaskId(restoredThread.taskId);
+      if (ownerIsActive) {
+        setChatThreads((current) =>
+          current.map((thread) =>
+            thread.threadId === threadId
+              ? { ...thread, status: "active" as const }
+              : thread,
+          ),
+        );
+        setActiveThreadId(threadId);
+        const restoredThread = chatThreads.find((thread) => thread.threadId === threadId);
+        if (restoredThread) {
+          setSelectedTaskId(restoredThread.taskId);
+        }
       }
       console.warn("chat_thread_unarchive unavailable", error);
+      return null;
     }
   }
 

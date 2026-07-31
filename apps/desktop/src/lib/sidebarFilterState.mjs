@@ -1,4 +1,4 @@
-import { normalizeThreadFilter, threadFilterCount } from "./threadFilter.mjs";
+import { normalizeThreadFilter } from "./threadFilter.mjs";
 
 export const SIDEBAR_FILTER_STORAGE_KEY = "homun.sidebar.threadFilter.v2";
 
@@ -48,15 +48,51 @@ export function toggleAttentionFilterStates(states) {
   return next;
 }
 
-export function sidebarFilterBadgeModel(count, label) {
+export function sidebarFilterBadgeModel(count, localizedLabel) {
   if (count <= 0) return { badge: null, badgeLabel: undefined };
   return {
     badge: count <= 9 ? count : "dot",
-    badgeLabel: `${count} ${label}`,
+    badgeLabel: localizedLabel,
   };
 }
 
-export function canReorderSidebarThreads(filter) {
-  const canonical = normalizeThreadFilter(filter);
-  return threadFilterCount(canonical) === 0 && canonical.order === "updated_desc";
+export function sidebarChannelOptions(availableChannels, selectedChannels) {
+  const options = [];
+  const seen = new Set();
+  for (const value of [...availableChannels, ...selectedChannels]) {
+    if (typeof value !== "string") continue;
+    const channel = value.trim();
+    if (!channel || seen.has(channel)) continue;
+    seen.add(channel);
+    options.push(channel);
+  }
+  return options;
+}
+
+export function sidebarWorkspaceIsActive(ownerWorkspaceId, activeWorkspaceId, personalWorkspaceId) {
+  const owner = ownerWorkspaceId ?? personalWorkspaceId;
+  const active = activeWorkspaceId ?? personalWorkspaceId;
+  return owner === active;
+}
+
+export function mergeSidebarUnarchiveResult(
+  projectThreadsById,
+  ownerWorkspaceId,
+  threadId,
+  snapshotThreads,
+  ownerIsActive,
+) {
+  if (ownerIsActive) return projectThreadsById;
+  const current = projectThreadsById[ownerWorkspaceId] ?? [];
+  const next = Array.isArray(snapshotThreads)
+    ? [...snapshotThreads]
+    : current.map((thread) => thread.threadId === threadId
+      ? { ...thread, status: "active", pinned: false }
+      : thread);
+  return { ...projectThreadsById, [ownerWorkspaceId]: next };
+}
+
+export function canReorderSidebarThreads(_filter) {
+  // Every canonical order is computed. Dragging is reserved for a future manual order.
+  return false;
 }

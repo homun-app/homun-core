@@ -27,7 +27,10 @@ interface ShellProps {
   onSelectSettingsSub: (sub: string) => void;
   onToggleDrawer: () => void;
   onSearchChat: () => void;
-  onUnarchiveChatThread: (threadId: string) => void;
+  onUnarchiveChatThread: (
+    threadId: string,
+    workspaceId: string,
+  ) => Promise<ChatThread[] | null>;
   settingsSection: SettingsSectionId;
   settingsSub: string;
   // While a full-window modal (onboarding) is up, drop the window-drag strips:

@@ -240,7 +240,7 @@ export function computeTooltipPlacement({
 }
 
 export function shouldRestoreMenuFocus(parentId, openPortalIds) {
-  if (parentId != null) return openPortalIds.includes(parentId);
+  if (parentId != null) return openPortalIds[openPortalIds.length - 1] === parentId;
   return openPortalIds.length === 0;
 }
 

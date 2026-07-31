@@ -374,6 +374,14 @@ test("nested selection followed by Escape restores the parent row before root Es
   assert.equal(shouldRestoreMenuFocus(null, []), true);
 });
 
+test("closing a replaced sibling cannot steal focus from the deepest open submenu", () => {
+  const root = "sidebar-filters-menu";
+  const nextChild = "sidebar-filters-channels-menu";
+
+  assert.equal(shouldRestoreMenuFocus(root, [root, nextChild]), false);
+  assert.equal(shouldRestoreMenuFocus(root, [root]), true);
+});
+
 test("focus restoration requires the destination menu chain to remain available", () => {
   assert.equal(shouldRestoreMenuFocus("add-menu", []), false);
   assert.equal(shouldRestoreMenuFocus(null, ["add-menu"]), false);
