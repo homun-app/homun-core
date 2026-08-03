@@ -28,6 +28,7 @@ mod gateway_auth;
 mod gateway_cors;
 mod gateway_file_security;
 mod gateway_health;
+mod gateway_identity;
 mod gateway_paths;
 mod gateway_prompt;
 mod gateway_vault_key;
@@ -107,6 +108,12 @@ use axum::{
 use base64::Engine as _;
 use bytes::Bytes;
 use chat_store::{BranchPoint, ChatStore, RemoteApprovalInput, RemoteApprovalRow, Tag, TagEntity};
+pub(crate) use gateway_identity::gateway_workspace_id;
+pub(crate) use gateway_identity::{
+    active_workspace_id, base_workspace_id, canonical_memory_workspace_id,
+    gateway_capability_user_id, gateway_capability_workspace_id, gateway_memory_user_id,
+    gateway_memory_workspace_id, gateway_user_id, set_active_workspace, set_memory_workspace,
+};
 use gateway_paths::{
     gateway_browser_policy_database_path, gateway_capability_database_path, gateway_data_dir,
     gateway_database_path, gateway_legacy_chat_database_path, gateway_legacy_task_database_path,
@@ -62316,120 +62323,6 @@ fn lock_task_executor_status(
             code: "task_executor_status_lock_error",
             message: error.to_string(),
         })
-}
-
-pub(crate) fn gateway_user_id() -> UserId {
-    UserId::new(
-        env::var("HOMUN_USER_ID")
-            .unwrap_or_else(|_| "local-user".to_string())
-            .trim()
-            .to_string(),
-    )
-}
-
-/// Active workspace ("project") — the scoping unit for tasks, memory, and
-/// capabilities. A project IS a workspace (isolated context), so selecting one
-/// re-scopes everything through the three workspace_id helpers below, which all
-/// read this. Process-global because the helpers are stateless free functions
-/// called from ~25 sites; the select endpoint sets it.
-static ACTIVE_WORKSPACE: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
-
-fn active_workspace_id() -> String {
-    if let Ok(guard) = ACTIVE_WORKSPACE.read()
-        && let Some(id) = guard.as_ref().filter(|id| !id.trim().is_empty())
-    {
-        return id.clone();
-    }
-    env::var("HOMUN_WORKSPACE_ID")
-        .unwrap_or_else(|_| "local-workspace".to_string())
-        .trim()
-        .to_string()
-}
-
-fn set_active_workspace(id: &str) {
-    if let Ok(mut guard) = ACTIVE_WORKSPACE.write() {
-        *guard = Some(id.trim().to_string());
-    }
-}
-
-// Per-turn MEMORY scope, set from the chat thread's project. Kept SEPARATE from
-// ACTIVE_WORKSPACE so scoping memory to a conversation's project does NOT hijack the
-// user's selected workspace — which other subsystems (Composio entity, etc.) rely on.
-static MEMORY_WORKSPACE: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
-
-fn set_memory_workspace(id: &str) {
-    if let Ok(mut guard) = MEMORY_WORKSPACE.write() {
-        *guard = if id.trim().is_empty() {
-            None
-        } else {
-            Some(id.trim().to_string())
-        };
-    }
-}
-
-pub(crate) fn gateway_workspace_id() -> WorkspaceId {
-    WorkspaceId::new(active_workspace_id())
-}
-
-/// The base "personal" workspace (the free "Compiti"/"Predefinito" space) where
-/// channel conversations live — independent of whichever project is active, since
-/// a WhatsApp/Telegram chat is personal, not project-scoped.
-fn base_workspace_id() -> String {
-    env::var("HOMUN_WORKSPACE_ID")
-        .unwrap_or_else(|_| "local-workspace".to_string())
-        .trim()
-        .to_string()
-}
-
-fn gateway_memory_user_id() -> MemoryUserId {
-    MemoryUserId::new(
-        env::var("HOMUN_USER_ID")
-            .unwrap_or_else(|_| "local-user".to_string())
-            .trim()
-            .to_string(),
-    )
-}
-
-fn gateway_memory_workspace_id() -> MemoryWorkspaceId {
-    // Prefer the per-turn memory scope (the conversation's project) if set, else the
-    // user's selected workspace.
-    let raw = MEMORY_WORKSPACE
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().filter(|id| !id.trim().is_empty()).cloned())
-        .unwrap_or_else(active_workspace_id);
-    // The base/default space ("Predefinito") IS the personal space for MEMORY: route
-    // it to __personal__ so the default chat doesn't accumulate a separate
-    // "Predefinito" bucket distinct from "Personale". Only NAMED projects (their own
-    // workspace ids) keep a project-scoped memory. NB: this is memory-only — chat
-    // threads and capabilities still use the base workspace id.
-    canonical_memory_workspace_id(&raw)
-}
-
-fn canonical_memory_workspace_id(workspace_id: &str) -> MemoryWorkspaceId {
-    let workspace_id = workspace_id.trim();
-    if !workspace_id.is_empty() && workspace_id == base_workspace_id() {
-        MemoryWorkspaceId::new(PERSONAL_WORKSPACE)
-    } else {
-        MemoryWorkspaceId::new(workspace_id)
-    }
-}
-
-fn gateway_capability_user_id() -> CapabilityUserId {
-    CapabilityUserId::new(
-        env::var("HOMUN_USER_ID")
-            .unwrap_or_else(|_| "local-user".to_string())
-            .trim()
-            .to_string(),
-    )
-}
-
-fn gateway_capability_workspace_id() -> CapabilityWorkspaceId {
-    // Capabilities (Composio/Gmail, browser, filesystem MCP) are the USER's, not a
-    // project's — a connected Gmail must work in EVERY project. Scope them to the stable
-    // base workspace, not the active project, so they don't "disappear" when a project
-    // is selected.
-    CapabilityWorkspaceId::new(base_workspace_id())
 }
 
 // ---- P4.1 Projects = Workspaces ----------------------------------------------

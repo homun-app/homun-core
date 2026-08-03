@@ -957,6 +957,9 @@ assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_file_security:
 assertRepoContains("crates/desktop-gateway/src/gateway_vault_key.rs", "resolve_vault_wrap_key", "desktop gateway vault wrap key resolution must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_vault_key.rs", "HOMUN_VAULT_WRAP_KEY", "desktop gateway vault key owner must preserve env-key precedence");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_vault_key::resolve_vault_wrap_key", "desktop gateway startup must use the shared vault key resolver");
+assertRepoContains("crates/desktop-gateway/src/gateway_identity.rs", "gateway_memory_workspace_id", "desktop gateway workspace identity scope must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_identity.rs", "PERSONAL_WORKSPACE", "desktop gateway identity owner must preserve personal memory canonicalization");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_identity::gateway_workspace_id", "desktop gateway root must re-export shared identity helpers");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "require_gateway_token", "desktop gateway auth middleware must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "resolve_gateway_auth_token", "desktop gateway auth token resolution must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_auth::require_gateway_token", "desktop gateway must protect chat endpoints with a local token");
