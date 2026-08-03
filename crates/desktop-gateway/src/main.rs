@@ -30,6 +30,7 @@ mod gateway_file_security;
 mod gateway_health;
 mod gateway_paths;
 mod gateway_prompt;
+mod gateway_vault_key;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod inference_transport;
 mod model_client;
@@ -1359,7 +1360,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             SQLiteVaultStore::open(gateway_vault_database_path()?)
                 .map_err(std::io::Error::other)?,
         )),
-        vault_wrap_key: Arc::new(resolve_vault_wrap_key()?),
+        vault_wrap_key: Arc::new(gateway_vault_key::resolve_vault_wrap_key()?),
         pending_vault_proposals: Arc::new(privacy_guard::PendingVaultProposalStore::default()),
         capability_registry: Arc::new(Mutex::new(open_seeded_capability_registry()?)),
         task_executor_status: Arc::new(Mutex::new(TaskExecutorStatus::new(
@@ -62315,103 +62316,6 @@ fn lock_task_executor_status(
             code: "task_executor_status_lock_error",
             message: error.to_string(),
         })
-}
-
-/// Keychain service under which the vault wrap key lives (macOS).
-#[cfg(target_os = "macos")]
-const VAULT_WRAP_KEY_KEYCHAIN_SERVICE: &str = "homun-vault-master-wrap";
-
-/// Load-or-create the 32-byte key that WRAPS the vault master key (ADR:
-/// system-usable vault values). At-rest protection of THIS key is delegated to
-/// the OS keychain, mirroring how a password manager guards its autofill key.
-/// Precedence:
-///   1. `HOMUN_VAULT_WRAP_KEY` (base64) — tests/CI; never touches the keychain.
-///   2. OS keychain (macOS) — the production home for this key.
-///   3. A 0600 file under the data dir — Linux/dev, or if the keychain errors.
-///
-/// The key MUST stay stable for the life of the vault: losing it makes the
-/// master key (and every record) unrecoverable, exactly like losing a keychain.
-/// So we only ever GENERATE when the key is definitively absent, never on a
-/// decode error (which would silently rotate and brick the vault).
-fn resolve_vault_wrap_key() -> Result<[u8; 32], std::io::Error> {
-    if let Ok(encoded) = env::var("HOMUN_VAULT_WRAP_KEY") {
-        let encoded = encoded.trim();
-        if !encoded.is_empty() {
-            return decode_vault_wrap_key(encoded).ok_or_else(|| {
-                std::io::Error::other("HOMUN_VAULT_WRAP_KEY must be 32 base64-encoded bytes")
-            });
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        match keychain_vault_wrap_key() {
-            Ok(key) => return Ok(key),
-            Err(error) => {
-                eprintln!(
-                    "[gateway] vault wrap key: keychain unavailable ({error}); using file fallback"
-                );
-            }
-        }
-    }
-    file_vault_wrap_key()
-}
-
-#[cfg(target_os = "macos")]
-fn keychain_vault_wrap_key() -> Result<[u8; 32], std::io::Error> {
-    use local_first_secrets::{SecretMaterial, SecretRef, SecretStore};
-    let store =
-        local_first_secrets::SystemKeychainSecretStore::new(VAULT_WRAP_KEY_KEYCHAIN_SERVICE);
-    let reference =
-        SecretRef::new("homun", "local", "vault", "master-wrap").map_err(std::io::Error::other)?;
-    if let Some(material) = store.get(&reference).map_err(std::io::Error::other)? {
-        let encoded = material.expose_utf8().map_err(std::io::Error::other)?;
-        return decode_vault_wrap_key(encoded.trim()).ok_or_else(|| {
-            std::io::Error::other(
-                "vault wrap key in keychain is corrupt (expected 32 base64 bytes)",
-            )
-        });
-    }
-    let key = generate_vault_wrap_key();
-    let encoded = base64::engine::general_purpose::STANDARD.encode(key);
-    store
-        .put(reference, SecretMaterial::from_string(encoded))
-        .map_err(std::io::Error::other)?;
-    Ok(key)
-}
-
-/// File fallback for the vault wrap key (0600). Used on platforms without a
-/// keychain backend (Linux/CI) or when the keychain is unreachable.
-fn file_vault_wrap_key() -> Result<[u8; 32], std::io::Error> {
-    let path = gateway_data_dir()?.join("vault-wrap-key");
-    if let Ok(bytes) = fs::read(&path)
-        && let Some(key) = decode_vault_wrap_key(String::from_utf8_lossy(&bytes).trim())
-    {
-        return Ok(key);
-    }
-    let key = generate_vault_wrap_key();
-    let encoded = base64::engine::general_purpose::STANDARD.encode(key);
-    gateway_file_security::write_private_file(&path, encoded.as_bytes())?;
-    Ok(key)
-}
-
-/// Mirrors `gateway_secret_key_seed`: two UUIDv4 (getrandom-backed) = 32 bytes.
-fn generate_vault_wrap_key() -> [u8; 32] {
-    let mut key = [0u8; 32];
-    key[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-    key[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-    key
-}
-
-fn decode_vault_wrap_key(encoded: &str) -> Option<[u8; 32]> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(encoded)
-        .ok()?;
-    if bytes.len() != 32 {
-        return None;
-    }
-    let mut key = [0u8; 32];
-    key.copy_from_slice(&bytes);
-    Some(key)
 }
 
 pub(crate) fn gateway_user_id() -> UserId {
