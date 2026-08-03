@@ -35,6 +35,22 @@ test("active turn keeps all rows visible for truthful progress", () => {
   );
 });
 
+test("active turn hides stale applied rows from previous turns", () => {
+  const rows = [
+    { steering_id: 1, active_turn_id: "turn-old", status: "applied" },
+    { steering_id: 2, active_turn_id: "turn-current", status: "applied" },
+    { steering_id: 3, active_turn_id: "turn-old", status: "pending" },
+  ];
+
+  assert.deepEqual(
+    visiblePendingSteeringRows(rows, {
+      terminalTurnAtRest: false,
+      activeTurnId: "turn-current",
+    }).map((row) => row.steering_id),
+    [2, 3],
+  );
+});
+
 test("stale steering status set is explicit", () => {
   assert.deepEqual([...STALE_STEERING_STATUSES].sort(), [
     "applied",

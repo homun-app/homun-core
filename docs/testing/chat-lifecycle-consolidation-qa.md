@@ -110,3 +110,4 @@ Controlli Electron reali post-fix:
 | Activity island aperta | PASS |
 | Dock computer/browser nascosto con island aperta | PASS (`display: none`) |
 | Marker reasoning/tool visibili nella transcript | PASS (nessun match per `<think`, `REASONING`, `tool_call`) |
+| Steering stale su HITL corrente | PASS (`Waiting for you` resta visibile, nessuna card `Applying`) |

@@ -15,7 +15,7 @@ aggiornare uno degli owner qui sotto e il relativo test.
 | Cleanup steering terminale | `crates/task-runtime/src/store.rs::close_unsettled_turn_steering`, `crates/desktop-gateway/src/main.rs::finalize_turn_steering` | `cargo test -p local-first-task-runtime finalization_fence_blocks_every_unapplied_steering_state`; `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway steering` |
 | Lifecycle UI del turno | `apps/desktop/src/lib/chat-runtime/lifecycle.ts` | `cd apps/desktop && npm run test:cursor-grammar` |
 | Modalita' composer | `apps/desktop/src/lib/chat-runtime/composerMode.ts` | `cd apps/desktop && npm run test:cursor-grammar` |
-| Steering visibile a thread fermo | `apps/desktop/src/lib/chatSteeringState.ts` | `cd apps/desktop && npm run test:cursor-grammar` |
+| Steering visibile in chat | `apps/desktop/src/lib/chat-runtime/steering.ts`, `apps/desktop/src/lib/chatSteeringState.ts` | `cd apps/desktop && npm run test:cursor-grammar` |
 | Testo assistente visibile | `apps/desktop/src/lib/chat-rendering/visibleContent.ts` e compat `apps/desktop/src/lib/chatVisibleContent.ts` | `cd apps/desktop && npm run test:cursor-grammar` |
 | Layout messaggi/chat overlay | `apps/desktop/src/styles/chat.css`, `apps/desktop/src/styles/workspace-island.css` | `cd apps/desktop && npm run test:ui-contract`; `npm run build` |
 
@@ -53,6 +53,12 @@ Non deve toccare:
 Il gateway chiama questo cleanup durante `finalize_turn_steering`, dopo la fence
 di finalizzazione. Le righe cambiate vengono ricaricate e pubblicate come
 `cancelled`; le righe non cambiate non generano eventi sintetici.
+
+Nel renderer, le righe stale in stato `pending`, `held`, `claimed`,
+`interpreted` o `applied` sono visibili solo quando appartengono al turno attivo
+corrente. Un turno `waiting_user_approval` puo' restare legittimamente bloccato
+su `Waiting for you`, ma non deve mostrare `Applying` o altre card provenienti
+da un `active_turn_id` precedente.
 
 ## Renderer
 

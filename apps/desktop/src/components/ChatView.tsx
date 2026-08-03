@@ -785,8 +785,11 @@ export function ChatView({
     threadTailAwaitsHitl,
   });
   const visiblePendingSteeringRowsForTurn = useMemo(
-    () => visiblePendingSteeringRows(pendingSteering.rows, { terminalTurnAtRest }),
-    [pendingSteering.rows, terminalTurnAtRest],
+    () => visiblePendingSteeringRows(pendingSteering.rows, {
+      terminalTurnAtRest,
+      activeTurnId: projectedActiveTurn?.turn_id ?? null,
+    }),
+    [pendingSteering.rows, projectedActiveTurn?.turn_id, terminalTurnAtRest],
   );
   const activeTurnKey = projectedActiveTurn?.turn_id ?? streamStatus?.requestId ?? null;
   useEffect(() => {

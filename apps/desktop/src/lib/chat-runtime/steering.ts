@@ -1,5 +1,6 @@
 export interface SteeringRowLike {
   status: string;
+  active_turn_id?: string | null;
 }
 
 export const STALE_STEERING_STATUSES = new Set([
@@ -13,8 +14,17 @@ export const STALE_STEERING_STATUSES = new Set([
 
 export function visiblePendingSteeringRows<Row extends SteeringRowLike>(
   rows: Row[],
-  options: { terminalTurnAtRest: boolean },
+  options: { terminalTurnAtRest: boolean; activeTurnId?: string | null },
 ): Row[] {
-  if (!options.terminalTurnAtRest) return rows;
-  return rows.filter((row) => !STALE_STEERING_STATUSES.has(row.status));
+  return rows.filter((row) => {
+    if (
+      options.activeTurnId
+      && row.active_turn_id
+      && row.active_turn_id !== options.activeTurnId
+      && STALE_STEERING_STATUSES.has(row.status)
+    ) {
+      return false;
+    }
+    return !options.terminalTurnAtRest || !STALE_STEERING_STATUSES.has(row.status);
+  });
 }

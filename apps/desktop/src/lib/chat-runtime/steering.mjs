@@ -8,6 +8,15 @@ export const STALE_STEERING_STATUSES = new Set([
 ]);
 
 export function visiblePendingSteeringRows(rows, options) {
-  if (!options.terminalTurnAtRest) return rows;
-  return rows.filter((row) => !STALE_STEERING_STATUSES.has(row.status));
+  return rows.filter((row) => {
+    if (
+      options.activeTurnId
+      && row.active_turn_id
+      && row.active_turn_id !== options.activeTurnId
+      && STALE_STEERING_STATUSES.has(row.status)
+    ) {
+      return false;
+    }
+    return !options.terminalTurnAtRest || !STALE_STEERING_STATUSES.has(row.status);
+  });
 }
