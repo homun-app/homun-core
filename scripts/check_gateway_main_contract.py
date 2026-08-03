@@ -103,6 +103,10 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn spawn_memory_consolidation_tick(": "memory consolidation tick must stay in gateway_memory_background",
         "fn spawn_embedding_catchup(": "embedding catchup must stay in gateway_memory_background",
         "fn spawn_memory_hygiene_sweep(": "memory hygiene sweep must stay in gateway_memory_background",
+        "struct RemoteApprovalIntent ": "remote approval intent parsing must stay in gateway_remote_approval",
+        "fn remote_approval_intent_from_marker(": "remote approval marker parsing must stay in gateway_remote_approval",
+        "fn remote_approval_intent_from_raw_text(": "remote approval marker parsing must stay in gateway_remote_approval",
+        "fn actionable_cards_from_raw_text(": "actionable card parsing must stay in gateway_remote_approval",
     }
 
 
@@ -135,6 +139,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
     assert_contains(source, "mod gateway_task_maintenance;", "gateway root must declare task maintenance owner")
     assert_contains(source, "mod gateway_memory_background;", "gateway root must declare memory background owner")
+    assert_contains(source, "mod gateway_remote_approval;", "gateway root must declare remote approval owner")
 
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",

@@ -41,6 +41,7 @@ mod gateway_paths;
 mod gateway_proactivity;
 mod gateway_prompt;
 mod gateway_recall_context;
+mod gateway_remote_approval;
 mod gateway_routes;
 mod gateway_secrets;
 mod gateway_store_integrity;
@@ -62,6 +63,13 @@ use local_first_engine::model_normalize;
 // Brings `.record(...)` into scope for direct calls on a `GatewayJournal` (C2, browser-protocol
 // metrics); `run_turn`'s own generic `J: ExecutionJournal` parameter doesn't need this import, but
 // calling the method directly outside that generic context does.
+#[cfg(test)]
+use gateway_remote_approval::remote_approval_matches_persisted_message;
+use gateway_remote_approval::{
+    ActionableCard, RemoteApprovalIntent, actionable_cards_from_raw_text,
+    remote_approval_event_part, remote_approval_intent_from_raw_text,
+    remote_approval_intents_from_message,
+};
 use local_first_engine::ExecutionJournal;
 mod model_registry;
 // Local scanner for Anthropic "Agent Skills" (SKILL.md folders).
@@ -1692,141 +1700,6 @@ pub(crate) async fn activate_remote_approvals_from_message(
         }
     }
     Ok(None)
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct RemoteApprovalIntent {
-    protocol: &'static str,
-    approval_id: Option<String>,
-    tool: String,
-    arguments: serde_json::Value,
-}
-
-fn remote_approval_intent_from_marker(
-    text: &str,
-    protocol: &'static str,
-    open_tag: &str,
-    close_tag: &str,
-) -> Option<RemoteApprovalIntent> {
-    let marker = confirm_marker_value(text, open_tag, close_tag)?;
-    let approval_id = marker
-        .get("approval_id")
-        .and_then(serde_json::Value::as_str)
-        .map(ToString::to_string);
-    let tool = marker.get("tool")?.as_str()?.to_string();
-    let arguments = marker
-        .get("arguments")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
-    let valid = if protocol == "mcp" {
-        mcp_confirm_matches(text, &tool, &arguments)
-    } else {
-        composio_confirm_matches(text, &tool, &arguments)
-    };
-    valid.then_some(RemoteApprovalIntent {
-        protocol,
-        approval_id,
-        tool,
-        arguments,
-    })
-}
-
-fn remote_approval_intent_from_raw_text(text: &str) -> Option<RemoteApprovalIntent> {
-    remote_approval_intent_from_marker(text, "mcp", MCP_CONFIRM_OPEN, MCP_CONFIRM_CLOSE).or_else(
-        || {
-            remote_approval_intent_from_marker(
-                text,
-                "composio",
-                COMPOSIO_CONFIRM_OPEN,
-                COMPOSIO_CONFIRM_CLOSE,
-            )
-        },
-    )
-}
-
-fn remote_approval_event_part(intent: &RemoteApprovalIntent) -> serde_json::Value {
-    serde_json::json!({
-        "type": "remote_approval",
-        "protocol": intent.protocol,
-        "approval_id": intent.approval_id,
-        "tool": intent.tool,
-        "arguments": intent.arguments,
-    })
-}
-
-#[derive(Debug, Clone)]
-struct ActionableCard {
-    kind: &'static str,
-    raw: String,
-    payload: serde_json::Value,
-}
-
-fn actionable_cards_from_raw_text(text: &str) -> Vec<ActionableCard> {
-    local_first_desktop_gateway::markers::validated_actionable_marker_blocks(text)
-        .into_iter()
-        .map(|block| ActionableCard {
-            kind: block.marker,
-            raw: block.raw,
-            payload: block.payload,
-        })
-        .collect()
-}
-
-fn remote_approval_intents_from_message(message: &ChatMessage) -> Vec<RemoteApprovalIntent> {
-    let structured: Vec<_> = message
-        .event_parts
-        .iter()
-        .filter(|part| {
-            part.get("type").and_then(serde_json::Value::as_str) == Some("remote_approval")
-        })
-        .filter_map(|part| {
-            let protocol = match part.get("protocol").and_then(serde_json::Value::as_str) {
-                Some("mcp") => "mcp",
-                Some("composio") => "composio",
-                _ => return None,
-            };
-            Some(RemoteApprovalIntent {
-                protocol,
-                approval_id: part
-                    .get("approval_id")
-                    .and_then(serde_json::Value::as_str)
-                    .map(ToString::to_string),
-                tool: part.get("tool")?.as_str()?.to_string(),
-                arguments: part
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::json!({})),
-            })
-        })
-        .collect();
-    if structured.is_empty() {
-        remote_approval_intent_from_raw_text(&message.text)
-            .into_iter()
-            .collect()
-    } else {
-        structured
-    }
-}
-
-#[cfg(test)]
-fn remote_approval_matches_persisted_message(
-    message: &ChatMessage,
-    approval_id: &str,
-    tool: &str,
-    arguments: &serde_json::Value,
-) -> bool {
-    remote_approval_intents_from_message(message)
-        .iter()
-        .any(|intent| {
-            intent.approval_id.as_deref() == Some(approval_id)
-                && intent.tool == tool
-                && &intent.arguments == arguments
-                && (if tool.starts_with("mcp__") {
-                    intent.protocol == "mcp"
-                } else {
-                    intent.protocol == "composio"
-                })
-        })
 }
 
 /// Branch switcher (‹ n/m ›): every branch point on the thread's active path.

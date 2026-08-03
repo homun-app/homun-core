@@ -284,6 +284,11 @@ assertRepoContains(
   "Gateway memory background jobs must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_remote_approval.rs",
+  "remote_approval_intent_from_raw_text",
+  "Gateway remote approval marker parsing must have a dedicated owner",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway main ownership contract"',
   "Kernel regression gate must run the gateway main ownership contract",
@@ -307,6 +312,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway memory background"',
   "Kernel regression gate must run the gateway memory background owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway remote approval"',
+  "Kernel regression gate must run the gateway remote approval owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",

@@ -150,6 +150,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway remote approval",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "gateway_remote_approval",
+            ],
+        ),
+        Step(
             "gateway steering cleanup",
             [
                 "cargo",
