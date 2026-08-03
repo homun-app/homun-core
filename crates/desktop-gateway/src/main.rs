@@ -37,6 +37,7 @@ mod gateway_model_timeouts;
 mod gateway_paths;
 mod gateway_prompt;
 mod gateway_secrets;
+mod gateway_store_integrity;
 mod gateway_task_executor_config;
 mod gateway_vault_key;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
@@ -1192,36 +1193,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // corrupt file is quarantined (never deleted) and the fresh open below
     // succeeds. Surfaced to the UI via /api/health `recovered_stores`.
     let recovered_stores: std::sync::Arc<Vec<String>> =
-        std::sync::Arc::new(store_integrity::ensure_store_integrity(&[
-            store_integrity::StoreCheck {
-                name: "desktop-gateway",
-                path: gateway_database_path()?,
-            },
-            store_integrity::StoreCheck {
-                name: "task-runtime",
-                path: gateway_task_database_path()?,
-            },
-            store_integrity::StoreCheck {
-                name: "local-computer-session",
-                path: gateway_local_computer_database_path()?,
-            },
-            store_integrity::StoreCheck {
-                name: "browser-url-policy",
-                path: gateway_browser_policy_database_path()?,
-            },
-            store_integrity::StoreCheck {
-                name: "memory",
-                path: gateway_memory_database_path()?,
-            },
-            store_integrity::StoreCheck {
-                name: "vault",
-                path: gateway_vault_database_path()?,
-            },
-            store_integrity::StoreCheck {
-                name: "capability-registry",
-                path: gateway_capability_database_path()?,
-            },
-        ]));
+        std::sync::Arc::new(gateway_store_integrity::ensure_gateway_store_integrity()?);
 
     let addr = gateway_bind::gateway_bind_addr();
     gateway_db_unify::unify_legacy_databases_at_startup()?;
