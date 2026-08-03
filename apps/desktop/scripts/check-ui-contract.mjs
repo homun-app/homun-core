@@ -248,6 +248,16 @@ assertRepoContains(
   '"gateway_turn_recovery"',
   "Kernel regression gate must run the gateway turn recovery owner test",
 );
+assertRepoContains(
+  "scripts/check_gateway_main_contract.py",
+  "forbidden_main_startup_snippets",
+  "Gateway main slimming must have a dedicated structural contract",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway main ownership contract"',
+  "Kernel regression gate must run the gateway main ownership contract",
+);
 assertContains("src/lib/coreBridge.ts", "usageDaily:", "Usage must expose the real daily series");
 assertContains("src/components/UsageCalendar.tsx", 'role="grid"', "Usage calendar must expose an accessible grid");
 assertContains("src/components/UsageCalendar.tsx", 'role="gridcell"', "Usage days must be keyboard reachable");

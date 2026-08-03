@@ -36,6 +36,7 @@ def truthy(value: str | None) -> bool:
 def build_plan(env: dict[str, str]) -> list[Step]:
     plan = [
         Step("rust format", ["cargo", "fmt", "--check"]),
+        Step("gateway main ownership contract", [PYTHON, "scripts/check_gateway_main_contract.py"]),
         Step(
             "task runtime turn lifecycle",
             ["cargo", "test", "-p", "local-first-task-runtime", "turn_lifecycle"],
