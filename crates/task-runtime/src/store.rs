@@ -1653,6 +1653,26 @@ impl TaskStore {
         )?)
     }
 
+    pub fn close_unsettled_turn_steering(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+        active_turn_id: &str,
+    ) -> TaskRuntimeResult<usize> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        Ok(self.connection.execute(
+            "UPDATE turn_steering
+             SET status='cancelled',
+                 cancelled_at=COALESCE(cancelled_at, ?1),
+                 updated_at=?1,
+                 revision=revision+1
+             WHERE user_id=?2 AND workspace_id=?3 AND thread_id=?4 AND active_turn_id=?5
+               AND status IN ('pending','held','claimed','interpreted','applied')",
+            params![now, user_id, workspace_id, thread_id, active_turn_id],
+        )?)
+    }
+
     /// Atomically fences terminal delivery against newly queued steering.
     /// `false` means the engine must continue; `true` changes the task to the
     /// internal SQL-only `finalizing` state so later input becomes a new turn.
@@ -5301,6 +5321,135 @@ mod turn_steering_tests {
             store
                 .fence_chat_turn_finalization("u", "w", "turn-1")
                 .unwrap()
+        );
+    }
+
+    #[test]
+    fn terminal_turn_stale_steering_can_be_closed_by_turn_owner() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let held = store
+            .append_turn_steering("u", "w", "thread", "turn-1", &new_steering("held"), 1)
+            .unwrap();
+        assert_eq!(
+            store
+                .hold_pending_turn_steering("u", "w", "turn-1")
+                .unwrap(),
+            1
+        );
+        let claimed = store
+            .append_turn_steering("u", "w", "thread", "turn-1", &new_steering("claimed"), 1)
+            .unwrap();
+        let claimed = store
+            .claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.steering_id == claimed.steering_id)
+            .unwrap();
+        let interpreted = store
+            .append_turn_steering(
+                "u",
+                "w",
+                "thread",
+                "turn-1",
+                &new_steering("interpreted"),
+                1,
+            )
+            .unwrap();
+        let interpreted = store
+            .claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.steering_id == interpreted.steering_id)
+            .unwrap();
+        let interpreted = store
+            .mark_turn_steering_interpreted(
+                interpreted.steering_id,
+                interpreted.revision,
+                &serde_json::json!({"steering_disposition": "continue"}),
+                "run-1",
+            )
+            .unwrap();
+        let applied = store
+            .append_turn_steering("u", "w", "thread", "turn-1", &new_steering("applied"), 1)
+            .unwrap();
+        let applied = store
+            .claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.steering_id == applied.steering_id)
+            .unwrap();
+        let applied = store
+            .mark_turn_steering_interpreted(
+                applied.steering_id,
+                applied.revision,
+                &serde_json::json!({"steering_disposition": "continue"}),
+                "run-1",
+            )
+            .unwrap();
+        let applied = store
+            .mark_turn_steering_applied(applied.steering_id, applied.revision, "run-1")
+            .unwrap();
+        let completed = store
+            .append_turn_steering("u", "w", "thread", "turn-1", &new_steering("completed"), 1)
+            .unwrap();
+        let completed = store
+            .claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.steering_id == completed.steering_id)
+            .unwrap();
+        let completed = store
+            .mark_turn_steering_interpreted(
+                completed.steering_id,
+                completed.revision,
+                &serde_json::json!({"steering_disposition": "continue"}),
+                "run-1",
+            )
+            .unwrap();
+        let completed = store
+            .mark_turn_steering_applied(completed.steering_id, completed.revision, "run-1")
+            .unwrap();
+        let completed = store
+            .mark_turn_steering_completed(completed.steering_id, completed.revision, "run-1")
+            .unwrap();
+        let pending = store
+            .append_turn_steering("u", "w", "thread", "turn-1", &new_steering("pending"), 1)
+            .unwrap();
+        let other_turn = store
+            .append_turn_steering("u", "w", "thread", "turn-2", &new_steering("other turn"), 1)
+            .unwrap();
+
+        assert_eq!(
+            store
+                .close_unsettled_turn_steering("u", "w", "thread", "turn-1")
+                .unwrap(),
+            5
+        );
+        let rows = store.list_turn_steering("u", "w", "thread").unwrap();
+        for id in [
+            held.steering_id,
+            pending.steering_id,
+            claimed.steering_id,
+            interpreted.steering_id,
+            applied.steering_id,
+        ] {
+            let row = rows.iter().find(|row| row.steering_id == id).unwrap();
+            assert_eq!(row.status, TurnSteeringStatus::Cancelled);
+            assert!(row.cancelled_at.is_some());
+        }
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.steering_id == completed.steering_id)
+                .unwrap()
+                .status,
+            TurnSteeringStatus::Completed
+        );
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.steering_id == other_turn.steering_id)
+                .unwrap()
+                .status,
+            TurnSteeringStatus::Pending
         );
     }
 

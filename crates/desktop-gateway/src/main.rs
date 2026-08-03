@@ -50069,34 +50069,50 @@ fn finalize_turn_steering(
         return;
     };
     let (user_id, workspace_id) = (user_id.as_str(), workspace_id.as_str());
-    let Ok(rows) = store.list_turn_steering(user_id, workspace_id, thread_id) else {
+    let Ok(before) = store.list_turn_steering(user_id, workspace_id, thread_id) else {
         return;
     };
-    for row in rows {
-        // Only this turn's leftovers: a row queued against a DIFFERENT (e.g. still running) turn is
-        // none of our business, and one already interpreted/applied/completed/cancelled is settled.
-        if row.active_turn_id != turn_id || !matches!(row.status.as_str(), "pending" | "held") {
-            continue;
-        }
-        match store.cancel_turn_steering(row.steering_id, user_id, workspace_id, row.revision) {
-            Ok(record) => {
-                tracing::warn!(
-                    target: "steering::finalize",
-                    steering_id = row.steering_id,
-                    turn_id,
-                    "closed a steering row left pending by a finished turn"
-                );
-                publish_steering_changed(&record);
-            }
+    let changed =
+        match store.close_unsettled_turn_steering(user_id, workspace_id, thread_id, turn_id) {
+            Ok(changed) => changed,
             Err(error) => {
                 tracing::warn!(
                     target: "steering::finalize",
-                    steering_id = row.steering_id,
+                    turn_id,
                     %error,
-                    "could not close a steering row left pending by a finished turn"
+                    "could not close steering rows left unsettled by a finished turn"
                 );
+                return;
             }
+        };
+    if changed == 0 {
+        return;
+    }
+    let Ok(after) = store.list_turn_steering(user_id, workspace_id, thread_id) else {
+        tracing::warn!(
+            target: "steering::finalize",
+            turn_id,
+            "closed steering rows left unsettled by a finished turn but could not reload them for publication"
+        );
+        return;
+    };
+    for record in after {
+        if record.active_turn_id != turn_id || record.status.as_str() != "cancelled" {
+            continue;
         }
+        let changed_status = before
+            .iter()
+            .any(|old| old.steering_id == record.steering_id && old.status != record.status);
+        if !changed_status {
+            continue;
+        }
+        tracing::warn!(
+            target: "steering::finalize",
+            steering_id = record.steering_id,
+            turn_id,
+            "closed a steering row left unsettled by a finished turn"
+        );
+        publish_steering_changed(&record);
     }
 }
 
