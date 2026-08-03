@@ -915,7 +915,9 @@ assertContains("src/styles.css", "@media (max-width: 860px)", "responsive shell 
 assertRepoContains("Cargo.toml", "\"crates/desktop-gateway\"", "workspace must include the desktop gateway crate");
 assertRepoContains("crates/desktop-gateway/src/lib.rs", "build_chat_runtime_prompt", "desktop gateway must own chat runtime prompt construction");
 assertRepoContains("crates/desktop-gateway/src/lib.rs", "ContextCompressor", "desktop gateway must use Rust context compression");
+assertRepoContains("crates/desktop-gateway/src/gateway_prompt.rs", "build_prompt", "desktop gateway prompt build handler must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/chat/build_prompt", "desktop gateway must expose prompt build endpoint");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_prompt::build_prompt", "desktop gateway must route prompt build through the shared handler");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/chat/turns", "desktop gateway must expose the broker turn endpoint (the only chat path)");
 assertRepoContains("apps/desktop/src/lib/coreBridge.ts", "export type CoreChatStreamEvent", "desktop renderer must expose structured chat stream events");
 assertRepoContains("apps/desktop/src/lib/chatApi.ts", "listenChatStreamEvent", "chat API must expose structured chat stream subscription");

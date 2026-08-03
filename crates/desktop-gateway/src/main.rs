@@ -27,6 +27,7 @@ mod execution_runtime;
 mod gateway_auth;
 mod gateway_cors;
 mod gateway_health;
+mod gateway_prompt;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod inference_transport;
 mod model_client;
@@ -137,7 +138,7 @@ use local_first_desktop_gateway::workspace_delete::{
     GatewayWorkspacePurgeReport, WorkspaceDeleteError, coordinate_workspace_delete,
 };
 use local_first_desktop_gateway::{
-    AttachmentInput, BuildPromptRequest, BuildPromptResponse, ChatContextMessage, ChatContextRole,
+    AttachmentInput, BuildPromptRequest, ChatContextMessage, ChatContextRole,
     ChatGenerateStreamRequest, ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
     EnqueueTurnRequest, RoutingBinding, SetActiveLeafRequest, SetBranchLabelRequest,
     SetThreadPinnedRequest, build_chat_runtime_prompt, compact_thread_title, strip_display_markers,
@@ -1586,7 +1587,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/chat/threads/{thread_id}/messages/{message_id}/save_to_memory",
             post(save_chat_message_to_memory),
         )
-        .route("/api/chat/build_prompt", post(build_prompt))
+        .route("/api/chat/build_prompt", post(gateway_prompt::build_prompt))
         .route("/api/chat/stream_resume/{request_id}", get(resume_stream))
         .route("/api/chat/active_streams", get(active_streams))
         .route("/api/events", get(app_events))
@@ -2191,10 +2192,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(reconnect_channels_on_startup(startup_state));
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-async fn build_prompt(Json(request): Json<BuildPromptRequest>) -> Json<BuildPromptResponse> {
-    Json(build_chat_runtime_prompt(&request))
 }
 
 /// Optional `?workspace=<id>` selects a SPECIFIC workspace's threads (default: the
