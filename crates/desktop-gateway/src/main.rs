@@ -27,6 +27,7 @@ mod execution_runtime;
 mod gateway_auth;
 mod gateway_cors;
 mod gateway_health;
+mod gateway_paths;
 mod gateway_prompt;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod inference_transport;
@@ -104,6 +105,12 @@ use axum::{
 use base64::Engine as _;
 use bytes::Bytes;
 use chat_store::{BranchPoint, ChatStore, RemoteApprovalInput, RemoteApprovalRow, Tag, TagEntity};
+use gateway_paths::{
+    gateway_browser_policy_database_path, gateway_data_dir, gateway_database_path,
+    gateway_legacy_chat_database_path, gateway_legacy_task_database_path,
+    gateway_local_computer_database_path, gateway_logs_dir, gateway_memory_database_path,
+    gateway_task_database_path, gateway_unified_database_path, gateway_vault_database_path,
+};
 use local_first_browser_automation::{
     BrowserAutomationClient, BrowserAutomationError, BrowserCheckpoint, BrowserMethod,
     BrowserResponse, BrowserSidecarSession, BrowserSidecarSpawnOptions, BrowserUrlApprovalGrant,
@@ -1365,7 +1372,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         secret_store: Arc::new(open_gateway_secret_store()?),
         browser_checkpoint_secret_store: Arc::new(open_browser_checkpoint_secret_store()?),
         auth_token: gateway_auth::resolve_gateway_auth_token(
-            &gateway_data_dir()?,
+            &gateway_paths::gateway_data_dir()?,
             write_private_file,
         )?
         .into(),
@@ -62306,110 +62313,6 @@ fn lock_task_executor_status(
         })
 }
 
-fn gateway_database_path() -> Result<PathBuf, std::io::Error> {
-    // Env override keeps working for backwards compat / testing.
-    if let Ok(path) = env::var("HOMUN_DESKTOP_GATEWAY_DB") {
-        let path = PathBuf::from(path);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        return Ok(path);
-    }
-
-    gateway_unified_database_path()
-}
-
-/// Diagnostic logs directory (panic trail, crash marker). Lives beside the
-/// SQLite stores so the desktop shell bundles diagnostics from one root.
-fn gateway_logs_dir() -> Result<PathBuf, std::io::Error> {
-    let base = gateway_data_dir()?.join("logs");
-    fs::create_dir_all(&base)?;
-    Ok(base)
-}
-
-fn gateway_task_database_path() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("HOMUN_TASK_RUNTIME_DB") {
-        let path = PathBuf::from(path);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        return Ok(path);
-    }
-
-    gateway_unified_database_path()
-}
-
-/// Path of the unified DB. Both ChatStore and TaskStore open this same file.
-/// The legacy two-file layout is migrated once at boot by `unify_databases_if_needed`.
-fn gateway_unified_database_path() -> Result<PathBuf, std::io::Error> {
-    let base = gateway_data_dir()?;
-    Ok(base.join("homun.sqlite"))
-}
-
-/// Legacy chat DB path (desktop-gateway.sqlite). Used only by the migration.
-fn gateway_legacy_chat_database_path() -> Result<PathBuf, std::io::Error> {
-    let base = gateway_data_dir()?;
-    Ok(base.join("desktop-gateway.sqlite"))
-}
-
-/// Legacy task DB path (task-runtime.sqlite). Used only by the migration.
-fn gateway_legacy_task_database_path() -> Result<PathBuf, std::io::Error> {
-    let base = gateway_data_dir()?;
-    Ok(base.join("task-runtime.sqlite"))
-}
-
-fn gateway_local_computer_database_path() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("HOMUN_LOCAL_COMPUTER_DB") {
-        let path = PathBuf::from(path);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        return Ok(path);
-    }
-
-    let base = gateway_data_dir()?;
-    Ok(base.join("local-computer-session.sqlite"))
-}
-
-fn gateway_browser_policy_database_path() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("HOMUN_BROWSER_POLICY_DB") {
-        let path = PathBuf::from(path);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        return Ok(path);
-    }
-
-    let base = gateway_data_dir()?;
-    Ok(base.join("browser-url-policy.sqlite"))
-}
-
-fn gateway_memory_database_path() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("HOMUN_MEMORY_DB") {
-        let path = PathBuf::from(path);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        return Ok(path);
-    }
-
-    let base = gateway_data_dir()?;
-    Ok(base.join("memory.sqlite"))
-}
-
-fn gateway_vault_database_path() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("HOMUN_VAULT_DB") {
-        let path = PathBuf::from(path);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        return Ok(path);
-    }
-
-    let base = gateway_data_dir()?;
-    Ok(base.join("vault.sqlite"))
-}
-
 /// Keychain service under which the vault wrap key lives (macOS).
 #[cfg(target_os = "macos")]
 const VAULT_WRAP_KEY_KEYCHAIN_SERVICE: &str = "homun-vault-master-wrap";
@@ -62534,22 +62437,6 @@ fn gateway_capability_database_path() -> Result<PathBuf, std::io::Error> {
 
     let base = gateway_data_dir()?;
     Ok(base.join("capability-registry.sqlite"))
-}
-
-/// Canonical data directory. All other gateway paths derive from this, so a
-/// single `HOMUN_DATA_DIR` override (12-factor / container deploys with a mounted
-/// volume) redirects every store at once. Falls back to the desktop default
-/// `~/.homun`.
-fn gateway_data_dir() -> Result<PathBuf, std::io::Error> {
-    let base = match env::var("HOMUN_DATA_DIR") {
-        Ok(dir) if !dir.trim().is_empty() => PathBuf::from(dir),
-        _ => env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| env::temp_dir())
-            .join(".homun"),
-    };
-    fs::create_dir_all(&base)?;
-    Ok(base)
 }
 
 /// Make every top-level file in the data directory owner-only (0600). The
