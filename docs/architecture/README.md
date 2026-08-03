@@ -7,6 +7,7 @@ Mappe riscritte dal codice del workspace Cargo e di `apps/desktop`.
 | --- | --- |
 | [`overview.md`](overview.md) | Crate, porte, flusso a bande |
 | [`agent-loop.md`](agent-loop.md) | Turno chat → `engine::run_turn` |
+| [`chat-lifecycle.md`](chat-lifecycle.md) | Contratti owner per turni, steering, visible content e layout chat |
 | [`execution.md`](execution.md) | `ExecutionContract`, effect host, outbox, lease |
 | [`memory.md`](memory.md) | `MemoryFacade`, SQLite, flag pool/service |
 | [`desktop-ui.md`](desktop-ui.md) | Superfici Electron, chat, island |

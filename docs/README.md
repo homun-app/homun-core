@@ -12,6 +12,7 @@
 | [`CAPISALDI.md`](CAPISALDI.md) | Principi vincolanti (non la mappa del codice) |
 | [`architecture/`](architecture/) | Mappa as-built dei sottosistemi (riscritta dal codice) |
 | [`decisions/`](decisions/) | ADR immutabili — il “perché” storico, non lo stato corrente |
+| [`testing/anti-regression-protocol.md`](testing/anti-regression-protocol.md) | Gate minimo per non far rientrare regressioni chat/runtime/UI |
 | [`testing/release-candidate-matrix.md`](testing/release-candidate-matrix.md) | Gate release installata |
 | [`distribution.md`](distribution.md) · [`release-macos.md`](release-macos.md) · [`windows-signing.md`](windows-signing.md) | Distribuzione / firma |
 | [`HANDOFF-2026-07-31.md`](HANDOFF-2026-07-31.md) | Prompt lungo per un altro agent (opzionale) |

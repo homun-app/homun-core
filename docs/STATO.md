@@ -1,6 +1,6 @@
 # Stato — Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-07-31 (P0 live + sandbox write allow/deny).**
+> **Ultimo aggiornamento: 2026-08-03 (chat lifecycle/rendering consolidation).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -20,6 +20,22 @@
 Homun = gateway Rust + Electron/React + sidecar. Contratto unico
 `ExecutionContract → execute → ExecutionOutcome`. Loop unico
 `engine::agent_loop::run_turn`. Vedi [`architecture/overview.md`](architecture/overview.md).
+
+### Consolidamento chat lifecycle/rendering — branch `fabio/chat-lifecycle-consolidation`
+
+Obiettivo corrente: consolidare contratti esistenti, non aggiungere feature.
+I contratti vivi sono in [`architecture/chat-lifecycle.md`](architecture/chat-lifecycle.md);
+il gate anti-regressione e' in
+[`testing/anti-regression-protocol.md`](testing/anti-regression-protocol.md).
+
+Slice completate nel branch:
+
+- view model frontend per lifecycle/composer in `apps/desktop/src/lib/chat-runtime`;
+- filtro visible content condiviso per streaming/persistito;
+- classifier Rust `crates/task-runtime/src/turn_lifecycle.rs`;
+- cleanup durable di steering non settled a fine turno;
+- contratti CSS/test per prompt utente senza frame, editor multilinea e
+  overlay workspace/browser non sovrapposti.
 
 ### P0 — fatto
 
