@@ -72,6 +72,21 @@ def forbidden_main_startup_snippets() -> dict[str, str]:
     }
 
 
+def forbidden_root_snippets() -> dict[str, str]:
+    return {
+        "fn recall_source_label(": "memory recall labeling must stay in gateway_recall_context",
+        "fn recall_collection_token(": "memory recall collection labeling must stay in gateway_recall_context",
+        "fn memory_access_status_instruction(": "memory access prompt status must stay in gateway_recall_context",
+        "fn recall_stream_payload_from_pack(": "recall stream payload assembly must stay in gateway_recall_context",
+        "fn recall_stream_payload_from_hits(": "recall stream payload assembly must stay in gateway_recall_context",
+        "fn merge_automatic_recall_payload(": "automatic recall payload merging must stay in gateway_recall_context",
+        "fn memory_read_effects_from_recall_payload(": "recall effect projection must stay in gateway_recall_context",
+        "fn seed_loop_memory_reads(": "loop memory-read seeding must stay in gateway_recall_context",
+        "fn gather_open_loops(": "open-loop recall gathering must stay in gateway_recall_context",
+        "fn sanitize_dedup_key(": "dedup-key normalization must stay in gateway_recall_context",
+    }
+
+
 def assert_contains(source: str, snippet: str, message: str) -> None:
     if snippet not in source:
         raise AssertionError(f"{message}: missing {snippet!r}")
@@ -97,6 +112,7 @@ def main() -> int:
     with open(MAIN_RS, "r", encoding="utf-8") as handle:
         source = handle.read()
     main_body = extract_async_main_body(source)
+    assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
 
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
@@ -109,6 +125,9 @@ def main() -> int:
 
     for snippet, message in forbidden_main_startup_snippets().items():
         assert_not_contains(main_body, snippet, message)
+
+    for snippet, message in forbidden_root_snippets().items():
+        assert_not_contains(source, snippet, message)
 
     assert_ordered(
         main_body,

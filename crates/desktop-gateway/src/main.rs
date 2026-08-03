@@ -38,6 +38,7 @@ mod gateway_legacy_data;
 mod gateway_model_timeouts;
 mod gateway_paths;
 mod gateway_prompt;
+mod gateway_recall_context;
 mod gateway_routes;
 mod gateway_secrets;
 mod gateway_store_integrity;
@@ -127,6 +128,12 @@ use gateway_paths::{
     gateway_database_path, gateway_local_computer_database_path, gateway_logs_dir,
     gateway_memory_database_path, gateway_memory_wiki_dir, gateway_project_access_path,
     gateway_task_database_path, gateway_vault_database_path, gateway_workspaces_path,
+};
+use gateway_recall_context::{
+    gather_open_loops, memory_access_status_instruction, memory_read_effects_from_recall_payload,
+    merge_automatic_recall_payload, recall_collection_token, recall_source_label,
+    recall_stream_payload_from_hits, recall_stream_payload_from_pack, sanitize_dedup_key,
+    scope_display_name, seed_loop_memory_reads,
 };
 use gateway_secrets::{open_browser_checkpoint_secret_store, open_gateway_secret_store};
 use local_first_browser_automation::{
@@ -1468,161 +1475,6 @@ async fn create_chat_thread(
 // (dedup_key semantico); gated per agire (proposed_action è sempre soggetta ad
 // approvazione, mai eseguita qui). Forma one-shot LLM→JSON (estrattore, temp 0.0).
 
-/// Friendly label for a scope (a workspace id or PERSONAL_WORKSPACE), so the
-/// supervisor reasons over "Progetto Acme" rather than an opaque id.
-fn scope_display_name(scope: &str) -> String {
-    match scope {
-        PERSONAL_WORKSPACE => "Personal".to_string(),
-        THREADS_WORKSPACE => "Conversations".to_string(),
-        other => load_workspaces_file()
-            .workspaces
-            .iter()
-            .find(|w| w.id == other)
-            .map(|w| w.name.clone())
-            .unwrap_or_else(|| other.to_string()),
-    }
-}
-
-/// Resolve provenance labels at emission time rather than trusting a label that
-/// travelled through recall. Renames are therefore visible immediately and the
-/// reserved personal space never leaks as an implementation id.
-fn recall_source_label(scope: &str) -> String {
-    if scope == PERSONAL_WORKSPACE {
-        return if effective_user_language() == "it" {
-            "Personale".to_string()
-        } else {
-            "Personal".to_string()
-        };
-    }
-    scope_display_name(scope)
-}
-
-fn recall_collection_token(collection: MemoryCollectionKey) -> &'static str {
-    match collection {
-        MemoryCollectionKey::Preferences => "preferences",
-        MemoryCollectionKey::Profile => "profile",
-        MemoryCollectionKey::Knowledge => "knowledge",
-        MemoryCollectionKey::Decisions => "decisions",
-        MemoryCollectionKey::Goals => "goals",
-        MemoryCollectionKey::Artifacts => "artifacts",
-        MemoryCollectionKey::Episodes => "episodes",
-    }
-}
-
-fn memory_access_status_instruction(
-    status: local_first_memory::MemoryAccessStatus,
-) -> &'static str {
-    match status {
-        local_first_memory::MemoryAccessStatus::Ready => {
-            "MEMORY ACCESS STATUS: ready. Matching records were retrieved."
-        }
-        local_first_memory::MemoryAccessStatus::Empty => {
-            "MEMORY ACCESS STATUS: empty. The memory store is connected and answered correctly, but no matching record was found. Never describe this as a connection failure."
-        }
-        local_first_memory::MemoryAccessStatus::Degraded => {
-            "MEMORY ACCESS STATUS: degraded. Memory is connected and lexical recall remains available, but semantic/vector recall is degraded. State that limitation precisely if relevant."
-        }
-        local_first_memory::MemoryAccessStatus::Unavailable => {
-            "MEMORY ACCESS STATUS: unavailable. The memory store could not be queried; do not claim that no matching memory exists."
-        }
-        local_first_memory::MemoryAccessStatus::Denied => {
-            "MEMORY ACCESS STATUS: denied. Policy does not authorize memory access for this turn; do not imply the store is empty or disconnected."
-        }
-    }
-}
-
-fn recall_stream_payload_from_pack(
-    pack: &RecallPack,
-) -> local_first_subagents::RecallStreamPayload {
-    let mut payload = recall_stream_payload_from_hits(&pack.query, &pack.scope, &pack.hits);
-    payload.status = pack.status.as_str().to_string();
-    payload
-}
-
-fn recall_stream_payload_from_hits(
-    query: &str,
-    scope: &MemoryScope,
-    hits: &[RecallHit],
-) -> local_first_subagents::RecallStreamPayload {
-    local_first_subagents::RecallStreamPayload {
-        query: query.to_string(),
-        hits: hits
-            .iter()
-            .map(|hit| local_first_subagents::RecallStreamHit {
-                r#ref: hit.memory_ref.clone(),
-                text: hit.text.clone(),
-                score: hit.score,
-                kind: hit.kind.clone(),
-                source_workspace_id: hit.source_workspace_id.as_str().to_string(),
-                source_label: recall_source_label(hit.source_workspace_id.as_str()),
-                collection: recall_collection_token(hit.collection).to_string(),
-                grant_id: hit.grant_id.clone(),
-                policy_version: hit.policy_version,
-                source_revision: hit.grant_id.as_ref().map(|_| hit.source_revision.clone()),
-                conflict: hit.conflict,
-                graph_path: hit.graph_path.clone(),
-            })
-            .collect(),
-        scope: match scope {
-            MemoryScope::Personal => "personal".to_string(),
-            MemoryScope::Project(_) | MemoryScope::Thread { .. } => "project".to_string(),
-        },
-        status: if hits.is_empty() {
-            "empty".to_string()
-        } else {
-            "ready".to_string()
-        },
-    }
-}
-
-fn merge_automatic_recall_payload(
-    target: &mut Option<local_first_subagents::RecallStreamPayload>,
-    incoming: local_first_subagents::RecallStreamPayload,
-) {
-    let Some(current) = target.as_mut() else {
-        *target = Some(incoming);
-        return;
-    };
-    let incoming_status = incoming.status;
-    for hit in incoming.hits {
-        let duplicate = current.hits.iter().any(|existing| {
-            existing.r#ref == hit.r#ref
-                && existing.source_workspace_id == hit.source_workspace_id
-                && existing.grant_id == hit.grant_id
-                && existing.policy_version == hit.policy_version
-                && existing.source_revision == hit.source_revision
-        });
-        if !duplicate {
-            current.hits.push(hit);
-        }
-    }
-    current.status = match (current.status.as_str(), incoming_status.as_str()) {
-        ("unavailable", _) | (_, "unavailable") => "unavailable",
-        ("denied", _) | (_, "denied") => "denied",
-        ("degraded", _) | (_, "degraded") => "degraded",
-        ("ready", _) | (_, "ready") => "ready",
-        _ => "empty",
-    }
-    .to_string();
-}
-
-fn memory_read_effects_from_recall_payload(
-    payload: &local_first_subagents::RecallStreamPayload,
-) -> local_first_engine::ToolEffects {
-    let mut effects = local_first_engine::ToolEffects::default();
-    effects.memory_reads.extend_payload(payload);
-    effects
-}
-
-fn seed_loop_memory_reads(
-    state: &mut local_first_engine::LoopState,
-    payload: Option<&local_first_subagents::RecallStreamPayload>,
-) {
-    if let Some(payload) = payload {
-        state.memory_reads.extend_payload(payload);
-    }
-}
-
 /// Durable knowledge of a scope (facts/preferences/decisions/goals), capped to
 /// keep the prompt bounded. `scope` is a workspace id or PERSONAL_WORKSPACE —
 /// which is exactly the suggestion card's `scope`, so no translation is needed.
@@ -1645,27 +1497,6 @@ fn gather_scope_memory(state: &AppState, scope: &str, cap: usize) -> Vec<String>
             let one = m.text.trim().replace('\n', " ");
             format!("[{}] {one}", m.memory_type)
         })
-        .collect();
-    if items.len() > cap {
-        items.drain(0..items.len() - cap);
-    }
-    items
-}
-
-/// WS5.4 — OPEN LOOPS of the active scope (unfinished work + why), ALWAYS injected into
-/// the briefing so a fresh chat resumes them WITHOUT the user naming the topic (the
-/// Zeigarnik guarantee). Most-recent first, small cap. Separate from the general profile
-/// so they get a guaranteed, high-priority slot instead of competing in the relevance mix.
-fn gather_open_loops(state: &AppState, cap: usize) -> Vec<String> {
-    let facade = memory_facade(state);
-    let user = gateway_memory_user_id();
-    let workspace = gateway_memory_workspace_id();
-    let mut items: Vec<String> = facade
-        .list_memories_for_ui(&user, &workspace)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(active_open_loop_record)
-        .map(|m| m.text.trim().replace('\n', " "))
         .collect();
     if items.len() > cap {
         items.drain(0..items.len() - cap);
@@ -1702,35 +1533,6 @@ fn gather_recent_connector_activity(state: &AppState, cap: usize) -> Vec<String>
             }
         })
         .collect()
-}
-
-/// Normalize a model-proposed anchor into a stable, DURABLE dedup key
-/// `{kind}:{slug}`. Semantic (survives paraphrase), unlike a hash of the body:
-/// lowercased, runs of non-alphanumerics collapsed to a single '-', trimmed.
-/// Pure → unit-testable.
-fn sanitize_dedup_key(kind: &str, raw: &str) -> String {
-    let slug = |s: &str| -> String {
-        let mut out = String::new();
-        let mut prev_dash = false;
-        for ch in s.trim().to_lowercase().chars() {
-            if ch.is_alphanumeric() {
-                out.push(ch);
-                prev_dash = false;
-            } else if !out.is_empty() && !prev_dash {
-                out.push('-');
-                prev_dash = true;
-            }
-        }
-        out.trim_matches('-').to_string()
-    };
-    let k = slug(kind);
-    let a = slug(raw);
-    match (k.is_empty(), a.is_empty()) {
-        (true, true) => "suggerimento".to_string(),
-        (true, false) => a,
-        (false, true) => k,
-        (false, false) => format!("{k}:{a}"),
-    }
 }
 
 /// Parse the supervisor's JSON into a ready-to-insert card, or None when the
