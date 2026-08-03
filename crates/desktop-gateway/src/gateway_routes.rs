@@ -197,34 +197,43 @@ pub(crate) fn build_gateway_router(state: AppState) -> Router {
         )
         .route(
             "/api/plugins/packages/install-local",
-            post(install_local_plugin_package),
+            post(crate::gateway_plugin_packages::install_local_plugin_package),
         )
         .route(
             "/api/plugins/packages/install-from-registry",
-            post(install_plugin_package_from_registry),
+            post(crate::gateway_plugin_packages::install_plugin_package_from_registry),
         )
         .route(
             "/api/plugins/packages/update-from-registry",
-            post(update_plugin_package_from_registry),
+            post(crate::gateway_plugin_packages::update_plugin_package_from_registry),
         )
         .route(
             "/api/plugins/packages/installed",
-            get(installed_plugin_packages),
+            get(crate::gateway_plugin_packages::installed_plugin_packages),
         )
-        .route("/api/plugins/packages/updates", get(plugin_package_updates))
+        .route(
+            "/api/plugins/packages/updates",
+            get(crate::gateway_plugin_packages::plugin_package_updates),
+        )
         .route(
             "/api/plugins/trusted-keys",
-            get(trusted_plugin_public_keys).put(set_trusted_plugin_public_keys),
+            get(crate::gateway_plugin_packages::trusted_plugin_public_keys)
+                .put(crate::gateway_plugin_packages::set_trusted_plugin_public_keys),
         )
         .route(
             "/api/plugins/licenses",
-            get(plugin_licenses).put(set_plugin_license),
+            get(crate::gateway_plugin_packages::plugin_licenses)
+                .put(crate::gateway_plugin_packages::set_plugin_license),
         )
         .route(
             "/api/plugins/registry/cache",
-            get(cached_plugin_registry).post(cache_plugin_registry),
+            get(crate::gateway_plugin_packages::cached_plugin_registry)
+                .post(crate::gateway_plugin_packages::cache_plugin_registry),
         )
-        .route("/api/plugins/registry/fetch", post(fetch_plugin_registry))
+        .route(
+            "/api/plugins/registry/fetch",
+            post(crate::gateway_plugin_packages::fetch_plugin_registry),
+        )
         .route(
             "/api/runtime/provider",
             get(runtime_provider).post(set_runtime_provider),

@@ -110,6 +110,13 @@ def forbidden_root_snippets() -> dict[str, str]:
         "const KNOWN_PLUGINS:": "plugin enablement registry must stay in gateway_plugins",
         "async fn plugins_list(": "plugin enablement listing must stay in gateway_plugins",
         "async fn plugin_toggle(": "plugin enablement toggle must stay in gateway_plugins",
+        "const MAX_LOCAL_PLUGIN_PACKAGE_BYTES:": "plugin package limits must stay in gateway_plugin_packages",
+        "struct InstallLocalPluginPackageRequest ": "plugin package request types must stay in gateway_plugin_packages",
+        "async fn install_local_plugin_package(": "plugin package install endpoint must stay in gateway_plugin_packages",
+        "async fn install_plugin_package_from_registry(": "plugin package install endpoint must stay in gateway_plugin_packages",
+        "async fn update_plugin_package_from_registry(": "plugin package update endpoint must stay in gateway_plugin_packages",
+        "async fn fetch_plugin_registry(": "plugin registry fetch endpoint must stay in gateway_plugin_packages",
+        "fn installed_plugin_packages_root(": "plugin package paths must stay in gateway_plugin_packages",
     }
 
 
@@ -144,6 +151,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_memory_background;", "gateway root must declare memory background owner")
     assert_contains(source, "mod gateway_remote_approval;", "gateway root must declare remote approval owner")
     assert_contains(source, "mod gateway_plugins;", "gateway root must declare plugin enablement owner")
+    assert_contains(source, "mod gateway_plugin_packages;", "gateway root must declare plugin package owner")
 
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",

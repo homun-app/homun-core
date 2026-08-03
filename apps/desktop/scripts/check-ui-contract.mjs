@@ -294,6 +294,11 @@ assertRepoContains(
   "Gateway plugin enablement endpoints must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_plugin_packages.rs",
+  "install_local_plugin_package",
+  "Gateway plugin package endpoints must have a dedicated owner",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway main ownership contract"',
   "Kernel regression gate must run the gateway main ownership contract",
@@ -327,6 +332,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway plugins"',
   "Kernel regression gate must run the gateway plugin owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway plugin packages"',
+  "Kernel regression gate must run the gateway plugin package owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",
