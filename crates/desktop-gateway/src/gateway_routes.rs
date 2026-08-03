@@ -11,6 +11,7 @@ use axum::{
     routing::{delete, get, post, put},
 };
 
+use crate::gateway_chat_branches::{chat_branches, set_active_leaf, set_branch_label};
 use crate::gateway_chat_threads::{
     archive_chat_thread, chat_messages, chat_thread_attentions, chat_threads, create_chat_thread,
     delete_chat_thread, mark_chat_thread_seen, rename_chat_thread, reorder_chat_threads,

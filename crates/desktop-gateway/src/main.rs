@@ -28,6 +28,7 @@ mod gateway_auth;
 mod gateway_background_startup;
 mod gateway_bind;
 mod gateway_boot_maintenance;
+mod gateway_chat_branches;
 mod gateway_chat_threads;
 mod gateway_cors;
 mod gateway_db_unify;
@@ -126,7 +127,7 @@ use axum::{
 };
 use base64::Engine as _;
 use bytes::Bytes;
-use chat_store::{BranchPoint, ChatStore, RemoteApprovalInput, RemoteApprovalRow, Tag, TagEntity};
+use chat_store::{ChatStore, RemoteApprovalInput, RemoteApprovalRow, Tag, TagEntity};
 pub(crate) use gateway_identity::gateway_workspace_id;
 pub(crate) use gateway_identity::{
     active_workspace_id, base_workspace_id, canonical_memory_workspace_id,
@@ -189,8 +190,8 @@ use local_first_desktop_gateway::workspace_delete::{
 use local_first_desktop_gateway::{
     AttachmentInput, BuildPromptRequest, ChatContextMessage, ChatContextRole,
     ChatGenerateStreamRequest, ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
-    EnqueueTurnRequest, RoutingBinding, SetActiveLeafRequest, SetBranchLabelRequest,
-    SetThreadPinnedRequest, build_chat_runtime_prompt, compact_thread_title, strip_display_markers,
+    EnqueueTurnRequest, RoutingBinding, SetThreadPinnedRequest, build_chat_runtime_prompt,
+    compact_thread_title, strip_display_markers,
 };
 // The pure plan state machine now lives in the engine crate (ADR 0024, increment 3). Imported
 // unqualified so every call site (and the `use super::{…}` in the test module) resolves unchanged.
@@ -1400,50 +1401,6 @@ pub(crate) async fn activate_remote_approvals_from_message(
         }
     }
     Ok(None)
-}
-
-/// Branch switcher (‹ n/m ›): every branch point on the thread's active path.
-async fn chat_branches(
-    State(state): State<AppState>,
-    Path(thread_id): Path<String>,
-) -> Result<Json<Vec<BranchPoint>>, GatewayError> {
-    Ok(Json(
-        lock_store(&state)?
-            .branch_options(&thread_id)
-            .map_err(GatewayError::store)?,
-    ))
-}
-
-/// Point the displayed conversation at a specific leaf (select a branch).
-async fn set_active_leaf(
-    State(state): State<AppState>,
-    Path(thread_id): Path<String>,
-    Json(request): Json<SetActiveLeafRequest>,
-) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
-    let store = lock_store(&state)?;
-    store
-        .set_active_leaf(&thread_id, request.leaf_id.as_deref())
-        .map_err(GatewayError::store)?;
-    Ok(Json(
-        store.messages(&thread_id).map_err(GatewayError::store)?,
-    ))
-}
-
-/// Name (or clear) a branch — Phase 4.
-async fn set_branch_label(
-    State(state): State<AppState>,
-    Path(thread_id): Path<String>,
-    Json(request): Json<SetBranchLabelRequest>,
-) -> Result<Json<Vec<BranchPoint>>, GatewayError> {
-    let store = lock_store(&state)?;
-    store
-        .set_branch_label(&thread_id, &request.message_id, request.label.as_deref())
-        .map_err(GatewayError::store)?;
-    Ok(Json(
-        store
-            .branch_options(&thread_id)
-            .map_err(GatewayError::store)?,
-    ))
 }
 
 async fn create_task_from_chat_message(
