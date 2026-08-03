@@ -99,7 +99,9 @@ Run:
 git diff --name-only
 ```
 
-Expected: paths grouped into these buckets:
+Expected: tracked modified paths grouped into these buckets. Keep `git status --short`
+untracked files separate from `git diff --name-only`, then assign them to a commit
+slice for planning.
 
 ```text
 chat-lifecycle-rendering:
@@ -115,7 +117,9 @@ chat-lifecycle-rendering:
 browser-computer-workspace:
   apps/desktop/src/styles/workspace-island.css
   apps/desktop/tests/adaptive-workspace-island-ui.test.mjs
-  crates/engine/src/agent_loop.rs
+
+browser-runtime:
+  apps/desktop/scripts/electron-dev.mjs
 
 runtime-model-context:
   apps/desktop/src/components/RuntimeContextPanel.tsx
@@ -129,11 +133,32 @@ durable-turn-runtime:
   crates/desktop-gateway/src/execution_projection.rs
   crates/desktop-gateway/src/main.rs
 
+model/tool-call-history-hygiene:
+  crates/engine/src/agent_loop.rs
+
+cross-bucket-contract-test:
+  apps/desktop/tests/cursor-grammar-ui.test.mjs
+
 docs:
   docs/README.md
   docs/STATO.md
   docs/testing/anti-regression-protocol.md
 ```
+
+Classification rules:
+
+- `docs/testing/anti-regression-protocol.md` is untracked/status-only when it appears as
+  `??`; it does not appear in `git diff --name-only`, but it still belongs to the docs
+  slice if `docs/README.md` or `docs/STATO.md` link it.
+- `crates/desktop-gateway/src/main.rs` is hunk-split required. It can contain stream
+  visibility/tool-call changes, `browser_done` parsing, and task acquisition/resource
+  race logic in the same file. Do not stage it wholesale.
+- `apps/desktop/tests/cursor-grammar-ui.test.mjs` is hunk-split required. It can contain
+  runtime context, terminal turn UI, stale steering, CSS, and composer layout assertions.
+  Do not stage it wholesale.
+- `crates/engine/src/agent_loop.rs` is model/tool-call history hygiene coupled to gateway
+  stream suppression, not primarily browser/computer workspace overlay.
+- Task 2 in the isolated worktree must not import dirty main-worktree files wholesale.
 
 If the actual list differs, update the bucket notes before continuing.
 
