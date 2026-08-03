@@ -299,6 +299,11 @@ assertRepoContains(
   "Gateway plugin package endpoints must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_chat_threads.rs",
+  "chat_threads",
+  "Gateway chat thread endpoints must have a dedicated owner",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway main ownership contract"',
   "Kernel regression gate must run the gateway main ownership contract",
@@ -337,6 +342,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway plugin packages"',
   "Kernel regression gate must run the gateway plugin package owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway chat threads"',
+  "Kernel regression gate must run the gateway chat thread owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",

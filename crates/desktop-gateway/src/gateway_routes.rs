@@ -11,6 +11,11 @@ use axum::{
     routing::{delete, get, post, put},
 };
 
+use crate::gateway_chat_threads::{
+    archive_chat_thread, chat_messages, chat_thread_attentions, chat_threads, create_chat_thread,
+    delete_chat_thread, mark_chat_thread_seen, rename_chat_thread, reorder_chat_threads,
+    select_chat_thread, set_chat_thread_pinned, unarchive_chat_thread,
+};
 use crate::*;
 
 pub(crate) fn build_gateway_router(state: AppState) -> Router {

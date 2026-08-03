@@ -117,6 +117,15 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn update_plugin_package_from_registry(": "plugin package update endpoint must stay in gateway_plugin_packages",
         "async fn fetch_plugin_registry(": "plugin registry fetch endpoint must stay in gateway_plugin_packages",
         "fn installed_plugin_packages_root(": "plugin package paths must stay in gateway_plugin_packages",
+        "struct ChatThreadsQuery ": "chat thread request types must stay in gateway_chat_threads",
+        "fn resolve_threads_workspace(": "chat thread workspace resolution must stay in gateway_chat_threads",
+        "async fn chat_threads(": "chat thread list endpoint must stay in gateway_chat_threads",
+        "struct ThreadAttentionResponse ": "chat thread attention response must stay in gateway_chat_threads",
+        "fn seen_terminal_cursor_to_persist(": "chat thread seen cursor clamp must stay in gateway_chat_threads",
+        "async fn mark_chat_thread_seen(": "chat thread seen endpoint must stay in gateway_chat_threads",
+        "async fn create_chat_thread(": "chat thread create endpoint must stay in gateway_chat_threads",
+        "async fn delete_chat_thread(": "chat thread delete endpoint must stay in gateway_chat_threads",
+        "async fn chat_messages(": "chat message list endpoint must stay in gateway_chat_threads",
     }
 
 
@@ -152,6 +161,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_remote_approval;", "gateway root must declare remote approval owner")
     assert_contains(source, "mod gateway_plugins;", "gateway root must declare plugin enablement owner")
     assert_contains(source, "mod gateway_plugin_packages;", "gateway root must declare plugin package owner")
+    assert_contains(source, "mod gateway_chat_threads;", "gateway root must declare chat thread owner")
 
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
