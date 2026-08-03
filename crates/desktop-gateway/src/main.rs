@@ -27,6 +27,7 @@ mod execution_runtime;
 mod gateway_auth;
 mod gateway_bind;
 mod gateway_cors;
+mod gateway_db_unify;
 mod gateway_file_security;
 mod gateway_health;
 mod gateway_identity;
@@ -125,10 +126,9 @@ pub(crate) use gateway_model_timeouts::{
 };
 use gateway_paths::{
     gateway_browser_policy_database_path, gateway_capability_database_path, gateway_data_dir,
-    gateway_database_path, gateway_legacy_chat_database_path, gateway_legacy_task_database_path,
-    gateway_local_computer_database_path, gateway_logs_dir, gateway_memory_database_path,
-    gateway_memory_wiki_dir, gateway_project_access_path, gateway_task_database_path,
-    gateway_unified_database_path, gateway_vault_database_path, gateway_workspaces_path,
+    gateway_database_path, gateway_local_computer_database_path, gateway_logs_dir,
+    gateway_memory_database_path, gateway_memory_wiki_dir, gateway_project_access_path,
+    gateway_task_database_path, gateway_vault_database_path, gateway_workspaces_path,
 };
 use gateway_secrets::{open_browser_checkpoint_secret_store, open_gateway_secret_store};
 use local_first_browser_automation::{
@@ -1223,31 +1223,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ]));
 
     let addr = gateway_bind::gateway_bind_addr();
-    // Phase 1b: fuse the legacy two-DB layout (desktop-gateway.sqlite +
-    // task-runtime.sqlite) into the unified homun.sqlite. Idempotent; MUST run
-    // before AppState opens the stores on the unified path.
-    {
-        let unified = gateway_unified_database_path()?;
-        let legacy_chat = gateway_legacy_chat_database_path()?;
-        let legacy_task = gateway_legacy_task_database_path()?;
-        let report = db_migrate::unify_databases_if_needed(&legacy_chat, &legacy_task, &unified)
-            .map_err(|error| {
-                std::io::Error::other(format!(
-                    "db unify failed for {}: {error}",
-                    unified.display()
-                ))
-            })?;
-        if report.unified {
-            let total_chat: usize = report.chat_rows.values().sum();
-            let total_task: usize = report.task_rows.values().sum();
-            eprintln!(
-                "db unify: migrated legacy chat ({total_chat} rows across {} tables) + task ({total_task} rows across {} tables) into {}",
-                report.chat_rows.len(),
-                report.task_rows.len(),
-                unified.display()
-            );
-        }
-    }
+    gateway_db_unify::unify_legacy_databases_at_startup()?;
     // Unified WS registry: build the Arc once, register it process-wide (so free
     // functions like `publish_app_event` can publish without `&AppState`), then
     // hand the same Arc to AppState. Clones below are cheap Arc clones.

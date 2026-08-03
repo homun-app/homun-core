@@ -976,6 +976,9 @@ assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_task_executor_
 assertRepoContains("crates/desktop-gateway/src/gateway_model_timeouts.rs", "model_request_timeout_secs", "desktop gateway model timeout config must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_model_timeouts.rs", "HOMUN_MODEL_FIRST_TOKEN_SECS", "desktop gateway model timeout owner must preserve first-token override compatibility");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "pub(crate) use gateway_model_timeouts", "desktop gateway root must re-export shared model timeout helpers");
+assertRepoContains("crates/desktop-gateway/src/gateway_db_unify.rs", "unify_legacy_databases_at_startup", "desktop gateway legacy DB unification must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_db_unify.rs", "unify_databases_if_needed", "desktop gateway DB unification owner must delegate to the canonical migration engine");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_db_unify::unify_legacy_databases_at_startup", "desktop gateway startup must use the shared DB unification owner");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "require_gateway_token", "desktop gateway auth middleware must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "resolve_gateway_auth_token", "desktop gateway auth token resolution must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_auth::require_gateway_token", "desktop gateway must protect chat endpoints with a local token");
