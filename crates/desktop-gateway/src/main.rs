@@ -106,10 +106,11 @@ use base64::Engine as _;
 use bytes::Bytes;
 use chat_store::{BranchPoint, ChatStore, RemoteApprovalInput, RemoteApprovalRow, Tag, TagEntity};
 use gateway_paths::{
-    gateway_browser_policy_database_path, gateway_data_dir, gateway_database_path,
-    gateway_legacy_chat_database_path, gateway_legacy_task_database_path,
+    gateway_browser_policy_database_path, gateway_capability_database_path, gateway_data_dir,
+    gateway_database_path, gateway_legacy_chat_database_path, gateway_legacy_task_database_path,
     gateway_local_computer_database_path, gateway_logs_dir, gateway_memory_database_path,
-    gateway_task_database_path, gateway_unified_database_path, gateway_vault_database_path,
+    gateway_memory_wiki_dir, gateway_project_access_path, gateway_task_database_path,
+    gateway_unified_database_path, gateway_vault_database_path, gateway_workspaces_path,
 };
 use local_first_browser_automation::{
     BrowserAutomationClient, BrowserAutomationError, BrowserCheckpoint, BrowserMethod,
@@ -62410,35 +62411,6 @@ fn decode_vault_wrap_key(encoded: &str) -> Option<[u8; 32]> {
     Some(key)
 }
 
-/// Directory for human-readable/editable memory wiki markdown pages.
-fn gateway_memory_wiki_dir() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("HOMUN_MEMORY_WIKI_DIR") {
-        let path = PathBuf::from(path);
-        fs::create_dir_all(&path)?;
-        return Ok(path);
-    }
-    let base = env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| env::temp_dir())
-        .join(".homun")
-        .join("memory-wiki");
-    fs::create_dir_all(&base)?;
-    Ok(base)
-}
-
-fn gateway_capability_database_path() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("HOMUN_CAPABILITY_REGISTRY_DB") {
-        let path = PathBuf::from(path);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        return Ok(path);
-    }
-
-    let base = gateway_data_dir()?;
-    Ok(base.join("capability-registry.sqlite"))
-}
-
 /// Make every top-level file in the data directory owner-only (0600). The
 /// personal stores (memory.sqlite, desktop-gateway.sqlite, the WhatsApp session,
 /// task-runtime.sqlite, their WAL/SHM, plus any *.bak snapshots) are plaintext on
@@ -63589,16 +63561,6 @@ fn validate_memory_source_overrides(
         }
     }
     Ok(overrides)
-}
-
-fn gateway_workspaces_path() -> Result<PathBuf, std::io::Error> {
-    let base = gateway_data_dir()?;
-    Ok(base.join("workspaces.json"))
-}
-
-fn gateway_project_access_path() -> Result<PathBuf, std::io::Error> {
-    let base = gateway_data_dir()?;
-    Ok(base.join("project-access.json"))
 }
 
 fn normalize_project_access_grant(mut grant: ProjectAccessGrant) -> ProjectAccessGrant {

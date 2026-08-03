@@ -948,6 +948,8 @@ assertRepoContains("crates/desktop-gateway/src/main.rs", "LocalComputerSessionSt
 assertRepoContains("crates/desktop-gateway/src/main.rs", "HOMUN_BROWSER_HEADLESS", "desktop gateway must allow visible Playwright browser sessions");
 assertRepoContains("crates/desktop-gateway/src/gateway_paths.rs", "gateway_data_dir", "desktop gateway data paths must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_paths.rs", "HOMUN_DESKTOP_GATEWAY_DB", "desktop gateway path owner must preserve DB override compatibility");
+assertRepoContains("crates/desktop-gateway/src/gateway_paths.rs", "gateway_workspaces_path", "desktop gateway workspace paths must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_paths.rs", "HOMUN_MEMORY_WIKI_DIR", "desktop gateway path owner must preserve memory wiki override compatibility");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_paths::gateway_data_dir", "desktop gateway startup must use the shared path owner");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "require_gateway_token", "desktop gateway auth middleware must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "resolve_gateway_auth_token", "desktop gateway auth token resolution must be owned outside the monolith");

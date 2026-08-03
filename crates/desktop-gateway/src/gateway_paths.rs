@@ -95,6 +95,33 @@ pub(crate) fn gateway_vault_database_path() -> Result<PathBuf, std::io::Error> {
     })
 }
 
+/// Directory for human-readable/editable memory wiki markdown pages.
+pub(crate) fn gateway_memory_wiki_dir() -> Result<PathBuf, std::io::Error> {
+    if let Ok(path) = env::var("HOMUN_MEMORY_WIKI_DIR") {
+        let path = PathBuf::from(path);
+        fs::create_dir_all(&path)?;
+        return Ok(path);
+    }
+    let base = default_data_dir(env::var("HOME").ok().map(PathBuf::from), env::temp_dir())
+        .join("memory-wiki");
+    fs::create_dir_all(&base)?;
+    Ok(base)
+}
+
+pub(crate) fn gateway_capability_database_path() -> Result<PathBuf, std::io::Error> {
+    database_path_from_env("HOMUN_CAPABILITY_REGISTRY_DB", || {
+        Ok(gateway_data_dir()?.join("capability-registry.sqlite"))
+    })
+}
+
+pub(crate) fn gateway_workspaces_path() -> Result<PathBuf, std::io::Error> {
+    Ok(gateway_data_dir()?.join("workspaces.json"))
+}
+
+pub(crate) fn gateway_project_access_path() -> Result<PathBuf, std::io::Error> {
+    Ok(gateway_data_dir()?.join("project-access.json"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
