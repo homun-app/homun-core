@@ -25,6 +25,7 @@ mod execution_host;
 mod execution_projection;
 mod execution_runtime;
 mod gateway_auth;
+mod gateway_cors;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod inference_transport;
 mod model_client;
@@ -90,10 +91,7 @@ use axum::{
     Json, Router,
     body::Body,
     extract::{Path, Query, RawQuery, Request, State},
-    http::{
-        HeaderName, HeaderValue, Method, StatusCode,
-        header::{AUTHORIZATION, CONTENT_TYPE},
-    },
+    http::{StatusCode, header::CONTENT_TYPE},
     middleware,
     response::{IntoResponse, Response},
     routing::delete,
@@ -234,7 +232,6 @@ use std::{
 use task_registry::TaskExecutorRegistry;
 use time::{Duration, OffsetDateTime};
 use tokio::net::TcpListener;
-use tower_http::cors::{AllowOrigin, CorsLayer};
 
 const TASK_EXECUTOR_WORKER_ID: &str = "desktop-gateway-background-worker";
 const TASK_EXECUTOR_MANUAL_WORKER_ID: &str = "desktop-gateway-manual-run";
@@ -2170,7 +2167,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .not_found_service(tower_http::services::ServeFile::new(index)),
         );
     }
-    let app = app.layer(cors_layer());
+    let app = app.layer(gateway_cors::cors_layer());
     // Warm up the contained computer so the live view + browser are ready without waiting for
     // the first skill. Off the async runtime so startup is not blocked by the container boot.
     // Behavior depends on the user's `local_computer_autostart` setting (default ON):
@@ -65009,35 +65006,6 @@ fn gateway_memory_access_request() -> MemoryAccessRequest {
     }
 }
 
-fn cors_layer() -> CorsLayer {
-    let mut origins = vec![
-        HeaderValue::from_static("http://127.0.0.1:1420"),
-        HeaderValue::from_static("http://localhost:1420"),
-        HeaderValue::from_static("http://127.0.0.1:1421"),
-        HeaderValue::from_static("http://localhost:1421"),
-        HeaderValue::from_static("null"),
-    ];
-    if let Ok(origin) = env::var("HOMUN_DESKTOP_ALLOWED_ORIGIN")
-        && let Ok(header) = HeaderValue::from_str(origin.trim())
-    {
-        origins.push(header);
-    }
-
-    CorsLayer::new()
-        .allow_origin(AllowOrigin::list(origins))
-        .allow_methods([
-            Method::GET,
-            Method::POST,
-            Method::PATCH,
-            Method::DELETE,
-            Method::OPTIONS,
-        ])
-        .allow_headers([CONTENT_TYPE, AUTHORIZATION])
-        // Custom response headers are hidden from browser `fetch` unless exposed —
-        // without this the UI reads `x-effective-model` as null (curl sees it fine).
-        .expose_headers([HeaderName::from_static("x-effective-model")])
-}
-
 impl IntoResponse for GatewayError {
     fn into_response(self) -> Response {
         (
@@ -72109,7 +72077,7 @@ prs.save(Path({path:?}))
 
         let app = Router::new()
             .route("/api/vault/records/record_1", get(ok).patch(ok))
-            .layer(super::cors_layer());
+            .layer(super::gateway_cors::cors_layer());
         let response = app
             .oneshot(
                 Request::builder()

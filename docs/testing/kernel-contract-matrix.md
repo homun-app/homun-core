@@ -29,6 +29,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | Layout chat/browser/activity | `apps/desktop/src/styles/chat.css`, `apps/desktop/src/styles/workspace-island.css` | live computer/browser polling | workspace island / transcript | `cd apps/desktop && npm run test:ui-contract`; `cd apps/desktop && npm run build` |
 | Runtime browser dev | `apps/desktop/scripts/browser-runtime.mjs`, `apps/desktop/scripts/electron-dev.mjs` | `HOMUN_BROWSER_AUTOMATION_DIR` | Activity/browser island | `node --test tests/contained-computer-package.test.mjs`; live smoke opt-in |
 | Gateway Bearer auth | `crates/desktop-gateway/src/gateway_auth.rs` | `Authorization: Bearer <token>` | `apps/desktop/src/lib/gatewayConfig.ts` | `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_auth`; `cd apps/desktop && npm run test:ui-contract` |
+| Gateway CORS | `crates/desktop-gateway/src/gateway_cors.rs` | `Origin`, `Access-Control-*`, `x-effective-model` | desktop renderer fetch | `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_cors`; `cd apps/desktop && npm run test:ui-contract` |
 
 ## Smoke Live
 
