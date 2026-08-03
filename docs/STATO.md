@@ -27,6 +27,8 @@ Obiettivo corrente: consolidare contratti esistenti, non aggiungere feature.
 I contratti vivi sono in [`architecture/chat-lifecycle.md`](architecture/chat-lifecycle.md);
 il gate anti-regressione e' in
 [`testing/anti-regression-protocol.md`](testing/anti-regression-protocol.md).
+L'evidenza QA della slice e' in
+[`testing/chat-lifecycle-consolidation-qa.md`](testing/chat-lifecycle-consolidation-qa.md).
 
 Slice completate nel branch:
 
