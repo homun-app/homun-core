@@ -259,6 +259,11 @@ assertRepoContains(
   "Gateway background startup must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_routes.rs",
+  "build_gateway_router",
+  "Gateway route assembly must have a dedicated owner",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway main ownership contract"',
   "Kernel regression gate must run the gateway main ownership contract",
@@ -586,10 +591,11 @@ assertContains("src/components/SettingsView.tsx", "editVaultPin", "Vault record 
 assertContains("src/components/SettingsView.tsx", "editVaultSecretValue", "Vault record editing must allow correcting the encrypted value after PIN unlock");
 assertContains("src/components/SettingsView.tsx", "className=\"vault-record-edit\"", "Vault settings must render an inline metadata editor");
 assertContains("src/components/SettingsView.tsx", "vault-record-list", "Vault settings must render a saved-record list under sensitive data");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/vault/records", "Gateway must expose Vault record listing");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/vault/records/{id}", "Gateway must expose Vault record deletion");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/vault/records/{id}/reveal", "Gateway must expose PIN-gated Vault record reveal");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "patch(vault_record_update)", "Gateway must expose metadata-only Vault record editing");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "build_gateway_router", "Gateway route assembly must stay in its dedicated owner");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/vault/records", "Gateway must expose Vault record listing");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/vault/records/{id}", "Gateway must expose Vault record deletion");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/vault/records/{id}/reveal", "Gateway must expose PIN-gated Vault record reveal");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "patch(vault_record_update)", "Gateway must expose metadata-only Vault record editing");
 assertContains("src/components/SettingsView.tsx", "t(\"settings.vaultEncrypted\")", "Vault status badge must use translations");
 assertContains("src/i18n/locales/it.json", "\"vaultEncrypted\": \"Cifrato\"", "Italian locale must translate the Vault encrypted badge");
 assertContains("src/i18n/locales/en.json", "\"vaultEncrypted\": \"Encrypted\"", "English locale must translate the Vault encrypted badge");
@@ -966,9 +972,9 @@ assertRepoContains("Cargo.toml", "\"crates/desktop-gateway\"", "workspace must i
 assertRepoContains("crates/desktop-gateway/src/lib.rs", "build_chat_runtime_prompt", "desktop gateway must own chat runtime prompt construction");
 assertRepoContains("crates/desktop-gateway/src/lib.rs", "ContextCompressor", "desktop gateway must use Rust context compression");
 assertRepoContains("crates/desktop-gateway/src/gateway_prompt.rs", "build_prompt", "desktop gateway prompt build handler must be owned outside the monolith");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/chat/build_prompt", "desktop gateway must expose prompt build endpoint");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_prompt::build_prompt", "desktop gateway must route prompt build through the shared handler");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/chat/turns", "desktop gateway must expose the broker turn endpoint (the only chat path)");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/chat/build_prompt", "desktop gateway must expose prompt build endpoint");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "gateway_prompt::build_prompt", "desktop gateway must route prompt build through the shared handler");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/chat/turns", "desktop gateway must expose the broker turn endpoint (the only chat path)");
 assertRepoContains("apps/desktop/src/lib/coreBridge.ts", "export type CoreChatStreamEvent", "desktop renderer must expose structured chat stream events");
 assertRepoContains("apps/desktop/src/lib/chatApi.ts", "listenChatStreamEvent", "chat API must expose structured chat stream subscription");
 assertRepoContains("apps/desktop/src/components/ChatView.tsx", "listenChatStreamEvent", "ChatView must consume structured chat stream events");
@@ -979,20 +985,20 @@ assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "eventPartToLe
 assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "visibleStreamingText", "streaming messages must keep prose text separate from structured event parts");
 assertRepoContains("apps/desktop/src/components/ChatView.tsx", "shouldDropStructuredMarkerDelta", "ChatView must drop legacy marker deltas after receiving structured event parts");
 assertNotContains("src/App.tsx", "‹‹CHOICES››", "new proactivity choice prompts must use structured event parts, not marker text");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/tasks/queue", "desktop gateway must expose task queue read model endpoint");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/tasks/executor", "desktop gateway must expose task executor status endpoint");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/tasks/run_next", "desktop gateway must expose the first local task executor endpoint");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/tasks/queue", "desktop gateway must expose task queue read model endpoint");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/tasks/executor", "desktop gateway must expose task executor status endpoint");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/tasks/run_next", "desktop gateway must expose the first local task executor endpoint");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "start_task_executor_worker", "desktop gateway must start a background task executor worker");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/local-computer/sessions/{session_id}", "desktop gateway must expose local computer session read model endpoint");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/local-computer/sessions/{session_id}/artifacts/{artifact_id}/preview", "desktop gateway must expose redacted local computer artifact previews");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/memory/dashboard", "desktop gateway must expose memory dashboard read model endpoint");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/capabilities/snapshot", "desktop gateway must expose capability registry snapshot endpoint");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/local-computer/sessions/{session_id}", "desktop gateway must expose local computer session read model endpoint");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/local-computer/sessions/{session_id}/artifacts/{artifact_id}/preview", "desktop gateway must expose redacted local computer artifact previews");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/memory/dashboard", "desktop gateway must expose memory dashboard read model endpoint");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/capabilities/snapshot", "desktop gateway must expose capability registry snapshot endpoint");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "TaskUiReadModel", "desktop gateway must use the task runtime UI read model");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "LocalComputerReadModel", "desktop gateway must use the local computer UI read model");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "MemoryUiReadModel", "desktop gateway must use the memory UI read model");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "CapabilityRegistryStore", "desktop gateway must use the capability registry store");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/chat/threads", "desktop gateway must expose persistent thread endpoints");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/messages/{message_id}/create_task", "desktop gateway must create durable tasks from chat messages");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/chat/threads", "desktop gateway must expose persistent thread endpoints");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/messages/{message_id}/create_task", "desktop gateway must create durable tasks from chat messages");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "link_brain_tasks_to_thread", "desktop gateway must link Brain-created operational tasks to the thread (and local computer read models)");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "LocalComputerSessionStore", "desktop gateway must persist computer sessions for operational tasks");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "HOMUN_BROWSER_HEADLESS", "desktop gateway must allow visible Playwright browser sessions");
@@ -1037,13 +1043,13 @@ assertRepoContains("crates/desktop-gateway/src/gateway_store_integrity.rs", "cap
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_store_integrity::ensure_gateway_store_integrity", "desktop gateway startup must use the shared store-integrity owner");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "require_gateway_token", "desktop gateway auth middleware must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "resolve_gateway_auth_token", "desktop gateway auth token resolution must be owned outside the monolith");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_auth::require_gateway_token", "desktop gateway must protect chat endpoints with a local token");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "gateway_auth::require_gateway_token", "desktop gateway must protect chat endpoints with a local token");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_auth::resolve_gateway_auth_token", "desktop gateway startup must use the shared auth token resolver");
 assertRepoContains("crates/desktop-gateway/src/gateway_cors.rs", "AllowOrigin::list", "desktop gateway CORS must use an explicit origin allowlist outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_cors.rs", "HeaderValue::from_static(\"null\")", "desktop gateway CORS must allow packaged file-origin renderer with bearer token");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_cors::cors_layer", "desktop gateway must apply the shared CORS layer");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "gateway_cors::cors_layer", "desktop gateway must apply the shared CORS layer");
 assertRepoContains("crates/desktop-gateway/src/gateway_health.rs", "HealthResponse", "desktop gateway health response must be owned outside the monolith");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_health::health", "desktop gateway must route liveness through the shared health handler");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "gateway_health::health", "desktop gateway must route liveness through the shared health handler");
 assertRepoContains("crates/desktop-gateway/src/chat_store.rs", "create table if not exists chat_threads", "desktop gateway must persist chat threads in SQLite");
 assertRepoContains("crates/desktop-gateway/src/chat_store.rs", "create table if not exists chat_messages", "desktop gateway must persist chat messages in SQLite");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "Body::from_stream", "desktop gateway must proxy runtime stream without buffering the full answer");

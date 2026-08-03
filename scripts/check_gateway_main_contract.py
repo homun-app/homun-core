@@ -64,6 +64,11 @@ def forbidden_main_startup_snippets() -> dict[str, str]:
         "spawn_connector_event_poller(state.clone());": "connector event poller must stay in gateway_background_startup",
         "start_proactivity_auto_review(state.clone());": "proactivity auto-review must stay in gateway_background_startup",
         "spawn_computer_live_publisher(state.clone());": "computer live publisher must stay in gateway_background_startup",
+        "let chat_routes = Router::new()": "route assembly must stay in gateway_routes",
+        "let chat_routes = chat_routes": "route layering must stay in gateway_routes",
+        "let mut app = Router::new()": "top-level app router assembly must stay in gateway_routes",
+        "app = app.fallback_service(": "web fallback mounting must stay in gateway_routes",
+        "let app = app.layer(gateway_cors::cors_layer());": "CORS layering must stay in gateway_routes",
     }
 
 
@@ -97,6 +102,7 @@ def main() -> int:
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
         "gateway_turn_recovery::recover_gateway_chat_turns_at_startup(&state).await;",
         "gateway_background_startup::start_gateway_background_services(state.clone());",
+        "let app = gateway_routes::build_gateway_router(state.clone());",
     ]
     for snippet in required_owner_calls:
         assert_contains(main_body, snippet, "async fn main must delegate startup ownership")
@@ -111,7 +117,8 @@ def main() -> int:
             "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
             "gateway_turn_recovery::recover_gateway_chat_turns_at_startup(&state).await;",
             "gateway_background_startup::start_gateway_background_services(state.clone());",
-            "let chat_routes = Router::new()",
+            "let app = gateway_routes::build_gateway_router(state.clone());",
+            "let computer_warmup_state = startup_state.clone();",
         ],
         "async fn main startup order must keep critical recovery before background work",
     )
