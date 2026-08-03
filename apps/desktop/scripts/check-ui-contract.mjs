@@ -944,7 +944,8 @@ assertRepoContains("crates/desktop-gateway/src/main.rs", "/messages/{message_id}
 assertRepoContains("crates/desktop-gateway/src/main.rs", "link_brain_tasks_to_thread", "desktop gateway must link Brain-created operational tasks to the thread (and local computer read models)");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "LocalComputerSessionStore", "desktop gateway must persist computer sessions for operational tasks");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "HOMUN_BROWSER_HEADLESS", "desktop gateway must allow visible Playwright browser sessions");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "require_gateway_token", "desktop gateway must protect chat endpoints with a local token");
+assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "require_gateway_token", "desktop gateway auth middleware must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_auth::require_gateway_token", "desktop gateway must protect chat endpoints with a local token");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "AllowOrigin::list", "desktop gateway CORS must use an explicit origin allowlist");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "HeaderValue::from_static(\"null\")", "desktop gateway CORS must allow packaged file-origin renderer with bearer token");
 assertRepoContains("crates/desktop-gateway/src/chat_store.rs", "create table if not exists chat_threads", "desktop gateway must persist chat threads in SQLite");

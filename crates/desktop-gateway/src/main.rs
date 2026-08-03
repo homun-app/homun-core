@@ -24,6 +24,7 @@ mod execution_control;
 mod execution_host;
 mod execution_projection;
 mod execution_runtime;
+mod gateway_auth;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod inference_transport;
 mod model_client;
@@ -90,10 +91,10 @@ use axum::{
     body::Body,
     extract::{Path, Query, RawQuery, Request, State},
     http::{
-        HeaderMap, HeaderName, HeaderValue, Method, StatusCode,
+        HeaderName, HeaderValue, Method, StatusCode,
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
-    middleware::{self, Next},
+    middleware,
     response::{IntoResponse, Response},
     routing::delete,
     routing::get,
@@ -296,6 +297,12 @@ pub(crate) struct AppState {
     pub(crate) ws_registry: std::sync::Arc<ws_gateway::WsRegistry>,
     /// Stores quarantined by the startup integrity sweep (empty = all healthy).
     recovered_stores: std::sync::Arc<Vec<String>>,
+}
+
+impl gateway_auth::GatewayAuthState for AppState {
+    fn gateway_auth_token(&self) -> &str {
+        self.auth_token.as_ref()
+    }
 }
 
 #[cfg(test)]
@@ -2128,7 +2135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     let chat_routes = chat_routes.route_layer(middleware::from_fn_with_state(
         state.clone(),
-        require_gateway_token,
+        gateway_auth::require_gateway_token::<AppState>,
     ));
     let startup_state = state.clone();
     let mut app = Router::new()
@@ -2196,30 +2203,6 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         recovered_stores: state.recovered_stores.as_ref().clone(),
         projection_worker_error,
     })
-}
-
-async fn require_gateway_token(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    request: Request,
-    next: Next,
-) -> Result<Response, GatewayError> {
-    // The token is resolved deny-by-default at startup and is never empty; if it
-    // somehow were, fail closed (reject) rather than open.
-    let expected = format!("Bearer {}", state.auth_token);
-    let authorized = headers
-        .get(AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value == expected);
-    if authorized {
-        Ok(next.run(request).await)
-    } else {
-        Err(GatewayError {
-            status: StatusCode::UNAUTHORIZED,
-            code: "gateway_unauthorized",
-            message: "Missing or invalid Desktop Gateway token".to_string(),
-        })
-    }
 }
 
 async fn build_prompt(Json(request): Json<BuildPromptRequest>) -> Json<BuildPromptResponse> {
