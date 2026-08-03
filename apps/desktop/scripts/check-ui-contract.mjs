@@ -951,6 +951,8 @@ assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_auth::resolve_
 assertRepoContains("crates/desktop-gateway/src/gateway_cors.rs", "AllowOrigin::list", "desktop gateway CORS must use an explicit origin allowlist outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_cors.rs", "HeaderValue::from_static(\"null\")", "desktop gateway CORS must allow packaged file-origin renderer with bearer token");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_cors::cors_layer", "desktop gateway must apply the shared CORS layer");
+assertRepoContains("crates/desktop-gateway/src/gateway_health.rs", "HealthResponse", "desktop gateway health response must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_health::health", "desktop gateway must route liveness through the shared health handler");
 assertRepoContains("crates/desktop-gateway/src/chat_store.rs", "create table if not exists chat_threads", "desktop gateway must persist chat threads in SQLite");
 assertRepoContains("crates/desktop-gateway/src/chat_store.rs", "create table if not exists chat_messages", "desktop gateway must persist chat messages in SQLite");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "Body::from_stream", "desktop gateway must proxy runtime stream without buffering the full answer");

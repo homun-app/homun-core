@@ -26,6 +26,7 @@ mod execution_projection;
 mod execution_runtime;
 mod gateway_auth;
 mod gateway_cors;
+mod gateway_health;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod inference_transport;
 mod model_client;
@@ -299,6 +300,16 @@ pub(crate) struct AppState {
 impl gateway_auth::GatewayAuthState for AppState {
     fn gateway_auth_token(&self) -> &str {
         self.auth_token.as_ref()
+    }
+}
+
+impl gateway_health::GatewayHealthState for AppState {
+    fn gateway_auth_required(&self) -> bool {
+        !self.auth_token.is_empty()
+    }
+
+    fn recovered_stores(&self) -> Vec<String> {
+        self.recovered_stores.as_ref().clone()
     }
 }
 
@@ -835,18 +846,6 @@ impl TaskExecutorStatus {
             failure_count: 0,
         }
     }
-}
-
-#[derive(Debug, Serialize)]
-struct HealthResponse {
-    ok: bool,
-    service: &'static str,
-    local_first: bool,
-    auth_required: bool,
-    /// Names of stores reset at startup after failing quick_check (backups kept
-    /// as *.corrupt-<epoch>.bak beside the store). Empty on a healthy boot.
-    recovered_stores: Vec<String>,
-    projection_worker_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2140,7 +2139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let startup_state = state.clone();
     let mut app = Router::new()
-        .route("/api/health", get(health))
+        .route("/api/health", get(gateway_health::health::<AppState>))
         // Unified WS endpoint: OUTSIDE the bearer layer (WS upgrade can't always
         // carry the header). See the unified-websocket-design spec.
         .route("/api/ws", get(ws_gateway::ws_handler))
@@ -2192,18 +2191,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(reconnect_channels_on_startup(startup_state));
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
-    let projection_worker_error = projection_worker::health_error();
-    Json(HealthResponse {
-        ok: projection_worker_error.is_none(),
-        service: "local-first-desktop-gateway",
-        local_first: true,
-        auth_required: !state.auth_token.is_empty(),
-        recovered_stores: state.recovered_stores.as_ref().clone(),
-        projection_worker_error,
-    })
 }
 
 async fn build_prompt(Json(request): Json<BuildPromptRequest>) -> Json<BuildPromptResponse> {
@@ -72096,7 +72083,10 @@ prs.save(Path({path:?}))
             .expect("background thread acquired the lock");
 
         let app = Router::new()
-            .route("/api/health", get(super::health))
+            .route(
+                "/api/health",
+                get(super::gateway_health::health::<super::AppState>),
+            )
             .with_state(state);
         // The request MUST run on a separate task: if `health` were to block on the held
         // mutex, it would park a worker — and if the request ran inline on THIS task it
