@@ -1,6 +1,6 @@
 # Agent loop (as-built)
 
-Verificato 2026-07-31.
+Verificato 2026-08-03.
 
 ## Path di un turno chat
 
@@ -46,6 +46,10 @@ copia inline del loop.
 - Sidecar: processo in `runtimes/browser-automation` (`npm run start`), con
   override `HOMUN_BROWSER_AUTOMATION_DIR`. Checkpoint/generation e crash recovery
   vivono nel sidecar + effect host (receipt `Uncertain` se process loss).
+- In sviluppo, `apps/desktop/scripts/electron-dev.mjs` deve preparare
+  `runtimes/browser-automation/node_modules/tsx/dist/cli.mjs` e passare
+  `HOMUN_BROWSER_AUTOMATION_DIR` al gateway. Senza questo preflight il gateway
+  puo' avviarsi correttamente ma il primo `browse` fallisce con sidecar chiuso.
 
 ## HITL
 

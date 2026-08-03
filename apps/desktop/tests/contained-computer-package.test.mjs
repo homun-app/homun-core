@@ -20,6 +20,23 @@ test("packaged contained computer uses native gateway bootstrap", async () => {
   assert.doesNotMatch(sandbox, /Command::new\("bash"\).*up_script/s);
 });
 
+test("electron dev startup prepares the browser automation runtime", async () => {
+  const devScript = await readFile(
+    path.join(appRoot, "scripts", "electron-dev.mjs"),
+    "utf8",
+  );
+  const browserRuntimeScript = await readFile(
+    path.join(appRoot, "scripts", "browser-runtime.mjs"),
+    "utf8",
+  );
+
+  assert.match(devScript, /ensureDevBrowserAutomationRuntime/);
+  assert.match(devScript, /HOMUN_BROWSER_AUTOMATION_DIR: browserAutomationDir/);
+  assert.match(browserRuntimeScript, /runtimes", "browser-automation"/);
+  assert.match(browserRuntimeScript, /node_modules", "tsx", "dist", "cli\.mjs"/);
+  assert.match(browserRuntimeScript, /runNpm\(\["ci"\], runtimeDir\)/);
+});
+
 test("chat noVNC viewer remains executable under the packaged Electron CSP", async () => {
   const viewer = await readFile(
     path.join(repoRoot, "runtimes", "contained-computer", "novnc-view.html"),

@@ -1,6 +1,6 @@
 # Flag runtime `HOMUN_*` (as-built)
 
-Default verificati 2026-07-31. Lista **non** esaustiva di ogni stringa env nel
+Default verificati 2026-08-03. Lista **non** esaustiva di ogni stringa env nel
 monolite — solo quelli con semantica booleana/path chiara. Per il resto: `rg HOMUN_`.
 
 ## Bind / dati
@@ -48,3 +48,7 @@ monolite — solo quelli con semantica booleana/path chiara. Per il resto: `rg H
 | `HOMUN_BROWSER_AUTOMATION_DIR` | `runtimes/browser-automation` |
 | `HOMUN_CONTAINED_COMPUTER` | **OFF** (`1`/`true` → CDP `127.0.0.1:9222`) |
 | `HOMUN_HOST_COMPUTER` | richiede `"1"` (macOS aarch64) |
+
+`electron:dev` imposta `HOMUN_BROWSER_AUTOMATION_DIR` esplicitamente al runtime
+del checkout corrente e prepara le dipendenze Node del sidecar se manca
+`node_modules/tsx/dist/cli.mjs`.

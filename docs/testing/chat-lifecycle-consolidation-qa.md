@@ -111,3 +111,31 @@ Controlli Electron reali post-fix:
 | Dock computer/browser nascosto con island aperta | PASS (`display: none`) |
 | Marker reasoning/tool visibili nella transcript | PASS (nessun match per `<think`, `REASONING`, `tool_call`) |
 | Steering stale su HITL corrente | PASS (`Waiting for you` resta visibile, nessuna card `Applying`) |
+
+## Browser Smoke
+
+Root cause osservata prima del fix dev-runtime:
+
+- `browse` veniva attivato dal modello, ma `browser_navigate` falliva con
+  `Navigation failed: sidecar:sidecar closed unexpectedly`.
+- Riproduzione diretta da `runtimes/browser-automation`:
+  `npm run start` falliva per assenza di
+  `node_modules/tsx/dist/cli.mjs`.
+
+Fix applicato:
+
+- `apps/desktop/scripts/browser-runtime.mjs` prepara il runtime browser dev con
+  `npm ci` se manca l'entrypoint `tsx`;
+- `apps/desktop/scripts/electron-dev.mjs` passa `HOMUN_BROWSER_AUTOMATION_DIR`
+  al gateway, evitando dipendenza dal path compilato nel binario Rust.
+
+Smoke fresco via broker reale:
+
+| Controllo | Esito |
+| --- | --- |
+| Thread fresco | PASS (`thread_1785758748_1785758748855732000`) |
+| Turn fresco | PASS (`turn_chat_stream_1785758761_smoke_browser_20260803`) |
+| Browser live durante il turno | PASS (`active=true`, thread corretto) |
+| Turn terminale | PASS (`status=completed`, `canonical_completed`) |
+| Risposta finale | PASS (`document.title` = `Selenium`) |
+| Prova CDP | PASS (tab `https://www.selenium.dev/`, title `Selenium`) |
