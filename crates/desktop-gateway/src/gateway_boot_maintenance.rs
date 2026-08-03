@@ -50,7 +50,7 @@ impl GatewayBootMaintenanceRunner for RuntimeGatewayBootMaintenanceRunner<'_> {
     }
 
     fn gc_stale_tasks(&mut self) {
-        crate::gc_stale_tasks(self.state);
+        crate::gateway_task_maintenance::gc_stale_tasks(self.state);
     }
 
     fn backfill_contacts(&mut self) {
@@ -66,7 +66,7 @@ impl GatewayBootMaintenanceRunner for RuntimeGatewayBootMaintenanceRunner<'_> {
     }
 
     fn cancel_homun_checkins(&mut self) {
-        crate::cancel_homun_checkins(self.state);
+        crate::gateway_task_maintenance::cancel_homun_checkins(self.state);
     }
 }
 

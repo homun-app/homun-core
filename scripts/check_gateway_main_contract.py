@@ -96,6 +96,10 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn proactive_cooldown_secs(": "proactivity cadence config must stay in gateway_proactivity",
         "fn start_proactivity_auto_review(": "proactivity background tick must stay in gateway_proactivity",
         "async fn proactivity_auto_review_tick(": "proactivity background tick must stay in gateway_proactivity",
+        "fn task_delivers_to_homun(": "Homun check-in task matching must stay in gateway_task_maintenance",
+        "fn task_is_live(": "task liveness classification must stay in gateway_task_maintenance",
+        "fn cancel_homun_checkins(": "Homun check-in cancellation must stay in gateway_task_maintenance",
+        "fn gc_stale_tasks(": "stale task GC must stay in gateway_task_maintenance",
     }
 
 
@@ -126,6 +130,7 @@ def main() -> int:
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
+    assert_contains(source, "mod gateway_task_maintenance;", "gateway root must declare task maintenance owner")
 
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
