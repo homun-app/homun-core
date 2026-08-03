@@ -29,6 +29,7 @@ mod gateway_background_startup;
 mod gateway_bind;
 mod gateway_boot_maintenance;
 mod gateway_chat_branches;
+mod gateway_chat_tasks;
 mod gateway_chat_threads;
 mod gateway_cors;
 mod gateway_db_unify;
@@ -1335,44 +1336,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(reconnect_channels_on_startup(startup_state));
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-async fn create_task_from_chat_message(
-    State(state): State<AppState>,
-    Path((thread_id, message_id)): Path<(String, String)>,
-) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
-    let message = lock_store(&state)?
-        .message(&thread_id, &message_id)
-        .map_err(GatewayError::store)?
-        .ok_or_else(|| GatewayError {
-            status: StatusCode::NOT_FOUND,
-            code: "chat_message_not_found",
-            message: format!("chat message not found: {message_id}"),
-        })?;
-    // Model-driven (Brain) planning when a capable backend is configured: the
-    // OrchestratorBrain comprehends the message and materializes the right
-    // durable (non-browser) tasks. There is no longer a browser_task fallback:
-    // browser interaction is driven inline by the chat agent (granular tools),
-    // so when the Brain is off or yields nothing we simply create no task here.
-    if brain_materialize_enabled() {
-        let state_for_brain = state.clone();
-        let thread_for_brain = thread_id.clone();
-        let goal = message.text.clone();
-        if let Err(error) = tokio::task::spawn_blocking(move || {
-            brain_materialize_tasks(&state_for_brain, &thread_for_brain, &goal)
-        })
-        .await
-        .map_err(|join_error| format!("join error: {join_error}"))
-        .and_then(|result| result.map_err(|error| error.message))
-        {
-            eprintln!("brain_materialize (create_task): {error}");
-        }
-    }
-    Ok(Json(
-        lock_store(&state)?
-            .messages(&thread_id)
-            .map_err(GatewayError::store)?,
-    ))
 }
 
 async fn save_chat_message_to_memory(

@@ -130,6 +130,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn chat_branches(": "chat branch list endpoint must stay in gateway_chat_branches",
         "async fn set_active_leaf(": "chat branch active leaf endpoint must stay in gateway_chat_branches",
         "async fn set_branch_label(": "chat branch label endpoint must stay in gateway_chat_branches",
+        "async fn create_task_from_chat_message(": "chat message task endpoint must stay in gateway_chat_tasks",
     }
 
 
@@ -167,6 +168,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_plugin_packages;", "gateway root must declare plugin package owner")
     assert_contains(source, "mod gateway_chat_threads;", "gateway root must declare chat thread owner")
     assert_contains(source, "mod gateway_chat_branches;", "gateway root must declare chat branch owner")
+    assert_contains(source, "mod gateway_chat_tasks;", "gateway root must declare chat task owner")
 
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
