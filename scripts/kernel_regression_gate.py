@@ -162,6 +162,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway plugins",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "gateway_plugins",
+            ],
+        ),
+        Step(
             "gateway steering cleanup",
             [
                 "cargo",

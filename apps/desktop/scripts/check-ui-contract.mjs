@@ -289,6 +289,11 @@ assertRepoContains(
   "Gateway remote approval marker parsing must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_plugins.rs",
+  "plugins_list",
+  "Gateway plugin enablement endpoints must have a dedicated owner",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway main ownership contract"',
   "Kernel regression gate must run the gateway main ownership contract",
@@ -317,6 +322,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway remote approval"',
   "Kernel regression gate must run the gateway remote approval owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway plugins"',
+  "Kernel regression gate must run the gateway plugin owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",

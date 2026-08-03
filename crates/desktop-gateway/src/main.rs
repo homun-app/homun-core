@@ -38,6 +38,7 @@ mod gateway_legacy_data;
 mod gateway_memory_background;
 mod gateway_model_timeouts;
 mod gateway_paths;
+mod gateway_plugins;
 mod gateway_proactivity;
 mod gateway_prompt;
 mod gateway_recall_context;
@@ -1479,11 +1480,6 @@ async fn create_chat_thread(
             .map_err(GatewayError::store)?,
     ))
 }
-
-/// Internal plugins (ADR 0011 §10-A). The id gates the plugin's UI (nav+panel,
-/// from the frontend registry) AND its engine (here) — detaching makes all three
-/// vanish. The proactivity dashboard is the FIRST addon.
-const KNOWN_PLUGINS: &[&str] = &["proattivita", "presentations"];
 
 async fn select_chat_thread(
     State(state): State<AppState>,
@@ -31544,42 +31540,6 @@ async fn proactivity_review_now(
             Json(serde_json::json!({ "emitted": true, "id": id, "card": card }))
         }
         None => Json(serde_json::json!({ "emitted": false })),
-    }
-}
-
-/// GET /api/plugins — the addon registry's enabled-state (ADR 0011 §10-A). The
-/// frontend registry owns each plugin's manifest (name/icon/panel); the backend
-/// owns the enabled flag, which gates BOTH the UI and the engine.
-async fn plugins_list(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let plugins: Vec<serde_json::Value> = KNOWN_PLUGINS
-        .iter()
-        .map(|id| {
-            let enabled = lock_store(&state)
-                .map(|s| s.plugin_enabled(id))
-                .unwrap_or(true);
-            serde_json::json!({ "id": id, "enabled": enabled })
-        })
-        .collect();
-    Json(serde_json::json!({ "plugins": plugins }))
-}
-
-/// POST /api/plugins/{id}/toggle — flip a plugin on/off. Detaching it makes its
-/// nav entry, panel AND engine all vanish (the engine checks this same flag).
-async fn plugin_toggle(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Json<serde_json::Value> {
-    if !KNOWN_PLUGINS.contains(&id.as_str()) {
-        return Json(serde_json::json!({ "ok": false, "error": "unknown_plugin" }));
-    }
-    let next = lock_store(&state).ok().and_then(|s| {
-        let next = !s.plugin_enabled(&id);
-        s.set_plugin_enabled(&id, next).ok()?;
-        Some(next)
-    });
-    match next {
-        Some(enabled) => Json(serde_json::json!({ "id": id, "enabled": enabled })),
-        None => Json(serde_json::json!({ "ok": false })),
     }
 }
 

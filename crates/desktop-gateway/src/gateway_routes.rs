@@ -189,9 +189,12 @@ pub(crate) fn build_gateway_router(state: AppState) -> Router {
         .route("/api/suggestions", get(suggestions_list))
         .route("/api/suggestions/{id}/act", post(suggestion_act))
         .route("/api/proactivity/review-now", post(proactivity_review_now))
-        .route("/api/plugins", get(plugins_list))
+        .route("/api/plugins", get(crate::gateway_plugins::plugins_list))
         .route("/api/brand-kit", get(brand_kit_get).put(brand_kit_put))
-        .route("/api/plugins/{id}/toggle", post(plugin_toggle))
+        .route(
+            "/api/plugins/{id}/toggle",
+            post(crate::gateway_plugins::plugin_toggle),
+        )
         .route(
             "/api/plugins/packages/install-local",
             post(install_local_plugin_package),

@@ -107,6 +107,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn remote_approval_intent_from_marker(": "remote approval marker parsing must stay in gateway_remote_approval",
         "fn remote_approval_intent_from_raw_text(": "remote approval marker parsing must stay in gateway_remote_approval",
         "fn actionable_cards_from_raw_text(": "actionable card parsing must stay in gateway_remote_approval",
+        "const KNOWN_PLUGINS:": "plugin enablement registry must stay in gateway_plugins",
+        "async fn plugins_list(": "plugin enablement listing must stay in gateway_plugins",
+        "async fn plugin_toggle(": "plugin enablement toggle must stay in gateway_plugins",
     }
 
 
@@ -140,6 +143,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_task_maintenance;", "gateway root must declare task maintenance owner")
     assert_contains(source, "mod gateway_memory_background;", "gateway root must declare memory background owner")
     assert_contains(source, "mod gateway_remote_approval;", "gateway root must declare remote approval owner")
+    assert_contains(source, "mod gateway_plugins;", "gateway root must declare plugin enablement owner")
 
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
