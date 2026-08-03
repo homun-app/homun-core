@@ -136,6 +136,9 @@ import {
   type TurnReplayState,
   type TurnReplayStatus,
 } from "../lib/turnReplayState";
+import { deriveTurnLifecycle } from "../lib/chat-runtime/lifecycle";
+import { deriveComposerMode } from "../lib/chat-runtime/composerMode";
+import { visiblePendingSteeringRows } from "../lib/chat-runtime/steering";
 import {
   createLoadingComputerSession,
   createUnavailableComputerSession,
@@ -761,19 +764,30 @@ export function ChatView({
   // Net: live while streaming, persisted-from-`messages` at rest.
   const persistedPlan = useMemo(() => latestPlanMarkdown(messages), [messages]);
   const persistedActivity = useMemo(() => latestActivitySteps(messages), [messages]);
-  const isStreaming = promptSubmitting || Boolean(streamingAssistantId);
   // Free HITL (CHOICES / CLARIFY / AWAIT_USER) does not hold the thread busy (Always Contract),
   // so the projection often has no waiting_user_approval — detect the open wait from the chat tail.
   const threadTailAwaitsHitl = useMemo(
     () => threadTailAwaitsUser(threadMessages),
     [threadMessages],
   );
-  const turnAwaitingUser =
-    projectedActiveTurn?.status === "waiting_user_approval" || threadTailAwaitsHitl;
-  // A turn waiting on the person is still "active" for Stop/status, but it is NOT model work —
-  // treating it as streaming hides CHOICES and makes the composer look like steering.
-  const hasActiveTurn = isStreaming || Boolean(projectedActiveTurn) || threadTailAwaitsHitl;
-  const workInProgress = isStreaming || (Boolean(projectedActiveTurn) && !turnAwaitingUser);
+  const {
+    isStreaming,
+    turnAwaitingUser,
+    hasActiveTurn,
+    workInProgress,
+    terminalTurnAtRest,
+  } = deriveTurnLifecycle({
+    promptSubmitting,
+    streamingAssistantId,
+    projectedActiveTurn,
+    projectedTurnStatus,
+    projectionLoaded,
+    threadTailAwaitsHitl,
+  });
+  const visiblePendingSteeringRowsForTurn = useMemo(
+    () => visiblePendingSteeringRows(pendingSteering.rows, { terminalTurnAtRest }),
+    [pendingSteering.rows, terminalTurnAtRest],
+  );
   const activeTurnKey = projectedActiveTurn?.turn_id ?? streamStatus?.requestId ?? null;
   useEffect(() => {
     if (!hasActiveTurn) {
@@ -1925,7 +1939,14 @@ export function ChatView({
     const augmented = Boolean(skillPrefix || contextPrefix);
 
     // Open HITL Free wait → always a new turn (ResumeBinding), never steer.
-    const forceNewTurn = Boolean(options?.forceNewTurn || turnAwaitingUser);
+    const composerMode = deriveComposerMode({
+      promptSubmitting,
+      streamingAssistantId,
+      turnAwaitingUser,
+      terminalTurnAtRest,
+      hasActiveTurn,
+    });
+    const forceNewTurn = Boolean(options?.forceNewTurn || composerMode.forceNewTurn);
     if (forceNewTurn) {
       setStreamingAssistantId(null);
       setStreamStatus(null);
@@ -3532,7 +3553,7 @@ export function ChatView({
           </div>
         )}
         <PendingSteeringQueue
-          rows={pendingSteering.rows}
+          rows={visiblePendingSteeringRowsForTurn}
           onEdit={editPendingSteering}
           onDelete={deletePendingSteering}
           onSendNow={sendPendingSteeringNow}

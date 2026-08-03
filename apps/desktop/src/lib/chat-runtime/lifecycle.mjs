@@ -1,5 +1,6 @@
 export const TERMINAL_TURN_STATUSES = new Set([
   "completed",
+  "finalizing",
   "failed",
   "cancelled",
   "expired",

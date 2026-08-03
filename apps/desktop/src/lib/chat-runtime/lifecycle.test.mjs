@@ -22,6 +22,22 @@ test("terminal projected turn at rest clears active work", () => {
   assert.equal(result.canStop, false);
 });
 
+test("backend finalizing state is terminal at rest", () => {
+  const result = deriveTurnLifecycle({
+    promptSubmitting: false,
+    streamingAssistantId: null,
+    projectedActiveTurn: null,
+    projectedTurnStatus: "finalizing",
+    projectionLoaded: true,
+    threadTailAwaitsHitl: false,
+  });
+
+  assert.equal(result.terminalTurnAtRest, true);
+  assert.equal(result.hasActiveTurn, false);
+  assert.equal(result.workInProgress, false);
+  assert.equal(result.canStop, false);
+});
+
 test("waiting user is active but not model work", () => {
   const result = deriveTurnLifecycle({
     promptSubmitting: false,
@@ -69,5 +85,6 @@ test("terminal status set is explicit", () => {
     "completed",
     "expired",
     "failed",
+    "finalizing",
   ]);
 });
