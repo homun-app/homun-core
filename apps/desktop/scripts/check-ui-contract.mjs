@@ -228,6 +228,16 @@ assertRepoContains(
   "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
   "Gateway startup must delegate idempotent maintenance to the dedicated owner",
 );
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_turn_recovery.rs",
+  "recover_gateway_chat_turns_at_startup",
+  "Gateway turn recovery must have a dedicated startup owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/main.rs",
+  "gateway_turn_recovery::recover_gateway_chat_turns_at_startup(&state).await;",
+  "Gateway startup must delegate lease-aware chat recovery to the dedicated owner",
+);
 assertContains("src/lib/coreBridge.ts", "usageDaily:", "Usage must expose the real daily series");
 assertContains("src/components/UsageCalendar.tsx", 'role="grid"', "Usage calendar must expose an accessible grid");
 assertContains("src/components/UsageCalendar.tsx", 'role="gridcell"', "Usage days must be keyboard reachable");

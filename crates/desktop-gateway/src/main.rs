@@ -40,6 +40,7 @@ mod gateway_prompt;
 mod gateway_secrets;
 mod gateway_store_integrity;
 mod gateway_task_executor_config;
+mod gateway_turn_recovery;
 mod gateway_vault_key;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod inference_transport;
@@ -95,9 +96,6 @@ mod ws_gateway;
 // not wired yet — seam types only).
 mod tool_safety;
 // tool_trace_dump moved to `local_first_engine::trace` (5.D1c.9); the loop calls it there.
-
-const AGENT_JOURNAL_RETENTION_DAYS: i64 = 30;
-const AGENT_JOURNAL_RETENTION_BATCH: usize = 1_000;
 
 // ADR 0023 tool-safety vocabulary + pure decision fn, used by the (unconditional)
 // write-confirm branches in `execute_chat_tool`.
@@ -1292,81 +1290,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         gateway_file_security::harden_data_at_rest(&dir);
     }
     gateway_boot_maintenance::run_gateway_boot_maintenance(&state);
-    eprintln!("turn broker: the only chat path; running lease-aware boot recovery");
-    // Phase 1a: fence the new process, then project every committed outcome before
-    // classifying the remaining running runs as crash orphans. This preserves the
-    // canonical outcome's ownership of task/run/message convergence across restart.
-    // The critical writes must precede the worker pool and background VACUUM.
-    let process_generation = {
-        let store = state.task_store.lock().expect("task store lock at boot");
-        let generation = store
-            .bump_process_generation()
-            .expect("bump process generation");
-        let journal_cutoff = (OffsetDateTime::now_utc()
-            - Duration::days(AGENT_JOURNAL_RETENTION_DAYS))
-        .unix_timestamp();
-        if let Err(error) =
-            store.purge_terminal_agent_runs_before(journal_cutoff, AGENT_JOURNAL_RETENTION_BATCH)
-        {
-            eprintln!("agent journal: retention error: {error}");
-        }
-        generation
-    };
-    match projection_worker::drain_at_startup(&state, process_generation).await {
-        Ok(replayed) if replayed > 0 => {
-            eprintln!("execution projection: drained {replayed} durable outbox rows");
-        }
-        Ok(_) => {}
-        Err(error) => {
-            eprintln!(
-                "execution projection: startup replay deferred to worker: {}",
-                error.message
-            );
-        }
-    }
-    let recovered_chat_turns = {
-        let store = state.task_store.lock().expect("task store lock at boot");
-        if let Err(error) = store.abort_orphaned_running_agent_runs("gateway_restart") {
-            eprintln!("agent journal: boot recovery error: {error}");
-        }
-        let user_id = gateway_user_id();
-        let workspace_id = gateway_workspace_id();
-        let recovered = local_first_task_runtime::broker::recover_chat_turns_at_boot(
-            &store,
-            &user_id,
-            &workspace_id,
-            process_generation,
-        )
-        .unwrap_or_else(|e| {
-            eprintln!("turn broker: recovery error: {e}");
-            Vec::new()
-        });
-        eprintln!(
-            "turn broker: recovery generation={process_generation} recovered={} turns",
-            recovered.len()
-        );
-        recovered
-            .iter()
-            .filter_map(|task_id| {
-                store
-                    .get_task(task_id, &user_id, &workspace_id)
-                    .ok()
-                    .flatten()
-            })
-            .collect::<Vec<_>>()
-    };
-    // The broker has re-queued these tasks, but their visible placeholders are
-    // owned by the chat store. Update them only after the task-store guard is
-    // released so recovery cannot deadlock on the two stores at startup.
-    for task in &recovered_chat_turns {
-        set_chat_turn_message_delivery_state(
-            &state,
-            task,
-            local_first_desktop_gateway::MessageDeliveryState::Retrying,
-        );
-    }
-    projection_worker::start(state.clone());
-    steering_control::start(state.clone());
+    gateway_turn_recovery::recover_gateway_chat_turns_at_startup(&state).await;
     // One-time (flag-guarded): retire proactivity cards whose date already passed but
     // that predate the `relevant_until` field. It may write the unified database, so it
     // must start only after process fencing and lease-aware recovery have completed.
