@@ -433,6 +433,7 @@ test("terminal turn hides stale steering rows", () => {
     { steering_id: 4, status: "applied" },
     { steering_id: 5, status: "completed" },
     { steering_id: 6, status: "cancelled" },
+    { steering_id: 7, status: "promoted" },
   ];
 
   assert.deepEqual(
@@ -445,11 +446,12 @@ test("active turn keeps all rows visible for truthful progress", () => {
   const rows = [
     { steering_id: 1, status: "pending" },
     { steering_id: 2, status: "applied" },
+    { steering_id: 3, status: "promoted" },
   ];
 
   assert.deepEqual(
     visiblePendingSteeringRows(rows, { terminalTurnAtRest: false }).map((row) => row.steering_id),
-    [1, 2],
+    [1, 2, 3],
   );
 });
 
@@ -460,6 +462,7 @@ test("stale steering status set is explicit", () => {
     "claimed",
     "completed",
     "interpreted",
+    "promoted",
   ]);
 });
 ```
@@ -485,6 +488,7 @@ export const STALE_STEERING_STATUSES = new Set([
   "applied",
   "completed",
   "cancelled",
+  "promoted",
 ]);
 
 export function visiblePendingSteeringRows(rows, options) {
@@ -506,6 +510,7 @@ export const STALE_STEERING_STATUSES = new Set([
   "applied",
   "completed",
   "cancelled",
+  "promoted",
 ]);
 
 export function visiblePendingSteeringRows<Row extends SteeringRowLike>(
