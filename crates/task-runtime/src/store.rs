@@ -3667,10 +3667,7 @@ impl TaskStore {
             .unwrap_or(0);
         let active_turn = latest_turn.as_ref().and_then(
             |(turn_id, status, task_json, updated_at, blocked_reason)| {
-                if matches!(
-                    status.as_str(),
-                    "completed" | "failed" | "cancelled" | "expired" | "finalizing"
-                ) {
+                if !crate::turn_lifecycle::status_has_active_turn_projection(status.as_str()) {
                     return None;
                 }
                 let task = serde_json::from_str::<TaskRecord>(task_json).ok()?;
@@ -3951,19 +3948,19 @@ impl TaskStore {
         // An "active" turn is any non-terminal chat_turn: the 1-turn-per-thread
         // constraint must hold while a turn is queued, running, OR paused/waiting
         // (e.g. waiting_resource, waiting_external_event, waiting_user_approval).
-        // Only terminal states (completed/failed/cancelled/expired) free the thread
-        // for a new turn — otherwise a turn stuck in waiting_external_event would
-        // silently stop blocking, letting a second turn race on the same transcript.
+        // Terminal states and the internal SQL-only finalizing boundary free the
+        // thread for a new turn. Waiting/parked states must keep blocking, otherwise
+        // a waiting_external_event turn could race a second turn on the transcript.
+        let query = format!(
+            "SELECT task_id FROM tasks
+             WHERE thread_id = ?1 AND kind = 'chat_turn'
+               AND status NOT IN ({})
+             LIMIT 1",
+            crate::turn_lifecycle::ACTIVE_CHAT_TURN_EXCLUDED_SQL_STATUSES,
+        );
         let task_id: Option<String> = self
             .connection
-            .query_row(
-                "SELECT task_id FROM tasks
-                 WHERE thread_id = ?1 AND kind = 'chat_turn'
-                   AND status NOT IN ('completed', 'failed', 'cancelled', 'expired', 'finalizing')
-                 LIMIT 1",
-                params![thread_id],
-                |row| row.get(0),
-            )
+            .query_row(&query, params![thread_id], |row| row.get(0))
             .optional()?;
         Ok(task_id)
     }
@@ -6268,6 +6265,26 @@ mod chat_turn_query_tests {
     }
 
     #[test]
+    fn active_chat_turn_ignores_internal_finalizing() {
+        let s = store();
+        let t = make_chat_turn("t1", "thread_x", TaskStatus::Running);
+        s.insert_chat_turn(&t, "thread_x", "chat_stream_1", "interactive", "full")
+            .unwrap();
+        s.connection
+            .execute(
+                "UPDATE tasks SET status = 'finalizing' WHERE task_id = ?1",
+                params!["t1"],
+            )
+            .unwrap();
+
+        assert_eq!(
+            s.active_chat_turn_for_thread("thread_x").unwrap(),
+            None,
+            "finalizing is an internal free-thread state for active-turn queries"
+        );
+    }
+
+    #[test]
     fn thread_attention_reports_latest_terminal_event() {
         let s = TaskStore::open_in_memory().unwrap();
         let task = make_chat_turn("turn-a", "thread-a", TaskStatus::Completed);
@@ -6333,6 +6350,39 @@ mod chat_turn_query_tests {
             .expect("active turn projection");
         assert_eq!(active.turn_id, "turn_cursor");
         assert_eq!(active.last_event_seq, last.seq);
+    }
+
+    #[test]
+    fn finalizing_turn_is_latest_but_not_active_in_thread_activity() {
+        let s = store();
+        let task = make_chat_turn("turn_finalizing", "thread_finalizing", TaskStatus::Running);
+        s.insert_chat_turn(
+            &task,
+            "thread_finalizing",
+            "request_finalizing",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_finalizing",
+            TurnEventKind::Activity,
+            json!({"text": "Almost done"}),
+        )
+        .unwrap();
+        assert!(
+            s.fence_chat_turn_finalization("u", "w", "turn_finalizing")
+                .unwrap()
+        );
+
+        let projection = s.project_thread_activity("thread_finalizing", 200).unwrap();
+        assert_eq!(projection.latest_turn_status.as_deref(), Some("finalizing"));
+        assert_eq!(projection.turn_count, 1);
+        assert!(
+            projection.active_turn.is_none(),
+            "finalizing must free active-turn projection while preserving latest status"
+        );
+        assert_eq!(projection.activity, vec!["Almost done".to_string()]);
     }
 
     #[test]
