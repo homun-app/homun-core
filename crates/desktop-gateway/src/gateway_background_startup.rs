@@ -91,15 +91,15 @@ impl GatewayBackgroundStartupRunner for RuntimeGatewayBackgroundStartupRunner {
     }
 
     fn spawn_memory_consolidation_tick(&mut self) {
-        crate::spawn_memory_consolidation_tick(self.state.clone());
+        crate::gateway_memory_background::spawn_memory_consolidation_tick(self.state.clone());
     }
 
     fn spawn_embedding_catchup(&mut self) {
-        crate::spawn_embedding_catchup(self.state.clone());
+        crate::gateway_memory_background::spawn_embedding_catchup(self.state.clone());
     }
 
     fn spawn_memory_hygiene_sweep(&mut self) {
-        crate::spawn_memory_hygiene_sweep(self.state.clone());
+        crate::gateway_memory_background::spawn_memory_hygiene_sweep(self.state.clone());
     }
 
     fn spawn_thread_browser_session_reaper(&mut self) {

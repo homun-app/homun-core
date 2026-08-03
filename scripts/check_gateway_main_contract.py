@@ -100,6 +100,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn task_is_live(": "task liveness classification must stay in gateway_task_maintenance",
         "fn cancel_homun_checkins(": "Homun check-in cancellation must stay in gateway_task_maintenance",
         "fn gc_stale_tasks(": "stale task GC must stay in gateway_task_maintenance",
+        "fn spawn_memory_consolidation_tick(": "memory consolidation tick must stay in gateway_memory_background",
+        "fn spawn_embedding_catchup(": "embedding catchup must stay in gateway_memory_background",
+        "fn spawn_memory_hygiene_sweep(": "memory hygiene sweep must stay in gateway_memory_background",
     }
 
 
@@ -131,6 +134,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
     assert_contains(source, "mod gateway_task_maintenance;", "gateway root must declare task maintenance owner")
+    assert_contains(source, "mod gateway_memory_background;", "gateway root must declare memory background owner")
 
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",

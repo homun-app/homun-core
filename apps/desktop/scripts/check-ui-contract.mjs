@@ -279,6 +279,11 @@ assertRepoContains(
   "Gateway task maintenance must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_background.rs",
+  "spawn_memory_consolidation_tick",
+  "Gateway memory background jobs must have a dedicated owner",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway main ownership contract"',
   "Kernel regression gate must run the gateway main ownership contract",
@@ -297,6 +302,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway task maintenance"',
   "Kernel regression gate must run the gateway task maintenance owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory background"',
+  "Kernel regression gate must run the gateway memory background owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",
