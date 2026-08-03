@@ -93,11 +93,10 @@
   max-width: min(680px, 92%);
   margin-left: auto;
   align-self: flex-end;
-  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
-  border-radius: var(--radius-control);
-  padding: 10px 12px 8px;
-  align-items: stretch;
-  background: color-mix(in srgb, var(--surface-muted) 34%, transparent);
+  border: 0;
+  padding: 0;
+  align-items: flex-end;
+  background: transparent;
   color: var(--text);
 }
 
@@ -189,6 +188,61 @@
 
 .chat-message-user-band .message-attachment-list {
   justify-content: flex-end;
+}
+
+/* Inline editing of a user message (edit -> re-run). */
+.message-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(620px, 100%);
+}
+
+.message-edit textarea {
+  width: 100%;
+  min-width: min(420px, 100%);
+  min-height: 96px;
+  max-height: 220px;
+  resize: vertical;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+.message-edit textarea:focus {
+  border-color: var(--blue);
+}
+
+.message-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.message-edit-actions button {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.message-edit-actions button:hover {
+  background: var(--surface-hover);
+}
+
+.message-edit-actions button.primary {
+  background: var(--blue);
+  color: #fff;
+}
+
+.message-edit-actions button.primary:disabled {
+  opacity: 0.5;
 }
 
 .chat-message-agent :is(.rich-message, .streaming-rich-message),

@@ -5982,53 +5982,6 @@ small {
   height: 20px;
 }
 
-/* Inline editing of a user message (edit → re-run). */
-.message-edit {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: min(620px, 100%);
-}
-.message-edit textarea {
-  width: 100%;
-  min-height: 60px;
-  max-height: 220px;
-  resize: vertical;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid var(--line-strong);
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-  outline: none;
-}
-.message-edit textarea:focus {
-  border-color: var(--blue);
-}
-.message-edit-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.message-edit-actions button {
-  min-height: 30px;
-  padding: 0 12px;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text);
-  font-size: 13px;
-}
-.message-edit-actions button:hover {
-  background: var(--surface-hover);
-}
-.message-edit-actions button.primary {
-  background: var(--blue);
-  color: #fff;
-}
-.message-edit-actions button.primary:disabled {
-  opacity: 0.5;
-}
-
 /* Dynamic follow-up suggestion chips under the latest answer. */
 .chat-followups {
   display: flex;

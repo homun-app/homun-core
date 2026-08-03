@@ -371,7 +371,7 @@
 }
 
 .active-task-layout[data-workspace-island-open="true"] .chat-computer-runtime {
-  right: calc(var(--workspace-island-panel-width) + 54px);
+  display: none;
 }
 
 @media (max-width: 900px) {
@@ -383,7 +383,4 @@
     padding-right: var(--workspace-island-rail-reserve);
   }
 
-  .active-task-layout[data-workspace-island-open="true"] .chat-computer-runtime {
-    right: 54px;
-  }
 }

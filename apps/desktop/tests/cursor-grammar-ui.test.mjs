@@ -99,6 +99,11 @@ const reducedMotion = foundation.match(
   /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\n\}/,
 )?.[0] ?? "";
 
+function cssBlock(styles, selector) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return styles.match(new RegExp(`${escaped}\\s*\\{[\\s\\S]*?\\n\\}`, "m"))?.[0] ?? "";
+}
+
 test("the desktop entrypoint uses the compact visual foundation", () => {
   assert.doesNotMatch(main, /@fontsource\/hanken-grotesk/);
   assert.match(
@@ -428,12 +433,30 @@ test("legacy CSS cannot recreate message, activity, or generated-file surfaces",
   assert.match(chatStyles, /@keyframes\s+msg-activity-pulse\b/);
   assert.match(
     chatStyles,
-    /\.chat-message-user-band\s*\{[\s\S]*?width:\s*fit-content;[\s\S]*?border:\s*1px solid[\s\S]*?background:\s*color-mix/,
+    /\.chat-message-user-band\s*\{[\s\S]*?width:\s*fit-content;[\s\S]*?margin-left:\s*auto;[\s\S]*?align-self:\s*flex-end;/,
   );
   assert.match(
     chatStyles,
     /\.chat-message-agent,[\s\S]*?\.chat-message-system\s*\{[\s\S]*?border:\s*0;[\s\S]*?background:\s*transparent;/,
   );
+});
+
+test("sent user messages stay right aligned without a bubble frame", () => {
+  const userBand = cssBlock(chatStyles, ".chat-message-user-band");
+  assert.match(userBand, /margin-left:\s*auto;/);
+  assert.match(userBand, /align-self:\s*flex-end;/);
+  assert.match(userBand, /border:\s*0;/);
+  assert.match(userBand, /background:\s*transparent;/);
+  assert.doesNotMatch(userBand, /background:\s*color-mix|border:\s*1px solid/);
+});
+
+test("message edit prompt keeps a usable multiline geometry", () => {
+  const editShell = cssBlock(chatStyles, ".message-edit");
+  const editTextarea = cssBlock(chatStyles, ".message-edit textarea");
+  assert.match(editShell, /width:\s*min\(620px,\s*100%\);/);
+  assert.match(editTextarea, /min-width:\s*min\(420px,\s*100%\);/);
+  assert.match(editTextarea, /min-height:\s*96px;/);
+  assert.doesNotMatch(legacyStyles, /\.message-edit(?:\s|\{|:)/);
 });
 
 test("ChatView delegates the prompt surface to the thin ComposerShell boundary", () => {

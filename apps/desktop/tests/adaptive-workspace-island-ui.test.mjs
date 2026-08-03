@@ -40,6 +40,19 @@ test("workspace island geometry keeps a fixed rail and bounded resizable panel",
   assert.match(styles, /@media\s*\(max-width:\s*900px\)/);
 });
 
+test("workspace island and live computer dock are mutually exclusive overlays", async () => {
+  const [styles, chatView] = await Promise.all([
+    readFile(stylesPath, "utf8"),
+    readFile(chatViewPath, "utf8"),
+  ]);
+  assert.match(styles, /\.active-task-layout\[data-workspace-island-open="true"\]\s+\.chat-computer-runtime\s*\{[\s\S]*?display:\s*none;/);
+  assert.doesNotMatch(
+    styles,
+    /\.active-task-layout\[data-workspace-island-open="true"\]\s+\.chat-computer-runtime\s*\{[\s\S]*?right:\s*calc/,
+  );
+  assert.match(chatView, /openSectionRequest=\{\{ section: "activity", nonce: activityNonce \}\}/);
+});
+
 test("adaptive island is the only workspace status owner", async () => {
   const [chatView, legacyStyles, main] = await Promise.all([
     readFile(chatViewPath, "utf8"),
