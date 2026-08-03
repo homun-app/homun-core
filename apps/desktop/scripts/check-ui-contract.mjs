@@ -963,6 +963,9 @@ assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_identity::gate
 assertRepoContains("crates/desktop-gateway/src/gateway_secrets.rs", "gateway_secret_key_seed", "desktop gateway encrypted secret seed must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_secrets.rs", "browser-checkpoint-secrets.json", "desktop gateway secret owner must preserve browser checkpoint secret path");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_secrets::open_gateway_secret_store", "desktop gateway startup must use the shared encrypted secret store owner");
+assertRepoContains("crates/desktop-gateway/src/gateway_legacy_data.rs", "migrate_legacy_data_dir", "desktop gateway legacy data-dir migration must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_legacy_data.rs", "LegacyDirAction", "desktop gateway legacy data-dir decision must stay unit-testable outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_legacy_data::migrate_legacy_data_dir", "desktop gateway startup must use the shared legacy data-dir migrator");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "require_gateway_token", "desktop gateway auth middleware must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "resolve_gateway_auth_token", "desktop gateway auth token resolution must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_auth::require_gateway_token", "desktop gateway must protect chat endpoints with a local token");

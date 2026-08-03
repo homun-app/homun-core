@@ -29,6 +29,7 @@ mod gateway_cors;
 mod gateway_file_security;
 mod gateway_health;
 mod gateway_identity;
+mod gateway_legacy_data;
 mod gateway_paths;
 mod gateway_prompt;
 mod gateway_secrets;
@@ -1149,68 +1150,6 @@ struct ErrorBody {
     message: String,
 }
 
-/// What to do with the legacy data dir at startup. Pure decision → unit-testable.
-#[derive(Debug, PartialEq, Eq)]
-enum LegacyDirAction {
-    /// No legacy dir (fresh install or already migrated) → nothing to do.
-    Noop,
-    /// Legacy exists, `~/.homun` does not → rename it across.
-    Migrate,
-    /// BOTH exist → can't rename; warn loudly instead of silently using `~/.homun`.
-    WarnCollision,
-}
-
-fn legacy_dir_action(legacy_exists: bool, current_exists: bool) -> LegacyDirAction {
-    match (legacy_exists, current_exists) {
-        (false, _) => LegacyDirAction::Noop,
-        (true, false) => LegacyDirAction::Migrate,
-        (true, true) => LegacyDirAction::WarnCollision,
-    }
-}
-
-/// One-time data-dir migration after the project rename to "homun". Existing
-/// installs keep their data: if the legacy `~/.local-first-personal-assistant`
-/// still exists and the new `~/.homun` does not, move it across. Never deletes or
-/// overwrites anything; on failure we proceed with a fresh `~/.homun`.
-///
-/// If BOTH dirs exist the rename can't run — and on at least one machine a
-/// pre-existing `~/.homun` (an unrelated older project) silently shadowed the real
-/// data left in the legacy dir, making the app look "empty". We don't guess which
-/// dataset wins (overwriting user data is never acceptable), but we make the split
-/// LOUD so it can't pass unnoticed again.
-fn migrate_legacy_data_dir() {
-    let Ok(home) = env::var("HOME") else {
-        return;
-    };
-    let home = PathBuf::from(home);
-    let legacy = home.join(".local-first-personal-assistant");
-    let current = home.join(".homun");
-    match legacy_dir_action(legacy.exists(), current.exists()) {
-        LegacyDirAction::Noop => {}
-        LegacyDirAction::Migrate => match fs::rename(&legacy, &current) {
-            Ok(()) => eprintln!(
-                "[homun] migrated data dir {} -> {}",
-                legacy.display(),
-                current.display()
-            ),
-            Err(error) => eprintln!(
-                "[homun] WARN: data-dir migration failed ({error}); starting fresh at {}",
-                current.display()
-            ),
-        },
-        LegacyDirAction::WarnCollision => eprintln!(
-            "[homun] WARN: two data folders coexist — using {} but {} still exists \
-             (possibly more recent data there). If the app looks EMPTY: stop the gateway, \
-             set {} aside and rename {} to {}.",
-            current.display(),
-            legacy.display(),
-            current.display(),
-            legacy.display(),
-            current.display(),
-        ),
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize structured logging. RUST_LOG controls verbosity per module:
@@ -1245,7 +1184,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Move any pre-rename data dir to the new ~/.homun location before anything
     // opens it (the SQLite stores are created immediately below).
-    migrate_legacy_data_dir();
+    gateway_legacy_data::migrate_legacy_data_dir();
 
     // P0 resilience: verify every personal store BEFORE anything opens it; a
     // corrupt file is quarantined (never deleted) and the fresh open below
@@ -64531,11 +64470,11 @@ mod tests {
     // only these unit tests do — import it here rather than re-exporting it at the crate root.
     use super::{
         ActiveModelInputs, AppState, ChannelSettings, CommandOutputError, ConnectorErrorKind,
-        InboundAction, LegacyDirAction, MAX_PLAN_STALL_RESUMES, MemoryBenchIngestRequest,
-        MemoryBenchMessage, MemoryBenchSearchRequest, MemoryBenchSession, MemoryBenchStatusRequest,
-        MemoryCandidate, MemoryDataSensitivity, MemorySourceOverrideInput,
-        MemorySourceUpsertRequest, TASK_EXECUTOR_DEFAULT_WORKER_COUNT, ValidatedMemorySourceInput,
-        WorkspaceRecord, WorkspacesFile, active_llm_concurrency, adapt_skill_body,
+        InboundAction, MAX_PLAN_STALL_RESUMES, MemoryBenchIngestRequest, MemoryBenchMessage,
+        MemoryBenchSearchRequest, MemoryBenchSession, MemoryBenchStatusRequest, MemoryCandidate,
+        MemoryDataSensitivity, MemorySourceOverrideInput, MemorySourceUpsertRequest,
+        TASK_EXECUTOR_DEFAULT_WORKER_COUNT, ValidatedMemorySourceInput, WorkspaceRecord,
+        WorkspacesFile, active_llm_concurrency, adapt_skill_body,
         aggregate_session_state_from_counts, authorize_managed_capability_tool, block_stalled_step,
         brain_budgets_for_context_window, browser_capability_action_refusal,
         browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
@@ -64547,8 +64486,8 @@ mod tests {
         earlier_browse_call_in_current_round, enforce_monotonic_plan_progress, extract_source_urls,
         fonti_section, format_memory_block, gateway_memory_user_id, humanize_task_kind,
         hybrid_memory_score, inbound_action, is_auto_confirmable, is_internal_task_kind,
-        is_low_value_source_url, is_semantic_duplicate, jail_in_root, legacy_dir_action,
-        llm_concurrency_view, mcp_error_hint, mcp_provider_slug, mcp_stdio_config_from_metadata,
+        is_low_value_source_url, is_semantic_duplicate, jail_in_root, llm_concurrency_view,
+        mcp_error_hint, mcp_provider_slug, mcp_stdio_config_from_metadata,
         mcp_stdio_config_to_metadata, memory_age_days, memory_bench_ingest, memory_bench_search,
         memory_bench_status, memory_facade, memory_source_candidates_from_records,
         memory_source_facade_error, memory_source_grant_views, memory_sources_flag,
@@ -69988,21 +69927,6 @@ prs.save(Path({path:?}))
         let row = store.suggestion(id).unwrap().expect("suggestion");
         assert_eq!(row.dedup_key, "follow-up:idra");
         assert_eq!(row.status, "pending");
-    }
-
-    #[test]
-    fn legacy_data_dir_decision() {
-        // No legacy dir → nothing to do (fresh install or already migrated).
-        assert_eq!(legacy_dir_action(false, false), LegacyDirAction::Noop);
-        assert_eq!(legacy_dir_action(false, true), LegacyDirAction::Noop);
-        // Legacy present, ~/.homun absent → clean rename.
-        assert_eq!(legacy_dir_action(true, false), LegacyDirAction::Migrate);
-        // BOTH present → can't rename; must warn (the collision that stranded data
-        // behind a pre-existing ~/.homun), never silently use the empty one.
-        assert_eq!(
-            legacy_dir_action(true, true),
-            LegacyDirAction::WarnCollision
-        );
     }
 
     #[test]
