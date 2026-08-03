@@ -979,6 +979,9 @@ assertRepoContains("crates/desktop-gateway/src/main.rs", "pub(crate) use gateway
 assertRepoContains("crates/desktop-gateway/src/gateway_db_unify.rs", "unify_legacy_databases_at_startup", "desktop gateway legacy DB unification must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_db_unify.rs", "unify_databases_if_needed", "desktop gateway DB unification owner must delegate to the canonical migration engine");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_db_unify::unify_legacy_databases_at_startup", "desktop gateway startup must use the shared DB unification owner");
+assertRepoContains("crates/desktop-gateway/src/gateway_http_client.rs", "build_gateway_http_client", "desktop gateway shared HTTP client must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_http_client.rs", "HOMUN_HTTP_CONNECT_TIMEOUT_SECS", "desktop gateway HTTP client owner must preserve connect-timeout override compatibility");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_http_client::build_gateway_http_client", "desktop gateway startup must use the shared HTTP client owner");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "require_gateway_token", "desktop gateway auth middleware must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "resolve_gateway_auth_token", "desktop gateway auth token resolution must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_auth::require_gateway_token", "desktop gateway must protect chat endpoints with a local token");

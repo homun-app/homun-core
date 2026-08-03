@@ -30,6 +30,7 @@ mod gateway_cors;
 mod gateway_db_unify;
 mod gateway_file_security;
 mod gateway_health;
+mod gateway_http_client;
 mod gateway_identity;
 mod gateway_legacy_data;
 mod gateway_model_timeouts;
@@ -1251,7 +1252,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ));
     let _ = usage_recorder_registry().set(usage_recorder.clone());
     let mut state = AppState {
-        http: build_gateway_http_client(),
+        http: gateway_http_client::build_gateway_http_client(),
         usage_store: Arc::new(Mutex::new(usage_store)),
         usage_recorder,
         usage_pricing,
@@ -17356,26 +17357,6 @@ async fn set_llm_concurrency(
 /// Prefers a provider with a configured API KEY (e.g. Z.ai with a valid key), then
 /// a LOCAL provider with a non-`:cloud` model (no auth). `None` if nothing usable
 /// differs from the failing model.
-/// The shared gateway HTTP client. One `connect_timeout` here bounds the TCP-connect phase
-/// for EVERY outbound call (model, embeddings, privacy-guard, channels) so a wedged or
-/// unreachable host fails fast instead of parking a worker; the per-call streaming timeouts
-/// (see `model_client`) layer on top for the model path. Named builder so all sites share
-/// one policy (converge, don't duplicate). Default 10s; override with
-/// HOMUN_HTTP_CONNECT_TIMEOUT_SECS.
-pub(crate) fn build_gateway_http_client() -> reqwest::Client {
-    let connect_secs = std::env::var("HOMUN_HTTP_CONNECT_TIMEOUT_SECS")
-        .ok()
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(10);
-    reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(connect_secs))
-        .build()
-        // A builder failure here is a TLS/backend init problem, not a per-call error;
-        // fall back to the default client so the gateway still boots.
-        .unwrap_or_else(|_| reqwest::Client::new())
-}
-
 /// Reassembles an OpenAI-compatible SSE stream body into a NON-streaming
 /// `{choices:[{message:{role,content,tool_calls}, finish_reason}]}` shape, so the
 /// rest of the agent loop is unchanged. Concatenates `delta.content` and rebuilds
