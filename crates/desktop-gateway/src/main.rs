@@ -34,6 +34,7 @@ mod gateway_legacy_data;
 mod gateway_paths;
 mod gateway_prompt;
 mod gateway_secrets;
+mod gateway_task_executor_config;
 mod gateway_vault_key;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod inference_transport;
@@ -255,16 +256,8 @@ use task_registry::TaskExecutorRegistry;
 use time::{Duration, OffsetDateTime};
 use tokio::net::TcpListener;
 
-const TASK_EXECUTOR_WORKER_ID: &str = "desktop-gateway-background-worker";
 const TASK_EXECUTOR_MANUAL_WORKER_ID: &str = "desktop-gateway-manual-run";
 const TASK_EXECUTOR_POLL_INTERVAL_MS: u64 = 1_000;
-/// How many independent background workers pull from the task queue. Each worker
-/// owns its own lease id, so two workers never grab the same task; the
-/// ResourceGovernor does the real gating (a task whose resource is exhausted
-/// returns `WaitingResource` and is re-tried next tick). Default 3: enough for
-/// genuine parallelism across resource classes (e.g. a `network_io` task next to
-/// an `llm_inference` one) without hammering SQLite. Env: `HOMUN_TASK_WORKER_COUNT`.
-const TASK_EXECUTOR_DEFAULT_WORKER_COUNT: usize = 3;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -843,16 +836,19 @@ struct TaskExecutorStatus {
 impl TaskExecutorStatus {
     fn new(enabled: bool) -> Self {
         let count = if enabled {
-            task_executor_worker_count()
+            gateway_task_executor_config::task_executor_worker_count()
         } else {
             0
         };
         Self {
             enabled,
             worker_id: if count > 1 {
-                format!("{TASK_EXECUTOR_WORKER_ID}-0..{count}")
+                format!(
+                    "{}-0..{count}",
+                    gateway_task_executor_config::TASK_EXECUTOR_WORKER_ID
+                )
             } else {
-                TASK_EXECUTOR_WORKER_ID.to_string()
+                gateway_task_executor_config::TASK_EXECUTOR_WORKER_ID.to_string()
             },
             poll_interval_ms: TASK_EXECUTOR_POLL_INTERVAL_MS,
             status: if enabled { "starting" } else { "disabled" }.to_string(),
@@ -1302,7 +1298,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         pending_vault_proposals: Arc::new(privacy_guard::PendingVaultProposalStore::default()),
         capability_registry: Arc::new(Mutex::new(open_seeded_capability_registry()?)),
         task_executor_status: Arc::new(Mutex::new(TaskExecutorStatus::new(
-            task_executor_worker_enabled(),
+            gateway_task_executor_config::task_executor_worker_enabled(),
         ))),
         task_executor_registry: ExecutionRuntime::default_registry(),
         browser_capability_client: Arc::new(Mutex::new(None)),
@@ -43572,10 +43568,10 @@ fn requeue_waiting_resource_tasks(
 }
 
 fn start_task_executor_worker(state: AppState) {
-    if !task_executor_worker_enabled() {
+    if !gateway_task_executor_config::task_executor_worker_enabled() {
         return;
     }
-    let count = task_executor_worker_count();
+    let count = gateway_task_executor_config::task_executor_worker_count();
     eprintln!(
         "task executor: starting {count} background worker{} (poll {}ms, ResourceGovernor gates concurrency)",
         if count == 1 { "" } else { "s" },
@@ -43583,7 +43579,7 @@ fn start_task_executor_worker(state: AppState) {
     );
     for index in 0..count {
         let worker_state = state.clone();
-        let worker_id = task_executor_worker_id(index);
+        let worker_id = gateway_task_executor_config::task_executor_worker_id(index);
         // Stagger the first tick across workers so they don't all hit SQLite at
         // once on startup; the interval stays shared afterwards.
         let stagger = StdDuration::from_millis(
@@ -43654,29 +43650,6 @@ fn record_task_executor_batch(state: &AppState, batch: TaskRunBatchResponse) {
             status.failure_count += 1;
         }
     });
-}
-
-fn task_executor_worker_enabled() -> bool {
-    env::var("HOMUN_TASK_EXECUTOR_WORKER")
-        .map(|value| {
-            let normalized = value.trim().to_lowercase();
-            !matches!(normalized.as_str(), "0" | "false" | "off" | "disabled")
-        })
-        .unwrap_or(true)
-}
-
-fn task_executor_worker_count() -> usize {
-    std::env::var("HOMUN_TASK_WORKER_COUNT")
-        .ok()
-        .and_then(|value| value.trim().parse::<usize>().ok())
-        .filter(|&count| (1..=16).contains(&count))
-        .unwrap_or(TASK_EXECUTOR_DEFAULT_WORKER_COUNT)
-}
-
-/// Worker id for index `n`. Stable per index so leases survive across ticks and
-/// `recover_stale_leases` can still identify ownership after a crash.
-fn task_executor_worker_id(index: usize) -> String {
-    format!("{TASK_EXECUTOR_WORKER_ID}-{index}")
 }
 
 fn update_task_executor_status(state: &AppState, update: impl FnOnce(&mut TaskExecutorStatus)) {
@@ -64463,10 +64436,9 @@ mod tests {
         InboundAction, MAX_PLAN_STALL_RESUMES, MemoryBenchIngestRequest, MemoryBenchMessage,
         MemoryBenchSearchRequest, MemoryBenchSession, MemoryBenchStatusRequest, MemoryCandidate,
         MemoryDataSensitivity, MemorySourceOverrideInput, MemorySourceUpsertRequest,
-        TASK_EXECUTOR_DEFAULT_WORKER_COUNT, ValidatedMemorySourceInput, WorkspaceRecord,
-        WorkspacesFile, active_llm_concurrency, adapt_skill_body,
-        aggregate_session_state_from_counts, authorize_managed_capability_tool, block_stalled_step,
-        brain_budgets_for_context_window, browser_capability_action_refusal,
+        ValidatedMemorySourceInput, WorkspaceRecord, WorkspacesFile, active_llm_concurrency,
+        adapt_skill_body, aggregate_session_state_from_counts, authorize_managed_capability_tool,
+        block_stalled_step, brain_budgets_for_context_window, browser_capability_action_refusal,
         browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
         browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_browse_goal,
         build_memory_source_grant, build_plan_markdown, capability_call_completed_outcome,
@@ -64492,11 +64464,10 @@ mod tests {
         sanitize_dedup_key, sanitize_wiki_filename, scheduled_thread_sender_for_task_id,
         scheduled_thread_title, search_composio_catalog, should_try_tool_compatibility_fallback,
         skill_id_from_command, strip_json_fences, suggestion_choices_json, task_effective_goal,
-        task_execution_outcome_from_executor_result, task_executor_worker_count,
-        task_executor_worker_id, task_goal_summary, task_queue_response, tool_touches_calendar,
-        tool_touches_contacts, valid_catalog_owner, validate_memory_source_input,
-        validate_memory_source_overrides, validate_memory_source_workspaces, wiki_title_from_text,
-        workspace_write_roots,
+        task_execution_outcome_from_executor_result, task_goal_summary, task_queue_response,
+        tool_touches_calendar, tool_touches_contacts, valid_catalog_owner,
+        validate_memory_source_input, validate_memory_source_overrides,
+        validate_memory_source_workspaces, wiki_title_from_text, workspace_write_roots,
     };
     use crate::browser_safety;
     use crate::chat_store::{self, ChatStore};
@@ -85462,40 +85433,6 @@ data: [DONE]\n";
         } else {
             assert_eq!(view.effective, if view.inferred_local { 1 } else { 4 });
         }
-    }
-
-    #[test]
-    fn task_executor_worker_count_clamps_and_defaults() {
-        let env = TestEnv::acquire();
-        env.set("HOMUN_TASK_WORKER_COUNT", Some("5"));
-        assert_eq!(task_executor_worker_count(), 5);
-        env.set("HOMUN_TASK_WORKER_COUNT", Some("0"));
-        assert_eq!(
-            task_executor_worker_count(),
-            TASK_EXECUTOR_DEFAULT_WORKER_COUNT
-        );
-        env.set("HOMUN_TASK_WORKER_COUNT", Some("99"));
-        assert_eq!(
-            task_executor_worker_count(),
-            TASK_EXECUTOR_DEFAULT_WORKER_COUNT
-        );
-        env.set("HOMUN_TASK_WORKER_COUNT", None);
-        assert_eq!(
-            task_executor_worker_count(),
-            TASK_EXECUTOR_DEFAULT_WORKER_COUNT
-        );
-    }
-
-    #[test]
-    fn task_executor_worker_id_is_stable_per_index() {
-        assert_eq!(
-            task_executor_worker_id(0),
-            "desktop-gateway-background-worker-0"
-        );
-        assert_eq!(
-            task_executor_worker_id(2),
-            "desktop-gateway-background-worker-2"
-        );
     }
 
     #[test]

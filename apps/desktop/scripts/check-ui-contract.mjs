@@ -970,6 +970,9 @@ assertRepoContains("crates/desktop-gateway/src/gateway_bind.rs", "gateway_bind_a
 assertRepoContains("crates/desktop-gateway/src/gateway_bind.rs", "HOMUN_DESKTOP_GATEWAY_PORT", "desktop gateway bind owner must preserve desktop port override compatibility");
 assertRepoContains("crates/desktop-gateway/src/gateway_bind.rs", "HOMUN_DESKTOP_GATEWAY_HOST", "desktop gateway bind owner must preserve host override compatibility");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_bind::gateway_bind_addr", "desktop gateway startup must use the shared bind resolver");
+assertRepoContains("crates/desktop-gateway/src/gateway_task_executor_config.rs", "task_executor_worker_enabled", "desktop gateway task executor worker config must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_task_executor_config.rs", "HOMUN_TASK_WORKER_COUNT", "desktop gateway task executor owner must preserve worker-count env compatibility");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_task_executor_config::task_executor_worker_enabled", "desktop gateway startup must use the shared task executor config");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "require_gateway_token", "desktop gateway auth middleware must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "resolve_gateway_auth_token", "desktop gateway auth token resolution must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_auth::require_gateway_token", "desktop gateway must protect chat endpoints with a local token");
