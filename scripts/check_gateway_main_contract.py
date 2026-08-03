@@ -107,6 +107,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn remote_approval_intent_from_marker(": "remote approval marker parsing must stay in gateway_remote_approval",
         "fn remote_approval_intent_from_raw_text(": "remote approval marker parsing must stay in gateway_remote_approval",
         "fn actionable_cards_from_raw_text(": "actionable card parsing must stay in gateway_remote_approval",
+        "async fn activate_remote_approvals_from_message(": "remote approval source binding and dispatch must stay in gateway_remote_approval",
         "const KNOWN_PLUGINS:": "plugin enablement registry must stay in gateway_plugins",
         "async fn plugins_list(": "plugin enablement listing must stay in gateway_plugins",
         "async fn plugin_toggle(": "plugin enablement toggle must stay in gateway_plugins",

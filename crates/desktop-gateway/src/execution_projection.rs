@@ -434,7 +434,7 @@ async fn project_human_wait(
             });
             if let Some(message) = message {
                 crate::projection_worker::assert_claim_current(state, projection_claim)?;
-                return crate::activate_remote_approvals_from_message(
+                return crate::gateway_remote_approval::activate_remote_approvals_from_message(
                     state,
                     contract,
                     projection_claim,

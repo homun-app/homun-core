@@ -122,6 +122,71 @@ pub(crate) fn remote_approval_intents_from_message(
     }
 }
 
+pub(crate) async fn activate_remote_approvals_from_message(
+    state: &AppState,
+    contract: &local_first_execution_protocol::ValidatedExecutionContract,
+    projection_claim: Option<&local_first_task_runtime::ProjectionClaim>,
+    thread_id: &str,
+    message: &ChatMessage,
+) -> Result<Option<local_first_execution_protocol::EffectReceiptRef>, String> {
+    for intent in remote_approval_intents_from_message(message) {
+        let Some(approval_id) = intent.approval_id.as_deref() else {
+            continue;
+        };
+        let row = lock_store(state).ok().and_then(|store| {
+            let pending = store.remote_approval_by_id(approval_id).ok().flatten()?;
+            let expected_protocol = if pending.tool.starts_with("mcp__") {
+                "mcp"
+            } else {
+                "composio"
+            };
+            if pending.tool != intent.tool
+                || pending.arguments != intent.arguments
+                || expected_protocol != intent.protocol
+            {
+                return None;
+            }
+            store
+                .bind_remote_approval_source(approval_id, thread_id, &message.id)
+                .ok()
+                .flatten()
+        });
+        let Some(row) = row else {
+            continue;
+        };
+        if lock_store(state)
+            .map_err(|error| error.message)?
+            .expire_remote_approval_if_due(
+                &row.approval_id,
+                OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .map_err(|error| format!("remote approval expiry failed: {error}"))?
+        {
+            continue;
+        }
+        if row.status != "pending"
+            || !row.requires_source
+            || row.dispatched_at.is_some()
+            || row.source_message_id.as_deref() != Some(message.id.as_str())
+        {
+            continue;
+        }
+        let projection_claim = projection_claim
+            .ok_or_else(|| "remote approval dispatch requires a projection claim".to_string())?;
+        match dispatch_remote_approval(state, contract, projection_claim, &row).await? {
+            ChannelProjectionDelivery::NotApplicable => {}
+            ChannelProjectionDelivery::Pending(receipt_ref) => return Ok(Some(receipt_ref)),
+            ChannelProjectionDelivery::Delivered(_) => {
+                lock_store(state)
+                    .map_err(|error| error.message)?
+                    .mark_remote_approval_dispatched(&row.approval_id)
+                    .map_err(|error| format!("remote approval dispatch marker failed: {error}"))?;
+            }
+        }
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 pub(crate) fn remote_approval_matches_persisted_message(
     message: &ChatMessage,
