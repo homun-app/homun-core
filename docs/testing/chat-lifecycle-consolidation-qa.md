@@ -8,6 +8,12 @@ Branch: `fabio/chat-lifecycle-consolidation`
 Da `/Users/fabio/Projects/Homun/app/.worktrees/chat-lifecycle-consolidation`:
 
 ```bash
+python3 scripts/kernel_regression_gate.py
+```
+
+Il gate sopra e' ora il wrapper canonico per i controlli sotto.
+
+```bash
 cargo fmt --check
 cargo test -p local-first-task-runtime turn_lifecycle
 cargo test -p local-first-task-runtime active_chat_turn
@@ -139,3 +145,9 @@ Smoke fresco via broker reale:
 | Turn terminale | PASS (`status=completed`, `canonical_completed`) |
 | Risposta finale | PASS (`document.title` = `Selenium`) |
 | Prova CDP | PASS (tab `https://www.selenium.dev/`, title `Selenium`) |
+
+Lo smoke e' stato reso rieseguibile con:
+
+```bash
+HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
+```

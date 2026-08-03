@@ -13,6 +13,7 @@
 | [`architecture/`](architecture/) | Mappa as-built dei sottosistemi (riscritta dal codice) |
 | [`decisions/`](decisions/) | ADR immutabili — il “perché” storico, non lo stato corrente |
 | [`testing/anti-regression-protocol.md`](testing/anti-regression-protocol.md) | Gate minimo per non far rientrare regressioni chat/runtime/UI |
+| [`testing/kernel-contract-matrix.md`](testing/kernel-contract-matrix.md) | Matrix owner/test/smoke dei contratti kernel vivi |
 | [`testing/release-candidate-matrix.md`](testing/release-candidate-matrix.md) | Gate release installata |
 | [`distribution.md`](distribution.md) · [`release-macos.md`](release-macos.md) · [`windows-signing.md`](windows-signing.md) | Distribuzione / firma |
 | [`HANDOFF-2026-07-31.md`](HANDOFF-2026-07-31.md) | Prompt lungo per un altro agent (opzionale) |
@@ -30,6 +31,7 @@ confronti, roadmap, …) e gli altri file in `archive/`. Utile solo come storia.
 # da app/
 cargo test --workspace
 cargo test -p local-first-desktop-gateway -- --nocapture
+python3 scripts/kernel_regression_gate.py
 python3 scripts/pre_release_gate.py
 
 # da apps/desktop/

@@ -26,6 +26,20 @@ Un controllo visuale senza fixture non basta: e' valido solo come smoke finale.
 Da `app/`:
 
 ```bash
+python3 scripts/kernel_regression_gate.py
+```
+
+Il comando sopra e' il gate unico per il perimetro kernel/chat/runtime. Esegue
+gli stessi controlli minimi elencati sotto e si ferma al primo errore. Per
+includere uno smoke reale gateway+browser:
+
+```bash
+HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
+```
+
+Componenti deterministici del gate:
+
+```bash
 cargo fmt --check
 cargo test -p local-first-task-runtime turn_lifecycle
 cargo test -p local-first-task-runtime active_chat_turn

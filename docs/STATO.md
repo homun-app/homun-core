@@ -38,6 +38,8 @@ Slice completate nel branch:
 - cleanup durable di steering non settled a fine turno;
 - contratti CSS/test per prompt utente senza frame, editor multilinea e
   overlay workspace/browser non sovrapposti.
+- gate unico `scripts/kernel_regression_gate.py` con smoke live opzionale
+  `scripts/kernel_live_smoke.py` per modello/gateway/browser/reasoning.
 
 ### P0 — fatto
 
