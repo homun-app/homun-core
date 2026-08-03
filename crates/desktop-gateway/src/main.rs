@@ -31,6 +31,7 @@ mod gateway_health;
 mod gateway_identity;
 mod gateway_paths;
 mod gateway_prompt;
+mod gateway_secrets;
 mod gateway_vault_key;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod inference_transport;
@@ -121,6 +122,7 @@ use gateway_paths::{
     gateway_memory_wiki_dir, gateway_project_access_path, gateway_task_database_path,
     gateway_unified_database_path, gateway_vault_database_path, gateway_workspaces_path,
 };
+use gateway_secrets::{open_browser_checkpoint_secret_store, open_gateway_secret_store};
 use local_first_browser_automation::{
     BrowserAutomationClient, BrowserAutomationError, BrowserCheckpoint, BrowserMethod,
     BrowserResponse, BrowserSidecarSession, BrowserSidecarSpawnOptions, BrowserUrlApprovalGrant,
@@ -1379,7 +1381,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         hitl_resume_by_thread: Arc::new(Mutex::new(std::collections::HashMap::new())),
         payment_approvals: Arc::new(Mutex::new(std::collections::HashMap::new())),
         setup_computer: Arc::new(setup_computer::SetupComputerCoordinator::default()),
-        secret_store: Arc::new(open_gateway_secret_store()?),
+        secret_store: Arc::new(gateway_secrets::open_gateway_secret_store()?),
         browser_checkpoint_secret_store: Arc::new(open_browser_checkpoint_secret_store()?),
         auth_token: gateway_auth::resolve_gateway_auth_token(
             &gateway_paths::gateway_data_dir()?,
@@ -63705,44 +63707,6 @@ fn upsert_workspace_root_memory_entity(
 /// Sets the in-process active workspace from the persisted selection at startup.
 fn init_active_workspace_from_disk() {
     set_active_workspace(&load_workspaces_file().active);
-}
-
-/// 32-byte local key for at-rest secret encryption, generated once into a 0600
-/// file. Connection API keys are encrypted with this; only `secret_ref`s live in
-/// the registry DB (ADR 0009 / memory design: never plaintext in the DB).
-fn gateway_secret_key_seed() -> Result<[u8; 32], std::io::Error> {
-    let base = gateway_data_dir()?;
-    let path = base.join("secret-key");
-    if let Ok(bytes) = fs::read(&path)
-        && bytes.len() == 32
-    {
-        let mut seed = [0u8; 32];
-        seed.copy_from_slice(&bytes);
-        return Ok(seed);
-    }
-    let mut seed = [0u8; 32];
-    seed[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-    seed[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-    gateway_file_security::write_private_file(&path, &seed)?;
-    Ok(seed)
-}
-
-fn open_gateway_secret_store()
--> Result<EncryptedFileSecretStore<DevelopmentSecretKeyProvider>, std::io::Error> {
-    let seed = gateway_secret_key_seed()?;
-    let base = gateway_data_dir()?;
-    EncryptedFileSecretStore::open(
-        base.join("secrets.json"),
-        DevelopmentSecretKeyProvider::new(seed),
-    )
-    .map_err(|error| std::io::Error::other(error.to_string()))
-}
-
-fn open_browser_checkpoint_secret_store() -> Result<BrowserCheckpointSecretStore, std::io::Error> {
-    let seed = gateway_secret_key_seed()?;
-    let base = gateway_data_dir()?;
-    BrowserCheckpointSecretStore::open(base.join("browser-checkpoint-secrets.json"), seed)
-        .map_err(std::io::Error::other)
 }
 
 async fn workspaces_list() -> Json<WorkspacesResponse> {
