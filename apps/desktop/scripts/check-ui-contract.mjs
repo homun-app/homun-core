@@ -951,6 +951,9 @@ assertRepoContains("crates/desktop-gateway/src/gateway_paths.rs", "HOMUN_DESKTOP
 assertRepoContains("crates/desktop-gateway/src/gateway_paths.rs", "gateway_workspaces_path", "desktop gateway workspace paths must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_paths.rs", "HOMUN_MEMORY_WIKI_DIR", "desktop gateway path owner must preserve memory wiki override compatibility");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_paths::gateway_data_dir", "desktop gateway startup must use the shared path owner");
+assertRepoContains("crates/desktop-gateway/src/gateway_file_security.rs", "write_private_file", "desktop gateway local file protection must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_file_security.rs", "harden_data_at_rest", "desktop gateway at-rest hardening must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_file_security::write_private_file", "desktop gateway startup must use the shared private file writer");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "require_gateway_token", "desktop gateway auth middleware must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "resolve_gateway_auth_token", "desktop gateway auth token resolution must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_auth::require_gateway_token", "desktop gateway must protect chat endpoints with a local token");

@@ -26,6 +26,7 @@ mod execution_projection;
 mod execution_runtime;
 mod gateway_auth;
 mod gateway_cors;
+mod gateway_file_security;
 mod gateway_health;
 mod gateway_paths;
 mod gateway_prompt;
@@ -1374,7 +1375,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         browser_checkpoint_secret_store: Arc::new(open_browser_checkpoint_secret_store()?),
         auth_token: gateway_auth::resolve_gateway_auth_token(
             &gateway_paths::gateway_data_dir()?,
-            write_private_file,
+            gateway_file_security::write_private_file,
         )?
         .into(),
         novnc_tickets: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -1398,7 +1399,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Fix any pre-existing 0644 data files (created before the umask above was set):
     // the SQLite stores and the WhatsApp session are world-readable on old installs.
     if let Ok(dir) = gateway_data_dir() {
-        harden_data_at_rest(&dir);
+        gateway_file_security::harden_data_at_rest(&dir);
     }
     init_active_workspace_from_disk();
     seed_default_skills();
@@ -36799,11 +36800,13 @@ async fn telegram_connect(
     {
         Some(token) => {
             if let Some(path) = telegram_token_path() {
-                write_private_file(&path, token.as_bytes()).map_err(|error| GatewayError {
-                    status: StatusCode::INTERNAL_SERVER_ERROR,
-                    code: "telegram_token_save",
-                    message: error.to_string(),
-                })?;
+                gateway_file_security::write_private_file(&path, token.as_bytes()).map_err(
+                    |error| GatewayError {
+                        status: StatusCode::INTERNAL_SERVER_ERROR,
+                        code: "telegram_token_save",
+                        message: error.to_string(),
+                    },
+                )?;
             }
             token.to_string()
         }
@@ -62387,7 +62390,7 @@ fn file_vault_wrap_key() -> Result<[u8; 32], std::io::Error> {
     }
     let key = generate_vault_wrap_key();
     let encoded = base64::engine::general_purpose::STANDARD.encode(key);
-    write_private_file(&path, encoded.as_bytes())?;
+    gateway_file_security::write_private_file(&path, encoded.as_bytes())?;
     Ok(key)
 }
 
@@ -62409,64 +62412,6 @@ fn decode_vault_wrap_key(encoded: &str) -> Option<[u8; 32]> {
     let mut key = [0u8; 32];
     key.copy_from_slice(&bytes);
     Some(key)
-}
-
-/// Make every top-level file in the data directory owner-only (0600). The
-/// personal stores (memory.sqlite, desktop-gateway.sqlite, the WhatsApp session,
-/// task-runtime.sqlite, their WAL/SHM, plus any *.bak snapshots) are plaintext on
-/// disk; world-readable (0644) would let any other local user or a casual backup
-/// read the user's memory, contacts and messages. New files are already born 0600
-/// via the process umask — this repairs files written before that. Only top-level
-/// files are touched: subdirectories (skills/, artifacts/) may hold executables
-/// whose modes must not be clobbered. Best-effort: logs a count, never aborts.
-#[cfg(unix)]
-fn harden_data_at_rest(base: &std::path::Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let Ok(entries) = fs::read_dir(base) else {
-        return;
-    };
-    let mut fixed = 0usize;
-    for entry in entries.flatten() {
-        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-            continue;
-        }
-        let Ok(meta) = entry.metadata() else { continue };
-        // Already owner-only? leave it. Otherwise group/other have some access → tighten.
-        if meta.permissions().mode() & 0o077 == 0 {
-            continue;
-        }
-        if fs::set_permissions(entry.path(), fs::Permissions::from_mode(0o600)).is_ok() {
-            fixed += 1;
-        }
-    }
-    if fixed > 0 {
-        eprintln!(
-            "[gateway] data-at-rest: tightened {fixed} file(s) to 0600 in {}",
-            base.display()
-        );
-    }
-}
-
-#[cfg(not(unix))]
-fn harden_data_at_rest(_base: &std::path::Path) {}
-
-/// Writes a file readable/writable only by the current user (0600 on Unix).
-#[cfg(unix)]
-fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), std::io::Error> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-    file.write_all(bytes)
-}
-
-#[cfg(not(unix))]
-fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), std::io::Error> {
-    fs::write(path, bytes)
 }
 
 pub(crate) fn gateway_user_id() -> UserId {
@@ -63981,7 +63926,7 @@ fn gateway_secret_key_seed() -> Result<[u8; 32], std::io::Error> {
     let mut seed = [0u8; 32];
     seed[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
     seed[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-    write_private_file(&path, &seed)?;
+    gateway_file_security::write_private_file(&path, &seed)?;
     Ok(seed)
 }
 
