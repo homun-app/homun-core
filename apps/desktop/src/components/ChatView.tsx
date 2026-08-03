@@ -10054,6 +10054,11 @@ function Composer({
     icon: option.icon,
     available: !option.projectOnly || linkedFolder != null,
   }));
+  const modelButtonLabel = selectedModel
+    ? shortModelName(selectedModel)
+    : activeModel
+      ? shortModelName(activeModel)
+      : effectiveModelLabel;
 
   return (
     <ComposerShell
@@ -10084,6 +10089,7 @@ function Composer({
       models={models}
       modelGroups={modelGroups}
       selectedNextTurnModel={selectedModel}
+      modelButtonLabel={modelButtonLabel}
       effectiveModelLabel={effectiveModelLabel}
       runtimeContext={runtimeContext}
       runtimeContextLoading={runtimeContextLoading}

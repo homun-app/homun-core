@@ -97,3 +97,15 @@ L'isola workspace e il dock live computer/browser non si sovrappongono:
 quando `.active-task-layout` ha `data-workspace-island-open="true"`, il dock
 `.chat-computer-runtime` e' nascosto. L'accesso al browser resta owner
 dell'isola workspace/rail, non del dock flottante.
+
+Il footer del composer separa tre concetti:
+
+- il bottone modello mostra il prossimo override selezionato oppure il modello
+  runtime attivo;
+- la provenienza del modello che ha prodotto una risposta resta message-scoped
+  e non viene falsificata dal next-turn override;
+- `Runtime & Context` nel footer e' un trigger icon-only, con testo solo in
+  `aria-label`/tooltip.
+
+Il panel runtime mostra prima una visualizzazione di context usage: percentuale,
+token usati/window, barra e legenda contributi. I dettagli tecnici restano sotto.

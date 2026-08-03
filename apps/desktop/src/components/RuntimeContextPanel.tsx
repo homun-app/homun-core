@@ -11,16 +11,35 @@ function formatTokens(value: number | null, unavailable: string) {
   return value === null ? unavailable : new Intl.NumberFormat().format(value);
 }
 
+function formatCompactTokens(value: number | null, unavailable: string) {
+  if (value === null) return unavailable;
+  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return new Intl.NumberFormat().format(value);
+}
+
 export function RuntimeContextPanel({ value, loading, error }: RuntimeContextPanelProps) {
   const { t } = useTranslation();
   const unavailable = t("composer.runtime.unavailable");
   const contributionRows = [
-    ["conversation", t("composer.runtime.conversation"), value.contributions.conversation],
-    ["compactedSummary", t("composer.runtime.compactedSummary"), value.contributions.compactedSummary],
-    ["filesArtifacts", t("composer.runtime.filesArtifacts"), value.contributions.filesArtifacts],
-    ["authorizedMemory", t("composer.runtime.authorizedMemory"), value.contributions.authorizedMemory],
-    ["systemTools", t("composer.runtime.systemTools"), value.contributions.systemTools],
+    ["conversation", t("composer.runtime.conversation"), value.contributions.conversation, "conversation"],
+    ["compactedSummary", t("composer.runtime.compactedSummary"), value.contributions.compactedSummary, "summary"],
+    ["filesArtifacts", t("composer.runtime.filesArtifacts"), value.contributions.filesArtifacts, "files"],
+    ["authorizedMemory", t("composer.runtime.authorizedMemory"), value.contributions.authorizedMemory, "memory"],
+    ["systemTools", t("composer.runtime.systemTools"), value.contributions.systemTools, "system"],
   ] as const;
+  const usedPercent = value.percent === null ? null : Math.round(value.percent);
+  const usageLabel = value.usedTokens === null || value.contextWindow === null
+    ? unavailable
+    : `~${formatCompactTokens(value.usedTokens, unavailable)} / ${formatCompactTokens(value.contextWindow, unavailable)} tokens`;
+  const contributionSegments = contributionRows
+    .filter(([, , contribution]) => contribution && value.contextWindow && value.contextWindow > 0)
+    .map(([key, label, contribution, tone]) => ({
+      key,
+      label,
+      tone,
+      percent: Math.max(1, Math.min(100, ((contribution?.estimatedTokens ?? 0) / (value.contextWindow ?? 1)) * 100)),
+    }));
   const facts = [
     [t("composer.runtime.effectiveModel"), value.effectiveModel],
     [t("composer.runtime.nextTurnModel"), value.selectedNextModel ?? t("composer.auto")],
@@ -55,31 +74,55 @@ export function RuntimeContextPanel({ value, loading, error }: RuntimeContextPan
       </h2>
       {loading ? <p className="composer-menu-empty">{t("composer.runtime.loading")}</p> : null}
       {error ? <p className="composer-error">{t("composer.runtime.error")}</p> : null}
-      <dl>
+      <div className="composer-runtime-usage">
+        <div className="composer-runtime-usage-head">
+          <span>{usedPercent === null ? unavailable : `${usedPercent}% Full`}</span>
+          <span>{usageLabel}</span>
+        </div>
+        <div
+          className="composer-runtime-usage-bar"
+          role="progressbar"
+          aria-label={t("composer.runtime.usedInput")}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={usedPercent ?? undefined}
+        >
+          <div className="composer-runtime-usage-fill" style={{ width: `${usedPercent ?? 0}%` }} />
+          <div className="composer-runtime-segments" aria-hidden="true">
+            {contributionSegments.map((segment) => (
+              <span
+                className={`composer-runtime-segment composer-runtime-segment--${segment.tone}`}
+                key={segment.key}
+                title={segment.label}
+                style={{ width: `${segment.percent}%` }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+      <dl className="composer-runtime-contributions">
+        {contributionRows.map(([key, label, contribution, tone]) => (
+          <div className="composer-runtime-contribution" key={key}>
+            <dt>
+              <span className={`composer-runtime-swatch composer-runtime-swatch--${tone}`} />
+              <span>{label}</span>
+            </dt>
+            <dd>
+              <span>{contribution ? formatTokens(contribution.estimatedTokens, unavailable) : unavailable}</span>
+              {contribution?.source === "prompt_snapshot_estimate" ? (
+                <small>{t("composer.runtime.promptEstimate")}</small>
+              ) : contribution?.source === "provider_reported" ? (
+                <small>{t("composer.runtime.providerReported")}</small>
+              ) : null}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <dl className="composer-runtime-facts">
         {facts.map(([label, content]) => (
           <div className="composer-runtime-row" key={label}>
             <dt className="menu-item__label">{label}</dt>
             <dd className="menu-item__trailing">{content ?? unavailable}</dd>
-          </div>
-        ))}
-      </dl>
-      <div className="composer-model-group-label">{t("composer.runtime.contributions")}</div>
-      <dl>
-        {contributionRows.map(([key, label, contribution]) => (
-          <div className="composer-runtime-row" key={key}>
-            <dt className="menu-item__label">{label}</dt>
-            <dd className="menu-item__trailing">
-              {contribution ? (
-                <>
-                  <span>{formatTokens(contribution.estimatedTokens, unavailable)}</span>
-                  {contribution.source === "prompt_snapshot_estimate" ? (
-                    <small>{t("composer.runtime.promptEstimate")}</small>
-                  ) : contribution.source === "provider_reported" ? (
-                    <small>{t("composer.runtime.providerReported")}</small>
-                  ) : null}
-                </>
-              ) : unavailable}
-            </dd>
           </div>
         ))}
       </dl>

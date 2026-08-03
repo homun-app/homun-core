@@ -94,6 +94,7 @@ export interface ComposerShellProps {
   models: string[];
   modelGroups: ProviderModelsGroup[];
   selectedNextTurnModel: string | null;
+  modelButtonLabel: string;
   effectiveModelLabel: string;
   runtimeContext: RuntimeContextResponse | null;
   runtimeContextLoading: boolean;
@@ -399,9 +400,9 @@ export function ComposerShell(props: ComposerShellProps) {
 
       <div className="composer-metadata-row">
         <button id="composer-mode-trigger" ref={modeRef} type="button" aria-label={t("composer.mode")} aria-haspopup="menu" aria-expanded={rootOpen("mode")} onClick={() => openRoot("mode")}><Bot size={13} /><span>{modeLabel}</span></button>
-        <button id="composer-model-trigger" ref={modelRef} className="composer-model-button" type="button" aria-label={t("composer.model")} aria-haspopup="menu" aria-expanded={rootOpen("model")} onClick={() => openRoot("model")}><span>{props.effectiveModelLabel}</span><Settings2 size={13} /></button>
+        <button id="composer-model-trigger" ref={modelRef} className="composer-model-button" type="button" aria-label={t("composer.model")} aria-haspopup="menu" aria-expanded={rootOpen("model")} onClick={() => openRoot("model")}><span>{props.modelButtonLabel}</span><Settings2 size={13} /></button>
         <span className="composer-metadata-item" aria-label={t("composer.environment")}><Monitor size={13} /><span>{props.environmentLabel}</span></span>
-        <button id="composer-runtime-trigger" ref={runtimeRef} type="button" aria-label={t("composer.runtimeContext")} aria-haspopup="dialog" aria-expanded={rootOpen("runtime")} onClick={() => openRoot("runtime")}><span>{t("composer.runtimeContext")}</span><Settings2 size={13} /></button>
+        <button id="composer-runtime-trigger" ref={runtimeRef} className="composer-runtime-button" type="button" aria-label={t("composer.runtimeContext")} title={t("composer.runtimeContext")} aria-haspopup="dialog" aria-expanded={rootOpen("runtime")} onClick={() => openRoot("runtime")}><Settings2 size={13} /></button>
       </div>
 
       <MenuSurface id="composer-add-menu" chainId="composer" label={t("composer.add")} open={rootOpen("add")} anchorRef={addRef} search={{ value: addQuery, onChange: setAddQuery, placeholder: t("composer.searchAdd") }} onCloseCurrent={closeCurrent} onCloseAll={closeAll}>

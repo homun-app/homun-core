@@ -311,6 +311,11 @@ test("runtime panel exposes only approved redacted categories", () => {
   assert.match(runtimeContextPanel, /composer\.runtime\.nextTurnModel/);
   assert.match(runtimeContextPanel, /value\.selectedNextModel\s*\?\?/);
   assert.match(runtimeContextPanel, /<section[\s\S]*?aria-labelledby=/);
+  assert.match(runtimeContextPanel, /className="composer-runtime-usage-bar"[\s\S]*?role="progressbar"/);
+  assert.match(runtimeContextPanel, /composer-runtime-contributions/);
+  assert.match(runtimeContextPanel, /composer-runtime-segment--/);
+  assert.match(composerStyles, /\.composer-runtime-usage-bar\s*\{[\s\S]*?height:\s*6px;/);
+  assert.match(composerStyles, /\.composer-runtime-swatch--conversation/);
 });
 
 test("the adaptive workspace island replaces every persistent status owner", () => {
@@ -567,10 +572,24 @@ test("composer keeps prior effective-model provenance separate from the next-tur
   assert.match(chatView, /threadMessages[\s\S]*?role\s*===\s*"assistant"[\s\S]*?\.model/);
   assert.match(composerShell, /selectedNextTurnModel/);
   assert.match(composerShell, /effectiveModelLabel/);
+  assert.match(composerShell, /modelButtonLabel/);
+  assert.match(chatView, /const modelButtonLabel = selectedModel[\s\S]*?activeModel[\s\S]*?effectiveModelLabel;/);
   assert.doesNotMatch(
     composerShell,
     /effectiveModelLabel\s*=\s*[^\n]*selectedNextTurnModel/,
   );
+});
+
+test("runtime context trigger is icon-only while retaining accessible text", () => {
+  assert.match(
+    composerShell,
+    /id="composer-runtime-trigger"[\s\S]*?className="composer-runtime-button"[\s\S]*?aria-label=\{t\("composer\.runtimeContext"\)\}[\s\S]*?title=\{t\("composer\.runtimeContext"\)\}/,
+  );
+  assert.doesNotMatch(
+    composerShell,
+    /id="composer-runtime-trigger"[\s\S]*?<span>\{t\("composer\.runtimeContext"\)\}<\/span>/,
+  );
+  assert.match(composerStyles, /\.composer-runtime-button\s*\{[\s\S]*?width:\s*26px;[\s\S]*?justify-content:\s*center;/);
 });
 
 test("composer reducer delegates Add children to exclusive nested-layer state", () => {
