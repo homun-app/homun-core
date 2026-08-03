@@ -238,6 +238,16 @@ assertRepoContains(
   "gateway_turn_recovery::recover_gateway_chat_turns_at_startup(&state).await;",
   "Gateway startup must delegate lease-aware chat recovery to the dedicated owner",
 );
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway boot maintenance"',
+  "Kernel regression gate must run the gateway boot maintenance owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway_turn_recovery"',
+  "Kernel regression gate must run the gateway turn recovery owner test",
+);
 assertContains("src/lib/coreBridge.ts", "usageDaily:", "Usage must expose the real daily series");
 assertContains("src/components/UsageCalendar.tsx", 'role="grid"', "Usage calendar must expose an accessible grid");
 assertContains("src/components/UsageCalendar.tsx", 'role="gridcell"', "Usage days must be keyboard reachable");

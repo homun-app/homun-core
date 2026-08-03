@@ -53,6 +53,30 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ["cargo", "test", "-p", "local-first-task-runtime", "enqueue_"],
         ),
         Step(
+            "gateway boot maintenance",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "gateway_boot_maintenance",
+            ],
+        ),
+        Step(
+            "gateway turn recovery",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "gateway_turn_recovery",
+            ],
+        ),
+        Step(
             "gateway steering cleanup",
             [
                 "cargo",
