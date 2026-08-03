@@ -8,6 +8,7 @@ export const STALE_STEERING_STATUSES = new Set([
   "applied",
   "completed",
   "cancelled",
+  "promoted",
 ]);
 
 export function visiblePendingSteeringRows<Row extends SteeringRowLike>(
