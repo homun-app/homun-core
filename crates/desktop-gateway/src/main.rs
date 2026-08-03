@@ -25,6 +25,7 @@ mod execution_host;
 mod execution_projection;
 mod execution_runtime;
 mod gateway_auth;
+mod gateway_bind;
 mod gateway_cors;
 mod gateway_file_security;
 mod gateway_health;
@@ -244,7 +245,6 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
     env, fs,
     io::{Cursor, Read, Write},
-    net::SocketAddr,
     path::{Path as FsPath, PathBuf},
     process::Command,
     str::FromStr,
@@ -1221,17 +1221,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         ]));
 
-    let port = env::var("HOMUN_DESKTOP_GATEWAY_PORT")
-        .ok()
-        .or_else(|| env::var("PORT").ok()) // PaaS convention
-        .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(18_765);
-    // Desktop binds loopback; server/PaaS deploys set HOMUN_DESKTOP_GATEWAY_HOST=0.0.0.0.
-    let host: std::net::IpAddr = env::var("HOMUN_DESKTOP_GATEWAY_HOST")
-        .ok()
-        .and_then(|value| value.trim().parse().ok())
-        .unwrap_or(std::net::IpAddr::from([127, 0, 0, 1]));
-    let addr = SocketAddr::from((host, port));
+    let addr = gateway_bind::gateway_bind_addr();
     // Phase 1b: fuse the legacy two-DB layout (desktop-gateway.sqlite +
     // task-runtime.sqlite) into the unified homun.sqlite. Idempotent; MUST run
     // before AppState opens the stores on the unified path.
