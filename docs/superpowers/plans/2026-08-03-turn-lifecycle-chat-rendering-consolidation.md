@@ -735,6 +735,16 @@ test("unterminated think block is hidden while streaming", () => {
   assert.equal(visibleAssistantText(input), "Risposta visibile");
 });
 
+test("stray think close tag is stripped", () => {
+  const input = "A </think> B";
+  assert.equal(visibleAssistantText(input), "A  B");
+});
+
+test("stray reasoning close marker is stripped", () => {
+  const input = "A ‹/REASONING› B";
+  assert.equal(visibleAssistantText(input), "A  B");
+});
+
 test("weak model prose tool call is removed", () => {
   const input = "Prima <tool_call name=\"browse\">{\"q\":\"x\"}</tool_call> Dopo";
   assert.equal(visibleAssistantText(input), "Prima  Dopo");
@@ -742,6 +752,21 @@ test("weak model prose tool call is removed", () => {
 
 test("unterminated weak model prose tool call is removed to end", () => {
   const input = "Prima <tool_call name=\"browse\">{\"q\":\"x\"}";
+  assert.equal(visibleAssistantText(input), "Prima");
+});
+
+test("closed structured card marker is removed", () => {
+  const input = "Prima ‹‹CHOICES››{}‹‹/CHOICES›› Dopo";
+  assert.equal(visibleAssistantText(input), "Prima  Dopo");
+});
+
+test("future uppercase structured marker is removed", () => {
+  const input = "Prima ‹‹FUTURE_CARD_2››{}‹‹/FUTURE_CARD_2›› Dopo";
+  assert.equal(visibleAssistantText(input), "Prima  Dopo");
+});
+
+test("unterminated structured marker is removed to end", () => {
+  const input = "Prima ‹‹AWAIT_USER››{\"kind\":\"choices\"}";
   assert.equal(visibleAssistantText(input), "Prima");
 });
 ```
@@ -761,21 +786,17 @@ Expected: FAIL because `visibleContent.mjs` does not exist.
 Create `apps/desktop/src/lib/chat-rendering/visibleContent.mjs`:
 
 ```js
-const REASONING_MARKER_RE = /‹‹REASONING››[\s\S]*?‹‹\/REASONING››/g;
-const STRAY_REASONING_MARKER_RE = /‹{1,2}\/?REASONING››/g;
-const THINK_RE = /<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/gi;
-const THINK_OPEN_RE = /<think(?:ing)?>[\s\S]*$/i;
+const CLOSED_REASONING_RE = /(?:‹‹REASONING››|<think(?:ing)?>)[\s\S]*?(?:‹‹\/REASONING››|<\/think(?:ing)?>)/gi;
+const OPEN_REASONING_RE = /(?:‹‹REASONING››|<think(?:ing)?>)[\s\S]*$/gi;
+const STRAY_REASONING_MARKER_RE = /‹+\/?REASONING›+|<\/?think(?:ing)?>/gi;
 const LEAKED_TOOLCALL_RE = /<tool_call\b[\s\S]*?(?:<\/tool_call>|$)/gi;
-const STRUCTURED_MARKER_RE =
-  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|SANDBOX_ESCALATE|SANDBOX_READONLY|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|CLARIFY|AWAIT_USER|PLAN_PROPOSE|GOAL_PROPOSE|PLAN|ACT|ARTIFACT|DIFF)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|SANDBOX_ESCALATE|SANDBOX_READONLY|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|CLARIFY|AWAIT_USER|PLAN_PROPOSE|GOAL_PROPOSE|PLAN|ACT|ARTIFACT|DIFF)››/g;
-const UNCLOSED_STRUCTURED_MARKER_RE =
-  /‹‹(?:REASONING|COMPOSIO_CONFIRM|COMPOSIO_DONE|COMPOSIO_RECONNECT|MCP_CONFIRM|FS_AUTHORIZE|SANDBOX_ESCALATE|SANDBOX_READONLY|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|CLARIFY|AWAIT_USER|PLAN_PROPOSE|GOAL_PROPOSE|PLAN|ACT|ARTIFACT|DIFF)››[\s\S]*$/;
+const STRUCTURED_MARKER_RE = /‹‹([A-Z0-9_]+)››[\s\S]*?‹‹\/\1››/g;
+const UNCLOSED_STRUCTURED_MARKER_RE = /‹‹[A-Z0-9_]+››[\s\S]*$/g;
 
 export function visibleAssistantText(text = "") {
-  return text
-    .replace(REASONING_MARKER_RE, "")
-    .replace(THINK_RE, "")
-    .replace(THINK_OPEN_RE, "")
+  return String(text)
+    .replace(CLOSED_REASONING_RE, "")
+    .replace(OPEN_REASONING_RE, "")
     .replace(LEAKED_TOOLCALL_RE, "")
     .replace(STRUCTURED_MARKER_RE, "")
     .replace(UNCLOSED_STRUCTURED_MARKER_RE, "")
