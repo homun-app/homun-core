@@ -12,6 +12,7 @@ use axum::{
 };
 
 use crate::gateway_chat_branches::{chat_branches, set_active_leaf, set_branch_label};
+use crate::gateway_chat_memory::save_chat_message_to_memory;
 use crate::gateway_chat_tasks::create_task_from_chat_message;
 use crate::gateway_chat_threads::{
     archive_chat_thread, chat_messages, chat_thread_attentions, chat_threads, create_chat_thread,

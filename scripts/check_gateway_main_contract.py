@@ -131,6 +131,10 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn set_active_leaf(": "chat branch active leaf endpoint must stay in gateway_chat_branches",
         "async fn set_branch_label(": "chat branch label endpoint must stay in gateway_chat_branches",
         "async fn create_task_from_chat_message(": "chat message task endpoint must stay in gateway_chat_tasks",
+        "async fn save_chat_message_to_memory(": "chat message memory-save endpoint must stay in gateway_chat_memory",
+        "fn persist_explicit_memory(": "explicit chat memory persistence must stay in gateway_chat_memory",
+        "fn wiki_title_from_text(": "chat memory wiki title helper must stay in gateway_chat_memory",
+        "fn sanitize_wiki_filename(": "chat memory wiki filename helper must stay in gateway_chat_memory",
     }
 
 
@@ -169,6 +173,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_chat_threads;", "gateway root must declare chat thread owner")
     assert_contains(source, "mod gateway_chat_branches;", "gateway root must declare chat branch owner")
     assert_contains(source, "mod gateway_chat_tasks;", "gateway root must declare chat task owner")
+    assert_contains(source, "mod gateway_chat_memory;", "gateway root must declare chat memory owner")
 
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",

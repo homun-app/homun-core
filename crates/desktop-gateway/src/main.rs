@@ -29,6 +29,7 @@ mod gateway_background_startup;
 mod gateway_bind;
 mod gateway_boot_maintenance;
 mod gateway_chat_branches;
+mod gateway_chat_memory;
 mod gateway_chat_tasks;
 mod gateway_chat_threads;
 mod gateway_cors;
@@ -1336,123 +1337,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(reconnect_channels_on_startup(startup_state));
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-async fn save_chat_message_to_memory(
-    State(state): State<AppState>,
-    Path((thread_id, message_id)): Path<(String, String)>,
-) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
-    let message = lock_store(&state)?
-        .message(&thread_id, &message_id)
-        .map_err(GatewayError::store)?
-        .ok_or_else(|| GatewayError {
-            status: StatusCode::NOT_FOUND,
-            code: "chat_message_not_found",
-            message: format!("chat message not found: {message_id}"),
-        })?;
-    let reference = persist_explicit_memory(&state, &thread_id, &message_id, &message.text)?;
-    // Embed-on-write: vectorize the just-saved memory now (not on a later lazy pass), so
-    // it's immediately semantically recallable in this same conversation.
-    backfill_embeddings(
-        &state,
-        &gateway_memory_user_id(),
-        &gateway_memory_workspace_id(),
-        4,
-    )
-    .await;
-    lock_store(&state)?
-        .set_message_saved_memory_ref(&thread_id, &message_id, &reference.to_string())
-        .map_err(GatewayError::store)?;
-    Ok(Json(
-        lock_store(&state)?
-            .messages(&thread_id)
-            .map_err(GatewayError::store)?,
-    ))
-}
-
-/// P3 (write): an explicit "save to memory" persists the text as a CONFIRMED
-/// memory record (the user's intent IS the confirmation, and `context_pack`
-/// only returns Confirmed) and projects it to a human-readable, editable wiki
-/// markdown page — the substance of memory per the design (markdown + graph,
-/// indexed by SQLite). Both the dashboard and the Brain's context provider read
-/// the same DB, so the fact becomes retrievable immediately.
-fn persist_explicit_memory(
-    state: &AppState,
-    thread_id: &str,
-    message_id: &str,
-    text: &str,
-) -> Result<MemoryRef, GatewayError> {
-    let user = gateway_memory_user_id();
-    let workspace = gateway_memory_workspace_id();
-    let lifecycle = MemoryLifecycleRequest {
-        actor_id: "desktop-chat".to_string(),
-        user_id: user.clone(),
-        workspace_id: workspace.clone(),
-        purpose: "explicit_save_to_memory".to_string(),
-    };
-    let redacted = redact_sensitive_text(text);
-
-    let facade = memory_facade(state);
-    let record = facade
-        .create_memory_candidate(MemoryCreateRequest {
-            request: lifecycle.clone(),
-            memory_type: "note".to_string(),
-            text: redacted.clone(),
-            aliases: Vec::new(),
-            language_hints: Vec::new(),
-            confidence: 1.0,
-            privacy_domain: PrivacyDomain::new("personal"),
-            sensitivity: MemoryDataSensitivity::Private,
-            evidence_refs: Vec::new(),
-            metadata: serde_json::json!({
-                "source": "desktop_chat",
-                "thread_id": thread_id,
-                "message_id": message_id,
-            }),
-        })
-        .map_err(|error| GatewayError::memory(error.to_string()))?;
-    facade
-        .confirm_memory(&lifecycle, &record.reference, "explicit user save")
-        .map_err(|error| GatewayError::memory(error.to_string()))?;
-
-    let wiki = WikiFileStore::new(gateway_memory_wiki_dir().map_err(|error| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "memory_wiki_dir",
-        message: error.to_string(),
-    })?);
-    let page = WikiPage {
-        reference: MemoryRef::generated(MemoryRefKind::Wiki, user.clone(), workspace.clone()),
-        user_id: user,
-        workspace_id: workspace,
-        path: format!(
-            "notes/{}.md",
-            sanitize_wiki_filename(&record.reference.to_string())
-        ),
-        title: wiki_title_from_text(&redacted),
-        body: redacted,
-        linked_refs: vec![record.reference.clone()],
-        privacy_domain: PrivacyDomain::new("personal"),
-        sensitivity: MemoryDataSensitivity::Private,
-    };
-    facade
-        .project_to_wiki(&wiki, &MemoryWikiProjection { page })
-        .map_err(|error| GatewayError::memory(error.to_string()))?;
-
-    Ok(record.reference)
-}
-
-/// Short human title for a wiki note: first non-empty line, bounded length.
-/// ADR 0022 (Tappa 4, F2): corpo migrato nel crate; thin wrapper (test caller).
-fn wiki_title_from_text(text: &str) -> String {
-    local_first_memory::wiki_title_from_text(text)
-}
-
-/// Filesystem-safe wiki filename (refs can carry `:`/`/`).
-fn sanitize_wiki_filename(reference: &str) -> String {
-    reference
-        .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
-        .collect()
 }
 
 /// Character budget for the always-on memory profile injected into the chat
@@ -61383,13 +61267,13 @@ mod tests {
         prune_browser_history, redact_sensitive_text, requeue_waiting_resource_tasks,
         resolve_active_model, resolve_contained_computer_cdp, resolve_contained_computer_novnc,
         response_language_instruction, rewrite_confirm_to_done, run_bash_unsandboxed_result,
-        sanitize_dedup_key, sanitize_wiki_filename, scheduled_thread_sender_for_task_id,
-        scheduled_thread_title, search_composio_catalog, should_try_tool_compatibility_fallback,
-        skill_id_from_command, strip_json_fences, suggestion_choices_json, task_effective_goal,
+        sanitize_dedup_key, scheduled_thread_sender_for_task_id, scheduled_thread_title,
+        search_composio_catalog, should_try_tool_compatibility_fallback, skill_id_from_command,
+        strip_json_fences, suggestion_choices_json, task_effective_goal,
         task_execution_outcome_from_executor_result, task_goal_summary, task_queue_response,
         tool_touches_calendar, tool_touches_contacts, valid_catalog_owner,
         validate_memory_source_input, validate_memory_source_overrides,
-        validate_memory_source_workspaces, wiki_title_from_text, workspace_write_roots,
+        validate_memory_source_workspaces, workspace_write_roots,
     };
     use crate::browser_safety;
     use crate::chat_store::{self, ChatStore};
@@ -80754,20 +80638,6 @@ data: [DONE]\n";
             aggregate_session_state_from_counts(5, 1, 1, false, true),
             (SessionStatus::WaitingUser, 1)
         );
-    }
-
-    #[test]
-    fn wiki_title_and_filename_helpers_are_safe() {
-        // Title = first non-empty line, length-bounded with an ellipsis.
-        assert_eq!(
-            wiki_title_from_text("\n  Prenota treno  \naltro"),
-            "Prenota treno"
-        );
-        let long = "x".repeat(100);
-        let title = wiki_title_from_text(&long);
-        assert!(title.chars().count() <= 60 && title.ends_with('…'));
-        // Filename keeps only alphanumerics (refs can carry ':' and '/').
-        assert_eq!(sanitize_wiki_filename("mem:abc/12-3"), "mem-abc-12-3");
     }
 
     #[test]

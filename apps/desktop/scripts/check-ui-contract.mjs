@@ -314,6 +314,11 @@ assertRepoContains(
   "Gateway chat task endpoints must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_chat_memory.rs",
+  "save_chat_message_to_memory",
+  "Gateway chat memory-save endpoint must have a dedicated owner",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway main ownership contract"',
   "Kernel regression gate must run the gateway main ownership contract",
@@ -367,6 +372,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway chat tasks"',
   "Kernel regression gate must run the gateway chat task owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway chat memory"',
+  "Kernel regression gate must run the gateway chat memory owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",
