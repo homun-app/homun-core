@@ -84,6 +84,18 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn seed_loop_memory_reads(": "loop memory-read seeding must stay in gateway_recall_context",
         "fn gather_open_loops(": "open-loop recall gathering must stay in gateway_recall_context",
         "fn sanitize_dedup_key(": "dedup-key normalization must stay in gateway_recall_context",
+        "fn gather_scope_memory(": "proactivity scope memory gathering must stay in gateway_proactivity",
+        "fn gather_recent_connector_activity(": "proactivity connector activity gathering must stay in gateway_proactivity",
+        "fn parse_review_suggestion(": "proactivity suggestion parsing must stay in gateway_proactivity",
+        "fn parse_relevant_until_epoch(": "proactivity stale-date parsing must stay in gateway_proactivity",
+        "fn suggestion_choices_json(": "proactivity choices serialization must stay in gateway_proactivity",
+        "const PROACTIVE_SUPERVISOR_SYSTEM:": "proactivity supervisor prompt must stay in gateway_proactivity",
+        "async fn run_proactive_review(": "proactivity review engine must stay in gateway_proactivity",
+        "async fn sweep_stale_dated_suggestions_once(": "proactivity stale-date sweep must stay in gateway_proactivity",
+        "fn proactive_tick_secs(": "proactivity cadence config must stay in gateway_proactivity",
+        "fn proactive_cooldown_secs(": "proactivity cadence config must stay in gateway_proactivity",
+        "fn start_proactivity_auto_review(": "proactivity background tick must stay in gateway_proactivity",
+        "async fn proactivity_auto_review_tick(": "proactivity background tick must stay in gateway_proactivity",
     }
 
 
@@ -113,6 +125,7 @@ def main() -> int:
         source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
+    assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
 
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",

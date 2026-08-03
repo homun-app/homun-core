@@ -68,7 +68,9 @@ impl RuntimeGatewayBackgroundStartupRunner {
 impl GatewayBackgroundStartupRunner for RuntimeGatewayBackgroundStartupRunner {
     fn sweep_stale_dated_suggestions(&mut self) {
         let st = self.state.clone();
-        tokio::spawn(async move { crate::sweep_stale_dated_suggestions_once(&st).await });
+        tokio::spawn(async move {
+            crate::gateway_proactivity::sweep_stale_dated_suggestions_once(&st).await
+        });
     }
 
     fn sweep_graph_on_startup(&mut self) {
@@ -117,7 +119,7 @@ impl GatewayBackgroundStartupRunner for RuntimeGatewayBackgroundStartupRunner {
     }
 
     fn start_proactivity_auto_review(&mut self) {
-        crate::start_proactivity_auto_review(self.state.clone());
+        crate::gateway_proactivity::start_proactivity_auto_review(self.state.clone());
     }
 
     fn spawn_computer_live_publisher(&mut self) {

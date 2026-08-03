@@ -269,6 +269,11 @@ assertRepoContains(
   "Gateway memory recall context must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_proactivity.rs",
+  "run_proactive_review",
+  "Gateway proactivity review engine must have a dedicated owner",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway main ownership contract"',
   "Kernel regression gate must run the gateway main ownership contract",
@@ -277,6 +282,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway recall context"',
   "Kernel regression gate must run the gateway recall context owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway proactivity"',
+  "Kernel regression gate must run the gateway proactivity owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",
