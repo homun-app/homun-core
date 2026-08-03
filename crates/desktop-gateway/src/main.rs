@@ -31,6 +31,7 @@ mod gateway_file_security;
 mod gateway_health;
 mod gateway_identity;
 mod gateway_legacy_data;
+mod gateway_model_timeouts;
 mod gateway_paths;
 mod gateway_prompt;
 mod gateway_secrets;
@@ -117,6 +118,10 @@ pub(crate) use gateway_identity::{
     active_workspace_id, base_workspace_id, canonical_memory_workspace_id,
     gateway_capability_user_id, gateway_capability_workspace_id, gateway_memory_user_id,
     gateway_memory_workspace_id, gateway_user_id, set_active_workspace, set_memory_workspace,
+};
+pub(crate) use gateway_model_timeouts::{
+    model_first_token_timeout_secs, model_headers_timeout_secs, model_idle_timeout_secs,
+    model_request_timeout_secs,
 };
 use gateway_paths::{
     gateway_browser_policy_database_path, gateway_capability_database_path, gateway_data_dir,
@@ -17375,39 +17380,6 @@ async fn set_llm_concurrency(
 /// Prefers a provider with a configured API KEY (e.g. Z.ai with a valid key), then
 /// a LOCAL provider with a non-`:cloud` model (no auth). `None` if nothing usable
 /// differs from the failing model.
-/// Total per-request timeout for a model completion (seconds). Default 600s (10 min):
-/// big reasoning models on slow proxies (e.g. nemotron on Ollama cloud) routinely
-/// need far more than the old fixed 180s — and editors like Zed don't cap total time
-/// at all because they STREAM (the proper fix; see roadmap). Override with
-/// HOMUN_MODEL_TIMEOUT_SECS.
-pub(crate) fn model_request_timeout_secs() -> u64 {
-    // High ceiling: with streaming the real governors are the first-token + idle
-    // timeouts (below). A total cap that fires mid-stream is reported by reqwest as
-    // "error decoding response body" (#2839), so keep it well above any real turn.
-    std::env::var("HOMUN_MODEL_TIMEOUT_SECS")
-        .ok()
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(3600)
-}
-
-/// Time-to-response-headers budget for the model call (seconds). Bounds the PRE-STREAM
-/// phase — TCP connect + request send + arrival of the HTTP response headers — which the
-/// total `model_request_timeout_secs` (a mid-stream backstop) and the stream first-token/
-/// idle governors do NOT cover: those only start once headers arrive. A cold-loading model
-/// (e.g. Ollama loading weights into memory) accepts the socket but withholds headers until
-/// it is ready, so without this bound `.send()` hung the whole turn for 20+ minutes
-/// (2026-07-09). Default 120s: generous enough for a legitimate local cold-load, finite
-/// enough to fail one turn cleanly instead of wedging. Override with
-/// HOMUN_MODEL_HEADERS_TIMEOUT_SECS.
-pub(crate) fn model_headers_timeout_secs() -> u64 {
-    std::env::var("HOMUN_MODEL_HEADERS_TIMEOUT_SECS")
-        .ok()
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(120)
-}
-
 /// The shared gateway HTTP client. One `connect_timeout` here bounds the TCP-connect phase
 /// for EVERY outbound call (model, embeddings, privacy-guard, channels) so a wedged or
 /// unreachable host fails fast instead of parking a worker; the per-call streaming timeouts
@@ -17426,18 +17398,6 @@ pub(crate) fn build_gateway_http_client() -> reqwest::Client {
         // A builder failure here is a TLS/backend init problem, not a per-call error;
         // fall back to the default client so the gateway still boots.
         .unwrap_or_else(|_| reqwest::Client::new())
-}
-
-/// Idle (inter-token) timeout for streamed completions (seconds). With streaming the
-/// governor is INACTIVITY, not total time: a generation that keeps emitting tokens
-/// never dies, only a genuine stall (no token for this long) does. Default 180s;
-/// override with HOMUN_MODEL_IDLE_TIMEOUT_SECS.
-pub(crate) fn model_idle_timeout_secs() -> u64 {
-    std::env::var("HOMUN_MODEL_IDLE_TIMEOUT_SECS")
-        .ok()
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(180)
 }
 
 /// Reassembles an OpenAI-compatible SSE stream body into a NON-streaming
@@ -17668,17 +17628,6 @@ pub(crate) async fn collect_openai_stream(
         let _ = emit_stream_event(sink, GenerateStreamEvent::Delta { text: tail }).await;
     }
     Ok(reassemble_openai_stream(&raw))
-}
-
-/// Generous budget for the FIRST token (seconds): Ollama may cold-load a big model
-/// or the cloud may take a moment before the first byte. Inter-token gaps use the
-/// tighter idle. Override with HOMUN_MODEL_FIRST_TOKEN_SECS.
-pub(crate) fn model_first_token_timeout_secs() -> u64 {
-    std::env::var("HOMUN_MODEL_FIRST_TOKEN_SECS")
-        .ok()
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(300)
 }
 
 /// True for an Ollama endpoint (local daemon or Ollama Cloud). Such providers must
