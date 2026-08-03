@@ -66,6 +66,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway background startup",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "gateway_background_startup",
+            ],
+        ),
+        Step(
             "gateway turn recovery",
             [
                 "cargo",

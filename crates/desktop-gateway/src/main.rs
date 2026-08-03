@@ -25,6 +25,7 @@ mod execution_host;
 mod execution_projection;
 mod execution_runtime;
 mod gateway_auth;
+mod gateway_background_startup;
 mod gateway_bind;
 mod gateway_boot_maintenance;
 mod gateway_cors;
@@ -1291,50 +1292,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     gateway_boot_maintenance::run_gateway_boot_maintenance(&state);
     gateway_turn_recovery::recover_gateway_chat_turns_at_startup(&state).await;
-    // One-time (flag-guarded): retire proactivity cards whose date already passed but
-    // that predate the `relevant_until` field. It may write the unified database, so it
-    // must start only after process fencing and lease-aware recovery have completed.
-    {
-        let st = state.clone();
-        tokio::spawn(async move { sweep_stale_dated_suggestions_once(&st).await });
-    }
-    // Graph regeneration runs in the BACKGROUND so it never blocks the HTTP bind. Start it
-    // only after the lease-aware broker recovery above has completed its critical write to
-    // the unified database; starting it earlier can race bump_process_generation and make a
-    // fresh desktop launch crash once before the watchdog recovers it.
-    {
-        let st = state.clone();
-        tokio::task::spawn_blocking(move || sweep_graph_on_startup(&st));
-    }
-    // VACUUM all SQLite stores in background to reclaim free space from
-    // deleted workspaces/tasks/memories. Runs at boot (not on every delete)
-    // because VACUUM rewrites the entire file and can be slow on large DBs.
-    // Runs AFTER the broker recovery above (which needs an exclusive write lock
-    // on the unified DB that VACUUM would otherwise block).
-    {
-        let st = state.clone();
-        tokio::task::spawn_blocking(move || {
-            vacuum_all_stores(&st);
-            eprintln!("startup VACUUM: all stores compacted");
-        });
-    }
-    start_task_executor_worker(state.clone());
-    spawn_memory_consolidation_tick(state.clone());
-    spawn_embedding_catchup(state.clone());
-    spawn_memory_hygiene_sweep(state.clone());
-    spawn_thread_browser_session_reaper(state.clone());
-    spawn_contained_computer_idle_reaper(state.clone());
-    spawn_browser_handoff_reaper(state.clone());
-    spawn_connector_event_poller(state.clone());
-    start_proactivity_auto_review(state.clone());
-    // Phase A: publish `computer.live` on the unified WS whenever the contained
-    // computer state changes. A background task polls the same read-model the
-    // `GET /api/local-computer/live` handler returns every 1s (internally) and
-    // pushes it only when its JSON signature changes — replacing the client's
-    // 600ms-2.5s polling with a server push. `touch_activity = false` so the
-    // publisher (which fires regardless of whether a panel is open) does not
-    // skew the contained-computer idle timer.
-    spawn_computer_live_publisher(state.clone());
+    gateway_background_startup::start_gateway_background_services(state.clone());
     let chat_routes = Router::new()
         .route(
             "/api/chat/threads",

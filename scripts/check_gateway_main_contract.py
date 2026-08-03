@@ -51,6 +51,19 @@ def forbidden_main_startup_snippets() -> dict[str, str]:
         "set_chat_turn_message_delivery_state(\n            &state,": "recovered message repair must stay in gateway_turn_recovery",
         "projection_worker::start(state.clone());": "projection worker startup must stay in gateway_turn_recovery",
         "steering_control::start(state.clone());": "steering startup must stay in gateway_turn_recovery",
+        "sweep_stale_dated_suggestions_once(&st).await": "stale suggestion sweep must stay in gateway_background_startup",
+        "sweep_graph_on_startup(&st)": "graph startup sweep must stay in gateway_background_startup",
+        "vacuum_all_stores(&st);": "startup VACUUM must stay in gateway_background_startup",
+        "start_task_executor_worker(state.clone());": "task worker startup must stay in gateway_background_startup",
+        "spawn_memory_consolidation_tick(state.clone());": "memory consolidation must stay in gateway_background_startup",
+        "spawn_embedding_catchup(state.clone());": "embedding catchup must stay in gateway_background_startup",
+        "spawn_memory_hygiene_sweep(state.clone());": "memory hygiene must stay in gateway_background_startup",
+        "spawn_thread_browser_session_reaper(state.clone());": "thread browser session reaper must stay in gateway_background_startup",
+        "spawn_contained_computer_idle_reaper(state.clone());": "contained computer reaper must stay in gateway_background_startup",
+        "spawn_browser_handoff_reaper(state.clone());": "browser handoff reaper must stay in gateway_background_startup",
+        "spawn_connector_event_poller(state.clone());": "connector event poller must stay in gateway_background_startup",
+        "start_proactivity_auto_review(state.clone());": "proactivity auto-review must stay in gateway_background_startup",
+        "spawn_computer_live_publisher(state.clone());": "computer live publisher must stay in gateway_background_startup",
     }
 
 
@@ -83,6 +96,7 @@ def main() -> int:
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
         "gateway_turn_recovery::recover_gateway_chat_turns_at_startup(&state).await;",
+        "gateway_background_startup::start_gateway_background_services(state.clone());",
     ]
     for snippet in required_owner_calls:
         assert_contains(main_body, snippet, "async fn main must delegate startup ownership")
@@ -96,10 +110,8 @@ def main() -> int:
             "gateway_file_security::harden_data_at_rest(&dir);",
             "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
             "gateway_turn_recovery::recover_gateway_chat_turns_at_startup(&state).await;",
-            "tokio::spawn(async move { sweep_stale_dated_suggestions_once(&st).await });",
-            "tokio::task::spawn_blocking(move || sweep_graph_on_startup(&st));",
-            "tokio::task::spawn_blocking(move || {",
-            "start_task_executor_worker(state.clone());",
+            "gateway_background_startup::start_gateway_background_services(state.clone());",
+            "let chat_routes = Router::new()",
         ],
         "async fn main startup order must keep critical recovery before background work",
     )

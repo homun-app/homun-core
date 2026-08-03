@@ -254,9 +254,19 @@ assertRepoContains(
   "Gateway main slimming must have a dedicated structural contract",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_background_startup.rs",
+  "start_gateway_background_services",
+  "Gateway background startup must have a dedicated owner",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway main ownership contract"',
   "Kernel regression gate must run the gateway main ownership contract",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway background startup"',
+  "Kernel regression gate must run the gateway background startup owner test",
 );
 assertContains("src/lib/coreBridge.ts", "usageDaily:", "Usage must expose the real daily series");
 assertContains("src/components/UsageCalendar.tsx", 'role="grid"', "Usage calendar must expose an accessible grid");
