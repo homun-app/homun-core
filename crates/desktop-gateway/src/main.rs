@@ -1364,7 +1364,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         setup_computer: Arc::new(setup_computer::SetupComputerCoordinator::default()),
         secret_store: Arc::new(open_gateway_secret_store()?),
         browser_checkpoint_secret_store: Arc::new(open_browser_checkpoint_secret_store()?),
-        auth_token: resolve_gateway_auth_token()?.into(),
+        auth_token: gateway_auth::resolve_gateway_auth_token(
+            &gateway_data_dir()?,
+            write_private_file,
+        )?
+        .into(),
         novnc_tickets: Arc::new(Mutex::new(std::collections::HashMap::new())),
         novnc_view_ticket: Arc::new(Mutex::new(None)),
         ws_registry: ws_registry_arc,
@@ -62548,13 +62552,6 @@ fn gateway_capability_database_path() -> Result<PathBuf, std::io::Error> {
     Ok(base.join("capability-registry.sqlite"))
 }
 
-fn gateway_token() -> String {
-    env::var("HOMUN_DESKTOP_GATEWAY_TOKEN")
-        .unwrap_or_default()
-        .trim()
-        .to_string()
-}
-
 /// Canonical data directory. All other gateway paths derive from this, so a
 /// single `HOMUN_DATA_DIR` override (12-factor / container deploys with a mounted
 /// volume) redirects every store at once. Falls back to the desktop default
@@ -62569,38 +62566,6 @@ fn gateway_data_dir() -> Result<PathBuf, std::io::Error> {
     };
     fs::create_dir_all(&base)?;
     Ok(base)
-}
-
-/// Resolves the gateway bearer token, deny-by-default. The gateway binds to
-/// loopback and drives the browser/local computer, so it must never run with
-/// auth disabled. Order: explicit env (set by the Electron shell) -> previously
-/// persisted local token -> a freshly generated token stored 0600 so a
-/// same-user client can read it but other-user/sandboxed processes cannot.
-fn resolve_gateway_auth_token() -> Result<String, std::io::Error> {
-    let from_env = gateway_token();
-    if !from_env.is_empty() {
-        return Ok(from_env);
-    }
-
-    let token_path = gateway_data_dir()?.join("desktop-gateway-token");
-    if let Ok(existing) = fs::read_to_string(&token_path) {
-        let existing = existing.trim().to_string();
-        if !existing.is_empty() {
-            return Ok(existing);
-        }
-    }
-
-    let token = format!(
-        "{}{}",
-        uuid::Uuid::new_v4().simple(),
-        uuid::Uuid::new_v4().simple()
-    );
-    write_private_file(&token_path, token.as_bytes())?;
-    eprintln!(
-        "[gateway] no HOMUN_DESKTOP_GATEWAY_TOKEN set; generated a local token at {} (auth required)",
-        token_path.display()
-    );
-    Ok(token)
 }
 
 /// Make every top-level file in the data directory owner-only (0600). The

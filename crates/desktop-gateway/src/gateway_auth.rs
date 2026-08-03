@@ -6,6 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
+use std::{fs, path::Path};
 
 pub(crate) trait GatewayAuthState {
     fn gateway_auth_token(&self) -> &str;
@@ -28,6 +29,55 @@ pub(crate) fn bearer_is_authorized(headers: &HeaderMap, expected_token: &str) ->
         .get(AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value == expected)
+}
+
+pub(crate) fn gateway_token_from_env() -> String {
+    std::env::var("HOMUN_DESKTOP_GATEWAY_TOKEN")
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+pub(crate) fn resolve_gateway_auth_token(
+    data_dir: &Path,
+    write_private_file: impl Fn(&Path, &[u8]) -> Result<(), std::io::Error>,
+) -> Result<String, std::io::Error> {
+    resolve_gateway_auth_token_with_explicit(
+        &gateway_token_from_env(),
+        data_dir,
+        write_private_file,
+    )
+}
+
+fn resolve_gateway_auth_token_with_explicit(
+    explicit_token: &str,
+    data_dir: &Path,
+    write_private_file: impl Fn(&Path, &[u8]) -> Result<(), std::io::Error>,
+) -> Result<String, std::io::Error> {
+    let from_env = explicit_token.trim();
+    if !from_env.is_empty() {
+        return Ok(from_env.to_string());
+    }
+
+    let token_path = data_dir.join("desktop-gateway-token");
+    if let Ok(existing) = fs::read_to_string(&token_path) {
+        let existing = existing.trim().to_string();
+        if !existing.is_empty() {
+            return Ok(existing);
+        }
+    }
+
+    let token = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+    write_private_file(&token_path, token.as_bytes())?;
+    eprintln!(
+        "[gateway] no HOMUN_DESKTOP_GATEWAY_TOKEN set; generated a local token at {} (auth required)",
+        token_path.display()
+    );
+    Ok(token)
 }
 
 fn gateway_unauthorized_response() -> Response {
@@ -64,6 +114,7 @@ mod tests {
     use super::*;
     use axum::{Router, body::to_bytes, http::HeaderValue, routing::get};
     use serde_json::Value;
+    use std::cell::RefCell;
     use tower::ServiceExt;
 
     #[derive(Clone)]
@@ -146,5 +197,68 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(&body[..], b"ok");
+    }
+
+    #[test]
+    fn auth_token_resolution_prefers_explicit_token() {
+        let writes = RefCell::new(Vec::new());
+
+        let token = resolve_gateway_auth_token_with_explicit(
+            " explicit-token ",
+            Path::new("/tmp"),
+            |path, bytes| {
+                writes
+                    .borrow_mut()
+                    .push((path.to_path_buf(), bytes.to_vec()));
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(token, "explicit-token");
+        assert!(writes.borrow().is_empty());
+    }
+
+    #[test]
+    fn auth_token_resolution_reads_existing_persisted_token() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "gateway-auth-test-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        fs::write(
+            temp_dir.join("desktop-gateway-token"),
+            " persisted-token \n",
+        )
+        .unwrap();
+
+        let token = resolve_gateway_auth_token_with_explicit("", &temp_dir, |_path, _bytes| {
+            panic!("existing token should not be overwritten")
+        })
+        .unwrap();
+
+        assert_eq!(token, "persisted-token");
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn auth_token_resolution_generates_and_persists_when_missing() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "gateway-auth-test-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let token = resolve_gateway_auth_token_with_explicit("", &temp_dir, |path, bytes| {
+            fs::write(path, bytes)
+        })
+        .unwrap();
+
+        assert_eq!(token.len(), 64);
+        assert_eq!(
+            fs::read_to_string(temp_dir.join("desktop-gateway-token")).unwrap(),
+            token
+        );
+        let _ = fs::remove_dir_all(temp_dir);
     }
 }

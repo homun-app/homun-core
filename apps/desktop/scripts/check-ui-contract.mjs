@@ -945,7 +945,9 @@ assertRepoContains("crates/desktop-gateway/src/main.rs", "link_brain_tasks_to_th
 assertRepoContains("crates/desktop-gateway/src/main.rs", "LocalComputerSessionStore", "desktop gateway must persist computer sessions for operational tasks");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "HOMUN_BROWSER_HEADLESS", "desktop gateway must allow visible Playwright browser sessions");
 assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "require_gateway_token", "desktop gateway auth middleware must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "resolve_gateway_auth_token", "desktop gateway auth token resolution must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_auth::require_gateway_token", "desktop gateway must protect chat endpoints with a local token");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_auth::resolve_gateway_auth_token", "desktop gateway startup must use the shared auth token resolver");
 assertRepoContains("crates/desktop-gateway/src/gateway_cors.rs", "AllowOrigin::list", "desktop gateway CORS must use an explicit origin allowlist outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_cors.rs", "HeaderValue::from_static(\"null\")", "desktop gateway CORS must allow packaged file-origin renderer with bearer token");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_cors::cors_layer", "desktop gateway must apply the shared CORS layer");
