@@ -218,6 +218,16 @@ assertNotContains("src/components/UsageSettingsPane.tsx", "latency-p50", "Models
 assertNotContains("src/components/UsageSettingsPane.tsx", "fallback-count", "Models must not show fallback placeholders as measured data");
 assertContains("src/components/UsageSettingsPane.tsx", "modelCostProvenance", "Per-model cost must disclose reported, estimated, unknown, or not-billed provenance");
 assertContains("src/components/UsageSettingsPane.tsx", "coreBridge.setRole({", "Settings must apply confirmed role instructions through the canonical role API");
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_boot_maintenance.rs",
+  "run_gateway_boot_maintenance",
+  "Gateway boot maintenance must have a dedicated startup owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/main.rs",
+  "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
+  "Gateway startup must delegate idempotent maintenance to the dedicated owner",
+);
 assertContains("src/lib/coreBridge.ts", "usageDaily:", "Usage must expose the real daily series");
 assertContains("src/components/UsageCalendar.tsx", 'role="grid"', "Usage calendar must expose an accessible grid");
 assertContains("src/components/UsageCalendar.tsx", 'role="gridcell"', "Usage days must be keyboard reachable");

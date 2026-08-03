@@ -26,6 +26,7 @@ mod execution_projection;
 mod execution_runtime;
 mod gateway_auth;
 mod gateway_bind;
+mod gateway_boot_maintenance;
 mod gateway_cors;
 mod gateway_db_unify;
 mod gateway_file_security;
@@ -1290,16 +1291,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(dir) = gateway_data_dir() {
         gateway_file_security::harden_data_at_rest(&dir);
     }
-    init_active_workspace_from_disk();
-    seed_default_skills();
-    gc_stale_tasks(&state);
-    backfill_contacts(&state);
-    backfill_mentions(&state);
-    unify_owner_identity(&state);
-    // Homun retired as a proactive surface: its curiosities/onboarding now flow as
-    // proactivity cards. Cancel any check-in still scheduled from a previous version
-    // so the old "sfilza di domande" push stops (the thread stays as inert data).
-    cancel_homun_checkins(&state);
+    gateway_boot_maintenance::run_gateway_boot_maintenance(&state);
     eprintln!("turn broker: the only chat path; running lease-aware boot recovery");
     // Phase 1a: fence the new process, then project every committed outcome before
     // classifying the remaining running runs as crash orphans. This preserves the
