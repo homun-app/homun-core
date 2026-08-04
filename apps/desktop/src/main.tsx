@@ -1,10 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-// Self-hosted brand fonts (no CDN → offline + privacy, local-first).
-import "@fontsource/hanken-grotesk/400.css";
-import "@fontsource/hanken-grotesk/500.css";
-import "@fontsource/hanken-grotesk/600.css";
-import "@fontsource/hanken-grotesk/700.css";
+// Self-hosted technical font (no CDN, offline and privacy friendly).
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
 import App from "./App";
@@ -12,6 +8,12 @@ import { initAccent, initTheme } from "./lib/accent";
 import "./i18n";
 import { registerPluginI18n } from "./plugins/registry";
 import "./styles.css";
+import "./styles/foundation.css";
+import "./styles/menus.css";
+import "./styles/sidebar.css";
+import "./styles/chat.css";
+import "./styles/composer.css";
+import "./styles/workspace-island.css";
 
 initTheme();
 initAccent();

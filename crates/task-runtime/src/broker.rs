@@ -410,15 +410,15 @@ fn queued_chat_turn_task(
 }
 
 fn active_chat_turn_on(conn: &Connection, thread_id: &str) -> TaskRuntimeResult<Option<String>> {
+    let query = format!(
+        "SELECT task_id FROM tasks
+         WHERE thread_id = ?1 AND kind = 'chat_turn'
+           AND status NOT IN ({})
+         LIMIT 1",
+        crate::turn_lifecycle::ACTIVE_CHAT_TURN_EXCLUDED_SQL_STATUSES,
+    );
     Ok(conn
-        .query_row(
-            "SELECT task_id FROM tasks
-             WHERE thread_id = ?1 AND kind = 'chat_turn'
-               AND status NOT IN ('completed', 'failed', 'cancelled', 'expired', 'finalizing')
-             LIMIT 1",
-            rusqlite::params![thread_id],
-            |row| row.get(0),
-        )
+        .query_row(&query, rusqlite::params![thread_id], |row| row.get(0))
         .optional()?)
 }
 
@@ -950,6 +950,23 @@ mod tests {
     }
 
     #[test]
+    fn enqueue_again_after_finalizing_succeeds() {
+        let s = store();
+        let user = UserId::new("u");
+        let workspace = WorkspaceId::new("w");
+        let r = enqueue_chat_turn(&s, &user, &workspace, &input("r1", "t1")).unwrap();
+        s.update_task_status(&r.task_id, &user, &workspace, TaskStatus::Running, None)
+            .unwrap();
+        assert!(
+            s.fence_chat_turn_finalization(user.as_str(), workspace.as_str(), r.task_id.as_str())
+                .unwrap()
+        );
+
+        enqueue_chat_turn(&s, &user, &workspace, &input("r2", "t1"))
+            .expect("finalizing is an internal free-thread state for enqueue");
+    }
+
+    #[test]
     fn different_threads_do_not_collide() {
         let s = store();
         enqueue_chat_turn(
@@ -1019,6 +1036,7 @@ mod recovery_tests {
             thread_id: "t1".into(),
             user_id: "u".into(),
             workspace_id: "w".into(),
+            role: None,
             model: None,
             provider: None,
             prompt_fingerprint: None,

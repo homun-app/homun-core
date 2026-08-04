@@ -182,22 +182,22 @@ assertContains(
   "non-selection thread actions must preserve the user-owned active task",
 );
 assertContains(
-  "src/styles.css",
+  "src/styles/sidebar.css",
   ".thread-status-dot.completed-unread",
   "completion uses a fixed teal dot",
 );
 assertSource("src/components/ChatView.tsx", [
-  'function openActivityIsland() {\n    dispatchInspector({ type: "hideWorkspace" });\n    setIslandOpen(true);',
+  'function openActivityIsland() {\n    dispatchInspector({ type: "hideWorkspace" });\n    setActivityNonce((n) => n + 1);',
   "onOpenActivity={openActivityIsland}",
   'if (result.status === "queued")',
 ]);
 assertNotContains(
   "src/components/ChatView.tsx",
-  "onOpenActivity={() => setIslandOpen(true)}",
-  "Every Activity action must close the inspector before opening the Island",
+  "setIslandOpen",
+  "Activity must target the adaptive section instead of reviving a persistent panel owner",
 );
-assertContains("src/components/ChatView.tsx", "{streaming && (", "Stop must remain available while the composer stays operational");
-assertContains("src/components/ChatView.tsx", "{(value.trim() || composerImages.length > 0) && (", "Send must remain available independently from Stop");
+assertContains("src/components/ComposerShell.tsx", "{props.streaming ? (", "Stop must remain available while the composer stays operational");
+assertContains("src/components/ComposerShell.tsx", ": canSend ? (", "Send must remain available independently from Stop");
 assertContains("src/lib/chatApi.ts", "res.status === 201 || res.status === 202", "Turn enqueue must accept steering responses");
 assertContains("src/components/UsageSuggestion.tsx", "usage-suggestion-confirm", "Suggestion changes must use an explicit confirmation surface");
 assertContains("src/components/UsageSuggestion.tsx", "confirmed: true", "Apply request must be explicitly confirmed");
@@ -207,8 +207,8 @@ assertContains("src/components/ChatUsageOverview.tsx", ".slice(0, 1)", "Home mus
 assertContains("src/styles.css", ".chat-usage-infographic", "New-chat usage must provide a dedicated infographic layout");
 assertContains("src/styles.css", ".usage-calendar-grid", "Usage calendar must use a shared compact grid");
 assertContains("src/styles.css", ".usage-calendar-tooltip", "Usage calendar must provide an unclipped callout");
-assertContains("src/styles.css", ".app-shell.drawer-open > .workspace {\n    grid-column: 1;", "Narrow Settings content must stay in the visible grid column");
-assertContains("src/styles.css", ".app-shell.drawer-open > .settings-workspace {\n    padding-left: calc(min(var(--drawer-width, 292px), 292px) + 24px);", "Narrow Settings content must clear the overlay navigation");
+assertContains("src/styles/sidebar.css", ".app-shell.drawer-open > .workspace {\n    grid-column: 1;", "Narrow Settings content must stay in the visible grid column");
+assertContains("src/styles/sidebar.css", ".app-shell.drawer-open > .settings-workspace {\n    padding-left: calc(min(var(--drawer-width, 268px), 268px) + 24px);", "Narrow Settings content must clear the overlay navigation");
 assertContains("src/styles.css", ".active-task-layout.is-empty {\n  grid-template-rows: 58px minmax(0, 1fr) auto;", "Empty chat must keep the composer in the same bottom row as active conversations");
 assertNotContains("src/styles.css", "grid-template-rows: 58px 1fr auto 1fr", "Empty chat must not vertically center the composer with spacer rows");
 assertContains("src/styles.css", ".active-task-layout.is-empty .thread-content {\n  width: min(100%, 960px);", "Empty chat must give the six-month heatmap enough desktop width");
@@ -218,6 +218,516 @@ assertNotContains("src/components/UsageSettingsPane.tsx", "latency-p50", "Models
 assertNotContains("src/components/UsageSettingsPane.tsx", "fallback-count", "Models must not show fallback placeholders as measured data");
 assertContains("src/components/UsageSettingsPane.tsx", "modelCostProvenance", "Per-model cost must disclose reported, estimated, unknown, or not-billed provenance");
 assertContains("src/components/UsageSettingsPane.tsx", "coreBridge.setRole({", "Settings must apply confirmed role instructions through the canonical role API");
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_boot_maintenance.rs",
+  "run_gateway_boot_maintenance",
+  "Gateway boot maintenance must have a dedicated startup owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/main.rs",
+  "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
+  "Gateway startup must delegate idempotent maintenance to the dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_turn_recovery.rs",
+  "recover_gateway_chat_turns_at_startup",
+  "Gateway turn recovery must have a dedicated startup owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/main.rs",
+  "gateway_turn_recovery::recover_gateway_chat_turns_at_startup(&state).await;",
+  "Gateway startup must delegate lease-aware chat recovery to the dedicated owner",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway boot maintenance"',
+  "Kernel regression gate must run the gateway boot maintenance owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway_turn_recovery"',
+  "Kernel regression gate must run the gateway turn recovery owner test",
+);
+assertRepoContains(
+  "scripts/check_gateway_main_contract.py",
+  "forbidden_main_startup_snippets",
+  "Gateway main slimming must have a dedicated structural contract",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_background_startup.rs",
+  "start_gateway_background_services",
+  "Gateway background startup must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_routes.rs",
+  "build_gateway_router",
+  "Gateway route assembly must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_recall_context.rs",
+  "recall_stream_payload_from_pack",
+  "Gateway memory recall context must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_proactivity.rs",
+  "run_proactive_review",
+  "Gateway proactivity review engine must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_task_maintenance.rs",
+  "gc_stale_tasks",
+  "Gateway task maintenance must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_background.rs",
+  "spawn_memory_consolidation_tick",
+  "Gateway memory background jobs must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_remote_approval.rs",
+  "remote_approval_intent_from_raw_text",
+  "Gateway remote approval marker parsing must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_plugins.rs",
+  "plugins_list",
+  "Gateway plugin enablement endpoints must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_plugin_packages.rs",
+  "install_local_plugin_package",
+  "Gateway plugin package endpoints must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_chat_threads.rs",
+  "chat_threads",
+  "Gateway chat thread endpoints must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_chat_branches.rs",
+  "chat_branches",
+  "Gateway chat branch endpoints must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_chat_tasks.rs",
+  "create_task_from_chat_message",
+  "Gateway chat task endpoints must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_chat_memory.rs",
+  "save_chat_message_to_memory",
+  "Gateway chat memory-save endpoint must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_dedup.rs",
+  "is_semantic_duplicate",
+  "Gateway memory dedup/suppression must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_dedup.rs",
+  "DEDUP_COSINE",
+  "Gateway memory semantic dedup threshold must stay with the dedup owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_query_embeddings.rs",
+  "memory_query_embedding_cache_key",
+  "Gateway memory query embedding cache must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_briefing.rs",
+  "format_memory_block_with_provenance",
+  "Gateway memory briefing prompt assembly must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_turn_context.rs",
+  "project_objective_block",
+  "Gateway memory turn context injection must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_clients.rs",
+  "gateway_embedding_client",
+  "Gateway memory provider clients must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_recall_service.rs",
+  "InProcessMemoryRecallService",
+  "Gateway memory recall service must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_graph.rs",
+  "upsert_memory_relation",
+  "Gateway memory graph relation helpers must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_graph_maintenance.rs",
+  "reconcile_memory_scope",
+  "Gateway memory graph maintenance must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_graph_persistence.rs",
+  "persist_graph",
+  "Gateway memory graph persistence must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_tools.rs",
+  "record_decision",
+  "Gateway memory tools must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_plan_tools.rs",
+  "step_advance_tool_schema",
+  "Gateway plan tools must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_chat_markers.rs",
+  "strip_chat_markers",
+  "Gateway chat marker stripping must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_project_search_tools.rs",
+  "query_code_graph",
+  "Gateway project search tools must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_datetime_tools.rs",
+  "resolve_datetime_tool_schema",
+  "Gateway datetime tools must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_runtime_flags.rs",
+  "plan_reconcile_on_delivery_flag",
+  "Gateway runtime flags must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_prompt_instructions.rs",
+  "booking_assumption_choice_instruction",
+  "Gateway prompt instructions must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_automation_tools.rs",
+  "create_automation_tool_schema",
+  "Gateway automation tools must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_automation_formatting.rs",
+  "automation_trigger_summary",
+  "Gateway automation formatting must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_automation_requests.rs",
+  "AutomationCreateRequest",
+  "Gateway automation request DTOs must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_template_catalog.rs",
+  "template_catalog_owner_smoke",
+  "Gateway template catalog must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_project_files.rs",
+  "project_files_owner_smoke",
+  "Gateway project files must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_browser_tools.rs",
+  "browser_tools_owner_smoke",
+  "Gateway browser tools must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_main_tests.rs",
+  "gateway_main_tests_owner_smoke",
+  "Gateway root test module must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_hygiene.rs",
+  "memory_hygiene_suggestions_for_scope",
+  "Gateway memory hygiene suggestions must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_artifact_memory.rs",
+  "register_artifact_memory",
+  "Gateway artifact memory registration must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_wiki.rs",
+  "rebuild_status_wiki",
+  "Gateway memory wiki projections must have a dedicated owner",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway main ownership contract"',
+  "Kernel regression gate must run the gateway main ownership contract",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway recall context"',
+  "Kernel regression gate must run the gateway recall context owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway proactivity"',
+  "Kernel regression gate must run the gateway proactivity owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway task maintenance"',
+  "Kernel regression gate must run the gateway task maintenance owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory background"',
+  "Kernel regression gate must run the gateway memory background owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway remote approval"',
+  "Kernel regression gate must run the gateway remote approval owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway plugins"',
+  "Kernel regression gate must run the gateway plugin owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway plugin packages"',
+  "Kernel regression gate must run the gateway plugin package owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway chat threads"',
+  "Kernel regression gate must run the gateway chat thread owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway chat branches"',
+  "Kernel regression gate must run the gateway chat branch owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway chat tasks"',
+  "Kernel regression gate must run the gateway chat task owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway chat memory"',
+  "Kernel regression gate must run the gateway chat memory owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory dedup"',
+  "Kernel regression gate must run the gateway memory dedup owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory query embeddings"',
+  "Kernel regression gate must run the gateway memory query embedding owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory briefing"',
+  "Kernel regression gate must run the gateway memory briefing owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory turn context"',
+  "Kernel regression gate must run the gateway memory turn context owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory clients"',
+  "Kernel regression gate must run the gateway memory client owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory recall service"',
+  "Kernel regression gate must run the gateway memory recall service owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory graph"',
+  "Kernel regression gate must run the gateway memory graph owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory graph maintenance"',
+  "Kernel regression gate must run the gateway memory graph maintenance owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory graph persistence"',
+  "Kernel regression gate must run the gateway memory graph persistence owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory tools"',
+  "Kernel regression gate must run the gateway memory tools owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway plan tools"',
+  "Kernel regression gate must run the gateway plan tools owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway chat markers"',
+  "Kernel regression gate must run the gateway chat marker owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway project search tools"',
+  "Kernel regression gate must run the gateway project search tools owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway datetime tools"',
+  "Kernel regression gate must run the gateway datetime tools owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway runtime flags"',
+  "Kernel regression gate must run the gateway runtime flags owner test",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_runtime_settings.rs",
+  "runtime_settings_owner_smoke",
+  "Gateway runtime settings owner must keep a local smoke test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway runtime settings"',
+  "Kernel regression gate must run the gateway runtime settings owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway prompt instructions"',
+  "Kernel regression gate must run the gateway prompt instructions owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway automation tools"',
+  "Kernel regression gate must run the gateway automation tools owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway automation formatting"',
+  "Kernel regression gate must run the gateway automation formatting owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway automation requests"',
+  "Kernel regression gate must run the gateway automation request owner test",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_automation_routes.rs",
+  "automation_routes_owner_smoke",
+  "Gateway automation route owner must keep a local smoke test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway automation routes"',
+  "Kernel regression gate must run the gateway automation route owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway main tests owner"',
+  "Kernel regression gate must run the gateway main test owner smoke",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway template catalog"',
+  "Kernel regression gate must run the gateway template catalog owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway project files"',
+  "Kernel regression gate must run the gateway project files owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway browser tools"',
+  "Kernel regression gate must run the gateway browser tools owner test",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_browser_runtime.rs",
+  "browser_runtime_owner_smoke",
+  "Gateway browser runtime owner must keep a local smoke test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway browser runtime"',
+  "Kernel regression gate must run the gateway browser runtime owner test",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_deliverables.rs",
+  "deliverables_owner_smoke",
+  "Gateway deliverables owner must keep a local smoke test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway deliverables"',
+  "Kernel regression gate must run the gateway deliverables owner test",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_model_routing.rs",
+  "model_routing_owner_smoke",
+  "Gateway model routing owner must keep a local smoke test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway model routing"',
+  "Kernel regression gate must run the gateway model routing owner test",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_tool_execution.rs",
+  "tool_execution_owner_smoke",
+  "Gateway tool execution owner must keep a local smoke test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway tool execution"',
+  "Kernel regression gate must run the gateway tool execution owner test",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_channels.rs",
+  "channels_owner_smoke",
+  "Gateway channels owner must keep a local smoke test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway channels"',
+  "Kernel regression gate must run the gateway channels owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory hygiene"',
+  "Kernel regression gate must run the gateway memory hygiene owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway artifact memory"',
+  "Kernel regression gate must run the gateway artifact memory owner test",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_artifacts.rs",
+  "artifacts_owner_smoke",
+  "Gateway artifact file owner must keep a local smoke test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway artifacts"',
+  "Kernel regression gate must run the gateway artifact file owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory wiki"',
+  "Kernel regression gate must run the gateway memory wiki owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway background startup"',
+  "Kernel regression gate must run the gateway background startup owner test",
+);
 assertContains("src/lib/coreBridge.ts", "usageDaily:", "Usage must expose the real daily series");
 assertContains("src/components/UsageCalendar.tsx", 'role="grid"', "Usage calendar must expose an accessible grid");
 assertContains("src/components/UsageCalendar.tsx", 'role="gridcell"', "Usage days must be keyboard reachable");
@@ -245,10 +755,10 @@ assertContains(
   'type: "not_applied" as const',
   "Manual verification must submit the canonical not-applied resolution",
 );
-assertNotContains(
+assertContains(
   "src/components/ChatView.tsx",
-  "uncertain-effect-card",
-  "Uncertain effects must not create a second chat-card resume path",
+  "function InlineUncertainEffectPanel",
+  "Uncertain effects must be resolved in their owning conversation",
 );
 assertContains(
   "src/App.tsx",
@@ -260,11 +770,6 @@ assertContains(
   "await loadTaskQueue();",
   "Resolution must refresh the canonical task queue",
 );
-assertContains(
-  "src/App.tsx",
-  "await refreshSelectedTaskDetail(selectedTaskId);",
-  "Resolution must refresh the selected task detail",
-);
 assertMatches(
   "src/App.tsx",
   /if \(effect\.threadId\) \{\s*await refreshChatReadModels\(effect\.threadId\);\s*\}/,
@@ -275,28 +780,37 @@ assertNotContains(
   "setUncertainEffectItems((current) => current.filter",
   "Resolution must not optimistically remove an uncertain receipt",
 );
-assertContains(
+assertMissing(
   "src/components/TasksView.tsx",
+  "The task runtime must not create a separate user-facing workspace",
+);
+assertNotContains(
+  "src/App.tsx",
+  'activeView === "tasks"',
+  "Tasks must not remain a desktop route",
+);
+assertContains(
+  "src/components/ChatView.tsx",
   'className="uncertain-effect-card"',
-  "Tasks Workbench must render uncertain effects separately from approvals",
+  "The owning conversation must render uncertain effects separately from approvals",
 );
 assertContains(
-  "src/components/TasksView.tsx",
-  't("tasksView.verifiedApplied")',
-  "Tasks Workbench must expose the verified-applied command",
+  "src/components/ChatView.tsx",
+  't("chat.verifiedApplied")',
+  "The conversation must expose the verified-applied command",
 );
 assertContains(
-  "src/components/TasksView.tsx",
-  't("tasksView.verifiedNotApplied")',
-  "Tasks Workbench must expose the verified-not-applied command",
+  "src/components/ChatView.tsx",
+  't("chat.verifiedNotApplied")',
+  "The conversation must expose the verified-not-applied command",
 );
 assertContains(
-  "src/components/TasksView.tsx",
-  "effectResolutionBusyId === effect.id",
+  "src/components/ChatView.tsx",
+  "busyId === effect.id",
   "Both uncertain-effect actions must share one in-flight guard",
 );
 assertNotContains(
-  "src/components/TasksView.tsx",
+  "src/components/ChatView.tsx",
   "JSON.stringify(effect.core.evidence",
   "Raw uncertain-effect evidence must not be rendered",
 );
@@ -348,10 +862,10 @@ assertMatches(
 assertContains("src/styles.css", ":root[data-theme=\"dark\"]", "dark surface theme must define CSS tokens");
 assertContains("src/styles.css", "color-scheme: dark", "dark surface theme must advertise dark controls to the browser");
 assertContains("src/components/SettingsView.tsx", "dark:", "Appearance picker previews must include literal dark swatch values");
-assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 94%, transparent);", "Workspace Island pill must inherit the active surface theme");
-assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 96%, transparent);", "Workspace Island panel/menu must inherit the active surface theme");
-assertContains("src/components/ChatView.tsx", "chat-status-stack", "Workspace and Computer islands must share one status stack");
-assertContains("src/styles.css", ".chat-status-stack", "Workspace and Computer islands must be laid out by one stack");
+assertContains("src/styles/workspace-island.css", "background: var(--surface);", "Adaptive workspace surfaces must inherit the active theme");
+assertContains("src/components/ChatView.tsx", "<AdaptiveWorkspaceIsland", "Chat must delegate factual sections to the adaptive island");
+assertNotContains("src/components/ChatView.tsx", "chat-status-stack", "The persistent status stack must stay retired");
+assertNotContains("src/styles.css", ".chat-status-stack", "Legacy status-stack geometry must stay retired");
 assertContains("src/styles.css", ".cc-dock {\n  position: relative;", "Computer dock must not use an independent absolute position that overlaps Workspace Island");
 assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 95%, transparent);", "Computer dock must inherit the active surface theme");
 assertNotContains("src/styles.css", "background: rgba(255, 255, 255, 0.98);", "Workspace Island pill must not force a light background");
@@ -398,19 +912,19 @@ assertNotContains("src/components/Shell.tsx", "drawer-edge-hotspot", "collapsed 
 assertContains("src/components/ChatView.tsx", "task-collapsed-controls", "collapsed sidebar's reopen + search must live in the chat header (no-drag), not a fixed overlay");
 assertContains("src/components/ChatView.tsx", "onExpandSidebar", "collapsed sidebar's in-header opener must reopen the drawer");
 assertNotContains("src/components/Shell.tsx", "transientDrawerOpen", "collapsed sidebar must not maintain hover-open transient drawer state");
-assertContains("src/styles.css", "--drawer-island-gap", "sidebar must be laid out as a floating island with stable margins");
+assertContains("src/styles/sidebar.css", "--drawer-island-gap", "sidebar must be laid out as a floating island with stable margins");
 assertContains("src/styles.css", ".window-chrome", "custom window chrome must own the top drag/header strip");
 assertNotContains("src/styles.css", ".window-light", "custom window chrome must not draw fake traffic lights");
 assertContains("src/styles.css", "pointer-events: none", "custom window chrome wrapper must not sit as a click-blocking overlay");
 assertContains("src/styles.css", ".window-drag-strip", "custom window chrome must use explicit drag strips instead of dragging over controls");
 assertContains("src/styles.css", ".task-collapsed-controls", "collapsed reopen/search controls styled in the chat header");
 assertContains("src/styles.css", ".task-collapsed-action svg", "sidebar toggle icon must not intercept pointer events from the button");
-assertContains("src/styles.css", ".app-shell.drawer-open > .nav-drawer", "open sidebar and Settings nav must use the same island styling");
+assertContains("src/styles/sidebar.css", ".app-shell.drawer-open > .nav-drawer", "open sidebar and Settings nav must use the same island styling");
 assertContains("src/components/Sidebar.tsx", "drawer-titlebar-action", "expanded sidebar toggle + search must live in the top titlebar row");
 assertNotContains("src/components/Sidebar.tsx", "drawer-new-action", "sidebar search row must not include a global new-chat plus button");
 assertNotContains("src/components/Sidebar.tsx", "the gear becomes a back-to-app arrow", "Settings nav must not keep a duplicate footer back action");
-assertContains("src/styles.css", "overflow-y: auto;\n  overflow-x: hidden;", "expanded project trees must scroll inside the sidebar middle region instead of covering footer actions");
-assertContains("src/styles.css", ".drawer-scroll::-webkit-scrollbar", "sidebar middle scrollbars must stay visually minimal");
+assertContains("src/styles/sidebar.css", "overflow-x: hidden;\n  overflow-y: auto;", "expanded project trees must scroll inside the sidebar middle region instead of covering footer actions");
+assertContains("src/styles/sidebar.css", ".drawer-scroll::-webkit-scrollbar", "sidebar middle scrollbars must stay visually minimal");
 assertContains("src/styles.css", "z-index: 200", "custom window chrome must stay above the sidebar island");
 assertContains("src/styles.css", ".app-shell.drawer-closed .task-topbar", "closed sidebar header must clear the top-left toggle/search controls");
 assertNotContains("src/components/Shell.tsx", "drawer-floating-host", "collapsed sidebar must not render a hover-only transient island");
@@ -504,10 +1018,10 @@ assertContains("src/plugins/proattivita/index.tsx", "navSection: \"work\"", "pro
 assertContains("src/components/ChatView.tsx", "{sidebarCollapsed && (", "chat header must render the reopen/search controls when the sidebar is collapsed");
 assertContains("src/components/Shell.tsx", "{drawerOpen && !isSettings && (", "main drawer must render when open");
 assertContains("src/components/Sidebar.tsx", "drawer-profile", "open drawer footer must show the user profile + settings");
-assertContains("src/components/ChatView.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
-assertContains("src/components/ChatView.tsx", "local-computer-card", "active task must expose a local computer activity card");
+assertContains("src/components/ComposerShell.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
+assertContains("src/components/ChatView.tsx", "function ComputerDetailPanel", "active task must expose local computer activity through the inspector");
 assertContains("src/components/ChatView.tsx", "timelineCollapsed", "computer timeline must keep collapsed state");
-assertContains("src/components/ChatView.tsx", "computerCardCollapsed", "local computer card must be collapsible after answers");
+assertContains("src/components/ChatView.tsx", 'view.key === "computer"', "local computer activity must remain discoverable as an inspector view");
 assertContains("src/components/SettingsView.tsx", "secret_value: manualSecretValue.trim()", "Vault manual entry must send raw secret material through the encrypted gateway path");
 assertContains("src/components/SettingsView.tsx", "pin: manualSecretPin", "Vault manual entry must require the local PIN when saving secret material");
 assertContains("src/components/SettingsView.tsx", "setManualSecretValue(\"\")", "Vault manual entry must clear the raw secret from renderer state after saving");
@@ -532,10 +1046,11 @@ assertContains("src/components/SettingsView.tsx", "editVaultPin", "Vault record 
 assertContains("src/components/SettingsView.tsx", "editVaultSecretValue", "Vault record editing must allow correcting the encrypted value after PIN unlock");
 assertContains("src/components/SettingsView.tsx", "className=\"vault-record-edit\"", "Vault settings must render an inline metadata editor");
 assertContains("src/components/SettingsView.tsx", "vault-record-list", "Vault settings must render a saved-record list under sensitive data");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/vault/records", "Gateway must expose Vault record listing");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/vault/records/{id}", "Gateway must expose Vault record deletion");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/vault/records/{id}/reveal", "Gateway must expose PIN-gated Vault record reveal");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "patch(vault_record_update)", "Gateway must expose metadata-only Vault record editing");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "build_gateway_router", "Gateway route assembly must stay in its dedicated owner");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/vault/records", "Gateway must expose Vault record listing");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/vault/records/{id}", "Gateway must expose Vault record deletion");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/vault/records/{id}/reveal", "Gateway must expose PIN-gated Vault record reveal");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "patch(vault_record_update)", "Gateway must expose metadata-only Vault record editing");
 assertContains("src/components/SettingsView.tsx", "t(\"settings.vaultEncrypted\")", "Vault status badge must use translations");
 assertContains("src/i18n/locales/it.json", "\"vaultEncrypted\": \"Cifrato\"", "Italian locale must translate the Vault encrypted badge");
 assertContains("src/i18n/locales/en.json", "\"vaultEncrypted\": \"Encrypted\"", "English locale must translate the Vault encrypted badge");
@@ -726,47 +1241,18 @@ assertMatches(
   /isStreamingMessage \? \([\s\S]*?<AssistantMessageBody[\s\S]*?\n\s+streaming\n[\s\S]*?\)/m,
   "streaming answers must keep rich markdown/progress parsing enabled while streaming",
 );
-assertContains("src/components/ChatView.tsx", "<WorkspaceIsland", "closed operational plan markers must feed the ambient workspace island");
-assertContains("src/components/ChatView.tsx", "workspacePlanSteps", "workspace island must derive progress from closed operational plan markers");
-assertContains("src/components/WorkspaceIsland.tsx", "Panel mode", "workspace island must expose its expand/collapse preference menu");
-assertContains("src/components/WorkspaceIsland.tsx", "wi-progress", "workspace island must render collapsible progress inside the island");
-assertContains("src/components/WorkspaceIsland.tsx", "if (!hasWorkspaceState && !hadWorkspaceState) return null", "workspace island must stay hidden when a thread has no real workspace state, while preserving completed state after a run");
-assertContains("src/components/ChatView.tsx", "threadHasMessages={threadMessages.length > 0}", "workspace island must not treat project memory artifacts as state for an empty new chat");
-assertContains("src/components/WorkspaceIsland.tsx", "(threadHasMessages || streaming || computerLive) &&", "workspace island must appear for thread-owned content, stream, or owned live computer work");
-assertContains("src/components/ChatView.tsx", "onOpenInspector={openUtilityTab}", "chat header and island must route views through the inspector reducer");
-// The redundant "Plan N/M" row was removed — Progress IS the plan (one section, not two).
-// Sources (artifacts + uploaded files) are fused into the island; each opens the Workbench.
-assertContains("src/components/WorkspaceIsland.tsx", "wi-sources", "workspace island must render the fused Sources section");
-// The activity row reveals its accumulated conversation steps INLINE. It used to open the
-// Workbench "activity" tab, but that tab renders background TASKS (activeTasks), not these
-// conversation activity steps — so clicking showed nothing. The island now owns the reveal.
-assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => setActivityOpen((value) => !value)}", "workspace island activity row must reveal its accumulated steps inline");
-assertContains("src/components/WorkspaceIsland.tsx", "wi-activity-list", "workspace island must render the inline activity list");
-// Cockpit redesign: one fused card — Objective → Progress (3-step window) → Activity →
-// Sources. Sources (artifacts + uploaded files) are fused back IN and open the Workbench;
-// Goals/Memory stay out. The separate ProjectContextPanel is retired (island owns the goal).
-assertContains(
-  "src/components/WorkspaceIsland.tsx",
-  "threeStepWindow",
-  "island plan must use the 3-step auto-focus window"
-);
-assertNotContains(
-  "src/components/WorkspaceIsland.tsx",
-  "onOpenWorkbench(\"goals\")",
-  "goals row must be removed from the island"
-);
-assertNotContains(
-  "src/components/WorkspaceIsland.tsx",
-  "onOpenWorkbench(\"memoria\")",
-  "memory row must be removed from the island"
-);
-// Task 4c: the objective sits at the top of the Objective → Plan → Activity hierarchy,
-// rendered as a text block (conditional — hidden when the workspace has no objective).
-assertContains(
-  "src/components/WorkspaceIsland.tsx",
-  "wi-goal",
-  "island must render the project objective as a text block"
-);
+assertContains("src/components/ChatView.tsx", "workspacePlanSteps", "adaptive activity must derive progress from the durable plan projection");
+assertContains("src/components/ChatView.tsx", "projectWorkspaceSections({", "island visibility must use the pure factual projection");
+assertContains("src/components/ChatView.tsx", "snapshotVerified: Boolean(previewDataUrl)", "inactive browser visibility requires a verified preview");
+assertContains("src/components/ChatView.tsx", "openSectionRequest={{ section: \"activity\", nonce: activityNonce }}", "Activity actions must target the adaptive activity section");
+assertContains("src/components/AdaptiveWorkspaceIsland.tsx", "useState<WorkspaceSectionId | null>(null)", "adaptive island must be collapsed by default");
+assertContains("src/components/AdaptiveWorkspaceIsland.tsx", "setActiveSection(null);\n  }, [threadId]);", "adaptive island state must reset per thread");
+assertContains("src/components/AdaptiveWorkspaceIsland.tsx", "role=\"region\"", "adaptive content must expose region semantics");
+assertContains("src/components/AdaptiveWorkspaceIsland.tsx", "aria-pressed={activeSection === section.id}", "rail buttons must expose their selected section");
+assertContains("src/lib/workspaceIslandSections.mjs", "const sections = [];", "workspace capabilities must be projected from factual input");
+assertNotContains("src/lib/workspaceIslandSections.mjs", 'id: "terminal"', "terminal must not appear before the capability exists");
+assertNotContains("src/components/ChatView.tsx", "<WorkspaceIsland", "legacy workspace island must stay retired");
+assertNotContains("src/styles.css", ".workspace-island-panel", "legacy island panel geometry must stay retired");
 // Task 5: the rows dropped from the island (artifacts/files/activity) resurface behind
 // a header kebab menu that reopens the docked Workbench on the right tab.
 assertContains(
@@ -806,7 +1292,8 @@ assertContains("src/styles.css", ".inspector-tab-panel {\n  min-width: 0;\n  min
 assertContains("src/styles.css", ".inspector-tab-panel .artifacts-preview-body {\n  overflow: visible;", "embedded artifact documents must use the tab scroll owner");
 assertContains("src/styles.css", ".inspector-tab-panel .workbench-files {\n  overflow: visible;", "inspector lists must use the tab scroll owner");
 assertContains("src/styles.css", "grid-template-columns: minmax(420px, 1fr) minmax(420px, var(--inspector-width));", "chat and inspector must be real sibling columns");
-assertContains("src/styles.css", ".active-task-layout.inspector-open > .chat-status-stack", "the working island must not create a third column");
+assertContains("src/components/ChatView.tsx", "disabled={inspector.open}", "the adaptive island must yield to the inspector column");
+assertContains("src/styles.css", "--workspace-current-reserve: 0px;", "the inspector column must clear the adaptive island reserve");
 assertNotContains("src/styles.css", ".workbench {\n  position: absolute", "legacy workbench must not float above the chat");
 assertContains("src/components/ChatView.tsx", "useReducer(inspectorWorkspaceReducer", "chat must use one inspector reducer");
 assertContains("src/components/ChatView.tsx", "loadInspectorState(thread.threadId", "inspector state must be scoped by thread");
@@ -835,8 +1322,8 @@ assertContains("src/components/InspectorWorkspace.tsx", "aria-valuenow", "inspec
 assertContains("src/components/InspectorWorkspace.tsx", "aria-valuemin={minPercent}", "inspector separator must expose its reachable minimum");
 assertContains("src/components/InspectorWorkspace.tsx", "aria-valuemax={maxPercent}", "inspector separator must expose its reachable maximum");
 assertContains("src/components/ChatView.tsx", "fileLoadGenerationRef", "file revalidation must ignore stale authorization responses");
-assertContains("src/styles.css", ".active-task-layout.inspector-focused > .composer-surface", "focused inspector must hide the current composer surface");
-assertNotContains("src/styles.css", ".active-task-layout.inspector-focused > .composer-shell", "focused inspector must not target the removed composer shell class");
+assertContains("src/styles/composer.css", ".active-task-layout.inspector-focused > .composer-stack", "focused inspector must hide the current composer surface");
+assertNotContains("src/styles.css", ".active-task-layout.inspector-focused > .composer-stack", "focused inspector composer ownership must not remain in legacy styles");
 assertNotContains("src/components/ChatView.tsx", "panel-menu-wrap--corner", "chat topbar must not expose a second workbench launcher");
 assertNotContains("src/styles.css", ".panel-menu-wrap--corner", "chat topbar workbench launcher must not compete with the workspace island");
 assertNotContains("src/styles.css", "z-index: 220;", "chat header workspace/review menu must not overlay native window controls");
@@ -859,7 +1346,7 @@ assertNotContains("src/components/ChatView.tsx", "streamingTextRef", "chat strea
 assertContains("src/components/ChatView.tsx", "messageContentKind", "message actions must derive from response content type");
 assertContains("src/components/ChatView.tsx", "onExplainCode", "code responses must expose code-specific contextual actions");
 assertContains("src/components/ChatView.tsx", "onImproveCode", "code responses must expose code improvement action");
-assertContains("src/components/ChatView.tsx", "reply-context-card", "composer must show the active reply context before submit");
+assertContains("src/components/ComposerShell.tsx", "reply-context-card", "composer must show the active reply context before submit");
 assertContains("src/components/ChatView.tsx", "message-action-menu", "secondary message actions must stay behind a compact menu");
 assertContains("src/components/ChatView.tsx", "runMessageMenuAction", "message overflow actions must close the menu before running");
 assertContains("src/components/ChatView.tsx", "message-latency-summary", "message metrics must be visible without dominating the answer");
@@ -874,16 +1361,16 @@ assertContains("src/components/ChatView.tsx", "d3ReheatSimulation", "memory grap
 assertContains("src/styles.css", ".memory-graph-canvas canvas", "memory graph must size the ForceGraph canvas, not only an svg");
 assertNotContains("src/components/ChatView.tsx", "canCreateteTask={assistantTextMessage}", "message action menu must not advertise unverified task creation for every assistant text");
 assertNotContains("src/components/ChatView.tsx", "canCreateteAutomation={assistantTextMessage}", "message action menu must not advertise unverified automation creation for every assistant text");
-assertNotContains("src/components/ChatView.tsx", "\"Use a skill\"", "composer add menu must expose user-facing capabilities, not implementation terms");
-assertNotContains("src/components/ChatView.tsx", "t(\"chat.searchSkill\")", "composer capability picker must not expose skill terminology");
-assertContains("src/components/ChatView.tsx", "t(\"chat.searchCapability\")", "composer capability picker must search capabilities");
-assertContains("src/components/ChatView.tsx", "t(\"chat.noCapabilities\")", "composer capability picker must use capability empty state");
-assertContains("src/components/ChatView.tsx", "t(\"chat.forcedCapabilityNextMessage\")", "forced capability chip must use user-facing capability terminology");
-assertContains("src/components/ChatView.tsx", "{m.desc && <small>{m.desc}</small>}", "composer mode picker must explain what each mode does");
-assertContains("src/components/ChatView.tsx", "!m.projectOnly || linkedFolder != null", "composer must hide project-only modes without a linked project folder");
+assertNotContains("src/components/ComposerShell.tsx", "\"Use a skill\"", "composer add menu must expose user-facing capabilities, not implementation terms");
+assertNotContains("src/components/ComposerShell.tsx", "t(\"chat.searchSkill\")", "composer capability picker must not expose skill terminology");
+assertContains("src/components/ComposerShell.tsx", "t(\"chat.searchCapability\")", "composer capability picker must search capabilities");
+assertContains("src/components/ComposerShell.tsx", "t(\"chat.noCapabilities\")", "composer capability picker must use capability empty state");
+assertContains("src/components/ComposerShell.tsx", "t(\"chat.forcedCapabilityNextMessage\")", "forced capability chip must use user-facing capability terminology");
+assertContains("src/components/ComposerShell.tsx", "<small>{option.description}</small>", "composer mode picker must explain what each mode does");
+assertContains("src/components/ChatView.tsx", "available: !option.projectOnly || linkedFolder != null", "composer must hide project-only modes without a linked project folder");
 assertContains("src/i18n/locales/en.json", "\"searchCapability\"", "English chat locale must include capability search label");
 assertContains("src/i18n/locales/it.json", "\"searchCapability\"", "Italian chat locale must include capability search label");
-assertContains("src/components/ChatView.tsx", "value.trim() && (", "composer improve prompt action must only render when there is prompt text to improve");
+assertContains("src/components/ComposerShell.tsx", "props.value.trim() && matchesAdd", "composer improve prompt action must only render when there is prompt text to improve");
 assertNotContains("src/components/ChatView.tsx", "/^fn\\s+", "code-specific message actions must not rely on fragile plain-text Rust heuristics");
 assertNotContains("src/components/ChatView.tsx", "/^let\\s+", "code-specific message actions must not rely on fragile plain-text variable heuristics");
 assertContains("src/components/ChatView.tsx", "cancelStreamingRequestRef", "chat must allow users to stop a visible streaming response");
@@ -915,8 +1402,8 @@ assertContains("src/components/ChatComputerPanel.tsx", "setView(fullscreen ? \"e
 assertContains("src/components/ChatComputerPanel.tsx", "fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />", "Computer dock enlarge/contract control must use fullscreen/minimize icons");
 assertContains("src/styles.css", ".cc-dock,\n.cc-scrim {\n  pointer-events: auto;", "Computer dock controls must be clickable inside the non-interactive status stack");
 assertContains("src/styles.css", ".cc-dock.full {\n  position: fixed;", "Computer fullscreen dock must escape the status stack and anchor inside the chat viewport");
-assertContains("src/styles.css", "left: calc(var(--drawer-island-gap) + var(--drawer-width, 292px) + 24px);", "Computer fullscreen dock must start to the right of the sidebar island");
-assertContains("src/styles.css", "width: min(1040px, calc(100vw - var(--drawer-width, 292px) - 72px));", "Computer fullscreen must be large but bounded by the chat area");
+assertContains("src/styles.css", "left: calc(var(--drawer-island-gap) + var(--drawer-width, 268px) + 24px);", "Computer fullscreen dock must start to the right of the sidebar island");
+assertContains("src/styles.css", "width: min(1040px, calc(100vw - var(--drawer-width, 268px) - 72px));", "Computer fullscreen must be large but bounded by the chat area");
 assertContains("src/lib/chatVisibleContent.mjs", "STRAY_REASONING_MARKER", "streaming renderer must strip stray or malformed reasoning markers from the visible answer body");
 assertContains("src/components/ChatView.tsx", "VAULT_PROPOSE_RE", "chat renderer must parse vault proposal markers");
 assertContains("src/components/ChatView.tsx", "VaultProposeCard", "chat renderer must render sensitive-data vault proposal cards");
@@ -939,8 +1426,10 @@ assertContains("src/styles.css", "@media (max-width: 860px)", "responsive shell 
 assertRepoContains("Cargo.toml", "\"crates/desktop-gateway\"", "workspace must include the desktop gateway crate");
 assertRepoContains("crates/desktop-gateway/src/lib.rs", "build_chat_runtime_prompt", "desktop gateway must own chat runtime prompt construction");
 assertRepoContains("crates/desktop-gateway/src/lib.rs", "ContextCompressor", "desktop gateway must use Rust context compression");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/chat/build_prompt", "desktop gateway must expose prompt build endpoint");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/chat/turns", "desktop gateway must expose the broker turn endpoint (the only chat path)");
+assertRepoContains("crates/desktop-gateway/src/gateway_prompt.rs", "build_prompt", "desktop gateway prompt build handler must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/chat/build_prompt", "desktop gateway must expose prompt build endpoint");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "gateway_prompt::build_prompt", "desktop gateway must route prompt build through the shared handler");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/chat/turns", "desktop gateway must expose the broker turn endpoint (the only chat path)");
 assertRepoContains("apps/desktop/src/lib/coreBridge.ts", "export type CoreChatStreamEvent", "desktop renderer must expose structured chat stream events");
 assertRepoContains("apps/desktop/src/lib/chatApi.ts", "listenChatStreamEvent", "chat API must expose structured chat stream subscription");
 assertRepoContains("apps/desktop/src/components/ChatView.tsx", "listenChatStreamEvent", "ChatView must consume structured chat stream events");
@@ -951,26 +1440,71 @@ assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "eventPartToLe
 assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "visibleStreamingText", "streaming messages must keep prose text separate from structured event parts");
 assertRepoContains("apps/desktop/src/components/ChatView.tsx", "shouldDropStructuredMarkerDelta", "ChatView must drop legacy marker deltas after receiving structured event parts");
 assertNotContains("src/App.tsx", "‹‹CHOICES››", "new proactivity choice prompts must use structured event parts, not marker text");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/tasks/queue", "desktop gateway must expose task queue read model endpoint");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/tasks/executor", "desktop gateway must expose task executor status endpoint");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/tasks/run_next", "desktop gateway must expose the first local task executor endpoint");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "start_task_executor_worker", "desktop gateway must start a background task executor worker");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/local-computer/sessions/{session_id}", "desktop gateway must expose local computer session read model endpoint");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/local-computer/sessions/{session_id}/artifacts/{artifact_id}/preview", "desktop gateway must expose redacted local computer artifact previews");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/memory/dashboard", "desktop gateway must expose memory dashboard read model endpoint");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/capabilities/snapshot", "desktop gateway must expose capability registry snapshot endpoint");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/tasks/queue", "desktop gateway must expose task queue read model endpoint");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/tasks/executor", "desktop gateway must expose task executor status endpoint");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/tasks/run_next", "desktop gateway must expose the first local task executor endpoint");
+assertRepoContains("crates/desktop-gateway/src/gateway_task_executor.rs", "start_task_executor_worker", "desktop gateway must start a background task executor worker");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/local-computer/sessions/{session_id}", "desktop gateway must expose local computer session read model endpoint");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/local-computer/sessions/{session_id}/artifacts/{artifact_id}/preview", "desktop gateway must expose redacted local computer artifact previews");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/memory/dashboard", "desktop gateway must expose memory dashboard read model endpoint");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/capabilities/snapshot", "desktop gateway must expose capability registry snapshot endpoint");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "TaskUiReadModel", "desktop gateway must use the task runtime UI read model");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "LocalComputerReadModel", "desktop gateway must use the local computer UI read model");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "MemoryUiReadModel", "desktop gateway must use the memory UI read model");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "CapabilityRegistryStore", "desktop gateway must use the capability registry store");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/chat/threads", "desktop gateway must expose persistent thread endpoints");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "/messages/{message_id}/create_task", "desktop gateway must create durable tasks from chat messages");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/chat/threads", "desktop gateway must expose persistent thread endpoints");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/messages/{message_id}/create_task", "desktop gateway must create durable tasks from chat messages");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "link_brain_tasks_to_thread", "desktop gateway must link Brain-created operational tasks to the thread (and local computer read models)");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "LocalComputerSessionStore", "desktop gateway must persist computer sessions for operational tasks");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "HOMUN_BROWSER_HEADLESS", "desktop gateway must allow visible Playwright browser sessions");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "require_gateway_token", "desktop gateway must protect chat endpoints with a local token");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "AllowOrigin::list", "desktop gateway CORS must use an explicit origin allowlist");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "HeaderValue::from_static(\"null\")", "desktop gateway CORS must allow packaged file-origin renderer with bearer token");
+assertRepoContains("crates/desktop-gateway/src/gateway_paths.rs", "gateway_data_dir", "desktop gateway data paths must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_paths.rs", "HOMUN_DESKTOP_GATEWAY_DB", "desktop gateway path owner must preserve DB override compatibility");
+assertRepoContains("crates/desktop-gateway/src/gateway_paths.rs", "gateway_workspaces_path", "desktop gateway workspace paths must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_paths.rs", "HOMUN_MEMORY_WIKI_DIR", "desktop gateway path owner must preserve memory wiki override compatibility");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_paths::gateway_data_dir", "desktop gateway startup must use the shared path owner");
+assertRepoContains("crates/desktop-gateway/src/gateway_file_security.rs", "write_private_file", "desktop gateway local file protection must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_file_security.rs", "harden_data_at_rest", "desktop gateway at-rest hardening must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_file_security::write_private_file", "desktop gateway startup must use the shared private file writer");
+assertRepoContains("crates/desktop-gateway/src/gateway_vault_key.rs", "resolve_vault_wrap_key", "desktop gateway vault wrap key resolution must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_vault_key.rs", "HOMUN_VAULT_WRAP_KEY", "desktop gateway vault key owner must preserve env-key precedence");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_vault_key::resolve_vault_wrap_key", "desktop gateway startup must use the shared vault key resolver");
+assertRepoContains("crates/desktop-gateway/src/gateway_identity.rs", "gateway_memory_workspace_id", "desktop gateway workspace identity scope must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_identity.rs", "PERSONAL_WORKSPACE", "desktop gateway identity owner must preserve personal memory canonicalization");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_identity::gateway_workspace_id", "desktop gateway root must re-export shared identity helpers");
+assertRepoContains("crates/desktop-gateway/src/gateway_secrets.rs", "gateway_secret_key_seed", "desktop gateway encrypted secret seed must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_secrets.rs", "browser-checkpoint-secrets.json", "desktop gateway secret owner must preserve browser checkpoint secret path");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_secrets::open_gateway_secret_store", "desktop gateway startup must use the shared encrypted secret store owner");
+assertRepoContains("crates/desktop-gateway/src/gateway_legacy_data.rs", "migrate_legacy_data_dir", "desktop gateway legacy data-dir migration must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_legacy_data.rs", "LegacyDirAction", "desktop gateway legacy data-dir decision must stay unit-testable outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_legacy_data::migrate_legacy_data_dir", "desktop gateway startup must use the shared legacy data-dir migrator");
+assertRepoContains("crates/desktop-gateway/src/gateway_bind.rs", "gateway_bind_addr", "desktop gateway bind address must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_bind.rs", "HOMUN_DESKTOP_GATEWAY_PORT", "desktop gateway bind owner must preserve desktop port override compatibility");
+assertRepoContains("crates/desktop-gateway/src/gateway_bind.rs", "HOMUN_DESKTOP_GATEWAY_HOST", "desktop gateway bind owner must preserve host override compatibility");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_bind::gateway_bind_addr", "desktop gateway startup must use the shared bind resolver");
+assertRepoContains("crates/desktop-gateway/src/gateway_task_executor_config.rs", "task_executor_worker_enabled", "desktop gateway task executor worker config must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_task_executor_config.rs", "HOMUN_TASK_WORKER_COUNT", "desktop gateway task executor owner must preserve worker-count env compatibility");
+assertRepoContains("crates/desktop-gateway/src/gateway_task_executor.rs", "gateway_task_executor_config::task_executor_worker_enabled", "desktop gateway task executor must use the shared task executor config");
+assertRepoContains("crates/desktop-gateway/src/gateway_model_timeouts.rs", "model_request_timeout_secs", "desktop gateway model timeout config must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_model_timeouts.rs", "HOMUN_MODEL_FIRST_TOKEN_SECS", "desktop gateway model timeout owner must preserve first-token override compatibility");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "pub(crate) use gateway_model_timeouts", "desktop gateway root must re-export shared model timeout helpers");
+assertRepoContains("crates/desktop-gateway/src/gateway_db_unify.rs", "unify_legacy_databases_at_startup", "desktop gateway legacy DB unification must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_db_unify.rs", "unify_databases_if_needed", "desktop gateway DB unification owner must delegate to the canonical migration engine");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_db_unify::unify_legacy_databases_at_startup", "desktop gateway startup must use the shared DB unification owner");
+assertRepoContains("crates/desktop-gateway/src/gateway_http_client.rs", "build_gateway_http_client", "desktop gateway shared HTTP client must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_http_client.rs", "HOMUN_HTTP_CONNECT_TIMEOUT_SECS", "desktop gateway HTTP client owner must preserve connect-timeout override compatibility");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_http_client::build_gateway_http_client", "desktop gateway startup must use the shared HTTP client owner");
+assertRepoContains("crates/desktop-gateway/src/gateway_store_integrity.rs", "ensure_gateway_store_integrity", "desktop gateway startup store-integrity sweep must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_store_integrity.rs", "capability-registry", "desktop gateway store-integrity owner must preserve health recovery store names");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_store_integrity::ensure_gateway_store_integrity", "desktop gateway startup must use the shared store-integrity owner");
+assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "require_gateway_token", "desktop gateway auth middleware must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_auth.rs", "resolve_gateway_auth_token", "desktop gateway auth token resolution must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "gateway_auth::require_gateway_token", "desktop gateway must protect chat endpoints with a local token");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_auth::resolve_gateway_auth_token", "desktop gateway startup must use the shared auth token resolver");
+assertRepoContains("crates/desktop-gateway/src/gateway_cors.rs", "AllowOrigin::list", "desktop gateway CORS must use an explicit origin allowlist outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_cors.rs", "HeaderValue::from_static(\"null\")", "desktop gateway CORS must allow packaged file-origin renderer with bearer token");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "gateway_cors::cors_layer", "desktop gateway must apply the shared CORS layer");
+assertRepoContains("crates/desktop-gateway/src/gateway_health.rs", "HealthResponse", "desktop gateway health response must be owned outside the monolith");
+assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "gateway_health::health", "desktop gateway must route liveness through the shared health handler");
 assertRepoContains("crates/desktop-gateway/src/chat_store.rs", "create table if not exists chat_threads", "desktop gateway must persist chat threads in SQLite");
 assertRepoContains("crates/desktop-gateway/src/chat_store.rs", "create table if not exists chat_messages", "desktop gateway must persist chat messages in SQLite");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "Body::from_stream", "desktop gateway must proxy runtime stream without buffering the full answer");
@@ -981,10 +1515,9 @@ assertContains(
   "per-turn activity must be rendered inline in each assistant message"
 );
 
-assertNotContains(
+assertMissing(
   "src/components/ProjectContextPanel.tsx",
-  "pcp-objective",
-  "objective is owned by the working island; the project panel must not duplicate it"
+  "project context must not create a second persistent status owner"
 );
 
 console.log("UI contract checks passed");

@@ -4,6 +4,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureDevBrowserAutomationRuntime } from "./browser-runtime.mjs";
+import { ensureDevPdfiumRuntime } from "./pdfium-runtime.mjs";
 
 const devUrl = process.env.HOMUN_DESKTOP_URL ?? "http://127.0.0.1:1420/";
 
@@ -36,6 +38,11 @@ function resolveGatewayToken() {
 const gatewayToken = resolveGatewayToken();
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const children = new Set();
+
+// Keep dev behavior aligned with packaged builds. This downloads the pinned
+// runtime once, then reuses the verified local copy on subsequent launches.
+const pdfiumDir = process.env.HOMUN_PDFIUM_LIB ?? await ensureDevPdfiumRuntime();
+const browserAutomationDir = ensureDevBrowserAutomationRuntime();
 
 function run(command, args, options = {}) {
   const child = spawn(command, args, {
@@ -106,6 +113,8 @@ const electron = run("npx", ["electron", "electron/main.cjs"], {
     ...process.env,
     HOMUN_DESKTOP_URL: devUrl,
     HOMUN_DESKTOP_GATEWAY_TOKEN: gatewayToken,
+    HOMUN_PDFIUM_LIB: pdfiumDir,
+    HOMUN_BROWSER_AUTOMATION_DIR: browserAutomationDir,
   },
 });
 

@@ -561,6 +561,7 @@ mod tests {
                 thread_id: "thread".to_string(),
                 user_id: "u".to_string(),
                 workspace_id: "w".to_string(),
+                role: None,
                 model: None,
                 provider: None,
                 prompt_fingerprint: None,

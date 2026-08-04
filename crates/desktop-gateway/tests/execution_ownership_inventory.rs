@@ -33,8 +33,8 @@ fn chat_turn_executor_does_not_project_lifecycle_state() {
 #[test]
 fn chat_dispatch_and_legacy_bridge_keep_one_terminal_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let main = production_source(&root.join("src/main.rs"));
-    let worker = main
+    let task_executor = production_source(&root.join("src/gateway_task_executor.rs"));
+    let worker = task_executor
         .split("fn run_next_task_once")
         .nth(1)
         .expect("task worker")
@@ -130,9 +130,13 @@ fn execution_attempt_control_is_not_a_second_persisted_contract() {
 fn channel_and_stream_markers_do_not_own_lifecycle() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
+    let channels = production_source(&root.join("src/gateway_channels.rs"));
+    let streams = production_source(&root.join("src/gateway_chat_streams.rs"));
     assert!(!main.contains("persist_legacy_hitl_wait_from_parts"));
+    assert!(!channels.contains("persist_legacy_hitl_wait_from_parts"));
+    assert!(!streams.contains("persist_legacy_hitl_wait_from_parts"));
 
-    let inbound = main
+    let inbound = channels
         .split("async fn handle_channel_inbound")
         .nth(1)
         .expect("channel inbound handler")
@@ -147,23 +151,177 @@ fn channel_and_stream_markers_do_not_own_lifecycle() {
 }
 
 #[test]
+fn turn_broker_surface_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let broker = production_source(&root.join("src/gateway_turn_broker.rs"));
+    let streams = production_source(&root.join("src/gateway_chat_streams.rs"));
+
+    let owned = [
+        "fn enqueue_chat_turn_core(",
+        "async fn enqueue_turn(",
+        "async fn cancel_turn(",
+        "async fn get_turn_events(",
+        "async fn thread_activity_projection(",
+        "async fn subscribe_turn_stream(",
+        "async fn list_thread_steering(",
+        "async fn update_steering(",
+        "async fn delete_steering(",
+        "async fn send_steering_now(",
+    ];
+    for pattern in owned {
+        assert!(
+            broker.contains(pattern),
+            "turn broker owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain turn broker surface {pattern}"
+        );
+    }
+
+    let forbidden_in_broker = [
+        "async fn run_agent_rounds(",
+        "async fn emit_stream_event(",
+        "fn stream_registry(",
+        "fn save_chat_message_to_memory(",
+        "fn start_task_executor_worker(",
+        "fn run_next_task_once(",
+        "fn recall_memory(",
+    ];
+    for pattern in forbidden_in_broker {
+        assert!(
+            !broker.contains(pattern),
+            "turn broker owner must not absorb adjacent owner {pattern}"
+        );
+    }
+    assert!(streams.contains("async fn emit_stream_event("));
+}
+
+#[test]
+fn task_executor_surface_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let executor = production_source(&root.join("src/gateway_task_executor.rs"));
+    let turn_broker = production_source(&root.join("src/gateway_turn_broker.rs"));
+
+    let owned = [
+        "struct TaskQueueQuery",
+        "async fn task_queue(",
+        "async fn task_detail(",
+        "async fn cancel_task(",
+        "async fn run_next_task(",
+        "async fn task_executor_status(",
+        "async fn approve_approval(",
+        "async fn reject_approval(",
+        "fn run_next_task_once(",
+        "fn start_task_executor_worker(",
+        "enum TaskAcquireResult",
+        "fn acquire_task_for_execution(",
+        "fn mark_task_completed(",
+        "fn mark_task_failed(",
+        "fn handle_failed_task_run(",
+        "fn request_task_executor_approval(",
+        "fn sync_session_for_task_run(",
+        "fn append_task_result_to_chat(",
+        "fn append_task_progress_checkpoint(",
+    ];
+    for pattern in owned {
+        assert!(
+            executor.contains(pattern),
+            "task executor owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain task executor surface {pattern}"
+        );
+    }
+
+    let forbidden_in_executor = [
+        "async fn run_agent_rounds(",
+        "async fn stream_chat_via_openai(",
+        "fn execute_capability_browser_task(",
+        "fn execute_capability_generic(",
+        "fn execute_persistent_browser_capability(",
+        "fn recall_memory(",
+        "async fn subscribe_turn_stream(",
+    ];
+    for pattern in forbidden_in_executor {
+        assert!(
+            !executor.contains(pattern),
+            "task executor owner must not absorb adjacent owner {pattern}"
+        );
+    }
+    assert!(turn_broker.contains("async fn subscribe_turn_stream("));
+}
+
+#[test]
 fn startup_background_writers_follow_process_fencing() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
-    let fencing = main
-        .find(".bump_process_generation()")
-        .expect("startup process fencing");
+    let background = production_source(&root.join("src/gateway_background_startup.rs"));
+    let boot = main
+        .find("gateway_boot_maintenance::run_gateway_boot_maintenance(&state);")
+        .expect("boot maintenance delegation");
+    let recovery = main
+        .find("gateway_turn_recovery::recover_gateway_chat_turns_at_startup(&state).await;")
+        .expect("turn recovery delegation");
+    let background_start = main
+        .find("gateway_background_startup::start_gateway_background_services(state.clone());")
+        .expect("background startup delegation");
+    assert!(boot < recovery);
+    assert!(recovery < background_start);
+
     let writers = [
         "sweep_stale_dated_suggestions_once(&st).await",
         "sweep_graph_on_startup(&st)",
         "vacuum_all_stores(&st)",
     ];
-
     for writer in writers {
-        let position = main.find(writer).expect("known startup background writer");
         assert!(
-            position > fencing,
-            "startup writer {writer} must not race process fencing and boot recovery"
+            background.contains(writer),
+            "startup writer {writer} must stay behind background startup delegation"
+        );
+        assert!(
+            !main.contains(writer),
+            "startup writer {writer} must not run inline in main.rs"
+        );
+    }
+}
+
+#[test]
+fn gateway_ownership_documentation_tracks_extracted_kernel_owners() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let doc = production_source(
+        &root
+            .parent()
+            .expect("crates dir")
+            .parent()
+            .expect("repo root")
+            .join("docs/testing/gateway-ownership-contracts.md"),
+    );
+    let required_patterns = [
+        "main.rs",
+        "gateway_turn_broker.rs",
+        "gateway_task_executor.rs",
+        "gateway_routes.rs",
+        "gateway_boot_maintenance.rs",
+        "gateway_turn_recovery.rs",
+        "gateway_background_startup.rs",
+        "gateway_chat_streams.rs",
+        "gateway_browser_tools.rs",
+        "gateway_browser_runtime.rs",
+        "gateway_model_routing.rs",
+        "gateway_tool_execution.rs",
+        "check_gateway_main_contract.py",
+        "execution_ownership_inventory.rs",
+        "kernel_regression_gate.py",
+    ];
+
+    for pattern in required_patterns {
+        assert!(
+            doc.contains(pattern),
+            "gateway ownership documentation must track {pattern}"
         );
     }
 }

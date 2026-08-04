@@ -113,7 +113,45 @@
   },
   "filters": {
     "label": "Filter",
+    "activeCount_one": "{{count}} active filter",
+    "activeCount_other": "{{count}} active filters",
+    "groupBy": "Group by",
+    "orderBy": "Order by",
+    "state": "State",
+    "requiresAttention": "Requires attention",
     "type": "Type",
+    "period": "Period",
+    "project": "Project",
+    "channel": "Channel",
+    "showArchived": "Show archived",
+    "groupByOption": {
+      "none": "None",
+      "project": "Project",
+      "channel": "Channel",
+      "period": "Period"
+    },
+    "orderOption": {
+      "updated_desc": "Recently updated",
+      "updated_asc": "Least recently updated",
+      "title_asc": "Title A-Z"
+    },
+    "stateOption": {
+      "working": "Working",
+      "completed_unread": "Completed, unread",
+      "waiting_user": "Waiting for you",
+      "failed": "Failed"
+    },
+    "typeOption": {
+      "chat": "Chat",
+      "project": "Project"
+    },
+    "periodOption": {
+      "all": "Any time",
+      "today": "Today",
+      "7d": "Last 7 days",
+      "30d": "Last 30 days",
+      "older": "Older"
+    },
     "date": "Updated",
     "dateOption": {
       "all": "Any",
@@ -463,6 +501,34 @@
     "learning": "Learning",
     "contacts": "Contacts"
   },
+  "composer": {
+    "add": "Add",
+    "model": "Model",
+    "mode": "Mode",
+    "environment": "Environment",
+    "runtimeContext": "Runtime & Context",
+    "searchAdd": "Search actions...",
+    "auto": "Auto",
+    "nextTurnOnly": "Applies to the next turn only",
+    "cloud": "Cloud",
+    "local": "Local",
+    "remove": "Remove",
+    "removeCapability": "Remove capability",
+    "attachment": "Attach file",
+    "files": "Linked files",
+    "models": "Models",
+    "capabilities": "Capabilities",
+    "connectors": "Connectors",
+    "openRuntimeContext": "Open runtime and context details",
+    "projectEnvironment": "Project",
+    "localEnvironment": "Local",
+    "toolsCount": "{{count}} tools",
+    "runtime": {
+      "unavailable": "Unavailable", "loading": "Loading runtime context...", "error": "Runtime context is temporarily unavailable.",
+      "effectiveModel": "Effective model", "nextTurnModel": "Next-turn model", "provider": "Provider", "locality": "Locality", "role": "Role", "contextWindow": "Context window", "usedInput": "Used input", "usedInputValue": "{{tokens}} tokens ({{percent}}%)", "compaction": "Compaction", "applied": "Applied", "notApplied": "Not applied",
+      "contributions": "Context contributions", "conversation": "Conversation", "compactedSummary": "Compacted summary", "filesArtifacts": "Files and artifacts", "authorizedMemory": "Authorized memory", "systemTools": "System and tools", "promptEstimate": "Estimated from model-visible prompt", "providerReported": "Provider reported"
+    }
+  },
   "chat": {
     "hostComputer": {
       "computer": "Computer", "mac": "Mac", "macApps": "Mac Apps", "live": "live",
@@ -560,6 +626,12 @@
     "steeringApplying": "Applying",
     "steeringHeld": "Activity stopped",
     "activity": "Activity",
+    "workspaceIsland": {
+      "activity": "Activity",
+      "browser": "Browser",
+      "artifacts": "Artifacts",
+      "sources": "Sources"
+    },
     "lastActivity": "Last activity",
     "sendNow": "Send now",
     "editInstruction": "Edit",
@@ -585,6 +657,17 @@
     "plan": "Plan",
     "projectFiles": "Project files",
     "approvalRequired": "Your confirmation is needed to continue",
+    "effectVerificationAria": "Pending outcome verifications",
+    "needsVerification": "Needs verification",
+    "effectVerificationPrompt": "Homun cannot confirm whether this external action completed. Check the result and indicate what happened.",
+    "effectResolutionError": "The verification could not be recorded. Try again.",
+    "uncertainSince": "Outcome uncertain since {{time}}",
+    "verifiedNotApplied": "Not completed",
+    "verifiedApplied": "Completed",
+    "effectFamilyBrowser": "Browser action",
+    "effectFamilyChannel": "Channel delivery",
+    "effectFamilyConnector": "Connector action",
+    "effectFamilyExternalWrite": "External action",
     "linkExpired": "Link expired",
     "autoCompleting": "I'm auto-completing this response.",
     "aboutToDo": "What it's about to do",
@@ -857,45 +940,6 @@
     },
     "queue": "Queue",
     "approvals": "Approvals"
-  },
-  "tasksView": {
-    "title": "Tasks and approvals",
-    "running": "running",
-    "approval": "approval",
-    "queueAria": "Task queue",
-    "queue": "Queue",
-    "approvalCenterAria": "Approval center",
-    "approvalCenter": "Approval center",
-    "reject": "Reject",
-    "approveAndContinue": "Approve and continue",
-    "noApprovals": "No approval pending.",
-    "resourceUsageAria": "Runtime resource usage",
-    "resources": "Resources",
-    "noResources": "No resource booked.",
-    "detailAria": "Redacted task detail",
-    "redactedDetail": "Redacted detail",
-    "selectTaskHint": "Select a task to see its status.",
-    "status": "Status",
-    "priority": "Priority",
-    "checkpoint": "Checkpoint",
-    "metadata": "Metadata",
-    "rawPayload": "Raw payload",
-    "blocked": "blocked",
-    "notExposed": "not exposed",
-    "block": "Block",
-    "verification": "verification",
-    "effectVerificationAria": "Effects requiring outcome verification",
-    "effectVerification": "Outcome verification",
-    "needsVerification": "outcome unknown",
-    "effectFamilyBrowser": "Browser action",
-    "effectFamilyChannel": "Channel message",
-    "effectFamilyConnector": "Connector action",
-    "effectFamilyExternalWrite": "External write",
-    "conversationScope": "Conversation",
-    "uncertainSince": "Uncertain since",
-    "verifiedApplied": "Verified applied",
-    "verifiedNotApplied": "Verified not applied",
-    "effectResolutionError": "Resolution failed"
   },
   "approval": {
     "browserAction": "Browser action pending",
@@ -1541,6 +1585,8 @@
     "restarting": "Restarting…",
     "newActivity": "New activity",
     "newMessage": "New message",
+    "requiresAttention": "Homun requires attention",
+    "openConversation": "Open the conversation to continue.",
     "scheduledReady": "Scheduled task ready"
   },
   "projectContext": {

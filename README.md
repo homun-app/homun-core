@@ -68,11 +68,17 @@ the [documentation](https://homun.app/docs) for setup and capability guides.
 A Rust gateway orchestrates the system, an Electron + React desktop app provides the
 interface, and standalone sidecars handle heavier or isolated work.
 
+Engineering docs (as-built, code-backed): [`docs/README.md`](docs/README.md) ·
+living state: [`docs/STATO.md`](docs/STATO.md).
+
 | Path | Responsibility |
 | --- | --- |
 | `apps/desktop` | Electron + React desktop application |
-| `crates/desktop-gateway` | Rust gateway, agent loop, routing, task runtime, and APIs |
-| `crates/*` | Memory, inference, orchestration, skills, secrets, and capabilities |
+| `crates/desktop-gateway` | HTTP/WS gateway, execution host, tools, APIs |
+| `crates/engine` | Single guarded agent loop (`run_turn`) |
+| `crates/execution-protocol` + `task-runtime` | Durable execution contract, lease, outbox |
+| `crates/memory` | Shared memory layer (`MemoryFacade`) |
+| `crates/*` | Capabilities, vault, inference, skills, … |
 | `runtimes/contained-computer` | Sandboxed Docker computer with browser and shell over CDP/noVNC |
 | `runtimes/host-computer/macos` | Native macOS helper for explicitly granted host applications |
 | `runtimes/browser-automation` | Playwright/CDP browser driver |

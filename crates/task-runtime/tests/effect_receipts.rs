@@ -327,6 +327,37 @@ fn uncertain_receipt_persists_redacted_dispatch_evidence() {
     ));
 }
 
+#[test]
+fn an_orphaned_uncertain_receipt_can_be_resolved_without_recreating_its_execution() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let prepared = store.prepare_effect_receipt(&new_receipt()).unwrap();
+    store.claim_effect_receipt(&prepared.receipt_ref).unwrap();
+    store.claim_effect_receipt(&prepared.receipt_ref).unwrap();
+    let resolution = EffectReceiptResolution::Applied {
+        result: json!({"verified": true}),
+        effects: json!({"applied": true}),
+    };
+
+    let strict_error = store
+        .resolve_effect_receipt(&prepared.receipt_ref, &resolution)
+        .expect_err("the normal path must still require an authoritative owner journal");
+    assert!(strict_error.to_string().contains("not found: execution-1"));
+
+    let resolved = store
+        .resolve_orphaned_effect_receipt(&prepared.receipt_ref, &resolution)
+        .expect("an explicitly orphaned receipt remains user-resolvable");
+
+    assert_eq!(resolved.receipt.status, EffectReceiptStatus::Completed);
+    assert_eq!(
+        resolved.receipt.result_json,
+        Some(json!({"verified": true}))
+    );
+    assert_eq!(
+        resolved.receipt.effects_json,
+        Some(json!({"applied": true}))
+    );
+}
+
 fn suspend_for_effect_resolution(store: &TaskStore, receipt_ref: &EffectReceiptRef) {
     let contract = ValidatedExecutionContract::try_from(ExecutionContract::new(
         "execution-1",

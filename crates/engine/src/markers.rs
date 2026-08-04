@@ -421,8 +421,17 @@ pub fn delivery_text(text: &str) -> Result<String, DeliveryTextError> {
             .copied()
             .max()
             .unwrap_or(0);
-        if adjacent_duplicates >= 2
-            || repeated_bigrams >= 3
+        // Repetition must dominate the answer, not merely occur a few times.
+        // Absolute thresholds reject legitimate long reports (truth tables naturally contain
+        // many `true true` / `false false` pairs). The density checks still catch short token
+        // floods and repeated phrases while allowing sparse repetition in structured prose.
+        let low_diversity = unique * 2 <= tokens.len();
+        let dense_adjacent_duplicates =
+            adjacent_duplicates >= 2 && adjacent_duplicates * 8 >= tokens.len();
+        let dense_repeated_bigram =
+            repeated_bigrams >= 3 && repeated_bigrams * 8 >= tokens.len() && low_diversity;
+        if dense_adjacent_duplicates
+            || dense_repeated_bigram
             || (repeated * 2 >= tokens.len() && unique <= 8)
         {
             return Err(DeliveryTextError::DegenerateRepetition);
@@ -802,6 +811,27 @@ Per procedere con la prenotazione, quale preferisci?"#;
             delivery_text("Molto bene. Bene davvero: il test è passato.").unwrap(),
             "Molto bene. Bene davvero: il test è passato."
         );
+    }
+
+    #[test]
+    fn delivery_text_keeps_long_reports_with_repetitive_table_values() {
+        let report = r#"## Verifica del contratto
+
+Il controllo combina due condizioni e riporta il risultato osservato per ogni caso.
+
+| modelConfigured | memoryIndexed | output attuale | output atteso |
+|---|---|---|---|
+| true | true | true | true |
+| true | false | true | false |
+| false | true | true | false |
+| false | false | false | false |
+
+I casi misti mostrano due falsi positivi. La suite contiene due test superati,
+nessun fallimento e nessun test saltato. Il rischio principale e la copertura
+incompleta delle combinazioni miste; il secondo e la configurazione fissa del
+server; il terzo e l'assenza di una verifica end-to-end dei quattro scenari."#;
+
+        assert_eq!(delivery_text(report).unwrap(), report);
     }
 
     #[test]

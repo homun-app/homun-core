@@ -108,6 +108,16 @@ def html_escape(s):
     return html.escape(str(s or ""))
 
 
+def _normalized_slides(deck):
+    """Apply the shared deck content contract without mutating source JSON."""
+    slides = [dict(slide) for slide in (deck.get("slides") or [])]
+    if slides and slides[0].get("layout") == "cover" and not str(slides[0].get("subtitle") or "").strip():
+        subtitle = str(deck.get("subtitle") or "").strip()
+        if subtitle:
+            slides[0]["subtitle"] = subtitle
+    return slides
+
+
 def render_html(deck, base_dir):
     raw_theme = deck.get("theme") or {}
     name = raw_theme.get("name")
@@ -123,7 +133,7 @@ def render_html(deck, base_dir):
     logo = data_url(theme.get("logo", ""), base_dir)
     slides_html = []
     # enumerate() gives _hero_art a call-unique seq per slide (see _hero_art docstring).
-    for seq, s in enumerate(deck.get("slides", [])):
+    for seq, s in enumerate(_normalized_slides(deck)):
         slides_html.append(_html_slide(s, base_dir, logo, seq))
     css = _HTML_CSS.format(
         primary=theme["primary"],
@@ -307,9 +317,10 @@ _HTML_CSS = """
   --head:'{heading}';--body:'{body}';
   --ink:{ink};--muted:{muted};--surface:{surface};--hairline:{hairline};--on-brand:{on_brand};}}
 *{{box-sizing:border-box;margin:0;padding:0}}
+html,body{{width:100%;height:100%}}
 body{{font-family:var(--head),-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
   color:var(--ink);-webkit-font-smoothing:antialiased}}
-.slide{{width:100%;min-height:100vh;padding:9vh 9vw;display:flex;flex-direction:column;
+.slide{{width:100vw;min-height:100vh;padding:9vh 9vw;display:flex;flex-direction:column;
   justify-content:center;position:relative;page-break-after:always;overflow:hidden;
   background:var(--surface)}}
 .slide h1{{font-size:4rem;line-height:1.04;font-weight:800;letter-spacing:-.02em}}
@@ -347,7 +358,11 @@ body{{font-family:var(--head),-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sa
   line-height:1.25}}
 .quote-slide blockquote::first-letter{{color:var(--accent)}}
 .quote-slide .sub{{font-size:1.4rem;color:var(--brand);margin-top:1.4rem;font-weight:600}}
-@media print{{.slide{{min-height:auto;height:100vh}}}}
+@page{{size:13.333in 7.5in;margin:0}}
+@media print{{
+  html,body{{width:13.333in;height:7.5in}}
+  .slide{{width:13.333in;height:7.5in;min-height:0;padding:.675in 1.2in;break-after:page}}
+}}
 .tl{{display:flex;flex-direction:column;gap:1.15rem;margin-top:1.3rem}}
 .tl-item{{display:grid;grid-template-columns:92px 18px 1fr;align-items:start;gap:1.1rem}}
 .tl-label{{font-weight:800;color:var(--brand);font-size:1.15rem;text-align:right}}
@@ -401,7 +416,7 @@ def render_template_pptx(deck, base_dir, template_path, out_path):
         return False
 
     prs = Presentation(source)
-    slides_list = deck.get("slides", [])
+    slides_list = _normalized_slides(deck)
     if not slides_list:
         return False
 
@@ -743,7 +758,7 @@ def render_pptx(deck, base_dir, out_path):
             slide.notes_slide.notes_text_frame.text = str(text)
 
     org = deck.get("organization", "")
-    slides_list = deck.get("slides", [])
+    slides_list = _normalized_slides(deck)
     total = len(slides_list)
     for idx, s in enumerate(slides_list, 1):
         layout = s.get("layout", "bullets")

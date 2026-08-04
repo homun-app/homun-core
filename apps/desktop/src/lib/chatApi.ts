@@ -8,6 +8,7 @@ import type {
   CoreChatThread,
   CoreChatThreadSnapshot,
   CorePromptSubmissionResult,
+  RuntimeContextResponse,
 } from "./coreBridge";
 import { buildJuicePromptChatContext } from "./contextBudget";
 import { DESKTOP_GATEWAY_URL, gatewayHeaders } from "./gatewayConfig";
@@ -121,6 +122,12 @@ export const chatApi = {
     } catch {
       return chatMessagesSnapshot(threadId);
     }
+  },
+
+  runtimeContext(threadId: string) {
+    return gatewayJson<RuntimeContextResponse>(
+      `/api/chat/threads/${encodeURIComponent(threadId)}/runtime-context`,
+    );
   },
 
   /** Append a literal assistant message (e.g. a proactivity card's question) so a

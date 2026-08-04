@@ -3,7 +3,6 @@ import {
   Archive,
   ArchiveRestore,
   Brain,
-  ChevronDown,
   ChevronRight,
   FolderOpen,
   FolderPlus,
@@ -56,11 +55,15 @@ import { SidebarFilters } from "./SidebarFilters";
 import { useTags, tagsForEntity } from "../lib/useTags";
 import {
   type ThreadFilter,
-  EMPTY_THREAD_FILTER,
-  threadMatchesFilter,
+  projectThreads,
   threadFilterIsActive,
   threadSourceKey,
 } from "../lib/threadFilter";
+import {
+  mergeSidebarUnarchiveResult,
+  readSidebarThreadFilter,
+  writeSidebarThreadFilter,
+} from "../lib/sidebarFilterState";
 import { ProjectAccessDialog } from "./ProjectAccessDialog";
 import { MemorySourcesDialog } from "./MemorySourcesDialog";
 
@@ -76,7 +79,7 @@ const NAV_SECTION_LABELS: Record<NonNullable<NavItem["navSection"]>, string> = {
 
 function navSectionForItem(item: NavItem): NonNullable<NavItem["navSection"]> {
   if (item.navSection) return item.navSection;
-  if (item.id === "automations" || item.id === "tasks") return "work";
+  if (item.id === "automations") return "work";
   if (item.id === "connections" || item.id === "browser") return "workspace";
   return "more";
 }
@@ -84,7 +87,6 @@ function navSectionForItem(item: NavItem): NonNullable<NavItem["navSection"]> {
 function navOrder(item: NavItem): number {
   if (typeof item.order === "number") return item.order;
   if (item.id === "automations") return 20;
-  if (item.id === "tasks") return 10;
   if (item.id === "connections") return 30;
   if (item.id === "browser") return 90;
   return 50;
@@ -93,6 +95,7 @@ function navOrder(item: NavItem): number {
 function toChatThread(thread: CoreChatThread): ChatThread {
   return {
     threadId: thread.thread_id,
+    workspaceId: thread.workspace_id,
     title: thread.title,
     subtitle: thread.subtitle,
     status: thread.status === "archived" ? "archived" : "active",
@@ -104,6 +107,14 @@ function toChatThread(thread: CoreChatThread): ChatThread {
     source: thread.source ?? null,
     channelRecipient: thread.channel_recipient ?? null,
   };
+}
+
+function readStoredThreadFilter(): ThreadFilter {
+  try {
+    return readSidebarThreadFilter(localStorage);
+  } catch {
+    return readSidebarThreadFilter(null);
+  }
 }
 
 interface NavigationRailProps {
@@ -185,11 +196,19 @@ interface ProjectsNavProps {
   activeThreads: ChatThread[];
   threadAttention: Record<string, ThreadAttentionStatus>;
   onArchiveChatThread: (threadId: string) => void;
+  onUnarchiveChatThread: (
+    threadId: string,
+    workspaceId: string,
+  ) => Promise<{ threads: ChatThread[] | null; appliedToActive: boolean }>;
   onSelectThread: (threadId: string) => void;
   onThreadAttention: (rows: CoreThreadAttention[]) => void;
   onCreateteChatThread: (workspaceId?: string) => void;
   onSetChatThreadPinned: (threadId: string, pinned: boolean) => void;
-  onThreadContextMenu: (thread: ChatThread, event: MouseEvent<HTMLElement>) => void;
+  onThreadContextMenu: (
+    thread: ChatThread,
+    event: MouseEvent<HTMLElement>,
+    onUnarchive: () => Promise<void>,
+  ) => void;
 }
 
 type ProjectModalState =
@@ -218,6 +237,7 @@ function ProjectsNav({
   activeThreads,
   threadAttention,
   onArchiveChatThread,
+  onUnarchiveChatThread,
   onSelectThread,
   onThreadAttention,
   onCreateteChatThread,
@@ -226,7 +246,7 @@ function ProjectsNav({
 }: ProjectsNavProps) {
   const { t } = useTranslation();
   const { assignments: tagAssignments } = useTags();
-  const [threadFilter, setThreadFilter] = useState<ThreadFilter>(EMPTY_THREAD_FILTER);
+  const [threadFilter, setThreadFilter] = useState<ThreadFilter>(readStoredThreadFilter);
   // Drag-to-reorder: a small distance constraint so a plain click still selects/toggles.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
@@ -252,6 +272,14 @@ function ProjectsNav({
     y: number;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      writeSidebarThreadFilter(localStorage, threadFilter);
+    } catch {
+      writeSidebarThreadFilter(null, threadFilter);
+    }
+  }, [threadFilter]);
 
   useEffect(() => {
     if (!projectMenu) return;
@@ -302,11 +330,9 @@ function ProjectsNav({
   // Render the Personal list from LOCAL state (not the prop) so it can be reordered / mutated
   // optimistically. Kept fresh from `activeThreads` while at the personal scope (below); the
   // backend already sorts by display_order, so a persisted manual order survives the resync.
-  const personalChats = personalThreads.filter(
-    (t) => t.status === "active" && t.threadId !== "homun",
-  );
+  const personalChats = personalThreads.filter((thread) => thread.threadId !== "homun");
   const projectChats = inProject
-    ? activeThreads.filter((t) => t.status === "active" && t.threadId !== "homun")
+    ? activeThreads.filter((thread) => thread.threadId !== "homun")
     : [];
 
   // Mirror the active context into the local Personal list while at the personal scope, so the
@@ -350,9 +376,7 @@ function ProjectsNav({
       onThreadAttention(attention);
       setProjectThreadsById((current) => ({
         ...current,
-        [projectId]: snap.threads
-          .map(toChatThread)
-          .filter((thread) => thread.status === "active" && thread.threadId !== "homun"),
+        [projectId]: snap.threads.map(toChatThread).filter((thread) => thread.threadId !== "homun"),
       }));
     } catch {
       setProjectThreadsById((current) => ({ ...current, [projectId]: [] }));
@@ -513,59 +537,88 @@ function ProjectsNav({
       .catch(() => void reloadWorkspaces());
   }
 
-  function handlePersonalThreadsDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = personalThreads.findIndex((thread) => thread.threadId === active.id);
-    const newIndex = personalThreads.findIndex((thread) => thread.threadId === over.id);
-    if (oldIndex < 0 || newIndex < 0) return;
-    const next = arrayMove(personalThreads, oldIndex, newIndex);
-    setPersonalThreads(next); // optimistic
-    void coreBridge
-      .reorderChatThreads(
-        PERSONAL_WORKSPACE_ID,
-        next.map((thread) => thread.threadId),
-      )
-      .catch(() => {});
+  async function unarchiveSidebarThread(workspaceId: string, threadId: string) {
+    const result = await onUnarchiveChatThread(threadId, workspaceId);
+    if (result.appliedToActive) return;
+    const snapshotThreads = result.threads;
+    if (workspaceId === PERSONAL_WORKSPACE_ID) {
+      setPersonalThreads((current) => mergeSidebarUnarchiveResult(
+        { [workspaceId]: current },
+        workspaceId,
+        threadId,
+        snapshotThreads,
+        false,
+      )[workspaceId]);
+      return;
+    }
+    setProjectThreadsById((current) => mergeSidebarUnarchiveResult(
+      current,
+      workspaceId,
+      threadId,
+      snapshotThreads,
+      false,
+    ));
   }
 
-  function handleProjectThreadsDragEnd(projectId: string, event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const list = projectThreadsById[projectId] ?? [];
-    const oldIndex = list.findIndex((thread) => thread.threadId === active.id);
-    const newIndex = list.findIndex((thread) => thread.threadId === over.id);
-    if (oldIndex < 0 || newIndex < 0) return;
-    const next = arrayMove(list, oldIndex, newIndex);
-    setProjectThreadsById((current) => ({ ...current, [projectId]: next })); // optimistic
-    void coreBridge
-      .reorderChatThreads(
-        projectId,
-        next.map((thread) => thread.threadId),
-      )
-      .catch(() => {});
+  const threadTagIdsByThread = useMemo(() => {
+    const result: Record<string, string[]> = {};
+    for (const assignment of tagAssignments) {
+      if (assignment.entity_type !== "thread") continue;
+      (result[assignment.entity_id] ??= []).push(assignment.tag.id);
+    }
+    return result;
+  }, [tagAssignments]);
+
+  const availableProjects = [
+    { id: PERSONAL_WORKSPACE_ID, name: t("sidebar.defaultWorkspace") },
+    ...projects.map((project) => ({ id: project.id, name: project.name })),
+  ];
+  const availableChannels = Array.from(
+    new Set(
+      ["chat", ...[personalChats, projectChats, ...Object.values(projectThreadsById)]
+        .flat()
+        .map((thread) => threadSourceKey(thread))],
+    ),
+  ).sort();
+
+  function threadGroupLabel(key: string): string {
+    if (threadFilter.groupBy === "project") {
+      return availableProjects.find((project) => project.id === key)?.name ?? key;
+    }
+    if (threadFilter.groupBy === "channel") {
+      return key === "chat"
+        ? t("filters.typeOption.chat")
+        : key.charAt(0).toUpperCase() + key.slice(1);
+    }
+    if (threadFilter.groupBy === "period") {
+      return t(`filters.periodOption.${key}`);
+    }
+    return key;
   }
 
-  /** Render a thread list. When `reorder` is given, the list is drag-sortable (Personal + a
-   *  non-active project's tasks — both backed by local state we can update optimistically). */
   function renderThreadList(
     threads: ChatThread[],
     emptyLabel: string,
     onSelect: (thread: ChatThread) => void,
-    reorder?: (event: DragEndEvent) => void,
+    workspaceId: string,
   ) {
-    const filtered = threads.filter((thread) =>
-      threadMatchesFilter(
-        thread,
-        threadFilter,
-        tagsForEntity(tagAssignments, "thread", thread.threadId).map((tag) => tag.id),
-      ),
+    const sourceThreads = threads.filter((thread) => thread.threadId !== "homun");
+    const groups = projectThreads(
+      sourceThreads,
+      threadFilter,
+      threadAttention,
+      threadTagIdsByThread,
+      PERSONAL_WORKSPACE_ID,
+      Date.now(),
     );
-    if (filtered.length === 0) {
+    const projected = groups.flatMap((group) => group.threads);
+    if (projected.length === 0) {
       // Distinguish "genuinely empty" from "hidden by the active filter".
       return (
         <p className="drawer-empty">
-          {threadFilterIsActive(threadFilter) ? t("filters.noMatches") : emptyLabel}
+          {sourceThreads.length > 0 && threadFilterIsActive(threadFilter)
+            ? t("filters.noMatches")
+            : emptyLabel}
         </p>
       );
     }
@@ -574,69 +627,61 @@ function ProjectsNav({
         active={thread.threadId === activeThreadId && activeView === "chat"}
         attention={threadAttention[thread.threadId] ?? "idle"}
         thread={thread}
-        onArchive={() => onArchiveChatThread(thread.threadId)}
-        onContextMenu={(e) => onThreadContextMenu(thread, e)}
-        onMore={(e) => onThreadContextMenu(thread, e)}
+        onArchive={
+          thread.status === "active" ? () => onArchiveChatThread(thread.threadId) : undefined
+        }
+        onContextMenu={(e) => onThreadContextMenu(
+          thread,
+          e,
+          () => unarchiveSidebarThread(workspaceId, thread.threadId),
+        )}
+        onMore={(e) => onThreadContextMenu(
+          thread,
+          e,
+          () => unarchiveSidebarThread(workspaceId, thread.threadId),
+        )}
         onPinToggle={() => onSetChatThreadPinned(thread.threadId, !thread.pinned)}
         onSelect={() => onSelect(thread)}
         tags={tagsForEntity(tagAssignments, "thread", thread.threadId)}
       />
     );
-    // Drag-to-reorder only when a handler is given AND no filter is narrowing the list —
-    // reordering a filtered subset would persist a misleading order.
-    if (reorder && !threadFilterIsActive(threadFilter)) {
-      return (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorder}>
-          <SortableContext
-            items={filtered.map((thread) => thread.threadId)}
-            strategy={verticalListSortingStrategy}
-          >
-            {filtered.map((thread) => (
-              <SortableItem id={thread.threadId} key={thread.threadId}>
-                {renderThread(thread)}
-              </SortableItem>
-            ))}
-          </SortableContext>
-        </DndContext>
-      );
-    }
-    return filtered.map((thread) => (
-      <div key={thread.threadId}>{renderThread(thread)}</div>
+    return groups.map((group) => (
+      <div className="sidebar-thread-group" key={group.key}>
+        {threadFilter.groupBy !== "none" ? (
+          <div className="sidebar-thread-group__label">{threadGroupLabel(group.key)}</div>
+        ) : null}
+        {group.threads.map((thread) => (
+          <div key={thread.threadId}>{renderThread(thread)}</div>
+        ))}
+      </div>
     ));
   }
 
-  const availableSources = Array.from(
-    new Set(
-      [personalChats, ...Object.values(projectThreadsById)]
-        .flat()
-        .map((thread) => threadSourceKey(thread)),
-    ),
-  ).sort();
-
   return (
     <>
-      <div className="drawer-filter-bar">
-        <SidebarFilters
-          filter={threadFilter}
-          onChange={setThreadFilter}
-          availableSources={availableSources}
-        />
-      </div>
       <section className="drawer-section drawer-personal-tree" data-project-tree="personal">
         <div className="drawer-chats-head">
           <button className="drawer-section-toggle" type="button" onClick={togglePersonal}>
             <span>{t("sidebar.defaultWorkspace")}</span>
           </button>
-          <button
-            className="drawer-eyebrow-add"
-            type="button"
-            disabled={busy}
-            onClick={() => onCreateteChatThread(PERSONAL_WORKSPACE_ID)}
-            aria-label={t("sidebar.newChat")}
-            title={t("sidebar.newChat")}
-          >
-            <Plus size={16} />
-          </button>
+          <div className="drawer-heading-actions">
+            <SidebarFilters
+              filter={threadFilter}
+              onChange={setThreadFilter}
+              availableProjects={availableProjects}
+              availableChannels={availableChannels}
+            />
+            <button
+              className="drawer-eyebrow-add"
+              type="button"
+              disabled={busy}
+              onClick={() => onCreateteChatThread(PERSONAL_WORKSPACE_ID)}
+              aria-label={t("sidebar.newChat")}
+              title={t("sidebar.newChat")}
+            >
+              <Plus size={16} />
+            </button>
+          </div>
         </div>
         {expandedGroups.personal && (
           <div className="drawer-project-chats">
@@ -646,7 +691,7 @@ function ProjectsNav({
               (thread) => {
                 void openPersonalThread(thread.threadId);
               },
-              handlePersonalThreadsDragEnd,
+              PERSONAL_WORKSPACE_ID,
             )}
           </div>
         )}
@@ -681,7 +726,7 @@ function ProjectsNav({
             >
               {projects.map((project) => {
                 const expanded = expandedProjectIds.has(project.id);
-                const projectThreads = project.id === activeWorkspaceId
+                const loadedProjectThreads = project.id === activeWorkspaceId
                   ? projectChats
                   : projectThreadsById[project.id] ?? [];
                 return (
@@ -744,16 +789,12 @@ function ProjectsNav({
                   {expanded && (
                     <div className="drawer-project-chats">
                       {renderThreadList(
-                        projectThreads,
+                        loadedProjectThreads,
                         t("sidebar.noChatsYet"),
                         (thread) => {
                           void openProjectThread(project.id, thread.threadId);
                         },
-                        // Reorder is optimistic against local `projectThreadsById`; the active
-                        // project renders from the parent prop, so skip DnD there for now.
-                        project.id !== activeWorkspaceId
-                          ? (event) => handleProjectThreadsDragEnd(project.id, event)
-                          : undefined,
+                        project.id,
                       )}
                     </div>
                   )}
@@ -951,7 +992,10 @@ interface NavDrawerProps {
   onThreadAttention: (rows: CoreThreadAttention[]) => void;
   onSetChatThreadPinned: (threadId: string, pinned: boolean) => void;
   onToggleDrawer: () => void;
-  onUnarchiveChatThread: (threadId: string) => void;
+  onUnarchiveChatThread: (
+    threadId: string,
+    workspaceId: string,
+  ) => Promise<{ threads: ChatThread[] | null; appliedToActive: boolean }>;
 }
 
 export function NavDrawer({
@@ -975,9 +1019,6 @@ export function NavDrawer({
   const { t } = useTranslation();
   const [profileImage] = useSetting<string>("profileImage", "");
   const [displayName] = useSetting<string>("displayName", "");
-  const [collapsedSections, setCollapsedSections] = useState({
-    archived: false,
-  });
   const [collapsedNavGroups, setCollapsedNavGroups] = useState<
     Record<NonNullable<NavItem["navSection"]>, boolean>
   >({
@@ -1001,6 +1042,7 @@ export function NavDrawer({
     thread: ChatThread;
     x: number;
     y: number;
+    onUnarchive: () => Promise<void>;
   } | null>(null);
   const [tagMenu, setTagMenu] = useState<{
     entityType: "thread" | "project";
@@ -1122,13 +1164,6 @@ export function NavDrawer({
     }
   }
 
-  function toggleSection(section: keyof typeof collapsedSections) {
-    setCollapsedSections((current) => ({
-      ...current,
-      [section]: !current[section],
-    }));
-  }
-
   function toggleNavGroup(section: NonNullable<NavItem["navSection"]>) {
     setCollapsedNavGroups((current) => ({
       ...current,
@@ -1138,11 +1173,7 @@ export function NavDrawer({
 
   // Memoized so the reference is stable across renders (ProjectsNav's personal-sync effect
   // depends on it — a fresh array every render would loop it).
-  const activeThreads = useMemo(
-    () => chatThreads.filter((thread) => thread.status === "active"),
-    [chatThreads],
-  );
-  const archivedThreads = chatThreads.filter((thread) => thread.status === "archived");
+  const activeThreads = useMemo(() => chatThreads, [chatThreads]);
   const newChatProjects = newChatWorkspaces
     .filter((project) => project.id !== PERSONAL_WORKSPACE_ID)
     .filter((project) => {
@@ -1229,46 +1260,17 @@ export function NavDrawer({
           activeThreads={activeThreads}
           threadAttention={threadAttention}
           onArchiveChatThread={onArchiveChatThread}
+          onUnarchiveChatThread={onUnarchiveChatThread}
           onSelectThread={onSelectThread}
           onThreadAttention={onThreadAttention}
           onCreateteChatThread={onCreateteChatThread}
           onSetChatThreadPinned={onSetChatThreadPinned}
-          onThreadContextMenu={(thread, event) => {
+          onThreadContextMenu={(thread, event, onUnarchive) => {
             event.preventDefault();
-            setThreadMenu({ thread, x: event.clientX, y: event.clientY });
+            setThreadMenu({ thread, x: event.clientX, y: event.clientY, onUnarchive });
           }}
         />
 
-        {archivedThreads.length > 0 && (
-          <section className="drawer-section">
-            <button
-              className="drawer-section-title"
-              type="button"
-              onClick={() => toggleSection("archived")}
-            >
-              <span>{t("sidebar.archived")}</span>
-              {collapsedSections.archived ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
-            </button>
-            {!collapsedSections.archived &&
-              archivedThreads.map((thread) => (
-                <ThreadLink
-                  active={thread.threadId === activeThreadId && activeView === "chat"}
-                  attention={threadAttention[thread.threadId] ?? "idle"}
-                  key={thread.threadId}
-                  thread={thread}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    setThreadMenu({
-                      thread,
-                      x: event.clientX,
-                      y: event.clientY,
-                    });
-                  }}
-                  onSelect={() => onSelectThread(thread.threadId)}
-                />
-              ))}
-          </section>
-        )}
       </div>
 
       {deleteCandidate && (
@@ -1482,11 +1484,7 @@ export function NavDrawer({
             <button
               type="button"
               role="menuitem"
-              onClick={() =>
-                runThreadAction(() =>
-                  onUnarchiveChatThread(threadMenu.thread.threadId),
-                )
-              }
+              onClick={() => runThreadAction(() => void threadMenu.onUnarchive())}
             >
               <ArchiveRestore size={15} />
               <span>{t("sidebar.removeFromArchive")}</span>

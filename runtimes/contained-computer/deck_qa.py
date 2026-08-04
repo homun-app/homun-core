@@ -248,6 +248,19 @@ QA_JS = r"""
       }
       const text = (node.innerText || '').trim();
       if (text) {
+        const nodeStyle = getComputedStyle(node);
+        const clipsX = nodeStyle.overflowX === 'hidden' || nodeStyle.overflowX === 'clip';
+        const clipsY = nodeStyle.overflowY === 'hidden' || nodeStyle.overflowY === 'clip';
+        if (MODE === 'deck' && (
+          (clipsX && node.scrollWidth > node.clientWidth + 2) ||
+          (clipsY && node.scrollHeight > node.clientHeight + 2)
+        )) {
+          issues.push({
+            severity: 'error',
+            code: 'text_container_overflow',
+            message: `slide ${unitNo}: ${label(node)} clips its own text`
+          });
+        }
         const style = getComputedStyle(node);
         const fontSize = Number.parseFloat(style.fontSize || '0');
         const fontWeight = Number.parseInt(style.fontWeight || '400', 10);

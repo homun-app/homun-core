@@ -2,8 +2,8 @@
 
 Data: 2026-06-22. Documento di riferimento. Si parte dal motore di memoria (il
 differenziatore), poi i principi di sistema. Tutte le modifiche future devono
-averli presenti. Il contratto operativo corrente della memoria è
-[MEMORIA.md](MEMORIA.md).
+averli presenti. Mappa memoria as-built:
+[`architecture/memory.md`](architecture/memory.md).
 
 ---
 
@@ -102,8 +102,8 @@ Tutto è **scoped per `workspace_id` (progetto) + `user_id`**.
    (l'id è del runtime, mai dedotto dal testo). Output strutturato imposto dove il
    backend lo supporta + parsing tollerante ovunque. Stesso principio sul **turno**:
    in ogni istante esattamente uno tra `model | harness | user` possiede il
-   control-flow — vedi [TURN_CONTRACT.md](TURN_CONTRACT.md) (niente contratti HITL
-   paralleli: CHOICES/confirm/clarify convergono su un solo `AwaitingUser`).
+   control-flow — chokepoint HITL in `crates/engine/src/hitl.rs` (niente contratti
+   HITL paralleli: CHOICES/confirm/clarify convergono su un solo wait utente).
 7. **Capability activation da registry unico, non keyword sparse.** Workflow nativi
    (`make_*`), MCP, skills/addon, connector tools e strumenti atomici interni stanno
    nello stesso registry logico interrogabile. Il turno fa retrieval/decisione
@@ -129,8 +129,7 @@ Tutto è **scoped per `workspace_id` (progetto) + `user_id`**.
    avere superfici contestuali, per-thread, spiegabili e verificabili. Il prodotto
    deve comportarsi come un action engine local-first: obiettivo → piano →
    capability dal registry unico → esecuzione → evidenza → artifact → ripresa/
-   correzione. Vedi
-   [Homun Agentic Workspace UX Design](superpowers/specs/2026-06-24-agentic-workspace-ux-design.md).
+   correzione.
 10. **Automazioni = regole evento → filtro → azione, non solo schedule.** Il
    tempo resta un trigger first-class, ma e' anche il fallback tecnico per fonti
    che non possono fare push (polling). Channels, Composio, MCP, skills/addon,
@@ -143,23 +142,20 @@ Tutto è **scoped per `workspace_id` (progetto) + `user_id`**.
    rappresenta il proprietario del workspace. Gli addon sono capability nel
    registry unico: una regola puo' invocare Presentations/Documents/PDF/etc.
    solo attraverso accesso progetto, policy, approval, memoria e provenance
-   canoniche. Vedi
-   [Homun Evented Automations Design](superpowers/specs/2026-06-26-evented-automations-design.md).
+   canoniche.
 11. **Comprensione senza keyword/regex; verità verificabile.** Il core non capisce le
    richieste con regex/keyword (de-gemma/capable-first); la verifica è deterministica
    dove possibile.
 12. **La memoria cattura il PERCHÉ e i LOOP APERTI, non solo i fatti, e collega TUTTO
    nel grafo** (codice, decisioni, artefatti, piano), con archi causali. Il lavoro
    incompiuto resta richiamabile finché non è chiuso. Obiettivo: un cervello che
-   sopravvive alle chat e sa sempre il perché — **verificabile via eval**. Vedi
-   [MEMORIA.md](MEMORIA.md) e [memory-vision.md](memory-vision.md).
+   sopravvive alle chat e sa sempre il perché — **verificabile via eval**.
+   As-built: [`architecture/memory.md`](architecture/memory.md).
 13. **Lingua UI/prompt e lingua di risposta sono contratti separati.** I prompt
    predefiniti e le istruzioni operative interne possono restare in inglese per
    coerenza di prodotto e routing. La risposta all'utente deve invece seguire la
    lingua dell'ultimo messaggio quando è chiara; la lingua scelta nei Settings è
    solo fallback per messaggi ambigui o language-neutral.
 
-> Questi capisaldi sono il filtro di ogni decisione nel
-> [backlog](plans/2026-06-22-batch-1042-artifacts-memory.md) e nella
-> [ADR 0016](decisions/0016-harness-owned-task-engine-cross-model.md). Se una
-> modifica li viola, va ridiscussa, non spedita.
+> Questi capisaldi filtrano ogni modifica. Stato vivo: [`STATO.md`](STATO.md).
+> ADR: [`decisions/`](decisions/). Se una modifica li viola, si ferma.

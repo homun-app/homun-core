@@ -89,6 +89,15 @@ class RenderHtmlLayouts(unittest.TestCase):
 
 
 class EditorialCover(unittest.TestCase):
+    def test_cover_inherits_global_subtitle_when_slide_omits_it(self):
+        html = deck_render.render_html(
+            {"title": "Homun Release QA Final",
+             "subtitle": "Collaudo del percorso di release",
+             "slides": [{"layout": "cover", "title": "Homun Release QA Final"}]},
+            HERE,
+        )
+        self.assertIn("Collaudo del percorso di release", html)
+
     def test_cover_renders_eyebrow_and_hero_art(self):
         html = deck_render.render_html(
             {"title": "T", "theme": {"name": "editorial_bold"},
@@ -262,6 +271,12 @@ class DeckQaOverflow(unittest.TestCase):
         self.assertIn("hero-art", deck_qa.QA_JS)
         self.assertIn("pointerEvents", deck_qa.QA_JS)
 
+    def test_deck_print_css_uses_widescreen_pages(self):
+        html = deck_render.render_html(
+            {"title": "T", "slides": [{"layout": "cover", "title": "QA"}]}, HERE)
+        self.assertIn("@page{size:13.333in 7.5in;margin:0}", html)
+        self.assertIn("width:13.333in;height:7.5in", html)
+
     def test_devtools_active_port_parser_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertIsNone(deck_qa._read_devtools_active_port(tmp))
@@ -336,6 +351,21 @@ class DeckQaOverflow(unittest.TestCase):
         self.assertIn(
             "slide_overflow", codes,
             f"genuine content overflow must still be flagged: {result.get('issues')}")
+
+    @unittest.skipUnless(CHROMIUM, "no chromium/chrome binary found")
+    def test_clipped_text_inside_its_own_box_is_flagged(self):
+        html = (
+            "<!doctype html><html><head><meta charset='utf-8'><style>"
+            ".slide{width:1280px;height:720px;position:relative;overflow:hidden}"
+            ".kpi{width:600px;height:100px;overflow:hidden;font-size:80px}"
+            "</style></head><body>"
+            "<section class='slide'><div class='kpi'>A very long KPI sentence that cannot fit</div></section>"
+            "</body></html>"
+        )
+        codes, result = self._run_qa_on_html(html)
+        self.assertIn(
+            "text_container_overflow", codes,
+            f"clipped text must fail QA: {result.get('issues')}")
 
 
 if __name__ == "__main__":

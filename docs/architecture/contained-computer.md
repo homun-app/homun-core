@@ -1,8 +1,13 @@
-# Contained Computer bootstrap
+# Contained Computer (as-built)
 
-Homun Computer is the isolated Docker environment used for real-browser work,
-tools, skills, and generated artifacts. First-run onboarding prepares it before
-the user selects an AI model, using the same flow on Windows, macOS, and Linux.
+Verificato 2026-07-31. Runtime: `runtimes/contained-computer`.
+Coordinator: `crates/desktop-gateway/src/setup_computer.rs`.
+Client: `apps/desktop/src/lib/coreBridge.ts` (`electronPrepareSetupComputer` /
+`electronSetupComputerStatus`).
+
+Homun Computer is the isolated Docker environment for headed browser/shell work
+and generated artifacts. First-run onboarding prepares it on Windows, macOS, and Linux
+before the user selects a model.
 
 ## Setup API
 
@@ -11,56 +16,28 @@ The desktop renderer starts preparation with:
 - `POST /api/setup/computer/prepare` — starts or joins the current preparation;
 - `GET /api/setup/computer/status` — returns the latest observed phase.
 
-Both endpoints return `phase`, `ready`, and a safe optional `error`. The stable
-phases are `idle`, `checking_docker`, `preparing_image`, `starting_container`,
-`verifying_browser`, `ready`, and `failed`. A coordinator permits only one active
-bootstrap. A failed attempt can be retried without restarting Homun, and a late
-result from an older attempt cannot replace the current state.
+Both return `phase`, `ready`, and an optional safe `error`. Stable phases:
+`idle`, `checking_docker`, `preparing_image`, `starting_container`,
+`verifying_browser`, `ready`, `failed` (`SetupComputerPhase` in
+`setup_computer.rs`). A single coordinator generation fences late results from
+older attempts.
 
-The onboarding Continue action is enabled only when the gateway reports both
-`phase: ready` and `ready: true`; the renderer never infers readiness from elapsed
-time or Docker presence alone.
+Continue in onboarding is enabled only when the gateway reports `phase: ready`
+and `ready: true`.
 
 ## Native lifecycle
 
-The gateway performs the lifecycle directly through the Docker CLI:
+The gateway drives Docker CLI directly (see sandbox/bootstrap helpers): resolve
+Docker, hash packaged build inputs vs `homun.cc_hash`, build
+`homun-contained-computer:local` when stale, recreate `homun-cc`, then verify
+Chrome CDP and noVNC before marking ready.
 
-1. resolve Docker again on every check and start its engine when needed;
-2. hash the packaged build inputs and compare the `homun.cc_hash` image label;
-3. build `homun-contained-computer:local` when the definition is stale;
-4. recreate and start `homun-cc` with the required ports, volumes, timezone,
-   network, shared memory, and temporary filesystem;
-5. wait for the container, then verify Chrome CDP on port 9222 and noVNC on port
-   6080 before reporting ready.
+`runtimes/contained-computer/up.sh` remains a developer helper, not the packaged
+runtime path.
 
-This path does not invoke Bash. `runtimes/contained-computer/up.sh` remains a
-developer helper and a backwards-compatible build-context locator, not a packaged
-runtime dependency.
+## Live view
 
-## Cross-platform discovery
-
-Docker lookup is evaluated for each request so installing Docker while Homun is
-open is immediately observable:
-
-- Windows checks the effective `ProgramFiles` Docker Desktop location and the
-  standard `C:\Program Files` location in addition to `PATH`;
-- macOS checks Docker Desktop, Homebrew, `/usr/local`, and the user's Docker CLI
-  directory;
-- Linux checks the standard system locations and the user's Docker CLI directory.
-
-The host data directory resolves `HOME` first and `USERPROFILE` second, allowing
-normal Windows installations to create artifact and persistent browser-profile
-mounts without Unix environment assumptions.
-
-## Packaging contract
-
-`apps/desktop/scripts/prepare-package.mjs` copies the complete
-`runtimes/contained-computer` directory into Electron resources on every platform.
-Electron supplies that location to the gateway. The context must include the
-Dockerfile, entrypoint, rendering utilities, noVNC page, Whisper service, and font
-assets used by the native content hash.
-
-Release verification must include cross-platform compilation and a physical fresh
-install. On first run, installing Docker or Ollama and returning to Homun must work
-through **Check again** without an app restart; preparation must create `homun-cc`,
-and only successful CDP plus noVNC checks may unlock model selection.
+UI surfaces (`ContainedComputerView`, chat computer panel, Settings) consume the
+noVNC/view iframe with origin checks (`homun-novnc-state`, `event.origin` /
+`event.source` guards). CDP and noVNC are the two readiness signals for the
+container browser stack.

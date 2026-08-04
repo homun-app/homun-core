@@ -362,12 +362,12 @@ pub trait PlanProgress {
 pub trait ContextCompactor {
     /// Collapse `messages[*start..]` (a completed step's COMPLETE tool-call/result groups — safe only
     /// at a round boundary) into one assistant summary message and advance `*start`. No-op when the
-    /// slice is empty or too small to be worth compacting.
+    /// slice is empty or too small to be worth compacting. Returns true only when messages changed.
     fn compact(
         &self,
         messages: &mut Vec<Value>,
         start: &mut usize,
-    ) -> impl Future<Output = ()> + Send;
+    ) -> impl Future<Output = bool> + Send;
 
     /// Token-budget auto-compaction (Fase 1.1) — the MEMORY-CHECKPOINT path, distinct from the
     /// per-step `compact` above. Called once per round BEFORE the model send: when `messages`
@@ -377,14 +377,14 @@ pub trait ContextCompactor {
     /// tied to a plan step and takes no `start` cursor — it re-derives the span from the whole
     /// `messages` each round. FAIL-OPEN: unknown window (`None`) → no-op; summarizer failure →
     /// `messages` untouched. Default no-op so the browse sub-turn / test stubs opt out for free;
-    /// only the gateway's real compactor overrides it.
+    /// only the gateway's real compactor overrides it. Returns true only when messages changed.
     fn compact_for_budget(
         &self,
         _messages: &mut Vec<Value>,
         _context_window: Option<usize>,
         _memory_reads: &TurnMemoryReadSet,
-    ) -> impl Future<Output = ()> + Send {
-        async {}
+    ) -> impl Future<Output = bool> + Send {
+        async { false }
     }
 }
 
@@ -397,6 +397,13 @@ pub trait TurnPolicy {
     /// Is this tool BLOCKED by the turn's workflow route? Returns the model-facing block message to
     /// surface (and skip the tool), or `None` when the tool is allowed.
     fn route_blocked(&self, tool: &str) -> Option<String>;
+
+    /// Whether a route block means the deterministic workflow has already produced its one result.
+    /// In that state retrying or switching tools cannot make progress, so the loop exits to its
+    /// bounded no-tools synthesis instead of feeding the rejection back for another tool round.
+    fn route_block_ends_turn(&self) -> bool {
+        false
+    }
 
     /// Can the CURRENT provider accept an image part? Gates the browser-screenshot vision injection;
     /// defaults to `true` for undetected/cloud providers (only a confidently non-vision model is skipped).
@@ -596,11 +603,14 @@ mod tests {
     // step slice to one note (the real impl's shape) so the loop can be driven with no LLM.
     struct StubCompactor;
     impl ContextCompactor for StubCompactor {
-        async fn compact(&self, messages: &mut Vec<Value>, start: &mut usize) {
+        async fn compact(&self, messages: &mut Vec<Value>, start: &mut usize) -> bool {
             if *start < messages.len() {
                 messages.truncate(*start);
                 messages.push(serde_json::json!({ "role": "assistant", "content": "[summary]" }));
                 *start = messages.len();
+                true
+            } else {
+                false
             }
         }
     }

@@ -156,6 +156,9 @@ pub(crate) fn decision_from_model_output(
         }
         let category = normalize_category(&item.category);
         let kind = normalize_kind(&item.kind);
+        if kind == "private_address" && looks_like_filesystem_path(secret) {
+            continue;
+        }
         let label = if item.label.trim().is_empty() {
             label_for_detection(&kind).to_string()
         } else {
@@ -178,6 +181,17 @@ pub(crate) fn decision_from_model_output(
         items,
         redacted_text,
     })
+}
+
+fn looks_like_filesystem_path(value: &str) -> bool {
+    let value = value.trim();
+    value.starts_with('/')
+        || value.starts_with("~/")
+        || value.starts_with("\\\\")
+        || (value.len() >= 3
+            && value.as_bytes()[0].is_ascii_alphabetic()
+            && value.as_bytes()[1] == b':'
+            && matches!(value.as_bytes()[2], b'\\' | b'/'))
 }
 
 fn extract_json_object(text: &str) -> Option<&str> {
@@ -366,6 +380,56 @@ mod tests {
         assert_eq!(decision.items[0].secret_value, "FM470BN");
         assert!(decision.redacted_text.contains("[VAULT:vehicles:plate]"));
         assert!(!decision.redacted_text.contains("FM470BN"));
+    }
+
+    #[test]
+    fn model_output_does_not_treat_an_absolute_unix_path_as_a_private_address() {
+        let original = "leggi /Users/fabio/Projects/Homun/app/README.md in sola lettura";
+        let decision = decision_from_model_output(
+            original,
+            r#"{
+              "has_sensitive_data": true,
+              "items": [
+                {
+                  "category":"identity",
+                  "kind":"private_address",
+                  "label":"Indirizzo privato",
+                  "secret_value":"/Users/fabio/Projects/Homun/app/README.md",
+                  "confidence":0.95
+                }
+              ]
+            }"#,
+        )
+        .expect("model output parses");
+
+        assert!(!decision.has_sensitive_data);
+        assert!(decision.items.is_empty());
+        assert_eq!(decision.redacted_text, original);
+    }
+
+    #[test]
+    fn model_output_still_accepts_a_real_private_address() {
+        let original = "abito in Via Roma 10, Milano";
+        let decision = decision_from_model_output(
+            original,
+            r#"{
+              "has_sensitive_data": true,
+              "items": [
+                {
+                  "category":"identity",
+                  "kind":"private_address",
+                  "label":"Indirizzo privato",
+                  "secret_value":"Via Roma 10, Milano",
+                  "confidence":0.95
+                }
+              ]
+            }"#,
+        )
+        .expect("model output parses");
+
+        assert!(decision.has_sensitive_data);
+        assert_eq!(decision.items.len(), 1);
+        assert!(!decision.redacted_text.contains("Via Roma 10, Milano"));
     }
 
     #[test]

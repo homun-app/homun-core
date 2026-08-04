@@ -15,6 +15,7 @@ pub mod recurrence;
 pub mod resources;
 pub mod scheduler;
 pub mod store;
+pub mod turn_lifecycle;
 pub mod types;
 pub mod ui;
 

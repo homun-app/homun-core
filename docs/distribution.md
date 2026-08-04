@@ -93,9 +93,11 @@ portachiavi viene firmato, altrimenti no.
   gateway è arm64. Per supportare gli Intel serve un build x64 separato
   (cross-compile del gateway o runner x64) → da aggiungere se richiesto.
 - **Linux/Windows arm64**: non prodotti (solo x64), stessa ragione.
-- **pdfium**: l'ingestione PDF degli allegati si lega a `pdfium` a runtime via
-  `libloading`. Verificare che la dylib sia disponibile nell'app pacchettizzata
-  (oggi `package:prepare` copia solo il binario del gateway) — altrimenti
-  l'estrazione testo dei PDF degrada. Da bundlare in `extraResources` se serve.
+- **pdfium**: anteprima e ingestione PDF usano la stessa libreria nativa caricata
+  via `libloading`. `package:prepare` scarica l'asset della piattaforma da una
+  release fissata, ne verifica SHA-256 e include libreria, versione e licenze in
+  `extraResources`; `main.cjs` passa il percorso al gateway con
+  `HOMUN_PDFIUM_LIB`. La dev prepara la stessa versione una sola volta in
+  `~/.homun/pdfium/`.
 - La pipeline va verificata con un primo run reale (build win/linux non
   riproducibili in locale su macOS); attendersi 1–2 iterazioni di rifinitura.

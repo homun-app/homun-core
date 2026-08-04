@@ -1,0 +1,386 @@
+.adaptive-workspace-island {
+  --workspace-island-panel-width: 340px;
+  position: absolute;
+  z-index: 32;
+  top: 58px;
+  right: 8px;
+  bottom: 8px;
+  width: 40px;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 40px;
+  color: var(--text);
+  pointer-events: none;
+}
+
+.adaptive-workspace-island.is-open {
+  width: calc(var(--workspace-island-panel-width) + 40px);
+  grid-template-columns: minmax(280px, var(--workspace-island-panel-width)) 40px;
+}
+
+.workspace-island-rail {
+  grid-column: -2 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  pointer-events: auto;
+  align-self: start;
+}
+
+.workspace-island-rail-button {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.workspace-island-rail-button:hover,
+.workspace-island-rail-button:focus-visible {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.workspace-island-rail-button[aria-pressed="true"] {
+  color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.workspace-island-rail-button.status-running::before,
+.workspace-island-rail-button.status-waiting::before,
+.workspace-island-rail-button.status-failed::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.workspace-island-rail-button.status-waiting::before {
+  background: var(--warning, #b87923);
+}
+
+.workspace-island-rail-button.status-failed::before {
+  background: var(--danger, #c94545);
+}
+
+.workspace-island-badge {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  min-width: 13px;
+  height: 13px;
+  display: grid;
+  place-items: center;
+  padding-inline: 2px;
+  border: 1px solid var(--surface);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--surface-raised);
+  font-size: 9px;
+  line-height: 1;
+}
+
+.workspace-island-content {
+  position: relative;
+  grid-column: 1;
+  min-width: 280px;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr);
+  margin-right: 6px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  pointer-events: auto;
+}
+
+.workspace-island-header {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.workspace-island-header > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-island-close {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  background: transparent;
+}
+
+.workspace-island-close:hover,
+.workspace-island-close:focus-visible {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.workspace-island-sections {
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.workspace-island-sections > [hidden] {
+  display: none;
+}
+
+.workspace-island-resizer {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+}
+
+.workspace-island-resizer::after {
+  content: "";
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+}
+
+.workspace-island-resizer:hover::after,
+.workspace-island-resizer:focus-visible::after {
+  background: var(--brand);
+}
+
+.workspace-island-activity,
+.workspace-island-block,
+.workspace-island-files,
+.workspace-island-browser {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workspace-island-objective {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.workspace-island-objective > span,
+.workspace-island-block-title {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.workspace-island-objective p {
+  margin: 5px 0 0;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.workspace-island-block + .workspace-island-block {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.workspace-island-block-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workspace-island-block-title em,
+.workspace-island-list em {
+  color: var(--faint);
+  font-style: normal;
+  font-size: 10px;
+}
+
+.workspace-island-list,
+.workspace-island-activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.workspace-island-list li {
+  min-width: 0;
+  min-height: 26px;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workspace-island-list li > span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-island-state {
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--faint);
+  border-radius: 50%;
+}
+
+.workspace-island-list .status-done .workspace-island-state,
+.workspace-island-list .status-completed .workspace-island-state {
+  border-color: var(--green);
+  background: var(--green);
+}
+
+.workspace-island-list .status-doing .workspace-island-state,
+.workspace-island-list .status-running .workspace-island-state {
+  border-color: var(--brand);
+  background: var(--brand);
+}
+
+.workspace-island-list .status-blocked .workspace-island-state,
+.workspace-island-list .status-failed .workspace-island-state {
+  border-color: var(--danger, #c94545);
+  background: var(--danger, #c94545);
+}
+
+.workspace-island-activity-list li {
+  position: relative;
+  padding: 3px 0 3px 14px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.workspace-island-activity-list li::before {
+  content: "";
+  position: absolute;
+  top: 9px;
+  left: 2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.workspace-island-files button,
+.workspace-island-browser button {
+  width: 100%;
+  min-height: 30px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+}
+
+.workspace-island-files button:hover,
+.workspace-island-files button:focus-visible,
+.workspace-island-browser button:hover,
+.workspace-island-browser button:focus-visible {
+  background: var(--surface-hover);
+}
+
+.workspace-island-files button span,
+.workspace-island-browser button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-island-files button em {
+  color: var(--faint);
+  font-style: normal;
+  font-size: 10px;
+}
+
+.workspace-island-browser img {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+}
+
+.workspace-island-content .browser-budget-notice {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+
+.chat-computer-runtime {
+  position: absolute;
+  z-index: 33;
+  top: 64px;
+  right: 54px;
+  width: 320px;
+  max-width: calc(100% - 108px);
+  pointer-events: none;
+}
+
+.chat-computer-runtime:empty {
+  display: none;
+}
+
+.active-task-layout[data-workspace-island-open="true"] .chat-computer-runtime {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .adaptive-workspace-island.is-open {
+    --workspace-island-panel-width: min(340px, calc(100vw - 104px));
+  }
+
+  .active-task-layout[data-workspace-island-open="true"] {
+    padding-right: var(--workspace-island-rail-reserve);
+  }
+
+}

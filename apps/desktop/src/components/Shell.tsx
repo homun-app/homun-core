@@ -27,7 +27,10 @@ interface ShellProps {
   onSelectSettingsSub: (sub: string) => void;
   onToggleDrawer: () => void;
   onSearchChat: () => void;
-  onUnarchiveChatThread: (threadId: string) => void;
+  onUnarchiveChatThread: (
+    threadId: string,
+    workspaceId: string,
+  ) => Promise<{ threads: ChatThread[] | null; appliedToActive: boolean }>;
   settingsSection: SettingsSectionId;
   settingsSub: string;
   // While a full-window modal (onboarding) is up, drop the window-drag strips:
@@ -177,7 +180,7 @@ export function Shell({
 }
 
 const DRAWER_WIDTH_KEY = "ui.drawerWidth";
-const DRAWER_DEFAULT_WIDTH = 292;
+const DRAWER_DEFAULT_WIDTH = 268;
 const DRAWER_MIN_WIDTH = 240;
 const DRAWER_MAX_WIDTH = 560;
 

@@ -113,7 +113,45 @@
   },
   "filters": {
     "label": "Filtrar",
+    "activeCount_one": "{{count}} filtro activo",
+    "activeCount_other": "{{count}} filtros activos",
+    "groupBy": "Agrupar por",
+    "orderBy": "Ordenar por",
+    "state": "Estado",
+    "requiresAttention": "Requiere atencion",
     "type": "Tipo",
+    "period": "Período",
+    "project": "Proyecto",
+    "channel": "Canal",
+    "showArchived": "Mostrar archivados",
+    "groupByOption": {
+      "none": "Ninguno",
+      "project": "Proyecto",
+      "channel": "Canal",
+      "period": "Período"
+    },
+    "orderOption": {
+      "updated_desc": "Actualizados recientemente",
+      "updated_asc": "Menos recientes",
+      "title_asc": "Título A-Z"
+    },
+    "stateOption": {
+      "working": "En curso",
+      "completed_unread": "Completado, sin leer",
+      "waiting_user": "Esperando tu respuesta",
+      "failed": "Fallido"
+    },
+    "typeOption": {
+      "chat": "Chat",
+      "project": "Proyecto"
+    },
+    "periodOption": {
+      "all": "Cualquier momento",
+      "today": "Hoy",
+      "7d": "Últimos 7 días",
+      "30d": "Últimos 30 días",
+      "older": "Anteriores"
+    },
     "date": "Actualizado",
     "dateOption": {
       "all": "Cualquiera",
@@ -463,6 +501,34 @@
     "learning": "Aprendizaje",
     "contacts": "Contactos"
   },
+  "composer": {
+    "add": "Añadir",
+    "model": "Modelo",
+    "mode": "Modo",
+    "environment": "Entorno",
+    "runtimeContext": "Ejecución y contexto",
+    "searchAdd": "Buscar acciones...",
+    "auto": "Auto",
+    "nextTurnOnly": "Se aplica solo al siguiente turno",
+    "cloud": "Nube",
+    "local": "Local",
+    "remove": "Eliminar",
+    "removeCapability": "Eliminar capacidad",
+    "attachment": "Adjuntar archivo",
+    "files": "Archivos vinculados",
+    "models": "Modelos",
+    "capabilities": "Capacidades",
+    "connectors": "Conectores",
+    "openRuntimeContext": "Abrir detalles de ejecución y contexto",
+    "projectEnvironment": "Proyecto",
+    "localEnvironment": "Local",
+    "toolsCount": "{{count}} herramientas",
+    "runtime": {
+      "unavailable": "No disponible", "loading": "Cargando ejecución y contexto...", "error": "La ejecución y el contexto no están disponibles temporalmente.",
+      "effectiveModel": "Modelo efectivo", "nextTurnModel": "Modelo del próximo turno", "provider": "Proveedor", "locality": "Localidad", "role": "Rol", "contextWindow": "Ventana de contexto", "usedInput": "Entrada usada", "usedInputValue": "{{tokens}} tokens ({{percent}}%)", "compaction": "Compactación", "applied": "Aplicada", "notApplied": "No aplicada",
+      "contributions": "Contribuciones al contexto", "conversation": "Conversación", "compactedSummary": "Resumen compactado", "filesArtifacts": "Archivos y artefactos", "authorizedMemory": "Memoria autorizada", "systemTools": "Sistema y herramientas", "promptEstimate": "Estimado desde el prompt visible para el modelo", "providerReported": "Declarado por el proveedor"
+    }
+  },
   "chat": {
     "hostComputer": {
       "computer": "Ordenador", "mac": "Mac", "macApps": "Apps de Mac", "live": "en vivo",
@@ -540,6 +606,12 @@
     "steeringApplying": "Aplicando",
     "steeringHeld": "Actividad detenida",
     "activity": "Actividad",
+    "workspaceIsland": {
+      "activity": "Actividad",
+      "browser": "Navegador",
+      "artifacts": "Artefactos",
+      "sources": "Fuentes"
+    },
     "lastActivity": "Última actividad",
     "sendNow": "Enviar ahora",
     "editInstruction": "Editar",
@@ -565,6 +637,17 @@
     "plan": "Plan",
     "projectFiles": "Archivos del proyecto",
     "approvalRequired": "Se necesita tu confirmación para continuar",
+    "effectVerificationAria": "Verificaciones de resultado pendientes",
+    "needsVerification": "Requiere verificación",
+    "effectVerificationPrompt": "Homun no puede confirmar si esta acción externa se completó. Comprueba el resultado e indica qué ocurrió.",
+    "effectResolutionError": "No se pudo registrar la verificación. Inténtalo de nuevo.",
+    "uncertainSince": "Resultado incierto desde {{time}}",
+    "verifiedNotApplied": "No realizada",
+    "verifiedApplied": "Realizada",
+    "effectFamilyBrowser": "Acción en el navegador",
+    "effectFamilyChannel": "Envío por un canal",
+    "effectFamilyConnector": "Acción mediante conector",
+    "effectFamilyExternalWrite": "Acción externa",
     "linkExpired": "Enlace caducado",
     "autoCompleting": "Estoy completando esta respuesta automáticamente.",
     "aboutToDo": "Lo que está a punto de hacer",
@@ -837,45 +920,6 @@
     },
     "queue": "Cola",
     "approvals": "Aprobaciones"
-  },
-  "tasksView": {
-    "title": "Tareas y aprobaciones",
-    "running": "en ejecución",
-    "approval": "aprobación",
-    "queueAria": "Cola de tareas",
-    "queue": "Cola",
-    "approvalCenterAria": "Centro de aprobaciones",
-    "approvalCenter": "Centro de aprobaciones",
-    "reject": "Rechazar",
-    "approveAndContinue": "Aprobar y continuar",
-    "noApprovals": "Sin aprobaciones pendientes.",
-    "resourceUsageAria": "Uso de recursos en tiempo de ejecución",
-    "resources": "Recursos",
-    "noResources": "Sin recursos reservados.",
-    "detailAria": "Detalle redactado de la tarea",
-    "redactedDetail": "Detalle redactado",
-    "selectTaskHint": "Selecciona una tarea para ver su estado.",
-    "status": "Estado",
-    "priority": "Prioridad",
-    "checkpoint": "Punto de control",
-    "metadata": "Metadatos",
-    "rawPayload": "Payload en bruto",
-    "blocked": "bloqueada",
-    "notExposed": "no expuesto",
-    "block": "Bloquear",
-    "verification": "por verificar",
-    "effectVerificationAria": "Efectos que requieren verificar el resultado",
-    "effectVerification": "Verificación del resultado",
-    "needsVerification": "resultado desconocido",
-    "effectFamilyBrowser": "Acción del navegador",
-    "effectFamilyChannel": "Mensaje de canal",
-    "effectFamilyConnector": "Acción del conector",
-    "effectFamilyExternalWrite": "Escritura externa",
-    "conversationScope": "Conversación",
-    "uncertainSince": "Incierto desde",
-    "verifiedApplied": "Verificado como aplicado",
-    "verifiedNotApplied": "Verificado como no aplicado",
-    "effectResolutionError": "No se pudo resolver"
   },
   "approval": {
     "browserAction": "Acción del navegador pendiente",
@@ -1521,6 +1565,8 @@
     "restarting": "Reiniciando…",
     "newActivity": "Nueva actividad",
     "newMessage": "Nuevo mensaje",
+    "requiresAttention": "Homun requiere atencion",
+    "openConversation": "Abre la conversacion para continuar.",
     "scheduledReady": "Tarea programada lista"
   },
   "projectContext": {

@@ -62,6 +62,7 @@ fn create_running_agent_run(store: &TaskStore, turn_id: &str) {
             thread_id: "thread-1".into(),
             user_id: "user-1".into(),
             workspace_id: "workspace-1".into(),
+            role: None,
             model: None,
             provider: None,
             prompt_fingerprint: None,

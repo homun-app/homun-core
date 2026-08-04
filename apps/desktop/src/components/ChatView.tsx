@@ -1,10 +1,12 @@
 import {
   ArrowUp,
   AlertCircle,
+  BadgeCheck,
   AtSign,
   BookMarked,
   ClipboardList,
   Check,
+  CircleX,
   CalendarClock,
   ChevronDown,
   ChevronLeft,
@@ -57,7 +59,6 @@ import {
   Sparkles,
   Square,
   SquareTerminal,
-  PanelRight,
   ThumbsDown,
   ThumbsUp,
   WandSparkles,
@@ -88,6 +89,7 @@ import {
   type CoreComputerSessionSnapshot,
   type CorePromptSubmissionResult,
   type CoreTaskQueueSnapshot,
+  type CoreUncertainEffectOutcome,
   type ProjectGoalsData,
   type FsEntry,
   type FsFilePayload,
@@ -103,6 +105,7 @@ import {
   modelIsCloud,
   type ProviderModelsGroup,
   type RoutingBindingInput,
+  type RuntimeContextResponse,
   type SkillsSummary,
   type VaultProposalAcceptResult,
 } from "../lib/coreBridge";
@@ -133,6 +136,9 @@ import {
   type TurnReplayState,
   type TurnReplayStatus,
 } from "../lib/turnReplayState";
+import { deriveTurnLifecycle } from "../lib/chat-runtime/lifecycle";
+import { deriveComposerMode } from "../lib/chat-runtime/composerMode";
+import { visiblePendingSteeringRows } from "../lib/chat-runtime/steering";
 import {
   createLoadingComputerSession,
   createUnavailableComputerSession,
@@ -156,6 +162,14 @@ import {
   type InspectorTabKind,
 } from "../lib/inspectorWorkspace";
 import { reconcileMemoryArtifacts } from "../lib/uiSnapshot";
+import {
+  effectiveModelFromGateway,
+  latestAssistantEffectiveModel,
+  selectedModelAfterSubmission,
+} from "../lib/composerTurnContract";
+// Persisted artifact rows need a storage-aware projection before previewing.
+// @ts-expect-error JavaScript sibling intentionally has no declaration file.
+import * as artifactProjection from "../lib/artifactProjection.mjs";
 // Transcript indexes live in a plain .mjs sibling so `node --test` can exercise
 // them without a build step, which is why they carry no type declaration.
 // @ts-expect-error JavaScript sibling intentionally has no declaration file.
@@ -188,12 +202,17 @@ import { MarkdownEditor } from "./MarkdownEditor";
 import { RichMessage } from "./RichMessage";
 import { CodeView, DiffView, diffStats } from "./CodeView";
 import { ChatComputerPanel } from "./ChatComputerPanel";
-import { WorkspaceIsland } from "./WorkspaceIsland";
+import { AdaptiveWorkspaceIsland } from "./AdaptiveWorkspaceIsland";
 import { ActiveTurnStatus } from "./ActiveTurnStatus";
 import { PendingSteeringQueue } from "./PendingSteeringQueue";
 import { ChatHeaderMenu } from "./ChatHeaderMenu";
 import { InspectorWorkspace } from "./InspectorWorkspace";
 import { MemoryUsagePopover } from "./MemoryUsagePopover";
+import { ComposerShell, type ComposerModeOption } from "./ComposerShell";
+import {
+  projectWorkspaceSections,
+  type WorkspaceSectionId,
+} from "../lib/workspaceIslandSections";
 import type {
   ChatMessage,
   ChatMessageMetrics,
@@ -205,6 +224,7 @@ import type {
   ApprovelItem,
   RuntimeHealth,
   TaskItem,
+  UncertainEffectItem,
   DiffEventPayload,
 } from "../types";
 
@@ -215,6 +235,11 @@ const buildPreviousUserMessageIndex = messageIndex.buildPreviousUserMessageIndex
 const buildBranchIndex = messageIndex.buildBranchIndex as (
   branches: CoreBranchPoint[],
 ) => Map<string, CoreBranchPoint>;
+
+const projectMemoryArtifact = artifactProjection.projectMemoryArtifact as (
+  artifact: MemoryArtifactView,
+  currentThread: string,
+) => ParsedArtifact;
 
 const CHAT_VIEW_SESSION_ID =
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -230,6 +255,9 @@ interface ChatViewProps {
   onOpenUsageSettings: () => void;
   approvals: ApprovelItem[];
   approvalBusyId: string | null;
+  uncertainEffects: UncertainEffectItem[];
+  effectResolutionBusyId: string | null;
+  effectResolutionError: string | null;
   computerSessionId: string;
   messages: ChatMessage[];
   health: RuntimeHealth[];
@@ -239,7 +267,10 @@ interface ChatViewProps {
     messages: ChatMessage[],
     options?: { advanceActivity?: boolean },
   ) => void;
-  onOpenTasks: () => void;
+  onResolveEffect: (
+    effect: UncertainEffectItem,
+    outcome: CoreUncertainEffectOutcome,
+  ) => void;
   onApproveApprovel: (
     approvalId: string,
     options?: {
@@ -256,6 +287,8 @@ interface ChatViewProps {
   /** Bumped by App on a `thread.updated` for this open thread → the working-island re-fetches
    *  its durable projection (so a BACKGROUND channel turn's finished activity folds in). */
   islandRefreshNonce?: number;
+  /** Monotonic id of the latest durable terminal event for this thread. */
+  runtimeContextRevision: number;
   /** Set by App on a `thread.turn_started` for this open thread that this client did NOT
    *  launch (a channel/scheduled reply, or a turn from another window). ChatView attaches to
    *  its live stream so the island + transcript update in real time, identical to an in-app
@@ -451,6 +484,9 @@ export function ChatView({
   onOpenUsageSettings,
   approvals,
   approvalBusyId,
+  uncertainEffects,
+  effectResolutionBusyId,
+  effectResolutionError,
   computerSessionId,
   messages,
   health,
@@ -458,8 +494,9 @@ export function ChatView({
   thread,
   onMessagesChange,
   islandRefreshNonce,
+  runtimeContextRevision,
   incomingBackgroundTurn,
-  onOpenTasks,
+  onResolveEffect,
   onApproveApprovel,
   onRejectApprovel,
   onRuntimeChanged,
@@ -476,10 +513,6 @@ export function ChatView({
   const [activeSurface, setActiveSurface] = useState<ComputerSurfaceKind>(
     computerSession.activeSurface,
   );
-  const [smokeTestRunning, setSmokeTestRunning] = useState(false);
-  const [smokeTestError, setSmokeTestError] = useState<string | null>(null);
-  const [planStepRunning, setPlanStepRunning] = useState(false);
-  const [planStepError, setPlanStepError] = useState<string | null>(null);
   const [computerControlBusy, setComputerControlBusy] = useState(false);
   const [computerControlError, setComputerControlError] = useState<string | null>(null);
   const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
@@ -501,6 +534,9 @@ export function ChatView({
   const [projectedSubagents, setProjectedSubagents] = useState<SubagentInfo[]>([]);
   const [projectedActiveTurn, setProjectedActiveTurn] =
     useState<ActiveTurnProjection | null>(null);
+  const [runtimeContext, setRuntimeContext] = useState<RuntimeContextResponse | null>(null);
+  const [runtimeContextLoading, setRuntimeContextLoading] = useState(true);
+  const [runtimeContextError, setRuntimeContextError] = useState(false);
   const [activeTurnElapsedSeconds, setActiveTurnElapsedSeconds] = useState(0);
   const [pendingSteering, setPendingSteering] = useState<SteeringQueueState>(() =>
     createSteeringQueueState(),
@@ -530,16 +566,11 @@ export function ChatView({
   const [modelOpen, setModelOpen] = useState(false);
   const [activeModelInfo, setActiveModelInfo] = useState<ActiveModelInfo | null>(null);
   const [timelineCollapsed, setTimelineCollapsed] = useState(true);
-  const [computerCardCollapsed, setComputerCardCollapsed] = useState(true);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[] | null>(null);
   const [streamHasVisibleText, setStreamHasVisibleText] = useState(false);
   const [autoContinueMessageId, setAutoContinueMessageId] = useState<string | null>(null);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
-  // The compact working island remains available while the universal inspector is hidden.
-  // Inspector tabs and their ordering are isolated by thread; App keys ChatView by thread id,
-  // so each mount restores only the current activity's validated descriptors.
-  const [islandOpen, setIslandOpen] = useState(true);
-  // Bumped when the user asks for the activity list, so the island expands it even when already open.
+  // Bumped when the user asks for the activity list; the adaptive island opens that exact section.
   const [activityNonce, setActivityNonce] = useState(0);
   const [inspector, dispatchInspector] = useReducer(inspectorWorkspaceReducer,
     loadInspectorState(thread.threadId,
@@ -720,15 +751,7 @@ export function ChatView({
       const displayName = artifact.project_relative_path || artifact.name;
       if (!displayName || seen.has(displayName)) continue;
       seen.add(displayName);
-      out.push({
-        name: displayName,
-        thread: thread.threadId,
-        size: artifact.size,
-        updated: artifact.updated,
-        source: "project",
-        projectPath: artifact.project_path ?? undefined,
-        projectRelativePath: artifact.project_relative_path ?? displayName,
-      });
+      out.push(projectMemoryArtifact(artifact, thread.threadId));
     }
     return out;
   }, [conversationArtifacts, memoryArtifacts, thread.threadId]);
@@ -741,19 +764,33 @@ export function ChatView({
   // Net: live while streaming, persisted-from-`messages` at rest.
   const persistedPlan = useMemo(() => latestPlanMarkdown(messages), [messages]);
   const persistedActivity = useMemo(() => latestActivitySteps(messages), [messages]);
-  const isStreaming = promptSubmitting || Boolean(streamingAssistantId);
   // Free HITL (CHOICES / CLARIFY / AWAIT_USER) does not hold the thread busy (Always Contract),
   // so the projection often has no waiting_user_approval — detect the open wait from the chat tail.
   const threadTailAwaitsHitl = useMemo(
     () => threadTailAwaitsUser(threadMessages),
     [threadMessages],
   );
-  const turnAwaitingUser =
-    projectedActiveTurn?.status === "waiting_user_approval" || threadTailAwaitsHitl;
-  // A turn waiting on the person is still "active" for Stop/status, but it is NOT model work —
-  // treating it as streaming hides CHOICES and makes the composer look like steering.
-  const hasActiveTurn = isStreaming || Boolean(projectedActiveTurn) || threadTailAwaitsHitl;
-  const workInProgress = isStreaming || (Boolean(projectedActiveTurn) && !turnAwaitingUser);
+  const {
+    isStreaming,
+    turnAwaitingUser,
+    hasActiveTurn,
+    workInProgress,
+    terminalTurnAtRest,
+  } = deriveTurnLifecycle({
+    promptSubmitting,
+    streamingAssistantId,
+    projectedActiveTurn,
+    projectedTurnStatus,
+    projectionLoaded,
+    threadTailAwaitsHitl,
+  });
+  const visiblePendingSteeringRowsForTurn = useMemo(
+    () => visiblePendingSteeringRows(pendingSteering.rows, {
+      terminalTurnAtRest,
+      activeTurnId: projectedActiveTurn?.turn_id ?? null,
+    }),
+    [pendingSteering.rows, projectedActiveTurn?.turn_id, terminalTurnAtRest],
+  );
   const activeTurnKey = projectedActiveTurn?.turn_id ?? streamStatus?.requestId ?? null;
   useEffect(() => {
     if (!hasActiveTurn) {
@@ -921,6 +958,28 @@ export function ChatView({
     // the previous turn's activity. (The message COUNT is stable: the assistant placeholder is
     // updated in place, so it can't be the trigger.)
   }, [thread.threadId, isStreaming, islandRefreshNonce]);
+  useEffect(() => {
+    let cancelled = false;
+    setRuntimeContext(null);
+    setRuntimeContextLoading(true);
+    setRuntimeContextError(false);
+    coreBridge.runtimeContext(thread.threadId)
+      .then((context) => {
+        if (!cancelled) setRuntimeContext(context);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRuntimeContext(null);
+          setRuntimeContextError(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRuntimeContextLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [thread.threadId, runtimeContextRevision]);
   // Files the user uploaded in THIS conversation (e.g. the patente PDF), derived
   // from message attachments — the chat-context "File" tab of the Workbench.
   const uploadedFiles = useMemo(() => {
@@ -1179,44 +1238,6 @@ export function ChatView({
   // answer. Same reasoning for every other non-user-initiated jump below.
   function afterStreamingFramePaint() {
     scrollConversationToBottomIfPinned("instant");
-  }
-
-  async function runLocalSmokeTest() {
-    setSmokeTestRunning(true);
-    setSmokeTestError(null);
-    setComputerCardCollapsed(false);
-    try {
-      const snapshot =
-        await coreBridge.runLocalComputerSmokeTest(computerSessionId);
-      setComputerSession(mapCoreComputerSession(snapshot));
-      await onRuntimeChanged();
-    } catch (error) {
-      setSmokeTestError(describeBridgeError(error));
-    } finally {
-      setSmokeTestRunning(false);
-    }
-  }
-
-  async function runPromptPlanNextStep() {
-    setPlanStepRunning(true);
-    setPlanStepError(null);
-    setComputerCardCollapsed(false);
-    try {
-      const result = await coreBridge.runPromptPlanReadySteps(
-        computerSessionId,
-        4,
-      );
-      const snapshot = await coreBridge.localComputerSession(computerSessionId);
-      if (snapshot) {
-        setComputerSession(mapCoreComputerSession(snapshot));
-      }
-      await onRuntimeChanged();
-      await onThreadChanged();
-    } catch (error) {
-      setPlanStepError(describeBridgeError(error));
-    } finally {
-      setPlanStepRunning(false);
-    }
   }
 
   async function runComputerControl(
@@ -1513,15 +1534,10 @@ export function ChatView({
         return;
       }
       setComputerSession(mapCoreComputerSession(result.computer_session));
-      setComputerCardCollapsed(true);
       setTimelineCollapsed(!result.plan);
-      // Model that produced THIS turn. Prefer the gateway's authoritative
-      // x-effective-model (via result.effective_model) — it reflects what ACTUALLY ran
-      // (the chat role default is NOT the global activeModelInfo). Fall back to the
-      // picked override's model, then the global default.
-      const turnModel =
-        result.effective_model ??
-        (model ? model.split("::").pop() ?? model : activeModelInfo?.model ?? undefined);
+      // Only gateway evidence may identify the model that produced this turn.
+      // The requested override remains next-turn input, not execution provenance.
+      const turnModel = effectiveModelFromGateway(result.effective_model) ?? undefined;
       const finalAssistantMessage: ChatMessage = {
         ...withChatMetrics(
           chatMessageFromAssistantResult(result, result.assistant_message.text || streamedText),
@@ -1650,7 +1666,6 @@ export function ChatView({
 
   function openActivityIsland() {
     dispatchInspector({ type: "hideWorkspace" });
-    setIslandOpen(true);
     setActivityNonce((n) => n + 1);
   }
 
@@ -1927,7 +1942,14 @@ export function ChatView({
     const augmented = Boolean(skillPrefix || contextPrefix);
 
     // Open HITL Free wait → always a new turn (ResumeBinding), never steer.
-    const forceNewTurn = Boolean(options?.forceNewTurn || turnAwaitingUser);
+    const composerMode = deriveComposerMode({
+      promptSubmitting,
+      streamingAssistantId,
+      turnAwaitingUser,
+      terminalTurnAtRest,
+      hasActiveTurn,
+    });
+    const forceNewTurn = Boolean(options?.forceNewTurn || composerMode.forceNewTurn);
     if (forceNewTurn) {
       setStreamingAssistantId(null);
       setStreamStatus(null);
@@ -2304,7 +2326,6 @@ export function ChatView({
       if (cancelledStreamIdsRef.current.has(requestId)) return;
       cancelScheduledStreamingFrame();
       setComputerSession(mapCoreComputerSession(result.computer_session));
-      setComputerCardCollapsed(true);
       setTimelineCollapsed(!result.plan);
       // The new answer is now a sibling in the tree; resync the real path + switcher.
       await refreshAfterChatSubmit();
@@ -2642,7 +2663,6 @@ export function ChatView({
         item.id === message.id ? updatedMessage : item,
       );
       setComputerSession(mapCoreComputerSession(result.computer_session));
-      setComputerCardCollapsed(true);
       setTimelineCollapsed(!result.plan);
       setOptimisticMessages(nextMessages);
       onMessagesChange(nextMessages, { advanceActivity: true });
@@ -2908,20 +2928,32 @@ export function ChatView({
   const headerModelMeta = activeModelInfo
     ? `${activeModelInfo.locality} · ${formatContextTokens(activeModelInfo.context_window)}`
     : t("chat.active");
+  const lastAssistantEffectiveModel = useMemo(() => {
+    const model = latestAssistantEffectiveModel(threadMessages);
+    return model ? shortModelName(model) : t("composer.runtime.unavailable");
+  }, [t, threadMessages]);
   const headerToolPolicy = thread.source ? t("chat.readOnlyChannel") : t("chat.fullLocalTools");
 
-  // The island column reserves space only when it has something to show (else the chat takes
-  // the full width). Content = the thread has messages AND there's a plan/activity/sources/
-  // subagents/live-computer/streaming signal — mirrors the island's own visibility.
-  const islandHasContent =
-    threadMessages.length > 0 &&
-    (workspacePlanSteps.length > 0 ||
-      conversationActivity.length > 0 ||
-      islandSources.length > 0 ||
-      projectedSubagents.length > 0 ||
-      computerLiveStatus.active ||
-      hasActiveTurn);
-  const islandColumnVisible = !inspector.open && islandOpen && islandHasContent;
+  const islandArtifacts = islandSources.filter((source) => source.action === "artifact");
+  const islandFileSources = islandSources.filter((source) => source.action === "files");
+  const workspaceSections = projectWorkspaceSections({
+    planSteps: workspacePlanSteps,
+    activity: [
+      ...conversationActivity,
+      ...projectedSubagents.map((subagent) => `${subagent.name}:${subagent.status}`),
+    ],
+    streaming: workInProgress,
+    executionStatus: turnAwaitingUser ? "waiting_user" : projectedTurnStatus,
+    browser: {
+      active: computerLiveStatus.active,
+      snapshotVerified: Boolean(previewDataUrl),
+      failed: computerControlError !== null,
+    },
+    artifacts: islandArtifacts.map((source) => ({
+      id: `${source.artifactThread ?? thread.threadId}:${source.artifactName ?? source.name}`,
+    })),
+    sources: islandFileSources.map((source) => ({ id: source.name })),
+  });
   const activeAssistantMessageId = streamingAssistantId ?? (
     !isStreaming && projectedActiveTurn
       ? [...threadMessages].reverse().find((message) => message.role === "assistant")?.id ?? null
@@ -2934,7 +2966,7 @@ export function ChatView({
         inspector.focused ? " inspector-focused" : ""
       }${
         threadMessages.length === 0 ? " is-empty" : ""
-      }${islandColumnVisible ? "" : " island-collapsed"}`}
+      }`}
       aria-labelledby="chat-title"
     >
       <header className="task-topbar">
@@ -2966,18 +2998,6 @@ export function ChatView({
           </div>
         </div>
         <span className="task-header-actions">
-          {islandHasContent && (
-            <button
-              type="button"
-              className={`chat-header-menu-trigger${islandOpen ? " active" : ""}`}
-              title={t("chat.panel")}
-              aria-label={t("chat.panel")}
-              aria-pressed={islandOpen}
-              onClick={() => setIslandOpen((value) => !value)}
-            >
-              <PanelRight size={17} />
-            </button>
-          )}
           <ChatHeaderMenu
             onOpenInspector={openUtilityTab}
             onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
@@ -2985,46 +3005,122 @@ export function ChatView({
         </span>
       </header>
 
-      <div className="chat-status-stack" aria-label="Live workspace status">
-        {/* One fused cockpit. The separate ProjectContextPanel (objective + a verbose
-            "open loops" list) was retired: the island owns the objective, and the loop
-            list read as clutter. Everything the agent shows lives in this single card. */}
-        <div className="unified-status-panel">
-          <WorkspaceIsland
-            openActivityNonce={activityNonce}
-            threadId={thread.threadId}
-            objective={projectObjective}
-            activitySteps={conversationActivity}
-            computerActivity={computerLiveStatus.activity}
-            computerLive={computerLiveStatus.active}
-            planSteps={workspacePlanSteps}
-            sources={islandSources}
-            subagents={projectedSubagents}
-            streaming={workInProgress}
-            status={streamStatus}
-            threadHasMessages={threadMessages.length > 0}
-            columnMode
-            onCollapseColumn={() => setIslandOpen(false)}
-            onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
-            onExportChat={() => void exportChatMarkdown()}
-            onOpenInspector={openUtilityTab}
-          />
-          {browserBudgetMessage && !workInProgress && (
-            <div className="browser-budget-notice" role="status">
-              <AlertTriangle size={15} aria-hidden="true" />
-              <span>{browserBudgetMessage}</span>
-              <button
-                type="button"
-                disabled={!browserBudgetAssistantId}
-                onClick={() => {
-                  if (browserBudgetAssistantId) regenerateAnswer(browserBudgetAssistantId);
-                }}
-              >
-                {t("chat.browserBudget.retry")}
-              </button>
+      <AdaptiveWorkspaceIsland
+        threadId={thread.threadId}
+        sections={workspaceSections}
+        disabled={inspector.open}
+        openSectionRequest={{ section: "activity", nonce: activityNonce }}
+        renderSection={(section: WorkspaceSectionId) => {
+          if (section === "activity") {
+            return (
+              <div className="workspace-island-activity">
+                {projectObjective ? (
+                  <div className="workspace-island-objective">
+                    <span>{t("projectContext.objective")}</span>
+                    <p>{projectObjective}</p>
+                  </div>
+                ) : null}
+                {workspacePlanSteps.length > 0 ? (
+                  <div className="workspace-island-block">
+                    <div className="workspace-island-block-title">
+                      <span>{t("chat.activityProgress")}</span>
+                      <em>
+                        {workspacePlanSteps.filter((step) => step.status === "done").length}/
+                        {workspacePlanSteps.length}
+                      </em>
+                    </div>
+                    <ol className="workspace-island-list">
+                      {workspacePlanSteps.map((step, index) => (
+                        <li key={`${index}-${step.title}`} className={`status-${step.status}`}>
+                          <span className="workspace-island-state" aria-hidden="true" />
+                          <span>{step.title}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}
+                {projectedSubagents.length > 0 ? (
+                  <div className="workspace-island-block">
+                    <div className="workspace-island-block-title">
+                      <span>{t("chat.inspector.views.subagents")}</span>
+                      <em>{projectedSubagents.length}</em>
+                    </div>
+                    <ul className="workspace-island-list">
+                      {projectedSubagents.map((subagent, index) => (
+                        <li key={`${index}-${subagent.name}`} className={`status-${subagent.status}`}>
+                          <span className="workspace-island-state" aria-hidden="true" />
+                          <span>{subagent.name}</span>
+                          <em>{subagent.status}</em>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {conversationActivity.length > 0 ? (
+                  <div className="workspace-island-block">
+                    <div className="workspace-island-block-title">
+                      <span>{workInProgress ? t("chat.activity") : t("chat.lastActivity")}</span>
+                      <em>{conversationActivity.length}</em>
+                    </div>
+                    <ol className="workspace-island-activity-list">
+                      {conversationActivity.slice(-40).map((step, index) => (
+                        <li key={`${index}-${step.slice(0, 24)}`}>
+                          {step.replace(/^(?:\p{Extended_Pictographic}|️|‍|\s)+/u, "").trim()}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}
+                {browserBudgetMessage && !workInProgress ? (
+                  <div className="browser-budget-notice" role="status">
+                    <AlertTriangle size={15} aria-hidden="true" />
+                    <span>{browserBudgetMessage}</span>
+                    <button
+                      type="button"
+                      disabled={!browserBudgetAssistantId}
+                      onClick={() => {
+                        if (browserBudgetAssistantId) regenerateAnswer(browserBudgetAssistantId);
+                      }}
+                    >
+                      {t("chat.browserBudget.retry")}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            );
+          }
+          if (section === "browser") {
+            return (
+              <div className="workspace-island-browser">
+                {previewDataUrl ? (
+                  <img src={previewDataUrl} alt={computerSession.previewTitle} />
+                ) : null}
+                <button type="button" onClick={() => openUtilityTab("computer")}>
+                  <Monitor size={15} aria-hidden="true" />
+                  <span>{t("chat.inspector.views.computer")}</span>
+                </button>
+              </div>
+            );
+          }
+          const rows = section === "artifacts" ? islandArtifacts : islandFileSources;
+          return (
+            <div className="workspace-island-files">
+              {rows.map((source, index) => (
+                <button
+                  type="button"
+                  key={`${index}-${source.name}`}
+                  onClick={() => openUtilityTab(source.action === "artifact" ? "artifact" : "file")}
+                >
+                  {source.kind === "image" ? <FileImage size={15} /> : <FileText size={15} />}
+                  <span>{source.name}</span>
+                  {source.meta ? <em>{source.meta}</em> : null}
+                </button>
+              ))}
             </div>
-          )}
-        </div>
+          );
+        }}
+      />
+      <div className="chat-computer-runtime">
         <ChatComputerPanel threadId={thread.threadId} onLiveChange={setComputerLiveStatus} />
       </div>
 
@@ -3051,13 +3147,19 @@ export function ChatView({
             const assistantOperationalMessage =
               displayMessage.role === "assistant" && contentKind !== "system";
             const incompleteMessage = isLikelyIncompleteMessage(displayMessage);
+            const messageSurfaceClass =
+              displayMessage.role === "assistant"
+                ? "message chat-message-agent"
+                : displayMessage.role === "user"
+                  ? "message chat-message-user-band"
+                  : "message chat-message-system";
 
             return (
             <div
               className="thread-message-row"
               key={displayMessage.id}
             >
-            <article className={`message ${displayMessage.role}`}>
+            <article className={messageSurfaceClass}>
               {displayMessage.role === "system" && (
                 <header className="assistant-label system-label">
                   <Clock3 size={15} />
@@ -3157,62 +3259,6 @@ export function ChatView({
                     <span>{t("chat.autoCompleting")}</span>
                   </div>
                 )}
-                <MessageActionBar
-                  contentKind={contentKind}
-                  copied={copiedMessageId === displayMessage.id}
-                  canContinue={
-                    assistantMessage && Boolean(displayMessage.text) && incompleteMessage
-                  }
-                  canRegenerate={
-                    displayMessage.role === "assistant" &&
-                    Boolean(previousUserMessageIndex.get(displayMessage.id))
-                  }
-                  canReply={displayMessage.role !== "system" && Boolean(displayMessage.text)}
-                  canEdit={displayMessage.role === "user" && Boolean(displayMessage.text)}
-                  canExpand={assistantTextMessage}
-                  canSaveToMemory={assistantOperationalMessage}
-                  canSaveAsGoal={assistantOperationalMessage && threadIsProject}
-                  feedback={displayMessage.feedback}
-                  metrics={displayMessage.metrics}
-                  savedToMemory={Boolean(displayMessage.savedMemoryRef)}
-                  onCopy={() => copyMessageText(displayMessage)}
-                  onContinue={() => continueAssistantResponse(displayMessage.id)}
-                  onExpand={() => expandAssistantResponse(displayMessage.id)}
-                  onExplainCode={() =>
-                    askAboutAssistantResponse(
-                      displayMessage.id,
-                      "Explain code",
-                      "Explain the previous code briefly and operationally.",
-                    )
-                  }
-                  onExplainDiagram={() =>
-                    askAboutAssistantResponse(
-                      displayMessage.id,
-                      "Explain diagram",
-                      "Explain the previous diagram briefly and operationally.",
-                    )
-                  }
-                  onFeedback={(feedback) => void setMessageFeedback(displayMessage, feedback)}
-                  onImproveCode={() =>
-                    askAboutAssistantResponse(
-                      displayMessage.id,
-                      "Improve code",
-                      "Improve the previous code keeping it short and including a fenced markdown block.",
-                    )
-                  }
-                  onReply={() => replyToMessage(displayMessage)}
-                  onEdit={() => startEditMessage(displayMessage)}
-                  onRegenerate={() => regenerateAnswer(displayMessage.id)}
-                  onReviseDiagram={() =>
-                    askAboutAssistantResponse(
-                      displayMessage.id,
-                      "Edit diagram",
-                      "Propose an improved version of the previous diagram in a fenced mermaid markdown block.",
-                    )
-                  }
-                  onSaveToMemory={() => void saveMessageToMemory(displayMessage)}
-                  onSaveAsGoal={() => saveMessageAsGoal(displayMessage.text)}
-                />
                 </>
               )}
               {!isStreamingMessage &&
@@ -3276,12 +3322,14 @@ export function ChatView({
               {displayMessage.attachments && displayMessage.attachments.length > 0 && (
                 <MessageAttachmentList attachments={displayMessage.attachments} />
               )}
-              <footer>
-                <span>{formatMessageTimestamp(displayMessage.timestamp)}</span>
+              <footer className="chat-message-meta">
+                <div className="chat-message-meta-copy">
+                  <span>{formatMessageTimestamp(displayMessage.timestamp)}</span>
+                  {displayMessage.model && <span>{displayMessage.model}</span>}
                 {displayMessage.role === "assistant" ? (
                   <>
-                    {/* Model label intentionally hidden (override verified via
-                        x-effective-model). Duration+tokens are robust: the cloud path
+                    {/* Model provenance comes from the message-scoped effective model.
+                        Duration+tokens are robust: the cloud path
                         leaves elapsed_seconds=0 but total_elapsed_seconds is the real
                         wall-clock; tokens are estimated from text when not provided. */}
                     {(() => {
@@ -3323,6 +3371,67 @@ export function ChatView({
                     <span>{visibleMessageMetadata(displayMessage.metadata)}</span>
                   )
                 )}
+                </div>
+                <div className="chat-message-actions-slot">
+                  {displayMessage.text && !isStreamingMessage && (
+                    <MessageActionBar
+                      contentKind={contentKind}
+                      copied={copiedMessageId === displayMessage.id}
+                      canContinue={
+                        assistantMessage && Boolean(displayMessage.text) && incompleteMessage
+                      }
+                      canRegenerate={
+                        displayMessage.role === "assistant" &&
+                        Boolean(previousUserMessageIndex.get(displayMessage.id))
+                      }
+                      canReply={displayMessage.role !== "system" && Boolean(displayMessage.text)}
+                      canEdit={displayMessage.role === "user" && Boolean(displayMessage.text)}
+                      canExpand={assistantTextMessage}
+                      canSaveToMemory={assistantOperationalMessage}
+                      canSaveAsGoal={assistantOperationalMessage && threadIsProject}
+                      feedback={displayMessage.feedback}
+                      metrics={displayMessage.metrics}
+                      savedToMemory={Boolean(displayMessage.savedMemoryRef)}
+                      onCopy={() => copyMessageText(displayMessage)}
+                      onContinue={() => continueAssistantResponse(displayMessage.id)}
+                      onExpand={() => expandAssistantResponse(displayMessage.id)}
+                      onExplainCode={() =>
+                        askAboutAssistantResponse(
+                          displayMessage.id,
+                          "Explain code",
+                          "Explain the previous code briefly and operationally.",
+                        )
+                      }
+                      onExplainDiagram={() =>
+                        askAboutAssistantResponse(
+                          displayMessage.id,
+                          "Explain diagram",
+                          "Explain the previous diagram briefly and operationally.",
+                        )
+                      }
+                      onFeedback={(feedback) => void setMessageFeedback(displayMessage, feedback)}
+                      onImproveCode={() =>
+                        askAboutAssistantResponse(
+                          displayMessage.id,
+                          "Improve code",
+                          "Improve the previous code keeping it short and including a fenced markdown block.",
+                        )
+                      }
+                      onReply={() => replyToMessage(displayMessage)}
+                      onEdit={() => startEditMessage(displayMessage)}
+                      onRegenerate={() => regenerateAnswer(displayMessage.id)}
+                      onReviseDiagram={() =>
+                        askAboutAssistantResponse(
+                          displayMessage.id,
+                          "Edit diagram",
+                          "Propose an improved version of the previous diagram in a fenced mermaid markdown block.",
+                        )
+                      }
+                      onSaveToMemory={() => void saveMessageToMemory(displayMessage)}
+                      onSaveAsGoal={() => saveMessageAsGoal(displayMessage.text)}
+                    />
+                  )}
+                </div>
               </footer>
             </article>
             </div>
@@ -3332,7 +3441,7 @@ export function ChatView({
 
           {promptSubmitting && !streamingAssistantId && !chatTurnState && (
             <div className="thread-message-row">
-              <article className="message assistant pending" aria-live="polite">
+              <article className="message chat-message-agent pending" aria-live="polite">
                 <header className="assistant-label">
                   <Sparkles size={17} />
                   <strong>assistant</strong>
@@ -3349,6 +3458,12 @@ export function ChatView({
             session={visibleComputerSession}
             onApprove={onApproveApprovel}
             onReject={onRejectApprovel}
+          />
+          <InlineUncertainEffectPanel
+            effects={uncertainEffects}
+            busyId={effectResolutionBusyId}
+            hasError={effectResolutionError !== null}
+            onResolve={onResolveEffect}
           />
         </div>
       </div>
@@ -3441,7 +3556,7 @@ export function ChatView({
           </div>
         )}
         <PendingSteeringQueue
-          rows={pendingSteering.rows}
+          rows={visiblePendingSteeringRowsForTurn}
           onEdit={editPendingSteering}
           onDelete={deletePendingSteering}
           onSendNow={sendPendingSteeringNow}
@@ -3449,6 +3564,10 @@ export function ChatView({
         <Composer
           activeWork={workInProgress}
           disabled={false}
+          effectiveModelLabel={lastAssistantEffectiveModel}
+          runtimeContext={runtimeContext}
+          runtimeContextLoading={runtimeContextLoading}
+          runtimeContextError={runtimeContextError}
           error={promptError}
           replyContext={replyContext}
           seed={composerSeed}
@@ -4481,19 +4600,26 @@ function MessageArtifacts({
   if (artifacts.length === 0) return null;
 
   return (
-    <div className="msg-artifacts" aria-label={t("chat.generatedFiles")}>
-      {artifacts.map((artifact) => (
-        <ArtifactCardRow
-          key={artifact.name}
-          artifact={artifact}
-          expanded={expanded === artifact.name}
-          onToggle={() =>
-            setExpanded((current) => (current === artifact.name ? null : artifact.name))
-          }
-          onOpen={() => onOpen(artifact)}
-        />
-      ))}
-    </div>
+    <details className="chat-operational-row msg-artifacts">
+      <summary>
+        <FileText size={14} aria-hidden="true" />
+        <span>{t("chat.generatedFiles")}</span>
+        <small>{artifacts.length}</small>
+      </summary>
+      <div className="chat-operational-content" aria-label={t("chat.generatedFiles")}>
+        {artifacts.map((artifact) => (
+          <ArtifactCardRow
+            key={artifact.name}
+            artifact={artifact}
+            expanded={expanded === artifact.name}
+            onToggle={() =>
+              setExpanded((current) => (current === artifact.name ? null : artifact.name))
+            }
+            onOpen={() => onOpen(artifact)}
+          />
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -4665,14 +4791,14 @@ async function projectArtifactBlob(artifact: ParsedArtifact): Promise<Blob> {
 }
 
 type ArtifactPreview =
-  | { kind: "image" | "pdf"; url: string; ext: string }
+  | { kind: "image"; url: string; ext: string }
   | { kind: "html"; url: string; ext: string }
   | { kind: "pdf-images"; pages: string[]; ext: string }
   | { kind: "markdown" | "code" | "csv" | "text"; text: string; ext: string }
   | { kind: "binary" | "missing" | "denied" | "error"; ext: string };
 
-/** Fetches an artifact and builds a renderable preview by type. For image/pdf it
- *  creates an object URL the caller must revoke (preview.url). */
+/** Fetches an artifact and builds a renderable preview by type. Image/HTML
+ *  previews create an object URL the caller must revoke (preview.url). */
 async function buildArtifactPreview(
   artifact: ParsedArtifact,
   version?: number,
@@ -4692,19 +4818,20 @@ async function buildArtifactPreview(
     if (ext === "txt" || ext === "log" || ext === "") return { kind: "text", text: payload.text, ext };
     return { kind: "text", text: payload.text, ext };
   }
-  const blob = await coreBridge.downloadArtifact(artifact.thread, artifact.name, version);
-  if (ARTIFACT_IMAGE_EXT.includes(ext)) return { kind: "image", url: URL.createObjectURL(blob), ext };
   if (ext === "pdf") {
-    // Prefer a clean document-style preview: render the pages to images server-side
-    // (pdfium). Fall back to the native PDF viewer iframe if that's unavailable.
+    // Render through the gateway's packaged PDFium runtime. Chromium's native
+    // PDF viewer cannot reliably authorize renderer-created blob URLs in an
+    // iframe and reports a misleading permission error.
     try {
       const pages = await coreBridge.artifactPdfPages(artifact.thread, artifact.name, version);
       if (pages.length > 0) return { kind: "pdf-images", pages, ext };
     } catch {
-      /* pdfium unavailable → native viewer */
+      return { kind: "error", ext };
     }
-    return { kind: "pdf", url: URL.createObjectURL(blob), ext };
+    return { kind: "error", ext };
   }
+  const blob = await coreBridge.downloadArtifact(artifact.thread, artifact.name, version);
+  if (ARTIFACT_IMAGE_EXT.includes(ext)) return { kind: "image", url: URL.createObjectURL(blob), ext };
   if (ext === "html" || ext === "htm") {
     // Render the deck/page inline (self-contained HTML — decks inline their images).
     // Re-blob as text/html so the iframe renders rather than downloads.
@@ -6906,14 +7033,6 @@ function ArtifactPreviewBody({
           ))}
         </div>
       );
-    case "pdf":
-      return (
-        <iframe
-          className="artifact-preview-frame"
-          src={`${preview.url}#toolbar=0&navpanes=0&view=FitH`}
-          title="Preview PDF"
-        />
-      );
     case "html":
       // Inline render of an HTML deck/page (e.g. an on-brand presentation). Sandboxed:
       // same-origin so a self-contained file (inlined CSS + data-URL images) displays,
@@ -7034,46 +7153,38 @@ function ArtifactCsvTable({ text }: { text: string }) {
  *  step count. Expanding reveals every step. Keeps the answer in focus. */
 function MessageActivity({ text, live = false }: { text: string; live?: boolean }) {
   const steps = useMemo(() => parseActivitySteps(text), [text]);
-  const [open, setOpen] = useState(false);
   if (steps.length === 0) return null;
   const countLabel = `Activity · ${steps.length} ${steps.length === 1 ? "passo" : "passi"}`;
   const collapsedLabel = live ? steps[steps.length - 1] : countLabel;
   return (
-    <div className={`msg-activity${open ? " open" : ""}${live ? " live" : ""}`}>
-      <button
-        type="button"
-        className="msg-activity-toggle"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        {live && !open ? (
+    <details className={`chat-operational-row msg-activity${live ? " live" : ""}`} open={live}>
+      <summary>
+        {live ? (
           <span className="msg-activity-dot" aria-hidden="true" />
         ) : (
           <SquareTerminal size={13} className="msg-activity-icon" />
         )}
-        <span className="msg-activity-label">{open ? countLabel : collapsedLabel}</span>
+        <span className="msg-activity-label">{collapsedLabel}</span>
         <ChevronDown size={13} className="msg-activity-caret" />
-      </button>
-      {open && (
-        <ol className="msg-activity-steps">
-          {steps.map((step, index) => {
-            // Per-step status, inferred without backend lifecycle data: the gateway's
-            // problem markers (⏳ retry / ↩ fallback / ⏹ stop / 🔧 fix) → "warn"; in a
-            // LIVE turn the last announced step is the one in progress; the rest are done.
-            const status = /^(?:⏳|↩|⏹|🔧)/u.test(step)
-              ? "warn"
-              : live && index === steps.length - 1
-                ? "doing"
-                : "done";
-            return (
-              <li key={`${index}-${step.slice(0, 24)}`} data-status={status}>
-                {step.replace(/^(?:\p{Extended_Pictographic}|️|‍|\s)+/u, "")}
-              </li>
-            );
-          })}
-        </ol>
-      )}
-    </div>
+      </summary>
+      <ol className="msg-activity-steps">
+        {steps.map((step, index) => {
+          // Per-step status, inferred without backend lifecycle data: the gateway's
+          // problem markers (⏳ retry / ↩ fallback / ⏹ stop / 🔧 fix) → "warn"; in a
+          // LIVE turn the last announced step is the one in progress; the rest are done.
+          const status = /^(?:⏳|↩|⏹|🔧)/u.test(step)
+            ? "warn"
+            : live && index === steps.length - 1
+              ? "doing"
+              : "done";
+          return (
+            <li key={`${index}-${step.slice(0, 24)}`} data-status={status}>
+              {step.replace(/^(?:\p{Extended_Pictographic}|️|‍|\s)+/u, "")}
+            </li>
+          );
+        })}
+      </ol>
+    </details>
   );
 }
 
@@ -7385,10 +7496,16 @@ const AssistantMessageBody = memo(
       {readable && <RichMessage text={readable} streaming={streaming} />}
       {!streaming && onOpenArtifact && <MessageArtifacts text={text} onOpen={onOpenArtifact} />}
       {doneTool && !streaming && (
-        <div className="cmp-confirm done">
-          <ShieldCheck size={15} />
-          <span>Action completed: {humanizeToolName(doneTool)}</span>
-        </div>
+        <details className="chat-operational-row">
+          <summary>
+            <ShieldCheck size={14} aria-hidden="true" />
+            <span>{humanizeToolName(doneTool)}</span>
+          </summary>
+          <div className="chat-operational-content cmp-confirm done">
+            <ShieldCheck size={15} />
+            <span>Action completed: {humanizeToolName(doneTool)}</span>
+          </div>
+        </details>
       )}
       {action && !streaming && (
         <ComposioConfirmCard action={action} messageId={messageId} threadId={threadId} />
@@ -9128,199 +9245,93 @@ function InlineApprovelPanel({
   );
 }
 
-function LocalComputerCard({
-  approvalsCount,
-  collapsed,
-  onOpen,
-  onOpenTasks,
-  onRunPlanStep,
-  onRunSmokeTest,
-  onToggleCollapsed,
-  planStepError,
-  planStepRunning,
-  previewDataUrl,
-  session,
-  smokeTestError,
-  smokeTestRunning,
-  task,
+function InlineUncertainEffectPanel({
+  effects,
+  busyId,
+  hasError,
+  onResolve,
 }: {
-  approvalsCount: number;
-  collapsed: boolean;
-  onOpen: () => void;
-  onOpenTasks: () => void;
-  onRunPlanStep: () => void;
-  onRunSmokeTest: () => void;
-  onToggleCollapsed: () => void;
-  planStepError: string | null;
-  planStepRunning: boolean;
-  previewDataUrl: string | null;
-  session: ComputerSession;
-  smokeTestError: string | null;
-  smokeTestRunning: boolean;
-  task: TaskItem;
+  effects: UncertainEffectItem[];
+  busyId: string | null;
+  hasError: boolean;
+  onResolve: (
+    effect: UncertainEffectItem,
+    outcome: CoreUncertainEffectOutcome,
+  ) => void;
 }) {
   const { t } = useTranslation();
-  const surfaceLabel =
-    session.activeSurface === "browser"
-      ? "Browser"
-      : session.activeSurface === "shell"
-        ? "Terminal"
-        : "Computer";
-  const activityLabel =
-    planStepRunning || smokeTestRunning ? "running" : "ready";
-  const hasApprovel = approvalsCount > 0;
-  const hasWaitingStep = session.timeline.some((item) => item.status === "waiting");
+  if (effects.length === 0) return null;
 
   return (
-    <article className={`local-computer-card ${collapsed ? "collapsed" : ""}`}>
-      <div className="computer-card-toolbar">
-        <button
-          className="computer-toolbar-main"
-          type="button"
-          onClick={onOpen}
-        >
-          <Monitor size={15} />
-          <strong>Local computer</strong>
-          <span className="computer-live-badge">
-            <span className="computer-live-dot" aria-hidden="true" />
-            {activityLabel === "running" ? t("chat.liveView") : surfaceLabel}
-          </span>
-        </button>
-        <div className="computer-toolbar-meta">
-          <span className="computer-card-source">
-            {session.activeSurface === "browser"
-              ? t("chat.noVncRealBrowser")
-              : session.activeSurface === "shell"
-                ? t("chat.realShell")
-                : t("chat.realComputer")}
-          </span>
-          <span>
-            {session.progressCurrent} / {session.progressTotal}
-          </span>
-          {hasApprovel ? (
-            <button
-              className="computer-inline-action attention"
-              type="button"
-              onClick={onOpenTasks}
-            >
-              {t("chat.confirmRequest")}
-            </button>
-          ) : (
-            <button
-              className="computer-inline-action"
-              disabled={planStepRunning || !hasWaitingStep}
-              type="button"
-              onClick={onRunPlanStep}
-            >
-              {planStepRunning
-                ? t("chat.running")
-                : hasWaitingStep
-                  ? t("chat.action.continue")
-                  : t("chat.noAction")}
-            </button>
-          )}
-          <button
-            className="computer-collapse-button"
-            type="button"
-            aria-expanded={!collapsed}
-            aria-label={collapsed ? t("chat.showLocalComputer") : t("chat.hideLocalComputer")}
-            onClick={onToggleCollapsed}
-          >
-            <ChevronDown
-              className={collapsed ? "" : "computer-collapse-icon-open"}
-              size={15}
-            />
-          </button>
-        </div>
-      </div>
-
-      {!collapsed && (
-        <>
-          <button className="computer-card-main" type="button" onClick={onOpen}>
-            <div className="computer-preview" aria-hidden="true">
-              {previewDataUrl ? (
-                <img
-                  className="computer-preview-image"
-                  alt=""
-                  src={previewDataUrl}
-                />
-              ) : (
-                <>
-                  <div className="browser-chrome">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                  <div className="browser-lines">
-                    <i />
-                    <i />
-                    <i />
-                  </div>
-                  <div className="terminal-preview">
-                    <span>$ date</span>
-                    <span>CEST · local</span>
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="computer-card-copy">
-              <div className="computer-card-title">
-                <strong>{session.previewTitle}</strong>
-                <span>{session.elapsed}</span>
-              </div>
-              <p>{session.subtitle}</p>
-              <small>{session.previewDetail}</small>
-            </div>
-            <div className="computer-card-progress">
-              <span>Open details</span>
-              <ChevronDown size={16} />
-            </div>
-          </button>
-
-          <div className="computer-card-footer">
-            <span className="status-line">
-              <Play size={14} />
-              {task.title}
-            </span>
-            <div className="computer-card-actions">
-              {(smokeTestError || planStepError) && (
-                <span>{smokeTestError ?? planStepError}</span>
-              )}
-              <button
-                className="smoke-test-button"
-                disabled={planStepRunning || !hasWaitingStep}
-                type="button"
-                onClick={onRunPlanStep}
-              >
-                {planStepRunning
-                  ? t("chat.running")
-                  : hasWaitingStep
-                    ? t("chat.runPlan")
-                    : t("chat.planStopped")}
-              </button>
-              {hasApprovel && (
-                <button
-                  className="smoke-test-button attention"
-                  type="button"
-                  onClick={onOpenTasks}
-                >
-                  {t("chat.openApproval")}
-                </button>
-              )}
-              <button
-                className="smoke-test-button"
-                disabled={smokeTestRunning}
-                type="button"
-                onClick={onRunSmokeTest}
-              >
-                {smokeTestRunning ? t("chat.runningEllipsis") : t("chat.realTest")}
-              </button>
-            </div>
-          </div>
-        </>
+    <section
+      className="inline-effect-verification"
+      aria-label={t("chat.effectVerificationAria")}
+    >
+      {hasError && (
+        <p className="uncertain-effect-error" role="alert">
+          {t("chat.effectResolutionError")}
+        </p>
       )}
-    </article>
+      {effects.map((effect) => {
+        const resolving = busyId === effect.id;
+        const disabled = busyId !== null;
+        return (
+          <article className="uncertain-effect-card" key={effect.id}>
+            <header className="uncertain-effect-header">
+              <AlertCircle size={17} aria-hidden="true" />
+              <strong>{effectFamilyLabel(effect.operationFamily, t)}</strong>
+              <span>{t("chat.needsVerification")}</span>
+            </header>
+            <p className="inline-effect-copy">{t("chat.effectVerificationPrompt")}</p>
+            <time dateTime={new Date(effect.uncertainAt * 1_000).toISOString()}>
+              {t("chat.uncertainSince", { time: formatEffectTime(effect.uncertainAt) })}
+            </time>
+            <div className="uncertain-effect-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={disabled}
+                onClick={() => onResolve(effect, "not_applied")}
+              >
+                <CircleX size={16} aria-hidden="true" />
+                {t("chat.verifiedNotApplied")}
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={disabled}
+                onClick={() => onResolve(effect, "applied")}
+              >
+                {resolving ? (
+                  <Loader2 className="spin" size={16} aria-hidden="true" />
+                ) : (
+                  <BadgeCheck size={16} aria-hidden="true" />
+                )}
+                {t("chat.verifiedApplied")}
+              </button>
+            </div>
+          </article>
+        );
+      })}
+    </section>
   );
+}
+
+function effectFamilyLabel(
+  family: UncertainEffectItem["operationFamily"],
+  t: (key: string) => string,
+) {
+  if (family === "browser") return t("chat.effectFamilyBrowser");
+  if (family === "channel") return t("chat.effectFamilyChannel");
+  if (family === "connector") return t("chat.effectFamilyConnector");
+  return t("chat.effectFamilyExternalWrite");
+}
+
+function formatEffectTime(timestamp: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(timestamp * 1_000));
 }
 
 function ComputerDetailPanel({
@@ -9519,6 +9530,10 @@ function ChatEmptyHero({
 function Composer({
   activeWork,
   disabled,
+  effectiveModelLabel,
+  runtimeContext,
+  runtimeContextLoading,
+  runtimeContextError,
   error,
   replyContext,
   seed,
@@ -9533,6 +9548,10 @@ function Composer({
 }: {
   activeWork: boolean;
   disabled: boolean;
+  effectiveModelLabel: string;
+  runtimeContext: RuntimeContextResponse | null;
+  runtimeContextLoading: boolean;
+  runtimeContextError: boolean;
   error: string | null;
   replyContext: ReplyContext | null;
   seed: { text: string; nonce: number } | null;
@@ -9565,9 +9584,6 @@ function Composer({
   }, [seed?.nonce]);
   const [linkedFolder, setLinkedFolder] = useState<string | null>(null);
   const [folderBusy, setFolderBusy] = useState(false);
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [fileMenuOpen, setFileMenuOpen] = useState(false);
-  const [fileQuery, setFileQuery] = useState("");
   const [fileResults, setFileResults] = useState<string[]>([]);
   const [folderPathInput, setFolderPathInput] = useState("");
   const [folderError, setFolderError] = useState<string | null>(null);
@@ -9585,11 +9601,9 @@ function Composer({
   useEffect(() => {
     if (suggestedModel?.value) setSelectedModel(suggestedModel.value);
   }, [suggestedModel?.nonce, suggestedModel?.value]);
-  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   // Interaction mode (composer pill, Cursor-style): agent | plan | ask | debug.
   // Debug is offered only when a project folder is linked (coding context).
   const [chatMode, setChatMode] = useState<ChatMode>("agent");
-  const [modelQuery, setModelQuery] = useState("");
 
   // Refetches the model list + default resolved for THIS thread + per-provider groups.
   // Called on mount and when the menu opens, so a Settings change reflects without an
@@ -9629,25 +9643,11 @@ function Composer({
   }
   const [skills, setSkillss] = useState<SkillsSummary[]>([]);
   const [forcedSkills, setForcedSkills] = useState<SkillsSummary | null>(null);
-  const [skillMenuOpen, setSkillsMenuOpen] = useState(false);
-  const [skillQuery, setSkillsQuery] = useState("");
+  const [composerConnectors, setComposerConnectors] = useState<
+    Awaited<ReturnType<typeof coreBridge.mcpConnected>>
+  >([]);
   const [improving, setImproving] = useState(false);
   const [improveError, setImproveError] = useState<string | null>(null);
-  // Click outside the toolbar closes any open composer menu (⊕ add / folder / skill /
-  // model). Clicks INSIDE .composer-toolbar are left to the buttons' own toggles.
-  useEffect(() => {
-    if (!addMenuOpen && !fileMenuOpen && !skillMenuOpen && !modelMenuOpen) return;
-    const onDown = (event: MouseEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target && target.closest(".composer-toolbar")) return;
-      setAddMenuOpen(false);
-      setFileMenuOpen(false);
-      setSkillsMenuOpen(false);
-      setModelMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [addMenuOpen, fileMenuOpen, skillMenuOpen, modelMenuOpen]);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [dictationError, setDictationError] = useState<string | null>(null);
@@ -9716,6 +9716,12 @@ function Composer({
         setSkillss((response.skills ?? []).filter((skill) => skill.enabled));
       } catch {
         /* skills unavailable → picker hidden */
+      }
+      try {
+        const connected = await coreBridge.mcpConnected();
+        if (!cancelled) setComposerConnectors(connected);
+      } catch {
+        if (!cancelled) setComposerConnectors([]);
       }
     })();
     return () => {
@@ -9788,8 +9794,7 @@ function Composer({
   useEffect(() => {
     let cancelled = false;
     setContextFiles([]);
-    setFileMenuOpen(false);
-    setFileQuery("");
+    setFileResults([]);
     void (async () => {
       try {
         const { path } = await coreBridge.threadFolder(threadId);
@@ -9803,25 +9808,14 @@ function Composer({
     };
   }, [threadId]);
 
-  // Search files in the linked folder as the query changes (while the @ menu is open).
-  useEffect(() => {
-    if (!fileMenuOpen || !linkedFolder) return;
-    let cancelled = false;
-    const handle = setTimeout(() => {
-      void (async () => {
-        try {
-          const files = await coreBridge.searchThreadFiles(threadId, fileQuery);
-          if (!cancelled) setFileResults(files);
-        } catch {
-          if (!cancelled) setFileResults([]);
-        }
-      })();
-    }, 140);
-    return () => {
-      cancelled = true;
-      clearTimeout(handle);
-    };
-  }, [fileMenuOpen, fileQuery, linkedFolder, threadId]);
+  async function searchContextFiles(query: string) {
+    if (!linkedFolder) return;
+    try {
+      setFileResults(await coreBridge.searchThreadFiles(threadId, query));
+    } catch {
+      setFileResults([]);
+    }
+  }
 
   async function linkFolderPath(path: string) {
     const trimmed = path.trim();
@@ -9861,13 +9855,12 @@ function Composer({
   function unlinkFolder() {
     void coreBridge.setThreadFolder(threadId, null).catch(() => undefined);
     setLinkedFolder(null);
-    setFileMenuOpen(false);
     setContextFiles([]);
+    setFileResults([]);
   }
 
   async function addContextFile(path: string) {
     if (contextFiles.some((file) => file.path === path)) {
-      setFileMenuOpen(false);
       return;
     }
     try {
@@ -9876,8 +9869,6 @@ function Composer({
     } catch {
       /* unreadable file → ignore */
     }
-    setFileMenuOpen(false);
-    setFileQuery("");
     textareaRef.current?.focus();
   }
 
@@ -9889,20 +9880,6 @@ function Composer({
     });
     return `Context from files attached from the linked folder:\n\n${blocks.join("\n\n")}`;
   }
-
-  const folderName = linkedFolder
-    ? linkedFolder.replace(/\/+$/, "").split("/").pop() || linkedFolder
-    : null;
-
-  const filteredSkillss = skills.filter((skill) => {
-    const q = skillQuery.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      skill.name.toLowerCase().includes(q) ||
-      skill.id.toLowerCase().includes(q) ||
-      skill.description.toLowerCase().includes(q)
-    );
-  });
 
   async function handleImprovePrompt() {
     const draft = value.trim();
@@ -9973,8 +9950,8 @@ function Composer({
     }).catch(() => false);
     setSubmitBusy(false);
     if (activeWork && accepted) clearSubmittedEnvelope();
+    setSelectedModel((current) => selectedModelAfterSubmission(current, accepted));
     if (accepted && suggestedModel && modelOverride === suggestedModel.value) {
-      setSelectedModel(null);
       onSuggestedModelConsumed();
     }
   }
@@ -10073,554 +10050,95 @@ function Composer({
     setDragOver(false);
   }
 
+  const modeOptions: ComposerModeOption[] = CHAT_MODES.map((option) => ({
+    key: option.key,
+    label: option.label,
+    description: option.desc,
+    icon: option.icon,
+    available: !option.projectOnly || linkedFolder != null,
+  }));
+  const modelButtonLabel = selectedModel
+    ? shortModelName(selectedModel)
+    : activeModel
+      ? shortModelName(activeModel)
+      : effectiveModelLabel;
+
   return (
-    <form
-      className={`composer-surface${dragOver ? " drag-over" : ""}`}
-      aria-label={t("chat.operationalPrompt")}
+    <ComposerShell
+      value={value}
+      disabled={disabled}
+      activeWork={activeWork}
+      streaming={streaming}
+      submitting={submitBusy}
+      dragOver={dragOver}
+      textareaRef={textareaRef}
+      fileInputRef={fileInputRef}
+      reply={replyContext
+        ? {
+            label: `Reply to ${messageRoleLabel(replyContext.role)}`,
+            preview: replyContext.preview,
+          }
+        : null}
+      attachments={attachments}
+      images={composerImages}
+      contextFiles={contextFiles}
+      forcedCapability={forcedSkills}
+      capabilities={skills}
+      connectors={composerConnectors}
+      linkedFolder={linkedFolder}
+      folderBusy={folderBusy}
+      folderError={folderError}
+      fileResults={fileResults}
+      models={models}
+      modelGroups={modelGroups}
+      selectedNextTurnModel={selectedModel}
+      modelButtonLabel={modelButtonLabel}
+      effectiveModelLabel={effectiveModelLabel}
+      runtimeContext={runtimeContext}
+      runtimeContextLoading={runtimeContextLoading}
+      runtimeContextError={runtimeContextError}
+      mode={chatMode}
+      modeOptions={modeOptions}
+      environmentLabel={linkedFolder ? t("composer.projectEnvironment") : t("composer.localEnvironment")}
+      recording={recording}
+      transcribing={transcribing}
+      improving={improving}
+      errors={[error, improveError, composerAttachmentError, dictationError]}
       onSubmit={handleSubmit}
+      onValueChange={handleValueChange}
+      onKeyDown={handleKeyDown}
+      onPaste={handleComposerPaste}
       onDrop={handleComposerDrop}
-      onDragOver={(event) => {
-        if (Array.from(event.dataTransfer?.items ?? []).some((item) => item.kind === "file")) {
-          event.preventDefault();
-          setDragOver(true);
-        }
+      onDragOverChange={setDragOver}
+      onAttachmentSelect={handleAttachmentSelect}
+      onRemoveReply={onClearReply}
+      onRemoveAttachment={removeAttachment}
+      onRemoveImage={removeComposerImage}
+      onRemoveContextFile={(path) =>
+        setContextFiles((current) => current.filter((item) => item.path !== path))
+      }
+      onRemoveCapability={() => setForcedSkills(null)}
+      onSelectCapability={(capability) => {
+        setForcedSkills(capability);
+        textareaRef.current?.focus();
       }}
-      onDragLeave={(event) => {
-        if (event.currentTarget === event.target) setDragOver(false);
+      onSearchFiles={(query) => void searchContextFiles(query)}
+      onSelectContextFile={(path) => void addContextFile(path)}
+      onBrowseFolder={() => void browseFolder()}
+      onLinkFolder={(path) => void linkFolderPath(path)}
+      onUnlinkFolder={unlinkFolder}
+      onRefreshModels={() => void refreshModels()}
+      onSelectModel={(model) => {
+        onManualModelSelection();
+        setSelectedModel(model);
       }}
-    >
-      {replyContext && (
-        <div className="reply-context-card" aria-label={t("chat.quotedMessage")}>
-          <Reply size={14} />
-          <div>
-            <strong>Reply to {messageRoleLabel(replyContext.role)}</strong>
-            <span>{replyContext.preview}</span>
-          </div>
-          <button type="button" aria-label={t("chat.removeQuote")} onClick={onClearReply}>
-            <X size={14} />
-          </button>
-        </div>
-      )}
-      <textarea
-        aria-label={t("chat.requestForAssistant")}
-        disabled={disabled}
-        onChange={handleValueChange}
-        onKeyDown={handleKeyDown}
-        onPaste={handleComposerPaste}
-        placeholder="Send a message or add task instructions"
-        ref={textareaRef}
-        value={value}
-      />
-      {composerImages.length > 0 && (
-        <div className="composer-image-tray" aria-label={t("chat.attachedImages")}>
-          {composerImages.map((image) => (
-            <span className="composer-image-thumb" key={image.id}>
-              <img src={image.dataUrl} alt={image.name} />
-              <button
-                type="button"
-                aria-label={`Remove ${image.name}`}
-                onClick={() => removeComposerImage(image.id)}
-              >
-                <X size={12} />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-      {attachments.length > 0 && (
-        <div className="composer-attachment-tray" aria-label={t("chat.selectedAttachments")}>
-          {attachments.map((attachment) => (
-            <span className="composer-attachment-item" key={attachment.id}>
-              <Paperclip size={13} />
-              <span>{attachment.name}</span>
-              <small>{formatFileSize(attachment.size)}</small>
-              {!attachment.localPath && <small>{t("chat.pathUnavailable")}</small>}
-              <button
-                type="button"
-                aria-label={`Remove ${attachment.name}`}
-                onClick={() => removeAttachment(attachment.id)}
-              >
-                <X size={13} />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-      {forcedSkills && (
-        <div className="composer-forced-skill" aria-label={t("chat.forcedCapabilityNextMessage")}>
-          <Puzzle size={13} />
-          <span>{forcedSkills.name}</span>
-          <button type="button" aria-label="Remove capability" onClick={() => setForcedSkills(null)}>
-            <X size={12} />
-          </button>
-        </div>
-      )}
-      {contextFiles.length > 0 && (
-        <div className="composer-context-files" aria-label={t("chat.filesAttachedAsContext")}>
-          {contextFiles.map((file) => (
-            <span className="composer-file-chip" key={file.path} title={file.path}>
-              <AtSign size={12} />
-              <span>{file.path.split("/").pop()}</span>
-              <button
-                type="button"
-                aria-label={`Remove ${file.path}`}
-                onClick={() =>
-                  setContextFiles((current) => current.filter((item) => item.path !== file.path))
-                }
-              >
-                <X size={11} />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-      {improveError && <span className="composer-error">{improveError}</span>}
-      <div className="composer-toolbar">
-        <div className="composer-actions">
-          <input
-            hidden
-            multiple
-            ref={fileInputRef}
-            type="file"
-            onChange={handleAttachmentSelect}
-          />
-          {/* One add menu gathers every input action while keeping the composer compact.
-              Folder and capability popovers stay anchored to this same wrap. */}
-          <div className="composer-pop-wrap">
-            <button
-              className={`composer-add-button${
-                addMenuOpen || contextFiles.length > 0 || linkedFolder || forcedSkills
-                  ? " active"
-                  : ""
-              }`}
-              type="button"
-              disabled={disabled}
-              aria-label="Add"
-              aria-expanded={addMenuOpen}
-              title={t("chat.addMenuTitle")}
-              onClick={() => {
-                setAddMenuOpen((open) => !open);
-                setFileMenuOpen(false);
-                setSkillsMenuOpen(false);
-                setModelMenuOpen(false);
-              }}
-            >
-              <Plus size={18} />
-            </button>
-            {addMenuOpen && (
-              <div className="composer-pop composer-add-pop" role="menu">
-                <div className="composer-add-eyebrow">
-                  {t("chat.addContextCapabilities")}
-                </div>
-                {CHAT_MODES.filter((m) => !m.projectOnly || linkedFolder != null).map((m) => {
-                  const I = m.icon;
-                  const active = m.key === chatMode;
-                  return (
-                    <button
-                      key={m.key}
-                      type="button"
-                      role="menuitem"
-                      className={active ? "active" : ""}
-                      onClick={() => {
-                        setChatMode(m.key);
-                        setAddMenuOpen(false);
-                      }}
-                    >
-                      <I size={16} />
-                      <span className="composer-mode-text">
-                        <strong>{m.label}</strong>
-                        {m.desc && <small>{m.desc}</small>}
-                      </span>
-                      {active && <Check size={14} className="composer-add-check" />}
-                    </button>
-                  );
-                })}
-                <div className="composer-add-divider" />
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setAddMenuOpen(false);
-                    fileInputRef.current?.click();
-                  }}
-                >
-                  <Paperclip size={16} />
-                  <span>Attach file</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className={contextFiles.length > 0 || linkedFolder ? "active" : ""}
-                  onClick={() => {
-                    setAddMenuOpen(false);
-                    setFileMenuOpen(true);
-                  }}
-                >
-                  <AtSign size={16} />
-                  <span>{linkedFolder ? "Mention a file" : "Link a folder"}</span>
-                </button>
-                {skills.length > 0 && (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={forcedSkills ? "active" : ""}
-                    onClick={() => {
-                      setAddMenuOpen(false);
-                      setSkillsMenuOpen(true);
-                    }}
-                  >
-                    <Puzzle size={16} />
-                    <span>{forcedSkills ? `Capability · ${forcedSkills.name}` : t("chat.useCapability")}</span>
-                  </button>
-                )}
-                {value.trim() && (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={improving}
-                    onClick={() => {
-                      setAddMenuOpen(false);
-                      void handleImprovePrompt();
-                    }}
-                  >
-                    {improving ? (
-                      <Loader2 size={16} className="composer-spin" />
-                    ) : (
-                      <WandSparkles size={16} />
-                    )}
-                    <span>{t("chat.improvePrompt")}</span>
-                  </button>
-                )}
-              </div>
-            )}
-            {fileMenuOpen && !linkedFolder && (
-              <div className="composer-pop composer-skill-pop" role="menu">
-                <div className="composer-pop-link">
-                  <p className="composer-pop-link-title">
-                    Link a folder to this conversation
-                  </p>
-                  <p className="composer-pop-link-hint">
-                    Then you can mention its files with <strong>@</strong>.
-                  </p>
-                  <button
-                    type="button"
-                    className="composer-link-browse"
-                    disabled={folderBusy}
-                    onClick={() => void browseFolder()}
-                  >
-                    {folderBusy ? <Loader2 size={14} className="composer-spin" /> : <Search size={14} />}
-                    {t("chat.browse")}
-                  </button>
-                  <div className="composer-pop-search">
-                    <input
-                      type="text"
-                      placeholder={t("chat.orPastePath")}
-                      value={folderPathInput}
-                      onChange={(event) => setFolderPathInput(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          void linkFolderPath(folderPathInput);
-                        }
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="composer-link-confirm"
-                      disabled={folderBusy || !folderPathInput.trim()}
-                      onClick={() => void linkFolderPath(folderPathInput)}
-                    >
-                      {t("chat.link")}
-                    </button>
-                  </div>
-                  {folderError && <p className="composer-pop-error">{folderError}</p>}
-                </div>
-              </div>
-            )}
-            {fileMenuOpen && linkedFolder && (
-              <div className="composer-pop composer-skill-pop" role="menu">
-                <div className="composer-pop-folder">
-                  <span title={linkedFolder}>📁 {folderName}</span>
-                  <button type="button" onClick={unlinkFolder} title={t("chat.unlinkFolder")}>
-                    {t("chat.unlink")}
-                  </button>
-                </div>
-                <div className="composer-pop-search">
-                  <Search size={14} />
-                  <input
-                    autoFocus
-                    type="text"
-                    placeholder={t("chat.searchFiles")}
-                    value={fileQuery}
-                    onChange={(event) => setFileQuery(event.target.value)}
-                  />
-                </div>
-                <div className="composer-pop-list">
-                  {fileResults.length === 0 ? (
-                    <p className="composer-pop-empty">{t("chat.noFiles")}</p>
-                  ) : (
-                    fileResults.map((file) => (
-                      <button
-                        key={file}
-                        type="button"
-                        role="menuitem"
-                        onClick={() => void addContextFile(file)}
-                      >
-                        <strong>{file.split("/").pop()}</strong>
-                        <small>{file}</small>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-          {skills.length > 0 && (
-            <div className="composer-pop-wrap composer-skill-anchor">
-              {skillMenuOpen && (
-                <div className="composer-pop composer-skill-pop" role="menu">
-                  <div className="composer-pop-search">
-                    <Search size={14} />
-                    <input
-                      autoFocus
-                      type="text"
-                      placeholder={t("chat.searchCapability")}
-                      value={skillQuery}
-                      onChange={(event) => setSkillsQuery(event.target.value)}
-                    />
-                  </div>
-                  <div className="composer-pop-list">
-                    {filteredSkillss.length === 0 ? (
-                      <p className="composer-pop-empty">{t("chat.noCapabilities")}</p>
-                    ) : (
-                      filteredSkillss.map((skill) => (
-                        <button
-                          key={skill.id}
-                          type="button"
-                          role="menuitem"
-                          className={forcedSkills?.id === skill.id ? "active" : ""}
-                          onClick={() => {
-                            setForcedSkills(skill);
-                            setSkillsMenuOpen(false);
-                            setSkillsQuery("");
-                            textareaRef.current?.focus();
-                          }}
-                        >
-                          <strong>{skill.name}</strong>
-                          <small>{skill.description}</small>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-          {(models.length > 0 || activeModel) && (
-            <div className="composer-pop-wrap">
-              <button
-                className="composer-model-button"
-                type="button"
-                aria-label={t("chat.chooseModel")}
-                aria-expanded={modelMenuOpen}
-                onClick={() => {
-                  setModelMenuOpen((open) => {
-                    if (!open) void refreshModels();
-                    return !open;
-                  });
-                  setModelQuery("");
-                  setSkillsMenuOpen(false);
-                }}
-              >
-                <span className="composer-model-chip-dot" aria-hidden="true" />
-                <span>
-                  {selectedModel
-                    ? shortModelName(selectedModel.split("::").pop() ?? selectedModel)
-                    : activeModel
-                      ? shortModelName(activeModel)
-                      : "Auto"}
-                </span>
-                <ChevronDown size={14} />
-              </button>
-              {modelMenuOpen && (
-                <div className="composer-pop composer-model-pop" role="menu">
-                  <input
-                    className="composer-model-search"
-                    type="text"
-                    autoFocus
-                    placeholder={t("chat.searchModels")}
-                    value={modelQuery}
-                    onChange={(event) => setModelQuery(event.target.value)}
-                  />
-                  <div className="composer-pop-list">
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={`composer-model-auto ${selectedModel === null ? "active" : ""}`}
-                      onClick={() => {
-                        onManualModelSelection();
-                        setSelectedModel(null);
-                        setModelMenuOpen(false);
-                        setModelQuery("");
-                      }}
-                    >
-                      {selectedModel === null ? (
-                        <Check size={14} />
-                      ) : (
-                        <span className="composer-model-dot" />
-                      )}
-                      <span className="composer-model-auto-text">
-                        <strong>Auto</strong>
-                        <small>
-                          {t("chat.balancedQualitySpeed")}
-                          {activeModel ? ` · ${shortModelName(activeModel)}` : ""}
-                        </small>
-                      </span>
-                    </button>
-                    {(() => {
-                      const q = modelQuery.trim().toLowerCase();
-                      const source =
-                        modelGroups.length > 0
-                          ? modelGroups
-                          : [{ provider_id: "", label: t("chat.models"), models }];
-                      const groups = source
-                        .map((group) => ({
-                          ...group,
-                          models: q
-                            ? group.models.filter(
-                                (m) =>
-                                  m.toLowerCase().includes(q) ||
-                                  group.label.toLowerCase().includes(q),
-                              )
-                            : group.models,
-                        }))
-                        .filter((group) => group.models.length > 0);
-                      if (groups.length === 0) {
-                        return <p className="composer-pop-empty">{t("chat.noModels")}</p>;
-                      }
-                      return groups.map((group) => (
-                        <div
-                          key={group.provider_id || group.label}
-                          className="composer-model-group"
-                        >
-                          <div className="composer-model-group-label">{group.label}</div>
-                          {group.models.map((modelId) => {
-                            const value = group.provider_id
-                              ? `${group.provider_id}::${modelId}`
-                              : modelId;
-                            const picked = selectedModel === value;
-                            return (
-                              <button
-                                key={value}
-                                type="button"
-                                role="menuitem"
-                                className={picked ? "active" : ""}
-                                onClick={() => {
-                                  onManualModelSelection();
-                                  setSelectedModel(value);
-                                  setModelMenuOpen(false);
-                                  setModelQuery("");
-                                }}
-                              >
-                                {picked ? (
-                                  <Check size={14} />
-                                ) : (
-                                  <span className="composer-model-dot" />
-                                )}
-                                <span className="composer-model-name">{modelId}</span>
-                                {(() => {
-                                  const cloud = modelIsCloud(group.base_url, modelId);
-                                  const base = (group.base_url ?? "").toLowerCase();
-                                  const localEndpoint =
-                                    base.includes("127.0.0.1") ||
-                                    base.includes("localhost") ||
-                                    base.includes("0.0.0.0");
-                                  const localProxyCloud = cloud && localEndpoint;
-                                  return (
-                                    <span
-                                      className={`composer-model-loc ${cloud ? "cloud" : "local"}${
-                                        localProxyCloud ? " proxy" : ""
-                                      }`}
-                                      title={
-                                        localProxyCloud
-                                          ? "Cloud model routed through local Ollama"
-                                          : cloud
-                                            ? "Runs in the cloud"
-                                            : "Runs on this machine"
-                                      }
-                                      aria-label={
-                                        localProxyCloud ? "cloud via local Ollama" : cloud ? "cloud" : "local"
-                                      }
-                                    >
-                                      {localProxyCloud ? "☁ via local" : cloud ? "☁️" : "💻"}
-                                    </span>
-                                  );
-                                })()}
-                                {modelId === activeModel && <small>default</small>}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ));
-                    })()}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        <div className="composer-actions">
-          {/* Voice dictation needs the local microphone + whisper bridge — desktop only. */}
-          {IS_DESKTOP && (
-            <button
-              className={`icon-button${recording ? " recording" : ""}`}
-              type="button"
-              aria-label={recording ? t("chat.stopDictation") : t("chat.voiceDictation")}
-              title={recording ? t("chat.stopAndTranscribe") : t("chat.voiceDictationMultilingual")}
-              disabled={transcribing}
-              onClick={() => (recording ? stopDictation() : void startDictation())}
-            >
-              {transcribing ? (
-                <Loader2 size={17} className="composer-spin" />
-              ) : recording ? (
-                <span className="composer-stop-square" aria-hidden="true" />
-              ) : (
-                <Mic size={17} />
-              )}
-            </button>
-          )}
-          {error && <span className="composer-error">{error}</span>}
-          {composerAttachmentError && (
-            <span className="composer-error">{composerAttachmentError}</span>
-          )}
-          {dictationError && <span className="composer-error">{dictationError}</span>}
-          {streaming && (
-            <button
-              className="composer-stop-button"
-              type="button"
-              aria-label={t("chat.interruptResponse")}
-              onClick={onCancelStreaming}
-            >
-              <X size={17} />
-            </button>
-          )}
-          {(value.trim() || composerImages.length > 0) && (
-            <button
-              className="send-button"
-              disabled={disabled || submitBusy || (!value.trim() && composerImages.length === 0)}
-              type="submit"
-              aria-label={activeWork ? t("chat.queueInstruction") : t("chat.send")}
-              title={activeWork ? t("chat.queueInstruction") : t("chat.send")}
-            >
-              {submitBusy ? <Loader2 size={18} className="composer-spin" /> : <ArrowUp size={18} />}
-            </button>
-          )}
-        </div>
-      </div>
-    </form>
+      onSelectMode={(mode) => setChatMode(mode as ChatMode)}
+      onImprovePrompt={() => void handleImprovePrompt()}
+      onVoice={() => (recording ? stopDictation() : void startDictation())}
+      onStop={onCancelStreaming}
+    />
   );
 }
-
 interface ResumeMarker {
   requestId: string;
   userText: string;
