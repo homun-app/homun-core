@@ -260,6 +260,16 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn markdown_to_docx(": "DOCX packaging must stay in gateway_deliverables",
         "fn doc_json_to_docx(": "templated document DOCX projection must stay in gateway_deliverables",
         "fn save_artifact_tool_schema(": "artifact delivery schema must stay in gateway_deliverables",
+        "fn active_inference_model(": "active model resolution must stay in gateway_model_routing",
+        "fn load_provider_registry(": "provider registry loading must stay in gateway_model_routing",
+        "fn chat_openai_stream_config(": "chat model config must stay in gateway_model_routing",
+        "fn role_openai_config(": "role model config must stay in gateway_model_routing",
+        "fn reassemble_openai_stream(": "OpenAI stream reassembly must stay in gateway_model_routing",
+        "fn build_chat_payload(": "provider chat payload shaping must stay in gateway_model_routing",
+        "fn parse_ollama_capabilities(": "Ollama capability parsing must stay in gateway_model_routing",
+        "fn resolve_context_budget_chars(": "model context budget resolution must stay in gateway_model_routing",
+        "async fn compact_for_context_budget(": "model-visible context compaction must stay in gateway_model_routing",
+        "fn zai_thinking_enabled(": "Z.ai thinking policy must stay in gateway_model_routing",
         "fn browser_open_research_discovery_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn booking_assumption_choice_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn choice_resume_instruction_legacy_backup(": "prompt instruction snippets must stay in gateway_prompt_instructions",
@@ -385,6 +395,7 @@ def main() -> int:
     )
     assert_contains(source, "mod gateway_datetime_tools;", "gateway root must declare datetime tools owner")
     assert_contains(source, "mod gateway_runtime_flags;", "gateway root must declare runtime flags owner")
+    assert_contains(source, "mod gateway_model_routing;", "gateway root must declare model routing owner")
     assert_contains(
         source,
         "mod gateway_prompt_instructions;",
