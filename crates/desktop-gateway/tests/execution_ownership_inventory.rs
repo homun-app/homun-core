@@ -151,6 +151,54 @@ fn channel_and_stream_markers_do_not_own_lifecycle() {
 }
 
 #[test]
+fn turn_broker_surface_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let broker = production_source(&root.join("src/gateway_turn_broker.rs"));
+    let streams = production_source(&root.join("src/gateway_chat_streams.rs"));
+
+    let owned = [
+        "fn enqueue_chat_turn_core(",
+        "async fn enqueue_turn(",
+        "async fn cancel_turn(",
+        "async fn get_turn_events(",
+        "async fn thread_activity_projection(",
+        "async fn subscribe_turn_stream(",
+        "async fn list_thread_steering(",
+        "async fn update_steering(",
+        "async fn delete_steering(",
+        "async fn send_steering_now(",
+    ];
+    for pattern in owned {
+        assert!(
+            broker.contains(pattern),
+            "turn broker owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain turn broker surface {pattern}"
+        );
+    }
+
+    let forbidden_in_broker = [
+        "async fn run_agent_rounds(",
+        "async fn emit_stream_event(",
+        "fn stream_registry(",
+        "fn save_chat_message_to_memory(",
+        "fn start_task_executor_worker(",
+        "fn run_next_task_once(",
+        "fn recall_memory(",
+    ];
+    for pattern in forbidden_in_broker {
+        assert!(
+            !broker.contains(pattern),
+            "turn broker owner must not absorb adjacent owner {pattern}"
+        );
+    }
+    assert!(streams.contains("async fn emit_stream_event("));
+}
+
+#[test]
 fn startup_background_writers_follow_process_fencing() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

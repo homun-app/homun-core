@@ -327,6 +327,31 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct GatewayBrowserExecutor": "gateway browser executor must stay in gateway_tool_execution",
         "struct GatewayBrowseExecutor": "browse sub-agent executor must stay in gateway_tool_execution",
         "struct BrowseOnlyCapabilityExecutor": "browse-only capability executor must stay in gateway_tool_execution",
+        "fn enqueue_chat_turn_core(": "turn broker enqueue core must stay in gateway_turn_broker",
+        "fn enqueue_or_steer_chat_turn_core(": "turn broker steer-or-enqueue core must stay in gateway_turn_broker",
+        "struct ResumedChatTurn ": "turn broker resume result must stay in gateway_turn_broker",
+        "fn resume_suspended_user_turn_core(": "turn broker user resume core must stay in gateway_turn_broker",
+        "fn resume_suspended_approval_turn_core(": "turn broker approval resume core must stay in gateway_turn_broker",
+        "fn insert_broker_turn_messages(": "turn broker transcript insertion must stay in gateway_turn_broker",
+        "fn insert_broker_steering_user_message(": "turn broker steering transcript insertion must stay in gateway_turn_broker",
+        "fn insert_broker_resume_user_message(": "turn broker resume transcript insertion must stay in gateway_turn_broker",
+        "fn broker_turn_message_attachments(": "turn broker attachment projection must stay in gateway_turn_broker",
+        "async fn enqueue_turn(": "turn broker enqueue route must stay in gateway_turn_broker",
+        "fn cancel_chat_turn_and_finalize_bubble(": "turn broker cancel/finalize helper must stay in gateway_turn_broker",
+        "async fn cancel_turn(": "turn broker cancel route must stay in gateway_turn_broker",
+        "struct TurnSinceQuery ": "turn broker cursor query must stay in gateway_turn_broker",
+        "fn execution_thread_workspace(": "turn broker workspace resolution must stay in gateway_turn_broker",
+        "fn set_chat_turn_message_delivery_state(": "turn broker delivery projection must stay in gateway_turn_broker",
+        "async fn get_turn_events(": "turn broker event route must stay in gateway_turn_broker",
+        "async fn thread_activity_projection(": "turn broker activity route must stay in gateway_turn_broker",
+        "struct SteeringMutationRequest ": "turn broker steering request DTO must stay in gateway_turn_broker",
+        "struct SteeringRevisionRequest ": "turn broker steering revision DTO must stay in gateway_turn_broker",
+        "fn publish_steering_changed(": "turn broker steering broadcast must stay in gateway_turn_broker",
+        "async fn list_thread_steering(": "turn broker steering routes must stay in gateway_turn_broker",
+        "async fn update_steering(": "turn broker steering routes must stay in gateway_turn_broker",
+        "async fn delete_steering(": "turn broker steering routes must stay in gateway_turn_broker",
+        "async fn send_steering_now(": "turn broker steering routes must stay in gateway_turn_broker",
+        "async fn subscribe_turn_stream(": "turn broker durable stream route must stay in gateway_turn_broker",
         "struct ChannelSettings": "channel settings must stay in gateway_channels",
         "fn inbound_action(": "channel inbound policy must stay in gateway_channels",
         "async fn whatsapp_status(": "WhatsApp status route must stay in gateway_channels",
@@ -446,6 +471,12 @@ def main() -> int:
     assert_contains(source, "mod gateway_chat_branches;", "gateway root must declare chat branch owner")
     assert_contains(source, "mod gateway_chat_tasks;", "gateway root must declare chat task owner")
     assert_contains(source, "mod gateway_chat_memory;", "gateway root must declare chat memory owner")
+    assert_contains(source, "mod gateway_turn_broker;", "gateway root must declare turn broker owner")
+    assert_contains(
+        source,
+        "pub(crate) use gateway_turn_broker::*;",
+        "gateway root must re-export turn broker owner",
+    )
     assert_contains(source, "mod gateway_memory_dedup;", "gateway root must declare memory dedup owner")
     assert_contains(
         source,
