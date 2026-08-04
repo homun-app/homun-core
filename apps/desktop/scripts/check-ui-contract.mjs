@@ -344,6 +344,11 @@ assertRepoContains(
   "Gateway memory turn context injection must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_clients.rs",
+  "gateway_embedding_client",
+  "Gateway memory provider clients must have a dedicated owner",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_memory_graph.rs",
   "upsert_memory_relation",
   "Gateway memory graph relation helpers must have a dedicated owner",
@@ -437,6 +442,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway memory turn context"',
   "Kernel regression gate must run the gateway memory turn context owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory clients"',
+  "Kernel regression gate must run the gateway memory client owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",

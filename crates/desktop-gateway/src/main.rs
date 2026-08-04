@@ -42,6 +42,7 @@ mod gateway_identity;
 mod gateway_legacy_data;
 mod gateway_memory_background;
 mod gateway_memory_briefing;
+mod gateway_memory_clients;
 mod gateway_memory_dedup;
 mod gateway_memory_graph;
 mod gateway_memory_query_embeddings;
@@ -171,6 +172,7 @@ pub(crate) use gateway_identity::{
     gateway_capability_user_id, gateway_capability_workspace_id, gateway_memory_user_id,
     gateway_memory_workspace_id, gateway_user_id, set_active_workspace, set_memory_workspace,
 };
+use gateway_memory_clients::{gateway_embedding_client, gateway_llm_client};
 use gateway_memory_graph::{provenance_key_fragment, upsert_memory_relation};
 use gateway_memory_turn_context::{
     memory_scope_for_turn, objective_block_for_workspace, project_brief_block,
@@ -1349,12 +1351,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // incapsula brief/recall/learn. Costruito dopo il letterale perché
     // `InProcessMemoryRecallService` prende in prestito lo stesso `AppState`.
     let embedding: Arc<dyn local_first_memory::EmbeddingClient> =
-        Arc::new(GatewayEmbeddingClient {
-            http: state.http.clone(),
-        });
-    let llm: Arc<dyn local_first_memory::LlmClient> = Arc::new(GatewayLlmClient {
-        http: state.http.clone(),
-    });
+        gateway_embedding_client(state.http.clone());
+    let llm: Arc<dyn local_first_memory::LlmClient> = gateway_llm_client(state.http.clone());
     install_memory_service_if_enabled(&mut state, embedding, llm);
     // Fix any pre-existing 0644 data files (created before the umask above was set):
     // the SQLite stores and the WhatsApp session are world-readable on old installs.
@@ -1730,9 +1728,7 @@ async fn backfill_embeddings(
     // ADR 0022 (Tappa 4): backfill ORCHESTRATO nel crate via 3 fasi Send-safe
     // (collect lock → embed off-lock → persist lock). Il guard non attraversa await.
     let embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient> =
-        std::sync::Arc::new(GatewayEmbeddingClient {
-            http: state.http.clone(),
-        });
+        gateway_embedding_client(state.http.clone());
     let model = embed_model();
     // Fase 1 (lock): collect pending + seen.
     let collected = {
@@ -1975,96 +1971,6 @@ fn recall_pack_on_facade(
         pack.status = local_first_memory::MemoryAccessStatus::Degraded;
     }
     pack
-}
-
-/// ADR 0022 (Tappa 4) — impl gateway del capability `EmbeddingClient`. Wrappa
-/// `embed_query_for_memory_recall` (cache LRU+TTL + timeout + degradazione). Il
-/// recall orchestrato nel crate lo consuma senza conoscere HTTP.
-struct GatewayEmbeddingClient {
-    http: reqwest::Client,
-}
-
-impl local_first_memory::EmbeddingClient for GatewayEmbeddingClient {
-    fn embed<'a>(&'a self, text: &'a str) -> local_first_memory::BoxFuture<'a, Vec<f32>> {
-        let http = self.http.clone();
-        Box::pin(async move {
-            // `embed_query_for_memory_recall` deriva workspace/timing internamente;
-            // per il recall orchestrato l'embedding è solo del testo della query.
-            // Usiamo embed_text direttamente (no cache globale qui, ma il gateway
-            // cache è per-workspace — vedremo se serve thread through lo scope).
-            // Per parità col path inline, riusiamo embed_query_for_memory_recall.
-            let active = gateway_memory_workspace_id();
-            let mut timing = MemoryRecallTiming::default();
-            embed_query_for_memory_recall(&http, text, &active, &mut timing)
-                .await
-                .unwrap_or_default()
-        })
-    }
-}
-
-/// ADR 0022 (Tappa 4) — impl gateway del capability `LlmClient` per l'estrazione
-/// memoria (learn). Risolve `extractor_openai_config` e POST `/chat/completions`.
-/// L'orchestrazione learn_on_facade nel crate lo consuma senza conoscere HTTP.
-struct GatewayLlmClient {
-    http: reqwest::Client,
-}
-
-impl local_first_memory::LlmClient for GatewayLlmClient {
-    fn chat<'a>(
-        &'a self,
-        system: &'a str,
-        user_content: &'a str,
-    ) -> local_first_memory::BoxFuture<'a, Option<String>> {
-        let http = self.http.clone();
-        Box::pin(async move {
-            let (base_url, model, api_key) = extractor_openai_config()?;
-            let payload = serde_json::json!({
-                "model": model,
-                "temperature": 0.0,
-                "max_tokens": 2000,
-                "response_format": { "type": "json_object" },
-                "messages": [
-                    { "role": "system", "content": system },
-                    { "role": "user", "content": user_content },
-                ],
-            });
-            let mut usage = local_first_inference_usage::UsageContext::new(
-                uuid::Uuid::new_v4().to_string(),
-                local_first_inference_usage::InferencePurpose::MemoryExtraction,
-                gateway_user_id().as_str(),
-            );
-            usage.purpose_detail = Some("learn_extraction".to_string());
-            usage.workspace_id = Some(gateway_memory_workspace_id().as_str().to_string());
-            let response = inference_transport::send_openai_json(
-                &http,
-                global_usage_recorder(),
-                &usage,
-                &inference_provider_id(&base_url),
-                &model,
-                inference_locality(&base_url),
-                &base_url,
-                api_key.as_deref(),
-                &payload,
-                Some(std::time::Duration::from_secs(120)),
-                system
-                    .chars()
-                    .count()
-                    .saturating_add(user_content.chars().count()),
-            )
-            .await
-            .ok()?;
-            if !(200..300).contains(&response.status) {
-                return None;
-            }
-            let body = response.body;
-            body.get("choices")
-                .and_then(|c| c.get(0))
-                .and_then(|c| c.get("message"))
-                .and_then(|m| m.get("content"))
-                .and_then(|c| c.as_str())
-                .map(str::to_string)
-        })
-    }
 }
 
 impl MemoryRecallService for InProcessMemoryRecallService {
@@ -2359,9 +2265,7 @@ fn learn_via_service_or_inline(
                 None
             };
             let llm: std::sync::Arc<dyn local_first_memory::LlmClient> =
-                std::sync::Arc::new(GatewayLlmClient {
-                    http: state.http.clone(),
-                });
+                gateway_llm_client(state.http.clone());
             // Fase 1 (lock): prompt.
             let prompt = {
                 let facade = memory_facade(&state);
@@ -2476,12 +2380,10 @@ async fn consolidate_scope(
         // <3 memorie sopravvissute (o early-exit): wiki già ricostruite nella prepare.
         return (merged, 0);
     };
-    // Fase 2 (off-lock): LLM curatore. Usa GatewayLlmClient (throwaway), poi parse
+    // Fase 2 (off-lock): LLM curatore via client gateway throwaway, poi parse
     // JSON resiliente (strip_json_fences è nel crate).
     let llm: std::sync::Arc<dyn local_first_memory::LlmClient> =
-        std::sync::Arc::new(GatewayLlmClient {
-            http: state.http.clone(),
-        });
+        gateway_llm_client(state.http.clone());
     let content = llm
         .chat(
             local_first_memory::CURATOR_SYSTEM,
@@ -26416,9 +26318,7 @@ normal answers."
                 let user = gateway_memory_user_id();
                 let workspace = gateway_memory_workspace_id();
                 let embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient> =
-                    std::sync::Arc::new(GatewayEmbeddingClient {
-                        http: state.http.clone(),
-                    });
+                    gateway_embedding_client(state.http.clone());
                 let query_vec =
                     local_first_memory::embed_query(embedding.as_ref(), &request.prompt).await;
                 let block = {
