@@ -27,6 +27,7 @@ mod execution_runtime;
 mod gateway_artifact_memory;
 mod gateway_auth;
 mod gateway_automation_formatting;
+mod gateway_automation_requests;
 mod gateway_automation_tools;
 mod gateway_background_startup;
 mod gateway_bind;
@@ -180,6 +181,10 @@ use gateway_artifact_memory::{
     register_project_file_artifact_memory, upsert_artifact_memory_record,
 };
 use gateway_automation_formatting::automation_trigger_summary;
+use gateway_automation_requests::{
+    AutomationCreateRequest, AutomationScopeQuery, AutomationUpdateRequest,
+    automation_workspace_scope,
+};
 use gateway_automation_tools::{
     create_automation_tool_schema, schedule_task_tool_schema, update_automation_tool_schema,
 };
@@ -5281,49 +5286,6 @@ I'll keep you posted in the «Scheduled» thread."
         },
         Err(_) => "Task store unavailable: scheduling failed.".to_string(),
     }
-}
-
-/// Body for creating an Automation (the user-facing rule). `trigger` is a typed
-/// `AutomationTrigger` ({"type":"schedule","recurrence":"daily@08:00","tz":"Europe/Rome"}
-/// or {"type":"event","event":{"kind":"channel_message","from":"Mario"}}).
-#[derive(Deserialize)]
-struct AutomationCreateRequest {
-    title: String,
-    trigger: AutomationTrigger,
-    prompt: String,
-    #[serde(default)]
-    workspace_id: Option<String>,
-    #[serde(default)]
-    approval: Option<ApprovalPolicy>,
-    #[serde(default)]
-    source: Option<AutomationSource>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct AutomationScopeQuery {
-    #[serde(default)]
-    workspace_id: Option<String>,
-}
-
-fn automation_workspace_scope(raw: Option<&str>) -> WorkspaceId {
-    let Some(value) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
-        return gateway_workspace_id();
-    };
-    WorkspaceId::new(value)
-}
-
-/// Partial update of an existing automation: any field left out is unchanged.
-/// `enabled` stays owned by the toggle endpoint.
-#[derive(Debug, Deserialize)]
-struct AutomationUpdateRequest {
-    #[serde(default)]
-    title: Option<String>,
-    #[serde(default)]
-    trigger: Option<AutomationTrigger>,
-    #[serde(default)]
-    prompt: Option<String>,
-    #[serde(default)]
-    approval: Option<ApprovalPolicy>,
 }
 
 /// Clean UI-facing DTO: unix-second timestamps (the `time` crate's default serde is a numeric
@@ -78633,22 +78595,6 @@ data: [DONE]\n";
                 .unwrap()
                 .len(),
             1
-        );
-    }
-
-    #[test]
-    fn automation_workspace_scope_defaults_and_trims() {
-        assert_eq!(
-            super::automation_workspace_scope(None).as_str(),
-            super::gateway_workspace_id().as_str()
-        );
-        assert_eq!(
-            super::automation_workspace_scope(Some("  ")).as_str(),
-            super::gateway_workspace_id().as_str()
-        );
-        assert_eq!(
-            super::automation_workspace_scope(Some("project_alpha")).as_str(),
-            "project_alpha"
         );
     }
 

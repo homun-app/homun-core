@@ -414,6 +414,11 @@ assertRepoContains(
   "Gateway automation formatting must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_automation_requests.rs",
+  "AutomationCreateRequest",
+  "Gateway automation request DTOs must have a dedicated owner",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_memory_hygiene.rs",
   "memory_hygiene_suggestions_for_scope",
   "Gateway memory hygiene suggestions must have a dedicated owner",
@@ -577,6 +582,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway automation formatting"',
   "Kernel regression gate must run the gateway automation formatting owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway automation requests"',
+  "Kernel regression gate must run the gateway automation request owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",

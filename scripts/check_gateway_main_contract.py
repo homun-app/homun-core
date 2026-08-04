@@ -229,6 +229,10 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn update_automation_tool_schema(": "automation tool schemas must stay in gateway_automation_tools",
         "fn humanize_recurrence(": "automation formatting must stay in gateway_automation_formatting",
         "fn automation_trigger_summary(": "automation formatting must stay in gateway_automation_formatting",
+        "struct AutomationCreateRequest ": "automation request DTOs must stay in gateway_automation_requests",
+        "struct AutomationScopeQuery ": "automation request DTOs must stay in gateway_automation_requests",
+        "struct AutomationUpdateRequest ": "automation request DTOs must stay in gateway_automation_requests",
+        "fn automation_workspace_scope(": "automation request scoping must stay in gateway_automation_requests",
         "fn provenance_key_fragment(": "memory graph key fragments must stay in gateway_memory_graph",
         "fn upsert_memory_relation(": "memory graph relation upsert must stay in gateway_memory_graph",
         "fn artifact_memory_kind(": "artifact memory type classification must stay in gateway_artifact_memory",
@@ -352,6 +356,11 @@ def main() -> int:
         source,
         "mod gateway_automation_formatting;",
         "gateway root must declare automation formatting owner",
+    )
+    assert_contains(
+        source,
+        "mod gateway_automation_requests;",
+        "gateway root must declare automation request owner",
     )
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
