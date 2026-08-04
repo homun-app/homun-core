@@ -204,6 +204,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn forget_in_scope(": "memory forget search must stay in gateway_memory_tools",
         "fn forget_topic_in_scope(": "memory topic forget must stay in gateway_memory_tools",
         "fn forget_memory(": "memory forget orchestration must stay in gateway_memory_tools",
+        "fn update_plan_tool_schema(": "runtime plan tool schemas must stay in gateway_plan_tools",
+        "fn step_advance_tool_schema(": "runtime plan tool schemas must stay in gateway_plan_tools",
         "fn provenance_key_fragment(": "memory graph key fragments must stay in gateway_memory_graph",
         "fn upsert_memory_relation(": "memory graph relation upsert must stay in gateway_memory_graph",
         "fn artifact_memory_kind(": "artifact memory type classification must stay in gateway_artifact_memory",
@@ -308,6 +310,7 @@ def main() -> int:
         "gateway root must declare memory graph persistence owner",
     )
     assert_contains(source, "mod gateway_memory_tools;", "gateway root must declare memory tools owner")
+    assert_contains(source, "mod gateway_plan_tools;", "gateway root must declare plan tools owner")
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
 
