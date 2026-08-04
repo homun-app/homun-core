@@ -197,6 +197,13 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn memory_hygiene_suggestions_for_scope(": "memory hygiene suggestions must stay in gateway_memory_hygiene",
         "fn persist_graph(": "memory graph persistence routing must stay in gateway_memory_graph_persistence",
         "fn persist_graph_scope(": "memory graph scope persistence must stay in gateway_memory_graph_persistence",
+        "fn recall_memory_tool_schema(": "memory tool schemas must stay in gateway_memory_tools",
+        "fn record_decision_tool_schema(": "memory tool schemas must stay in gateway_memory_tools",
+        "fn record_decision(": "memory decision recording must stay in gateway_memory_tools",
+        "fn forget_memory_tool_schema(": "memory tool schemas must stay in gateway_memory_tools",
+        "fn forget_in_scope(": "memory forget search must stay in gateway_memory_tools",
+        "fn forget_topic_in_scope(": "memory topic forget must stay in gateway_memory_tools",
+        "fn forget_memory(": "memory forget orchestration must stay in gateway_memory_tools",
         "fn provenance_key_fragment(": "memory graph key fragments must stay in gateway_memory_graph",
         "fn upsert_memory_relation(": "memory graph relation upsert must stay in gateway_memory_graph",
         "fn artifact_memory_kind(": "artifact memory type classification must stay in gateway_artifact_memory",
@@ -300,6 +307,7 @@ def main() -> int:
         "mod gateway_memory_graph_persistence;",
         "gateway root must declare memory graph persistence owner",
     )
+    assert_contains(source, "mod gateway_memory_tools;", "gateway root must declare memory tools owner")
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
 
