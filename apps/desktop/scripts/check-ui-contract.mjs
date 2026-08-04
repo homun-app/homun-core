@@ -609,6 +609,16 @@ assertRepoContains(
   "Kernel regression gate must run the gateway automation request owner test",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_automation_routes.rs",
+  "automation_routes_owner_smoke",
+  "Gateway automation route owner must keep a local smoke test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway automation routes"',
+  "Kernel regression gate must run the gateway automation route owner test",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway main tests owner"',
   "Kernel regression gate must run the gateway main test owner smoke",

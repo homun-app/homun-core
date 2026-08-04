@@ -301,6 +301,16 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct AutomationScopeQuery ": "automation request DTOs must stay in gateway_automation_requests",
         "struct AutomationUpdateRequest ": "automation request DTOs must stay in gateway_automation_requests",
         "fn automation_workspace_scope(": "automation request scoping must stay in gateway_automation_requests",
+        "fn automation_to_json(": "automation route DTO assembly must stay in gateway_automation_routes",
+        "fn materialize_automation_task(": "automation task materialization must stay in gateway_automation_routes",
+        "fn connector_poll_tick(": "automation connector polling must stay in gateway_automation_routes",
+        "fn fire_channel_event_automations(": "channel event automation firing must stay in gateway_automation_routes",
+        "async fn automations_list(": "automation list route must stay in gateway_automation_routes",
+        "async fn automation_create(": "automation create route must stay in gateway_automation_routes",
+        "async fn automation_update(": "automation update route must stay in gateway_automation_routes",
+        "async fn automation_toggle(": "automation toggle route must stay in gateway_automation_routes",
+        "async fn automation_delete(": "automation delete route must stay in gateway_automation_routes",
+        "fn list_scheduled_tasks_tool_schema(": "scheduled task tool schemas must stay in gateway_automation_routes",
         "fn provenance_key_fragment(": "memory graph key fragments must stay in gateway_memory_graph",
         "fn upsert_memory_relation(": "memory graph relation upsert must stay in gateway_memory_graph",
         "fn artifact_memory_kind(": "artifact memory type classification must stay in gateway_artifact_memory",
@@ -430,6 +440,11 @@ def main() -> int:
         source,
         "mod gateway_automation_requests;",
         "gateway root must declare automation request owner",
+    )
+    assert_contains(
+        source,
+        "mod gateway_automation_routes;",
+        "gateway root must declare automation route owner",
     )
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")

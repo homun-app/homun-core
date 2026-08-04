@@ -462,6 +462,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway automation routes",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "gateway_automation_routes",
+            ],
+        ),
+        Step(
             "gateway main tests owner",
             [
                 "cargo",
