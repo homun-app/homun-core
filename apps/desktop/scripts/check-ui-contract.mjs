@@ -324,6 +324,11 @@ assertRepoContains(
   "Gateway memory dedup/suppression must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_dedup.rs",
+  "DEDUP_COSINE",
+  "Gateway memory semantic dedup threshold must stay with the dedup owner",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_memory_query_embeddings.rs",
   "memory_query_embedding_cache_key",
   "Gateway memory query embedding cache must have a dedicated owner",

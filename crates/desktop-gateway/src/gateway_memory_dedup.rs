@@ -45,9 +45,32 @@ pub(crate) fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f32 {
     intersection / union
 }
 
+pub(crate) fn cosine(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let mut dot = 0f32;
+    let mut na = 0f32;
+    let mut nb = 0f32;
+    for i in 0..a.len() {
+        dot += a[i] * b[i];
+        na += a[i] * a[i];
+        nb += b[i] * b[i];
+    }
+    if na == 0.0 || nb == 0.0 {
+        return 0.0;
+    }
+    dot / (na.sqrt() * nb.sqrt())
+}
+
 /// Threshold above which two same-type memories are considered the same thing.
 /// Slightly higher than 0.5 to compensate for not removing function words.
 pub(crate) const DEDUP_JACCARD: f32 = 0.55;
+
+/// Cosine above which two memories are the same thing (semantic dedup / collapse).
+/// Tuned on real nomic-embed-v2-moe vectors: clear paraphrases of one decision sit at
+/// 0.85-0.96, while genuinely distinct decisions on the same topic stay below ~0.80.
+pub(crate) const DEDUP_COSINE: f32 = 0.85;
 
 /// True if two anchors are near-duplicates: Jaccard over the threshold, OR the
 /// smaller token set is fully contained in the larger. Containment requires >=2
@@ -139,6 +162,15 @@ mod tests {
             "distinct: {}",
             jaccard(&a, &c)
         );
+    }
+
+    #[test]
+    fn cosine_scores_matching_vectors_and_rejects_invalid_shapes() {
+        assert_eq!(cosine(&[], &[]), 0.0);
+        assert_eq!(cosine(&[1.0, 0.0], &[1.0]), 0.0);
+        assert_eq!(cosine(&[0.0, 0.0], &[1.0, 1.0]), 0.0);
+        assert!((cosine(&[1.0, 0.0], &[1.0, 0.0]) - 1.0).abs() < 0.0001);
+        assert!(cosine(&[1.0, 0.0], &[0.0, 1.0]) < DEDUP_COSINE);
     }
 
     #[test]

@@ -74,8 +74,8 @@ use local_first_engine::model_normalize;
 #[cfg(test)]
 use gateway_memory_dedup::normalize_for_dedup;
 use gateway_memory_dedup::{
-    DEDUP_JACCARD, dedup_tokens, forgotten_token_sets, is_semantic_duplicate, is_suppressed,
-    jaccard,
+    DEDUP_COSINE, DEDUP_JACCARD, cosine, dedup_tokens, forgotten_token_sets, is_semantic_duplicate,
+    is_suppressed, jaccard,
 };
 use gateway_memory_query_embeddings::{
     memory_query_embedding_cache, memory_query_embedding_cache_key,
@@ -1908,29 +1908,6 @@ async fn embed_text(
         .collect();
     (!vector.is_empty()).then_some(vector)
 }
-
-fn cosine(a: &[f32], b: &[f32]) -> f32 {
-    if a.len() != b.len() || a.is_empty() {
-        return 0.0;
-    }
-    let mut dot = 0f32;
-    let mut na = 0f32;
-    let mut nb = 0f32;
-    for i in 0..a.len() {
-        dot += a[i] * b[i];
-        na += a[i] * a[i];
-        nb += b[i] * b[i];
-    }
-    if na == 0.0 || nb == 0.0 {
-        return 0.0;
-    }
-    dot / (na.sqrt() * nb.sqrt())
-}
-
-/// Cosine above which two memories are the same thing (semantic dedup / collapse).
-/// Tuned on real nomic-embed-v2-moe vectors: clear paraphrases of one decision sit at
-/// 0.85–0.96, while genuinely distinct decisions on the same topic stay below ~0.80.
-const DEDUP_COSINE: f32 = 0.85;
 
 /// Local Ollama OpenAI-compat base for image generation (the last-resort default).
 fn default_image_base() -> String {
