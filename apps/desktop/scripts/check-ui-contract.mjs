@@ -349,6 +349,11 @@ assertRepoContains(
   "Gateway artifact memory registration must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_wiki.rs",
+  "rebuild_status_wiki",
+  "Gateway memory wiki projections must have a dedicated owner",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway main ownership contract"',
   "Kernel regression gate must run the gateway main ownership contract",
@@ -432,6 +437,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway artifact memory"',
   "Kernel regression gate must run the gateway artifact memory owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory wiki"',
+  "Kernel regression gate must run the gateway memory wiki owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",

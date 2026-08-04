@@ -191,6 +191,19 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn mcp_filesystem_project_relative_path(": "MCP filesystem artifact detection must stay in gateway_artifact_memory",
         "fn mcp_filesystem_project_relative_path_for_root(": "MCP filesystem artifact detection must stay in gateway_artifact_memory",
         "async fn register_mcp_filesystem_artifact_memory(": "MCP filesystem artifact memory must stay in gateway_artifact_memory",
+        "fn wiki_edited_path(": "memory wiki edit registry path must stay in gateway_memory_wiki",
+        "fn load_wiki_edited(": "memory wiki edit registry loading must stay in gateway_memory_wiki",
+        "fn mark_wiki_edited(": "memory wiki edit registry writes must stay in gateway_memory_wiki",
+        "fn wiki_is_edited(": "memory wiki edit checks must stay in gateway_memory_wiki",
+        "fn rebuild_decisions_wiki(": "memory decisions wiki rebuild must stay in gateway_memory_wiki",
+        "fn rebuild_profile_wiki(": "memory profile wiki rebuild must stay in gateway_memory_wiki",
+        "fn rebuild_project_brief(": "memory project brief rebuild must stay in gateway_memory_wiki",
+        "fn rebuild_status_wiki(": "memory status wiki rebuild must stay in gateway_memory_wiki",
+        "fn active_open_loop_record(": "memory open-loop status filter must stay in gateway_memory_wiki",
+        "fn deduplicate_open_loops(": "memory open-loop dedup wrapper must stay in gateway_memory_wiki",
+        "fn open_loop_matches_target(": "memory open-loop closure matching must stay in gateway_memory_wiki",
+        "fn close_matching_open_loops(": "memory open-loop closure must stay in gateway_memory_wiki",
+        "fn status_wiki_body_from_open_loops(": "memory status wiki body helper must stay in gateway_memory_wiki",
     }
 
 
@@ -239,6 +252,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_memory_briefing;", "gateway root must declare memory briefing owner")
     assert_contains(source, "mod gateway_memory_graph;", "gateway root must declare memory graph owner")
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
+    assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
 
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
