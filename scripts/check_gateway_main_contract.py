@@ -135,6 +135,14 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn persist_explicit_memory(": "explicit chat memory persistence must stay in gateway_chat_memory",
         "fn wiki_title_from_text(": "chat memory wiki title helper must stay in gateway_chat_memory",
         "fn sanitize_wiki_filename(": "chat memory wiki filename helper must stay in gateway_chat_memory",
+        "fn normalize_for_dedup(": "memory dedup normalization must stay in gateway_memory_dedup",
+        "fn dedup_tokens(": "memory dedup tokenization must stay in gateway_memory_dedup",
+        "fn jaccard(": "memory dedup scoring must stay in gateway_memory_dedup",
+        "const DEDUP_JACCARD:": "memory dedup threshold must stay in gateway_memory_dedup",
+        "fn anchors_are_similar(": "memory anchor similarity must stay in gateway_memory_dedup",
+        "fn is_semantic_duplicate(": "memory semantic duplicate check must stay in gateway_memory_dedup",
+        "fn forgotten_token_sets(": "memory forget suppression tokenization must stay in gateway_memory_dedup",
+        "fn is_suppressed(": "memory forget suppression must stay in gateway_memory_dedup",
     }
 
 
@@ -174,6 +182,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_chat_branches;", "gateway root must declare chat branch owner")
     assert_contains(source, "mod gateway_chat_tasks;", "gateway root must declare chat task owner")
     assert_contains(source, "mod gateway_chat_memory;", "gateway root must declare chat memory owner")
+    assert_contains(source, "mod gateway_memory_dedup;", "gateway root must declare memory dedup owner")
 
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",

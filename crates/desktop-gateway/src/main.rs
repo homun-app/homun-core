@@ -40,6 +40,7 @@ mod gateway_http_client;
 mod gateway_identity;
 mod gateway_legacy_data;
 mod gateway_memory_background;
+mod gateway_memory_dedup;
 mod gateway_model_timeouts;
 mod gateway_paths;
 mod gateway_plugin_packages;
@@ -69,6 +70,12 @@ use local_first_engine::model_normalize;
 // Brings `.record(...)` into scope for direct calls on a `GatewayJournal` (C2, browser-protocol
 // metrics); `run_turn`'s own generic `J: ExecutionJournal` parameter doesn't need this import, but
 // calling the method directly outside that generic context does.
+#[cfg(test)]
+use gateway_memory_dedup::normalize_for_dedup;
+use gateway_memory_dedup::{
+    DEDUP_JACCARD, dedup_tokens, forgotten_token_sets, is_semantic_duplicate, is_suppressed,
+    jaccard,
+};
 #[cfg(test)]
 use gateway_remote_approval::remote_approval_matches_persisted_message;
 use gateway_remote_approval::{
@@ -1773,115 +1780,6 @@ fn strip_json_fences(text: &str) -> &str {
         .strip_suffix("```")
         .unwrap_or(without_open.trim())
         .trim()
-}
-
-/// Normalize a memory's text for cheap dedup against what's already stored.
-/// Normalizes text for exact-duplicate comparison (used by tests + dedup paths).
-#[cfg(test)]
-fn normalize_for_dedup(text: &str) -> String {
-    text.trim()
-        .to_lowercase()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Content tokens of a memory for similarity. LANGUAGE-AGNOSTIC by design (the system
-/// is multilingual): lowercase + alphanumeric tokens of ≥3 chars, NO per-language
-/// stopword list. Most function words are ≤2 chars (drop) or wash out equally across
-/// pairs; the threshold compensates for the rest. True cross-language / semantic
-/// dedup is the embeddings layer, not this lexical pre-filter.
-fn dedup_tokens(text: &str) -> std::collections::HashSet<String> {
-    text.to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|token| token.chars().count() >= 3)
-        .map(str::to_string)
-        .collect()
-}
-
-/// Jaccard overlap of two token sets (0..1). Used to fold near-duplicate memories
-/// (the extractor re-phrases the same decision across turns).
-fn jaccard(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<String>) -> f32 {
-    if a.is_empty() || b.is_empty() {
-        return 0.0;
-    }
-    let intersection = a.intersection(b).count() as f32;
-    let union = a.union(b).count() as f32;
-    intersection / union
-}
-
-/// Threshold above which two same-type memories are considered the same thing.
-/// Slightly higher than 0.5 to compensate for not removing function words (kept
-/// language-agnostic — no stopword list).
-const DEDUP_JACCARD: f32 = 0.55;
-
-/// True if two anchors are near-duplicates: Jaccard over the threshold, OR the
-/// smaller token set is fully contained in the larger (length-asymmetric paraphrase,
-/// e.g. "tappo" ⊂ "tappo moto"). Containment requires ≥2 shared tokens so a single
-/// common word (a shared `kind` prefix like "curiosità") never collapses distinct
-/// cards. Empty sets never match.
-fn anchors_are_similar(
-    a: &std::collections::HashSet<String>,
-    b: &std::collections::HashSet<String>,
-) -> bool {
-    if a.is_empty() || b.is_empty() {
-        return false;
-    }
-    if jaccard(a, b) >= DEDUP_JACCARD {
-        return true;
-    }
-    let shared = a.intersection(b).count();
-    shared >= 2 && shared == a.len().min(b.len())
-}
-
-/// Fix 3 (anti re-propose): true if the freshly-emitted card is a SEMANTIC near-dup
-/// of one already surfaced (in ANY status). The exact `dedup_key` check misses
-/// paraphrases — the supervisor's anchor drifts between runs — so we compare token
-/// sets on BOTH the dedup_key and the human title. Pure → unit-testable.
-fn is_semantic_duplicate(new_key: &str, new_title: &str, existing: &[(String, String)]) -> bool {
-    let nk = dedup_tokens(new_key);
-    let nt = dedup_tokens(new_title);
-    existing.iter().any(|(key, title)| {
-        anchors_are_similar(&nk, &dedup_tokens(key))
-            || anchors_are_similar(&nt, &dedup_tokens(title))
-    })
-}
-
-/// "Soppressione permanente" del forget: the texts of DELETED/REJECTED memories in
-/// the always-on scopes ARE the suppression list — no extra table needed. Anything
-/// the user forgot must not resurface (re-derived contact facts, re-extracted
-/// memories), even though the raw source messages stay. A forget directive ("vuole
-/// che i ricordi su Berlino vengano dimenticati") is itself a deleted memory, so its
-/// topic terms suppress too.
-fn forgotten_token_sets(
-    facade: &MemoryFacade,
-    user: &MemoryUserId,
-) -> Vec<std::collections::HashSet<String>> {
-    let mut out = Vec::new();
-    for ws in [PERSONAL_WORKSPACE, THREADS_WORKSPACE] {
-        // list_forgotten_texts bypasses the tombstone filter that hides deleted rows
-        // from list_memories_for_ui — we NEED the forgotten texts here.
-        if let Ok(texts) = facade.list_forgotten_texts(user, &MemoryWorkspaceId::new(ws)) {
-            for text in texts {
-                let tokens = dedup_tokens(&text);
-                if !tokens.is_empty() {
-                    out.push(tokens);
-                }
-            }
-        }
-    }
-    out
-}
-
-/// True when `text` substantially overlaps any forgotten text → it must be suppressed.
-fn is_suppressed(text: &str, forgotten: &[std::collections::HashSet<String>]) -> bool {
-    if forgotten.is_empty() {
-        return false;
-    }
-    let tokens = dedup_tokens(text);
-    forgotten
-        .iter()
-        .any(|f| jaccard(&tokens, f) >= DEDUP_JACCARD)
 }
 
 // ---- Embeddings (multilingual semantic layer) -----------------------------------

@@ -319,6 +319,11 @@ assertRepoContains(
   "Gateway chat memory-save endpoint must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_dedup.rs",
+  "is_semantic_duplicate",
+  "Gateway memory dedup/suppression must have a dedicated owner",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway main ownership contract"',
   "Kernel regression gate must run the gateway main ownership contract",
@@ -377,6 +382,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway chat memory"',
   "Kernel regression gate must run the gateway chat memory owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory dedup"',
+  "Kernel regression gate must run the gateway memory dedup owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",
