@@ -184,6 +184,13 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn install_memory_service_if_enabled(": "memory recall service installation must stay in gateway_memory_recall_service",
         "fn recall_pack_on_facade(": "memory recall facade projection must stay in gateway_memory_recall_service",
         "impl MemoryRecallService for InProcessMemoryRecallService": "memory recall service impl must stay in gateway_memory_recall_service",
+        "fn normalize_project_scope_entities(": "memory graph maintenance normalization must stay in gateway_memory_graph_maintenance",
+        "fn is_generic_self_word(": "memory graph mention self-word policy must stay in gateway_memory_graph_maintenance",
+        "fn link_memory_mentions(": "memory graph mention linking must stay in gateway_memory_graph_maintenance",
+        "fn link_mentions_core(": "memory graph mention linking core must stay in gateway_memory_graph_maintenance",
+        "fn sweep_graph_orphans(": "memory graph orphan sweep must stay in gateway_memory_graph_maintenance",
+        "fn regenerate_graph_links(": "memory graph regeneration must stay in gateway_memory_graph_maintenance",
+        "fn reconcile_memory_scope(": "memory graph scope reconciliation must stay in gateway_memory_graph_maintenance",
         "fn provenance_key_fragment(": "memory graph key fragments must stay in gateway_memory_graph",
         "fn upsert_memory_relation(": "memory graph relation upsert must stay in gateway_memory_graph",
         "fn artifact_memory_kind(": "artifact memory type classification must stay in gateway_artifact_memory",
@@ -276,6 +283,11 @@ def main() -> int:
         "gateway root must declare memory recall service owner",
     )
     assert_contains(source, "mod gateway_memory_graph;", "gateway root must declare memory graph owner")
+    assert_contains(
+        source,
+        "mod gateway_memory_graph_maintenance;",
+        "gateway root must declare memory graph maintenance owner",
+    )
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
 

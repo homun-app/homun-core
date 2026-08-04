@@ -359,6 +359,11 @@ assertRepoContains(
   "Gateway memory graph relation helpers must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_graph_maintenance.rs",
+  "reconcile_memory_scope",
+  "Gateway memory graph maintenance must have a dedicated owner",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_artifact_memory.rs",
   "register_artifact_memory",
   "Gateway artifact memory registration must have a dedicated owner",
@@ -462,6 +467,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway memory graph"',
   "Kernel regression gate must run the gateway memory graph owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory graph maintenance"',
+  "Kernel regression gate must run the gateway memory graph maintenance owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",
