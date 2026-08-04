@@ -30,6 +30,7 @@ mod gateway_background_startup;
 mod gateway_bind;
 mod gateway_boot_maintenance;
 mod gateway_chat_branches;
+mod gateway_chat_markers;
 mod gateway_chat_memory;
 mod gateway_chat_tasks;
 mod gateway_chat_threads;
@@ -172,6 +173,7 @@ use gateway_artifact_memory::{
     register_artifact_memory, register_mcp_filesystem_artifact_memory,
     register_project_file_artifact_memory, upsert_artifact_memory_record,
 };
+use gateway_chat_markers::strip_chat_markers;
 pub(crate) use gateway_identity::gateway_workspace_id;
 pub(crate) use gateway_identity::{
     active_workspace_id, base_workspace_id, canonical_memory_workspace_id,
@@ -2115,26 +2117,6 @@ fn tombstone_automation_memory_records(
         deleted += 1;
     }
     Ok(deleted)
-}
-
-/// Anti-churn: the harness appends a fresh ‹‹PLAN›› marker to the running message on
-/// EVERY `update_plan`/`step_advance` call so the plan card animates live. The PERSISTED
-/// message, though, must carry the plan card exactly ONCE — the latest canonical state —
-/// not one block per tool call (a 5-step task that touches the plan 5× otherwise stores
-/// 5 stacked ‹‹PLAN›› blocks = unreadable minestra, the agentic-loop regression).
-///
-/// Keep the LAST block's content (most steps closed = freshest canonical plan) but place
-/// it at the FIRST block's position, so the card stays where the user first saw it instead
-/// of jumping below the prose. All other blocks are removed; surrounding prose is intact.
-/// `parse_plan_marker`'s resume still works: it `rfind`s the single remaining block.
-/// Remove the app-only control markers (and their content) from a message before it
-/// leaves the app to a plain-text surface — chiefly a channel mirror (Telegram/WhatsApp).
-/// These markers (‹‹PLAN››, ‹‹ACT››, ‹‹ARTIFACT››, ‹‹REASONING››, ‹‹COMPOSIO_*››) are
-/// rendered by the app UI; a channel must never receive them raw.
-pub(crate) fn strip_chat_markers(text: &str) -> String {
-    // Canonical stripper lives in the lib (shared with the in-app context renderer, caposaldo
-    // #5). The channel mirror just wants the trimmed prose.
-    strip_display_markers(text).trim().to_string()
 }
 
 // `answer_body_is_empty` folded into `local_first_engine::markers::

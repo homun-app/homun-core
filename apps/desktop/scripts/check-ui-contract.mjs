@@ -379,6 +379,11 @@ assertRepoContains(
   "Gateway plan tools must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_chat_markers.rs",
+  "strip_chat_markers",
+  "Gateway chat marker stripping must have a dedicated owner",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_memory_hygiene.rs",
   "memory_hygiene_suggestions_for_scope",
   "Gateway memory hygiene suggestions must have a dedicated owner",
@@ -507,6 +512,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway plan tools"',
   "Kernel regression gate must run the gateway plan tools owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway chat markers"',
+  "Kernel regression gate must run the gateway chat marker owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",
