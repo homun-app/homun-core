@@ -195,6 +195,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn normalized_entity_name(": "memory hygiene entity-name normalization must stay in gateway_memory_hygiene",
         "fn verified_identity_aliases(": "memory hygiene identity alias detection must stay in gateway_memory_hygiene",
         "fn memory_hygiene_suggestions_for_scope(": "memory hygiene suggestions must stay in gateway_memory_hygiene",
+        "fn persist_graph(": "memory graph persistence routing must stay in gateway_memory_graph_persistence",
+        "fn persist_graph_scope(": "memory graph scope persistence must stay in gateway_memory_graph_persistence",
         "fn provenance_key_fragment(": "memory graph key fragments must stay in gateway_memory_graph",
         "fn upsert_memory_relation(": "memory graph relation upsert must stay in gateway_memory_graph",
         "fn artifact_memory_kind(": "artifact memory type classification must stay in gateway_artifact_memory",
@@ -293,6 +295,11 @@ def main() -> int:
         "gateway root must declare memory graph maintenance owner",
     )
     assert_contains(source, "mod gateway_memory_hygiene;", "gateway root must declare memory hygiene owner")
+    assert_contains(
+        source,
+        "mod gateway_memory_graph_persistence;",
+        "gateway root must declare memory graph persistence owner",
+    )
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
 
