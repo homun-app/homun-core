@@ -419,6 +419,11 @@ assertRepoContains(
   "Gateway automation request DTOs must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_template_catalog.rs",
+  "template_catalog_owner_smoke",
+  "Gateway template catalog must have a dedicated owner",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_main_tests.rs",
   "gateway_main_tests_owner_smoke",
   "Gateway root test module must have a dedicated owner",
@@ -597,6 +602,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway main tests owner"',
   "Kernel regression gate must run the gateway main test owner smoke",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway template catalog"',
+  "Kernel regression gate must run the gateway template catalog owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",

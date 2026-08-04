@@ -221,6 +221,19 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn turn_trace_max_bytes(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn plan_autoadvance_from_evidence_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn memory_service_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
+        "struct TemplateCatalogEntry ": "template catalog entry model must stay in gateway_template_catalog",
+        "trait TemplateCatalogProvider ": "template catalog provider contract must stay in gateway_template_catalog",
+        "struct FileTemplateCatalogProvider ": "file template catalog provider must stay in gateway_template_catalog",
+        "struct ImportedTemplatePackProvider ": "imported template pack provider must stay in gateway_template_catalog",
+        "fn template_catalog_entries(": "template catalog loading must stay in gateway_template_catalog",
+        "fn template_catalog_response_from_entries(": "template catalog response projection must stay in gateway_template_catalog",
+        "fn template_catalog_capability_entries(": "template catalog capability projection must stay in gateway_template_catalog",
+        "fn template_preview_content_type(": "template preview asset policy must stay in gateway_template_catalog",
+        "async fn template_catalog(": "template catalog route must stay in gateway_template_catalog",
+        "async fn template_preview(": "template preview route must stay in gateway_template_catalog",
+        "async fn import_pptx_template(": "template import route must stay in gateway_template_catalog",
+        "async fn delete_template(": "template delete route must stay in gateway_template_catalog",
+        "async fn template_source_attachment(": "template source attachment route must stay in gateway_template_catalog",
         "fn browser_open_research_discovery_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn booking_assumption_choice_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn choice_resume_instruction_legacy_backup(": "prompt instruction snippets must stay in gateway_prompt_instructions",
@@ -364,6 +377,7 @@ def main() -> int:
     )
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
+    assert_contains(source, "mod gateway_template_catalog;", "gateway root must declare template catalog owner")
     assert_contains(
         source,
         "#[cfg(test)]\nmod gateway_main_tests;",
