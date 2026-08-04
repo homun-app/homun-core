@@ -130,9 +130,13 @@ fn execution_attempt_control_is_not_a_second_persisted_contract() {
 fn channel_and_stream_markers_do_not_own_lifecycle() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
+    let channels = production_source(&root.join("src/gateway_channels.rs"));
+    let streams = production_source(&root.join("src/gateway_chat_streams.rs"));
     assert!(!main.contains("persist_legacy_hitl_wait_from_parts"));
+    assert!(!channels.contains("persist_legacy_hitl_wait_from_parts"));
+    assert!(!streams.contains("persist_legacy_hitl_wait_from_parts"));
 
-    let inbound = main
+    let inbound = channels
         .split("async fn handle_channel_inbound")
         .nth(1)
         .expect("channel inbound handler")
