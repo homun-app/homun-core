@@ -270,6 +270,14 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn resolve_context_budget_chars(": "model context budget resolution must stay in gateway_model_routing",
         "async fn compact_for_context_budget(": "model-visible context compaction must stay in gateway_model_routing",
         "fn zai_thinking_enabled(": "Z.ai thinking policy must stay in gateway_model_routing",
+        "struct BrowserToolCtx": "browser tool context must stay in gateway_tool_execution",
+        "struct ChatToolCtx": "chat tool context must stay in gateway_tool_execution",
+        "async fn execute_browser_tool(": "browser tool dispatch must stay in gateway_tool_execution",
+        "async fn execute_chat_tool(": "chat tool dispatch must stay in gateway_tool_execution",
+        "struct GatewayCapabilityExecutor": "gateway capability executor must stay in gateway_tool_execution",
+        "struct GatewayBrowserExecutor": "gateway browser executor must stay in gateway_tool_execution",
+        "struct GatewayBrowseExecutor": "browse sub-agent executor must stay in gateway_tool_execution",
+        "struct BrowseOnlyCapabilityExecutor": "browse-only capability executor must stay in gateway_tool_execution",
         "fn browser_open_research_discovery_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn booking_assumption_choice_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn choice_resume_instruction_legacy_backup(": "prompt instruction snippets must stay in gateway_prompt_instructions",
@@ -418,6 +426,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_project_files;", "gateway root must declare project files owner")
     assert_contains(source, "mod gateway_browser_tools;", "gateway root must declare browser tools owner")
     assert_contains(source, "mod gateway_deliverables;", "gateway root must declare deliverables owner")
+    assert_contains(source, "mod gateway_tool_execution;", "gateway root must declare tool execution owner")
     assert_contains(
         source,
         "#[cfg(test)]\nmod gateway_main_tests;",
