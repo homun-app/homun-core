@@ -170,6 +170,12 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct MemoryInjectionPolicy": "memory briefing injection policy type must stay in gateway_memory_briefing",
         "fn memory_injection_policy(": "memory briefing injection policy must stay in gateway_memory_briefing",
         "fn memory_intent_allows_recall(": "memory briefing recall policy must stay in gateway_memory_briefing",
+        "fn project_objective_block(": "memory turn objective injection must stay in gateway_memory_turn_context",
+        "fn objective_block_for_workspace(": "memory turn objective derivation must stay in gateway_memory_turn_context",
+        "fn project_brief_block(": "memory turn project brief injection must stay in gateway_memory_turn_context",
+        "fn recent_work_block(": "memory turn recent-work injection must stay in gateway_memory_turn_context",
+        "fn scope_from_active_workspace(": "memory turn scope projection must stay in gateway_memory_turn_context",
+        "fn memory_scope_for_turn(": "memory turn thread scope projection must stay in gateway_memory_turn_context",
         "fn provenance_key_fragment(": "memory graph key fragments must stay in gateway_memory_graph",
         "fn upsert_memory_relation(": "memory graph relation upsert must stay in gateway_memory_graph",
         "fn artifact_memory_kind(": "artifact memory type classification must stay in gateway_artifact_memory",
@@ -250,6 +256,11 @@ def main() -> int:
         "gateway root must declare memory query embedding owner",
     )
     assert_contains(source, "mod gateway_memory_briefing;", "gateway root must declare memory briefing owner")
+    assert_contains(
+        source,
+        "mod gateway_memory_turn_context;",
+        "gateway root must declare memory turn context owner",
+    )
     assert_contains(source, "mod gateway_memory_graph;", "gateway root must declare memory graph owner")
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
