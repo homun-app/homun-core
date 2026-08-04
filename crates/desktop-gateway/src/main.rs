@@ -46,6 +46,7 @@ mod gateway_memory_clients;
 mod gateway_memory_dedup;
 mod gateway_memory_graph;
 mod gateway_memory_graph_maintenance;
+mod gateway_memory_hygiene;
 mod gateway_memory_query_embeddings;
 mod gateway_memory_recall_service;
 mod gateway_memory_turn_context;
@@ -180,6 +181,7 @@ use gateway_memory_graph_maintenance::{
     link_memory_mentions, normalize_project_scope_entities, reconcile_memory_scope,
     regenerate_graph_links,
 };
+use gateway_memory_hygiene::{memory_hygiene_suggestions_for_scope, normalized_entity_name};
 #[cfg(test)]
 use gateway_memory_recall_service::InProcessMemoryRecallService;
 use gateway_memory_recall_service::{install_memory_service_if_enabled, recall_pack_on_facade};
@@ -2267,86 +2269,6 @@ fn tombstone_automation_memory_records(
         deleted += 1;
     }
     Ok(deleted)
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct MemoryHygieneSuggestion {
-    survivor_ref: String,
-    absorbed_ref: String,
-    survivor_label: String,
-    absorbed_label: String,
-    reason: String,
-    safe_auto_merge: bool,
-    confidence: f64,
-}
-
-fn normalized_entity_name(name: &str) -> String {
-    sanitize_dedup_key("name", name)
-        .strip_prefix("name:")
-        .unwrap_or("")
-        .to_string()
-}
-
-fn verified_identity_aliases(entity: &MemoryEntity) -> std::collections::BTreeSet<String> {
-    entity
-        .aliases
-        .iter()
-        .map(|alias| alias.trim().to_lowercase())
-        .filter(|alias| {
-            alias.contains('@')
-                || alias.starts_with("telegram:")
-                || alias.starts_with("whatsapp:")
-                || alias.starts_with("email:")
-        })
-        .collect()
-}
-
-fn memory_hygiene_suggestions_for_scope(
-    facade: &MemoryFacade,
-    user: &MemoryUserId,
-    workspace: &MemoryWorkspaceId,
-) -> Result<Vec<MemoryHygieneSuggestion>, String> {
-    let mut people: Vec<MemoryEntity> = facade
-        .list_entities_for_ui(user, workspace)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .filter(|entity| entity.entity_type == "person")
-        .filter(|entity| entity.metadata.get("merged_into").is_none())
-        .collect();
-    people.sort_by(|a, b| a.canonical_key.cmp(&b.canonical_key));
-    let mut out = Vec::new();
-    for i in 0..people.len() {
-        for j in (i + 1)..people.len() {
-            let left = &people[i];
-            let right = &people[j];
-            let left_handles = verified_identity_aliases(left);
-            let right_handles = verified_identity_aliases(right);
-            let shared_handle = left_handles.intersection(&right_handles).next().cloned();
-            let same_name = !left.name.trim().is_empty()
-                && normalized_entity_name(&left.name) == normalized_entity_name(&right.name);
-            let (reason, safe_auto_merge, confidence) = if let Some(handle) = shared_handle {
-                (
-                    format!("same verified identity alias: {handle}"),
-                    true,
-                    0.99,
-                )
-            } else if same_name {
-                ("same normalized person name".to_string(), false, 0.72)
-            } else {
-                continue;
-            };
-            out.push(MemoryHygieneSuggestion {
-                survivor_ref: left.reference.to_string(),
-                absorbed_ref: right.reference.to_string(),
-                survivor_label: left.name.clone(),
-                absorbed_label: right.name.clone(),
-                reason,
-                safe_auto_merge,
-                confidence,
-            });
-        }
-    }
-    Ok(out)
 }
 
 /// Tool schema for on-demand deep memory recall (M3). The always-on profile is a
