@@ -234,6 +234,14 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn import_pptx_template(": "template import route must stay in gateway_template_catalog",
         "async fn delete_template(": "template delete route must stay in gateway_template_catalog",
         "async fn template_source_attachment(": "template source attachment route must stay in gateway_template_catalog",
+        "fn read_file_tool_schema(": "project file tool schemas must stay in gateway_project_files",
+        "fn project_filesystem_mcp_instruction(": "project filesystem MCP prompt must stay in gateway_project_files",
+        "fn jail_in_root(": "project path jail must stay in gateway_project_files",
+        "fn fs_expand_abs(": "filesystem absolute path expansion must stay in gateway_project_files",
+        "fn read_project_file(": "project file reads must stay in gateway_project_files",
+        "fn write_project_file(": "project file writes must stay in gateway_project_files",
+        "fn apply_patch_in_project(": "project patch application must stay in gateway_project_files",
+        "async fn run_in_project(": "project command execution must stay in gateway_project_files",
         "fn browser_open_research_discovery_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn booking_assumption_choice_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn choice_resume_instruction_legacy_backup(": "prompt instruction snippets must stay in gateway_prompt_instructions",
@@ -378,6 +386,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
     assert_contains(source, "mod gateway_template_catalog;", "gateway root must declare template catalog owner")
+    assert_contains(source, "mod gateway_project_files;", "gateway root must declare project files owner")
     assert_contains(
         source,
         "#[cfg(test)]\nmod gateway_main_tests;",
