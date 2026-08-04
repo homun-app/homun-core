@@ -414,6 +414,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway prompt instructions",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "gateway_prompt_instructions",
+            ],
+        ),
+        Step(
             "gateway memory hygiene",
             [
                 "cargo",

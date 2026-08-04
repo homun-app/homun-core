@@ -221,6 +221,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn turn_trace_max_bytes(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn plan_autoadvance_from_evidence_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn memory_service_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
+        "fn browser_open_research_discovery_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
+        "fn booking_assumption_choice_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
+        "fn choice_resume_instruction_legacy_backup(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn provenance_key_fragment(": "memory graph key fragments must stay in gateway_memory_graph",
         "fn upsert_memory_relation(": "memory graph relation upsert must stay in gateway_memory_graph",
         "fn artifact_memory_kind(": "artifact memory type classification must stay in gateway_artifact_memory",
@@ -334,6 +337,11 @@ def main() -> int:
     )
     assert_contains(source, "mod gateway_datetime_tools;", "gateway root must declare datetime tools owner")
     assert_contains(source, "mod gateway_runtime_flags;", "gateway root must declare runtime flags owner")
+    assert_contains(
+        source,
+        "mod gateway_prompt_instructions;",
+        "gateway root must declare prompt instructions owner",
+    )
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
 

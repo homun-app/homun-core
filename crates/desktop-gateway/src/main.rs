@@ -63,6 +63,7 @@ mod gateway_plugins;
 mod gateway_proactivity;
 mod gateway_project_search_tools;
 mod gateway_prompt;
+mod gateway_prompt_instructions;
 mod gateway_recall_context;
 mod gateway_remote_approval;
 mod gateway_routes;
@@ -229,6 +230,9 @@ use gateway_proactivity::{run_proactive_review, suggestion_choices_json};
 use gateway_project_search_tools::{
     github_search, github_search_tool_schema, query_code_graph, query_code_graph_tool_schema,
     query_git_history, query_git_history_tool_schema,
+};
+use gateway_prompt_instructions::{
+    booking_assumption_choice_instruction, browser_open_research_discovery_instruction,
 };
 use gateway_recall_context::{
     gather_open_loops, memory_access_status_instruction, memory_read_effects_from_recall_payload,
@@ -2237,34 +2241,6 @@ fn block_stalled_step(plan: &mut [serde_json::Value]) -> Option<String> {
 
 // `MIN_DELIVERED_CHARS_TO_CONCLUDE` + `answer_concludes_plan` moved to `engine::plan`
 // (ADR 0024 inc 5e.3); imported below.
-
-fn browser_open_research_discovery_instruction() -> &'static str {
-    "For open-ended current news or broad web research where the user did NOT name \
-a specific site/URL, start with search/discovery (for example a search results or \
-news discovery page), scan multiple recent candidates, then choose the best sources. \
-match the user's language and the browser locale when choosing discovery pages; when \
-using a search/news URL, include locale parameters such as hl=it and gl=IT when \
-appropriate instead of defaulting to an unrelated market. \
-Do not jump directly to one outlet unless the user explicitly named it."
-}
-
-fn booking_assumption_choice_instruction() -> &'static str {
-    "For bookings, purchases, or other real-world transactions, do NOT silently proceed \
-with an assumed critical parameter (departure city/station, destination, date/time, quantity, \
-budget, passenger count, etc.). If you have a likely default from context, STOP and emit a \
-CHOICES marker with one option that confirms the default and one option for free-text correction \
-(for example: Confirm Milan departure / Choose another departure). Continue only after the user \
-chooses or writes the missing value."
-}
-
-/// Legacy prose backup — NOT the source of truth. ResumeBinding + `choice_resume_harness_slot`
-/// own the contract; this string must not be injected on its own from context heuristics.
-#[cfg(test)]
-fn choice_resume_instruction_legacy_backup() -> &'static str {
-    "CHOICE RESUME (legacy backup): the user's latest message answers your prior CHOICES card. \
-Continue the unfinished task from the warm browser session and open plan — do NOT restart \
-discovery/search from scratch."
-}
 
 fn runtime_plan_thread_key(thread_id: Option<&str>) -> String {
     thread_id
@@ -63217,34 +63193,6 @@ prs.save(Path({path:?}))
         assert!(!super::answer_concludes_plan(1, 599));
         // Several steps still open → it genuinely stopped early, keep nudging.
         assert!(!super::answer_concludes_plan(2, 5000));
-    }
-
-    #[test]
-    fn browser_method_guides_open_ended_news_through_discovery_first() {
-        let guidance = super::browser_open_research_discovery_instruction();
-        assert!(guidance.contains("open-ended current news"));
-        assert!(guidance.contains("start with search/discovery"));
-        assert!(guidance.contains("match the user's language"));
-        assert!(guidance.contains("browser locale"));
-        assert!(guidance.contains("hl="));
-        assert!(guidance.contains("gl="));
-        assert!(guidance.contains("Do not jump directly to one outlet"));
-    }
-
-    #[test]
-    fn booking_assumption_instruction_requires_choice_card_before_proceeding() {
-        let guidance = super::booking_assumption_choice_instruction();
-        assert!(guidance.contains("do NOT silently proceed"));
-        assert!(guidance.contains("assumed critical parameter"));
-        assert!(guidance.contains("CHOICES marker"));
-        assert!(guidance.contains("Continue only after the user"));
-    }
-
-    #[test]
-    fn choice_resume_legacy_backup_is_not_contract_sot() {
-        let guidance = super::choice_resume_instruction_legacy_backup();
-        assert!(guidance.contains("legacy backup"));
-        assert!(guidance.contains("do NOT restart"));
     }
 
     #[test]
