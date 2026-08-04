@@ -221,6 +221,10 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn turn_trace_max_bytes(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn plan_autoadvance_from_evidence_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn memory_service_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
+        "struct RuntimeSettings": "runtime settings DTO must stay in gateway_runtime_settings",
+        "fn merge_runtime_settings(": "runtime settings merge must stay in gateway_runtime_settings",
+        "async fn get_runtime_settings(": "runtime settings read route must stay in gateway_runtime_settings",
+        "async fn set_runtime_settings(": "runtime settings update route must stay in gateway_runtime_settings",
         "struct TemplateCatalogEntry ": "template catalog entry model must stay in gateway_template_catalog",
         "trait TemplateCatalogProvider ": "template catalog provider contract must stay in gateway_template_catalog",
         "struct FileTemplateCatalogProvider ": "file template catalog provider must stay in gateway_template_catalog",
@@ -343,6 +347,19 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn mcp_filesystem_project_relative_path(": "MCP filesystem artifact detection must stay in gateway_artifact_memory",
         "fn mcp_filesystem_project_relative_path_for_root(": "MCP filesystem artifact detection must stay in gateway_artifact_memory",
         "async fn register_mcp_filesystem_artifact_memory(": "MCP filesystem artifact memory must stay in gateway_artifact_memory",
+        "struct ArtifactRef": "artifact file route DTOs must stay in gateway_artifacts",
+        "struct ArtifactDestination": "artifact destination DTOs must stay in gateway_artifacts",
+        "struct BrandKit": "brand kit DTO must stay in gateway_artifacts",
+        "async fn save_artifact_content(": "artifact content save route must stay in gateway_artifacts",
+        "async fn download_artifact(": "artifact download route must stay in gateway_artifacts",
+        "async fn artifact_pdf_pages(": "artifact PDF preview route must stay in gateway_artifacts",
+        "async fn list_artifact_destinations(": "artifact destination route must stay in gateway_artifacts",
+        "async fn export_artifacts_zip(": "artifact export route must stay in gateway_artifacts",
+        "async fn memory_artifacts(": "artifact memory catalog route must stay in gateway_artifacts",
+        "fn write_artifact_bytes(": "artifact write path must stay in gateway_artifacts",
+        "fn materialize_brand_kit(": "brand kit materialization must stay in gateway_artifacts",
+        "fn save_artifact_to_destination(": "authorized artifact save path must stay in gateway_artifacts",
+        "fn detect_new_artifacts(": "artifact detection must stay in gateway_artifacts",
         "fn wiki_edited_path(": "memory wiki edit registry path must stay in gateway_memory_wiki",
         "fn load_wiki_edited(": "memory wiki edit registry loading must stay in gateway_memory_wiki",
         "fn mark_wiki_edited(": "memory wiki edit registry writes must stay in gateway_memory_wiki",
@@ -435,6 +452,11 @@ def main() -> int:
     )
     assert_contains(source, "mod gateway_datetime_tools;", "gateway root must declare datetime tools owner")
     assert_contains(source, "mod gateway_runtime_flags;", "gateway root must declare runtime flags owner")
+    assert_contains(
+        source,
+        "mod gateway_runtime_settings;",
+        "gateway root must declare runtime settings owner",
+    )
     assert_contains(source, "mod gateway_model_routing;", "gateway root must declare model routing owner")
     assert_contains(
         source,
@@ -458,6 +480,7 @@ def main() -> int:
         "gateway root must declare automation route owner",
     )
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
+    assert_contains(source, "mod gateway_artifacts;", "gateway root must declare artifact file owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
     assert_contains(source, "mod gateway_template_catalog;", "gateway root must declare template catalog owner")
     assert_contains(source, "mod gateway_project_files;", "gateway root must declare project files owner")

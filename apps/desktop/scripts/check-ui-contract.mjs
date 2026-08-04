@@ -589,6 +589,16 @@ assertRepoContains(
   "Kernel regression gate must run the gateway runtime flags owner test",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_runtime_settings.rs",
+  "runtime_settings_owner_smoke",
+  "Gateway runtime settings owner must keep a local smoke test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway runtime settings"',
+  "Kernel regression gate must run the gateway runtime settings owner test",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway prompt instructions"',
   "Kernel regression gate must run the gateway prompt instructions owner test",
@@ -697,6 +707,16 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway artifact memory"',
   "Kernel regression gate must run the gateway artifact memory owner test",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_artifacts.rs",
+  "artifacts_owner_smoke",
+  "Gateway artifact file owner must keep a local smoke test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway artifacts"',
+  "Kernel regression gate must run the gateway artifact file owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",

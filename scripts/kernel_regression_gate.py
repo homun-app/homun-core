@@ -414,6 +414,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway runtime settings",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "gateway_runtime_settings",
+            ],
+        ),
+        Step(
             "gateway prompt instructions",
             [
                 "cargo",
@@ -603,6 +615,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
                 "--bin",
                 "local-first-desktop-gateway",
                 "gateway_artifact_memory",
+            ],
+        ),
+        Step(
+            "gateway artifacts",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "gateway_artifacts",
             ],
         ),
         Step(
