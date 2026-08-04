@@ -522,6 +522,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway browser runtime",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "gateway_browser_runtime",
+            ],
+        ),
+        Step(
             "gateway deliverables",
             [
                 "cargo",

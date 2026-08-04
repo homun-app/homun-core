@@ -250,6 +250,17 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn browser_action_outcome_hint(": "browser action outcome policy must stay in gateway_browser_tools",
         "fn normalize_browser_action_bundle(": "browser action bundle normalization must stay in gateway_browser_tools",
         "fn stale_ref_recovery_message(": "stale browser ref recovery must stay in gateway_browser_tools",
+        "fn browse_web_lock(": "browser runtime lock must stay in gateway_browser_runtime",
+        "async fn chat_browser_call_bounded(": "bounded browser sidecar calls must stay in gateway_browser_runtime",
+        "async fn persist_browser_checkpoint(": "browser checkpoint persistence must stay in gateway_browser_runtime",
+        "async fn restore_browser_checkpoint(": "browser checkpoint restore must stay in gateway_browser_runtime",
+        "struct BrowserPaymentContext": "browser payment runtime context must stay in gateway_browser_runtime",
+        "fn thread_has_browser_continuation(": "browser continuation probing must stay in gateway_browser_runtime",
+        "fn spawn_thread_browser_session_reaper(": "browser session reaper must stay in gateway_browser_runtime",
+        "fn spawn_contained_computer_idle_reaper(": "contained computer idle reaper must stay in gateway_browser_runtime",
+        "fn spawn_browser_handoff_reaper(": "browser handoff reaper must stay in gateway_browser_runtime",
+        "struct BrowserActivityState": "browser activity state must stay in gateway_browser_runtime",
+        "struct TerminalEntryView": "sandbox terminal activity state must stay in gateway_browser_runtime",
         "fn make_deck_tool_schema(": "deck tool schema must stay in gateway_deliverables",
         "fn make_document_tool_schema(": "document tool schema must stay in gateway_deliverables",
         "fn deliverable_design_template(": "deliverable design parsing must stay in gateway_deliverables",
@@ -451,6 +462,11 @@ def main() -> int:
     assert_contains(source, "mod gateway_template_catalog;", "gateway root must declare template catalog owner")
     assert_contains(source, "mod gateway_project_files;", "gateway root must declare project files owner")
     assert_contains(source, "mod gateway_browser_tools;", "gateway root must declare browser tools owner")
+    assert_contains(
+        source,
+        "mod gateway_browser_runtime;",
+        "gateway root must declare browser runtime owner",
+    )
     assert_contains(source, "mod gateway_deliverables;", "gateway root must declare deliverables owner")
     assert_contains(source, "mod gateway_tool_execution;", "gateway root must declare tool execution owner")
     assert_contains(source, "mod gateway_channels;", "gateway root must declare channels owner")

@@ -639,6 +639,16 @@ assertRepoContains(
   "Kernel regression gate must run the gateway browser tools owner test",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_browser_runtime.rs",
+  "browser_runtime_owner_smoke",
+  "Gateway browser runtime owner must keep a local smoke test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway browser runtime"',
+  "Kernel regression gate must run the gateway browser runtime owner test",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_deliverables.rs",
   "deliverables_owner_smoke",
   "Gateway deliverables owner must keep a local smoke test",
