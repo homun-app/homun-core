@@ -289,8 +289,8 @@ use gateway_proactivity::parse_review_suggestion;
 use gateway_proactivity::{run_proactive_review, suggestion_choices_json};
 #[cfg(test)]
 pub(crate) use gateway_project_files::{
-    CommandOutputError, build_sandbox_command, command_output_with_timeout, fs_path_authorized,
-    jail_absolute_in_root, workspace_filesystem_manifest, workspace_scoped_mcp_write_for_root,
+    CommandOutputError, command_output_with_timeout, fs_path_authorized, jail_absolute_in_root,
+    workspace_filesystem_manifest, workspace_scoped_mcp_write_for_root,
 };
 pub(crate) use gateway_project_files::{
     FsAuthIssue, RunProjectOutcome, addons_enabled, apply_patch_in_project,
@@ -6010,10 +6010,10 @@ fn chat_max_rounds() -> usize {
         .filter(|n| *n > 0)
         .unwrap_or(MAX_TOOL_ROUNDS)
 }
-/// Round budget once a browser tool is in play. Driving a browser one micro-action
-/// at a time (navigate → snapshot → act → re-snapshot …) needs many more
-/// model↔tool round-trips than a normal chat turn. Env-overridable via
-/// `HOMUN_CHAT_BROWSER_MAX_ROUNDS`.
+// Round budget once a browser tool is in play. Driving a browser one micro-action
+// at a time (navigate -> snapshot -> act -> re-snapshot) needs many more
+// model/tool round-trips than a normal chat turn. Env-overridable via
+// `HOMUN_CHAT_BROWSER_MAX_ROUNDS`.
 
 /// `"Riepilogo Spese Q1"` → `"riepilogo-spese-q1"`. Lowercase, alnum runs joined
 /// by single hyphens, trimmed, capped — a stable directory id for a new skill.

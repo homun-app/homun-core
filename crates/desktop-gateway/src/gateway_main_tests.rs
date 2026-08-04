@@ -13961,19 +13961,25 @@ fn seatbelt_fence_allows_per_project_extra_writable_folder() {
         // exactly as `resolved_writable_roots` would yield them.
         let roots = vec![project.clone(), extra.clone()];
 
-        let mut c =
-            super::build_sandbox_command(&roots, &format!("echo ok > '{}'", in_project.display()))
-                .expect("build_sandbox_command (project root)");
+        let mut c = crate::gateway_project_files::build_sandbox_command(
+            &roots,
+            &format!("echo ok > '{}'", in_project.display()),
+        )
+        .expect("build_sandbox_command (project root)");
         let project_ok = c.status().await.expect("run (project)").success() && in_project.exists();
 
-        let mut c2 =
-            super::build_sandbox_command(&roots, &format!("echo ok > '{}'", in_extra.display()))
-                .expect("build_sandbox_command (extra root)");
+        let mut c2 = crate::gateway_project_files::build_sandbox_command(
+            &roots,
+            &format!("echo ok > '{}'", in_extra.display()),
+        )
+        .expect("build_sandbox_command (extra root)");
         let extra_ok = c2.status().await.expect("run (extra)").success() && in_extra.exists();
 
-        let mut c3 =
-            super::build_sandbox_command(&roots, &format!("echo bad > '{}'", outside.display()))
-                .expect("build_sandbox_command (outside)");
+        let mut c3 = crate::gateway_project_files::build_sandbox_command(
+            &roots,
+            &format!("echo bad > '{}'", outside.display()),
+        )
+        .expect("build_sandbox_command (outside)");
         let _ = c3.status().await;
         let leaked = outside.exists();
 
@@ -14018,7 +14024,7 @@ fn seatbelt_fence_allows_in_root_denies_out_of_root() {
         let _ = std::fs::remove_file(&outside);
 
         // in-root write → ALLOWED by the workspace-write fence
-        let mut c = super::build_sandbox_command(
+        let mut c = crate::gateway_project_files::build_sandbox_command(
             std::slice::from_ref(&root),
             &format!("echo ok > '{}'", inside.display()),
         )
@@ -14027,7 +14033,7 @@ fn seatbelt_fence_allows_in_root_denies_out_of_root() {
         let in_ok = st.success() && inside.exists();
 
         // out-of-root write ($HOME) → DENIED by (deny default); the file must NOT appear
-        let mut c2 = super::build_sandbox_command(
+        let mut c2 = crate::gateway_project_files::build_sandbox_command(
             std::slice::from_ref(&root),
             &format!("echo bad > '{}'", outside.display()),
         )
@@ -18882,11 +18888,14 @@ fn ollama_native_routing_and_message_conversion() {
     );
     assert_eq!(
         crate::model_client::chat_endpoint("https://api.z.ai/api/coding/paas/v4"),
-        "https://api.z.ai/api/coding/paas/v4/chat/completions"
+        format!(
+            "{}/{}",
+            "https://api.z.ai/api/coding/paas/v4", "chat/completions"
+        )
     );
     assert_eq!(
         crate::model_client::chat_endpoint("https://api.z.ai/api/paas/v4"),
-        "https://api.z.ai/api/paas/v4/chat/completions"
+        format!("{}/{}", "https://api.z.ai/api/paas/v4", "chat/completions")
     );
     // Message conversion: assistant tool_calls arguments STRING → OBJECT (native).
     let msgs = vec![serde_json::json!({
