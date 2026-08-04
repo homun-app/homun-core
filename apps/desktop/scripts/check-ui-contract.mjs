@@ -659,6 +659,16 @@ assertRepoContains(
   "Kernel regression gate must run the gateway tool execution owner test",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_channels.rs",
+  "channels_owner_smoke",
+  "Gateway channels owner must keep a local smoke test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway channels"',
+  "Kernel regression gate must run the gateway channels owner test",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway memory hygiene"',
   "Kernel regression gate must run the gateway memory hygiene owner test",

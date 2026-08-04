@@ -278,6 +278,17 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct GatewayBrowserExecutor": "gateway browser executor must stay in gateway_tool_execution",
         "struct GatewayBrowseExecutor": "browse sub-agent executor must stay in gateway_tool_execution",
         "struct BrowseOnlyCapabilityExecutor": "browse-only capability executor must stay in gateway_tool_execution",
+        "struct ChannelSettings": "channel settings must stay in gateway_channels",
+        "fn inbound_action(": "channel inbound policy must stay in gateway_channels",
+        "async fn whatsapp_status(": "WhatsApp status route must stay in gateway_channels",
+        "async fn telegram_status(": "Telegram status route must stay in gateway_channels",
+        "async fn whatsapp_inbound(": "WhatsApp inbound route must stay in gateway_channels",
+        "async fn telegram_inbound(": "Telegram inbound route must stay in gateway_channels",
+        "fn contact_turn_context(": "channel contact perimeter resolution must stay in gateway_channels",
+        "fn backfill_mentions(": "channel mention backfill must stay in gateway_channels",
+        "fn unify_owner_identity(": "owner identity channel unification must stay in gateway_channels",
+        "fn backfill_contacts(": "channel contact backfill must stay in gateway_channels",
+        "fn channel_chat_message(": "channel chat message construction must stay in gateway_channels",
         "fn browser_open_research_discovery_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn booking_assumption_choice_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn choice_resume_instruction_legacy_backup(": "prompt instruction snippets must stay in gateway_prompt_instructions",
@@ -427,6 +438,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_browser_tools;", "gateway root must declare browser tools owner")
     assert_contains(source, "mod gateway_deliverables;", "gateway root must declare deliverables owner")
     assert_contains(source, "mod gateway_tool_execution;", "gateway root must declare tool execution owner")
+    assert_contains(source, "mod gateway_channels;", "gateway root must declare channels owner")
     assert_contains(
         source,
         "#[cfg(test)]\nmod gateway_main_tests;",
