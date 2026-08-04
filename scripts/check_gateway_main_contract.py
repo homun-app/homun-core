@@ -214,6 +214,13 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn query_git_history(": "git history search must stay in gateway_project_search_tools",
         "fn query_code_graph(": "code graph search must stay in gateway_project_search_tools",
         "fn resolve_datetime_tool_schema(": "datetime tool schema must stay in gateway_datetime_tools",
+        "fn plan_stall_abort_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
+        "fn plan_reconcile_on_delivery_flag(": "runtime environment flags must stay in gateway_runtime_flags",
+        "fn plan_reconcile_on_delivery_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
+        "fn turn_trace_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
+        "fn turn_trace_max_bytes(": "runtime environment flags must stay in gateway_runtime_flags",
+        "fn plan_autoadvance_from_evidence_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
+        "fn memory_service_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn provenance_key_fragment(": "memory graph key fragments must stay in gateway_memory_graph",
         "fn upsert_memory_relation(": "memory graph relation upsert must stay in gateway_memory_graph",
         "fn artifact_memory_kind(": "artifact memory type classification must stay in gateway_artifact_memory",
@@ -326,6 +333,7 @@ def main() -> int:
         "gateway root must declare project search tools owner",
     )
     assert_contains(source, "mod gateway_datetime_tools;", "gateway root must declare datetime tools owner")
+    assert_contains(source, "mod gateway_runtime_flags;", "gateway root must declare runtime flags owner")
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
 

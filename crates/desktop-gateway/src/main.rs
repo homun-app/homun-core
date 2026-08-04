@@ -66,6 +66,7 @@ mod gateway_prompt;
 mod gateway_recall_context;
 mod gateway_remote_approval;
 mod gateway_routes;
+mod gateway_runtime_flags;
 mod gateway_secrets;
 mod gateway_store_integrity;
 mod gateway_task_executor_config;
@@ -234,6 +235,11 @@ use gateway_recall_context::{
     merge_automatic_recall_payload, recall_collection_token, recall_source_label,
     recall_stream_payload_from_hits, recall_stream_payload_from_pack, sanitize_dedup_key,
     seed_loop_memory_reads,
+};
+use gateway_runtime_flags::{
+    memory_service_enabled, plan_autoadvance_from_evidence_enabled,
+    plan_reconcile_on_delivery_enabled, plan_stall_abort_enabled, turn_trace_enabled,
+    turn_trace_max_bytes,
 };
 use gateway_secrets::{open_browser_checkpoint_secret_store, open_gateway_secret_store};
 use local_first_browser_automation::{
@@ -2229,76 +2235,8 @@ fn block_stalled_step(plan: &mut [serde_json::Value]) -> Option<String> {
     None
 }
 
-/// F4 abort is hot-path control-flow that can't be validated live in this environment, so it
-/// ships gated (same discipline as `HOMUN_PLAN_RECONCILE`). Flip on to validate. The pure
-/// stall math and the `settled`-termination it relies on are always active and tested.
-fn plan_stall_abort_enabled() -> bool {
-    std::env::var("HOMUN_PLAN_STALL_ABORT")
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("on"))
-        .unwrap_or(false)
-}
-
 // `MIN_DELIVERED_CHARS_TO_CONCLUDE` + `answer_concludes_plan` moved to `engine::plan`
 // (ADR 0024 inc 5e.3); imported below.
-
-/// When the over-running guard accepts the answer with the last
-/// step still open, reconcile that step to `done` so the PERSISTED runtime plan reflects the
-/// delivered work. Without it the plan stays "active" and the NEXT turn falsely resumes it
-/// (the runtime-plan state only goes quiet when the plan is complete→Stale) — the
-/// "lo segue e non lo segue" symptom. Default-on after live evidence showed the Plan panel
-/// stuck at 1/2 while the delivered answer had already registered the last-step failure.
-/// `HOMUN_PLAN_RECONCILE=0`/`off` remains as a diagnostic opt-out.
-fn plan_reconcile_on_delivery_flag(value: Option<&str>) -> bool {
-    !matches!(
-        value.map(str::trim).filter(|value| !value.is_empty()),
-        Some(value) if value == "0" || value.eq_ignore_ascii_case("off")
-    )
-}
-
-fn plan_reconcile_on_delivery_enabled() -> bool {
-    plan_reconcile_on_delivery_flag(std::env::var("HOMUN_PLAN_RECONCILE").ok().as_deref())
-}
-
-/// Turn trace is ON by default (local-only, bounded). `HOMUN_TURN_TRACE=0`/`off` opts out. See
-/// `engine::turn_trace`.
-fn turn_trace_enabled() -> bool {
-    !matches!(
-        std::env::var("HOMUN_TURN_TRACE")
-            .ok()
-            .as_deref()
-            .map(str::trim),
-        Some("0") | Some("off") | Some("OFF") | Some("Off")
-    )
-}
-
-/// Max bytes before `turn-trace.jsonl` rotates. Override with `HOMUN_TURN_TRACE_MAX_BYTES`.
-fn turn_trace_max_bytes() -> u64 {
-    std::env::var("HOMUN_TURN_TRACE_MAX_BYTES")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .filter(|v| *v > 0)
-        .unwrap_or(5_000_000)
-}
-
-/// Harness-driven plan progress during a browsing turn. When the driver switches to the
-/// (weaker) browser model for the rest of the turn (see the browser branch), that model stops
-/// calling `step_advance`, so the Plan card freezes at the frontier while markets are actually
-/// being read — then jumps to N/N only at the final delivery reconcile. With this ON the harness
-/// itself advances the frontier step as soon as the gathered evidence VERIFIES it (reusing the
-/// F2 judge), so progress rises in real time without trusting the weak model. Same default-on +
-/// diagnostic opt-out (`HOMUN_PLAN_AUTOADVANCE=0`/`off`) as the delivery reconcile.
-fn plan_autoadvance_from_evidence_enabled() -> bool {
-    plan_reconcile_on_delivery_flag(std::env::var("HOMUN_PLAN_AUTOADVANCE").ok().as_deref())
-}
-
-/// ADR 0022 — Tappa 1: instrada brief/recall/learn tramite `MemoryRecallService`
-/// invece dell'orchestrazione inline. Default OFF (parità conservativa); flip ON
-/// per validare l'incapsulamento. Stessa disciplina di `plan_stall_abort_enabled`.
-fn memory_service_enabled() -> bool {
-    std::env::var("HOMUN_MEMORY_SERVICE")
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("on"))
-        .unwrap_or(false)
-}
 
 fn browser_open_research_discovery_instruction() -> &'static str {
     "For open-ended current news or broad web research where the user did NOT name \
@@ -63279,15 +63217,6 @@ prs.save(Path({path:?}))
         assert!(!super::answer_concludes_plan(1, 599));
         // Several steps still open → it genuinely stopped early, keep nudging.
         assert!(!super::answer_concludes_plan(2, 5000));
-    }
-
-    #[test]
-    fn plan_reconcile_on_delivery_is_default_on_with_explicit_opt_out() {
-        assert!(super::plan_reconcile_on_delivery_flag(None));
-        assert!(super::plan_reconcile_on_delivery_flag(Some("1")));
-        assert!(super::plan_reconcile_on_delivery_flag(Some("on")));
-        assert!(!super::plan_reconcile_on_delivery_flag(Some("0")));
-        assert!(!super::plan_reconcile_on_delivery_flag(Some("off")));
     }
 
     #[test]
