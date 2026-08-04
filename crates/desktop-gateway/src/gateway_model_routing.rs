@@ -1226,6 +1226,7 @@ pub(crate) async fn collect_openai_stream(
     resp: reqwest::Response,
     first_token: std::time::Duration,
     idle: std::time::Duration,
+    stream_visible_content: bool,
     sink: &StreamSink,
 ) -> Result<serde_json::Value, String> {
     use futures_util::StreamExt;
@@ -1305,7 +1306,7 @@ pub(crate) async fn collect_openai_stream(
                             .filter(|s| !s.is_empty())
                         {
                             let out = markers.push(fragment);
-                            if !out.is_empty() {
+                            if stream_visible_content && !out.is_empty() {
                                 let _ = emit_stream_event(
                                     sink,
                                     GenerateStreamEvent::Delta { text: out },
@@ -1334,7 +1335,7 @@ pub(crate) async fn collect_openai_stream(
     }
     // Drain the filter at stream end (held partial marker + close a dangling reasoning block).
     let tail = markers.flush();
-    if !tail.is_empty() {
+    if stream_visible_content && !tail.is_empty() {
         let _ = emit_stream_event(sink, GenerateStreamEvent::Delta { text: tail }).await;
     }
     Ok(reassemble_openai_stream(&raw))
@@ -1729,6 +1730,7 @@ pub(crate) async fn process_ollama_line(
     reasoning: &mut String,
     tool_calls: &mut Vec<serde_json::Value>,
     markers: &mut local_first_desktop_gateway::markers::StreamMarkerFilter,
+    stream_visible_content: bool,
     sink: &StreamSink,
 ) -> bool {
     if let Some(message) = json.get("message") {
@@ -1741,7 +1743,7 @@ pub(crate) async fn process_ollama_line(
             // The SAME streaming filter as the OpenAI path (the browser sub-model MiniMax via
             // Ollama native splits `‹‹REASONING››` and can flood orphan closings).
             let out = markers.push(fragment);
-            if !out.is_empty() {
+            if stream_visible_content && !out.is_empty() {
                 let _ = emit_stream_event(sink, GenerateStreamEvent::Delta { text: out }).await;
             }
         }
@@ -1780,6 +1782,7 @@ pub(crate) async fn collect_ollama_native_stream(
     resp: reqwest::Response,
     first_token: std::time::Duration,
     idle: std::time::Duration,
+    stream_visible_content: bool,
     sink: &StreamSink,
 ) -> Result<serde_json::Value, String> {
     use futures_util::StreamExt;
@@ -1839,6 +1842,7 @@ pub(crate) async fn collect_ollama_native_stream(
                             &mut reasoning,
                             &mut tool_calls,
                             &mut markers,
+                            stream_visible_content,
                             sink,
                         )
                         .await
@@ -1871,13 +1875,14 @@ pub(crate) async fn collect_ollama_native_stream(
             &mut reasoning,
             &mut tool_calls,
             &mut markers,
+            stream_visible_content,
             sink,
         )
         .await;
     }
     // Drain the filter (held partial marker + close a dangling reasoning block).
     let tail_delta = markers.flush();
-    if !tail_delta.is_empty() {
+    if stream_visible_content && !tail_delta.is_empty() {
         let _ = emit_stream_event(sink, GenerateStreamEvent::Delta { text: tail_delta }).await;
     }
     // Canonical assembly (F0 / ADR 0019), shared with the OpenAI collector. `reasoning` is the

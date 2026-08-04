@@ -328,7 +328,7 @@ fn project_message_state(
         ExecutionOutcome::Suspended {
             wake: WakeCondition::User { .. },
             ..
-        } => local_first_desktop_gateway::MessageDeliveryState::Delivered,
+        } => local_first_desktop_gateway::MessageDeliveryState::WaitingUser,
         ExecutionOutcome::Suspended {
             wake: WakeCondition::Approval { .. } | WakeCondition::EffectResolution { .. },
             ..
@@ -776,6 +776,51 @@ mod tests {
             .expect_err("missing completed message must keep projection pending");
 
         assert!(error.message.contains("message"));
+    }
+
+    #[test]
+    fn user_suspension_projects_assistant_message_as_waiting_user() {
+        let state = crate::AppState::for_tests();
+        let thread = state
+            .chat_store
+            .lock()
+            .expect("chat store")
+            .create_thread("default")
+            .expect("thread");
+        let mut assistant = local_first_desktop_gateway::seeded_ready_message(
+            &thread.thread_id,
+            "2027-01-15T08:00:00Z".to_string(),
+        );
+        assistant.id = "assistant-user-wait".to_string();
+        assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
+        state
+            .chat_store
+            .lock()
+            .expect("chat store")
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .expect("assistant");
+
+        project_message_state(
+            &state,
+            &thread.thread_id,
+            &assistant.id,
+            &suspended(WakeCondition::User {
+                wait_ref: "turn-1:1:user".to_string(),
+            }),
+        )
+        .expect("project user wait");
+
+        let stored = state
+            .chat_store
+            .lock()
+            .expect("chat store")
+            .message(&thread.thread_id, &assistant.id)
+            .expect("message lookup")
+            .expect("message");
+        assert_eq!(
+            stored.delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::WaitingUser
+        );
     }
 
     #[test]

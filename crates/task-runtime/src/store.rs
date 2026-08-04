@@ -2627,6 +2627,25 @@ impl TaskStore {
         Ok(())
     }
 
+    pub fn has_resource_reservation(&self, task: &TaskRecord) -> TaskRuntimeResult<bool> {
+        let present: i64 = self.connection.query_row(
+            "
+            SELECT EXISTS(
+                SELECT 1
+                FROM resource_reservations
+                WHERE task_id = ?1 AND user_id = ?2 AND workspace_id = ?3
+            )
+            ",
+            params![
+                task.task_id.as_str(),
+                task.user_id.as_str(),
+                task.workspace_id.as_str(),
+            ],
+            |row| row.get(0),
+        )?;
+        Ok(present != 0)
+    }
+
     pub fn resource_usage(
         &self,
         user_id: &UserId,

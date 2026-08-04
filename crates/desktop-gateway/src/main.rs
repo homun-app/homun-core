@@ -822,7 +822,7 @@ mod agent_run_api_tests {
         assert_eq!(value["effective_model"], "snapshot-model");
         assert_eq!(value["provider"], "usage-provider");
         assert_eq!(value["locality"], "cloud");
-        assert_eq!(value["used_input_tokens"], 321);
+        assert_eq!(value["used_input_tokens"], 35);
         assert_eq!(value["compacted"], true);
         assert_eq!(
             value["contributions"]["conversation"]["estimated_tokens"],

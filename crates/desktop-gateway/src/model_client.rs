@@ -1105,10 +1105,12 @@ check/update the key in Settings → Model & Runtime."
         // Reflect the provider actually used (a 401/timeout fallback may have
         // switched it) so we parse the right stream format.
         let ollama = is_ollama_base(&base_url);
+        let stream_visible_content = !payload_has_tools;
         let collected = if ollama {
-            collect_ollama_native_stream(resp, first_token, idle, self.tx).await
+            collect_ollama_native_stream(resp, first_token, idle, stream_visible_content, self.tx)
+                .await
         } else {
-            collect_openai_stream(resp, first_token, idle, self.tx).await
+            collect_openai_stream(resp, first_token, idle, stream_visible_content, self.tx).await
         };
         let body: serde_json::Value = match collected {
             Ok(value) => value,

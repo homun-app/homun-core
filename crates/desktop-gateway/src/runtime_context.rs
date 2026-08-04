@@ -93,6 +93,10 @@ pub fn project_runtime_context(
             .unwrap_or((None, None)),
     };
     let context_window = registry_match.and_then(|(_, model)| model.context_window);
+    let contributions = prompt_snapshot
+        .and_then(snapshot_contributions)
+        .unwrap_or_default();
+    let used_input_tokens = current_prompt_tokens(&contributions);
 
     RuntimeContextResponse {
         run_id: Some(run.run_id.clone()),
@@ -102,12 +106,16 @@ pub fn project_runtime_context(
         provider,
         locality,
         context_window,
-        used_input_tokens: usage.and_then(|usage| usage.input_tokens),
+        used_input_tokens,
         compacted,
-        contributions: prompt_snapshot
-            .and_then(snapshot_contributions)
-            .unwrap_or_default(),
+        contributions,
     }
+}
+
+fn current_prompt_tokens(contributions: &RuntimeContextContributions) -> Option<u64> {
+    let conversation = contributions.conversation.as_ref()?.estimated_tokens;
+    let system_tools = contributions.system_tools.as_ref()?.estimated_tokens;
+    Some(conversation.saturating_add(system_tools))
 }
 
 fn snapshot_contributions(snapshot: &Value) -> Option<RuntimeContextContributions> {
@@ -293,7 +301,7 @@ mod tests {
         assert_eq!(response.provider.as_deref(), Some("usage-provider"));
         assert_eq!(response.locality.as_deref(), Some("cloud"));
         assert_eq!(response.context_window, Some(16_384));
-        assert_eq!(response.used_input_tokens, Some(321));
+        assert_eq!(response.used_input_tokens, Some(40));
         assert!(response.compacted);
         assert_eq!(
             response.contributions.conversation,
@@ -315,6 +323,28 @@ mod tests {
     }
 
     #[test]
+    fn runtime_context_usage_bar_uses_current_prompt_snapshot_not_run_total() {
+        let usage = RunTokenUsage {
+            provider_id: Some("usage-provider".into()),
+            model_id: Some("usage-model".into()),
+            locality: Some("cloud".into()),
+            input_tokens: Some(1_830_132),
+            ..RunTokenUsage::default()
+        };
+
+        let response = project_runtime_context(
+            Some(&run()),
+            Some(&snapshot()),
+            false,
+            Some(&usage),
+            &registry(),
+        );
+
+        assert_eq!(response.used_input_tokens, Some(40));
+        assert_eq!(response.context_window, Some(16_384));
+    }
+
+    #[test]
     fn runtime_context_registry_fallback_never_exposes_internal_endpoint() {
         let response =
             project_runtime_context(Some(&run()), Some(&snapshot()), false, None, &registry());
@@ -322,7 +352,7 @@ mod tests {
 
         assert_eq!(response.provider.as_deref(), Some("registry-provider"));
         assert_eq!(response.locality.as_deref(), Some("cloud"));
-        assert_eq!(response.used_input_tokens, None);
+        assert_eq!(response.used_input_tokens, Some(40));
         for forbidden in [
             "system-secret",
             "user-secret",

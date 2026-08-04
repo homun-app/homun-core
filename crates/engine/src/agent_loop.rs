@@ -736,20 +736,11 @@ again to find the right control). Keep working on the task — do not stop and d
                 ls.last_round_sig = round_sig;
             }
             // Echo the assistant's tool-call turn, then append each tool result.
-            // Content is sanitized so a leaked text tool-call doesn't pollute the
-            // conversation history. A model may emit the analytical deliverable in
-            // the same message as update_plan; retain that prose as candidate evidence
-            // before dispatch so the plan verifier can judge the actual output.
-            let sanitized_content = model_normalize::sanitize_model_text(&raw_content);
-            if let Some(answer_evidence) = candidate_answer_evidence(&sanitized_content) {
-                ls.step_evidence.insert(0, answer_evidence);
-                if ls.step_evidence.len() > 60 {
-                    ls.step_evidence.pop();
-                }
-            }
+            // Keep provider-required tool_calls, but never preserve planning prose
+            // from the same round as model-visible conversation history.
             ls.messages.push(serde_json::json!({
                 "role": "assistant",
-                "content": sanitized_content,
+                "content": "",
                 "tool_calls": calls,
             }));
             // Set when a write tool needs confirmation: we stop the loop and let
@@ -2056,6 +2047,55 @@ mod tests {
                     base_url: call.base_url.to_string(),
                     api_key: None,
                 },
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct ToolCallTextLeakModel {
+        calls: AtomicUsize,
+        second_round_messages: Mutex<Vec<Value>>,
+    }
+
+    impl ModelClient for ToolCallTextLeakModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if index == 0 {
+                return Ok(ModelRoundOutput {
+                    message: json!({
+                        "role": "assistant",
+                        "content": "Planning text that must not become visible history.",
+                        "tool_calls": [{
+                            "id": "tool_1",
+                            "type": "function",
+                            "function": { "name": "recall_memory", "arguments": "{}" },
+                        }],
+                    }),
+                    provider,
+                    finish_reason: Some("tool_calls".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                });
+            }
+            *self.second_round_messages.lock().unwrap() = call.messages.to_vec();
+            on_delta("Final answer after tool.");
+            Ok(ModelRoundOutput {
+                message: json!({ "role": "assistant", "content": "Final answer after tool." }),
+                provider,
                 finish_reason: Some("stop".to_string()),
                 usage: Default::default(),
                 latency_ms: None,
@@ -3668,6 +3708,76 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         assert!(evidence.chars().count() < 3400);
         assert!(candidate_answer_evidence(&"Repeated grounded row. ".repeat(20)).is_some());
         assert!(candidate_answer_evidence("Short answer").is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tool_call_round_text_is_not_preserved_as_visible_history() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "use a tool" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let model = ToolCallTextLeakModel::default();
+
+        let outcome = run_turn(
+            ls,
+            cfg(),
+            &usage_context(),
+            &model,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &Vec::new(),
+            "use a tool".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
+        let second_round_messages = model.second_round_messages.lock().unwrap();
+        assert!(
+            second_round_messages.iter().all(|message| message
+                .get("content")
+                .and_then(Value::as_str)
+                .is_none_or(|content| !content.contains("Planning text"))),
+            "tool-call planning text leaked into model-visible history: {second_round_messages:?}"
+        );
+        let assistant_tool_message = second_round_messages
+            .iter()
+            .find(|message| {
+                message.get("role").and_then(Value::as_str) == Some("assistant")
+                    && message
+                        .get("tool_calls")
+                        .and_then(Value::as_array)
+                        .is_some()
+            })
+            .expect("assistant tool-call message should be preserved structurally");
+        assert_eq!(
+            assistant_tool_message
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+            ""
+        );
     }
 
     // ⭐ The FIRST actual execution of `run_turn` (everything else is compile-time): drive a full turn

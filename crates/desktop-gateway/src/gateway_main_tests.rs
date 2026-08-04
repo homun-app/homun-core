@@ -18856,6 +18856,7 @@ async fn openai_stream_finishes_when_provider_sends_finish_reason_but_keeps_sock
             response,
             std::time::Duration::from_secs(1),
             std::time::Duration::from_secs(30),
+            true,
             &sink,
         ),
     )
@@ -18866,6 +18867,71 @@ async fn openai_stream_finishes_when_provider_sends_finish_reason_but_keeps_sock
     server.abort();
     assert_eq!(body["choices"][0]["message"]["content"], "final answer");
     assert_eq!(body["choices"][0]["finish_reason"], "stop");
+}
+
+#[tokio::test]
+async fn openai_tool_round_stream_reassembles_body_without_visible_delta() {
+    use tokio::io::AsyncWriteExt;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test stream");
+    let address = listener.local_addr().expect("test stream address");
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("accept test stream");
+        let payload = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"planning text\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            payload.len(),
+            payload,
+        );
+        socket
+            .write_all(response.as_bytes())
+            .await
+            .expect("write test stream");
+        socket.flush().await.expect("flush test stream");
+    });
+    let response = reqwest::Client::new()
+        .get(format!("http://{address}"))
+        .send()
+        .await
+        .expect("open test stream");
+    let (mpsc, mut rx) = tokio::sync::mpsc::channel(4);
+    let (tx, _) = tokio::sync::broadcast::channel(4);
+    let entry = std::sync::Arc::new(super::StreamEntry {
+        lines: std::sync::Mutex::new(Vec::new()),
+        tx,
+        finished: std::sync::atomic::AtomicBool::new(false),
+        last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
+        thread_id: None,
+        assistant_message_id: std::sync::Mutex::new(None),
+        outcome: std::sync::Mutex::new(None),
+        outcome_ready: tokio::sync::Notify::new(),
+    });
+    let sink = super::StreamSink {
+        mpsc,
+        entry: entry.clone(),
+    };
+
+    let body = super::collect_openai_stream(
+        response,
+        std::time::Duration::from_secs(1),
+        std::time::Duration::from_secs(30),
+        false,
+        &sink,
+    )
+    .await
+    .expect("stream is valid");
+
+    server.await.expect("server completes");
+    assert_eq!(body["choices"][0]["message"]["content"], "planning text");
+    assert_eq!(body["choices"][0]["finish_reason"], "tool_calls");
+    assert!(rx.try_recv().is_err());
+    assert!(entry.lines.lock().expect("stream lines").is_empty());
 }
 
 #[test]

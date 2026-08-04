@@ -692,6 +692,53 @@ pub fn recover_chat_turns_at_boot(
             continue;
         }
         if task.status != TaskStatus::Running {
+            if task.status == TaskStatus::WaitingResource
+                && (store.has_resource_reservation(&task)?
+                    || task.lease_owner.is_some()
+                    || task.lease_expires_at.is_some()
+                    || task.last_heartbeat_at.is_some())
+            {
+                store.abort_running_agent_runs_for_turn(
+                    task.task_id.as_str(),
+                    user_id.as_str(),
+                    workspace_id.as_str(),
+                    "gateway_restart",
+                )?;
+                store.release_resources(&task)?;
+                task.status = TaskStatus::Queued;
+                task.clear_lease();
+                task.blocked_reason = Some("recovered at boot (stale resource reservation)".into());
+                task.updated_at = OffsetDateTime::now_utc();
+                let task_id = task.task_id.clone();
+                store.insert_chat_turn(
+                    &task,
+                    task.input_json
+                        .get("thread_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                    task.input_json
+                        .get("request_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                    task.input_json
+                        .get("source")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("interactive"),
+                    task.input_json
+                        .get("approval")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("full"),
+                )?;
+                store.insert_turn_event(
+                    task_id.as_str(),
+                    TurnEventKind::Aborted,
+                    serde_json::json!({
+                        "reason": "stale_resource_reservation_at_boot",
+                        "generation": current_generation,
+                    }),
+                )?;
+                recovered.push(task_id);
+            }
             continue;
         }
         // lease_owner has the form "<generation>:<worker_id>". If the generation is the
@@ -1140,6 +1187,62 @@ mod recovery_tests {
             recover_chat_turns_at_boot(&s, &UserId::new("u"), &WorkspaceId::new("w"), generation)
                 .unwrap();
         assert!(recovered.is_empty());
+    }
+
+    #[test]
+    fn recover_requeues_waiting_resource_turn_that_owns_stale_reservation() {
+        let s = store();
+        let user = UserId::new("u");
+        let workspace = WorkspaceId::new("w");
+        let mut task = TaskRecord::new(
+            "turn_waiting_stale",
+            user.clone(),
+            workspace.clone(),
+            "chat_turn",
+            "prompt",
+            json!({
+                "thread_id": "t1",
+                "request_id": "r_wait",
+                "source": "interactive",
+                "approval": "full"
+            }),
+        )
+        .with_resource(ResourceRequirement::new(ResourceClass::BrowserSession, 1));
+        task.status = TaskStatus::WaitingResource;
+        task.blocked_reason =
+            Some("resource browser_session requires 1 units but only 0 available".into());
+        task.lease_owner = Some("dead-worker".into());
+        task.lease_expires_at = Some(time::OffsetDateTime::now_utc() - Duration::minutes(1));
+        s.insert_chat_turn(&task, "t1", "r_wait", "interactive", "full")
+            .unwrap();
+        s.reserve_resources(&task, "dead-worker").unwrap();
+
+        let recovered = recover_chat_turns_at_boot(&s, &user, &workspace, 7).unwrap();
+
+        assert_eq!(recovered, vec![TaskId::new("turn_waiting_stale")]);
+        assert_eq!(
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession)
+                .unwrap(),
+            0
+        );
+        let stored = s
+            .get_task(&TaskId::new("turn_waiting_stale"), &user, &workspace)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.status, TaskStatus::Queued);
+        assert!(stored.lease_owner.is_none());
+        assert!(stored.lease_expires_at.is_none());
+        assert_eq!(
+            stored.blocked_reason.as_deref(),
+            Some("recovered at boot (stale resource reservation)")
+        );
+        let events = s.read_turn_events("turn_waiting_stale", 0).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, TurnEventKind::Aborted);
+        assert_eq!(
+            events[0].payload["reason"],
+            "stale_resource_reservation_at_boot"
+        );
     }
 
     #[test]
