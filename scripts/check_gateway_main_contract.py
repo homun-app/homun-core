@@ -224,6 +224,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn browser_open_research_discovery_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn booking_assumption_choice_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn choice_resume_instruction_legacy_backup(": "prompt instruction snippets must stay in gateway_prompt_instructions",
+        "fn schedule_task_tool_schema(": "automation tool schemas must stay in gateway_automation_tools",
+        "fn create_automation_tool_schema(": "automation tool schemas must stay in gateway_automation_tools",
+        "fn update_automation_tool_schema(": "automation tool schemas must stay in gateway_automation_tools",
         "fn provenance_key_fragment(": "memory graph key fragments must stay in gateway_memory_graph",
         "fn upsert_memory_relation(": "memory graph relation upsert must stay in gateway_memory_graph",
         "fn artifact_memory_kind(": "artifact memory type classification must stay in gateway_artifact_memory",
@@ -342,6 +345,7 @@ def main() -> int:
         "mod gateway_prompt_instructions;",
         "gateway root must declare prompt instructions owner",
     )
+    assert_contains(source, "mod gateway_automation_tools;", "gateway root must declare automation tools owner")
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
 
