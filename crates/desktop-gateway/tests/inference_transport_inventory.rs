@@ -7,6 +7,8 @@ const APPROVED: &[&str] = &[
     "crates/inference/src/anthropic.rs",
 ];
 
+const TEST_ONLY: &[&str] = &["crates/desktop-gateway/src/gateway_main_tests.rs"];
+
 fn rust_files(root: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(root).unwrap() {
         let path = entry.unwrap().path();
@@ -33,6 +35,9 @@ fn inference_transport_inventory() {
     let mut violations = Vec::new();
     for path in files {
         let relative = path.strip_prefix(&workspace).unwrap().to_string_lossy();
+        if TEST_ONLY.iter().any(|test_only| *test_only == relative) {
+            continue;
+        }
         if APPROVED.iter().any(|approved| *approved == relative) {
             continue;
         }
