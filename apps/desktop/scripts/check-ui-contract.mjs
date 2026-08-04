@@ -389,6 +389,11 @@ assertRepoContains(
   "Gateway project search tools must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_datetime_tools.rs",
+  "resolve_datetime_tool_schema",
+  "Gateway datetime tools must have a dedicated owner",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_memory_hygiene.rs",
   "memory_hygiene_suggestions_for_scope",
   "Gateway memory hygiene suggestions must have a dedicated owner",
@@ -527,6 +532,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway project search tools"',
   "Kernel regression gate must run the gateway project search tools owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway datetime tools"',
+  "Kernel regression gate must run the gateway datetime tools owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",

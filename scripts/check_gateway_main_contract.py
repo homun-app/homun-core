@@ -213,6 +213,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn github_search(": "github repository search must stay in gateway_project_search_tools",
         "fn query_git_history(": "git history search must stay in gateway_project_search_tools",
         "fn query_code_graph(": "code graph search must stay in gateway_project_search_tools",
+        "fn resolve_datetime_tool_schema(": "datetime tool schema must stay in gateway_datetime_tools",
         "fn provenance_key_fragment(": "memory graph key fragments must stay in gateway_memory_graph",
         "fn upsert_memory_relation(": "memory graph relation upsert must stay in gateway_memory_graph",
         "fn artifact_memory_kind(": "artifact memory type classification must stay in gateway_artifact_memory",
@@ -324,6 +325,7 @@ def main() -> int:
         "mod gateway_project_search_tools;",
         "gateway root must declare project search tools owner",
     )
+    assert_contains(source, "mod gateway_datetime_tools;", "gateway root must declare datetime tools owner")
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
 
