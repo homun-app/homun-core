@@ -324,6 +324,11 @@ assertRepoContains(
   "Gateway memory dedup/suppression must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_query_embeddings.rs",
+  "memory_query_embedding_cache_key",
+  "Gateway memory query embedding cache must have a dedicated owner",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway main ownership contract"',
   "Kernel regression gate must run the gateway main ownership contract",
@@ -387,6 +392,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway memory dedup"',
   "Kernel regression gate must run the gateway memory dedup owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory query embeddings"',
+  "Kernel regression gate must run the gateway memory query embedding owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",

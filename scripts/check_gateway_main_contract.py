@@ -143,6 +143,14 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn is_semantic_duplicate(": "memory semantic duplicate check must stay in gateway_memory_dedup",
         "fn forgotten_token_sets(": "memory forget suppression tokenization must stay in gateway_memory_dedup",
         "fn is_suppressed(": "memory forget suppression must stay in gateway_memory_dedup",
+        "struct MemoryQueryEmbeddingCacheEntry": "memory query embedding cache entry must stay in gateway_memory_query_embeddings",
+        "struct MemoryQueryEmbeddingCache": "memory query embedding cache must stay in gateway_memory_query_embeddings",
+        "fn memory_query_embedding_cache(": "memory query embedding cache singleton must stay in gateway_memory_query_embeddings",
+        "fn memory_query_embedding_cache_max_entries(": "memory query embedding cache sizing must stay in gateway_memory_query_embeddings",
+        "fn memory_query_embedding_cache_ttl(": "memory query embedding cache ttl must stay in gateway_memory_query_embeddings",
+        "fn memory_query_embedding_timeout(": "memory query embedding timeout must stay in gateway_memory_query_embeddings",
+        "fn normalize_memory_embedding_query(": "memory query normalization must stay in gateway_memory_query_embeddings",
+        "fn memory_query_embedding_cache_key(": "memory query embedding cache key must stay in gateway_memory_query_embeddings",
     }
 
 
@@ -183,6 +191,11 @@ def main() -> int:
     assert_contains(source, "mod gateway_chat_tasks;", "gateway root must declare chat task owner")
     assert_contains(source, "mod gateway_chat_memory;", "gateway root must declare chat memory owner")
     assert_contains(source, "mod gateway_memory_dedup;", "gateway root must declare memory dedup owner")
+    assert_contains(
+        source,
+        "mod gateway_memory_query_embeddings;",
+        "gateway root must declare memory query embedding owner",
+    )
 
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
