@@ -438,6 +438,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway automation formatting",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "gateway_automation_formatting",
+            ],
+        ),
+        Step(
             "gateway memory hygiene",
             [
                 "cargo",

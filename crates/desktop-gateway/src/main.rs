@@ -26,6 +26,7 @@ mod execution_projection;
 mod execution_runtime;
 mod gateway_artifact_memory;
 mod gateway_auth;
+mod gateway_automation_formatting;
 mod gateway_automation_tools;
 mod gateway_background_startup;
 mod gateway_bind;
@@ -178,6 +179,7 @@ use gateway_artifact_memory::{
     register_artifact_memory, register_mcp_filesystem_artifact_memory,
     register_project_file_artifact_memory, upsert_artifact_memory_record,
 };
+use gateway_automation_formatting::automation_trigger_summary;
 use gateway_automation_tools::{
     create_automation_tool_schema, schedule_task_tool_schema, update_automation_tool_schema,
 };
@@ -5322,89 +5324,6 @@ struct AutomationUpdateRequest {
     prompt: Option<String>,
     #[serde(default)]
     approval: Option<ApprovalPolicy>,
-}
-
-/// Human label for a recurrence rule (handles the flexible `dow@days@times` form).
-fn humanize_recurrence(rec: &str) -> String {
-    fn day_label(d: &str) -> &str {
-        match d.trim() {
-            "mon" => "Mon",
-            "tue" => "Tue",
-            "wed" => "Wed",
-            "thu" => "Thu",
-            "fri" => "Fri",
-            "sat" => "Sat",
-            "sun" => "Sun",
-            other => other,
-        }
-    }
-    let lower = rec.trim().to_ascii_lowercase();
-    if let Some(rest) = lower.strip_prefix("dow")
-        && let Some((days, times)) = rest.trim_start_matches(['@', ' ']).split_once('@')
-    {
-        let times_h = times
-            .split(',')
-            .map(str::trim)
-            .collect::<Vec<_>>()
-            .join(", ");
-        let days_h = if matches!(days.trim(), "*" | "all" | "daily" | "") {
-            "Every day".to_string()
-        } else {
-            days.split(',')
-                .map(day_label)
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        return format!("{days_h} · {times_h}");
-    }
-    if let Some(t) = lower.strip_prefix("daily") {
-        return format!("Every day · {}", t.trim_start_matches(['@', ' ']).trim());
-    }
-    if let Some(rest) = lower.strip_prefix("weekly") {
-        let rest = rest.trim_start_matches(['@', ' ']);
-        if let Some((d, t)) = rest.split_once(['@', ' ']) {
-            return format!(
-                "{} · {}",
-                day_label(d),
-                t.trim_start_matches(['@', ' ']).trim()
-            );
-        }
-    }
-    if lower.starts_with("every") {
-        return rec.replacen("every", "Every", 1);
-    }
-    rec.to_string()
-}
-
-/// Human one-line summary of a trigger for the list view.
-fn automation_trigger_summary(trigger: &AutomationTrigger) -> String {
-    match trigger {
-        AutomationTrigger::Schedule { recurrence, .. } => {
-            format!("Schedule · {}", humanize_recurrence(recurrence))
-        }
-        AutomationTrigger::Event { event } => match event {
-            EventTrigger::ChannelMessage { channel, from } => {
-                let ch = channel.as_deref().unwrap_or("any channel");
-                match from {
-                    Some(f) => format!("When {f} writes on {ch}"),
-                    None => format!("Message on {ch}"),
-                }
-            }
-            EventTrigger::EmailReceived { from } => match from {
-                Some(f) => format!("Email from {f}"),
-                None => "Email received".to_string(),
-            },
-            EventTrigger::FileChanged { path } => format!("File changed: {path}"),
-            EventTrigger::MemoryUpdated { topic } => match topic {
-                Some(t) => format!("Memory updated: {t}"),
-                None => "Memory updated".to_string(),
-            },
-            EventTrigger::ConnectorPoll { tool, label, .. } => match label {
-                Some(l) => format!("Event · {l}"),
-                None => format!("Event · {tool}"),
-            },
-        },
-    }
 }
 
 /// Clean UI-facing DTO: unix-second timestamps (the `time` crate's default serde is a numeric
