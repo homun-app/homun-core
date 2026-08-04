@@ -44,9 +44,12 @@ flowchart LR
 | `skill-runtime` / `process-skill` | … | Skills |
 | `subagents` / `context-compression` / `process-manager` / `local-computer-session` | … | Supporto |
 
-`main.rs` del gateway è ancora ~89k righe: pezzi estratti in moduli
-(`execution_host`, `effect_host`, `turn_executor`, `projection_worker`, …) ma il
-file resta il centro di massa.
+`main.rs` del gateway e' ancora grande (~30.3k righe sul branch
+`fabio/chat-lifecycle-consolidation`), ma non e' piu' il centro unico di
+ownership: boot, recovery, background startup, route assembly, browser runtime,
+tool execution, model routing, chat broker e task executor hanno moduli owner
+dedicati. Il contratto operativo e' in
+[`../testing/gateway-ownership-contracts.md`](../testing/gateway-ownership-contracts.md).
 
 ## Porte e versione
 

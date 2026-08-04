@@ -1,6 +1,6 @@
 # Stato — Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-03 (chat lifecycle/rendering consolidation).**
+> **Ultimo aggiornamento: 2026-08-04 (gateway ownership/main.rs consolidation).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,7 +11,7 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
+| Branch | `fabio/chat-lifecycle-consolidation` |
 | HEAD base P0 | `75418ba8` (+ commit smoke/STATO successivi) |
 | Versione | `0.1.1094` |
 
@@ -40,6 +40,14 @@ Slice completate nel branch:
   overlay workspace/browser non sovrapposti.
 - gate unico `scripts/kernel_regression_gate.py` con smoke live opzionale
   `scripts/kernel_live_smoke.py` per modello/gateway/browser/reasoning.
+- estrazione gateway `gateway_turn_broker.rs` per enqueue/resume/cancel/eventi,
+  stream, activity projection e steering.
+- estrazione gateway `gateway_task_executor.rs` per queue task, approval,
+  acquire/lease/finalizzazione, worker, progress checkpoint e sync sessione.
+- contratto ownership in
+  [`testing/gateway-ownership-contracts.md`](testing/gateway-ownership-contracts.md),
+  coperto da `execution_ownership_inventory.rs`,
+  `scripts/check_gateway_main_contract.py` e gate kernel.
 
 ### P0 — fatto
 
@@ -100,7 +108,9 @@ Autorità del residuo: **fence OS + jail + shadow policy + config live**. Il pat
 
 ### Debito noto
 
-- `main.rs` ~89k; `ChatView.tsx` ~10k
+- `main.rs` ~30.3k sul branch `fabio/chat-lifecycle-consolidation`; ulteriori
+  tagli solo con owner contract RED e gate completo.
+- `ChatView.tsx` ~10k
 - `HOMUN_MEMORY_SERVICE` default OFF; `OrchestratorBrain` ancora materializza task
 - Profilo locale ora ha PIN Vault QA e due record sintetici (CF + targa) — solo metadata in list
 - Workspace QA `sandbox-write-probe` creati in temp durante collaudo (pulibili)
@@ -114,8 +124,10 @@ Autorità del residuo: **fence OS + jail + shadow policy + config live**. Il pat
 ## Prompt di ripartenza
 
 ```text
-Continuo Homun. Repo: /Users/fabio/Projects/Homun/app, branch main.
-Leggi docs/STATO.md. P0 gate + Vault + browser crash + sandbox fence OK;
-chat model-driven (S3/S4/write_file) ancora debole sul modello locale.
-Prossimo: uncertain resolve o presentazioni/UI. Non pubblicare.
+Continuo Homun. Repo: /Users/fabio/Projects/Homun/app, branch fabio/chat-lifecycle-consolidation.
+Leggi docs/STATO.md e docs/testing/gateway-ownership-contracts.md.
+Branch corrente: fabio/chat-lifecycle-consolidation. Obiettivo: consolidamento,
+non nuove feature. main.rs e' ~30.3k; nuovi tagli solo con test RED in
+execution_ownership_inventory.rs, check_gateway_main_contract.py e
+kernel_regression_gate.py. Non pubblicare.
 ```

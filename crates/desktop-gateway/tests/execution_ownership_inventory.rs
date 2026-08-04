@@ -288,3 +288,40 @@ fn startup_background_writers_follow_process_fencing() {
         );
     }
 }
+
+#[test]
+fn gateway_ownership_documentation_tracks_extracted_kernel_owners() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let doc = production_source(
+        &root
+            .parent()
+            .expect("crates dir")
+            .parent()
+            .expect("repo root")
+            .join("docs/testing/gateway-ownership-contracts.md"),
+    );
+    let required_patterns = [
+        "main.rs",
+        "gateway_turn_broker.rs",
+        "gateway_task_executor.rs",
+        "gateway_routes.rs",
+        "gateway_boot_maintenance.rs",
+        "gateway_turn_recovery.rs",
+        "gateway_background_startup.rs",
+        "gateway_chat_streams.rs",
+        "gateway_browser_tools.rs",
+        "gateway_browser_runtime.rs",
+        "gateway_model_routing.rs",
+        "gateway_tool_execution.rs",
+        "check_gateway_main_contract.py",
+        "execution_ownership_inventory.rs",
+        "kernel_regression_gate.py",
+    ];
+
+    for pattern in required_patterns {
+        assert!(
+            doc.contains(pattern),
+            "gateway ownership documentation must track {pattern}"
+        );
+    }
+}

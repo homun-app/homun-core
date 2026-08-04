@@ -14,6 +14,7 @@
 | [`decisions/`](decisions/) | ADR immutabili — il “perché” storico, non lo stato corrente |
 | [`testing/anti-regression-protocol.md`](testing/anti-regression-protocol.md) | Gate minimo per non far rientrare regressioni chat/runtime/UI |
 | [`testing/kernel-contract-matrix.md`](testing/kernel-contract-matrix.md) | Matrix owner/test/smoke dei contratti kernel vivi |
+| [`testing/gateway-ownership-contracts.md`](testing/gateway-ownership-contracts.md) | Confini owner del gateway e regole per non far rientrare il monolite |
 | [`testing/release-candidate-matrix.md`](testing/release-candidate-matrix.md) | Gate release installata |
 | [`distribution.md`](distribution.md) · [`release-macos.md`](release-macos.md) · [`windows-signing.md`](windows-signing.md) | Distribuzione / firma |
 | [`HANDOFF-2026-07-31.md`](HANDOFF-2026-07-31.md) | Prompt lungo per un altro agent (opzionale) |
