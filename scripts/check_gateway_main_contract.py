@@ -170,6 +170,27 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct MemoryInjectionPolicy": "memory briefing injection policy type must stay in gateway_memory_briefing",
         "fn memory_injection_policy(": "memory briefing injection policy must stay in gateway_memory_briefing",
         "fn memory_intent_allows_recall(": "memory briefing recall policy must stay in gateway_memory_briefing",
+        "fn provenance_key_fragment(": "memory graph key fragments must stay in gateway_memory_graph",
+        "fn upsert_memory_relation(": "memory graph relation upsert must stay in gateway_memory_graph",
+        "fn artifact_memory_kind(": "artifact memory type classification must stay in gateway_artifact_memory",
+        "fn artifact_memory_matches(": "artifact memory matching must stay in gateway_artifact_memory",
+        "fn provenance_label(": "artifact provenance labels must stay in gateway_artifact_memory",
+        "fn provenance_normalized_label(": "artifact provenance labels must stay in gateway_artifact_memory",
+        "fn artifact_provenance_labels(": "artifact provenance labels must stay in gateway_artifact_memory",
+        "fn decision_affects_artifact(": "artifact evidence provenance must stay in gateway_artifact_memory",
+        "fn explicit_artifact_source_refs(": "artifact source ref parsing must stay in gateway_artifact_memory",
+        "fn upsert_artifact_evidence_provenance_graph(": "artifact evidence provenance graph must stay in gateway_artifact_memory",
+        "fn upsert_artifact_provenance_graph(": "artifact provenance graph must stay in gateway_artifact_memory",
+        "fn upsert_artifact_memory_record(": "artifact memory upsert must stay in gateway_artifact_memory",
+        "fn remember_artifact_memory(": "artifact memory registration must stay in gateway_artifact_memory",
+        "async fn register_artifact_memory(": "artifact memory registration must stay in gateway_artifact_memory",
+        "async fn register_artifact_memory_with_metadata(": "artifact memory registration must stay in gateway_artifact_memory",
+        "async fn emit_rendered_deck_artifacts(": "rendered deck artifact emission must stay in gateway_artifact_memory",
+        "fn remember_project_file_artifact_memory(": "project file artifact memory must stay in gateway_artifact_memory",
+        "async fn register_project_file_artifact_memory(": "project file artifact memory must stay in gateway_artifact_memory",
+        "fn mcp_filesystem_project_relative_path(": "MCP filesystem artifact detection must stay in gateway_artifact_memory",
+        "fn mcp_filesystem_project_relative_path_for_root(": "MCP filesystem artifact detection must stay in gateway_artifact_memory",
+        "async fn register_mcp_filesystem_artifact_memory(": "MCP filesystem artifact memory must stay in gateway_artifact_memory",
     }
 
 
@@ -216,6 +237,8 @@ def main() -> int:
         "gateway root must declare memory query embedding owner",
     )
     assert_contains(source, "mod gateway_memory_briefing;", "gateway root must declare memory briefing owner")
+    assert_contains(source, "mod gateway_memory_graph;", "gateway root must declare memory graph owner")
+    assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
 
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",

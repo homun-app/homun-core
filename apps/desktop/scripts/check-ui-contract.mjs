@@ -339,6 +339,16 @@ assertRepoContains(
   "Gateway memory briefing prompt assembly must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_graph.rs",
+  "upsert_memory_relation",
+  "Gateway memory graph relation helpers must have a dedicated owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_artifact_memory.rs",
+  "register_artifact_memory",
+  "Gateway artifact memory registration must have a dedicated owner",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway main ownership contract"',
   "Kernel regression gate must run the gateway main ownership contract",
@@ -412,6 +422,16 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway memory briefing"',
   "Kernel regression gate must run the gateway memory briefing owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory graph"',
+  "Kernel regression gate must run the gateway memory graph owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway artifact memory"',
+  "Kernel regression gate must run the gateway artifact memory owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",
