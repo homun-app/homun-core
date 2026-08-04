@@ -364,6 +364,12 @@ def main() -> int:
     )
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
+    assert_contains(
+        source,
+        "#[cfg(test)]\nmod gateway_main_tests;",
+        "gateway root must declare extracted main test owner",
+    )
+    assert_not_contains(source, "\nmod tests {", "gateway root tests must stay in gateway_main_tests")
 
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
