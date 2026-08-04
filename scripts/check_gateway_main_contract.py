@@ -250,6 +250,16 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn browser_action_outcome_hint(": "browser action outcome policy must stay in gateway_browser_tools",
         "fn normalize_browser_action_bundle(": "browser action bundle normalization must stay in gateway_browser_tools",
         "fn stale_ref_recovery_message(": "stale browser ref recovery must stay in gateway_browser_tools",
+        "fn make_deck_tool_schema(": "deck tool schema must stay in gateway_deliverables",
+        "fn make_document_tool_schema(": "document tool schema must stay in gateway_deliverables",
+        "fn deliverable_design_template(": "deliverable design parsing must stay in gateway_deliverables",
+        "fn deck_content_schema(": "deck content schema must stay in gateway_deliverables",
+        "async fn generate_deck_content(": "deck content generation must stay in gateway_deliverables",
+        "fn document_generation_options(": "document generation options must stay in gateway_deliverables",
+        "async fn generate_document_markdown(": "document markdown generation must stay in gateway_deliverables",
+        "fn markdown_to_docx(": "DOCX packaging must stay in gateway_deliverables",
+        "fn doc_json_to_docx(": "templated document DOCX projection must stay in gateway_deliverables",
+        "fn save_artifact_tool_schema(": "artifact delivery schema must stay in gateway_deliverables",
         "fn browser_open_research_discovery_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn booking_assumption_choice_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn choice_resume_instruction_legacy_backup(": "prompt instruction snippets must stay in gateway_prompt_instructions",
@@ -396,6 +406,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_template_catalog;", "gateway root must declare template catalog owner")
     assert_contains(source, "mod gateway_project_files;", "gateway root must declare project files owner")
     assert_contains(source, "mod gateway_browser_tools;", "gateway root must declare browser tools owner")
+    assert_contains(source, "mod gateway_deliverables;", "gateway root must declare deliverables owner")
     assert_contains(
         source,
         "#[cfg(test)]\nmod gateway_main_tests;",
