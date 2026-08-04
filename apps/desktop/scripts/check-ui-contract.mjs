@@ -1443,7 +1443,7 @@ assertNotContains("src/App.tsx", "‹‹CHOICES››", "new proactivity choice 
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/tasks/queue", "desktop gateway must expose task queue read model endpoint");
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/tasks/executor", "desktop gateway must expose task executor status endpoint");
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/tasks/run_next", "desktop gateway must expose the first local task executor endpoint");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "start_task_executor_worker", "desktop gateway must start a background task executor worker");
+assertRepoContains("crates/desktop-gateway/src/gateway_task_executor.rs", "start_task_executor_worker", "desktop gateway must start a background task executor worker");
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/local-computer/sessions/{session_id}", "desktop gateway must expose local computer session read model endpoint");
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/local-computer/sessions/{session_id}/artifacts/{artifact_id}/preview", "desktop gateway must expose redacted local computer artifact previews");
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/memory/dashboard", "desktop gateway must expose memory dashboard read model endpoint");
@@ -1483,7 +1483,7 @@ assertRepoContains("crates/desktop-gateway/src/gateway_bind.rs", "HOMUN_DESKTOP_
 assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_bind::gateway_bind_addr", "desktop gateway startup must use the shared bind resolver");
 assertRepoContains("crates/desktop-gateway/src/gateway_task_executor_config.rs", "task_executor_worker_enabled", "desktop gateway task executor worker config must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_task_executor_config.rs", "HOMUN_TASK_WORKER_COUNT", "desktop gateway task executor owner must preserve worker-count env compatibility");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "gateway_task_executor_config::task_executor_worker_enabled", "desktop gateway startup must use the shared task executor config");
+assertRepoContains("crates/desktop-gateway/src/gateway_task_executor.rs", "gateway_task_executor_config::task_executor_worker_enabled", "desktop gateway task executor must use the shared task executor config");
 assertRepoContains("crates/desktop-gateway/src/gateway_model_timeouts.rs", "model_request_timeout_secs", "desktop gateway model timeout config must be owned outside the monolith");
 assertRepoContains("crates/desktop-gateway/src/gateway_model_timeouts.rs", "HOMUN_MODEL_FIRST_TOKEN_SECS", "desktop gateway model timeout owner must preserve first-token override compatibility");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "pub(crate) use gateway_model_timeouts", "desktop gateway root must re-export shared model timeout helpers");
