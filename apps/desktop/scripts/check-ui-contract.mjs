@@ -334,6 +334,11 @@ assertRepoContains(
   "Gateway memory query embedding cache must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_briefing.rs",
+  "format_memory_block_with_provenance",
+  "Gateway memory briefing prompt assembly must have a dedicated owner",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway main ownership contract"',
   "Kernel regression gate must run the gateway main ownership contract",
@@ -402,6 +407,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway memory query embeddings"',
   "Kernel regression gate must run the gateway memory query embedding owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory briefing"',
+  "Kernel regression gate must run the gateway memory briefing owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",

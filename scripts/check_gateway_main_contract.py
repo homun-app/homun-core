@@ -153,6 +153,23 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn memory_query_embedding_timeout(": "memory query embedding timeout must stay in gateway_memory_query_embeddings",
         "fn normalize_memory_embedding_query(": "memory query normalization must stay in gateway_memory_query_embeddings",
         "fn memory_query_embedding_cache_key(": "memory query embedding cache key must stay in gateway_memory_query_embeddings",
+        "const CHAT_MEMORY_BUDGET_CHARS:": "memory briefing prompt budget must stay in gateway_memory_briefing",
+        "fn briefing_authorized_sources(": "memory briefing authorized sources must stay in gateway_memory_briefing",
+        "fn memory_briefing_source_fingerprint(": "memory briefing source fingerprint must stay in gateway_memory_briefing",
+        "fn revalidated_cached_briefing": "memory briefing cache revalidation must stay in gateway_memory_briefing",
+        "struct BriefingMemoryItem": "memory briefing item type must stay in gateway_memory_briefing",
+        "fn briefing_items_for_authorized_source(": "memory briefing source item collection must stay in gateway_memory_briefing",
+        "fn gather_profile_memory_for_prompt(": "memory briefing prompt gathering must stay in gateway_memory_briefing",
+        "fn gather_profile_memory_for_intent_with_provenance(": "memory briefing provenance gathering must stay in gateway_memory_briefing",
+        "fn gather_profile_memory_with_options(": "memory briefing test gathering helper must stay in gateway_memory_briefing",
+        "fn gather_profile_memory_with_provenance(": "memory briefing provenance gathering must stay in gateway_memory_briefing",
+        "struct FormattedMemoryBlock": "memory briefing formatted block type must stay in gateway_memory_briefing",
+        "fn format_memory_block_with_provenance(": "memory briefing block formatting must stay in gateway_memory_briefing",
+        "fn format_memory_block(": "memory briefing test formatter must stay in gateway_memory_briefing",
+        "fn memory_intent_for_execution(": "memory briefing execution intent resolution must stay in gateway_memory_briefing",
+        "struct MemoryInjectionPolicy": "memory briefing injection policy type must stay in gateway_memory_briefing",
+        "fn memory_injection_policy(": "memory briefing injection policy must stay in gateway_memory_briefing",
+        "fn memory_intent_allows_recall(": "memory briefing recall policy must stay in gateway_memory_briefing",
     }
 
 
@@ -198,6 +215,7 @@ def main() -> int:
         "mod gateway_memory_query_embeddings;",
         "gateway root must declare memory query embedding owner",
     )
+    assert_contains(source, "mod gateway_memory_briefing;", "gateway root must declare memory briefing owner")
 
     required_owner_calls = [
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
