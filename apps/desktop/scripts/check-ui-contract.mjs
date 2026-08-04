@@ -349,6 +349,11 @@ assertRepoContains(
   "Gateway memory provider clients must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_recall_service.rs",
+  "InProcessMemoryRecallService",
+  "Gateway memory recall service must have a dedicated owner",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_memory_graph.rs",
   "upsert_memory_relation",
   "Gateway memory graph relation helpers must have a dedicated owner",
@@ -447,6 +452,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway memory clients"',
   "Kernel regression gate must run the gateway memory client owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway memory recall service"',
+  "Kernel regression gate must run the gateway memory recall service owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",

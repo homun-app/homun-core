@@ -294,6 +294,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway memory recall service",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "gateway_memory_recall_service",
+            ],
+        ),
+        Step(
             "gateway memory graph",
             [
                 "cargo",

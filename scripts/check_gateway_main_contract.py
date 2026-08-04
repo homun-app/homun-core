@@ -180,6 +180,10 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct GatewayLlmClient": "memory LLM client must stay in gateway_memory_clients",
         "impl local_first_memory::EmbeddingClient for GatewayEmbeddingClient": "memory embedding client impl must stay in gateway_memory_clients",
         "impl local_first_memory::LlmClient for GatewayLlmClient": "memory LLM client impl must stay in gateway_memory_clients",
+        "struct InProcessMemoryRecallService": "memory recall service must stay in gateway_memory_recall_service",
+        "fn install_memory_service_if_enabled(": "memory recall service installation must stay in gateway_memory_recall_service",
+        "fn recall_pack_on_facade(": "memory recall facade projection must stay in gateway_memory_recall_service",
+        "impl MemoryRecallService for InProcessMemoryRecallService": "memory recall service impl must stay in gateway_memory_recall_service",
         "fn provenance_key_fragment(": "memory graph key fragments must stay in gateway_memory_graph",
         "fn upsert_memory_relation(": "memory graph relation upsert must stay in gateway_memory_graph",
         "fn artifact_memory_kind(": "artifact memory type classification must stay in gateway_artifact_memory",
@@ -266,6 +270,11 @@ def main() -> int:
         "gateway root must declare memory turn context owner",
     )
     assert_contains(source, "mod gateway_memory_clients;", "gateway root must declare memory client owner")
+    assert_contains(
+        source,
+        "mod gateway_memory_recall_service;",
+        "gateway root must declare memory recall service owner",
+    )
     assert_contains(source, "mod gateway_memory_graph;", "gateway root must declare memory graph owner")
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
