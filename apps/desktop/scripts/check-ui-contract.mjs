@@ -429,6 +429,11 @@ assertRepoContains(
   "Gateway project files must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_browser_tools.rs",
+  "browser_tools_owner_smoke",
+  "Gateway browser tools must have a dedicated owner",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_main_tests.rs",
   "gateway_main_tests_owner_smoke",
   "Gateway root test module must have a dedicated owner",
@@ -617,6 +622,11 @@ assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway project files"',
   "Kernel regression gate must run the gateway project files owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway browser tools"',
+  "Kernel regression gate must run the gateway browser tools owner test",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",
