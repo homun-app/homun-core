@@ -65,6 +65,13 @@ const chatView = await readFile(
   "utf8",
 );
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
+const appWorkspace = await readFile(
+  new URL("../src/components/AppWorkspace.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const appCoreMappers = await readFile(
   new URL("../src/lib/appCoreMappers.ts", import.meta.url),
   "utf8",
@@ -130,6 +137,13 @@ const taskQueueProjection = await readFile(
 });
 const threadSnapshotProjection = await readFile(
   new URL("../src/lib/threadSnapshotProjection.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
+const initialThreadSelection = await readFile(
+  new URL("../src/lib/initialThreadSelection.mjs", import.meta.url),
   "utf8",
 ).catch((error) => {
   if (error.code === "ENOENT") return "";
@@ -613,8 +627,9 @@ test("App delegates core-to-ui mapping helpers to appCoreMappers", () => {
   assert.match(appCoreMappers, /function providerDisplayName/);
 });
 
-test("App delegates context budget display helpers to contextBudgetDisplay", () => {
-  assert.match(app, /from "\.\/lib\/contextBudgetDisplay";/);
+test("AppWorkspace delegates context budget display helpers to contextBudgetDisplay", () => {
+  assert.match(appWorkspace, /from "\.\.\/lib\/contextBudgetDisplay";/);
+  assert.doesNotMatch(app, /from "\.\/lib\/contextBudgetDisplay";/);
   assert.doesNotMatch(app, /function contextBudgetCompressionRatio\(/);
   assert.doesNotMatch(app, /function contextBudgetSummary\(/);
   assert.match(contextBudgetDisplay, /export function contextBudgetCompressionRatio/);
@@ -684,6 +699,22 @@ test("App delegates thread snapshot selection to threadSnapshotProjection", () =
   assert.match(app, /from "\.\/lib\/threadSnapshotProjection";/);
   assert.doesNotMatch(app, /const preservedThread = mappedThreads\.find/);
   assert.match(threadSnapshotProjection, /export function projectThreadSnapshotSelection/);
+});
+
+test("App delegates initial thread selection to initialThreadSelection", () => {
+  assert.match(app, /from "\.\/lib\/initialThreadSelection";/);
+  assert.doesNotMatch(app, /mapped\.find\(\(thread\) => thread\.threadId === snapshot\.active_thread_id\)/);
+  assert.match(initialThreadSelection, /export function selectInitialThreadFromSnapshot/);
+});
+
+test("App delegates workspace view rendering to AppWorkspace", () => {
+  assert.match(app, /from "\.\/components\/AppWorkspace";/);
+  assert.match(app, /<AppWorkspace/);
+  assert.doesNotMatch(app, /<ChatView/);
+  assert.doesNotMatch(app, /<AutomationsView/);
+  assert.match(appWorkspace, /export function AppWorkspace/);
+  assert.match(appWorkspace, /<ChatView/);
+  assert.match(appWorkspace, /<AutomationsView/);
 });
 
 test("the sidebar uses the canonical persisted thread filter projection", () => {

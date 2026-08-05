@@ -1,21 +1,16 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { OnboardingWizard } from "./components/OnboardingWizard";
-import { ChatView } from "./components/ChatView";
 import { Shell } from "./components/Shell";
 import { ChatSearchModal } from "./components/Sidebar";
 import { LoginGate } from "./components/LoginGate";
-import { ShallowView } from "./components/ShallowView";
+import { AppWorkspace } from "./components/AppWorkspace";
 import {
   approvals,
-  brainRun,
   chatMessages,
   connections,
-  automationProposals,
-  learningInsights,
   memorySummary,
   navItems as staticNavItems,
-  runtimeHealth,
   tasks,
 } from "./data/mockData";
 import { pluginRegistry, type PluginHost } from "./plugins/registry";
@@ -65,10 +60,6 @@ import {
   summarizeThreadTitle,
   updateThreadPreview,
 } from "./lib/appCoreMappers";
-import {
-  contextBudgetCompressionRatio,
-  contextBudgetSummary,
-} from "./lib/contextBudgetDisplay";
 import { buildTemplateWorkflowAutoSubmit } from "./lib/templateWorkflowPrompt";
 import {
   hasPendingLocalMessages,
@@ -86,6 +77,7 @@ import {
 import { projectThreadSnapshotSelection } from "./lib/threadSnapshotProjection";
 import { projectBusyThreadIds } from "./lib/busyThreadProjection";
 import { buildProactivityChatSeed } from "./lib/proactivityChatSeed";
+import { selectInitialThreadFromSnapshot } from "./lib/initialThreadSelection";
 import type {
   ApprovelItem,
   ChatAttachment,
@@ -94,31 +86,11 @@ import type {
   ConnectionItem,
   MemorySummary,
   NavItem,
-  RuntimeHealth,
   SettingsSectionId,
   TaskItem,
   UncertainEffectItem,
   ViewId,
 } from "./types";
-
-// Secondary views are not on the path to the first chat paint; keeping them in
-// the eager chunk cost ~1MB of parse before anything was interactive. ChatView
-// and Shell stay static imports on purpose — they *are* the first paint, and
-// deferring them would only move the wait, not remove it.
-const AutomationsView = lazy(() =>
-  import("./components/AutomationsView").then((m) => ({ default: m.AutomationsView })),
-);
-const ContainedComputerView = lazy(() =>
-  import("./components/ContainedComputerView").then((m) => ({
-    default: m.ContainedComputerView,
-  })),
-);
-const SettingsView = lazy(() =>
-  import("./components/SettingsView").then((m) => ({ default: m.SettingsView })),
-);
-const LearningView = lazy(() =>
-  import("./components/LearningView").then((m) => ({ default: m.LearningView })),
-);
 
 const defaultChatThread: ChatThread = {
   threadId: "thread_active_prompt",
@@ -168,7 +140,6 @@ function AuthenticatedApp() {
     UncertainEffectItem[]
   >([]);
   const [automationItems, setAutomationItems] = useState<ManagedAutomation[]>([]);
-  const [runtimeItems] = useState<RuntimeHealth[]>(runtimeHealth);
   const [memoryDashboard, setMemoryDashboard] =
     useState<MemorySummary>(memorySummary);
   const [connectionItems, setConnectionItems] =
@@ -1054,10 +1025,11 @@ function AuthenticatedApp() {
         const snapshot = await coreBridge.chatThreads();
         if (cancelled) return;
         const mapped = snapshot.threads.map(mapCoreChatThread);
-        const selectedThread =
-          mapped.find((thread) => thread.threadId === snapshot.active_thread_id) ??
-          mapped[0] ??
-          defaultChatThread;
+        const { desiredThreads, selectedThread } = selectInitialThreadFromSnapshot({
+          mappedThreads: mapped,
+          snapshotActiveThreadId: snapshot.active_thread_id,
+          defaultThread: defaultChatThread,
+        });
         let selectedMessages = starterMessages(selectedThread);
         let attention: CoreThreadAttention[] = [];
         try {
@@ -1071,7 +1043,7 @@ function AuthenticatedApp() {
           console.warn("active chat_messages unavailable", error);
         }
         if (cancelled) return;
-        setChatThreads(mapped.length ? mapped : [defaultChatThread]);
+        setChatThreads(desiredThreads);
         setActiveThreadId(selectedThread.threadId);
         setSelectedTaskId(selectedThread.taskId);
         setThreadMessagesFromBackend(selectedThread.threadId, selectedMessages);
@@ -1121,117 +1093,70 @@ function AuthenticatedApp() {
       onSelectSettingsSub={setSettingsSub}
       hideChrome={showOnboarding}
     >
-      <main
-        className={`workspace ${isSettings ? "settings-workspace" : ""}`}
-        aria-label={t("app.mainWorkspace")}
-      >
-        {/* The boundary sits INSIDE <main> so a lazy chunk fetch blanks only
-            the workspace pane: Shell (sidebar, nav, topbar) and the overlays
-            rendered as its siblings stay mounted instead of flashing away. */}
-        <Suspense fallback={null}>
-          {activeView === "chat" && (
-            <ChatView
-              key={activeThread.threadId}
-              sidebarCollapsed={!drawerOpen}
-              onExpandSidebar={() => setDrawerOpen(true)}
-              onOpenSearch={() => setSearchOpen(true)}
-              onOpenUsageSettings={() => {
-                setPreviousView("chat");
-                setSettingsSection("usage");
-                setSettingsSub("");
-                setActiveView("settings");
-              }}
-              approvals={approvalItems}
-              approvalBusyId={approvalBusyId}
-              uncertainEffects={activeUncertainEffects}
-              effectResolutionBusyId={effectResolutionBusyId}
-              effectResolutionError={
-                effectResolutionError &&
-                activeUncertainEffects.some(
-                  (effect) => effect.id === effectResolutionError.receiptId,
-                )
-                  ? effectResolutionError.message
-                  : null
-              }
-              computerSessionId={activeThread.computerSessionId}
-              messages={activeMessages}
-              thread={activeThread}
-              onMessagesChange={(messages) =>
-                handleMessagesChange(activeThread.threadId, messages)
-              }
-              islandRefreshNonce={islandRefreshNonce}
-              runtimeContextRevision={
-                threadAttention.terminalEventIds[activeThread.threadId] ?? 0
-              }
-              incomingBackgroundTurn={incomingBackgroundTurn}
-              autoSubmit={
-                pendingTemplateAutoSubmit?.threadId === activeThread.threadId
-                  ? pendingTemplateAutoSubmit
-                  : null
-              }
-              onAutoSubmitConsumed={(id) =>
-                setPendingTemplateAutoSubmit((current) =>
-                  current?.id === id ? null : current,
-                )
-              }
-              onResolveEffect={handleResolveUncertainEffect}
-              onApproveApprovel={handleApproveApprovel}
-              onRejectApprovel={handleRejectApprovel}
-              onRuntimeChanged={refreshRuntimeReadModels}
-              onThreadChanged={() => refreshChatReadModels(activeThread.threadId)}
-              onStreamingChange={(busy) =>
-                setStreamingThreadId(busy ? activeThread.threadId : null)
-              }
-            />
-          )}
-          {activeView === "learning" && (
-            <LearningView
-              insights={learningInsights}
-              proposals={automationProposals}
-            />
-          )}
-          {/* Memory has no top-level view: it lives in Settings → Memory only
-              (SettingsView renders <MemoryView embedded />). */}
-          {activeView === "settings" && (
-            <SettingsView
-              connections={connectionItems}
-              section={settingsSection}
-              sub={settingsSub}
-              onPluginsChanged={reloadPlugins}
-            />
-          )}
-          {activeView === "automations" && (
-            <AutomationsView
-              automations={automationItems}
-              onCreatete={handleCreateteAutomation}
-              onUpdate={handleUpdateAutomation}
-              onToggle={handleToggleAutomation}
-              onDelete={handleDeleteAutomation}
-            />
-          )}
-          {enabledPlugins.map(
-            (plugin) =>
-              activeView === plugin.id && <plugin.Panel key={plugin.id} host={pluginHost} />,
-          )}
-          {activeView === "browser" && <ContainedComputerView />}
-          {activeView === "brain" && (
-            <ShallowView
-              title="Brain Audit"
-              eyebrow={t("app.explainablePlans")}
-              description={`Route, loaded tools, memory refs and subagent steps are persisted without raw payload. ${contextBudgetSummary(brainRun.contextBudget)}`}
-              stats={[
-                { label: "Route", value: brainRun.route },
-                { label: "Rounds", value: String(brainRun.plannerRounds) },
-                { label: "Tools", value: String(brainRun.loadedTools) },
-                {
-                  label: "Context",
-                  value: `${Math.round(contextBudgetCompressionRatio(brainRun.contextBudget) * 100)}%`,
-                },
-              ]}
-            />
-          )}
-        </Suspense>
-      </main>
+      <AppWorkspace
+        activeView={activeView}
+        isSettings={isSettings}
+        sidebarCollapsed={!drawerOpen}
+        activeThread={activeThread}
+        activeMessages={activeMessages}
+        approvals={approvalItems}
+        approvalBusyId={approvalBusyId}
+        uncertainEffects={activeUncertainEffects}
+        effectResolutionBusyId={effectResolutionBusyId}
+        effectResolutionError={
+          effectResolutionError &&
+          activeUncertainEffects.some(
+            (effect) => effect.id === effectResolutionError.receiptId,
+          )
+            ? effectResolutionError.message
+            : null
+        }
+        islandRefreshNonce={islandRefreshNonce}
+        runtimeContextRevision={
+          threadAttention.terminalEventIds[activeThread.threadId] ?? 0
+        }
+        incomingBackgroundTurn={incomingBackgroundTurn}
+        autoSubmit={
+          pendingTemplateAutoSubmit?.threadId === activeThread.threadId
+            ? pendingTemplateAutoSubmit
+            : null
+        }
+        settingsSection={settingsSection}
+        settingsSub={settingsSub}
+        connections={connectionItems}
+        automations={automationItems}
+        enabledPlugins={enabledPlugins}
+        pluginHost={pluginHost}
+        onExpandSidebar={() => setDrawerOpen(true)}
+        onOpenSearch={() => setSearchOpen(true)}
+        onOpenUsageSettings={() => {
+          setPreviousView("chat");
+          setSettingsSection("usage");
+          setSettingsSub("");
+          setActiveView("settings");
+        }}
+        onMessagesChange={(messages) =>
+          handleMessagesChange(activeThread.threadId, messages)
+        }
+        onAutoSubmitConsumed={(id) =>
+          setPendingTemplateAutoSubmit((current) =>
+            current?.id === id ? null : current,
+          )
+        }
+        onResolveEffect={handleResolveUncertainEffect}
+        onApproveApprovel={handleApproveApprovel}
+        onRejectApprovel={handleRejectApprovel}
+        onRuntimeChanged={refreshRuntimeReadModels}
+        onThreadChanged={() => refreshChatReadModels(activeThread.threadId)}
+        onStreamingChange={(busy) =>
+          setStreamingThreadId(busy ? activeThread.threadId : null)
+        }
+        onPluginsChanged={reloadPlugins}
+        onCreateteAutomation={handleCreateteAutomation}
+        onUpdateAutomation={handleUpdateAutomation}
+        onToggleAutomation={handleToggleAutomation}
+        onDeleteAutomation={handleDeleteAutomation}
+      />
     </Shell>
       {searchOpen && (
         <ChatSearchModal
