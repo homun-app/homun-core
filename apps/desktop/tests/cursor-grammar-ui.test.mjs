@@ -72,6 +72,13 @@ const contextBudgetDisplay = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const templateWorkflowPrompt = await readFile(
+  new URL("../src/lib/templateWorkflowPrompt.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -549,6 +556,16 @@ test("App delegates context budget display helpers to contextBudgetDisplay", () 
   assert.doesNotMatch(app, /function contextBudgetSummary\(/);
   assert.match(contextBudgetDisplay, /export function contextBudgetCompressionRatio/);
   assert.match(contextBudgetDisplay, /export function contextBudgetSummary/);
+});
+
+test("App delegates template workflow prompt routing to templateWorkflowPrompt", () => {
+  assert.match(app, /from "\.\/lib\/templateWorkflowPrompt";/);
+  assert.doesNotMatch(app, /const operativePrompt = \[/);
+  assert.doesNotMatch(app, /const routingBinding: RoutingBindingInput =/);
+  assert.doesNotMatch(app, /Do not generate the deck yet/);
+  assert.match(templateWorkflowPrompt, /export function buildTemplateWorkflowAutoSubmit/);
+  assert.match(templateWorkflowPrompt, /presentations\.template_deck/);
+  assert.match(templateWorkflowPrompt, /presentations\.template_document/);
 });
 
 test("the sidebar uses the canonical persisted thread filter projection", () => {

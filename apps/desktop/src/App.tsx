@@ -70,6 +70,7 @@ import {
   contextBudgetCompressionRatio,
   contextBudgetSummary,
 } from "./lib/contextBudgetDisplay";
+import { buildTemplateWorkflowAutoSubmit } from "./lib/templateWorkflowPrompt";
 import type {
   ApprovelItem,
   ChatAttachment,
@@ -641,54 +642,7 @@ function AuthenticatedApp() {
     template: TemplateCatalogEntry;
     attachment?: ChatAttachmentInput;
   }) {
-    // Document packs must route to the document-generation tool, not the
-    // deck one — the only branch point below is `isDocument`; every other
-    // line stays byte-identical to the presentation wording so this
-    // refactor changes nothing for decks.
-    const isDocument = input.template.kind === "document";
-    const artifactNoun = isDocument ? "document" : "presentation";
-    const makeTool = isDocument ? "make_document" : "make_deck";
-    const visiblePrompt = `Help me create a ${artifactNoun} using the selected template "${input.template.name}".`;
-    const operativePrompt = [
-      `The user selected a template from the Presentations catalog and wants to use it to create a new ${artifactNoun}.`,
-      `template_ref=${input.template.id}`,
-      `template_name=${input.template.name}`,
-      `source_provider=${input.template.source_provider ?? "user_upload"}`,
-      input.attachment
-        ? `attached_file=${input.attachment.displayName}`
-        : "attached_file=none; use the catalog template_ref and metadata as the style constraint.",
-      "",
-      isDocument ? "Do not generate the document yet." : "Do not generate the deck yet.",
-      "Analyze the selected template as a constraint for style, layout and visual tone.",
-      isDocument
-        ? "First ask 2-4 essential questions to understand objective, audience, available content and tone."
-        : "First ask 2-4 essential questions to understand objective, audience, available content, slide count and tone.",
-      ...(input.template.intake_questions.length > 0
-        ? [
-            `Ask these template-specific questions first (one message): ${input.template.intake_questions
-              .map((question, index) => `${index + 1}. ${question}`)
-              .join(" ")}`,
-          ]
-        : []),
-      // Final-review fix (I1): this used to say "propose a concise plan and wait for
-      // confirmation before using ${makeTool}" — but the harness now forces the
-      // tool_choice to `makeTool` on the FIRST post-intake reply (S2 T5), so a
-      // plan-confirmation step is impossible/contradictory for a bound flow. Reworded to
-      // match reality: go straight from the intake answers to the call, no ceremony.
-      `Once you have the answers above, call ${makeTool} directly — no plan and no confirmation step needed.`,
-    ].join("\n");
-    // S2 (plugin-owned deterministic routing): weak local managers used to wander to
-    // generic skills + shell file-writing (observed: a model hand-wrote a .md via `cat`
-    // heredoc through a "Create Documents" skill, bypassing the template entirely). The
-    // fix used to be pleading in the prompt (IMPORTANT/MUST text); that's now enforced
-    // deterministically by the gateway off this binding (S2 T3-T5: forces tool_choice to
-    // the routed make tool and denies skill/shell tools once intake is past its first
-    // round), so the operative prompt above stays brief + intake only.
-    const routingBinding: RoutingBindingInput = {
-      plugin_id: "presentations",
-      route_id: isDocument ? "presentations.template_document" : "presentations.template_deck",
-      args: { template_ref: input.template.id },
-    };
+    const workflow = buildTemplateWorkflowAutoSubmit(input);
     try {
       const created = mapCoreChatThread(await coreBridge.createChatThread());
       const messages = await coreBridge.chatMessages(created.threadId);
@@ -696,7 +650,7 @@ function AuthenticatedApp() {
       setChatThreads((current) => [
         {
           ...created,
-          title: summarizeThreadTitle(visiblePrompt),
+          title: summarizeThreadTitle(workflow.visiblePrompt),
           messageCount: Math.max(created.messageCount, messages.messages.length),
           updatedAt: timestamp,
         },
@@ -709,14 +663,14 @@ function AuthenticatedApp() {
       setPendingTemplateAutoSubmit({
         id: `template_auto_submit_${created.threadId}_${Date.now()}`,
         threadId: created.threadId,
-        prompt: operativePrompt,
-        visibleText: visiblePrompt,
+        prompt: workflow.operativePrompt,
+        visibleText: workflow.visiblePrompt,
         attachments: input.attachment ? [input.attachment] : [],
         visibleAttachments: input.attachment
           ? [pendingChatAttachmentFromInput(input.attachment)]
           : undefined,
         mode: "plan",
-        routingBinding,
+        routingBinding: workflow.routingBinding,
       });
     } catch (error) {
       console.warn("start_template_workflow unavailable", error);

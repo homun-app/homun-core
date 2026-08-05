@@ -1166,14 +1166,16 @@ assertContains("src/components/TemplateGallery.tsx", "entry.category", "template
 assertContains("src/components/BrandKitPanel.tsx", "TemplateCatalogGallery", "BrandKitPanel must stay a thin compositor wiring the gallery + brand chip/drawer");
 assertContains("src/plugins/registry.tsx", "startTemplateWorkflow", "plugin host must expose a typed template workflow handoff");
 assertContains("src/App.tsx", "handleStartTemplateWorkflow", "App must own the template workflow chat creation path");
-assertContains("src/App.tsx", "template_ref=", "template workflow prompt must preserve the canonical template reference");
-assertContains("src/App.tsx", "Do not generate the deck yet.", "template workflow must start with discovery and planning, not immediate deck generation");
-assertContains("src/App.tsx", "make_document", "document packs must route to make_document from Use template");
+assertContains("src/lib/templateWorkflowPrompt.mjs", "template_ref=", "template workflow prompt must preserve the canonical template reference");
+assertContains("src/lib/templateWorkflowPrompt.mjs", "Do not generate the deck yet.", "template workflow must start with discovery and planning, not immediate deck generation");
+assertContains("src/lib/templateWorkflowPrompt.mjs", "make_document", "document packs must route to make_document from Use template");
 assertNotContains("src/App.tsx", "Aiutami a creare una presentazione", "template workflow default visible prompt must remain English");
 // S2 T6: Use template builds a deterministic routing binding (App.tsx uses the
 // camelCase field per TS convention; the wire-format lock below on chatApi.ts guards
 // the literal `routing_binding` key the Rust gateway's EnqueueTurnRequest reads).
 assertContains("src/App.tsx", "routingBinding", "Use template must build a deterministic routing binding");
+assertContains("src/lib/templateWorkflowPrompt.mjs", "presentations.template_deck", "Use template must route presentation templates to the deck workflow");
+assertContains("src/lib/templateWorkflowPrompt.mjs", "presentations.template_document", "Use template must route document templates to the document workflow");
 assertContains("src/lib/coreBridge.ts", "importPptxTemplate", "Desktop bridge must expose PPTX template import");
 assertContains("src/lib/coreBridge.ts", "templateSourceAttachment", "Desktop bridge must resolve local template attachments without exposing paths in the catalog");
 assertContains("src/lib/coreBridge.ts", "attachments?: CoreChatAttachment[]", "streamed prompt commits must be able to preserve user attachments");
