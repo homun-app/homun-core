@@ -113,6 +113,13 @@ const messageActivity = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const assistantThinkingState = await readFile(
+  new URL("../src/components/AssistantThinkingState.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const runtimeContextPanel = await readFile(
   new URL("../src/components/RuntimeContextPanel.tsx", import.meta.url),
   "utf8",
@@ -624,6 +631,17 @@ test("ChatView delegates message activity rendering to MessageActivity", () => {
   assert.match(messageActivity, /export function parseActivitySteps/);
   assert.match(messageActivity, /msg-activity-steps/);
   assert.match(messageActivity, /ACTIVITY_RE/);
+});
+
+test("ChatView delegates assistant thinking rendering to AssistantThinkingState", () => {
+  assert.match(chatView, /import \{ AssistantThinkingState, type ChatStreamStatus \} from "\.\/AssistantThinkingState";/);
+  assert.match(chatView, /<AssistantThinkingState status=\{streamStatus\}/);
+  assert.doesNotMatch(chatView, /function AssistantThinkingState\(/);
+  assert.doesNotMatch(chatView, /interface ChatStreamStatus/);
+  assert.match(assistantThinkingState, /export interface ChatStreamStatus/);
+  assert.match(assistantThinkingState, /export function AssistantThinkingState/);
+  assert.match(assistantThinkingState, /assistant-thinking-state/);
+  assert.match(assistantThinkingState, /thinking-elapsed/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
