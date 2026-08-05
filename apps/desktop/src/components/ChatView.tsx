@@ -1,4 +1,3 @@
-import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRuntimeContext } from "../lib/useRuntimeContext";
@@ -97,10 +96,9 @@ import { type ParsedArtifact } from "./MessageArtifacts";
 import { ChatComputerPanel } from "./ChatComputerPanel";
 import { AdaptiveWorkspaceIsland } from "./AdaptiveWorkspaceIsland";
 import { ChatComposerDock, type ChatTurnState } from "./ChatComposerDock";
-import { InspectorWorkspace } from "./InspectorWorkspace";
+import { ChatInspectorDock } from "./ChatInspectorDock";
 import {
   INSPECTOR_VIEW_LABEL_KEY,
-  InspectorView,
   PANEL_VIEWS,
   isRestorableInspectorTab,
   type IslandSource,
@@ -2727,14 +2725,25 @@ export function ChatView({
         }}
       />
 
-      <InspectorWorkspace
+      <ChatInspectorDock
         layoutRef={layoutRef}
         state={inspector}
         ratio={inspectorRatio}
-        addItems={availableInspectorViews.map((view) => ({
-          kind: view.key,
-          title: t(INSPECTOR_VIEW_LABEL_KEY[view.key]),
-        }))}
+        availableViews={availableInspectorViews}
+        artifacts={workbenchArtifacts}
+        artifactCatalogError={memoryArtifactsLoadError}
+        uploadedFiles={uploadedFiles}
+        threadId={thread.threadId}
+        goalSeed={goalSeed}
+        operationalPlanMarkdown={conversationPlan ?? visibleComputerSession.operationalPlanMarkdown}
+        sources={islandSources}
+        subagents={projectedSubagents}
+        activeSurface={activeSurface}
+        controlBusy={computerControlBusy}
+        controlError={computerControlError}
+        previewDataUrl={previewDataUrl}
+        computerSession={computerSession}
+        inspectorResourcesReady={inspectorResourcesReady}
         onActivate={(tabId) => dispatchInspector({ type: "activateTab", tabId })}
         onCloseTab={(tabId) => dispatchInspector({ type: "closeTab", tabId })}
         onMoveTab={(tabId, targetIndex) =>
@@ -2747,44 +2756,17 @@ export function ChatView({
           setInspectorRatio(next);
           saveInspectorWidthRatio(next);
         }}
-        renderTab={(tab) => (
-          !inspectorResourcesReady && (tab.kind === "file" || tab.kind === "artifact") ? (
-            <div className="workbench-empty">
-              <Loader2 size={22} className="spin" />
-              <p>{t("chat.loadingActivity")}</p>
-            </div>
-          ) : <InspectorView
-            descriptor={tab}
-            artifacts={workbenchArtifacts}
-            artifactCatalogError={memoryArtifactsLoadError}
-            uploadedFiles={uploadedFiles}
-            threadId={thread.threadId}
-            goalSeed={goalSeed}
-            onGoalSeedConsumed={() => setGoalSeed(null)}
-            operationalPlanMarkdown={
-              conversationPlan ?? visibleComputerSession.operationalPlanMarkdown
-            }
-            layoutSignal={`${inspector.activeTabId}:${inspectorRatio}`}
-            onOpenFile={openFileTab}
-            onOpenFilesIndex={() => openUtilityTab("file")}
-            onOpenArtifact={openArtifactTab}
-            onRetryArtifactCatalog={() => setMemoryArtifactsReloadNonce((value) => value + 1)}
-            sources={islandSources}
-            subagents={projectedSubagents}
-            activeSurface={activeSurface}
-            controlBusy={computerControlBusy}
-            controlError={computerControlError}
-            onPauseComputer={() => runComputerControl(coreBridge.pauseLocalComputerSession)}
-            onResumeComputer={() => runComputerControl(coreBridge.resumeLocalComputerSession)}
-            onSelectSurface={setActiveSurface}
-            onTakeoverComputer={() =>
-              runComputerControl(coreBridge.requestLocalComputerTakeover)
-            }
-            previewDataUrl={previewDataUrl}
-            computerSession={computerSession}
-            onCloseTab={() => dispatchInspector({ type: "closeTab", tabId: tab.id })}
-          />
-        )}
+        onGoalSeedConsumed={() => setGoalSeed(null)}
+        onOpenFile={openFileTab}
+        onOpenFilesIndex={() => openUtilityTab("file")}
+        onOpenArtifact={openArtifactTab}
+        onRetryArtifactCatalog={() => setMemoryArtifactsReloadNonce((value) => value + 1)}
+        onPauseComputer={() => runComputerControl(coreBridge.pauseLocalComputerSession)}
+        onResumeComputer={() => runComputerControl(coreBridge.resumeLocalComputerSession)}
+        onSelectSurface={setActiveSurface}
+        onTakeoverComputer={() =>
+          runComputerControl(coreBridge.requestLocalComputerTakeover)
+        }
       />
 
       <ChatComposerDock

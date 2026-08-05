@@ -120,6 +120,13 @@ const chatTranscript = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatInspectorDock = await readFile(
+  new URL("../src/components/ChatInspectorDock.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatWorkspaceProjections = await readFile(
   new URL("../src/components/ChatWorkspaceProjections.ts", import.meta.url),
   "utf8",
@@ -1189,12 +1196,18 @@ test("InspectorView delegates memory graph rendering to MemoryGraphPanel", () =>
 });
 
 test("ChatView delegates inspector body rendering to InspectorView", () => {
-  assert.match(chatView, /from "\.\/InspectorView";/);
-  assert.match(chatView, /<InspectorView[\s\S]*descriptor=\{tab\}/);
+  assert.match(chatView, /from "\.\/ChatInspectorDock";/);
+  assert.match(chatView, /<ChatInspectorDock[\s\S]*state=\{inspector\}/);
+  assert.doesNotMatch(chatView, /<InspectorWorkspace/);
+  assert.doesNotMatch(chatView, /<InspectorView/);
+  assert.match(chatInspectorDock, /from "\.\/InspectorWorkspace";/);
+  assert.match(chatInspectorDock, /from "\.\/InspectorView";/);
+  assert.match(chatInspectorDock, /<InspectorView[\s\S]*descriptor=\{tab\}/);
   assert.doesNotMatch(chatView, /function InspectorView\(/);
   assert.doesNotMatch(chatView, /fileStatus === "missing"/);
   assert.doesNotMatch(chatView, /coreBridge\.taskQueue/);
   assert.doesNotMatch(chatView, /coreBridge\.fsList/);
+  assert.match(chatInspectorDock, /export function ChatInspectorDock/);
   assert.match(inspectorView, /export function InspectorView/);
   assert.match(inspectorView, /fileStatus === "missing"/);
   assert.match(inspectorView, /\.taskQueue\(/);

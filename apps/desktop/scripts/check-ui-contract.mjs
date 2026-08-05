@@ -1374,7 +1374,7 @@ assertContains("src/components/GoalsPanel.tsx", "dedupeGoalDrafts", "goals manag
 assertContains("src/components/GoalsPanel.tsx", "decideMemory(g.reference, \"delete\")", "goals manager must allow deleting saved project goals");
 assertContains("src/components/MemoryGraphPanel.tsx", "resizeFitTimer", "memory graph must refit after the workbench/canvas changes size");
 assertContains("src/components/MemoryGraphPanel.tsx", "layoutSignal", "memory graph must receive an explicit workbench layout signal");
-assertContains("src/components/ChatView.tsx", "layoutSignal={`${inspector.activeTabId}:${inspectorRatio}`}", "inspector must refit Memory when the active tab or width changes");
+assertContains("src/components/ChatInspectorDock.tsx", "layoutSignal={`${state.activeTabId}:${ratio}`}", "inspector must refit Memory when the active tab or width changes");
 assertContains("src/components/MemoryGraphPanel.tsx", "requestAnimationFrame", "memory graph resize refit must wait for the resized canvas to paint");
 assertContains("src/components/MemoryGraphPanel.tsx", "d3ReheatSimulation", "memory graph resize refit must restart layout before fitting");
 assertContains("src/styles.css", ".memory-graph-canvas canvas", "memory graph must size the ForceGraph canvas, not only an svg");
