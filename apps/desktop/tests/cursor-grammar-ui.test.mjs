@@ -169,6 +169,13 @@ const messageSandboxReadOnlyCard = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageComposioReconnectCard = await readFile(
+  new URL("../src/components/MessageComposioReconnectCard.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -795,6 +802,15 @@ test("ChatView delegates sandbox read-only rendering to MessageSandboxReadOnlyCa
   assert.match(messageSandboxReadOnlyCard, /coreBridge\.setRuntimeSettings/);
   assert.match(messageSandboxReadOnlyCard, /sandbox_mode: "workspace-write"/);
   assert.match(messageSandboxReadOnlyCard, /sandboxReadOnlyTitle/);
+});
+
+test("ChatView delegates Composio reconnect rendering to MessageComposioReconnectCard", () => {
+  assert.match(chatView, /from "\.\/MessageComposioReconnectCard";/);
+  assert.match(chatView, /<ComposioReconnectCard slug=\{reconnectSlug\}/);
+  assert.doesNotMatch(chatView, /function ComposioReconnectCard\(/);
+  assert.match(messageComposioReconnectCard, /export function ComposioReconnectCard/);
+  assert.match(messageComposioReconnectCard, /connectComposioToolkit/);
+  assert.match(messageComposioReconnectCard, /chat\.openingReconnection/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
