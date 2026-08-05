@@ -75,6 +75,10 @@ import {
   hasPendingLocalMessages,
   shouldPreserveLocalMessages,
 } from "./lib/chatMessagePreservation";
+import {
+  composePluginNavItems,
+  enabledRegistryPlugins,
+} from "./lib/appPluginNavigation";
 import type {
   ApprovelItem,
   ChatAttachment,
@@ -675,20 +679,11 @@ function AuthenticatedApp() {
   }, []);
 
   // A registry plugin is shown unless the backend says it's disabled (default-on).
-  const enabledPlugins = pluginRegistry.filter(
-    (p) => pluginStates.find((s) => s.id === p.id)?.enabled !== false,
+  const enabledPlugins = enabledRegistryPlugins(pluginRegistry, pluginStates);
+  const composedNavItems: NavItem[] = composePluginNavItems(
+    staticNavItems,
+    enabledPlugins,
   );
-  const composedNavItems: NavItem[] = [
-    ...staticNavItems,
-    ...enabledPlugins.map((p) => ({
-      id: p.id as ViewId,
-      label: p.navLabel,
-      icon: p.navIcon,
-      navSection: p.navSection ?? "more",
-      promoted: p.promoted === true,
-      order: p.navOrder,
-    })),
-  ];
   // The host capability surface handed to each plugin panel (ADR 0011 §6).
   const pluginHost: PluginHost = {
     openChat: handleOpenSuggestion,

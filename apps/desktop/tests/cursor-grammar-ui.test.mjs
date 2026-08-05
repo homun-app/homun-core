@@ -86,6 +86,13 @@ const chatMessagePreservation = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const appPluginNavigation = await readFile(
+  new URL("../src/lib/appPluginNavigation.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -581,6 +588,14 @@ test("App delegates optimistic chat message preservation to chatMessagePreservat
   assert.doesNotMatch(app, /function shouldPreserveLocalMessages\(/);
   assert.match(chatMessagePreservation, /export function hasPendingLocalMessages/);
   assert.match(chatMessagePreservation, /export function shouldPreserveLocalMessages/);
+});
+
+test("App delegates plugin navigation projection to appPluginNavigation", () => {
+  assert.match(app, /from "\.\/lib\/appPluginNavigation";/);
+  assert.doesNotMatch(app, /pluginRegistry\.filter\(/);
+  assert.doesNotMatch(app, /\.\.\.enabledPlugins\.map\(/);
+  assert.match(appPluginNavigation, /export function enabledRegistryPlugins/);
+  assert.match(appPluginNavigation, /export function composePluginNavItems/);
 });
 
 test("the sidebar uses the canonical persisted thread filter projection", () => {
