@@ -1347,9 +1347,9 @@ assertContains("src/components/ChatView.tsx", "messageContentKind", "message act
 assertContains("src/components/ChatView.tsx", "onExplainCode", "code responses must expose code-specific contextual actions");
 assertContains("src/components/ChatView.tsx", "onImproveCode", "code responses must expose code improvement action");
 assertContains("src/components/ComposerShell.tsx", "reply-context-card", "composer must show the active reply context before submit");
-assertContains("src/components/ChatView.tsx", "message-action-menu", "secondary message actions must stay behind a compact menu");
-assertContains("src/components/ChatView.tsx", "runMessageMenuAction", "message overflow actions must close the menu before running");
-assertContains("src/components/ChatView.tsx", "message-latency-summary", "message metrics must be visible without dominating the answer");
+assertContains("src/components/MessageActionBar.tsx", "message-action-menu", "secondary message actions must stay behind a compact menu");
+assertContains("src/components/MessageActionBar.tsx", "runMessageMenuAction", "message overflow actions must close the menu before running");
+assertContains("src/components/MessageActionBar.tsx", "message-latency-summary", "message metrics must be visible without dominating the answer");
 assertContains("src/components/ChatView.tsx", "normalizeGoalText", "goals manager must normalize goal text before comparing suggestions");
 assertContains("src/components/ChatView.tsx", "dedupeGoalDrafts", "goals manager must dedupe suggested goals against existing project goals");
 assertContains("src/components/ChatView.tsx", "decideMemory(g.reference, \"delete\")", "goals manager must allow deleting saved project goals");

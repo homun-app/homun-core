@@ -99,6 +99,13 @@ const messageAttachmentList = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageActionBar = await readFile(
+  new URL("../src/components/MessageActionBar.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const runtimeContextPanel = await readFile(
   new URL("../src/components/RuntimeContextPanel.tsx", import.meta.url),
   "utf8",
@@ -588,6 +595,17 @@ test("ChatView delegates message attachment rendering to MessageAttachmentList",
   assert.match(messageAttachmentList, /message-image-attachment/);
   assert.match(messageAttachmentList, /message-attachment-chip/);
   assert.match(messageAttachmentList, /formatFileSize\(attachment\.sizeBytes\)/);
+});
+
+test("ChatView delegates message action rendering to MessageActionBar", () => {
+  assert.match(chatView, /import \{ MessageActionBar \} from "\.\/MessageActionBar";/);
+  assert.match(chatView, /<MessageActionBar[\s\S]*?onSaveAsGoal=\{\(\) => saveMessageAsGoal\(displayMessage\.text\)\}/);
+  assert.doesNotMatch(chatView, /function MessageActionBar\(/);
+  assert.doesNotMatch(chatView, /resolveMessageActionMenuPlacement/);
+  assert.match(messageActionBar, /export function MessageActionBar/);
+  assert.match(messageActionBar, /message-action-menu-feedback/);
+  assert.match(messageActionBar, /message-latency-summary/);
+  assert.match(messageActionBar, /resolveMessageActionMenuPlacement/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
