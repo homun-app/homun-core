@@ -1128,6 +1128,12 @@ assertContains("src/App.tsx", "useAutomationController", "App must delegate auto
 assertNotContains("src/App.tsx", "coreBridge.automations", "App must not own automation dashboard fetching directly");
 assertContains("src/App.tsx", "useCapabilityController", "App must delegate capability read model loading to the capability controller");
 assertNotContains("src/App.tsx", "coreBridge.capabilities", "App must not own capability fetching directly");
+assertContains("src/App.tsx", "useOnboardingSetupGate", "App must delegate onboarding setup checks to the setup gate hook");
+assertContains("src/App.tsx", "usePluginController", "App must delegate plugin state loading to the plugin controller");
+assertContains("src/App.tsx", "useResponsiveDrawer", "App must delegate responsive drawer state to the drawer hook");
+assertNotContains("src/App.tsx", "coreBridge.setupStatus", "App must not own setup status fetching directly");
+assertNotContains("src/App.tsx", "coreBridge.plugins()", "App must not own plugin state fetching directly");
+assertNotContains("src/App.tsx", "window.innerWidth > 1024", "App must not own responsive drawer viewport logic directly");
 assertContains("src/components/AutomationsView.tsx", "t(\"automations.ifThis\")", "Event automation builder must expose the IF part explicitly");
 assertContains("src/components/AutomationsView.tsx", "t(\"automations.filter\")", "Event automation builder must expose the FILTER part explicitly");
 assertContains("src/i18n/locales/en.json", "\"ifThis\": \"If this happens\"", "Event automation IF label must be localized in English");

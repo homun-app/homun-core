@@ -156,6 +156,27 @@ const capabilityController = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const onboardingSetupGate = await readFile(
+  new URL("../src/lib/useOnboardingSetupGate.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
+const pluginController = await readFile(
+  new URL("../src/lib/usePluginController.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
+const responsiveDrawer = await readFile(
+  new URL("../src/lib/useResponsiveDrawer.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -742,6 +763,20 @@ test("App delegates capability state to useCapabilityController", () => {
   assert.match(capabilityController, /export function useCapabilityController/);
   assert.match(capabilityController, /coreBridge\.capabilities/);
   assert.match(capabilityController, /mapCoreCapabilitySnapshot/);
+});
+
+test("App delegates shell setup and plugin state to focused controllers", () => {
+  assert.match(app, /from "\.\/lib\/useOnboardingSetupGate";/);
+  assert.match(app, /from "\.\/lib\/usePluginController";/);
+  assert.match(app, /from "\.\/lib\/useResponsiveDrawer";/);
+  assert.doesNotMatch(app, /coreBridge\.setupStatus/);
+  assert.doesNotMatch(app, /coreBridge\.plugins\(\)/);
+  assert.doesNotMatch(app, /useState<PluginState/);
+  assert.doesNotMatch(app, /function syncDrawerWithViewport/);
+  assert.doesNotMatch(app, /window\.innerWidth > 1024/);
+  assert.match(onboardingSetupGate, /coreBridge\.setupStatus/);
+  assert.match(pluginController, /coreBridge\.plugins\(\)/);
+  assert.match(responsiveDrawer, /window\.innerWidth > breakpoint/);
 });
 
 test("App delegates workspace view rendering to AppWorkspace", () => {

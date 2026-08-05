@@ -21,7 +21,6 @@ import {
   type CoreTaskQueueSnapshot,
   type CoreUncertainEffectOutcome,
   type ProactivitySuggestion,
-  type PluginState,
   type RoutingBindingInput,
   type TemplateCatalogEntry,
 } from "./lib/coreBridge";
@@ -72,6 +71,9 @@ import { buildProactivityChatSeed } from "./lib/proactivityChatSeed";
 import { selectInitialThreadFromSnapshot } from "./lib/initialThreadSelection";
 import { useAutomationController } from "./lib/useAutomationController";
 import { useCapabilityController } from "./lib/useCapabilityController";
+import { useOnboardingSetupGate } from "./lib/useOnboardingSetupGate";
+import { usePluginController } from "./lib/usePluginController";
+import { useResponsiveDrawer } from "./lib/useResponsiveDrawer";
 import type {
   ApprovelItem,
   ChatAttachment,
@@ -104,11 +106,6 @@ function AuthenticatedApp() {
   const [systemNotifEnabled] = useSetting<boolean>("general.systemNotifications", false);
   const [activeView, setActiveView] = useState<ViewId>("chat");
   const [previousView, setPreviousView] = useState<ViewId>("chat");
-  // Onboarding wizard: shown on first launch when no provider is configured.
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  // Addons/plugin enabled-state (ADR 0011 §10-A): drives which registry plugins
-  // contribute a nav entry + panel. Default-on until the backend answers.
-  const [pluginStates, setPluginStates] = useState<PluginState[]>([]);
   const [settingsSection, setSettingsSection] =
     useState<SettingsSectionId>("account");
   // Active sub-item within a section that has an inline expandable submenu (e.g.
@@ -178,10 +175,12 @@ function AuthenticatedApp() {
     createThreadAttentionState(defaultChatThread.threadId),
   );
   const threadAttentionRef = useRef(threadAttention);
-  const [drawerOpen, setDrawerOpen] = useState(() => window.innerWidth > 1024);
   // Search modal lifted here (was in Shell) so BOTH the sidebar and the collapsed in-header
   // controls can open it via one owner.
   const [searchOpen, setSearchOpen] = useState(false);
+  const { showOnboarding, completeOnboarding } = useOnboardingSetupGate();
+  const { pluginStates, reloadPlugins } = usePluginController();
+  const { drawerOpen, expandDrawer, toggleDrawer } = useResponsiveDrawer();
   const activeThread = useMemo(
     () =>
       chatThreads.find((thread) => thread.threadId === activeThreadId) ??
@@ -477,19 +476,6 @@ function AuthenticatedApp() {
     };
   }, []);
 
-  // Onboarding check: if setup isn't complete and no provider is configured,
-  // show the wizard overlay on first launch.
-  useEffect(() => {
-    void (async () => {
-      try {
-        const status = await coreBridge.setupStatus();
-        if (status.needs_setup) setShowOnboarding(true);
-      } catch {
-        /* gateway not ready — will retry on next interaction */
-      }
-    })();
-  }, []);
-
   async function handleCreateteChatThread(workspaceId?: string) {
     try {
       const targetWorkspace = workspaceId?.trim();
@@ -601,13 +587,6 @@ function AuthenticatedApp() {
       console.warn("start_template_workflow unavailable", error);
     }
   }
-
-  async function reloadPlugins() {
-    setPluginStates(await coreBridge.plugins());
-  }
-  useEffect(() => {
-    void reloadPlugins();
-  }, []);
 
   // A registry plugin is shown unless the backend says it's disabled (default-on).
   const enabledPlugins = enabledRegistryPlugins(pluginRegistry, pluginStates);
@@ -874,16 +853,6 @@ function AuthenticatedApp() {
   }
 
   useEffect(() => {
-    function syncDrawerWithViewport() {
-      setDrawerOpen(window.innerWidth > 1024);
-    }
-
-    syncDrawerWithViewport();
-    window.addEventListener("resize", syncDrawerWithViewport);
-    return () => window.removeEventListener("resize", syncDrawerWithViewport);
-  }, []);
-
-  useEffect(() => {
     const pollActiveStreams = () =>
       void coreBridge.activeStreams().then((ids) => setBackgroundStreamIds(new Set(ids)));
     void loadTaskQueue();
@@ -985,7 +954,7 @@ function AuthenticatedApp() {
       onSelectThread={handleSelectThread}
       onThreadAttention={applyThreadAttentionRows}
       onSetChatThreadPinned={handleSetChatThreadPinned}
-      onToggleDrawer={() => setDrawerOpen((value) => !value)}
+      onToggleDrawer={toggleDrawer}
       onSearchChat={() => setSearchOpen(true)}
       onUnarchiveChatThread={handleUnarchiveChatThread}
       onSelectSettingsSection={setSettingsSection}
@@ -1028,7 +997,7 @@ function AuthenticatedApp() {
         automations={automationItems}
         enabledPlugins={enabledPlugins}
         pluginHost={pluginHost}
-        onExpandSidebar={() => setDrawerOpen(true)}
+        onExpandSidebar={expandDrawer}
         onOpenSearch={() => setSearchOpen(true)}
         onOpenUsageSettings={() => {
           setPreviousView("chat");
@@ -1074,7 +1043,7 @@ function AuthenticatedApp() {
           (e.g. .task-topbar), which otherwise swallow clicks on the onboarding's
           top-placed controls (provider slide-over close). */}
       {showOnboarding && (
-        <OnboardingWizard onComplete={() => setShowOnboarding(false)} />
+        <OnboardingWizard onComplete={completeOnboarding} />
       )}
     </>
   );
