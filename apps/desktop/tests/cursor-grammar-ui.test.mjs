@@ -99,6 +99,13 @@ const chatFollowUpsHook = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatActiveTurnElapsed = await readFile(
+  new URL("../src/components/useChatActiveTurnElapsed.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const appWorkspace = await readFile(
   new URL("../src/components/AppWorkspace.tsx", import.meta.url),
@@ -1875,6 +1882,16 @@ test("ChatView delegates follow-up suggestion ownership to useChatFollowUps", ()
   assert.match(chatFollowUpsHook, /export function useChatFollowUps/);
   assert.match(chatFollowUpsHook, /coreBridge\s*\.\s*chatSuggestions/);
   assert.match(chatFollowUpsHook, /const \[followUps,\s*setFollowUps\]/);
+});
+
+test("ChatView delegates active-turn elapsed timing to useChatActiveTurnElapsed", () => {
+  assert.match(chatView, /from "\.\/useChatActiveTurnElapsed";/);
+  assert.match(chatView, /useChatActiveTurnElapsed\(\{\s*activeTurnKey,/);
+  assert.doesNotMatch(chatView, /setActiveTurnElapsedSeconds/);
+  assert.doesNotMatch(chatView, /window\.setInterval\(updateElapsed,\s*1000\)/);
+  assert.match(chatActiveTurnElapsed, /export function useChatActiveTurnElapsed/);
+  assert.match(chatActiveTurnElapsed, /window\.setInterval\(updateElapsed,\s*1000\)/);
+  assert.match(chatActiveTurnElapsed, /projectedUpdatedAt/);
 });
 
 test("ChatView delegates resume marker persistence to chatResumeMarkers", () => {

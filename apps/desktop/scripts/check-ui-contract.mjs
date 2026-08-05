@@ -1380,6 +1380,9 @@ assertNotContains("src/components/ChatView.tsx", "setMemoryArtifactsReloadNonce"
 assertContains("src/components/useChatFollowUps.ts", ".chatSuggestions", "follow-up suggestions must have one focused owner");
 assertContains("src/components/ChatView.tsx", "useChatFollowUps({", "ChatView must consume the focused follow-up suggestion owner");
 assertNotContains("src/components/ChatView.tsx", "coreBridge.chatSuggestions", "ChatView must not own follow-up suggestion loading");
+assertContains("src/components/useChatActiveTurnElapsed.ts", "window.setInterval(updateElapsed, 1000)", "active-turn elapsed timing must have one focused owner");
+assertContains("src/components/ChatView.tsx", "useChatActiveTurnElapsed({", "ChatView must consume the focused active-turn timer owner");
+assertNotContains("src/components/ChatView.tsx", "setActiveTurnElapsedSeconds", "ChatView must not own active-turn elapsed state");
 assertNotContains("src/components/ChatView.tsx", "memoryArtifactsRevision", "artifact validation must not use an unconditional revision counter");
 assertContains("src/components/ArtifactsPanel.tsx", "selectedResourceRevision", "artifact preview reloads must follow a semantic resource revision");
 assertNotContains("src/components/ChatView.tsx", "setArtifactsOpen", "legacy open boolean must not compete with inspector state");

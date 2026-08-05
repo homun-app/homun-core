@@ -116,6 +116,7 @@ import type {
   MessageFeedback,
   ReplyContext,
 } from "./ChatViewTypes";
+import { useChatActiveTurnElapsed } from "./useChatActiveTurnElapsed";
 import {
   latestActivitySteps,
   latestPlanMarkdown,
@@ -212,7 +213,6 @@ export function ChatView({
     threadId: thread.threadId,
     runtimeContextRevision,
   });
-  const [activeTurnElapsedSeconds, setActiveTurnElapsedSeconds] = useState(0);
   const [pendingSteering, setPendingSteering] = useState<SteeringQueueState>(() =>
     createSteeringQueueState(),
   );
@@ -454,22 +454,11 @@ export function ChatView({
     [pendingSteering.rows, projectedActiveTurn?.turn_id, terminalTurnAtRest],
   );
   const activeTurnKey = projectedActiveTurn?.turn_id ?? streamStatus?.requestId ?? null;
-  useEffect(() => {
-    if (!hasActiveTurn) {
-      setActiveTurnElapsedSeconds(0);
-      return;
-    }
-    const projectedUpdatedAt = projectedActiveTurn?.updated_at;
-    const startedAt = projectedUpdatedAt && projectedUpdatedAt > 0
-      ? Math.min(Date.now(), projectedUpdatedAt * 1000)
-      : Date.now();
-    const updateElapsed = () => {
-      setActiveTurnElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
-    };
-    updateElapsed();
-    const timer = window.setInterval(updateElapsed, 1000);
-    return () => window.clearInterval(timer);
-  }, [activeTurnKey, hasActiveTurn, projectedActiveTurn?.updated_at]);
+  const activeTurnElapsedSeconds = useChatActiveTurnElapsed({
+    activeTurnKey,
+    hasActiveTurn,
+    projectedUpdatedAt: projectedActiveTurn?.updated_at,
+  });
   // Durable wait (approval/CHOICES hold) must not keep a live "writing" owner: that hides
   // choice cards and makes the next composer send look like mid-turn steering.
   useEffect(() => {
