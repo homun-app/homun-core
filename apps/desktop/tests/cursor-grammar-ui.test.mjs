@@ -204,6 +204,13 @@ const messageFsAuthorizeCard = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageSandboxEscalateCard = await readFile(
+  new URL("../src/components/MessageSandboxEscalateCard.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -882,6 +889,15 @@ test("ChatView delegates filesystem authorization rendering to MessageFsAuthoriz
   assert.match(messageFsAuthorizeCard, /export function FsAuthorizeCard/);
   assert.match(messageFsAuthorizeCard, /coreBridge\.fsAuthorize/);
   assert.match(messageFsAuthorizeCard, /chat\.authorizationFailed/);
+});
+
+test("ChatView delegates sandbox escalation rendering to MessageSandboxEscalateCard", () => {
+  assert.match(chatView, /from "\.\/MessageSandboxEscalateCard";/);
+  assert.match(chatView, /<SandboxEscalateCard[\s\S]*command=\{sandboxEscalate\.command\}/);
+  assert.doesNotMatch(chatView, /function SandboxEscalateCard\(/);
+  assert.match(messageSandboxEscalateCard, /export function SandboxEscalateCard/);
+  assert.match(messageSandboxEscalateCard, /coreBridge\.runEscalate/);
+  assert.match(messageSandboxEscalateCard, /Run without sandbox/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
