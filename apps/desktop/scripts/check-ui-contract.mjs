@@ -1191,7 +1191,7 @@ assertContains("src/lib/coreBridge.ts", "/api/vault/pin/setup", "Vault PIN setup
 assertContains("src/lib/coreBridge.ts", "/api/vault/pin/verify", "Vault PIN verification must run through the local gateway");
 assertContains("src/lib/coreBridge.ts", "/api/vault/payment-approvals/approve", "Payment approvals must verify through the local gateway");
 assertContains("src/components/ChatView.tsx", "PAYMENT_APPROVAL_RE", "Chat must parse Payment Approval Card markers");
-assertContains("src/components/ChatView.tsx", "coreBridge.vaultPaymentApprovalApprove", "Payment Approval Card must verify PIN/CVV through the bridge");
+assertContains("src/components/MessagePaymentApprovalCard.tsx", "coreBridge.vaultPaymentApprovalApprove", "Payment Approval Card must verify PIN/CVV through the bridge");
 assertContains("src/components/ChatView.tsx", "messageId={messageId}", "Payment Approval Card must receive the source message id for transcript rewrite");
 assertContains("src/lib/coreBridge.ts", "message_id: ctx.messageId", "Payment approvals must include source message id when available");
 assertContains("src/data/mockData.ts", "id: \"vault\"", "Vault must be a separate Settings section");

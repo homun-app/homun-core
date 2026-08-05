@@ -190,6 +190,13 @@ const inlineApprovelPanel = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messagePaymentApprovalCard = await readFile(
+  new URL("../src/components/MessagePaymentApprovalCard.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -848,6 +855,17 @@ test("ChatView delegates inline approvals to InlineApprovelPanel", () => {
   assert.match(inlineApprovelPanel, /const surfaceIcons:/);
   assert.match(inlineApprovelPanel, /busyId === approval\.id/);
   assert.match(inlineApprovelPanel, /approval-plan-preview/);
+});
+
+test("ChatView delegates payment approval rendering to MessagePaymentApprovalCard", () => {
+  assert.match(chatView, /from "\.\/MessagePaymentApprovalCard";/);
+  assert.match(chatView, /<PaymentApprovalCard[\s\S]*proposal=\{paymentApproval\}/);
+  assert.doesNotMatch(chatView, /function PaymentApprovalCard\(/);
+  assert.doesNotMatch(chatView, /function formatPaymentAmount\(/);
+  assert.match(messagePaymentApprovalCard, /export interface PaymentApprovalProposal/);
+  assert.match(messagePaymentApprovalCard, /export function PaymentApprovalCard/);
+  assert.match(messagePaymentApprovalCard, /coreBridge\.vaultPaymentApprovalApprove/);
+  assert.match(messagePaymentApprovalCard, /formatPaymentAmount/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
