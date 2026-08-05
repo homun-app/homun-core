@@ -10,22 +10,12 @@ import {
 import { wsSubscription } from "../lib/wsSubscription";
 import {
   cancelTurn,
-  deleteSteering,
   enqueueTurn,
   fetchThreadActivity,
-  fetchThreadSteering,
-  sendSteeringNow,
   SteeringConflictError,
-  updateSteering,
   type SubagentInfo,
   type TurnSteeringRecord,
 } from "../lib/chatApi";
-import {
-  applySteeringChange,
-  createSteeringQueueState,
-  reconcileSteering,
-  type SteeringQueueState,
-} from "../lib/chatSteeringState";
 import {
   CONTINUE_RESPONSE_PROMPT,
   buildAssistantFollowUpPrompt,
@@ -33,7 +23,6 @@ import {
   buildReplyContextPrompt,
   buildSteeringPrompt,
 } from "../lib/chatPromptAssembly";
-import { steeringPromptWithEdit } from "../lib/chatSteeringPrompt";
 import {
   applyTurnEvent,
   createTurnReplayState,
@@ -109,6 +98,7 @@ import { useChatFollowUps } from "./useChatFollowUps";
 import { useChatInspectorWorkspace } from "./useChatInspectorWorkspace";
 import { useChatMemoryArtifacts } from "./useChatMemoryArtifacts";
 import { useChatProjectContext } from "./useChatProjectContext";
+import { useChatSteeringQueue } from "./useChatSteeringQueue";
 import { useChatStreamingNotifier } from "./useChatStreamingNotifier";
 import {
   projectWorkspaceSections,
@@ -204,9 +194,6 @@ export function ChatView({
     threadId: thread.threadId,
     runtimeContextRevision,
   });
-  const [pendingSteering, setPendingSteering] = useState<SteeringQueueState>(() =>
-    createSteeringQueueState(),
-  );
   // Once the projection has loaded for a thread we TRUST it — including a null plan (a new
   // plan-less task must clear the previous task's plan). Before it loads we fall back to the
   // text markers to avoid a blank flash. Reset per thread.
@@ -250,6 +237,19 @@ export function ChatView({
   const cancelledStreamIdsRef = useRef<Set<string>>(new Set());
   const { isMountedRef, notifyStreaming } = useChatStreamingNotifier(onStreamingChange);
   const {
+    pendingSteering,
+    applyPendingSteeringChange,
+    deletePendingSteering,
+    editPendingSteering,
+    refreshPendingSteering,
+    sendPendingSteeringNow,
+  } = useChatSteeringQueue({
+    isMountedRef,
+    onThreadChanged,
+    setPromptError,
+    threadId: thread.threadId,
+  });
+  const {
     branchBusy,
     branches,
     refreshBranches,
@@ -266,30 +266,6 @@ export function ChatView({
     streamingAssistantId,
     threadId: thread.threadId,
   });
-  const refreshPendingSteering = useCallback(async () => {
-    const rows = await fetchThreadSteering(thread.threadId);
-    if (!isMountedRef.current) return;
-    setPendingSteering((current) => reconcileSteering(current, rows));
-  }, [thread.threadId]);
-
-  useEffect(() => {
-    setPendingSteering(createSteeringQueueState());
-    void refreshPendingSteering().catch(() => {
-      /* Queue remains empty until the endpoint is available or an event retries hydration. */
-    });
-  }, [refreshPendingSteering]);
-
-  useEffect(() => {
-    const unsubscribe = wsSubscription.subscribe((message) => {
-      const event = message.type === "app.event"
-        ? message.event as Record<string, unknown> | undefined
-        : message;
-      if (event?.type !== "thread.steering_changed") return;
-      if (event.thread_id !== thread.threadId) return;
-      void refreshPendingSteering().catch(() => undefined);
-    });
-    return unsubscribe;
-  }, [refreshPendingSteering, thread.threadId]);
   // The global WS provides a second observation of turn state. The monotonic
   // reducer makes it safe to overlap with the durable per-turn stream; content
   // rendering stays on that replayable stream, while WS terminal/abort state
@@ -1387,7 +1363,7 @@ export function ChatView({
           result as typeof result & { steering?: TurnSteeringRecord }
         ).steering;
         if (returnedRecord) {
-          setPendingSteering((current) => applySteeringChange(current, returnedRecord));
+          applyPendingSteeringChange(returnedRecord);
         } else {
           await refreshPendingSteering().catch(() => undefined);
         }
@@ -1399,7 +1375,7 @@ export function ChatView({
         return true;
       } catch (error) {
         if (error instanceof SteeringConflictError) {
-          setPendingSteering((current) => applySteeringChange(current, error.steering));
+          applyPendingSteeringChange(error.steering);
         }
         setPromptError(describeBridgeError(error));
         return false;
@@ -1461,61 +1437,6 @@ export function ChatView({
       options?.resumeAssistantMessageId,
     );
     return true;
-  }
-
-  async function editPendingSteering(
-    row: TurnSteeringRecord,
-    visiblePrompt: string,
-    expectedRevision: number,
-  ) {
-    try {
-      const updated = await updateSteering(row.steering_id, {
-        expected_revision: expectedRevision,
-        prompt: steeringPromptWithEdit(row, visiblePrompt),
-        visible_prompt: visiblePrompt,
-        images: row.images,
-        attachments: row.attachments,
-        mode: row.mode,
-        model: row.model,
-      });
-      setPendingSteering((current) => applySteeringChange(current, updated));
-      setPromptError(null);
-    } catch (error) {
-      if (error instanceof SteeringConflictError) {
-        setPendingSteering((current) => applySteeringChange(current, error.steering));
-      }
-      setPromptError(describeBridgeError(error));
-      throw error;
-    }
-  }
-
-  async function deletePendingSteering(row: TurnSteeringRecord, expectedRevision: number) {
-    try {
-      const deleted = await deleteSteering(row.steering_id, expectedRevision);
-      setPendingSteering((current) => applySteeringChange(current, deleted));
-      setPromptError(null);
-    } catch (error) {
-      if (error instanceof SteeringConflictError) {
-        setPendingSteering((current) => applySteeringChange(current, error.steering));
-      }
-      setPromptError(describeBridgeError(error));
-      throw error;
-    }
-  }
-
-  async function sendPendingSteeringNow(row: TurnSteeringRecord, expectedRevision: number) {
-    try {
-      await sendSteeringNow(row.steering_id, expectedRevision);
-      await refreshPendingSteering();
-      setPromptError(null);
-      await onThreadChanged();
-    } catch (error) {
-      if (error instanceof SteeringConflictError) {
-        setPendingSteering((current) => applySteeringChange(current, error.steering));
-      }
-      setPromptError(describeBridgeError(error));
-      throw error;
-    }
   }
 
   async function copyMessageText(message: ChatMessage) {

@@ -134,6 +134,13 @@ const chatComputerSessionHook = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatSteeringQueueHook = await readFile(
+  new URL("../src/components/useChatSteeringQueue.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const appWorkspace = await readFile(
   new URL("../src/components/AppWorkspace.tsx", import.meta.url),
@@ -1785,7 +1792,8 @@ test("ChatView delegates structured payload parsing to ChatPayloadParsers", () =
 });
 
 test("ChatView delegates steering prompt edit assembly to chatSteeringPrompt", () => {
-  assert.match(chatView, /from "\.\.\/lib\/chatSteeringPrompt";/);
+  assert.match(chatSteeringQueueHook, /from "\.\.\/lib\/chatSteeringPrompt";/);
+  assert.doesNotMatch(chatView, /from "\.\.\/lib\/chatSteeringPrompt";/);
   assert.doesNotMatch(chatView, /function steeringPromptWithEdit\(/);
   assert.match(chatSteeringPrompt, /export function steeringPromptWithEdit/);
   assert.match(chatSteeringPrompt, /visible_prompt/);
@@ -1984,6 +1992,26 @@ test("ChatView delegates local computer session ownership to useChatComputerSess
   assert.match(chatComputerSessionHook, /coreBridge\s*\.\s*pauseLocalComputerSession/);
   assert.match(chatComputerSessionHook, /coreBridge\s*\.\s*resumeLocalComputerSession/);
   assert.match(chatComputerSessionHook, /coreBridge\s*\.\s*requestLocalComputerTakeover/);
+});
+
+test("ChatView delegates steering queue ownership to useChatSteeringQueue", () => {
+  assert.match(chatView, /from "\.\/useChatSteeringQueue";/);
+  assert.match(chatView, /useChatSteeringQueue\(\{/);
+  assert.doesNotMatch(chatView, /createSteeringQueueState/);
+  assert.doesNotMatch(chatView, /reconcileSteering/);
+  assert.doesNotMatch(chatView, /applySteeringChange/);
+  assert.doesNotMatch(chatView, /fetchThreadSteering/);
+  assert.doesNotMatch(chatView, /updateSteering/);
+  assert.doesNotMatch(chatView, /deleteSteering/);
+  assert.doesNotMatch(chatView, /sendSteeringNow/);
+  assert.match(chatSteeringQueueHook, /export function useChatSteeringQueue/);
+  assert.match(chatSteeringQueueHook, /createSteeringQueueState/);
+  assert.match(chatSteeringQueueHook, /reconcileSteering/);
+  assert.match(chatSteeringQueueHook, /applySteeringChange/);
+  assert.match(chatSteeringQueueHook, /fetchThreadSteering/);
+  assert.match(chatSteeringQueueHook, /updateSteering/);
+  assert.match(chatSteeringQueueHook, /deleteSteering/);
+  assert.match(chatSteeringQueueHook, /sendSteeringNow/);
 });
 
 test("ChatView delegates resume marker persistence to chatResumeMarkers", () => {
