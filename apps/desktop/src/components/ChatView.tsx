@@ -184,7 +184,6 @@ import {
   UNCLOSED_PROPOSE_RE,
   COMPOSIO_MARKERS_RE,
   PROPOSE_MARKERS_VISIBLE_RE,
-  ACTIVITY_RE,
   ARTIFACT_RE,
   PLAN_RE,
 } from "../lib/markers";
@@ -203,6 +202,7 @@ import { ComputerDetailPanel } from "./ComputerDetailPanel";
 import { ChatEmptyHero } from "./ChatEmptyHero";
 import { MessageAttachmentList } from "./MessageAttachmentList";
 import { MessageActionBar } from "./MessageActionBar";
+import { MessageActivity, parseActivitySteps } from "./MessageActivity";
 import {
   projectWorkspaceSections,
   type WorkspaceSectionId,
@@ -4077,17 +4077,6 @@ function parsePlanSteps(markdown: string): PlanStep[] {
   return out;
 }
 
-// Tool-activity trace markers (browser / skill / sandbox / connected-tool steps).
-// They are extracted into a compact collapsible panel so the answer body stays
-// clean — the pattern Claude/assistant-ui use for "tool activity".
-
-function parseActivitySteps(text: string): string[] {
-  if (!text.includes("‹‹ACT››")) return [];
-  return Array.from(text.matchAll(ACTIVITY_RE), (match) => match[1].trim()).filter(
-    (step) => step.length > 0,
-  );
-}
-
 // Generated-file artifacts surfaced by the gateway (skill outputs in $OUTPUT_DIR).
 
 export interface ParsedArtifact {
@@ -6735,47 +6724,6 @@ function ArtifactCsvTable({ text }: { text: string }) {
         </tbody>
       </table>
     </div>
-  );
-}
-
-/** Compact, collapsible trace of the tool steps the assistant ran (browse, skill,
- *  sandbox, connected tools). Always collapsed by default: while streaming, the
- *  collapsed line reflects the latest action in progress; once done it shows the
- *  step count. Expanding reveals every step. Keeps the answer in focus. */
-function MessageActivity({ text, live = false }: { text: string; live?: boolean }) {
-  const steps = useMemo(() => parseActivitySteps(text), [text]);
-  if (steps.length === 0) return null;
-  const countLabel = `Activity · ${steps.length} ${steps.length === 1 ? "passo" : "passi"}`;
-  const collapsedLabel = live ? steps[steps.length - 1] : countLabel;
-  return (
-    <details className={`chat-operational-row msg-activity${live ? " live" : ""}`} open={live}>
-      <summary>
-        {live ? (
-          <span className="msg-activity-dot" aria-hidden="true" />
-        ) : (
-          <SquareTerminal size={13} className="msg-activity-icon" />
-        )}
-        <span className="msg-activity-label">{collapsedLabel}</span>
-        <ChevronDown size={13} className="msg-activity-caret" />
-      </summary>
-      <ol className="msg-activity-steps">
-        {steps.map((step, index) => {
-          // Per-step status, inferred without backend lifecycle data: the gateway's
-          // problem markers (⏳ retry / ↩ fallback / ⏹ stop / 🔧 fix) → "warn"; in a
-          // LIVE turn the last announced step is the one in progress; the rest are done.
-          const status = /^(?:⏳|↩|⏹|🔧)/u.test(step)
-            ? "warn"
-            : live && index === steps.length - 1
-              ? "doing"
-              : "done";
-          return (
-            <li key={`${index}-${step.slice(0, 24)}`} data-status={status}>
-              {step.replace(/^(?:\p{Extended_Pictographic}|️|‍|\s)+/u, "")}
-            </li>
-          );
-        })}
-      </ol>
-    </details>
   );
 }
 

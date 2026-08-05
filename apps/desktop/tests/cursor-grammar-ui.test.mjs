@@ -106,6 +106,13 @@ const messageActionBar = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageActivity = await readFile(
+  new URL("../src/components/MessageActivity.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const runtimeContextPanel = await readFile(
   new URL("../src/components/RuntimeContextPanel.tsx", import.meta.url),
   "utf8",
@@ -606,6 +613,17 @@ test("ChatView delegates message action rendering to MessageActionBar", () => {
   assert.match(messageActionBar, /message-action-menu-feedback/);
   assert.match(messageActionBar, /message-latency-summary/);
   assert.match(messageActionBar, /resolveMessageActionMenuPlacement/);
+});
+
+test("ChatView delegates message activity rendering to MessageActivity", () => {
+  assert.match(chatView, /import \{ MessageActivity, parseActivitySteps \} from "\.\/MessageActivity";/);
+  assert.match(chatView, /<MessageActivity text=\{displayMessage\.text\} live=\{false\}/);
+  assert.doesNotMatch(chatView, /function MessageActivity\(/);
+  assert.doesNotMatch(chatView, /function parseActivitySteps\(/);
+  assert.match(messageActivity, /export function MessageActivity/);
+  assert.match(messageActivity, /export function parseActivitySteps/);
+  assert.match(messageActivity, /msg-activity-steps/);
+  assert.match(messageActivity, /ACTIVITY_RE/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {

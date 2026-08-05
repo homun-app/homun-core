@@ -1514,6 +1514,11 @@ assertContains(
   "<MessageActivity",
   "per-turn activity must be rendered inline in each assistant message"
 );
+assertContains(
+  "src/components/MessageActivity.tsx",
+  "msg-activity-steps",
+  "per-turn activity markup must be owned by MessageActivity"
+);
 
 assertMissing(
   "src/components/ProjectContextPanel.tsx",
