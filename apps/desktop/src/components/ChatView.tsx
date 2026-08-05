@@ -2,14 +2,6 @@ import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRuntimeContext } from "../lib/useRuntimeContext";
-import type {
-  ChangeEvent,
-  ClipboardEvent,
-  DragEvent,
-  FormEvent,
-  KeyboardEvent,
-  MouseEvent as ReactMouseEvent,
-} from "react";
 import {
   coreBridge,
   SteeringQueuedDuringSubmissionError,
@@ -18,11 +10,7 @@ import {
   type CoreComputerSessionSnapshot,
   type CoreUncertainEffectOutcome,
   type MemoryArtifactView,
-  modelIsCloud,
-  type ProviderModelsGroup,
   type RoutingBindingInput,
-  type RuntimeContextResponse,
-  type SkillsSummary,
 } from "../lib/coreBridge";
 import { wsSubscription } from "../lib/wsSubscription";
 import {
@@ -60,10 +48,6 @@ import {
 import { captureAppScreenshot, IS_DESKTOP } from "../lib/gatewayConfig";
 import { copyText } from "../lib/clipboard";
 import {
-  isLocalOllamaProvider,
-  RUNTIME_MODELS_CHANGED_EVENT,
-} from "../lib/providerPresets";
-import {
   filterInspectorState,
   inspectorWorkspaceReducer,
   loadInspectorState,
@@ -76,15 +60,12 @@ import { reconcileMemoryArtifacts } from "../lib/uiSnapshot";
 import {
   effectiveModelFromGateway,
   latestAssistantEffectiveModel,
-  selectedModelAfterSubmission,
 } from "../lib/composerTurnContract";
 import {
-  blobToBase64,
   chatMessageFromAssistantResult,
   createReplyPreview,
   currentTimestampSeconds,
   describeBridgeError,
-  fileLocalPath,
   isLikelyIncompleteMessage,
   isPlaceholderThreadTitle,
   isUserVisibleComputerEvent,
@@ -115,8 +96,7 @@ import * as messageIndex from "../lib/messageIndex.mjs";
 import { type ParsedArtifact } from "./MessageArtifacts";
 import { ChatComputerPanel } from "./ChatComputerPanel";
 import { AdaptiveWorkspaceIsland } from "./AdaptiveWorkspaceIsland";
-import { ActiveTurnStatus } from "./ActiveTurnStatus";
-import { PendingSteeringQueue } from "./PendingSteeringQueue";
+import { ChatComposerDock, type ChatTurnState } from "./ChatComposerDock";
 import { InspectorWorkspace } from "./InspectorWorkspace";
 import {
   INSPECTOR_VIEW_LABEL_KEY,
@@ -125,7 +105,6 @@ import {
   isRestorableInspectorTab,
   type IslandSource,
 } from "./InspectorView";
-import { ComposerContainer } from "./ComposerContainer";
 import { ChatTopbar } from "./ChatTopbar";
 import { ChatTranscript } from "./ChatTranscript";
 import { type ChatStreamStatus } from "./AssistantThinkingState";
@@ -233,14 +212,6 @@ interface ReplyContext {
 }
 
 type MessageFeedback = NonNullable<ChatMessage["feedback"]>;
-
-interface ChatTurnState {
-  phase: string;
-  detail?: string;
-  elapsedSeconds: number;
-  attempt: number;
-  activityCount: number;
-}
 
 interface ChatAutoSubmit {
   id: string;
@@ -2816,45 +2787,32 @@ export function ChatView({
         )}
       />
 
-      <div className="composer-stack">
-        {chatTurnState && (
-          /* Band matching the composer's width so the status pill lines up with the LEFT edge of the
-             input instead of floating centred above it. */
-          <div className="active-turn-band">
-            <ActiveTurnStatus
-              {...chatTurnState}
-              onOpenActivity={openActivityIsland}
-              onStop={() => void stopActiveTurn()}
-            />
-          </div>
-        )}
-        <PendingSteeringQueue
-          rows={visiblePendingSteeringRowsForTurn}
-          onEdit={editPendingSteering}
-          onDelete={deletePendingSteering}
-          onSendNow={sendPendingSteeringNow}
-        />
-        <ComposerContainer
-          activeWork={workInProgress}
-          disabled={false}
-          effectiveModelLabel={lastAssistantEffectiveModel}
-          runtimeContext={runtimeContext}
-          runtimeContextLoading={runtimeContextLoading}
-          runtimeContextError={runtimeContextError}
-          error={promptError}
-          replyContext={replyContext}
-          seed={composerSeed}
-          suggestedModel={usageSuggestedModel}
-          streaming={promptSubmitting}
-          threadId={thread.threadId}
-          onCancelStreaming={cancelActiveStreaming}
-          onClearReply={() => setReplyContext(null)}
-          onManualModelSelection={() => setUsageSuggestedModel(null)}
-          onRefreshRuntimeContext={refreshRuntimeContext}
-          onSuggestedModelConsumed={() => setUsageSuggestedModel(null)}
-          onSubmit={submitComposerPrompt}
-        />
-      </div>
+      <ChatComposerDock
+        activeWork={workInProgress}
+        chatTurnState={chatTurnState}
+        effectiveModelLabel={lastAssistantEffectiveModel}
+        runtimeContext={runtimeContext}
+        runtimeContextLoading={runtimeContextLoading}
+        runtimeContextError={runtimeContextError}
+        error={promptError}
+        replyContext={replyContext}
+        seed={composerSeed}
+        suggestedModel={usageSuggestedModel}
+        streaming={promptSubmitting}
+        threadId={thread.threadId}
+        visiblePendingSteeringRows={visiblePendingSteeringRowsForTurn}
+        onCancelStreaming={cancelActiveStreaming}
+        onClearReply={() => setReplyContext(null)}
+        onDeletePendingSteering={deletePendingSteering}
+        onEditPendingSteering={editPendingSteering}
+        onManualModelSelection={() => setUsageSuggestedModel(null)}
+        onOpenActivity={openActivityIsland}
+        onRefreshRuntimeContext={refreshRuntimeContext}
+        onSendPendingSteeringNow={sendPendingSteeringNow}
+        onStopActiveTurn={() => void stopActiveTurn()}
+        onSuggestedModelConsumed={() => setUsageSuggestedModel(null)}
+        onSubmit={submitComposerPrompt}
+      />
     </section>
   );
 }

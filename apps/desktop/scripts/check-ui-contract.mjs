@@ -165,7 +165,8 @@ assertContains("src/components/ChatView.tsx", "onUseForTask", "Confirmed task su
 assertContains("src/components/ChatView.tsx", "enqueueTurn(thread.threadId, requestId, promptWithReplyContext", "Active task instructions must be queued as steering");
 assertSource("src/components/ActiveTurnStatus.tsx", ["chat.inspector.views.activity", "onStop", "attempt"]);
 assertSource("src/components/PendingSteeringQueue.tsx", ["onEdit", "onDelete", "onSendNow"]);
-assertSource("src/components/ChatView.tsx", ["<ActiveTurnStatus", "pendingSteering"]);
+assertSource("src/components/ChatComposerDock.tsx", ["<ActiveTurnStatus", "<PendingSteeringQueue", "<ComposerContainer"]);
+assertSource("src/components/ChatView.tsx", ["<ChatComposerDock", "pendingSteering"]);
 assertNotContains(
   "src/App.tsx",
   "navigateToThread(eventThreadId",
@@ -1071,7 +1072,8 @@ assertContains("src/data/mockData.ts", "label: \"settings.computer.title\"", "Se
 assertContains("src/lib/coreBridge.ts", "secret_value?: string", "Vault bridge must expose optional raw secret material only for the encrypted accept path");
 assertContains("src/components/ChatComputerPanel.tsx", "const browserRunning = Boolean(live?.active && live?.novnc_url)", "live computer browser state must distinguish running activity from idle availability");
 assertContains("src/components/ChatComputerPanel.tsx", "view_only=1&viewer=csp-external-v1", "chat computer must invalidate the CSP-blocked inline viewer cached by older desktop releases");
-assertOccurrences("src/components/ChatView.tsx", "<ActiveTurnStatus", 1, "active turn status must have one canonical composer mount");
+assertOccurrences("src/components/ChatComposerDock.tsx", "<ActiveTurnStatus", 1, "active turn status must have one canonical composer mount");
+assertNotContains("src/components/ChatView.tsx", "<ActiveTurnStatus", "ChatView must not remount active turn status outside the composer dock");
 assertNotContains("src/components/ChatView.tsx", 'variant="assistant-footer"', "active turn status must not duplicate inside the transcript");
 assertContains(
   "src/components/ChatView.tsx",

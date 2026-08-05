@@ -85,6 +85,13 @@ const composerContainer = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatComposerDock = await readFile(
+  new URL("../src/components/ChatComposerDock.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const computerDetailPanel = await readFile(
   new URL("../src/components/ComputerDetailPanel.tsx", import.meta.url),
   "utf8",
@@ -899,8 +906,8 @@ test("ChatView delegates the prompt surface to the thin ComposerShell boundary",
 });
 
 test("ChatView delegates composer state and submit ownership to ComposerContainer", () => {
-  assert.match(chatView, /import \{ ComposerContainer \} from "\.\/ComposerContainer";/);
-  assert.match(chatView, /<ComposerContainer[\s\S]*?onSubmit=\{submitComposerPrompt\}/);
+  assert.match(chatComposerDock, /import \{ ComposerContainer/);
+  assert.match(chatComposerDock, /<ComposerContainer[\s\S]*?onSubmit=\{onSubmit\}/);
   assert.doesNotMatch(chatView, /function Composer\(/);
   assert.doesNotMatch(chatView, /const \[selectedModel,\s*setSelectedModel\]/);
   assert.doesNotMatch(chatView, /const \[attachments,\s*setAttachments\]/);
@@ -908,6 +915,18 @@ test("ChatView delegates composer state and submit ownership to ComposerContaine
   assert.match(composerContainer, /<ComposerShell/);
   assert.match(composerContainer, /selectedModelAfterSubmission/);
   assert.match(composerContainer, /coreBridge\.runtimeModels/);
+});
+
+test("ChatView delegates the composer dock surface to ChatComposerDock", () => {
+  assert.match(chatView, /import \{ ChatComposerDock[\s\S]*?from "\.\/ChatComposerDock";/);
+  assert.match(chatView, /<ChatComposerDock[\s\S]*?onSubmit=\{submitComposerPrompt\}/);
+  assert.doesNotMatch(chatView, /<ActiveTurnStatus/);
+  assert.doesNotMatch(chatView, /<PendingSteeringQueue/);
+  assert.doesNotMatch(chatView, /<ComposerContainer/);
+  assert.match(chatComposerDock, /export function ChatComposerDock/);
+  assert.match(chatComposerDock, /<ActiveTurnStatus/);
+  assert.match(chatComposerDock, /<PendingSteeringQueue/);
+  assert.match(chatComposerDock, /<ComposerContainer/);
 });
 
 test("InspectorView delegates local computer inspector rendering to ComputerDetailPanel", () => {
