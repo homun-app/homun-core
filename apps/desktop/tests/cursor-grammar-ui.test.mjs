@@ -134,6 +134,13 @@ const chatMessageAfterContent = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatMessageRow = await readFile(
+  new URL("../src/components/ChatMessageRow.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatBranchPicker = await readFile(
   new URL("../src/components/ChatBranchPicker.tsx", import.meta.url),
   "utf8",
@@ -560,7 +567,7 @@ test("sidebar styles load after shared menus and own sidebar selectors", () => {
 });
 
 test("the transcript uses the flat role and operational message grammar", () => {
-  const transcriptMarkup = `${chatView}\n${assistantMessageBody}\n${messageActionFooter}`;
+  const transcriptMarkup = `${chatView}\n${chatMessageRow}\n${assistantMessageBody}\n${messageActionFooter}`;
   for (const className of [
     "chat-message-agent",
     "chat-message-user-band",
@@ -987,8 +994,9 @@ test("ChatView delegates post-message status badges to MessageStatusBadges", () 
 });
 
 test("ChatView delegates system message headers to ChatSystemMessageHeader", () => {
-  assert.match(chatView, /from "\.\/ChatSystemMessageHeader";/);
-  assert.match(chatView, /<ChatSystemMessageHeader/);
+  assert.doesNotMatch(chatView, /from "\.\/ChatSystemMessageHeader";/);
+  assert.match(chatMessageRow, /from "\.\/ChatSystemMessageHeader";/);
+  assert.match(chatMessageRow, /<ChatSystemMessageHeader/);
   assert.doesNotMatch(chatView, /className="assistant-label system-label"/);
   assert.doesNotMatch(chatView, /Clock3/);
   assert.match(chatSystemMessageHeader, /export function ChatSystemMessageHeader/);
@@ -1151,9 +1159,10 @@ test("ChatView delegates assistant message body rendering to AssistantMessageBod
 });
 
 test("ChatView delegates message content state rendering to ChatMessageContent", () => {
-  assert.match(chatView, /from "\.\/ChatMessageContent";/);
-  assert.match(chatView, /<ChatMessageContent[\s\S]*?onSubmitChoiceAnswer=\{submitChoiceAnswer\}/);
-  assert.match(chatView, /<ChatMessageContent[\s\S]*?onHandleProactiveAnswer=\{handleProactiveAnswer\}/);
+  assert.doesNotMatch(chatView, /from "\.\/ChatMessageContent";/);
+  assert.match(chatMessageRow, /from "\.\/ChatMessageContent";/);
+  assert.match(chatMessageRow, /<ChatMessageContent[\s\S]*?onSubmitChoiceAnswer=\{onSubmitChoiceAnswer\}/);
+  assert.match(chatMessageRow, /<ChatMessageContent[\s\S]*?onHandleProactiveAnswer=\{onHandleProactiveAnswer\}/);
   assert.doesNotMatch(chatView, /streamHasVisibleText && !chatTurnState/);
   assert.match(chatMessageContent, /export function ChatMessageContent/);
   assert.match(chatMessageContent, /isStreaming \?/);
@@ -1162,14 +1171,26 @@ test("ChatView delegates message content state rendering to ChatMessageContent",
 });
 
 test("ChatView delegates post-content message controls to ChatMessageAfterContent", () => {
-  assert.match(chatView, /from "\.\/ChatMessageAfterContent";/);
-  assert.match(chatView, /<ChatMessageAfterContent[\s\S]*?onSelectFollowUp=\{selectFollowUp\}/);
-  assert.match(chatView, /<ChatMessageAfterContent[\s\S]*?onSaveAsGoal=\{saveMessageAsGoal\}/);
+  assert.doesNotMatch(chatView, /from "\.\/ChatMessageAfterContent";/);
+  assert.match(chatMessageRow, /from "\.\/ChatMessageAfterContent";/);
+  assert.match(chatMessageRow, /<ChatMessageAfterContent[\s\S]*?onSelectFollowUp=\{onSelectFollowUp\}/);
+  assert.match(chatMessageRow, /<ChatMessageAfterContent[\s\S]*?onSaveAsGoal=\{onSaveAsGoal\}/);
   assert.doesNotMatch(chatView, /followUpsFor === displayMessage\.id/);
   assert.doesNotMatch(chatView, /previousUserMessageIndex\.get\(displayMessage\.id\)/);
   assert.match(chatMessageAfterContent, /export function ChatMessageAfterContent/);
   assert.match(chatMessageAfterContent, /branchPoint\.options\.length >= 2/);
   assert.match(chatMessageAfterContent, /onSelectFollowUp\(suggestion\)/);
+});
+
+test("ChatView delegates each transcript row to ChatMessageRow", () => {
+  assert.match(chatView, /from "\.\/ChatMessageRow";/);
+  assert.match(chatView, /<ChatMessageRow[\s\S]*?onSaveAsGoal=\{saveMessageAsGoal\}/);
+  assert.doesNotMatch(chatView, /messageSurfaceClass/);
+  assert.doesNotMatch(chatView, /className="thread-message-row"/);
+  assert.doesNotMatch(chatView, /isLikelyIncompleteMessage\(displayMessage\)/);
+  assert.match(chatMessageRow, /export function ChatMessageRow/);
+  assert.match(chatMessageRow, /className="thread-message-row"/);
+  assert.match(chatMessageRow, /isLikelyIncompleteMessage\(message\)/);
 });
 
 test("ChatView delegates resume marker persistence to chatResumeMarkers", () => {

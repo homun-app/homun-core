@@ -138,10 +138,8 @@ import {
 } from "./InspectorView";
 import { ComposerContainer } from "./ComposerContainer";
 import { ChatEmptyHero } from "./ChatEmptyHero";
-import { ChatSystemMessageHeader } from "./ChatSystemMessageHeader";
 import { ChatTopbar } from "./ChatTopbar";
-import { ChatMessageContent } from "./ChatMessageContent";
-import { ChatMessageAfterContent } from "./ChatMessageAfterContent";
+import { ChatMessageRow } from "./ChatMessageRow";
 import { PendingAssistantMessage } from "./PendingAssistantMessage";
 import { type ChatStreamStatus } from "./AssistantThinkingState";
 import { InlineUncertainEffectPanel } from "./InlineUncertainEffectPanel";
@@ -2781,77 +2779,50 @@ export function ChatView({
               })}
             />
           )}
-          {threadMessages.map((message) => {
-            const isStreamingMessage = message.id === streamingAssistantId;
-            const displayMessage = message;
-            const assistantMessage = displayMessage.role === "assistant";
-            const incompleteMessage = isLikelyIncompleteMessage(displayMessage);
-            const messageSurfaceClass =
-              displayMessage.role === "assistant"
-                ? "message chat-message-agent"
-                : displayMessage.role === "user"
-                  ? "message chat-message-user-band"
-                  : "message chat-message-system";
-
-            return (
-            <div
-              className="thread-message-row"
-              key={displayMessage.id}
-            >
-            <article className={messageSurfaceClass}>
-              {displayMessage.role === "system" && (
-                <ChatSystemMessageHeader />
-              )}
-              <ChatMessageContent
-                message={displayMessage}
-                isStreaming={isStreamingMessage}
-                isEditing={editingMessageId === displayMessage.id}
-                editingText={editingText}
-                streamHasVisibleText={streamHasVisibleText}
-                hasActiveTurnState={Boolean(chatTurnState)}
-                streamStatus={streamStatus}
-                threadId={thread.threadId}
-                cancelLabel="Cancel"
-                saveLabel={t("chat.saveAndSend")}
-                onEditingTextChange={setEditingText}
-                onCancelEdit={cancelEditMessage}
-                onSaveEdit={saveEditedMessage}
-                onOpenArtifact={openArtifactTab}
-                onSubmitChoiceAnswer={submitChoiceAnswer}
-                onHandleProactiveAnswer={handleProactiveAnswer}
-              />
-              <ChatMessageAfterContent
-                message={displayMessage}
-                isStreaming={isStreamingMessage}
-                incomplete={incompleteMessage}
-                autoContinuing={autoContinueMessageId === displayMessage.id}
-                branchPoint={branchIndex.get(displayMessage.id)}
-                branchBusy={branchBusy}
-                followUps={followUps}
-                followUpsFor={followUpsFor}
-                copied={copiedMessageId === displayMessage.id}
-                previousUserMessageIndex={previousUserMessageIndex}
-                threadIsProject={threadIsProject}
-                consumerWorkspaceId={thread.workspaceId}
-                onSwitchBranch={switchBranch}
-                onRenameBranch={renameBranch}
-                onSelectFollowUp={selectFollowUp}
-                onCopy={copyMessageText}
-                onContinue={continueAssistantResponse}
-                onExpand={expandAssistantResponse}
-                onAskAboutAssistantResponse={askAboutAssistantResponse}
-                onFeedback={setMessageFeedback}
-                onReply={replyToMessage}
-                onEdit={startEditMessage}
-                onRegenerate={regenerateAnswer}
-                onSaveToMemory={saveMessageToMemory}
-                onSaveAsGoal={saveMessageAsGoal}
-                onMemoryPublicationApproved={refreshAfterChatSubmit}
-              />
-            </article>
-            </div>
-            );
-          })}
+          {threadMessages.map((message) => (
+            <ChatMessageRow
+              key={message.id}
+              message={message}
+              streamingAssistantId={streamingAssistantId}
+              editingMessageId={editingMessageId}
+              editingText={editingText}
+              streamHasVisibleText={streamHasVisibleText}
+              hasActiveTurnState={Boolean(chatTurnState)}
+              streamStatus={streamStatus}
+              threadId={thread.threadId}
+              cancelLabel="Cancel"
+              saveLabel={t("chat.saveAndSend")}
+              autoContinueMessageId={autoContinueMessageId}
+              branchIndex={branchIndex}
+              branchBusy={branchBusy}
+              followUps={followUps}
+              followUpsFor={followUpsFor}
+              copiedMessageId={copiedMessageId}
+              previousUserMessageIndex={previousUserMessageIndex}
+              threadIsProject={threadIsProject}
+              consumerWorkspaceId={thread.workspaceId}
+              onEditingTextChange={setEditingText}
+              onCancelEdit={cancelEditMessage}
+              onSaveEdit={saveEditedMessage}
+              onOpenArtifact={openArtifactTab}
+              onSubmitChoiceAnswer={submitChoiceAnswer}
+              onHandleProactiveAnswer={handleProactiveAnswer}
+              onSwitchBranch={switchBranch}
+              onRenameBranch={renameBranch}
+              onSelectFollowUp={selectFollowUp}
+              onCopy={copyMessageText}
+              onContinue={continueAssistantResponse}
+              onExpand={expandAssistantResponse}
+              onAskAboutAssistantResponse={askAboutAssistantResponse}
+              onFeedback={setMessageFeedback}
+              onReply={replyToMessage}
+              onEdit={startEditMessage}
+              onRegenerate={regenerateAnswer}
+              onSaveToMemory={saveMessageToMemory}
+              onSaveAsGoal={saveMessageAsGoal}
+              onMemoryPublicationApproved={refreshAfterChatSubmit}
+            />
+          ))}
           </div>
 
           {promptSubmitting && !streamingAssistantId && !chatTurnState && (
