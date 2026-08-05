@@ -7,7 +7,6 @@ import {
   type ChatAttachmentInput,
   type CoreBranchPoint,
   type CoreComputerSessionSnapshot,
-  type MemoryArtifactView,
   type RoutingBindingInput,
 } from "../lib/coreBridge";
 import { wsSubscription } from "../lib/wsSubscription";
@@ -62,7 +61,6 @@ import {
   saveInspectorWidthRatio,
   type InspectorTabKind,
 } from "../lib/inspectorWorkspace";
-import { reconcileMemoryArtifacts } from "../lib/uiSnapshot";
 import {
   effectiveModelFromGateway,
   latestAssistantEffectiveModel,
@@ -124,6 +122,7 @@ import {
   parsePlanSteps,
 } from "./ChatPayloadParsers";
 import { useChatConversationScroll } from "./useChatConversationScroll";
+import { useChatMemoryArtifacts } from "./useChatMemoryArtifacts";
 import { useChatProjectContext } from "./useChatProjectContext";
 import {
   projectWorkspaceSections,
@@ -252,10 +251,12 @@ export function ChatView({
   const inspectorRestoreScopeRef = useRef<string | null>(null);
   inspectorRef.current = inspector;
   const [inspectorRatio, setInspectorRatio] = useState(loadInspectorWidthRatio);
-  const [memoryArtifacts, setMemoryArtifacts] = useState<MemoryArtifactView[]>([]);
-  const [memoryArtifactsLoaded, setMemoryArtifactsLoaded] = useState(false);
-  const [memoryArtifactsLoadError, setMemoryArtifactsLoadError] = useState(false);
-  const [memoryArtifactsReloadNonce, setMemoryArtifactsReloadNonce] = useState(0);
+  const {
+    memoryArtifacts,
+    memoryArtifactsLoaded,
+    memoryArtifactsLoadError,
+    retryMemoryArtifacts,
+  } = useChatMemoryArtifacts(thread.threadId, messages);
   const {
     goalSeed,
     projectGoalCount,
@@ -1955,28 +1956,6 @@ export function ChatView({
     }
   }
 
-  useEffect(() => {
-    let cancelled = false;
-    void coreBridge
-      .memoryArtifacts(thread.threadId)
-      .then((items) => {
-        if (!cancelled) {
-          setMemoryArtifacts((current) => reconcileMemoryArtifacts(current, items));
-          setMemoryArtifactsLoadError(false);
-          setMemoryArtifactsLoaded(true);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setMemoryArtifactsLoadError(true);
-          setMemoryArtifactsLoaded(true);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [memoryArtifactsReloadNonce, messages, thread.threadId]);
-
   // Promote a chat message to a project objective: hand the text off to the Obiettivi
   // panel's compose (open Workbench → Obiettivi tab, pre-filled) so the user trims and
   // confirms with the polished UI — never auto-saving long prose verbatim.
@@ -2504,7 +2483,7 @@ export function ChatView({
         onOpenFile={openFileTab}
         onOpenFilesIndex={() => openUtilityTab("file")}
         onOpenArtifact={openArtifactTab}
-        onRetryArtifactCatalog={() => setMemoryArtifactsReloadNonce((value) => value + 1)}
+        onRetryArtifactCatalog={retryMemoryArtifacts}
         onPauseComputer={() => runComputerControl(coreBridge.pauseLocalComputerSession)}
         onResumeComputer={() => runComputerControl(coreBridge.resumeLocalComputerSession)}
         onSelectSurface={setActiveSurface}

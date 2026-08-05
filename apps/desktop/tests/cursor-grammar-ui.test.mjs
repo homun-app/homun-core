@@ -85,6 +85,13 @@ const chatProjectContext = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatMemoryArtifacts = await readFile(
+  new URL("../src/components/useChatMemoryArtifacts.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const appWorkspace = await readFile(
   new URL("../src/components/AppWorkspace.tsx", import.meta.url),
@@ -1838,6 +1845,18 @@ test("ChatView delegates project context ownership to useChatProjectContext", ()
   assert.match(chatProjectContext, /coreBridge\s*\.\s*projectGoals\(threadId\)/);
   assert.match(chatProjectContext, /coreBridge\s*\.\s*memoryGraph\(threadId\)/);
   assert.match(chatProjectContext, /setGoalSeed/);
+});
+
+test("ChatView delegates memory artifact loading to useChatMemoryArtifacts", () => {
+  assert.match(chatView, /from "\.\/useChatMemoryArtifacts";/);
+  assert.match(chatView, /useChatMemoryArtifacts\(thread\.threadId,\s*messages\)/);
+  assert.match(chatView, /onRetryArtifactCatalog=\{retryMemoryArtifacts\}/);
+  assert.doesNotMatch(chatView, /reconcileMemoryArtifacts/);
+  assert.doesNotMatch(chatView, /setMemoryArtifactsReloadNonce/);
+  assert.match(chatMemoryArtifacts, /export function useChatMemoryArtifacts/);
+  assert.match(chatMemoryArtifacts, /coreBridge\s*\.\s*memoryArtifacts\(threadId\)/);
+  assert.match(chatMemoryArtifacts, /reconcileMemoryArtifacts/);
+  assert.match(chatMemoryArtifacts, /retryMemoryArtifacts/);
 });
 
 test("ChatView delegates resume marker persistence to chatResumeMarkers", () => {

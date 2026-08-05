@@ -1373,7 +1373,10 @@ assertContains("src/components/ChatView.tsx", "saveInspectorState(thread.threadI
 assertContains("src/components/ChatView.tsx", "Promise.all(restored.tabs.map", "restored resource tabs must be revalidated as one batch");
 assertContains("src/components/InspectorView.tsx", "coreBridge.fsFile(path, threadId)", "restored file tabs must recheck current authorization");
 assertContains("src/components/ChatView.tsx", "inspectorResourcesReady", "restored resources must stay hidden until validation completes");
-assertContains("src/components/ChatView.tsx", "reconcileMemoryArtifacts", "artifact polling must preserve an unchanged catalog");
+assertContains("src/components/useChatMemoryArtifacts.ts", "reconcileMemoryArtifacts", "artifact polling must preserve an unchanged catalog");
+assertContains("src/components/ChatView.tsx", "useChatMemoryArtifacts(thread.threadId, messages)", "ChatView must consume the focused artifact catalog owner");
+assertNotContains("src/components/ChatView.tsx", "coreBridge.memoryArtifacts", "ChatView must not own artifact catalog loading");
+assertNotContains("src/components/ChatView.tsx", "setMemoryArtifactsReloadNonce", "ChatView must not own artifact catalog retry state");
 assertNotContains("src/components/ChatView.tsx", "memoryArtifactsRevision", "artifact validation must not use an unconditional revision counter");
 assertContains("src/components/ArtifactsPanel.tsx", "selectedResourceRevision", "artifact preview reloads must follow a semantic resource revision");
 assertNotContains("src/components/ChatView.tsx", "setArtifactsOpen", "legacy open boolean must not compete with inspector state");
