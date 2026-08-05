@@ -1,10 +1,7 @@
 import {
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Clock3,
   Loader2,
-  Tag,
   Sparkles,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -150,6 +147,7 @@ import { MemoryUsagePopover } from "./MemoryUsagePopover";
 import { ComposerContainer } from "./ComposerContainer";
 import { ChatEmptyHero } from "./ChatEmptyHero";
 import { ChatTopbar } from "./ChatTopbar";
+import { ChatBranchPicker } from "./ChatBranchPicker";
 import { MessageAttachmentList } from "./MessageAttachmentList";
 import { MessageActionBar } from "./MessageActionBar";
 import { MessageActivity } from "./MessageActivity";
@@ -2915,40 +2913,13 @@ export function ChatView({
                 (() => {
                   const point = branchIndex.get(displayMessage.id);
                   if (!point || point.options.length < 2) return null;
-                  const active = point.options[point.active_index];
-                  const label = active?.label ?? null;
                   return (
-                    <div className="branch-picker" aria-label={t("chat.responseVariants")}>
-                      <button
-                        type="button"
-                        aria-label={t("chat.prevVariant")}
-                        disabled={branchBusy || point.active_index === 0}
-                        onClick={() => void switchBranch(point, -1)}
-                      >
-                        <ChevronLeft size={14} />
-                      </button>
-                      <span>
-                        {point.active_index + 1} / {point.options.length}
-                      </span>
-                      <button
-                        type="button"
-                        aria-label={t("chat.nextVariant")}
-                        disabled={branchBusy || point.active_index === point.options.length - 1}
-                        onClick={() => void switchBranch(point, 1)}
-                      >
-                        <ChevronRight size={14} />
-                      </button>
-                      {label && <span className="branch-label">{label}</span>}
-                      <button
-                        type="button"
-                        className="branch-rename"
-                        aria-label={t("chat.branchLabelAria")}
-                        title={t("chat.branchLabelAria")}
-                        onClick={() => void renameBranch(displayMessage.id, label)}
-                      >
-                        <Tag size={13} />
-                      </button>
-                    </div>
+                    <ChatBranchPicker
+                      point={point}
+                      busy={branchBusy}
+                      onSwitch={(direction) => void switchBranch(point, direction)}
+                      onRename={(label) => void renameBranch(displayMessage.id, label)}
+                    />
                   );
                 })()}
               {!isStreamingMessage &&
