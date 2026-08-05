@@ -64,6 +64,13 @@ const chatView = await readFile(
   new URL("../src/components/ChatView.tsx", import.meta.url),
   "utf8",
 );
+const chatViewTypes = await readFile(
+  new URL("../src/components/ChatViewTypes.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const appWorkspace = await readFile(
   new URL("../src/components/AppWorkspace.tsx", import.meta.url),
@@ -1134,7 +1141,7 @@ test("runtime context refresh follows the durable terminal cursor", () => {
     app,
     /runtimeContextRevision=\{\s*threadAttention\.terminalEventIds\[activeThread\.threadId\]\s*\?\?\s*0\s*\}/,
   );
-  assert.match(chatView, /runtimeContextRevision:\s*number/);
+  assert.match(chatViewTypes, /runtimeContextRevision:\s*number/);
   assert.match(chatView, /useRuntimeContext\(\{\s*threadId:\s*thread\.threadId,\s*runtimeContextRevision/);
   assert.match(runtimeContextHook, /export function useRuntimeContext/);
   assert.match(runtimeContextHook, /const refreshRuntimeContext = useCallback/);
@@ -1340,6 +1347,15 @@ test("message edit prompt keeps a usable multiline geometry", () => {
   assert.match(editTextarea, /min-width:\s*min\(420px,\s*100%\);/);
   assert.match(editTextarea, /min-height:\s*96px;/);
   assert.doesNotMatch(legacyStyles, /\.message-edit(?:\s|\{|:)/);
+});
+
+test("ChatView delegates its public types to ChatViewTypes", () => {
+  assert.match(chatView, /from "\.\/ChatViewTypes";/);
+  assert.doesNotMatch(chatView, /interface ChatViewProps/);
+  assert.doesNotMatch(chatView, /interface ChatAutoSubmit/);
+  assert.match(chatViewTypes, /export interface ChatViewProps/);
+  assert.match(chatViewTypes, /export interface ChatAutoSubmit/);
+  assert.match(chatViewTypes, /autoSubmit\?: ChatAutoSubmit \| null/);
 });
 
 test("ChatView delegates the prompt surface to the thin ComposerShell boundary", () => {

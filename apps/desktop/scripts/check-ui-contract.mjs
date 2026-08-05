@@ -1466,7 +1466,7 @@ assertContains("src/lib/useChatReadModelController.ts", "shouldPreserveLocalMess
 assertContains("src/App.tsx", "setThreadMessagesFromBackend", "backend chat snapshots must pass through the stale-safe message updater");
 assertContains("src/App.tsx", "pendingTemplateAutoSubmit", "template workflows must be handed to the visible chat renderer");
 assertContains("src/App.tsx", "onAutoSubmitConsumed", "template auto-submit triggers must be consumed after entering the chat pipeline");
-assertContains("src/components/ChatView.tsx", "autoSubmit?: ChatAutoSubmit | null", "ChatView must accept external chat-start triggers without bypassing streaming UI");
+assertContains("src/components/ChatViewTypes.ts", "autoSubmit?: ChatAutoSubmit | null", "ChatView must accept external chat-start triggers without bypassing streaming UI");
 assertContains("src/components/ChatView.tsx", "submitPrompt(\n      autoSubmit.prompt", "external chat-start triggers must reuse the normal visible submit pipeline");
 assertNotContains("src/App.tsx", "template_workflow_", "template workflows must not start a parallel invisible stream from App");
 // The dock now has ONE enlarge/contract control (right-aligned): fullscreen ⇄ back.

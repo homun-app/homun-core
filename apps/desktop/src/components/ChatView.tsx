@@ -7,7 +7,6 @@ import {
   type ChatAttachmentInput,
   type CoreBranchPoint,
   type CoreComputerSessionSnapshot,
-  type CoreUncertainEffectOutcome,
   type MemoryArtifactView,
   type RoutingBindingInput,
 } from "../lib/coreBridge";
@@ -114,6 +113,11 @@ import {
 import { ChatTopbar } from "./ChatTopbar";
 import { ChatTranscript } from "./ChatTranscript";
 import { type ChatStreamStatus } from "./AssistantThinkingState";
+import type {
+  ChatViewProps,
+  MessageFeedback,
+  ReplyContext,
+} from "./ChatViewTypes";
 import {
   latestActivitySteps,
   latestPlanMarkdown,
@@ -135,94 +139,12 @@ import type {
   ChatThread,
   ComputerSession,
   ComputerSurfaceKind,
-  ApprovelItem,
-  UncertainEffectItem,
 } from "../types";
 
 const CHAT_VIEW_SESSION_ID =
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `chat_view_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-
-interface ChatViewProps {
-  // When the sidebar is collapsed, the chat header hosts the reopen + search controls (as
-  // no-drag children of the drag titlebar, so their clicks aren't swallowed).
-  sidebarCollapsed?: boolean;
-  onExpandSidebar?: () => void;
-  onOpenSearch?: () => void;
-  onOpenUsageSettings: () => void;
-  approvals: ApprovelItem[];
-  approvalBusyId: string | null;
-  uncertainEffects: UncertainEffectItem[];
-  effectResolutionBusyId: string | null;
-  effectResolutionError: string | null;
-  computerSessionId: string;
-  messages: ChatMessage[];
-  thread: ChatThread;
-  onMessagesChange: (
-    messages: ChatMessage[],
-    options?: { advanceActivity?: boolean },
-  ) => void;
-  onResolveEffect: (
-    effect: UncertainEffectItem,
-    outcome: CoreUncertainEffectOutcome,
-  ) => void;
-  onApproveApprovel: (
-    approvalId: string,
-    options?: {
-      scope?: "once" | "always";
-      browser_visibility?: "auto" | "visible" | "headless";
-    },
-  ) => void;
-  onRejectApprovel: (approvalId: string) => void;
-  onRuntimeChanged: () => void | Promise<void>;
-  onThreadChanged: () => void | Promise<void>;
-  // Fires when this thread starts/stops generating, so the parent can mark the
-  // thread busy in the sidebar in real time (before the 2.5s taskQueue poll).
-  onStreamingChange?: (busy: boolean) => void;
-  /** Bumped by App on a `thread.updated` for this open thread → the working-island re-fetches
-   *  its durable projection (so a BACKGROUND channel turn's finished activity folds in). */
-  islandRefreshNonce?: number;
-  /** Monotonic id of the latest durable terminal event for this thread. */
-  runtimeContextRevision: number;
-  /** Set by App on a `thread.turn_started` for this open thread that this client did NOT
-   *  launch (a channel/scheduled reply, or a turn from another window). ChatView attaches to
-   *  its live stream so the island + transcript update in real time, identical to an in-app
-   *  turn — not just at turn end. The persisted ids let us seed without duplicating bubbles. */
-  incomingBackgroundTurn?: {
-    turnId: string;
-    threadId: string;
-    userMessageId: string;
-    assistantMessageId: string;
-  } | null;
-  // Pre-fill the composer (e.g. engaging a proactivity card opens a chat seeded
-  // with the card's context). The nonce re-applies the same text.
-  seed?: { text: string; nonce: number } | null;
-  autoSubmit?: ChatAutoSubmit | null;
-  onAutoSubmitConsumed?: (id: string) => void;
-}
-
-interface ReplyContext {
-  messageId: string;
-  role: ChatMessage["role"];
-  preview: string;
-}
-
-type MessageFeedback = NonNullable<ChatMessage["feedback"]>;
-
-interface ChatAutoSubmit {
-  id: string;
-  threadId: string;
-  prompt: string;
-  visibleText: string;
-  attachments: ChatAttachmentInput[];
-  visibleAttachments?: ChatAttachment[];
-  mode?: string;
-  // S2: deterministic routing binding for a plugin workflow launch (e.g. "Use
-  // template"). Rides only this first auto-submitted turn — the gateway persists
-  // it thread-scoped, so later turns in the thread don't resend it.
-  routingBinding?: RoutingBindingInput;
-}
 
 export function ChatView({
   sidebarCollapsed,
