@@ -93,10 +93,9 @@ import {
 // @ts-expect-error JavaScript sibling intentionally has no declaration file.
 import * as messageIndex from "../lib/messageIndex.mjs";
 import { type ParsedArtifact } from "./MessageArtifacts";
-import { ChatComputerPanel } from "./ChatComputerPanel";
-import { AdaptiveWorkspaceIsland } from "./AdaptiveWorkspaceIsland";
 import { ChatComposerDock, type ChatTurnState } from "./ChatComposerDock";
 import { ChatInspectorDock } from "./ChatInspectorDock";
+import { ChatWorkspaceDock } from "./ChatWorkspaceDock";
 import {
   INSPECTOR_VIEW_LABEL_KEY,
   PANEL_VIEWS,
@@ -106,7 +105,6 @@ import {
 import { ChatTopbar } from "./ChatTopbar";
 import { ChatTranscript } from "./ChatTranscript";
 import { type ChatStreamStatus } from "./AssistantThinkingState";
-import { WorkspaceIslandSections } from "./WorkspaceIslandSections";
 import {
   latestActivitySteps,
   latestPlanMarkdown,
@@ -2632,36 +2630,29 @@ export function ChatView({
         onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
       />
 
-      <AdaptiveWorkspaceIsland
+      <ChatWorkspaceDock
         threadId={thread.threadId}
         sections={workspaceSections}
         disabled={inspector.open}
-        openSectionRequest={{ section: "activity", nonce: activityNonce }}
-        renderSection={(section) => (
-          <WorkspaceIslandSections
-            section={section}
-            projectObjective={projectObjective}
-            planSteps={workspacePlanSteps}
-            subagents={projectedSubagents}
-            activity={conversationActivity}
-            workInProgress={workInProgress}
-            browserBudgetMessage={browserBudgetMessage}
-            browserBudgetAssistantId={browserBudgetAssistantId}
-            previewDataUrl={previewDataUrl}
-            previewTitle={computerSession.previewTitle}
-            artifactSources={islandArtifacts}
-            fileSources={islandFileSources}
-            onRetryBrowserBudget={regenerateAnswer}
-            onOpenComputer={() => openUtilityTab("computer")}
-            onOpenSource={(source) =>
-              openUtilityTab(source.action === "artifact" ? "artifact" : "file")
-            }
-          />
-        )}
+        openActivityNonce={activityNonce}
+        projectObjective={projectObjective}
+        planSteps={workspacePlanSteps}
+        subagents={projectedSubagents}
+        activity={conversationActivity}
+        workInProgress={workInProgress}
+        browserBudgetMessage={browserBudgetMessage}
+        browserBudgetAssistantId={browserBudgetAssistantId}
+        previewDataUrl={previewDataUrl}
+        previewTitle={computerSession.previewTitle}
+        artifactSources={islandArtifacts}
+        fileSources={islandFileSources}
+        onRetryBrowserBudget={regenerateAnswer}
+        onOpenComputer={() => openUtilityTab("computer")}
+        onOpenSource={(source) =>
+          openUtilityTab(source.action === "artifact" ? "artifact" : "file")
+        }
+        onComputerLiveChange={setComputerLiveStatus}
       />
-      <div className="chat-computer-runtime">
-        <ChatComputerPanel threadId={thread.threadId} onLiveChange={setComputerLiveStatus} />
-      </div>
 
       <ChatTranscript
         conversationRef={conversationRef}

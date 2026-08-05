@@ -874,7 +874,8 @@ assertContains("src/styles.css", ":root[data-theme=\"dark\"]", "dark surface the
 assertContains("src/styles.css", "color-scheme: dark", "dark surface theme must advertise dark controls to the browser");
 assertContains("src/components/SettingsView.tsx", "dark:", "Appearance picker previews must include literal dark swatch values");
 assertContains("src/styles/workspace-island.css", "background: var(--surface);", "Adaptive workspace surfaces must inherit the active theme");
-assertContains("src/components/ChatView.tsx", "<AdaptiveWorkspaceIsland", "Chat must delegate factual sections to the adaptive island");
+assertContains("src/components/ChatWorkspaceDock.tsx", "<AdaptiveWorkspaceIsland", "Chat must delegate factual sections to the adaptive island");
+assertContains("src/components/ChatView.tsx", "<ChatWorkspaceDock", "Chat must mount the workspace dock owner");
 assertNotContains("src/components/ChatView.tsx", "chat-status-stack", "The persistent status stack must stay retired");
 assertNotContains("src/styles.css", ".chat-status-stack", "Legacy status-stack geometry must stay retired");
 assertContains("src/styles.css", ".cc-dock {\n  position: relative;", "Computer dock must not use an independent absolute position that overlaps Workspace Island");
@@ -1262,7 +1263,7 @@ assertMatches(
 assertContains("src/components/ChatView.tsx", "workspacePlanSteps", "adaptive activity must derive progress from the durable plan projection");
 assertContains("src/components/ChatView.tsx", "projectWorkspaceSections({", "island visibility must use the pure factual projection");
 assertContains("src/components/ChatView.tsx", "snapshotVerified: Boolean(previewDataUrl)", "inactive browser visibility requires a verified preview");
-assertContains("src/components/ChatView.tsx", "openSectionRequest={{ section: \"activity\", nonce: activityNonce }}", "Activity actions must target the adaptive activity section");
+assertContains("src/components/ChatWorkspaceDock.tsx", "openSectionRequest={{ section: \"activity\", nonce: openActivityNonce }}", "Activity actions must target the adaptive activity section");
 assertContains("src/components/AdaptiveWorkspaceIsland.tsx", "useState<WorkspaceSectionId | null>(null)", "adaptive island must be collapsed by default");
 assertContains("src/components/AdaptiveWorkspaceIsland.tsx", "setActiveSection(null);\n  }, [threadId]);", "adaptive island state must reset per thread");
 assertContains("src/components/AdaptiveWorkspaceIsland.tsx", "role=\"region\"", "adaptive content must expose region semantics");

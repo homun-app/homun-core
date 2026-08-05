@@ -460,6 +460,13 @@ const workspaceIslandSections = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatWorkspaceDock = await readFile(
+  new URL("../src/components/ChatWorkspaceDock.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const workspaceIslandStyles = await readFile(
   new URL("../src/styles/workspace-island.css", import.meta.url),
   "utf8",
@@ -738,7 +745,10 @@ test("runtime panel exposes only approved redacted categories", () => {
 });
 
 test("the adaptive workspace island replaces every persistent status owner", () => {
-  assert.match(chatView, /<AdaptiveWorkspaceIsland/);
+  assert.match(chatView, /from "\.\/ChatWorkspaceDock";/);
+  assert.match(chatView, /<ChatWorkspaceDock[\s\S]*sections=\{workspaceSections\}/);
+  assert.doesNotMatch(chatView, /<AdaptiveWorkspaceIsland/);
+  assert.match(chatWorkspaceDock, /<AdaptiveWorkspaceIsland/);
   assert.match(chatView, /projectWorkspaceSections/);
   assert.match(adaptiveWorkspaceIsland, /useState<WorkspaceSectionId\s*\|\s*null>\(null\)/);
   assert.match(adaptiveWorkspaceIsland, /role="region"/);
@@ -1361,8 +1371,9 @@ test("ChatView does not retain retired unused UI flags", () => {
 });
 
 test("ChatView delegates workspace island section bodies", () => {
-  assert.match(chatView, /from "\.\/WorkspaceIslandSections";/);
-  assert.match(chatView, /<WorkspaceIslandSections/);
+  assert.match(chatWorkspaceDock, /from "\.\/WorkspaceIslandSections";/);
+  assert.match(chatWorkspaceDock, /<WorkspaceIslandSections/);
+  assert.doesNotMatch(chatView, /<WorkspaceIslandSections/);
   assert.doesNotMatch(chatView, /workspace-island-activity/);
   assert.doesNotMatch(chatView, /workspace-island-browser/);
   assert.doesNotMatch(chatView, /workspace-island-files/);
