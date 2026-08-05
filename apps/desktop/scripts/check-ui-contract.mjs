@@ -189,7 +189,7 @@ assertContains(
   "completion uses a fixed teal dot",
 );
 assertSource("src/components/ChatView.tsx", [
-  'function openActivityIsland() {\n    dispatchInspector({ type: "hideWorkspace" });\n    setActivityNonce((n) => n + 1);',
+  'function openActivityIsland() {\n    hideInspector();\n    setActivityNonce((n) => n + 1);',
   "onOpenActivity={openActivityIsland}",
   'if (result.status === "queued")',
 ]);
@@ -1367,10 +1367,17 @@ assertContains("src/styles.css", "grid-template-columns: minmax(420px, 1fr) minm
 assertContains("src/components/ChatView.tsx", "disabled={inspector.open}", "the adaptive island must yield to the inspector column");
 assertContains("src/styles.css", "--workspace-current-reserve: 0px;", "the inspector column must clear the adaptive island reserve");
 assertNotContains("src/styles.css", ".workbench {\n  position: absolute", "legacy workbench must not float above the chat");
-assertContains("src/components/ChatView.tsx", "useReducer(inspectorWorkspaceReducer", "chat must use one inspector reducer");
-assertContains("src/components/ChatView.tsx", "loadInspectorState(thread.threadId", "inspector state must be scoped by thread");
-assertContains("src/components/ChatView.tsx", "saveInspectorState(thread.threadId", "inspector state changes must persist by thread");
-assertContains("src/components/ChatView.tsx", "Promise.all(restored.tabs.map", "restored resource tabs must be revalidated as one batch");
+assertContains("src/components/useChatInspectorWorkspace.ts", "inspectorWorkspaceReducer", "inspector workspace must have one focused owner");
+assertContains("src/components/useChatInspectorWorkspace.ts", "loadInspectorState", "inspector restore must have one focused owner");
+assertContains("src/components/useChatInspectorWorkspace.ts", "saveInspectorState(threadId", "inspector state changes must persist by thread");
+assertContains("src/components/useChatInspectorWorkspace.ts", "Promise.all(restored.tabs.map", "restored resource tabs must be revalidated as one batch");
+assertContains("src/components/useChatInspectorWorkspace.ts", "filterInspectorState", "inspector authorization filtering must have one focused owner");
+assertContains("src/components/useChatInspectorWorkspace.ts", "coreBridge.fsFile", "inspector resource authorization must have one focused owner");
+assertContains("src/components/ChatView.tsx", "useChatInspectorWorkspace({", "ChatView must consume the focused inspector workspace owner");
+assertNotContains("src/components/ChatView.tsx", "inspectorWorkspaceReducer", "ChatView must not own inspector reducer");
+assertNotContains("src/components/ChatView.tsx", "loadInspectorState", "ChatView must not own inspector restore");
+assertNotContains("src/components/ChatView.tsx", "filterInspectorState", "ChatView must not own inspector filtering");
+assertNotContains("src/components/ChatView.tsx", "coreBridge.fsFile", "ChatView must not own inspector resource authorization");
 assertContains("src/components/InspectorView.tsx", "coreBridge.fsFile(path, threadId)", "restored file tabs must recheck current authorization");
 assertContains("src/components/ChatView.tsx", "inspectorResourcesReady", "restored resources must stay hidden until validation completes");
 assertContains("src/components/useChatMemoryArtifacts.ts", "reconcileMemoryArtifacts", "artifact polling must preserve an unchanged catalog");
@@ -1397,8 +1404,8 @@ assertNotContains("src/components/ChatView.tsx", "memoryArtifactsRevision", "art
 assertContains("src/components/ArtifactsPanel.tsx", "selectedResourceRevision", "artifact preview reloads must follow a semantic resource revision");
 assertNotContains("src/components/ChatView.tsx", "setArtifactsOpen", "legacy open boolean must not compete with inspector state");
 assertNotContains("src/components/ChatView.tsx", "setWorkbenchTab", "legacy active-tab state must be removed");
-assertContains("src/components/ChatView.tsx", "`file:${normalizedPath}`", "file tabs must dedupe by canonical path");
-assertContains("src/components/ChatView.tsx", "`artifact:${artifact.thread}:${artifact.name}`", "artifact tabs must dedupe by provenance and name");
+assertContains("src/components/useChatInspectorWorkspace.ts", "`file:${normalizedPath}`", "file tabs must dedupe by canonical path");
+assertContains("src/components/useChatInspectorWorkspace.ts", "`artifact:${artifact.thread}:${artifact.name}`", "artifact tabs must dedupe by provenance and name");
 assertContains("src/components/useChatProjectContext.ts", ".projectGoals(threadId)", "project chat context must have one focused owner");
 assertContains("src/components/useChatProjectContext.ts", ".memoryGraph(threadId)", "project graph count must follow the focused project context owner");
 assertContains("src/components/ChatView.tsx", "useChatProjectContext(thread.threadId)", "ChatView must consume the focused project context owner");

@@ -120,6 +120,13 @@ const chatBranchesHook = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatInspectorWorkspace = await readFile(
+  new URL("../src/components/useChatInspectorWorkspace.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const appWorkspace = await readFile(
   new URL("../src/components/AppWorkspace.tsx", import.meta.url),
@@ -1642,7 +1649,7 @@ test("ChatView delegates assistant thinking rendering to AssistantThinkingState"
 });
 
 test("ChatView delegates generated artifact rendering to MessageArtifacts", () => {
-  assert.match(chatView, /from "\.\/MessageArtifacts";/);
+  assert.match(assistantMessageBody, /from "\.\/MessageArtifacts";/);
   assert.match(assistantMessageBody, /<MessageArtifacts text=\{text\} onOpen=\{onOpenArtifact\}/);
   assert.doesNotMatch(chatView, /function MessageArtifacts\(/);
   assert.doesNotMatch(chatView, /function ArtifactCardRow\(/);
@@ -1930,6 +1937,24 @@ test("ChatView delegates branch state ownership to useChatBranches", () => {
   assert.match(chatBranchesHook, /coreBridge\s*\.\s*chatBranches/);
   assert.match(chatBranchesHook, /coreBridge\s*\.\s*setActiveLeaf/);
   assert.match(chatBranchesHook, /coreBridge\s*\.\s*setBranchLabel/);
+});
+
+test("ChatView delegates inspector workspace ownership to useChatInspectorWorkspace", () => {
+  assert.match(chatView, /from "\.\/useChatInspectorWorkspace";/);
+  assert.match(chatView, /useChatInspectorWorkspace\(\{/);
+  assert.doesNotMatch(chatView, /inspectorWorkspaceReducer/);
+  assert.doesNotMatch(chatView, /loadInspectorState/);
+  assert.doesNotMatch(chatView, /filterInspectorState/);
+  assert.doesNotMatch(chatView, /saveInspectorState/);
+  assert.doesNotMatch(chatView, /saveInspectorWidthRatio/);
+  assert.doesNotMatch(chatView, /coreBridge\s*\.\s*fsFile/);
+  assert.match(chatInspectorWorkspace, /export function useChatInspectorWorkspace/);
+  assert.match(chatInspectorWorkspace, /inspectorWorkspaceReducer/);
+  assert.match(chatInspectorWorkspace, /loadInspectorState/);
+  assert.match(chatInspectorWorkspace, /filterInspectorState/);
+  assert.match(chatInspectorWorkspace, /saveInspectorState/);
+  assert.match(chatInspectorWorkspace, /saveInspectorWidthRatio/);
+  assert.match(chatInspectorWorkspace, /coreBridge\s*\.\s*fsFile/);
 });
 
 test("ChatView delegates resume marker persistence to chatResumeMarkers", () => {

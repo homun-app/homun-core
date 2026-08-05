@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRuntimeContext } from "../lib/useRuntimeContext";
 import {
@@ -52,15 +52,6 @@ import {
 import { captureAppScreenshot, IS_DESKTOP } from "../lib/gatewayConfig";
 import { copyText } from "../lib/clipboard";
 import {
-  filterInspectorState,
-  inspectorWorkspaceReducer,
-  loadInspectorState,
-  loadInspectorWidthRatio,
-  saveInspectorState,
-  saveInspectorWidthRatio,
-  type InspectorTabKind,
-} from "../lib/inspectorWorkspace";
-import {
   effectiveModelFromGateway,
   latestAssistantEffectiveModel,
 } from "../lib/composerTurnContract";
@@ -97,14 +88,11 @@ import {
   buildBranchIndex,
   buildPreviousUserMessageIndex,
 } from "../lib/messageIndex";
-import { type ParsedArtifact } from "./MessageArtifacts";
 import { ChatComposerDock, type ChatTurnState } from "./ChatComposerDock";
 import { ChatInspectorDock } from "./ChatInspectorDock";
 import { ChatWorkspaceDock } from "./ChatWorkspaceDock";
 import {
-  INSPECTOR_VIEW_LABEL_KEY,
   PANEL_VIEWS,
-  isRestorableInspectorTab,
   type IslandSource,
 } from "./InspectorView";
 import { ChatTopbar } from "./ChatTopbar";
@@ -124,6 +112,7 @@ import {
 } from "./ChatPayloadParsers";
 import { useChatConversationScroll } from "./useChatConversationScroll";
 import { useChatFollowUps } from "./useChatFollowUps";
+import { useChatInspectorWorkspace } from "./useChatInspectorWorkspace";
 import { useChatMemoryArtifacts } from "./useChatMemoryArtifacts";
 import { useChatProjectContext } from "./useChatProjectContext";
 import { useChatStreamingNotifier } from "./useChatStreamingNotifier";
@@ -238,16 +227,6 @@ export function ChatView({
   const [autoContinueMessageId, setAutoContinueMessageId] = useState<string | null>(null);
   // Bumped when the user asks for the activity list; the adaptive island opens that exact section.
   const [activityNonce, setActivityNonce] = useState(0);
-  const [inspector, dispatchInspector] = useReducer(inspectorWorkspaceReducer,
-    loadInspectorState(thread.threadId,
-      (tab) => isRestorableInspectorTab(tab, thread.threadId, thread.workspaceId),
-    ),
-  );
-  const [inspectorResourcesReady, setInspectorResourcesReady] = useState(false);
-  const inspectorRef = useRef(inspector);
-  const inspectorRestoreScopeRef = useRef<string | null>(null);
-  inspectorRef.current = inspector;
-  const [inspectorRatio, setInspectorRatio] = useState(loadInspectorWidthRatio);
   const {
     memoryArtifacts,
     memoryArtifactsLoaded,
@@ -405,6 +384,27 @@ export function ChatView({
     () => buildWorkbenchArtifacts(conversationArtifacts, memoryArtifacts, thread.threadId),
     [conversationArtifacts, memoryArtifacts, thread.threadId],
   );
+  const {
+    inspector,
+    inspectorRatio,
+    inspectorResourcesReady,
+    activateInspectorTab,
+    closeInspectorTab,
+    commitInspectorRatio,
+    hideInspector,
+    moveInspectorTab,
+    openArtifactTab,
+    openFileTab,
+    openUtilityTab,
+    toggleInspectorFocus,
+  } = useChatInspectorWorkspace({
+    artifactCatalogLoaded: memoryArtifactsLoaded,
+    artifactCatalogLoadError: memoryArtifactsLoadError,
+    threadId: thread.threadId,
+    translate: t,
+    workbenchArtifacts,
+    workspaceId: thread.workspaceId,
+  });
   // The agent's operational plan for this conversation (latest update_plan), shown
   // in the Workbench "Piano" panel. Merge of two lines:
   //  - Piano UI C2 (persisted): the fallback derives from PERSISTED `messages`, NOT
@@ -641,140 +641,6 @@ export function ChatView({
       computerLiveStatus.active,
     ],
   );
-
-  const openInspectorTab = useCallback(
-    (
-      kind: InspectorTabKind,
-      title: string,
-      resourceKey: string,
-      payload: Record<string, string> = {},
-    ) => {
-      dispatchInspector({
-        type: "openTab",
-        tab: {
-          id: crypto.randomUUID(),
-          kind,
-          resourceKey,
-          title,
-          workspaceId: thread.workspaceId ?? undefined,
-          payload: { ...payload, threadId: thread.threadId },
-        },
-      });
-    },
-    [thread.threadId, thread.workspaceId],
-  );
-
-  const openUtilityTab = useCallback(
-    (kind: InspectorTabKind) => {
-      openInspectorTab(kind, t(INSPECTOR_VIEW_LABEL_KEY[kind]), `${kind}:${thread.threadId}`);
-    },
-    [openInspectorTab, t, thread.threadId],
-  );
-
-  const openFileTab = useCallback(
-    (path: string) => {
-      const normalizedPath = path.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
-      openInspectorTab(
-        "file",
-        normalizedPath.split("/").pop() || normalizedPath,
-        `file:${normalizedPath}`,
-        { path: normalizedPath },
-      );
-    },
-    [openInspectorTab],
-  );
-
-  const openArtifactTab = useCallback(
-    (artifact: ParsedArtifact) => {
-      openInspectorTab(
-        "artifact",
-        artifact.name,
-        `artifact:${artifact.thread}:${artifact.name}`,
-        {
-          artifactThread: artifact.thread,
-          name: artifact.name,
-          artifactSource: artifact.source ?? "conversation",
-          projectPath: artifact.projectPath || artifact.projectRelativePath || "",
-        },
-      );
-    },
-    [openInspectorTab],
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    const scope = `${thread.threadId}:${thread.workspaceId ?? ""}`;
-    const firstValidation = inspectorRestoreScopeRef.current !== scope;
-    const restored = firstValidation
-      ? loadInspectorState(
-          thread.threadId,
-          (tab) => isRestorableInspectorTab(tab, thread.threadId, thread.workspaceId),
-        )
-      : inspectorRef.current;
-    if (firstValidation) {
-      inspectorRestoreScopeRef.current = scope;
-      inspectorRef.current = restored;
-      dispatchInspector({ type: "replaceState", state: restored });
-    }
-    if (firstValidation) setInspectorResourcesReady(false);
-
-    void Promise.all(restored.tabs.map(async (tab): Promise<"allowed" | "denied" | "error"> => {
-      if (tab.kind === "artifact") {
-        if (!tab.payload.name) return "allowed";
-        const artifact = workbenchArtifacts.find(
-          (artifact) =>
-            artifact.thread === tab.payload.artifactThread &&
-            artifact.name === tab.payload.name,
-        );
-        const projectPath =
-          artifact?.projectPath || artifact?.projectRelativePath || tab.payload.projectPath;
-        const projectBacked = artifact?.source === "project" || tab.payload.artifactSource === "project";
-        if (!artifact && !projectPath) {
-          return memoryArtifactsLoaded && !memoryArtifactsLoadError ? "denied" : "error";
-        }
-        if (!projectBacked) return "allowed";
-        try {
-          const payload = await coreBridge.fsFile(projectPath || tab.payload.name, thread.threadId);
-          return payload.authorized ? "allowed" : "denied";
-        } catch {
-          return "error";
-        }
-      }
-      if (tab.kind !== "file" || !tab.payload.path) return "allowed";
-      try {
-        const payload = await coreBridge.fsFile(tab.payload.path, thread.threadId);
-        return payload.authorized ? "allowed" : "denied";
-      } catch {
-        return "error";
-      }
-    })).then((outcomes) => {
-      if (cancelled) return;
-      const deniedIds = new Set(
-        restored.tabs.filter((_, index) => outcomes[index] === "denied").map((tab) => tab.id),
-      );
-      const current = inspectorRef.current;
-      dispatchInspector({
-        type: "replaceState",
-        state: filterInspectorState(
-          current,
-          (tab) => !deniedIds.has(tab.id),
-        ),
-      });
-      setInspectorResourcesReady(true);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-    // Resource descriptors are restored once per authorization scope. Individual
-    // open tabs revalidate again on window focus, without ever persisting content.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [memoryArtifacts, memoryArtifactsLoadError, memoryArtifactsLoaded, thread.threadId, thread.workspaceId]);
-
-  useEffect(() => {
-    if (!inspectorResourcesReady) return;
-    saveInspectorState(thread.threadId, inspector);
-  }, [inspector, inspectorResourcesReady, thread.threadId]);
 
   const visibleComputerSession = useMemo(
     () => ({
@@ -1215,7 +1081,7 @@ export function ChatView({
   }
 
   function openActivityIsland() {
-    dispatchInspector({ type: "hideWorkspace" });
+    hideInspector();
     setActivityNonce((n) => n + 1);
   }
 
@@ -2378,18 +2244,13 @@ export function ChatView({
         previewDataUrl={previewDataUrl}
         computerSession={computerSession}
         inspectorResourcesReady={inspectorResourcesReady}
-        onActivate={(tabId) => dispatchInspector({ type: "activateTab", tabId })}
-        onCloseTab={(tabId) => dispatchInspector({ type: "closeTab", tabId })}
-        onMoveTab={(tabId, targetIndex) =>
-          dispatchInspector({ type: "moveTab", tabId, targetIndex })
-        }
+        onActivate={activateInspectorTab}
+        onCloseTab={closeInspectorTab}
+        onMoveTab={moveInspectorTab}
         onAdd={openUtilityTab}
-        onHide={() => dispatchInspector({ type: "hideWorkspace" })}
-        onToggleFocus={() => dispatchInspector({ type: "toggleFocus" })}
-        onRatioCommit={(next) => {
-          setInspectorRatio(next);
-          saveInspectorWidthRatio(next);
-        }}
+        onHide={hideInspector}
+        onToggleFocus={toggleInspectorFocus}
+        onRatioCommit={commitInspectorRatio}
         onGoalSeedConsumed={() => setGoalSeed(null)}
         onOpenFile={openFileTab}
         onOpenFilesIndex={() => openUtilityTab("file")}
