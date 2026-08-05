@@ -124,6 +124,7 @@ import {
   parsePlanSteps,
 } from "./ChatPayloadParsers";
 import { useChatConversationScroll } from "./useChatConversationScroll";
+import { useChatProjectContext } from "./useChatProjectContext";
 import {
   projectWorkspaceSections,
 } from "../lib/workspaceIslandSections";
@@ -255,16 +256,14 @@ export function ChatView({
   const [memoryArtifactsLoaded, setMemoryArtifactsLoaded] = useState(false);
   const [memoryArtifactsLoadError, setMemoryArtifactsLoadError] = useState(false);
   const [memoryArtifactsReloadNonce, setMemoryArtifactsReloadNonce] = useState(0);
-  // Is this thread a project? Reliable context signal (not keyword-detection) that gates
-  // the "Save as goal" message action + the Obiettivi tab. `goalSeed` pre-fills
-  // the Obiettivi compose when promoting a chat message to a goal.
-  const [threadIsProject, setThreadIsProject] = useState(false);
-  const [projectGoalCount, setProjectGoalCount] = useState(0);
-  // Task 4c: north-star objective text, rides along the same /api/memory/goals
-  // fetch that already yields projectGoalCount — no separate network call.
-  const [projectObjective, setProjectObjective] = useState<string | null>(null);
-  const [projectMemoryCount, setProjectMemoryCount] = useState(0);
-  const [goalSeed, setGoalSeed] = useState<string | null>(null);
+  const {
+    goalSeed,
+    projectGoalCount,
+    projectMemoryCount,
+    projectObjective,
+    setGoalSeed,
+    threadIsProject,
+  } = useChatProjectContext(thread.threadId);
   const [computerLiveStatus, setComputerLiveStatus] = useState<{
     active: boolean;
     activity: string | null;
@@ -1955,48 +1954,6 @@ export function ChatView({
       setPromptError(describeBridgeError(error));
     }
   }
-
-  // Resolve once per thread whether it's a project (gates "Save as goal").
-  useEffect(() => {
-    let cancelled = false;
-    setThreadIsProject(false);
-    setProjectGoalCount(0);
-    setProjectObjective(null);
-    setProjectMemoryCount(0);
-    void coreBridge
-      .projectGoals(thread.threadId)
-      .then((d) => {
-        if (cancelled) return;
-        const isProject = Boolean(d?.is_project);
-        setThreadIsProject(isProject);
-        setProjectGoalCount(d?.goals.length ?? 0);
-        setProjectObjective(d?.objective ?? null);
-        if (!isProject) {
-          setProjectMemoryCount(0);
-          return;
-        }
-        void coreBridge
-          .memoryGraph(thread.threadId)
-          .then((graph) => {
-            if (!cancelled) {
-              setProjectMemoryCount(Math.max(0, graph.nodes.length - 1));
-            }
-          })
-          .catch(() => {
-            if (!cancelled) setProjectMemoryCount(0);
-          });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setThreadIsProject(false);
-        setProjectGoalCount(0);
-        setProjectObjective(null);
-        setProjectMemoryCount(0);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [thread.threadId]);
 
   useEffect(() => {
     let cancelled = false;

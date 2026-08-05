@@ -1380,6 +1380,11 @@ assertNotContains("src/components/ChatView.tsx", "setArtifactsOpen", "legacy ope
 assertNotContains("src/components/ChatView.tsx", "setWorkbenchTab", "legacy active-tab state must be removed");
 assertContains("src/components/ChatView.tsx", "`file:${normalizedPath}`", "file tabs must dedupe by canonical path");
 assertContains("src/components/ChatView.tsx", "`artifact:${artifact.thread}:${artifact.name}`", "artifact tabs must dedupe by provenance and name");
+assertContains("src/components/useChatProjectContext.ts", ".projectGoals(threadId)", "project chat context must have one focused owner");
+assertContains("src/components/useChatProjectContext.ts", ".memoryGraph(threadId)", "project graph count must follow the focused project context owner");
+assertContains("src/components/ChatView.tsx", "useChatProjectContext(thread.threadId)", "ChatView must consume the focused project context owner");
+assertNotContains("src/components/ChatView.tsx", "coreBridge.projectGoals", "ChatView must not own project context loading");
+assertNotContains("src/components/ChatView.tsx", "coreBridge.memoryGraph", "ChatView must not own project graph loading");
 assertNotContains("src/styles.css", ".artifacts-panel.embedded .artifacts-panel-body {\n  grid-template-columns:", "artifact preview must not keep a permanent inner sidebar");
 assertNotContains("src/components/ChatView.tsx", "detailsOpen && (", "computer detail must use the shared inspector");
 assertNotContains("src/styles.css", ".computer-detail-panel {\n  position: absolute", "computer detail must not float separately");

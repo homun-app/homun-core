@@ -78,6 +78,13 @@ const chatConversationScroll = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatProjectContext = await readFile(
+  new URL("../src/components/useChatProjectContext.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const appWorkspace = await readFile(
   new URL("../src/components/AppWorkspace.tsx", import.meta.url),
@@ -1820,6 +1827,17 @@ test("ChatView delegates conversation scroll ownership to useChatConversationScr
   assert.match(chatConversationScroll, /const \[showJumpToBottom,\s*setShowJumpToBottom\]/);
   assert.match(chatConversationScroll, /scrollConversationToBottomIfPinned/);
   assert.match(chatConversationScroll, /window\.addEventListener\("resize", handleResize\)/);
+});
+
+test("ChatView delegates project context ownership to useChatProjectContext", () => {
+  assert.match(chatView, /from "\.\/useChatProjectContext";/);
+  assert.match(chatView, /useChatProjectContext\(thread\.threadId\)/);
+  assert.doesNotMatch(chatView, /coreBridge\s*\.\s*projectGoals/);
+  assert.doesNotMatch(chatView, /coreBridge\s*\.\s*memoryGraph/);
+  assert.match(chatProjectContext, /export function useChatProjectContext/);
+  assert.match(chatProjectContext, /coreBridge\s*\.\s*projectGoals\(threadId\)/);
+  assert.match(chatProjectContext, /coreBridge\s*\.\s*memoryGraph\(threadId\)/);
+  assert.match(chatProjectContext, /setGoalSeed/);
 });
 
 test("ChatView delegates resume marker persistence to chatResumeMarkers", () => {
