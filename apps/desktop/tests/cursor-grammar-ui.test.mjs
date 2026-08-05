@@ -65,6 +65,13 @@ const appCoreMappers = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const contextBudgetDisplay = await readFile(
+  new URL("../src/lib/contextBudgetDisplay.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -534,6 +541,14 @@ test("App delegates core-to-ui mapping helpers to appCoreMappers", () => {
   assert.match(appCoreMappers, /function mapCoreChatEventParts/);
   assert.match(appCoreMappers, /function filterApprovelScopes/);
   assert.match(appCoreMappers, /function providerDisplayName/);
+});
+
+test("App delegates context budget display helpers to contextBudgetDisplay", () => {
+  assert.match(app, /from "\.\/lib\/contextBudgetDisplay";/);
+  assert.doesNotMatch(app, /function contextBudgetCompressionRatio\(/);
+  assert.doesNotMatch(app, /function contextBudgetSummary\(/);
+  assert.match(contextBudgetDisplay, /export function contextBudgetCompressionRatio/);
+  assert.match(contextBudgetDisplay, /export function contextBudgetSummary/);
 });
 
 test("the sidebar uses the canonical persisted thread filter projection", () => {

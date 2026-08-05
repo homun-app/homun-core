@@ -66,6 +66,10 @@ import {
   summarizeThreadTitle,
   updateThreadPreview,
 } from "./lib/appCoreMappers";
+import {
+  contextBudgetCompressionRatio,
+  contextBudgetSummary,
+} from "./lib/contextBudgetDisplay";
 import type {
   ApprovelItem,
   ChatAttachment,
@@ -1348,36 +1352,4 @@ export default function App() {
       <AuthenticatedApp />
     </LoginGate>
   );
-}
-
-function contextBudgetCompressionRatio(
-  budget: Array<{ inputChars: number; outputChars: number }>,
-) {
-  const input = budget.reduce((total, item) => total + item.inputChars, 0);
-  const output = budget.reduce((total, item) => total + item.outputChars, 0);
-  if (input === 0) return 100;
-  return output / input;
-}
-
-function contextBudgetSummary(
-  budget: Array<{
-    compressed: boolean;
-    redacted: boolean;
-    estimatedInputTokens: number;
-    estimatedOutputTokens: number;
-    redactionCount: number;
-  }>,
-) {
-  const compressed = budget.filter((item) => item.compressed).length;
-  const redacted = budget.reduce((total, item) => total + item.redactionCount, 0);
-  const inputTokens = budget.reduce(
-    (total, item) => total + item.estimatedInputTokens,
-    0,
-  );
-  const outputTokens = budget.reduce(
-    (total, item) => total + item.estimatedOutputTokens,
-    0,
-  );
-  if (budget.length === 0) return "No compression applied.";
-  return `Compressed ${compressed}/${budget.length} contexts, ${inputTokens} -> ${outputTokens} estimated tokens, ${redacted} redactions.`;
 }
