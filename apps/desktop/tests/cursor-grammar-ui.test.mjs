@@ -267,6 +267,13 @@ const inspectorView = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const assistantMessageBody = await readFile(
+  new URL("../src/components/AssistantMessageBody.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatViewMessages = await readFile(
   new URL("../src/lib/chatViewMessages.ts", import.meta.url),
   "utf8",
@@ -455,6 +462,7 @@ test("sidebar styles load after shared menus and own sidebar selectors", () => {
 });
 
 test("the transcript uses the flat role and operational message grammar", () => {
+  const transcriptMarkup = `${chatView}\n${assistantMessageBody}`;
   for (const className of [
     "chat-message-agent",
     "chat-message-user-band",
@@ -462,10 +470,10 @@ test("the transcript uses the flat role and operational message grammar", () => 
     "chat-message-actions-slot",
     "chat-operational-row",
   ]) {
-    assert.match(chatView, new RegExp(`\\b${className}\\b`));
+    assert.match(transcriptMarkup, new RegExp(`\\b${className}\\b`));
   }
-  assert.match(chatView, /<details\s+className="chat-operational-row"/);
-  assert.match(chatView, /<summary>/);
+  assert.match(assistantMessageBody, /<details\s+className="chat-operational-row"/);
+  assert.match(assistantMessageBody, /<summary>/);
   assert.doesNotMatch(chatView, /message-bubble\s+user|user\s+message-bubble/);
   assert.doesNotMatch(chatView, /"message\s+(?:user|assistant|system)\b/);
 });
@@ -823,7 +831,7 @@ test("ChatView delegates assistant thinking rendering to AssistantThinkingState"
 
 test("ChatView delegates generated artifact rendering to MessageArtifacts", () => {
   assert.match(chatView, /from "\.\/MessageArtifacts";/);
-  assert.match(chatView, /<MessageArtifacts text=\{text\} onOpen=\{onOpenArtifact\}/);
+  assert.match(assistantMessageBody, /<MessageArtifacts text=\{text\} onOpen=\{onOpenArtifact\}/);
   assert.doesNotMatch(chatView, /function MessageArtifacts\(/);
   assert.doesNotMatch(chatView, /function ArtifactCardRow\(/);
   assert.doesNotMatch(chatView, /function InlineArtifactPreview\(/);
@@ -925,6 +933,17 @@ test("ChatView delegates structured payload parsing to ChatPayloadParsers", () =
   assert.match(chatPayloadParsers, /export function latestActivitySteps/);
 });
 
+test("ChatView delegates assistant message body rendering to AssistantMessageBody", () => {
+  assert.match(chatView, /from "\.\/AssistantMessageBody";/);
+  assert.match(chatView, /<AssistantMessageBody[\s\S]*text=\{displayMessage\.text\}/);
+  assert.doesNotMatch(chatView, /const AssistantMessageBody = memo/);
+  assert.doesNotMatch(chatView, /function humanizeToolSlugs/);
+  assert.doesNotMatch(chatView, /parseComposioConfirm\(text, eventParts\)/);
+  assert.match(assistantMessageBody, /export const AssistantMessageBody = memo/);
+  assert.match(assistantMessageBody, /parseComposioConfirm\(text, eventParts\)/);
+  assert.match(assistantMessageBody, /visibleMessageText\(visible\)/);
+});
+
 test("InspectorView delegates operational plan preview rendering and parsing", () => {
   assert.match(inspectorView, /from "\.\/OperationalPlanPreview";/);
   assert.match(inspectorView, /<OperationalPlanPreview collapsed=\{false\} markdown=\{operationalPlanMarkdown\}/);
@@ -938,8 +957,9 @@ test("InspectorView delegates operational plan preview rendering and parsing", (
 });
 
 test("ChatView delegates choice prompt rendering to MessageChoiceCard", () => {
-  assert.match(chatView, /from "\.\/MessageChoiceCard";/);
-  assert.match(chatView, /<ChoicesCard prompt=\{choices\} onChoose=\{onChoose\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageChoiceCard";/);
+  assert.match(assistantMessageBody, /from "\.\/MessageChoiceCard";/);
+  assert.match(assistantMessageBody, /<ChoicesCard prompt=\{choices\} onChoose=\{onChoose\}/);
   assert.doesNotMatch(chatView, /function ChoicesCard\(/);
   assert.doesNotMatch(chatView, /interface ChoicePrompt/);
   assert.match(messageChoiceCard, /export interface ChoicePrompt/);
@@ -948,8 +968,9 @@ test("ChatView delegates choice prompt rendering to MessageChoiceCard", () => {
 });
 
 test("ChatView delegates proposed plan rendering to MessagePlanProposeCard", () => {
-  assert.match(chatView, /from "\.\/MessagePlanProposeCard";/);
-  assert.match(chatView, /<PlanProposeCard plan=\{planPropose\} onAnswer=\{onChoose\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessagePlanProposeCard";/);
+  assert.match(assistantMessageBody, /from "\.\/MessagePlanProposeCard";/);
+  assert.match(assistantMessageBody, /<PlanProposeCard plan=\{planPropose\} onAnswer=\{onChoose\}/);
   assert.doesNotMatch(chatView, /function PlanProposeCard\(/);
   assert.doesNotMatch(chatView, /interface PlanProposal/);
   assert.match(messagePlanProposeCard, /export interface PlanProposal/);
@@ -968,8 +989,9 @@ test("ChatView does not retain the retired inline operational plan progress card
 });
 
 test("ChatView delegates diff message rendering to MessageDiffCard", () => {
-  assert.match(chatView, /from "\.\/MessageDiffCard";/);
-  assert.match(chatView, /<DiffCard key=\{`diff-\$\{index\}`\} payload=\{part\.payload\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageDiffCard";/);
+  assert.match(assistantMessageBody, /from "\.\/MessageDiffCard";/);
+  assert.match(assistantMessageBody, /<DiffCard key=\{`diff-\$\{index\}`\} payload=\{part\.payload\}/);
   assert.doesNotMatch(chatView, /function DiffCard\(/);
   assert.match(messageDiffCard, /export function DiffCard/);
   assert.match(messageDiffCard, /DiffEventPayload/);
@@ -977,8 +999,9 @@ test("ChatView delegates diff message rendering to MessageDiffCard", () => {
 });
 
 test("ChatView delegates proposed goal rendering to MessageGoalProposeCard", () => {
-  assert.match(chatView, /from "\.\/MessageGoalProposeCard";/);
-  assert.match(chatView, /<GoalProposeCard objectives=\{goalPropose\} threadId=\{threadId\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageGoalProposeCard";/);
+  assert.match(assistantMessageBody, /from "\.\/MessageGoalProposeCard";/);
+  assert.match(assistantMessageBody, /<GoalProposeCard objectives=\{goalPropose\} threadId=\{threadId\}/);
   assert.doesNotMatch(chatView, /function GoalProposeCard\(/);
   assert.match(messageGoalProposeCard, /export function GoalProposeCard/);
   assert.match(messageGoalProposeCard, /coreBridge\.projectGoals/);
@@ -987,8 +1010,9 @@ test("ChatView delegates proposed goal rendering to MessageGoalProposeCard", () 
 });
 
 test("ChatView delegates vault reveal rendering to MessageVaultRevealCard", () => {
-  assert.match(chatView, /from "\.\/MessageVaultRevealCard";/);
-  assert.match(chatView, /<VaultRevealCard proposal=\{vaultReveal\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageVaultRevealCard";/);
+  assert.match(assistantMessageBody, /from "\.\/MessageVaultRevealCard";/);
+  assert.match(assistantMessageBody, /<VaultRevealCard proposal=\{vaultReveal\}/);
   assert.doesNotMatch(chatView, /function VaultRevealCard\(/);
   assert.doesNotMatch(chatView, /interface VaultRevealProposal/);
   assert.match(messageVaultRevealCard, /export interface VaultRevealProposal/);
@@ -998,8 +1022,9 @@ test("ChatView delegates vault reveal rendering to MessageVaultRevealCard", () =
 });
 
 test("ChatView delegates sandbox read-only rendering to MessageSandboxReadOnlyCard", () => {
-  assert.match(chatView, /from "\.\/MessageSandboxReadOnlyCard";/);
-  assert.match(chatView, /<SandboxReadOnlyCard target=\{readOnlyBlocked\.target\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageSandboxReadOnlyCard";/);
+  assert.match(assistantMessageBody, /from "\.\/MessageSandboxReadOnlyCard";/);
+  assert.match(assistantMessageBody, /<SandboxReadOnlyCard target=\{readOnlyBlocked\.target\}/);
   assert.doesNotMatch(chatView, /function SandboxReadOnlyCard\(/);
   assert.match(messageSandboxReadOnlyCard, /export function SandboxReadOnlyCard/);
   assert.match(messageSandboxReadOnlyCard, /coreBridge\.setRuntimeSettings/);
@@ -1008,8 +1033,9 @@ test("ChatView delegates sandbox read-only rendering to MessageSandboxReadOnlyCa
 });
 
 test("ChatView delegates Composio reconnect rendering to MessageComposioReconnectCard", () => {
-  assert.match(chatView, /from "\.\/MessageComposioReconnectCard";/);
-  assert.match(chatView, /<ComposioReconnectCard slug=\{reconnectSlug\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageComposioReconnectCard";/);
+  assert.match(assistantMessageBody, /from "\.\/MessageComposioReconnectCard";/);
+  assert.match(assistantMessageBody, /<ComposioReconnectCard slug=\{reconnectSlug\}/);
   assert.doesNotMatch(chatView, /function ComposioReconnectCard\(/);
   assert.match(messageComposioReconnectCard, /export function ComposioReconnectCard/);
   assert.match(messageComposioReconnectCard, /connectComposioToolkit/);
@@ -1040,8 +1066,9 @@ test("ChatView delegates inline approvals to InlineApprovelPanel", () => {
 });
 
 test("ChatView delegates payment approval rendering to MessagePaymentApprovalCard", () => {
-  assert.match(chatView, /from "\.\/MessagePaymentApprovalCard";/);
-  assert.match(chatView, /<PaymentApprovalCard[\s\S]*proposal=\{paymentApproval\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessagePaymentApprovalCard";/);
+  assert.match(assistantMessageBody, /from "\.\/MessagePaymentApprovalCard";/);
+  assert.match(assistantMessageBody, /<PaymentApprovalCard[\s\S]*proposal=\{paymentApproval\}/);
   assert.doesNotMatch(chatView, /function PaymentApprovalCard\(/);
   assert.doesNotMatch(chatView, /function formatPaymentAmount\(/);
   assert.match(messagePaymentApprovalCard, /export interface PaymentApprovalProposal/);
@@ -1051,8 +1078,9 @@ test("ChatView delegates payment approval rendering to MessagePaymentApprovalCar
 });
 
 test("ChatView delegates filesystem authorization rendering to MessageFsAuthorizeCard", () => {
-  assert.match(chatView, /from "\.\/MessageFsAuthorizeCard";/);
-  assert.match(chatView, /<FsAuthorizeCard[\s\S]*path=\{fsAuthorize\.path\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageFsAuthorizeCard";/);
+  assert.match(assistantMessageBody, /from "\.\/MessageFsAuthorizeCard";/);
+  assert.match(assistantMessageBody, /<FsAuthorizeCard[\s\S]*path=\{fsAuthorize\.path\}/);
   assert.doesNotMatch(chatView, /function FsAuthorizeCard\(/);
   assert.match(messageFsAuthorizeCard, /export function FsAuthorizeCard/);
   assert.match(messageFsAuthorizeCard, /coreBridge\.fsAuthorize/);
@@ -1060,8 +1088,9 @@ test("ChatView delegates filesystem authorization rendering to MessageFsAuthoriz
 });
 
 test("ChatView delegates sandbox escalation rendering to MessageSandboxEscalateCard", () => {
-  assert.match(chatView, /from "\.\/MessageSandboxEscalateCard";/);
-  assert.match(chatView, /<SandboxEscalateCard[\s\S]*command=\{sandboxEscalate\.command\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageSandboxEscalateCard";/);
+  assert.match(assistantMessageBody, /from "\.\/MessageSandboxEscalateCard";/);
+  assert.match(assistantMessageBody, /<SandboxEscalateCard[\s\S]*command=\{sandboxEscalate\.command\}/);
   assert.doesNotMatch(chatView, /function SandboxEscalateCard\(/);
   assert.match(messageSandboxEscalateCard, /export function SandboxEscalateCard/);
   assert.match(messageSandboxEscalateCard, /coreBridge\.runEscalate/);
@@ -1069,12 +1098,14 @@ test("ChatView delegates sandbox escalation rendering to MessageSandboxEscalateC
 });
 
 test("ChatView delegates Composio and MCP confirmations to MessageComposioConfirmCard", () => {
-  assert.match(chatView, /from "\.\/MessageComposioConfirmCard";/);
-  assert.match(chatView, /<ComposioConfirmCard action=\{action\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageComposioConfirmCard";/);
+  assert.match(assistantMessageBody, /from "\.\/MessageComposioConfirmCard";/);
+  assert.match(assistantMessageBody, /<ComposioConfirmCard action=\{action\}/);
   assert.doesNotMatch(chatView, /function ComposioConfirmCard\(/);
   assert.doesNotMatch(chatView, /function parseComposioConfirm\(/);
   assert.doesNotMatch(chatView, /COMPOSIO_CONFIRM_RE/);
-  assert.match(chatView, /from "\.\/ChatMessageMarkerParser";/);
+  assert.doesNotMatch(chatView, /from "\.\/ChatMessageMarkerParser";/);
+  assert.match(assistantMessageBody, /from "\.\/ChatMessageMarkerParser";/);
   assert.match(chatMessageMarkerParser, /export function parseComposioConfirm/);
   assert.match(chatMessageMarkerParser, /COMPOSIO_CONFIRM_RE/);
   assert.match(chatMessageMarkerParser, /MCP_CONFIRM_RE/);
@@ -1092,8 +1123,9 @@ test("ChatView delegates Composio and MCP confirmations to MessageComposioConfir
 });
 
 test("ChatView delegates capability suggestions to MessageConnectSuggestCard", () => {
-  assert.match(chatView, /from "\.\/MessageConnectSuggestCard";/);
-  assert.match(chatView, /<ConnectSuggestCard[\s\S]*suggest=\{connectSuggest\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageConnectSuggestCard";/);
+  assert.match(assistantMessageBody, /from "\.\/MessageConnectSuggestCard";/);
+  assert.match(assistantMessageBody, /<ConnectSuggestCard[\s\S]*suggest=\{connectSuggest\}/);
   assert.doesNotMatch(chatView, /function ConnectSuggestCard\(/);
   assert.doesNotMatch(chatView, /function ConnectSuggestRow\(/);
   assert.doesNotMatch(chatView, /const CONNECT_KIND_META:/);
@@ -1105,8 +1137,9 @@ test("ChatView delegates capability suggestions to MessageConnectSuggestCard", (
 });
 
 test("ChatView delegates vault proposal rendering to MessageVaultProposeCard", () => {
-  assert.match(chatView, /from "\.\/MessageVaultProposeCard";/);
-  assert.match(chatView, /<VaultProposeCard[\s\S]*proposal=\{vaultPropose\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageVaultProposeCard";/);
+  assert.match(assistantMessageBody, /from "\.\/MessageVaultProposeCard";/);
+  assert.match(assistantMessageBody, /<VaultProposeCard[\s\S]*proposal=\{vaultPropose\}/);
   assert.doesNotMatch(chatView, /function VaultProposeCard\(/);
   assert.match(messageVaultProposeCard, /export interface VaultProposal/);
   assert.match(messageVaultProposeCard, /export function VaultProposeCard/);

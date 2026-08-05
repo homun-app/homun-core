@@ -1193,7 +1193,7 @@ assertContains("src/lib/coreBridge.ts", "/api/vault/pin/verify", "Vault PIN veri
 assertContains("src/lib/coreBridge.ts", "/api/vault/payment-approvals/approve", "Payment approvals must verify through the local gateway");
 assertContains("src/components/ChatMessageMarkerParser.ts", "PAYMENT_APPROVAL_RE", "Chat must parse Payment Approval Card markers");
 assertContains("src/components/MessagePaymentApprovalCard.tsx", "coreBridge.vaultPaymentApprovalApprove", "Payment Approval Card must verify PIN/CVV through the bridge");
-assertContains("src/components/ChatView.tsx", "messageId={messageId}", "Payment Approval Card must receive the source message id for transcript rewrite");
+assertContains("src/components/AssistantMessageBody.tsx", "messageId={messageId}", "Payment Approval Card must receive the source message id for transcript rewrite");
 assertContains("src/lib/coreBridge.ts", "message_id: ctx.messageId", "Payment approvals must include source message id when available");
 assertContains("src/data/mockData.ts", "id: \"vault\"", "Vault must be a separate Settings section");
 assertContains("src/data/mockData.ts", "id: \"sandbox\"", "Sandbox must be a separate Settings section");
@@ -1341,10 +1341,10 @@ assertContains("src/styles.css", ".artifacts-panel.embedded .artifact-preview-do
 assertContains("src/styles.css", ".workbench-artifacts-list .artifact-row-wrap {\n  overflow: hidden;\n  border: 0;", "artifact rows must avoid nested card borders");
 assertContains("src/components/InspectorView.tsx", "fileStatus === \"missing\"", "missing files must expose a dedicated recoverable state");
 assertNotContains("src/components/ChatView.tsx", "{planSteps.length > 0 && <PlanProgressCard steps={planSteps} />}", "operational plan markers must not render duplicate inline cards inside the assistant answer");
-assertContains("src/components/ChatView.tsx", "{readable && <RichMessage text={readable} streaming={streaming} />}", "assistant markdown must stay progressive while the message streams");
+assertContains("src/components/AssistantMessageBody.tsx", "{readable && <RichMessage text={readable} streaming={streaming} />}", "assistant markdown must stay progressive while the message streams");
 assertContains("src/components/RichMessage.tsx", "visibleMessageText(text)", "raw reasoning must be filtered before transcript rendering");
 assertNotContains("src/components/RichMessage.tsx", "ReasoningBlock", "raw reasoning must never render as transcript content");
-assertContains("src/components/ChatView.tsx", "{planPropose && !streaming && onChoose && (", "actionable plan proposal cards must wait for a completed non-streaming message");
+assertContains("src/components/AssistantMessageBody.tsx", "{planPropose && !streaming && onChoose && (", "actionable plan proposal cards must wait for a completed non-streaming message");
 assertContains("src/components/ChatView.tsx", "streamingUserPinnedRef", "chat must keep new streaming responses visible");
 assertNotContains("src/components/ChatView.tsx", "STREAM_TYPEWRITER_INTERVAL_MS", "chat streaming must not use timer-based typewriter rendering");
 assertNotContains("src/components/ChatView.tsx", "streamingTextRef", "chat streaming must not bypass React with a manual DOM text node");
@@ -1412,13 +1412,13 @@ assertContains("src/styles.css", "left: calc(var(--drawer-island-gap) + var(--dr
 assertContains("src/styles.css", "width: min(1040px, calc(100vw - var(--drawer-width, 268px) - 72px));", "Computer fullscreen must be large but bounded by the chat area");
 assertContains("src/lib/chatVisibleContent.mjs", "STRAY_REASONING_MARKER", "streaming renderer must strip stray or malformed reasoning markers from the visible answer body");
 assertContains("src/components/ChatMessageMarkerParser.ts", "VAULT_PROPOSE_RE", "chat renderer must parse vault proposal markers");
-assertContains("src/components/ChatView.tsx", "VaultProposeCard", "chat renderer must render sensitive-data vault proposal cards");
+assertContains("src/components/AssistantMessageBody.tsx", "VaultProposeCard", "chat renderer must render sensitive-data vault proposal cards");
 // The strip regex (COMPOSIO_MARKERS_RE, which lists VAULT_PROPOSE|…) was refactored out of
 // ChatView into src/lib/markers.ts; ChatMessageMarkerParser imports and applies it.
 assertContains("src/lib/markers.ts", "VAULT_PROPOSE|", "vault proposal markers must be stripped from visible prose");
 assertContains("src/components/ChatMessageMarkerParser.ts", "COMPOSIO_MARKERS_RE", "chat renderer must apply the marker-strip regex to visible prose");
 assertContains("src/components/ChatMessageMarkerParser.ts", "VAULT_REVEAL_RE", "chat renderer must parse vault reveal markers");
-assertContains("src/components/ChatView.tsx", "VaultRevealCard", "chat renderer must render PIN-gated vault reveal cards");
+assertContains("src/components/AssistantMessageBody.tsx", "VaultRevealCard", "chat renderer must render PIN-gated vault reveal cards");
 assertContains("src/lib/markers.ts", "VAULT_REVEAL|", "vault reveal markers must be stripped from visible prose");
 
 assertContains("src/types.ts", "\"learning\"", "auto-learning must be a first-class view");
