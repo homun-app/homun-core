@@ -14,7 +14,6 @@ import {
   coreBridge,
 } from "./lib/coreBridge";
 import { useSetting } from "./lib/settingsStore";
-import { showSystemNotification, notificationPermission } from "./lib/systemNotifications";
 import { reconcileChatMessages, reconcileChatThreads } from "./lib/uiSnapshot";
 import {
   currentTimestampSeconds,
@@ -52,6 +51,7 @@ import {
   useChatThreadCreation,
   type PendingTemplateAutoSubmit,
 } from "./lib/useChatThreadCreation";
+import { useThreadAttentionNotifications } from "./lib/useThreadAttentionNotifications";
 import type {
   ChatMessage,
   ChatThread,
@@ -113,7 +113,6 @@ function AuthenticatedApp() {
     useState<IncomingBackgroundTurn | null>(null);
   const pendingLocalMessageThreadIdsRef = useRef<Set<string>>(new Set());
   const busyThreadIdsRef = useRef<Set<string>>(new Set());
-  const notifiedAttentionThreadIdsRef = useRef<Set<string> | null>(null);
   const { showOnboarding, completeOnboarding } = useOnboardingSetupGate();
   const { pluginStates, reloadPlugins } = usePluginController();
   const { drawerOpen, expandDrawer, toggleDrawer } = useResponsiveDrawer();
@@ -249,25 +248,16 @@ function AuthenticatedApp() {
     }
   }
 
-  useEffect(() => {
-    const previous = notifiedAttentionThreadIdsRef.current;
-    notifiedAttentionThreadIdsRef.current = new Set(pendingAttentionThreadIds);
-    // Seed from persisted state without replaying old notifications on every launch.
-    if (previous === null) return;
-    if (!systemNotifEnabled || !document.hidden || notificationPermission() !== "granted") {
-      return;
-    }
-    for (const threadId of pendingAttentionThreadIds) {
-      if (previous.has(threadId)) continue;
-      const owner = chatThreads.find((thread) => thread.threadId === threadId);
-      void showSystemNotification({
-        title: t("notifications.requiresAttention"),
-        body: owner?.title ?? t("notifications.openConversation"),
-        tag: `attention:${threadId}`,
-        onClick: () => void handleSelectThread(threadId),
-      });
-    }
-  }, [chatThreads, pendingAttentionThreadIds, systemNotifEnabled, t]);
+  useThreadAttentionNotifications({
+    chatThreads,
+    pendingAttentionThreadIds,
+    systemNotifEnabled,
+    labels: {
+      requiresAttention: t("notifications.requiresAttention"),
+      openConversation: t("notifications.openConversation"),
+    },
+    onSelectThread: handleSelectThread,
+  });
 
   async function refreshThreadInBackground(
     threadId: string,

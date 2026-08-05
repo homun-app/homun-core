@@ -1135,6 +1135,7 @@ assertContains("src/App.tsx", "useTaskQueueController", "App must delegate task 
 assertContains("src/App.tsx", "useBackgroundStreams", "App must delegate active stream polling to the background streams hook");
 assertContains("src/App.tsx", "useAppNavigation", "App must delegate shell navigation/search state to the navigation hook");
 assertContains("src/App.tsx", "useThreadAttentionController", "App must delegate thread attention state to the attention controller");
+assertContains("src/App.tsx", "useThreadAttentionNotifications", "App must delegate thread attention notifications to the notification hook");
 assertContains("src/App.tsx", "useOperationalReadModelPoller", "App must delegate operational read model polling to the poller hook");
 assertContains("src/App.tsx", "useAppEventSubscription", "App must delegate app-event websocket subscription to the subscription hook");
 assertContains("src/App.tsx", "useInitialChatThreadsLoader", "App must delegate initial chat snapshot loading to the loader hook");
@@ -1146,6 +1147,8 @@ assertNotContains("src/App.tsx", "coreBridge.activeStreams", "App must not own a
 assertNotContains("src/App.tsx", "coreBridge.markThreadSeen", "App must not own thread seen mutations directly");
 assertNotContains("src/App.tsx", "hydrateThreadAttentionState", "App must not own thread attention hydration directly");
 assertNotContains("src/App.tsx", "projectConversationAttention", "App must not own thread attention projection directly");
+assertNotContains("src/App.tsx", "showSystemNotification", "App must not own attention notification dispatch directly");
+assertNotContains("src/App.tsx", "notifiedAttentionThreadIdsRef", "App must not own attention notification dedupe state directly");
 assertNotContains("src/App.tsx", "operational_read_models_poll unavailable", "App must not own operational read model polling directly");
 assertNotContains("src/App.tsx", "appEventHandlerRef", "App must not own app-event websocket dispatch directly");
 assertNotContains("src/App.tsx", "wsSubscription", "App must not own websocket subscription directly");

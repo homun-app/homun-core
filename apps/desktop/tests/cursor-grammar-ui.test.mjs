@@ -156,6 +156,13 @@ const chatThreadCreation = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const threadAttentionNotifications = await readFile(
+  new URL("../src/lib/useThreadAttentionNotifications.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const initialThreadSelection = await readFile(
   new URL("../src/lib/initialThreadSelection.mjs", import.meta.url),
   "utf8",
@@ -883,16 +890,21 @@ test("App delegates shell navigation state to useAppNavigation", () => {
 
 test("App delegates thread attention ownership to useThreadAttentionController", () => {
   assert.match(app, /from "\.\/lib\/useThreadAttentionController";/);
+  assert.match(app, /from "\.\/lib\/useThreadAttentionNotifications";/);
   assert.doesNotMatch(app, /createThreadAttentionState/);
   assert.doesNotMatch(app, /hydrateThreadAttentionState/);
   assert.doesNotMatch(app, /mapCoreThreadAttention/);
   assert.doesNotMatch(app, /attentionRequiredThreadIds/);
   assert.doesNotMatch(app, /projectConversationAttention/);
   assert.doesNotMatch(app, /coreBridge\.markThreadSeen/);
+  assert.doesNotMatch(app, /notifiedAttentionThreadIdsRef/);
+  assert.doesNotMatch(app, /showSystemNotification/);
   assert.match(threadAttentionController, /export function useThreadAttentionController/);
   assert.match(threadAttentionController, /createThreadAttentionState/);
   assert.match(threadAttentionController, /hydrateThreadAttentionState/);
   assert.match(threadAttentionController, /coreBridge[\s\S]*?\.markThreadSeen/);
+  assert.match(threadAttentionNotifications, /notificationPermission/);
+  assert.match(threadAttentionNotifications, /showSystemNotification/);
 });
 
 test("App delegates operational read-model polling to useOperationalReadModelPoller", () => {
