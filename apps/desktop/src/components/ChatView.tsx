@@ -30,6 +30,13 @@ import {
   reconcileSteering,
   type SteeringQueueState,
 } from "../lib/chatSteeringState";
+import {
+  CONTINUE_RESPONSE_PROMPT,
+  buildAssistantFollowUpPrompt,
+  buildComposerPromptDecorators,
+  buildReplyContextPrompt,
+  buildSteeringPrompt,
+} from "../lib/chatPromptAssembly";
 import { steeringPromptWithEdit } from "../lib/chatSteeringPrompt";
 import {
   applyTurnEvent,
@@ -1607,16 +1614,11 @@ export function ChatView({
     const images = options?.images;
     const mode = options?.mode;
 
-    // Forcing a skill (🧩 picker) augments the MODEL-facing prompt while the
-    // user still sees their clean text. The gateway honors "usa la skill X".
-    const skillPrefix = options?.forcedSkillsId
-      ? `Use the skill \`${options.forcedSkillsId}\` to fulfill this request.\n\n`
-      : "";
-    // @ file context: the selected files' content is prepended to the hidden
-    // prompt; the user keeps seeing their clean message.
-    const contextPrefix = options?.contextText ? `${options.contextText}\n\n` : "";
+    const { skillPrefix, contextPrefix, augmented } = buildComposerPromptDecorators({
+      forcedSkillsId: options?.forcedSkillsId,
+      contextText: options?.contextText,
+    });
     const model = options?.model;
-    const augmented = Boolean(skillPrefix || contextPrefix);
 
     // Open HITL Free wait → always a new turn (ResumeBinding), never steer.
     const composerMode = deriveComposerMode({
@@ -1637,18 +1639,15 @@ export function ChatView({
     // in progress (streaming just ended / projected active turn lag) — otherwise the
     // answer becomes steering and the browser session context is mishandled.
     if (workInProgress && !forceNewTurn) {
-      const promptWithReplyContext = activeReplyContext
-        ? [
-            skillPrefix,
-            contextPrefix,
-            "Apply this instruction to the active task while keeping the quoted context.",
-            `Quoted message (${messageRoleLabel(activeReplyContext.role)}):`,
-            activeReplyContext.preview,
-            "",
-            "User instruction:",
-            prompt,
-          ].join("\n")
-        : `${skillPrefix}${contextPrefix}${prompt}`;
+      const promptWithReplyContext = buildSteeringPrompt({
+        skillPrefix,
+        contextPrefix,
+        prompt,
+        replyRoleLabel: activeReplyContext
+          ? messageRoleLabel(activeReplyContext.role)
+          : undefined,
+        replyPreview: activeReplyContext?.preview,
+      });
       const requestId = `chat_steering_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       try {
         const result = await enqueueTurn(thread.threadId, requestId, promptWithReplyContext, {
@@ -1726,16 +1725,13 @@ export function ChatView({
       return true;
     }
 
-    const promptWithReplyContext = [
+    const promptWithReplyContext = buildReplyContextPrompt({
       skillPrefix,
       contextPrefix,
-      "Reply to the quoted message keeping the context.",
-      `Quoted message (${messageRoleLabel(activeReplyContext.role)}):`,
-      activeReplyContext.preview,
-      "",
-      "User request:",
       prompt,
-    ].join("\n");
+      replyRoleLabel: messageRoleLabel(activeReplyContext.role),
+      replyPreview: activeReplyContext.preview,
+    });
     void submitPrompt(
       promptWithReplyContext,
       attachments,
@@ -2170,9 +2166,7 @@ export function ChatView({
       setPromptError(t("chat.noResponseToContinue"));
       return;
     }
-    const continuationPrompt =
-      "Continue the previous response from where it stopped. Do not repeat already written parts. Keep the same language and format.";
-    void submitPrompt(continuationPrompt, [], [], "Continue");
+    void submitPrompt(CONTINUE_RESPONSE_PROMPT, [], [], "Continue");
   }
 
   async function autoContinueAssistantResponse(
@@ -2351,13 +2345,10 @@ export function ChatView({
       setPromptError(t("chat.noPreviousResponse"));
       return;
     }
-    const followUpPrompt = [
+    const followUpPrompt = buildAssistantFollowUpPrompt({
       instruction,
-      "Keep the same language as the user.",
-      "",
-      "Previous response:",
-      message.text,
-    ].join("\n");
+      previousResponse: message.text,
+    });
     void submitPrompt(followUpPrompt, [], [], visibleText);
   }
 

@@ -428,6 +428,13 @@ const chatSteeringPrompt = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatPromptAssembly = await readFile(
+  new URL("../src/lib/chatPromptAssembly.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatMessageMarkerParser = await readFile(
   new URL("../src/components/ChatMessageMarkerParser.ts", import.meta.url),
   "utf8",
@@ -1266,6 +1273,18 @@ test("ChatView delegates steering prompt edit assembly to chatSteeringPrompt", (
   assert.doesNotMatch(chatView, /function steeringPromptWithEdit\(/);
   assert.match(chatSteeringPrompt, /export function steeringPromptWithEdit/);
   assert.match(chatSteeringPrompt, /visible_prompt/);
+});
+
+test("ChatView delegates model-facing prompt assembly to chatPromptAssembly", () => {
+  assert.match(chatView, /from "\.\.\/lib\/chatPromptAssembly";/);
+  assert.doesNotMatch(chatView, /const skillPrefix = options\?\.forcedSkillsId/);
+  assert.doesNotMatch(chatView, /Apply this instruction to the active task while keeping the quoted context/);
+  assert.doesNotMatch(chatView, /Reply to the quoted message keeping the context/);
+  assert.doesNotMatch(chatView, /Continue the previous response from where it stopped/);
+  assert.match(chatPromptAssembly, /export function buildComposerPromptDecorators/);
+  assert.match(chatPromptAssembly, /export function buildSteeringPrompt/);
+  assert.match(chatPromptAssembly, /export function buildReplyContextPrompt/);
+  assert.match(chatPromptAssembly, /export const CONTINUE_RESPONSE_PROMPT/);
 });
 
 test("ChatView delegates assistant message body rendering to AssistantMessageBody", () => {
