@@ -1,7 +1,6 @@
 import {
   ChevronDown,
   Loader2,
-  Sparkles,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -151,6 +150,7 @@ import { MessageEditBox } from "./MessageEditBox";
 import { MessageMetaCopy } from "./MessageMetaCopy";
 import { MessageStatusBadges } from "./MessageStatusBadges";
 import { MessageActivity } from "./MessageActivity";
+import { PendingAssistantMessage } from "./PendingAssistantMessage";
 import { AssistantThinkingState, type ChatStreamStatus } from "./AssistantThinkingState";
 import { InlineUncertainEffectPanel } from "./InlineUncertainEffectPanel";
 import { InlineApprovelPanel } from "./InlineApprovelPanel";
@@ -2977,16 +2977,7 @@ export function ChatView({
           </div>
 
           {promptSubmitting && !streamingAssistantId && !chatTurnState && (
-            <div className="thread-message-row">
-              <article className="message chat-message-agent pending" aria-live="polite">
-                <header className="assistant-label">
-                  <Sparkles size={17} />
-                  <strong>assistant</strong>
-                  <span>{t("chat.roleAssistant")}</span>
-                </header>
-                <AssistantThinkingState status={streamStatus} />
-              </article>
-            </div>
+            <PendingAssistantMessage status={streamStatus} />
           )}
 
           <InlineApprovelPanel

@@ -155,6 +155,13 @@ const chatSystemMessageHeader = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const pendingAssistantMessage = await readFile(
+  new URL("../src/components/PendingAssistantMessage.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageActivity = await readFile(
   new URL("../src/components/MessageActivity.tsx", import.meta.url),
   "utf8",
@@ -950,6 +957,17 @@ test("ChatView delegates system message headers to ChatSystemMessageHeader", () 
   assert.match(chatSystemMessageHeader, /className="assistant-label system-label"/);
   assert.match(chatSystemMessageHeader, /Clock3/);
   assert.match(chatSystemMessageHeader, /chat\.roleSystem/);
+});
+
+test("ChatView delegates pending assistant rendering to PendingAssistantMessage", () => {
+  assert.match(chatView, /from "\.\/PendingAssistantMessage";/);
+  assert.match(chatView, /<PendingAssistantMessage/);
+  assert.doesNotMatch(chatView, /className="message chat-message-agent pending"/);
+  assert.doesNotMatch(chatView, /Sparkles/);
+  assert.match(pendingAssistantMessage, /export function PendingAssistantMessage/);
+  assert.match(pendingAssistantMessage, /className="message chat-message-agent pending"/);
+  assert.match(pendingAssistantMessage, /AssistantThinkingState/);
+  assert.match(pendingAssistantMessage, /chat\.roleAssistant/);
 });
 
 test("ChatView delegates message activity rendering to MessageActivity", () => {
