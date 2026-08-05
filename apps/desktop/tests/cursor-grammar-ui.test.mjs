@@ -148,6 +148,13 @@ const messageStatusBadges = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatSystemMessageHeader = await readFile(
+  new URL("../src/components/ChatSystemMessageHeader.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageActivity = await readFile(
   new URL("../src/components/MessageActivity.tsx", import.meta.url),
   "utf8",
@@ -932,6 +939,17 @@ test("ChatView delegates post-message status badges to MessageStatusBadges", () 
   assert.match(messageStatusBadges, /className="auto-continue-status"/);
   assert.match(messageStatusBadges, /chat\.responseLikelyInterrupted/);
   assert.match(messageStatusBadges, /chat\.autoCompleting/);
+});
+
+test("ChatView delegates system message headers to ChatSystemMessageHeader", () => {
+  assert.match(chatView, /from "\.\/ChatSystemMessageHeader";/);
+  assert.match(chatView, /<ChatSystemMessageHeader/);
+  assert.doesNotMatch(chatView, /className="assistant-label system-label"/);
+  assert.doesNotMatch(chatView, /Clock3/);
+  assert.match(chatSystemMessageHeader, /export function ChatSystemMessageHeader/);
+  assert.match(chatSystemMessageHeader, /className="assistant-label system-label"/);
+  assert.match(chatSystemMessageHeader, /Clock3/);
+  assert.match(chatSystemMessageHeader, /chat\.roleSystem/);
 });
 
 test("ChatView delegates message activity rendering to MessageActivity", () => {

@@ -1,6 +1,5 @@
 import {
   ChevronDown,
-  Clock3,
   Loader2,
   Sparkles,
 } from "lucide-react";
@@ -142,6 +141,7 @@ import {
 } from "./InspectorView";
 import { ComposerContainer } from "./ComposerContainer";
 import { ChatEmptyHero } from "./ChatEmptyHero";
+import { ChatSystemMessageHeader } from "./ChatSystemMessageHeader";
 import { ChatTopbar } from "./ChatTopbar";
 import { ChatBranchPicker } from "./ChatBranchPicker";
 import { ChatFollowUps } from "./ChatFollowUps";
@@ -2809,11 +2809,7 @@ export function ChatView({
             >
             <article className={messageSurfaceClass}>
               {displayMessage.role === "system" && (
-                <header className="assistant-label system-label">
-                  <Clock3 size={15} />
-                  <strong>{t("chat.status")}</strong>
-                  <span>{t("chat.roleSystem")}</span>
-                </header>
+                <ChatSystemMessageHeader />
               )}
               {isStreamingMessage ? (
                 <>
