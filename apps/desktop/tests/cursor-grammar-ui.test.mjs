@@ -120,6 +120,13 @@ const messageActionFooter = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatMessageContent = await readFile(
+  new URL("../src/components/ChatMessageContent.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatBranchPicker = await readFile(
   new URL("../src/components/ChatBranchPicker.tsx", import.meta.url),
   "utf8",
@@ -927,8 +934,10 @@ test("ChatView delegates follow-up suggestion rendering to ChatFollowUps", () =>
 });
 
 test("ChatView delegates inline message editing to MessageEditBox", () => {
-  assert.match(chatView, /from "\.\/MessageEditBox";/);
-  assert.match(chatView, /<MessageEditBox/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageEditBox";/);
+  assert.doesNotMatch(chatView, /<MessageEditBox/);
+  assert.match(chatMessageContent, /from "\.\/MessageEditBox";/);
+  assert.match(chatMessageContent, /<MessageEditBox/);
   assert.doesNotMatch(chatView, /className="message-edit"/);
   assert.doesNotMatch(chatView, /message-edit-actions/);
   assert.match(messageEditBox, /export function MessageEditBox/);
@@ -988,8 +997,9 @@ test("ChatView delegates pending assistant rendering to PendingAssistantMessage"
 });
 
 test("ChatView delegates message activity rendering to MessageActivity", () => {
-  assert.match(chatView, /import \{ MessageActivity \} from "\.\/MessageActivity";/);
-  assert.match(chatView, /<MessageActivity text=\{displayMessage\.text\} live=\{false\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageActivity";/);
+  assert.match(chatMessageContent, /from "\.\/MessageActivity";/);
+  assert.match(chatMessageContent, /<MessageActivity text=\{message\.text\} live=\{false\}/);
   assert.doesNotMatch(chatView, /function MessageActivity\(/);
   assert.doesNotMatch(chatView, /function parseActivitySteps\(/);
   assert.match(chatPayloadParsers, /import \{ parseActivitySteps \} from "\.\/MessageActivity";/);
@@ -1000,8 +1010,10 @@ test("ChatView delegates message activity rendering to MessageActivity", () => {
 });
 
 test("ChatView delegates assistant thinking rendering to AssistantThinkingState", () => {
-  assert.match(chatView, /import \{ AssistantThinkingState, type ChatStreamStatus \} from "\.\/AssistantThinkingState";/);
-  assert.match(chatView, /<AssistantThinkingState status=\{streamStatus\}/);
+  assert.match(chatView, /import \{ type ChatStreamStatus \} from "\.\/AssistantThinkingState";/);
+  assert.doesNotMatch(chatView, /<AssistantThinkingState/);
+  assert.match(chatMessageContent, /from "\.\/AssistantThinkingState";/);
+  assert.match(chatMessageContent, /<AssistantThinkingState status=\{streamStatus\}/);
   assert.doesNotMatch(chatView, /function AssistantThinkingState\(/);
   assert.doesNotMatch(chatView, /interface ChatStreamStatus/);
   assert.match(assistantThinkingState, /export interface ChatStreamStatus/);
@@ -1115,14 +1127,26 @@ test("ChatView delegates structured payload parsing to ChatPayloadParsers", () =
 });
 
 test("ChatView delegates assistant message body rendering to AssistantMessageBody", () => {
-  assert.match(chatView, /from "\.\/AssistantMessageBody";/);
-  assert.match(chatView, /<AssistantMessageBody[\s\S]*text=\{displayMessage\.text\}/);
+  assert.doesNotMatch(chatView, /from "\.\/AssistantMessageBody";/);
+  assert.match(chatMessageContent, /from "\.\/AssistantMessageBody";/);
+  assert.match(chatMessageContent, /<AssistantMessageBody[\s\S]*text=\{message\.text\}/);
   assert.doesNotMatch(chatView, /const AssistantMessageBody = memo/);
   assert.doesNotMatch(chatView, /function humanizeToolSlugs/);
   assert.doesNotMatch(chatView, /parseComposioConfirm\(text, eventParts\)/);
   assert.match(assistantMessageBody, /export const AssistantMessageBody = memo/);
   assert.match(assistantMessageBody, /parseComposioConfirm\(text, eventParts\)/);
   assert.match(assistantMessageBody, /visibleMessageText\(visible\)/);
+});
+
+test("ChatView delegates message content state rendering to ChatMessageContent", () => {
+  assert.match(chatView, /from "\.\/ChatMessageContent";/);
+  assert.match(chatView, /<ChatMessageContent[\s\S]*?onSubmitChoiceAnswer=\{submitChoiceAnswer\}/);
+  assert.match(chatView, /<ChatMessageContent[\s\S]*?onHandleProactiveAnswer=\{handleProactiveAnswer\}/);
+  assert.doesNotMatch(chatView, /streamHasVisibleText && !chatTurnState/);
+  assert.match(chatMessageContent, /export function ChatMessageContent/);
+  assert.match(chatMessageContent, /isStreaming \?/);
+  assert.match(chatMessageContent, /if \(isEditing\)/);
+  assert.match(chatMessageContent, /onHandleProactiveAnswer\(message\.text, answer\)/);
 });
 
 test("ChatView delegates resume marker persistence to chatResumeMarkers", () => {

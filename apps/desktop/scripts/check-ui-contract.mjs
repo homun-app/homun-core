@@ -1240,12 +1240,12 @@ assertNotContains("src/components/ChatView.tsx", "useVirtualizer", "chat transcr
 assertNotContains("src/styles.css", ".virtual-message-row", "chat transcript must not use absolute virtual rows in the base Electron path");
 assertContains("src/components/ChatView.tsx", "streamingFrameRef", "chat streaming must throttle visible updates in Electron");
 assertContains("src/components/ChatView.tsx", "setOptimisticMessages", "chat streaming must keep visible text in the React message state");
-assertContains("src/components/ChatView.tsx", "<AssistantMessageBody", "streaming answers must render through the normal message body component");
+assertContains("src/components/ChatMessageContent.tsx", "<AssistantMessageBody", "streaming answers must render through the normal message body component");
 assertContains("src/components/ChatView.tsx", "browser_budget_exceeded", "browser budget has an actionable Activity state");
 assertContains("src/i18n/locales/it.json", "Tempo massimo del browser raggiunto", "browser timeout is localized");
 assertMatches(
-  "src/components/ChatView.tsx",
-  /isStreamingMessage \? \([\s\S]*?<AssistantMessageBody[\s\S]*?\n\s+streaming\n[\s\S]*?\)/m,
+  "src/components/ChatMessageContent.tsx",
+  /isStreaming\) \{[\s\S]*?<AssistantMessageBody[\s\S]*?\n\s+streaming\n[\s\S]*?\)/m,
   "streaming answers must keep rich markdown/progress parsing enabled while streaming",
 );
 assertContains("src/components/ChatView.tsx", "workspacePlanSteps", "adaptive activity must derive progress from the durable plan projection");
@@ -1518,7 +1518,7 @@ assertRepoContains("crates/desktop-gateway/src/chat_store.rs", "create table if 
 assertRepoContains("crates/desktop-gateway/src/main.rs", "Body::from_stream", "desktop gateway must proxy runtime stream without buffering the full answer");
 
 assertContains(
-  "src/components/ChatView.tsx",
+  "src/components/ChatMessageContent.tsx",
   "<MessageActivity",
   "per-turn activity must be rendered inline in each assistant message"
 );

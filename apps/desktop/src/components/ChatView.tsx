@@ -144,14 +144,12 @@ import { ChatBranchPicker } from "./ChatBranchPicker";
 import { ChatFollowUps } from "./ChatFollowUps";
 import { MessageAttachmentList } from "./MessageAttachmentList";
 import { MessageActionFooter } from "./MessageActionFooter";
-import { MessageEditBox } from "./MessageEditBox";
+import { ChatMessageContent } from "./ChatMessageContent";
 import { MessageStatusBadges } from "./MessageStatusBadges";
-import { MessageActivity } from "./MessageActivity";
 import { PendingAssistantMessage } from "./PendingAssistantMessage";
-import { AssistantThinkingState, type ChatStreamStatus } from "./AssistantThinkingState";
+import { type ChatStreamStatus } from "./AssistantThinkingState";
 import { InlineUncertainEffectPanel } from "./InlineUncertainEffectPanel";
 import { InlineApprovelPanel } from "./InlineApprovelPanel";
-import { AssistantMessageBody } from "./AssistantMessageBody";
 import { WorkspaceIslandSections } from "./WorkspaceIslandSections";
 import {
   latestActivitySteps,
@@ -2803,65 +2801,24 @@ export function ChatView({
               {displayMessage.role === "system" && (
                 <ChatSystemMessageHeader />
               )}
-              {isStreamingMessage ? (
-                <>
-                  {!streamHasVisibleText && !chatTurnState && (
-                    <AssistantThinkingState status={streamStatus} />
-                  )}
-                  {displayMessage.text && (
-                    <AssistantMessageBody
-                      text={displayMessage.text}
-                      eventParts={displayMessage.eventParts}
-                      streaming
-                      messageId={displayMessage.id}
-                      threadId={thread.threadId}
-                      onOpenArtifact={(artifact) => {
-                        openArtifactTab(artifact);
-                      }}
-                      onChoose={(answer, purpose) =>
-                        purpose
-                          ? void handleProactiveAnswer(displayMessage.text, answer)
-                          : void submitChoiceAnswer(answer, displayMessage.id)
-                      }
-                    />
-                  )}
-                </>
-              ) : editingMessageId === displayMessage.id ? (
-                <MessageEditBox
-                  value={editingText}
-                  cancelLabel="Cancel"
-                  saveLabel={t("chat.saveAndSend")}
-                  onChange={setEditingText}
-                  onCancel={cancelEditMessage}
-                  onSave={saveEditedMessage}
-                />
-              ) : displayMessage.text ? (
-                <>
-                  {/* The ‹‹ACT››…‹‹/ACT›› trace markers are already persisted inside
-                      chat_messages.text; mounting it here (not just on the live streaming
-                      path) makes a turn's activity survive reload instead of vanishing
-                      once streaming ends. */}
-                  {assistantMessage && (
-                    <MessageActivity text={displayMessage.text} live={false} />
-                  )}
-                  <AssistantMessageBody
-                    text={displayMessage.text}
-                    eventParts={displayMessage.eventParts}
-                    messageId={displayMessage.id}
-                    threadId={thread.threadId}
-                    onOpenArtifact={(artifact) => {
-                      openArtifactTab(artifact);
-                    }}
-                    onChoose={(answer) => void submitChoiceAnswer(answer, displayMessage.id)}
-                  />
-                </>
-              ) : (
-                <AssistantThinkingState
-                  status={
-                    isStreamingMessage ? streamStatus : null
-                  }
-                />
-              )}
+              <ChatMessageContent
+                message={displayMessage}
+                isStreaming={isStreamingMessage}
+                isEditing={editingMessageId === displayMessage.id}
+                editingText={editingText}
+                streamHasVisibleText={streamHasVisibleText}
+                hasActiveTurnState={Boolean(chatTurnState)}
+                streamStatus={streamStatus}
+                threadId={thread.threadId}
+                cancelLabel="Cancel"
+                saveLabel={t("chat.saveAndSend")}
+                onEditingTextChange={setEditingText}
+                onCancelEdit={cancelEditMessage}
+                onSaveEdit={saveEditedMessage}
+                onOpenArtifact={openArtifactTab}
+                onSubmitChoiceAnswer={submitChoiceAnswer}
+                onHandleProactiveAnswer={handleProactiveAnswer}
+              />
               {displayMessage.text && !isStreamingMessage && (
                 <MessageStatusBadges
                   incomplete={assistantMessage && incompleteMessage}
