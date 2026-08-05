@@ -1199,8 +1199,8 @@ assertContains("src/data/mockData.ts", "id: \"sandbox\"", "Sandbox must be a sep
 assertContains("src/components/SettingsView.tsx", "<SandboxSettingsView />", "Settings must render the dedicated Sandbox pane");
 assertContains("src/lib/coreBridge.ts", "/policy`", "coreBridge must POST per-workspace sandbox/approval overrides");
 assertContains("src/components/SettingsView.tsx", "coreBridge.vaultPinSetup", "Vault Settings must configure the local PIN through the bridge");
-assertContains("src/components/ChatView.tsx", "coreBridge.vaultProposalAccept", "Vault proposal card must expose an accept action");
-assertContains("src/components/ChatView.tsx", "Save to Vault", "Vault proposal card must offer an explicit save action");
+assertContains("src/components/MessageVaultProposeCard.tsx", "coreBridge.vaultProposalAccept", "Vault proposal card must expose an accept action");
+assertContains("src/components/MessageVaultProposeCard.tsx", "Save to Vault", "Vault proposal card must offer an explicit save action");
 assertContains("src/App.tsx", "mapCoreMemoryDashboard", "desktop memory page must map the gateway memory dashboard read model");
 assertContains("src/App.tsx", "mapCoreCapabilitySnapshot", "desktop connections page must map the gateway capability read model");
 assertContains("src/lib/chatApi.ts", "/api/chat/threads", "chat threads must load from the local Rust gateway first");

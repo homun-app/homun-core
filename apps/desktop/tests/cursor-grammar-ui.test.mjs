@@ -225,6 +225,13 @@ const messageConnectSuggestCard = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageVaultProposeCard = await readFile(
+  new URL("../src/components/MessageVaultProposeCard.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -941,6 +948,17 @@ test("ChatView delegates capability suggestions to MessageConnectSuggestCard", (
   assert.match(messageConnectSuggestCard, /coreBridge\.mcpConnect/);
   assert.match(messageConnectSuggestCard, /coreBridge\.catalogInstall/);
   assert.match(messageConnectSuggestCard, /connectComposioToolkit/);
+});
+
+test("ChatView delegates vault proposal rendering to MessageVaultProposeCard", () => {
+  assert.match(chatView, /from "\.\/MessageVaultProposeCard";/);
+  assert.match(chatView, /<VaultProposeCard[\s\S]*proposal=\{vaultPropose\}/);
+  assert.doesNotMatch(chatView, /function VaultProposeCard\(/);
+  assert.match(messageVaultProposeCard, /export interface VaultProposal/);
+  assert.match(messageVaultProposeCard, /export function VaultProposeCard/);
+  assert.match(messageVaultProposeCard, /coreBridge\.vaultProposalAccept/);
+  assert.match(messageVaultProposeCard, /coreBridge\.vaultProposalDismiss/);
+  assert.match(messageVaultProposeCard, /Similar Vault record exists/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
