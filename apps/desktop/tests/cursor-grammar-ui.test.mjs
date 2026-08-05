@@ -120,6 +120,13 @@ const chatBranchPicker = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatFollowUps = await readFile(
+  new URL("../src/components/ChatFollowUps.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageActivity = await readFile(
   new URL("../src/components/MessageActivity.tsx", import.meta.url),
   "utf8",
@@ -859,6 +866,15 @@ test("ChatView delegates branch variant controls to ChatBranchPicker", () => {
   assert.match(chatBranchPicker, /export function ChatBranchPicker/);
   assert.match(chatBranchPicker, /className="branch-picker"/);
   assert.match(chatBranchPicker, /branch-rename/);
+});
+
+test("ChatView delegates follow-up suggestion rendering to ChatFollowUps", () => {
+  assert.match(chatView, /from "\.\/ChatFollowUps";/);
+  assert.match(chatView, /<ChatFollowUps/);
+  assert.doesNotMatch(chatView, /className="chat-followups"/);
+  assert.match(chatFollowUps, /export function ChatFollowUps/);
+  assert.match(chatFollowUps, /className="chat-followups"/);
+  assert.match(chatFollowUps, /chat\.followUpQuestions/);
 });
 
 test("ChatView delegates message activity rendering to MessageActivity", () => {

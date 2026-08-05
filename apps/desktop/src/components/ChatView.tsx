@@ -148,6 +148,7 @@ import { ComposerContainer } from "./ComposerContainer";
 import { ChatEmptyHero } from "./ChatEmptyHero";
 import { ChatTopbar } from "./ChatTopbar";
 import { ChatBranchPicker } from "./ChatBranchPicker";
+import { ChatFollowUps } from "./ChatFollowUps";
 import { MessageAttachmentList } from "./MessageAttachmentList";
 import { MessageActionBar } from "./MessageActionBar";
 import { MessageActivity } from "./MessageActivity";
@@ -2925,20 +2926,13 @@ export function ChatView({
               {!isStreamingMessage &&
                 followUpsFor === displayMessage.id &&
                 followUps.length > 0 && (
-                  <div className="chat-followups" aria-label={t("chat.followUpQuestions")}>
-                    {followUps.map((suggestion) => (
-                      <button
-                        key={suggestion}
-                        type="button"
-                        onClick={() => {
-                          setFollowUps([]);
-                          void submitPrompt(suggestion, []);
-                        }}
-                      >
-                        {suggestion}
-                      </button>
-                    ))}
-                  </div>
+                  <ChatFollowUps
+                    suggestions={followUps}
+                    onSelect={(suggestion) => {
+                      setFollowUps([]);
+                      void submitPrompt(suggestion, []);
+                    }}
+                  />
                 )}
               {displayMessage.attachments && displayMessage.attachments.length > 0 && (
                 <MessageAttachmentList attachments={displayMessage.attachments} />
