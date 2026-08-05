@@ -183,6 +183,13 @@ const inlineUncertainEffectPanel = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const inlineApprovelPanel = await readFile(
+  new URL("../src/components/InlineApprovelPanel.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -830,6 +837,17 @@ test("ChatView delegates uncertain effect verification to InlineUncertainEffectP
   assert.match(inlineUncertainEffectPanel, /effectFamilyLabel/);
   assert.match(inlineUncertainEffectPanel, /formatEffectTime/);
   assert.match(inlineUncertainEffectPanel, /verifiedNotApplied/);
+});
+
+test("ChatView delegates inline approvals to InlineApprovelPanel", () => {
+  assert.match(chatView, /from "\.\/InlineApprovelPanel";/);
+  assert.match(chatView, /<InlineApprovelPanel[\s\S]*approvals=\{activeApprovels\}/);
+  assert.doesNotMatch(chatView, /function InlineApprovelPanel\(/);
+  assert.doesNotMatch(chatView, /const surfaceIcons:/);
+  assert.match(inlineApprovelPanel, /export function InlineApprovelPanel/);
+  assert.match(inlineApprovelPanel, /const surfaceIcons:/);
+  assert.match(inlineApprovelPanel, /busyId === approval\.id/);
+  assert.match(inlineApprovelPanel, /approval-plan-preview/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {

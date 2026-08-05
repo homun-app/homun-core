@@ -1088,7 +1088,7 @@ assertNotContains(
   "const showComputerActivity =",
   "computer activity must use the shared inspector instead of a second inline panel",
 );
-assertContains("src/components/ChatView.tsx", "approval-scope-options", "approval UI must make temporary vs fixed scope explicit");
+assertContains("src/components/InlineApprovelPanel.tsx", "approval-scope-options", "approval UI must make temporary vs fixed scope explicit");
 assertContains("src/lib/providerPresets.ts", "https://api.z.ai/api/paas/v4", "Z.ai standard preset must keep the standard GLM endpoint");
 assertContains("src/lib/providerPresets.ts", "https://api.z.ai/api/coding/paas/v4", "Z.ai coding preset must keep the coding GLM endpoint");
 assertContains("src/components/SettingsView.tsx", "v.id === p.id || normUrl(v.base_url) === normUrl(p.baseUrl)", "provider preset cards must match by stable id before URL fallback");
