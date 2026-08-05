@@ -1367,15 +1367,15 @@ assertContains("src/components/ComposerShell.tsx", "t(\"chat.searchCapability\")
 assertContains("src/components/ComposerShell.tsx", "t(\"chat.noCapabilities\")", "composer capability picker must use capability empty state");
 assertContains("src/components/ComposerShell.tsx", "t(\"chat.forcedCapabilityNextMessage\")", "forced capability chip must use user-facing capability terminology");
 assertContains("src/components/ComposerShell.tsx", "<small>{option.description}</small>", "composer mode picker must explain what each mode does");
-assertContains("src/components/ChatView.tsx", "available: !option.projectOnly || linkedFolder != null", "composer must hide project-only modes without a linked project folder");
+assertContains("src/components/ComposerContainer.tsx", "available: !option.projectOnly || linkedFolder != null", "composer must hide project-only modes without a linked project folder");
 assertContains("src/i18n/locales/en.json", "\"searchCapability\"", "English chat locale must include capability search label");
 assertContains("src/i18n/locales/it.json", "\"searchCapability\"", "Italian chat locale must include capability search label");
 assertContains("src/components/ComposerShell.tsx", "props.value.trim() && matchesAdd", "composer improve prompt action must only render when there is prompt text to improve");
 assertNotContains("src/components/ChatView.tsx", "/^fn\\s+", "code-specific message actions must not rely on fragile plain-text Rust heuristics");
 assertNotContains("src/components/ChatView.tsx", "/^let\\s+", "code-specific message actions must not rely on fragile plain-text variable heuristics");
 assertContains("src/components/ChatView.tsx", "cancelStreamingRequestRef", "chat must allow users to stop a visible streaming response");
-assertContains("src/components/ChatView.tsx", "catalogsMissingModels", "chat must refresh an empty provider catalog even when an active model is already known");
-assertContains("src/components/ChatView.tsx", "RUNTIME_MODELS_CHANGED_EVENT", "chat model picker must react immediately to provider changes without a page refresh");
+assertContains("src/components/ComposerContainer.tsx", "catalogsMissingModels", "chat must refresh an empty provider catalog even when an active model is already known");
+assertContains("src/components/ComposerContainer.tsx", "RUNTIME_MODELS_CHANGED_EVENT", "chat model picker must react immediately to provider changes without a page refresh");
 assertContains("src/components/SettingsView.tsx", "refreshEmptyLocalOllamaCatalogs", "settings must discover local Ollama models automatically when its catalog is empty");
 assertContains("src/components/SettingsView.tsx", "isLocalOllamaProvider", "settings must distinguish keyless local Ollama from authenticated cloud endpoints");
 assertContains("src/components/OnboardingWizard.tsx", "isLocalOllamaProvider", "onboarding must not ask for an API key when a custom local Ollama endpoint is selected");

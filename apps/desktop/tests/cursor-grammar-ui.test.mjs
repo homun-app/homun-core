@@ -71,6 +71,13 @@ const composerShell = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const composerContainer = await readFile(
+  new URL("../src/components/ComposerContainer.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const runtimeContextPanel = await readFile(
   new URL("../src/components/RuntimeContextPanel.tsx", import.meta.url),
   "utf8",
@@ -488,10 +495,10 @@ test("message edit prompt keeps a usable multiline geometry", () => {
 
 test("ChatView delegates the prompt surface to the thin ComposerShell boundary", () => {
   assert.match(
-    chatView,
+    composerContainer || chatView,
     /import\s+\{[^}]*\bComposerShell\b[^}]*\}\s+from\s+"\.\/ComposerShell"/s,
   );
-  assert.match(chatView, /<ComposerShell\b/);
+  assert.match(composerContainer || chatView, /<ComposerShell\b/);
   assert.doesNotMatch(
     chatView,
     /\b(?:addMenuOpen|fileMenuOpen|skillMenuOpen|modelMenuOpen)\b/,
@@ -513,6 +520,18 @@ test("ChatView delegates the prompt surface to the thin ComposerShell boundary",
   for (const layer of ["add", "model", "mode", "runtime", "files", "capabilities", "connectors", "models"]) {
     assert.match(composerShell, new RegExp(`[\"']${layer}[\"']`));
   }
+});
+
+test("ChatView delegates composer state and submit ownership to ComposerContainer", () => {
+  assert.match(chatView, /import \{ ComposerContainer \} from "\.\/ComposerContainer";/);
+  assert.match(chatView, /<ComposerContainer[\s\S]*?onSubmit=\{submitComposerPrompt\}/);
+  assert.doesNotMatch(chatView, /function Composer\(/);
+  assert.doesNotMatch(chatView, /const \[selectedModel,\s*setSelectedModel\]/);
+  assert.doesNotMatch(chatView, /const \[attachments,\s*setAttachments\]/);
+  assert.match(composerContainer, /export function ComposerContainer/);
+  assert.match(composerContainer, /<ComposerShell/);
+  assert.match(composerContainer, /selectedModelAfterSubmission/);
+  assert.match(composerContainer, /coreBridge\.runtimeModels/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
@@ -635,9 +654,9 @@ test("composer reducer delegates Add children to exclusive nested-layer state", 
 });
 
 test("accepted submissions reset every next-turn model while rejected submissions retain it", () => {
-  assert.match(chatView, /selectedModelAfterSubmission\(current, accepted\)/);
+  assert.match(composerContainer, /selectedModelAfterSubmission\(current, accepted\)/);
   assert.doesNotMatch(
-    chatView,
+    composerContainer,
     /if \(accepted && suggestedModel && modelOverride === suggestedModel\.value\) \{\s*setSelectedModel\(null\)/,
   );
 });
