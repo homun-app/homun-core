@@ -92,6 +92,13 @@ const chatEmptyHero = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatTopbar = await readFile(
+  new URL("../src/components/ChatTopbar.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageAttachmentList = await readFile(
   new URL("../src/components/MessageAttachmentList.tsx", import.meta.url),
   "utf8",
@@ -802,6 +809,16 @@ test("ChatView delegates empty-thread hero rendering to ChatEmptyHero", () => {
   assert.match(chatEmptyHero, /chat-hero-prompt/);
 });
 
+test("ChatView delegates the chat topbar to ChatTopbar", () => {
+  assert.match(chatView, /from "\.\/ChatTopbar";/);
+  assert.match(chatView, /<ChatTopbar/);
+  assert.doesNotMatch(chatView, /<header className="task-topbar"/);
+  assert.doesNotMatch(chatView, /task-collapsed-controls/);
+  assert.match(chatTopbar, /export function ChatTopbar/);
+  assert.match(chatTopbar, /<header className="task-topbar"/);
+  assert.match(chatTopbar, /<ChatHeaderMenu/);
+});
+
 test("ChatView does not keep the retired unused inline computer timeline component", () => {
   assert.doesNotMatch(chatView, /function InlineTimeline\(/);
 });
@@ -998,6 +1015,17 @@ test("ChatView does not retain retired unused chat mode helpers", () => {
   assert.doesNotMatch(chatView, /const CHAT_MODES:/);
   assert.doesNotMatch(chatView, /type ChatMode =/);
   assert.doesNotMatch(chatView, /Systematic debugging \(code projects\)/);
+});
+
+test("ChatView does not retain retired topbar status props", () => {
+  assert.doesNotMatch(chatView, /activeHealth/);
+  assert.doesNotMatch(chatView, /activeModelInfo/);
+  assert.doesNotMatch(chatView, /headerModelLabel/);
+  assert.doesNotMatch(chatView, /headerToolPolicy/);
+  assert.doesNotMatch(chatView, /health: RuntimeHealth/);
+  assert.doesNotMatch(chatView, /task: TaskItem/);
+  assert.doesNotMatch(app, /health=\{runtimeItems\}/);
+  assert.doesNotMatch(app, /task=\{selectedTask\}/);
 });
 
 test("ChatView delegates workspace island section bodies", () => {

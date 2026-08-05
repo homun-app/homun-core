@@ -4,8 +4,6 @@ import {
   ChevronRight,
   Clock3,
   Loader2,
-  PanelLeftOpen,
-  Search,
   Tag,
   Sparkles,
 } from "lucide-react";
@@ -23,7 +21,6 @@ import type {
 import {
   coreBridge,
   SteeringQueuedDuringSubmissionError,
-  type ActiveModelInfo,
   type ChatAttachmentInput,
   type CoreBranchPoint,
   type CoreComputerSessionSnapshot,
@@ -97,7 +94,6 @@ import {
   describeBridgeError,
   fileLocalPath,
   formatChatDuration,
-  formatContextTokens,
   formatMessageTimestamp,
   isLikelyIncompleteMessage,
   isPlaceholderThreadTitle,
@@ -142,7 +138,6 @@ import { ChatComputerPanel } from "./ChatComputerPanel";
 import { AdaptiveWorkspaceIsland } from "./AdaptiveWorkspaceIsland";
 import { ActiveTurnStatus } from "./ActiveTurnStatus";
 import { PendingSteeringQueue } from "./PendingSteeringQueue";
-import { ChatHeaderMenu } from "./ChatHeaderMenu";
 import { InspectorWorkspace } from "./InspectorWorkspace";
 import {
   INSPECTOR_VIEW_LABEL_KEY,
@@ -154,6 +149,7 @@ import {
 import { MemoryUsagePopover } from "./MemoryUsagePopover";
 import { ComposerContainer } from "./ComposerContainer";
 import { ChatEmptyHero } from "./ChatEmptyHero";
+import { ChatTopbar } from "./ChatTopbar";
 import { MessageAttachmentList } from "./MessageAttachmentList";
 import { MessageActionBar } from "./MessageActionBar";
 import { MessageActivity } from "./MessageActivity";
@@ -178,8 +174,6 @@ import type {
   ComputerSession,
   ComputerSurfaceKind,
   ApprovelItem,
-  RuntimeHealth,
-  TaskItem,
   UncertainEffectItem,
 } from "../types";
 
@@ -215,8 +209,6 @@ interface ChatViewProps {
   effectResolutionError: string | null;
   computerSessionId: string;
   messages: ChatMessage[];
-  health: RuntimeHealth[];
-  task: TaskItem;
   thread: ChatThread;
   onMessagesChange: (
     messages: ChatMessage[],
@@ -303,8 +295,6 @@ export function ChatView({
   effectResolutionError,
   computerSessionId,
   messages,
-  health,
-  task,
   thread,
   onMessagesChange,
   islandRefreshNonce,
@@ -384,7 +374,6 @@ export function ChatView({
   const [branches, setBranches] = useState<CoreBranchPoint[]>([]);
   const [branchBusy, setBranchBusy] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
-  const [activeModelInfo, setActiveModelInfo] = useState<ActiveModelInfo | null>(null);
   const [timelineCollapsed, setTimelineCollapsed] = useState(true);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[] | null>(null);
   const [streamHasVisibleText, setStreamHasVisibleText] = useState(false);
@@ -516,10 +505,6 @@ export function ChatView({
     });
     return unsub;
   }, []);
-  const activeHealth = useMemo(
-    () => health.filter((item) => item.status !== "attention").slice(0, 2),
-    [health],
-  );
   // The backend seeds a placeholder "ready" greeting on every new thread (id ends
   // "_ready"). The designed new-chat experience is the centered hero, so hide that
   // greeting: a thread whose only message is the greeting then renders as empty →
@@ -2718,31 +2703,10 @@ export function ChatView({
     streamingAssistantId,
   ]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void coreBridge
-      .runtimeModel()
-      .then((info) => {
-        if (!cancelled) setActiveModelInfo(info);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Header status (read-only): the REAL active model; the per-chat picker lives in
-  // the composer. Channel threads run the read-only tool policy; in-app chats get
-  // the full local toolset.
-  const headerModelLabel = activeModelInfo ? shortModelName(activeModelInfo.model) : "Model";
-  const headerModelMeta = activeModelInfo
-    ? `${activeModelInfo.locality} · ${formatContextTokens(activeModelInfo.context_window)}`
-    : t("chat.active");
   const lastAssistantEffectiveModel = useMemo(() => {
     const model = latestAssistantEffectiveModel(threadMessages);
     return model ? shortModelName(model) : t("composer.runtime.unavailable");
   }, [t, threadMessages]);
-  const headerToolPolicy = thread.source ? t("chat.readOnlyChannel") : t("chat.fullLocalTools");
 
   const islandArtifacts = islandSources.filter((source) => source.action === "artifact");
   const islandFileSources = islandSources.filter((source) => source.action === "files");
@@ -2779,41 +2743,14 @@ export function ChatView({
       }`}
       aria-labelledby="chat-title"
     >
-      <header className="task-topbar">
-        <div className="task-title-area">
-          {sidebarCollapsed && (
-            <span className="task-collapsed-controls">
-              <button
-                type="button"
-                className="task-collapsed-action"
-                aria-label={t("sidebar.expandSidebar")}
-                title={t("sidebar.expandSidebar")}
-                onClick={() => onExpandSidebar?.()}
-              >
-                <PanelLeftOpen size={17} />
-              </button>
-              <button
-                type="button"
-                className="task-collapsed-action"
-                aria-label={t("sidebar.search")}
-                title={t("sidebar.search")}
-                onClick={() => onOpenSearch?.()}
-              >
-                <Search size={17} />
-              </button>
-            </span>
-          )}
-          <div className="task-title-button" style={{ cursor: "default" }}>
-            <span id="chat-title">{thread.title}</span>
-          </div>
-        </div>
-        <span className="task-header-actions">
-          <ChatHeaderMenu
-            onOpenInspector={openUtilityTab}
-            onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
-          />
-        </span>
-      </header>
+      <ChatTopbar
+        title={thread.title}
+        sidebarCollapsed={sidebarCollapsed}
+        onExpandSidebar={onExpandSidebar}
+        onOpenSearch={onOpenSearch}
+        onOpenInspector={openUtilityTab}
+        onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
+      />
 
       <AdaptiveWorkspaceIsland
         threadId={thread.threadId}

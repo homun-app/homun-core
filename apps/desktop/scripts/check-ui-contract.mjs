@@ -914,8 +914,8 @@ assertContains("src/components/Shell.tsx", "window-chrome", "desktop shell must 
 assertNotContains("src/components/Shell.tsx", "window-light close", "custom chrome must not render fake traffic lights");
 assertNotContains("src/components/Shell.tsx", "window-sidebar-toggle", "sidebar toggle must not live inside the native window-control row");
 assertNotContains("src/components/Shell.tsx", "drawer-edge-hotspot", "collapsed sidebar must not open from a left-edge hover hotspot");
-assertContains("src/components/ChatView.tsx", "task-collapsed-controls", "collapsed sidebar's reopen + search must live in the chat header (no-drag), not a fixed overlay");
-assertContains("src/components/ChatView.tsx", "onExpandSidebar", "collapsed sidebar's in-header opener must reopen the drawer");
+assertContains("src/components/ChatTopbar.tsx", "task-collapsed-controls", "collapsed sidebar's reopen + search must live in the chat header (no-drag), not a fixed overlay");
+assertContains("src/components/ChatTopbar.tsx", "onExpandSidebar", "collapsed sidebar's in-header opener must reopen the drawer");
 assertNotContains("src/components/Shell.tsx", "transientDrawerOpen", "collapsed sidebar must not maintain hover-open transient drawer state");
 assertContains("src/styles/sidebar.css", "--drawer-island-gap", "sidebar must be laid out as a floating island with stable margins");
 assertContains("src/styles.css", ".window-chrome", "custom window chrome must own the top drag/header strip");
@@ -1021,7 +1021,7 @@ assertContains("src/lib/coreBridge.ts", "await cancelTurn(`turn_${requestId}`)",
 assertContains("src/plugins/registry.tsx", "navSection?: \"work\" | \"create\" | \"workspace\" | \"more\"", "plugin manifest must declare sidebar placement by operational role");
 assertContains("src/plugins/presentations/index.tsx", "navSection: \"create\"", "presentations addon must be promoted into the create section");
 assertContains("src/plugins/proattivita/index.tsx", "navSection: \"work\"", "proactivity addon must be promoted into the work section");
-assertContains("src/components/ChatView.tsx", "{sidebarCollapsed && (", "chat header must render the reopen/search controls when the sidebar is collapsed");
+assertContains("src/components/ChatTopbar.tsx", "{sidebarCollapsed && (", "chat header must render the reopen/search controls when the sidebar is collapsed");
 assertContains("src/components/Shell.tsx", "{drawerOpen && !isSettings && (", "main drawer must render when open");
 assertContains("src/components/Sidebar.tsx", "drawer-profile", "open drawer footer must show the user profile + settings");
 assertContains("src/components/ComposerShell.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
@@ -1263,7 +1263,7 @@ assertNotContains("src/styles.css", ".workspace-island-panel", "legacy island pa
 // Task 5: the rows dropped from the island (artifacts/files/activity) resurface behind
 // a header kebab menu that reopens the docked Workbench on the right tab.
 assertContains(
-  "src/components/ChatView.tsx",
+  "src/components/ChatTopbar.tsx",
   "<ChatHeaderMenu",
   "chat header must expose a kebab menu for artifacts/files/screenshots/background activity"
 );

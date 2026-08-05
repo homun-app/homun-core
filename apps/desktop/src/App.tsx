@@ -1659,8 +1659,6 @@ function AuthenticatedApp() {
               }
               computerSessionId={activeThread.computerSessionId}
               messages={activeMessages}
-              health={runtimeItems}
-              task={selectedTask}
               thread={activeThread}
               onMessagesChange={(messages) =>
                 handleMessagesChange(activeThread.threadId, messages)
