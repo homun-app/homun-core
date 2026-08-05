@@ -163,6 +163,13 @@ const chatReadModelController = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const pluginHostController = await readFile(
+  new URL("../src/lib/usePluginHostController.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const threadAttentionNotifications = await readFile(
   new URL("../src/lib/useThreadAttentionNotifications.ts", import.meta.url),
   "utf8",
@@ -765,9 +772,13 @@ test("App delegates optimistic chat message preservation to chatMessagePreservat
 });
 
 test("App delegates plugin navigation projection to appPluginNavigation", () => {
-  assert.match(app, /from "\.\/lib\/appPluginNavigation";/);
+  assert.match(app, /from "\.\/lib\/usePluginHostController";/);
+  assert.doesNotMatch(app, /from "\.\/lib\/appPluginNavigation";/);
   assert.doesNotMatch(app, /pluginRegistry\.filter\(/);
   assert.doesNotMatch(app, /\.\.\.enabledPlugins\.map\(/);
+  assert.match(pluginHostController, /from "\.\/appPluginNavigation";/);
+  assert.match(pluginHostController, /pluginRegistry/);
+  assert.match(pluginHostController, /const pluginHost: PluginHost/);
   assert.match(appPluginNavigation, /export function enabledRegistryPlugins/);
   assert.match(appPluginNavigation, /export function composePluginNavItems/);
 });

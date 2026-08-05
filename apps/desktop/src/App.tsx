@@ -5,17 +5,9 @@ import { Shell } from "./components/Shell";
 import { ChatSearchModal } from "./components/Sidebar";
 import { LoginGate } from "./components/LoginGate";
 import { AppWorkspace } from "./components/AppWorkspace";
-import {
-  chatMessages,
-  navItems as staticNavItems,
-} from "./data/mockData";
-import { pluginRegistry, type PluginHost } from "./plugins/registry";
+import { chatMessages } from "./data/mockData";
 import { useSetting } from "./lib/settingsStore";
 import { currentTimestampSeconds } from "./lib/appCoreMappers";
-import {
-  composePluginNavItems,
-  enabledRegistryPlugins,
-} from "./lib/appPluginNavigation";
 import { projectBusyThreadIds } from "./lib/busyThreadProjection";
 import { useAutomationController } from "./lib/useAutomationController";
 import { useCapabilityController } from "./lib/useCapabilityController";
@@ -39,10 +31,10 @@ import {
 } from "./lib/useChatThreadCreation";
 import { useThreadAttentionNotifications } from "./lib/useThreadAttentionNotifications";
 import { useChatReadModelController } from "./lib/useChatReadModelController";
+import { usePluginHostController } from "./lib/usePluginHostController";
 import type {
   ChatMessage,
   ChatThread,
-  NavItem,
 } from "./types";
 
 const defaultChatThread: ChatThread = {
@@ -242,17 +234,11 @@ function AuthenticatedApp() {
     setPendingTemplateAutoSubmit,
   });
 
-  // A registry plugin is shown unless the backend says it's disabled (default-on).
-  const enabledPlugins = enabledRegistryPlugins(pluginRegistry, pluginStates);
-  const composedNavItems: NavItem[] = composePluginNavItems(
-    staticNavItems,
-    enabledPlugins,
-  );
-  // The host capability surface handed to each plugin panel (ADR 0011 §6).
-  const pluginHost: PluginHost = {
+  const { enabledPlugins, composedNavItems, pluginHost } = usePluginHostController({
+    pluginStates,
     openChat: handleOpenSuggestion,
     startTemplateWorkflow: handleStartTemplateWorkflow,
-  };
+  });
   const {
     handleSetChatThreadPinned,
     handleRenameChatThread,

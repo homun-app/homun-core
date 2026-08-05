@@ -1130,6 +1130,7 @@ assertContains("src/App.tsx", "useCapabilityController", "App must delegate capa
 assertNotContains("src/App.tsx", "coreBridge.capabilities", "App must not own capability fetching directly");
 assertContains("src/App.tsx", "useOnboardingSetupGate", "App must delegate onboarding setup checks to the setup gate hook");
 assertContains("src/App.tsx", "usePluginController", "App must delegate plugin state loading to the plugin controller");
+assertContains("src/App.tsx", "usePluginHostController", "App must delegate plugin host composition to the plugin host controller");
 assertContains("src/App.tsx", "useResponsiveDrawer", "App must delegate responsive drawer state to the drawer hook");
 assertContains("src/App.tsx", "useTaskQueueController", "App must delegate task queue state and approvals to the task queue controller");
 assertContains("src/App.tsx", "useBackgroundStreams", "App must delegate active stream polling to the background streams hook");
@@ -1144,6 +1145,8 @@ assertContains("src/App.tsx", "useChatThreadCreation", "App must delegate chat c
 assertContains("src/App.tsx", "useChatReadModelController", "App must delegate chat read-model lifecycle to the read-model controller");
 assertNotContains("src/App.tsx", "coreBridge.setupStatus", "App must not own setup status fetching directly");
 assertNotContains("src/App.tsx", "coreBridge.plugins()", "App must not own plugin state fetching directly");
+assertNotContains("src/App.tsx", "pluginRegistry", "App must not own plugin registry composition directly");
+assertNotContains("src/App.tsx", "composePluginNavItems", "App must not own plugin nav composition directly");
 assertNotContains("src/App.tsx", "coreBridge.activeStreams", "App must not own active stream polling directly");
 assertNotContains("src/App.tsx", "coreBridge.markThreadSeen", "App must not own thread seen mutations directly");
 assertNotContains("src/App.tsx", "hydrateThreadAttentionState", "App must not own thread attention hydration directly");
