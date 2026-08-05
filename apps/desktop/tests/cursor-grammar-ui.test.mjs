@@ -721,6 +721,14 @@ test("ChatView delegates proposed plan rendering to MessagePlanProposeCard", () 
   assert.match(messagePlanProposeCard, /plan-card-gate/);
 });
 
+test("ChatView does not retain the retired inline operational plan progress card", () => {
+  assert.doesNotMatch(chatView, /from "\.\/MessagePlanProgressCard";/);
+  assert.doesNotMatch(chatView, /<PlanProgressCard/);
+  assert.doesNotMatch(chatView, /function PlanProgressCard\(/);
+  assert.match(chatView, /interface PlanStep/);
+  assert.match(chatView, /parsePlanSteps\(markdown: string\): PlanStep\[\]/);
+});
+
 test("composer.css exclusively owns the compact prompt geometry", () => {
   assert.match(
     main,

@@ -3824,8 +3824,8 @@ const CHAT_MODES: {
   { key: "debug", label: "Debug", desc: "Systematic debugging (code projects)", icon: Bug, projectOnly: true },
 ];
 
-/** One step of the live operational plan (update_plan), rendered inline with status. */
-export interface PlanStep {
+/** One step of the live operational plan (update_plan), used by workspace plan projections. */
+interface PlanStep {
   status: "todo" | "doing" | "done" | "blocked";
   title: string;
   detail: string;
@@ -6866,47 +6866,6 @@ function GoalProposeCard({ objectives, threadId }: { objectives: string[]; threa
           </div>
         ))}
       </div>
-    </div>
-  );
-}
-
-/** Live operational plan rendered inline (Claude-Code todo style): a checklist with a
- *  status icon per step, updated as the agent calls update_plan (doing→done). */
-function PlanProgressCard({ steps }: { steps: PlanStep[] }) {
-  const { t } = useTranslation();
-  const doneCount = steps.filter((s) => s.status === "done").length;
-  return (
-    <div className="plan-progress">
-      <div className="plan-progress-head">
-        <ListTodo size={14} />
-        <strong>{t("chat.plan")}</strong>
-        <span className="plan-progress-count">
-          {doneCount}/{steps.length}
-        </span>
-      </div>
-      <ul className="plan-progress-steps">
-        {steps.map((step, i) => (
-          <li key={i} className={`plan-progress-step ${step.status}`}>
-            <span className="plan-progress-icon">
-              {step.status === "done" ? (
-                <Check size={14} />
-              ) : step.status === "doing" ? (
-                <Loader2 size={14} className="composer-spin" />
-              ) : step.status === "blocked" ? (
-                <AlertTriangle size={14} />
-              ) : (
-                <span className="plan-progress-dot" />
-              )}
-            </span>
-            <span className="plan-progress-text">
-              <span className="plan-progress-title">{step.title}</span>
-              {step.detail && step.detail !== "—" && (
-                <span className="plan-progress-detail">{step.detail}</span>
-              )}
-            </span>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }
