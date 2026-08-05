@@ -78,6 +78,13 @@ const runtimeContextPanel = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const runtimeContextHook = await readFile(
+  new URL("../src/lib/useRuntimeContext.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const adaptiveWorkspaceIsland = await readFile(
   new URL("../src/components/AdaptiveWorkspaceIsland.tsx", import.meta.url),
   "utf8",
@@ -275,8 +282,13 @@ test("runtime context refresh follows the durable terminal cursor", () => {
     /runtimeContextRevision=\{\s*threadAttention\.terminalEventIds\[activeThread\.threadId\]\s*\?\?\s*0\s*\}/,
   );
   assert.match(chatView, /runtimeContextRevision:\s*number/);
-  assert.match(chatView, /const refreshRuntimeContext = useCallback/);
-  assert.match(chatView, /\[refreshRuntimeContext,\s*runtimeContextRevision\]/);
+  assert.match(chatView, /useRuntimeContext\(\{\s*threadId:\s*thread\.threadId,\s*runtimeContextRevision/);
+  assert.match(runtimeContextHook, /export function useRuntimeContext/);
+  assert.match(runtimeContextHook, /const refreshRuntimeContext = useCallback/);
+  assert.match(runtimeContextHook, /\[refreshRuntimeContext,\s*runtimeContextRevision\]/);
+  assert.match(runtimeContextHook, /runtimeContextRequestRef/);
+  assert.doesNotMatch(chatView, /runtimeContextRequestRef/);
+  assert.doesNotMatch(chatView, /setRuntimeContextLoading/);
   assert.doesNotMatch(chatView, /runtimeContextRefreshKey/);
 });
 

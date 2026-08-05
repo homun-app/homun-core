@@ -69,6 +69,7 @@ import { useTranslation } from "react-i18next";
 import { ChatUsageOverview } from "./ChatUsageOverview";
 import { greetingPeriod, selectGreetingKey } from "../lib/chatGreeting";
 import { useSetting } from "../lib/settingsStore";
+import { useRuntimeContext } from "../lib/useRuntimeContext";
 import ForceGraph2D from "react-force-graph-2d";
 import type {
   ChangeEvent,
@@ -534,10 +535,15 @@ export function ChatView({
   const [projectedSubagents, setProjectedSubagents] = useState<SubagentInfo[]>([]);
   const [projectedActiveTurn, setProjectedActiveTurn] =
     useState<ActiveTurnProjection | null>(null);
-  const [runtimeContext, setRuntimeContext] = useState<RuntimeContextResponse | null>(null);
-  const [runtimeContextLoading, setRuntimeContextLoading] = useState(true);
-  const [runtimeContextError, setRuntimeContextError] = useState(false);
-  const runtimeContextRequestRef = useRef(0);
+  const {
+    runtimeContext,
+    runtimeContextLoading,
+    runtimeContextError,
+    refreshRuntimeContext,
+  } = useRuntimeContext({
+    threadId: thread.threadId,
+    runtimeContextRevision,
+  });
   const [activeTurnElapsedSeconds, setActiveTurnElapsedSeconds] = useState(0);
   const [pendingSteering, setPendingSteering] = useState<SteeringQueueState>(() =>
     createSteeringQueueState(),
@@ -959,29 +965,6 @@ export function ChatView({
     // the previous turn's activity. (The message COUNT is stable: the assistant placeholder is
     // updated in place, so it can't be the trigger.)
   }, [thread.threadId, isStreaming, islandRefreshNonce]);
-  const refreshRuntimeContext = useCallback(() => {
-    const requestId = runtimeContextRequestRef.current + 1;
-    runtimeContextRequestRef.current = requestId;
-    setRuntimeContext(null);
-    setRuntimeContextLoading(true);
-    setRuntimeContextError(false);
-    return coreBridge.runtimeContext(thread.threadId)
-      .then((context) => {
-        if (runtimeContextRequestRef.current === requestId) setRuntimeContext(context);
-      })
-      .catch(() => {
-        if (runtimeContextRequestRef.current === requestId) {
-          setRuntimeContext(null);
-          setRuntimeContextError(true);
-        }
-      })
-      .finally(() => {
-        if (runtimeContextRequestRef.current === requestId) setRuntimeContextLoading(false);
-      });
-  }, [thread.threadId]);
-  useEffect(() => {
-    void refreshRuntimeContext();
-  }, [refreshRuntimeContext, runtimeContextRevision]);
   // Files the user uploaded in THIS conversation (e.g. the patente PDF), derived
   // from message attachments — the chat-context "File" tab of the Workbench.
   const uploadedFiles = useMemo(() => {
