@@ -60,6 +60,7 @@ import {
   effectiveModelFromGateway,
   latestAssistantEffectiveModel,
 } from "../lib/composerTurnContract";
+import { buildChatMarkdown } from "../lib/chatExportMarkdown";
 import {
   chatMessageFromAssistantResult,
   createReplyPreview,
@@ -1820,28 +1821,8 @@ export function ChatView({
     window.setTimeout(() => setCopiedMessageId(null), 1_400);
   }
 
-  // Export the whole conversation as Markdown to the clipboard — so the user can
-  // paste the full thread (e.g. to report a usability issue). Control markers
-  // (activity/plan/confirmation) are stripped; generated files become "[file: …]".
   async function exportChatMarkdown() {
-    const strip = (raw: string) =>
-      raw
-        .replace(/‹‹ARTIFACT››([\s\S]*?)‹‹\/ARTIFACT››/g, (_m, j) => {
-          try {
-            return `\n_[file: ${JSON.parse(j).name}]_`;
-          } catch {
-            return "\n_[file]_";
-          }
-        })
-        .replace(/‹‹(ACT|PLAN|COMPOSIO_[A-Z]+)››[\s\S]*?‹‹\/\1››/g, "")
-        .replace(/‹‹[A-Z_]+››|‹‹\/[A-Z_]+››/g, "")
-        .trim();
-    const lines: string[] = [`# ${thread.title || "Chat"}`, ""];
-    for (const m of threadMessages) {
-      const who = m.role === "user" ? "Utente" : m.role === "assistant" ? "Homun" : m.role;
-      lines.push(`## ${who}`, "", strip(m.text ?? "") || "_(vuoto)_", "");
-    }
-    await copyText(lines.join("\n"));
+    await copyText(buildChatMarkdown(thread.title, threadMessages));
   }
 
   // Capture the whole app window to a PNG and reveal it in Finder — the user can then
