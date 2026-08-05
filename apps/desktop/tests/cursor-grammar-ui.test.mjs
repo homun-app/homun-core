@@ -120,6 +120,13 @@ const assistantThinkingState = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageArtifacts = await readFile(
+  new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const runtimeContextPanel = await readFile(
   new URL("../src/components/RuntimeContextPanel.tsx", import.meta.url),
   "utf8",
@@ -642,6 +649,23 @@ test("ChatView delegates assistant thinking rendering to AssistantThinkingState"
   assert.match(assistantThinkingState, /export function AssistantThinkingState/);
   assert.match(assistantThinkingState, /assistant-thinking-state/);
   assert.match(assistantThinkingState, /thinking-elapsed/);
+});
+
+test("ChatView delegates generated artifact rendering to MessageArtifacts", () => {
+  assert.match(chatView, /from "\.\/MessageArtifacts";/);
+  assert.match(chatView, /<MessageArtifacts text=\{text\} onOpen=\{onOpenArtifact\}/);
+  assert.match(chatView, /<ArtifactPreviewBody[\s\S]*?preview=\{preview\}/);
+  assert.doesNotMatch(chatView, /function MessageArtifacts\(/);
+  assert.doesNotMatch(chatView, /function ArtifactCardRow\(/);
+  assert.doesNotMatch(chatView, /function InlineArtifactPreview\(/);
+  assert.doesNotMatch(chatView, /function parseArtifacts\(/);
+  assert.match(messageArtifacts, /export function MessageArtifacts/);
+  assert.match(messageArtifacts, /export function ArtifactsList/);
+  assert.match(messageArtifacts, /export function ArtifactPreviewBody/);
+  assert.match(messageArtifacts, /export function parseArtifacts/);
+  assert.match(messageArtifacts, /export async function buildArtifactPreview/);
+  assert.match(messageArtifacts, /export async function triggerArtifactDownload/);
+  assert.match(messageArtifacts, /msg-artifacts/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
