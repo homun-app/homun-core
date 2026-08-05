@@ -1355,9 +1355,9 @@ assertContains("src/components/ComposerShell.tsx", "reply-context-card", "compos
 assertContains("src/components/MessageActionBar.tsx", "message-action-menu", "secondary message actions must stay behind a compact menu");
 assertContains("src/components/MessageActionBar.tsx", "runMessageMenuAction", "message overflow actions must close the menu before running");
 assertContains("src/components/MessageActionBar.tsx", "message-latency-summary", "message metrics must be visible without dominating the answer");
-assertContains("src/components/ChatView.tsx", "normalizeGoalText", "goals manager must normalize goal text before comparing suggestions");
-assertContains("src/components/ChatView.tsx", "dedupeGoalDrafts", "goals manager must dedupe suggested goals against existing project goals");
-assertContains("src/components/ChatView.tsx", "decideMemory(g.reference, \"delete\")", "goals manager must allow deleting saved project goals");
+assertContains("src/components/GoalsPanel.tsx", "normalizeGoalText", "goals manager must normalize goal text before comparing suggestions");
+assertContains("src/components/GoalsPanel.tsx", "dedupeGoalDrafts", "goals manager must dedupe suggested goals against existing project goals");
+assertContains("src/components/GoalsPanel.tsx", "decideMemory(g.reference, \"delete\")", "goals manager must allow deleting saved project goals");
 assertContains("src/components/ChatView.tsx", "resizeFitTimer", "memory graph must refit after the workbench/canvas changes size");
 assertContains("src/components/ChatView.tsx", "layoutSignal", "memory graph must receive an explicit workbench layout signal");
 assertContains("src/components/ChatView.tsx", "layoutSignal={`${inspector.activeTabId}:${inspectorRatio}`}", "inspector must refit Memory when the active tab or width changes");

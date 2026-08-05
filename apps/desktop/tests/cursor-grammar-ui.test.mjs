@@ -239,6 +239,13 @@ const artifactsPanel = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const goalsPanel = await readFile(
+  new URL("../src/components/GoalsPanel.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -796,6 +803,19 @@ test("ChatView delegates the artifacts workbench panel to ArtifactsPanel", () =>
   assert.match(artifactsPanel, /coreBridge\.artifactVersions/);
   assert.match(artifactsPanel, /diffStats/);
   assert.match(artifactsPanel, /triggerArtifactDownload/);
+});
+
+test("ChatView delegates the goals workbench panel to GoalsPanel", () => {
+  assert.match(chatView, /from "\.\/GoalsPanel";/);
+  assert.match(chatView, /<GoalsPanel[\s\S]*data=\{goalsData\}/);
+  assert.doesNotMatch(chatView, /function GoalsPanel\(/);
+  assert.doesNotMatch(chatView, /function normalizeGoalText\(/);
+  assert.doesNotMatch(chatView, /function dedupeGoalDrafts\(/);
+  assert.match(goalsPanel, /export function GoalsPanel/);
+  assert.match(goalsPanel, /function normalizeGoalText/);
+  assert.match(goalsPanel, /function dedupeGoalDrafts/);
+  assert.match(goalsPanel, /coreBridge\.addGoal/);
+  assert.match(goalsPanel, /coreBridge\.promoteGoals/);
 });
 
 test("ChatView delegates operational plan preview rendering and parsing", () => {
