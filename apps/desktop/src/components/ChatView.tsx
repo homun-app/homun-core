@@ -216,6 +216,7 @@ import {
 import { ChoicesCard, type ChoicePrompt } from "./MessageChoiceCard";
 import { PlanProposeCard, type PlanProposal } from "./MessagePlanProposeCard";
 import { DiffCard } from "./MessageDiffCard";
+import { GoalProposeCard } from "./MessageGoalProposeCard";
 import {
   projectWorkspaceSections,
   type WorkspaceSectionId,
@@ -6794,66 +6795,6 @@ function formatPaymentAmount(amountMinor: number, currency: string): string {
   } catch {
     return `${(amountMinor / 100).toFixed(2)} ${currency}`;
   }
-}
-
-/** Plan-mode card: the model proposed a plan and stopped. Accetta sends the approval
- *  (the agent executes next turn); Edit reveals a box to request changes. The
- *  answer becomes the next user message. */
-/** Inline affordance: the model proposed the project's objective(s) — save them with one
- * click (content-contextual via a model-emitted marker, not keyword parsing). Resolves the
- * project workspace from the thread, then saves each chosen objective as a `goal`. */
-function GoalProposeCard({ objectives, threadId }: { objectives: string[]; threadId: string }) {
-  const { t } = useTranslation();
-  const [workspace, setWorkspace] = useState<string | null>(null);
-  const [saved, setSaved] = useState<Set<number>>(new Set());
-  const [busy, setBusy] = useState<number | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    void coreBridge.projectGoals(threadId).then((d) => {
-      if (!cancelled) setWorkspace(d?.workspace ?? null);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [threadId]);
-  const save = (i: number, text: string) => {
-    if (!workspace || saved.has(i)) return;
-    setBusy(i);
-    void coreBridge
-      .addGoal(workspace, text)
-      .then((ok) => {
-        if (ok) setSaved((prev) => new Set(prev).add(i));
-      })
-      .finally(() => setBusy(null));
-  };
-  return (
-    <div className="goal-propose-card">
-      <div className="goal-propose-head">
-        <Target size={14} />
-        <span>{t("chat.proposedGoalsHint")}</span>
-      </div>
-      <div className="goal-propose-list">
-        {objectives.map((o, i) => (
-          <div key={i} className="goal-propose-item">
-            <span>{o}</span>
-            <button
-              className="goals-btn goals-btn-sm"
-              disabled={busy !== null || saved.has(i) || !workspace}
-              onClick={() => save(i, o)}
-            >
-              {saved.has(i) ? (
-                <>
-                  <Check size={13} /> Saveto
-                </>
-              ) : (
-                "Save"
-              )}
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 /** In-chat connect-cards: turns `suggest_capabilities` results into clickable

@@ -148,6 +148,13 @@ const messageDiffCard = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageGoalProposeCard = await readFile(
+  new URL("../src/components/MessageGoalProposeCard.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -743,6 +750,16 @@ test("ChatView delegates diff message rendering to MessageDiffCard", () => {
   assert.match(messageDiffCard, /export function DiffCard/);
   assert.match(messageDiffCard, /DiffEventPayload/);
   assert.match(messageDiffCard, /diff-card/);
+});
+
+test("ChatView delegates proposed goal rendering to MessageGoalProposeCard", () => {
+  assert.match(chatView, /from "\.\/MessageGoalProposeCard";/);
+  assert.match(chatView, /<GoalProposeCard objectives=\{goalPropose\} threadId=\{threadId\}/);
+  assert.doesNotMatch(chatView, /function GoalProposeCard\(/);
+  assert.match(messageGoalProposeCard, /export function GoalProposeCard/);
+  assert.match(messageGoalProposeCard, /coreBridge\.projectGoals/);
+  assert.match(messageGoalProposeCard, /\.addGoal/);
+  assert.match(messageGoalProposeCard, /goal-propose-card/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
