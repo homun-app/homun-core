@@ -121,6 +121,13 @@ const selectedTaskProjection = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const taskQueueProjection = await readFile(
+  new URL("../src/lib/taskQueueProjection.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -651,6 +658,12 @@ test("App delegates selected task fallback to selectedTaskProjection", () => {
   assert.match(app, /from "\.\/lib\/selectedTaskProjection";/);
   assert.doesNotMatch(app, /kind: "prompt_session",\n        status: "queued"/);
   assert.match(selectedTaskProjection, /export function projectSelectedTask/);
+});
+
+test("App delegates task queue snapshot projection to taskQueueProjection", () => {
+  assert.match(app, /from "\.\/lib\/taskQueueProjection";/);
+  assert.doesNotMatch(app, /const nextTasks = \[/);
+  assert.match(taskQueueProjection, /export function projectTaskQueueSnapshot/);
 });
 
 test("the sidebar uses the canonical persisted thread filter projection", () => {

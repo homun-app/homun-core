@@ -79,6 +79,10 @@ import {
   enabledRegistryPlugins,
 } from "./lib/appPluginNavigation";
 import { projectSelectedTask } from "./lib/selectedTaskProjection";
+import {
+  projectEffectResolutionError,
+  projectTaskQueueSnapshot,
+} from "./lib/taskQueueProjection";
 import { projectBusyThreadIds } from "./lib/busyThreadProjection";
 import { buildProactivityChatSeed } from "./lib/proactivityChatSeed";
 import type {
@@ -824,26 +828,18 @@ function AuthenticatedApp() {
   }
 
   function applyTaskQueueSnapshot(snapshot: CoreTaskQueueSnapshot) {
-    const nextTasks = [
-      ...snapshot.active,
-      ...snapshot.queued,
-      ...snapshot.blocked,
-      ...snapshot.recent_failures,
-    ].map(mapCoreTask);
-    setTaskItems(nextTasks.length ? nextTasks : tasks);
-    setApprovelItems(
-      snapshot.waiting_approvals.length
-        ? snapshot.waiting_approvals.map(mapCoreApprovel)
-        : [],
-    );
-    const nextUncertainEffects = (snapshot.uncertain_effects ?? []).map(
-      mapCoreUncertainEffect,
-    );
-    setUncertainEffectItems(nextUncertainEffects);
+    const projection = projectTaskQueueSnapshot({
+      snapshot,
+      fallbackTasks: tasks,
+      mapTask: mapCoreTask,
+      mapApproval: mapCoreApprovel,
+      mapUncertainEffect: mapCoreUncertainEffect,
+    });
+    setTaskItems(projection.taskItems);
+    setApprovelItems(projection.approvelItems);
+    setUncertainEffectItems(projection.uncertainEffectItems);
     setEffectResolutionError((current) =>
-      current && nextUncertainEffects.some((effect) => effect.id === current.receiptId)
-        ? current
-        : null,
+      projectEffectResolutionError(current, projection.uncertainEffectItems),
     );
   }
 
