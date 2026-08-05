@@ -9,7 +9,6 @@ import {
   approvals,
   chatMessages,
   connections,
-  memorySummary,
   navItems as staticNavItems,
   tasks,
 } from "./data/mockData";
@@ -50,7 +49,6 @@ import {
   mapCoreCapabilitySnapshot,
   mapCoreChatMessage,
   mapCoreChatThread,
-  mapCoreMemoryDashboard,
   mapCoreTask,
   mapCoreThreadAttention,
   mapCoreUncertainEffect,
@@ -82,7 +80,6 @@ import type {
   ChatMessage,
   ChatThread,
   ConnectionItem,
-  MemorySummary,
   NavItem,
   SettingsSectionId,
   TaskItem,
@@ -138,8 +135,6 @@ function AuthenticatedApp() {
     UncertainEffectItem[]
   >([]);
   const [automationItems, setAutomationItems] = useState<ManagedAutomation[]>([]);
-  const [memoryDashboard, setMemoryDashboard] =
-    useState<MemorySummary>(memorySummary);
   const [connectionItems, setConnectionItems] =
     useState<ConnectionItem[]>(connections);
   const [approvalBusyId, setApprovelBusyId] = useState<string | null>(null);
@@ -842,14 +837,7 @@ function AuthenticatedApp() {
     }
   }
 
-  async function loadMemoryAndCapabilities() {
-    try {
-      setMemoryDashboard(
-        mapCoreMemoryDashboard(await coreBridge.memoryDashboard()),
-      );
-    } catch (error) {
-      console.warn("memory_dashboard unavailable", error);
-    }
+  async function loadCapabilities() {
     try {
       const nextConnections = mapCoreCapabilitySnapshot(
         await coreBridge.capabilities(),
@@ -951,7 +939,7 @@ function AuthenticatedApp() {
   useEffect(() => {
     const pollActiveStreams = () =>
       void coreBridge.activeStreams().then((ids) => setBackgroundStreamIds(new Set(ids)));
-    void loadMemoryAndCapabilities();
+    void loadCapabilities();
     void loadTaskQueue();
     void loadAutomations();
     pollActiveStreams();

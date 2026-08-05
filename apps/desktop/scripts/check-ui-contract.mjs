@@ -1218,7 +1218,7 @@ assertContains("src/lib/coreBridge.ts", "/policy`", "coreBridge must POST per-wo
 assertContains("src/components/SettingsView.tsx", "coreBridge.vaultPinSetup", "Vault Settings must configure the local PIN through the bridge");
 assertContains("src/components/MessageVaultProposeCard.tsx", "coreBridge.vaultProposalAccept", "Vault proposal card must expose an accept action");
 assertContains("src/components/MessageVaultProposeCard.tsx", "Save to Vault", "Vault proposal card must offer an explicit save action");
-assertContains("src/App.tsx", "mapCoreMemoryDashboard", "desktop memory page must map the gateway memory dashboard read model");
+assertContains("src/components/MemoryView.tsx", "coreBridge.memoryDashboard", "desktop memory page must own the gateway memory dashboard read model");
 assertContains("src/App.tsx", "mapCoreCapabilitySnapshot", "desktop connections page must map the gateway capability read model");
 assertContains("src/lib/chatApi.ts", "/api/chat/threads", "chat threads must load from the local Rust gateway first");
 assertContains("src/lib/chatApi.ts", "hydrateThreadSnapshot", "chat API must keep a local cache synchronized with gateway thread snapshots");

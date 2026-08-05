@@ -682,6 +682,14 @@ test("App does not retain retired selected task projection state", () => {
   assert.doesNotMatch(app, /selectedTask/);
 });
 
+test("App does not retain retired memory dashboard state", () => {
+  assert.doesNotMatch(app, /memorySummary/);
+  assert.doesNotMatch(app, /memoryDashboard/);
+  assert.doesNotMatch(app, /setMemoryDashboard/);
+  assert.doesNotMatch(app, /mapCoreMemoryDashboard/);
+  assert.doesNotMatch(app, /coreBridge\.memoryDashboard/);
+});
+
 test("App delegates task queue snapshot projection to taskQueueProjection", () => {
   assert.match(app, /from "\.\/lib\/taskQueueProjection";/);
   assert.doesNotMatch(app, /const nextTasks = \[/);
