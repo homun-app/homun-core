@@ -1191,7 +1191,7 @@ assertContains("src/lib/coreBridge.ts", "/api/vault/pin/status", "Vault PIN stat
 assertContains("src/lib/coreBridge.ts", "/api/vault/pin/setup", "Vault PIN setup must persist through the local gateway");
 assertContains("src/lib/coreBridge.ts", "/api/vault/pin/verify", "Vault PIN verification must run through the local gateway");
 assertContains("src/lib/coreBridge.ts", "/api/vault/payment-approvals/approve", "Payment approvals must verify through the local gateway");
-assertContains("src/components/ChatView.tsx", "PAYMENT_APPROVAL_RE", "Chat must parse Payment Approval Card markers");
+assertContains("src/components/ChatMessageMarkerParser.ts", "PAYMENT_APPROVAL_RE", "Chat must parse Payment Approval Card markers");
 assertContains("src/components/MessagePaymentApprovalCard.tsx", "coreBridge.vaultPaymentApprovalApprove", "Payment Approval Card must verify PIN/CVV through the bridge");
 assertContains("src/components/ChatView.tsx", "messageId={messageId}", "Payment Approval Card must receive the source message id for transcript rewrite");
 assertContains("src/lib/coreBridge.ts", "message_id: ctx.messageId", "Payment approvals must include source message id when available");
@@ -1411,13 +1411,13 @@ assertContains("src/styles.css", ".cc-dock.full {\n  position: fixed;", "Compute
 assertContains("src/styles.css", "left: calc(var(--drawer-island-gap) + var(--drawer-width, 268px) + 24px);", "Computer fullscreen dock must start to the right of the sidebar island");
 assertContains("src/styles.css", "width: min(1040px, calc(100vw - var(--drawer-width, 268px) - 72px));", "Computer fullscreen must be large but bounded by the chat area");
 assertContains("src/lib/chatVisibleContent.mjs", "STRAY_REASONING_MARKER", "streaming renderer must strip stray or malformed reasoning markers from the visible answer body");
-assertContains("src/components/ChatView.tsx", "VAULT_PROPOSE_RE", "chat renderer must parse vault proposal markers");
+assertContains("src/components/ChatMessageMarkerParser.ts", "VAULT_PROPOSE_RE", "chat renderer must parse vault proposal markers");
 assertContains("src/components/ChatView.tsx", "VaultProposeCard", "chat renderer must render sensitive-data vault proposal cards");
 // The strip regex (COMPOSIO_MARKERS_RE, which lists VAULT_PROPOSE|…) was refactored out of
-// ChatView into src/lib/markers.ts; ChatView imports and applies it (see COMPOSIO_MARKERS_RE below).
+// ChatView into src/lib/markers.ts; ChatMessageMarkerParser imports and applies it.
 assertContains("src/lib/markers.ts", "VAULT_PROPOSE|", "vault proposal markers must be stripped from visible prose");
-assertContains("src/components/ChatView.tsx", "COMPOSIO_MARKERS_RE", "chat renderer must apply the marker-strip regex to visible prose");
-assertContains("src/components/ChatView.tsx", "VAULT_REVEAL_RE", "chat renderer must parse vault reveal markers");
+assertContains("src/components/ChatMessageMarkerParser.ts", "COMPOSIO_MARKERS_RE", "chat renderer must apply the marker-strip regex to visible prose");
+assertContains("src/components/ChatMessageMarkerParser.ts", "VAULT_REVEAL_RE", "chat renderer must parse vault reveal markers");
 assertContains("src/components/ChatView.tsx", "VaultRevealCard", "chat renderer must render PIN-gated vault reveal cards");
 assertContains("src/lib/markers.ts", "VAULT_REVEAL|", "vault reveal markers must be stripped from visible prose");
 

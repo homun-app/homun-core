@@ -274,6 +274,13 @@ const chatPayloadParsers = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatMessageMarkerParser = await readFile(
+  new URL("../src/components/ChatMessageMarkerParser.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -1038,6 +1045,13 @@ test("ChatView delegates Composio and MCP confirmations to MessageComposioConfir
   assert.match(chatView, /from "\.\/MessageComposioConfirmCard";/);
   assert.match(chatView, /<ComposioConfirmCard action=\{action\}/);
   assert.doesNotMatch(chatView, /function ComposioConfirmCard\(/);
+  assert.doesNotMatch(chatView, /function parseComposioConfirm\(/);
+  assert.doesNotMatch(chatView, /COMPOSIO_CONFIRM_RE/);
+  assert.match(chatView, /from "\.\/ChatMessageMarkerParser";/);
+  assert.match(chatMessageMarkerParser, /export function parseComposioConfirm/);
+  assert.match(chatMessageMarkerParser, /COMPOSIO_CONFIRM_RE/);
+  assert.match(chatMessageMarkerParser, /MCP_CONFIRM_RE/);
+  assert.match(chatMessageMarkerParser, /SANDBOX_ESCALATE_RE/);
   assert.doesNotMatch(chatView, /const COMPOSIO_FIELD_LABELS:/);
   assert.doesNotMatch(chatView, /const OPAQUE_FIELD_KEYS =/);
   assert.doesNotMatch(chatView, /function humanizeFieldKey\(/);
