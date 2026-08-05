@@ -114,6 +114,13 @@ const proactivityChatSeed = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const selectedTaskProjection = await readFile(
+  new URL("../src/lib/selectedTaskProjection.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -638,6 +645,12 @@ test("App delegates proactivity chat seeding to proactivityChatSeed", () => {
   assert.doesNotMatch(app, /scope === "__personal__"/);
   assert.doesNotMatch(app, /type: "choice_prompt"/);
   assert.match(proactivityChatSeed, /export function buildProactivityChatSeed/);
+});
+
+test("App delegates selected task fallback to selectedTaskProjection", () => {
+  assert.match(app, /from "\.\/lib\/selectedTaskProjection";/);
+  assert.doesNotMatch(app, /kind: "prompt_session",\n        status: "queued"/);
+  assert.match(selectedTaskProjection, /export function projectSelectedTask/);
 });
 
 test("the sidebar uses the canonical persisted thread filter projection", () => {

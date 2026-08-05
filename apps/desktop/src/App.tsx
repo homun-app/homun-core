@@ -78,6 +78,7 @@ import {
   composePluginNavItems,
   enabledRegistryPlugins,
 } from "./lib/appPluginNavigation";
+import { projectSelectedTask } from "./lib/selectedTaskProjection";
 import { projectBusyThreadIds } from "./lib/busyThreadProjection";
 import { buildProactivityChatSeed } from "./lib/proactivityChatSeed";
 import type {
@@ -259,13 +260,12 @@ function AuthenticatedApp() {
   );
   const selectedTask = useMemo(
     () =>
-      taskItems.find((task) => task.id === selectedTaskId) ?? {
-        ...tasks[0],
-        id: activeThread.taskId,
-        title: activeThread.title,
-        kind: "prompt_session",
-        status: "queued" as const,
-      },
+      projectSelectedTask({
+        taskItems,
+        selectedTaskId,
+        activeThread,
+        fallbackTask: tasks[0],
+      }),
     [activeThread.taskId, activeThread.title, selectedTaskId, taskItems],
   );
   const activeMessages =
