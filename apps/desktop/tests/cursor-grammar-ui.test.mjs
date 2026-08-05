@@ -334,6 +334,13 @@ const adaptiveWorkspaceIsland = await readFile(
   new URL("../src/components/AdaptiveWorkspaceIsland.tsx", import.meta.url),
   "utf8",
 );
+const workspaceIslandSections = await readFile(
+  new URL("../src/components/WorkspaceIslandSections.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const workspaceIslandStyles = await readFile(
   new URL("../src/styles/workspace-island.css", import.meta.url),
   "utf8",
@@ -991,6 +998,18 @@ test("ChatView does not retain retired unused chat mode helpers", () => {
   assert.doesNotMatch(chatView, /const CHAT_MODES:/);
   assert.doesNotMatch(chatView, /type ChatMode =/);
   assert.doesNotMatch(chatView, /Systematic debugging \(code projects\)/);
+});
+
+test("ChatView delegates workspace island section bodies", () => {
+  assert.match(chatView, /from "\.\/WorkspaceIslandSections";/);
+  assert.match(chatView, /<WorkspaceIslandSections/);
+  assert.doesNotMatch(chatView, /workspace-island-activity/);
+  assert.doesNotMatch(chatView, /workspace-island-browser/);
+  assert.doesNotMatch(chatView, /workspace-island-files/);
+  assert.match(workspaceIslandSections, /export function WorkspaceIslandSections/);
+  assert.match(workspaceIslandSections, /workspace-island-activity/);
+  assert.match(workspaceIslandSections, /workspace-island-browser/);
+  assert.match(workspaceIslandSections, /workspace-island-files/);
 });
 
 test("InspectorView delegates operational plan preview rendering and parsing", () => {

@@ -1,26 +1,13 @@
 import {
-  ArrowUp,
-  AtSign,
-  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock3,
-  ExternalLink,
-  FileImage,
-  FileText,
-  AlertTriangle,
-  HardDrive,
   Loader2,
-  Mic,
-  Monitor,
-  Plus,
-  Play,
   PanelLeftOpen,
   Search,
   Tag,
   Sparkles,
-  X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -171,12 +158,10 @@ import { MessageAttachmentList } from "./MessageAttachmentList";
 import { MessageActionBar } from "./MessageActionBar";
 import { MessageActivity } from "./MessageActivity";
 import { AssistantThinkingState, type ChatStreamStatus } from "./AssistantThinkingState";
-import {
-  OperationalPlanPreview,
-} from "./OperationalPlanPreview";
 import { InlineUncertainEffectPanel } from "./InlineUncertainEffectPanel";
 import { InlineApprovelPanel } from "./InlineApprovelPanel";
 import { AssistantMessageBody } from "./AssistantMessageBody";
+import { WorkspaceIslandSections } from "./WorkspaceIslandSections";
 import {
   latestActivitySteps,
   latestPlanMarkdown,
@@ -184,7 +169,6 @@ import {
 } from "./ChatPayloadParsers";
 import {
   projectWorkspaceSections,
-  type WorkspaceSectionId,
 } from "../lib/workspaceIslandSections";
 import type {
   ChatMessage,
@@ -2836,115 +2820,27 @@ export function ChatView({
         sections={workspaceSections}
         disabled={inspector.open}
         openSectionRequest={{ section: "activity", nonce: activityNonce }}
-        renderSection={(section: WorkspaceSectionId) => {
-          if (section === "activity") {
-            return (
-              <div className="workspace-island-activity">
-                {projectObjective ? (
-                  <div className="workspace-island-objective">
-                    <span>{t("projectContext.objective")}</span>
-                    <p>{projectObjective}</p>
-                  </div>
-                ) : null}
-                {workspacePlanSteps.length > 0 ? (
-                  <div className="workspace-island-block">
-                    <div className="workspace-island-block-title">
-                      <span>{t("chat.activityProgress")}</span>
-                      <em>
-                        {workspacePlanSteps.filter((step) => step.status === "done").length}/
-                        {workspacePlanSteps.length}
-                      </em>
-                    </div>
-                    <ol className="workspace-island-list">
-                      {workspacePlanSteps.map((step, index) => (
-                        <li key={`${index}-${step.title}`} className={`status-${step.status}`}>
-                          <span className="workspace-island-state" aria-hidden="true" />
-                          <span>{step.title}</span>
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-                ) : null}
-                {projectedSubagents.length > 0 ? (
-                  <div className="workspace-island-block">
-                    <div className="workspace-island-block-title">
-                      <span>{t("chat.inspector.views.subagents")}</span>
-                      <em>{projectedSubagents.length}</em>
-                    </div>
-                    <ul className="workspace-island-list">
-                      {projectedSubagents.map((subagent, index) => (
-                        <li key={`${index}-${subagent.name}`} className={`status-${subagent.status}`}>
-                          <span className="workspace-island-state" aria-hidden="true" />
-                          <span>{subagent.name}</span>
-                          <em>{subagent.status}</em>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                {conversationActivity.length > 0 ? (
-                  <div className="workspace-island-block">
-                    <div className="workspace-island-block-title">
-                      <span>{workInProgress ? t("chat.activity") : t("chat.lastActivity")}</span>
-                      <em>{conversationActivity.length}</em>
-                    </div>
-                    <ol className="workspace-island-activity-list">
-                      {conversationActivity.slice(-40).map((step, index) => (
-                        <li key={`${index}-${step.slice(0, 24)}`}>
-                          {step.replace(/^(?:\p{Extended_Pictographic}|️|‍|\s)+/u, "").trim()}
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-                ) : null}
-                {browserBudgetMessage && !workInProgress ? (
-                  <div className="browser-budget-notice" role="status">
-                    <AlertTriangle size={15} aria-hidden="true" />
-                    <span>{browserBudgetMessage}</span>
-                    <button
-                      type="button"
-                      disabled={!browserBudgetAssistantId}
-                      onClick={() => {
-                        if (browserBudgetAssistantId) regenerateAnswer(browserBudgetAssistantId);
-                      }}
-                    >
-                      {t("chat.browserBudget.retry")}
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            );
-          }
-          if (section === "browser") {
-            return (
-              <div className="workspace-island-browser">
-                {previewDataUrl ? (
-                  <img src={previewDataUrl} alt={computerSession.previewTitle} />
-                ) : null}
-                <button type="button" onClick={() => openUtilityTab("computer")}>
-                  <Monitor size={15} aria-hidden="true" />
-                  <span>{t("chat.inspector.views.computer")}</span>
-                </button>
-              </div>
-            );
-          }
-          const rows = section === "artifacts" ? islandArtifacts : islandFileSources;
-          return (
-            <div className="workspace-island-files">
-              {rows.map((source, index) => (
-                <button
-                  type="button"
-                  key={`${index}-${source.name}`}
-                  onClick={() => openUtilityTab(source.action === "artifact" ? "artifact" : "file")}
-                >
-                  {source.kind === "image" ? <FileImage size={15} /> : <FileText size={15} />}
-                  <span>{source.name}</span>
-                  {source.meta ? <em>{source.meta}</em> : null}
-                </button>
-              ))}
-            </div>
-          );
-        }}
+        renderSection={(section) => (
+          <WorkspaceIslandSections
+            section={section}
+            projectObjective={projectObjective}
+            planSteps={workspacePlanSteps}
+            subagents={projectedSubagents}
+            activity={conversationActivity}
+            workInProgress={workInProgress}
+            browserBudgetMessage={browserBudgetMessage}
+            browserBudgetAssistantId={browserBudgetAssistantId}
+            previewDataUrl={previewDataUrl}
+            previewTitle={computerSession.previewTitle}
+            artifactSources={islandArtifacts}
+            fileSources={islandFileSources}
+            onRetryBrowserBudget={regenerateAnswer}
+            onOpenComputer={() => openUtilityTab("computer")}
+            onOpenSource={(source) =>
+              openUtilityTab(source.action === "artifact" ? "artifact" : "file")
+            }
+          />
+        )}
       />
       <div className="chat-computer-runtime">
         <ChatComputerPanel threadId={thread.threadId} onLiveChange={setComputerLiveStatus} />

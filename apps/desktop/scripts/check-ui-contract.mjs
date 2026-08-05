@@ -1257,7 +1257,8 @@ assertContains("src/components/AdaptiveWorkspaceIsland.tsx", "role=\"region\"", 
 assertContains("src/components/AdaptiveWorkspaceIsland.tsx", "aria-pressed={activeSection === section.id}", "rail buttons must expose their selected section");
 assertContains("src/lib/workspaceIslandSections.mjs", "const sections = [];", "workspace capabilities must be projected from factual input");
 assertNotContains("src/lib/workspaceIslandSections.mjs", 'id: "terminal"', "terminal must not appear before the capability exists");
-assertNotContains("src/components/ChatView.tsx", "<WorkspaceIsland", "legacy workspace island must stay retired");
+assertNotContains("src/components/ChatView.tsx", "<WorkspaceIsland ", "legacy workspace island must stay retired");
+assertNotContains("src/components/ChatView.tsx", "<WorkspaceIsland\n", "legacy workspace island must stay retired");
 assertNotContains("src/styles.css", ".workspace-island-panel", "legacy island panel geometry must stay retired");
 // Task 5: the rows dropped from the island (artifacts/files/activity) resurface behind
 // a header kebab menu that reopens the docked Workbench on the right tab.
