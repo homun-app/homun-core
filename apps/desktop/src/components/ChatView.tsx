@@ -218,6 +218,7 @@ import { PlanProposeCard, type PlanProposal } from "./MessagePlanProposeCard";
 import { DiffCard } from "./MessageDiffCard";
 import { GoalProposeCard } from "./MessageGoalProposeCard";
 import { VaultRevealCard, type VaultRevealProposal } from "./MessageVaultRevealCard";
+import { SandboxReadOnlyCard } from "./MessageSandboxReadOnlyCard";
 import {
   projectWorkspaceSections,
   type WorkspaceSectionId,
@@ -7167,83 +7168,6 @@ function SandboxEscalateCard({
           <span style={{ marginLeft: 6 }}>
             {status === "running" ? "Running…" : "Run without sandbox"}
           </span>
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/** ADR 0023 — read-only escalation card. A file write was blocked because the sandbox is
- *  in read-only mode. Unlike the bash on-failure card (which re-runs the exact command
- *  unsandboxed via a provenance-checked endpoint), the read-only write result carries no
- *  content to re-dispatch, so the action here flips the persisted `sandbox_mode` to
- *  workspace-write and asks the user to re-send — the honest, no-bypass option on this
- *  branch's plain-marker design. */
-function SandboxReadOnlyCard({ target }: { target: string }) {
-  const { t } = useTranslation();
-  const [status, setStatus] = useState<"idle" | "switching" | "switched" | "error">("idle");
-  const [note, setNote] = useState<string | null>(null);
-  const [dismissed, setDismissed] = useState(false);
-  if (dismissed) return null;
-
-  const switchToWorkspace = async () => {
-    setStatus("switching");
-    setNote(null);
-    try {
-      await coreBridge.setRuntimeSettings({ sandbox_mode: "workspace-write" });
-      setStatus("switched");
-    } catch (error) {
-      setStatus("error");
-      setNote((error as Error).message);
-    }
-  };
-
-  if (status === "switched") {
-    return (
-      <div className="cmp-confirm">
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <ShieldCheck size={15} />
-          <strong>{t("chat.sandboxReadOnlySwitchedTitle")}</strong>
-        </div>
-        <p className="set-hint" style={{ fontSize: 12 }}>
-          {t("chat.sandboxReadOnlySwitchedHint")}
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="cmp-confirm">
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <AlertTriangle size={15} />
-        <strong>{t("chat.sandboxReadOnlyTitle")}</strong>
-      </div>
-      <p className="set-hint" style={{ fontSize: 12 }}>
-        {target
-          ? t("chat.sandboxReadOnlyDesc", { target })
-          : t("chat.sandboxReadOnlyDescNoTarget")}
-      </p>
-      {status === "error" && <p className="cmp-confirm-err">{t("chat.failed")}: {note}</p>}
-      <div className="cmp-confirm-actions">
-        <button
-          className="set-btn primary"
-          type="button"
-          disabled={status === "switching"}
-          onClick={() => void switchToWorkspace()}
-        >
-          <span>
-            {status === "switching"
-              ? t("chat.sandboxReadOnlySwitching")
-              : t("chat.sandboxReadOnlySwitch")}
-          </span>
-        </button>
-        <button
-          className="set-btn"
-          type="button"
-          disabled={status === "switching"}
-          onClick={() => setDismissed(true)}
-        >
-          <span>{t("chat.sandboxReadOnlyKeep")}</span>
         </button>
       </div>
     </div>

@@ -162,6 +162,13 @@ const messageVaultRevealCard = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageSandboxReadOnlyCard = await readFile(
+  new URL("../src/components/MessageSandboxReadOnlyCard.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -778,6 +785,16 @@ test("ChatView delegates vault reveal rendering to MessageVaultRevealCard", () =
   assert.match(messageVaultRevealCard, /export function VaultRevealCard/);
   assert.match(messageVaultRevealCard, /coreBridge\.vaultRecordReveal/);
   assert.match(messageVaultRevealCard, /Vault unlock required/);
+});
+
+test("ChatView delegates sandbox read-only rendering to MessageSandboxReadOnlyCard", () => {
+  assert.match(chatView, /from "\.\/MessageSandboxReadOnlyCard";/);
+  assert.match(chatView, /<SandboxReadOnlyCard target=\{readOnlyBlocked\.target\}/);
+  assert.doesNotMatch(chatView, /function SandboxReadOnlyCard\(/);
+  assert.match(messageSandboxReadOnlyCard, /export function SandboxReadOnlyCard/);
+  assert.match(messageSandboxReadOnlyCard, /coreBridge\.setRuntimeSettings/);
+  assert.match(messageSandboxReadOnlyCard, /sandbox_mode: "workspace-write"/);
+  assert.match(messageSandboxReadOnlyCard, /sandboxReadOnlyTitle/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
