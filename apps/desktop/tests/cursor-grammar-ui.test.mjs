@@ -85,6 +85,13 @@ const computerDetailPanel = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatEmptyHero = await readFile(
+  new URL("../src/components/ChatEmptyHero.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const runtimeContextPanel = await readFile(
   new URL("../src/components/RuntimeContextPanel.tsx", import.meta.url),
   "utf8",
@@ -549,6 +556,17 @@ test("ChatView delegates local computer inspector rendering to ComputerDetailPan
   assert.match(computerDetailPanel, /className="computer-detail-panel"/);
   assert.match(computerDetailPanel, /onSelectSurface\(surface\.id\)/);
   assert.match(computerDetailPanel, /onClick=\{paused \? onResume : onPause\}/);
+});
+
+test("ChatView delegates empty-thread hero rendering to ChatEmptyHero", () => {
+  assert.match(chatView, /import \{ ChatEmptyHero \} from "\.\/ChatEmptyHero";/);
+  assert.match(chatView, /<ChatEmptyHero[\s\S]*?sessionSeed=\{CHAT_VIEW_SESSION_ID\}/);
+  assert.doesNotMatch(chatView, /function ChatEmptyHero\(/);
+  assert.match(chatEmptyHero, /export function ChatEmptyHero/);
+  assert.match(chatEmptyHero, /selectGreetingKey/);
+  assert.match(chatEmptyHero, /<ChatUsageOverview/);
+  assert.match(chatEmptyHero, /chat-hero-headline/);
+  assert.match(chatEmptyHero, /chat-hero-prompt/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {

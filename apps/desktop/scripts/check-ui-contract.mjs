@@ -160,7 +160,7 @@ assertContains(
 assertNotContains("src/components/ChatUsageOverview.tsx", "usageModels", "New chat must not load full analytics");
 assertNotContains("src/components/ChatView.tsx", "EMPTY_HERO_CHIPS", "New chat must not keep canned prompt chips");
 assertNotContains("src/components/ChatView.tsx", "chat-hero-chip", "New chat must not render canned prompt buttons");
-assertContains("src/components/ChatView.tsx", "<ChatUsageOverview", "Empty hero must mount compact usage");
+assertContains("src/components/ChatEmptyHero.tsx", "<ChatUsageOverview", "Empty hero must mount compact usage");
 assertContains("src/components/ChatView.tsx", "onUseForTask", "Confirmed task suggestions must reach the composer model override");
 assertContains("src/components/ChatView.tsx", "enqueueTurn(thread.threadId, requestId, promptWithReplyContext", "Active task instructions must be queued as steering");
 assertSource("src/components/ActiveTurnStatus.tsx", ["chat.inspector.views.activity", "onStop", "attempt"]);
@@ -814,9 +814,9 @@ assertNotContains(
   "JSON.stringify(effect.core.evidence",
   "Raw uncertain-effect evidence must not be rendered",
 );
-assertContains("src/components/ChatView.tsx", "selectGreetingKey", "New chat must select a stable curated greeting");
-assertContains("src/components/ChatView.tsx", "chat-hero-headline", "New chat must render the primary greeting separately");
-assertContains("src/components/ChatView.tsx", "chat-hero-prompt", "New chat must render the rotating prompt as secondary typography");
+assertContains("src/components/ChatEmptyHero.tsx", "selectGreetingKey", "New chat must select a stable curated greeting");
+assertContains("src/components/ChatEmptyHero.tsx", "chat-hero-headline", "New chat must render the primary greeting separately");
+assertContains("src/components/ChatEmptyHero.tsx", "chat-hero-prompt", "New chat must render the rotating prompt as secondary typography");
 assertContains("src/styles.css", ".chat-hero-welcome", "New chat must give the welcome block its own spacing hierarchy");
 assertContains("src/data/mockData.ts", 'id: "m1_ready"', "The bootstrap greeting must be recognized as a removable placeholder");
 assertContains("src/components/ChatUsageOverview.tsx", "<UsageCalendar", "New chat must render the real activity calendar");

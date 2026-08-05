@@ -65,9 +65,6 @@ import {
 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChatUsageOverview } from "./ChatUsageOverview";
-import { greetingPeriod, selectGreetingKey } from "../lib/chatGreeting";
-import { useSetting } from "../lib/settingsStore";
 import { useRuntimeContext } from "../lib/useRuntimeContext";
 import ForceGraph2D from "react-force-graph-2d";
 import type {
@@ -210,6 +207,7 @@ import { InspectorWorkspace } from "./InspectorWorkspace";
 import { MemoryUsagePopover } from "./MemoryUsagePopover";
 import { ComposerContainer } from "./ComposerContainer";
 import { ComputerDetailPanel } from "./ComputerDetailPanel";
+import { ChatEmptyHero } from "./ChatEmptyHero";
 import {
   projectWorkspaceSections,
   type WorkspaceSectionId,
@@ -3115,6 +3113,7 @@ export function ChatView({
           {threadMessages.length === 0 && !promptSubmitting && (
             <ChatEmptyHero
               thread={thread}
+              sessionSeed={CHAT_VIEW_SESSION_ID}
               onOpenUsageSettings={onOpenUsageSettings}
               onUseForTask={(providerId, modelId) => setUsageSuggestedModel({
                 value: `${providerId}::${modelId}`,
@@ -9318,50 +9317,6 @@ function formatEffectTime(timestamp: number) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(timestamp * 1_000));
-}
-
-function ChatEmptyHero({
-  thread,
-  onOpenUsageSettings,
-  onUseForTask,
-}: {
-  thread: ChatThread;
-  onOpenUsageSettings: () => void;
-  onUseForTask: (providerId: string, modelId: string) => void;
-}) {
-  const { t } = useTranslation();
-  const [displayName] = useSetting("displayName", "");
-  const [{ greetingKey, period }] = useState(() => {
-    const hour = new Date().getHours();
-    return {
-      greetingKey: selectGreetingKey({
-        hour,
-        hasName: Boolean(displayName.trim()),
-        hasProject: Boolean(thread.workspaceId && thread.workspaceId !== "local-workspace"),
-        seed: `${CHAT_VIEW_SESSION_ID}:${thread.threadId}`,
-      }),
-      period: greetingPeriod(hour),
-    };
-  });
-  const interpolation = {
-    name: displayName.trim(),
-    salutation: t(`chat.greetings.period.${period}`),
-  };
-  const greetingHeadline = t(`${greetingKey}.headline`, interpolation);
-  const greetingPrompt = t(`${greetingKey}.prompt`, interpolation);
-  return (
-    <div className="chat-hero">
-      <div className="chat-hero-welcome">
-        <h1 className="chat-hero-headline">{greetingHeadline}</h1>
-        <p className="chat-hero-prompt">{greetingPrompt}</p>
-      </div>
-      <ChatUsageOverview
-        threadId={thread.threadId}
-        onOpenUsageSettings={onOpenUsageSettings}
-        onUseForTask={onUseForTask}
-      />
-    </div>
-  );
 }
 
 interface ResumeMarker {
