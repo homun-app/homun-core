@@ -421,6 +421,13 @@ const chatPayloadParsers = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatSteeringPrompt = await readFile(
+  new URL("../src/lib/chatSteeringPrompt.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatMessageMarkerParser = await readFile(
   new URL("../src/components/ChatMessageMarkerParser.ts", import.meta.url),
   "utf8",
@@ -1252,6 +1259,13 @@ test("ChatView delegates structured payload parsing to ChatPayloadParsers", () =
   assert.match(chatPayloadParsers, /export function parsePaymentApprovalPayload/);
   assert.match(chatPayloadParsers, /export function parseChoicePromptPayload/);
   assert.match(chatPayloadParsers, /export function latestActivitySteps/);
+});
+
+test("ChatView delegates steering prompt edit assembly to chatSteeringPrompt", () => {
+  assert.match(chatView, /from "\.\.\/lib\/chatSteeringPrompt";/);
+  assert.doesNotMatch(chatView, /function steeringPromptWithEdit\(/);
+  assert.match(chatSteeringPrompt, /export function steeringPromptWithEdit/);
+  assert.match(chatSteeringPrompt, /visible_prompt/);
 });
 
 test("ChatView delegates assistant message body rendering to AssistantMessageBody", () => {

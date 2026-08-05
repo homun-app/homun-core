@@ -30,6 +30,7 @@ import {
   reconcileSteering,
   type SteeringQueueState,
 } from "../lib/chatSteeringState";
+import { steeringPromptWithEdit } from "../lib/chatSteeringPrompt";
 import {
   applyTurnEvent,
   createTurnReplayState,
@@ -1749,13 +1750,6 @@ export function ChatView({
       options?.resumeAssistantMessageId,
     );
     return true;
-  }
-
-  function steeringPromptWithEdit(row: TurnSteeringRecord, visiblePrompt: string): string {
-    if (row.visible_prompt && row.prompt.endsWith(row.visible_prompt)) {
-      return `${row.prompt.slice(0, -row.visible_prompt.length)}${visiblePrompt}`;
-    }
-    return visiblePrompt;
   }
 
   async function editPendingSteering(
