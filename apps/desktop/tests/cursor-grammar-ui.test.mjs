@@ -58,6 +58,13 @@ const chatView = await readFile(
   "utf8",
 );
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
+const appCoreMappers = await readFile(
+  new URL("../src/lib/appCoreMappers.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -467,6 +474,31 @@ test("the desktop entrypoint uses the compact visual foundation", () => {
     main,
     /import "\.\/styles\.css";\s*import "\.\/styles\/foundation\.css";\s*import "\.\/styles\/menus\.css";/,
   );
+});
+
+test("App delegates core-to-ui mapping helpers to appCoreMappers", () => {
+  assert.match(app, /from "\.\/lib\/appCoreMappers";/);
+  for (const helper of [
+    "mapCoreChatThread",
+    "mapCoreThreadAttention",
+    "mapCoreChatMessage",
+    "pendingChatAttachmentFromInput",
+    "starterMessages",
+    "summarizeThreadTitle",
+    "updateThreadPreview",
+    "currentTimestampSeconds",
+    "mapCoreTask",
+    "mapCoreUncertainEffect",
+    "mapCoreApprovel",
+    "mapCoreMemoryDashboard",
+    "mapCoreCapabilitySnapshot",
+  ]) {
+    assert.doesNotMatch(app, new RegExp(`function ${helper}\\(`));
+    assert.match(appCoreMappers, new RegExp(`export function ${helper}\\(`));
+  }
+  assert.match(appCoreMappers, /function mapCoreChatEventParts/);
+  assert.match(appCoreMappers, /function filterApprovelScopes/);
+  assert.match(appCoreMappers, /function providerDisplayName/);
 });
 
 test("the sidebar uses the canonical persisted thread filter projection", () => {

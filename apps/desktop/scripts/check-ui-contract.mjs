@@ -1452,7 +1452,8 @@ assertRepoContains("apps/desktop/src/lib/chatApi.ts", "listenChatStreamEvent", "
 assertRepoContains("apps/desktop/src/components/ChatView.tsx", "listenChatStreamEvent", "ChatView must consume structured chat stream events");
 assertRepoContains("apps/desktop/src/components/ChatView.tsx", "eventParts", "ChatView must pass structured event parts into assistant rendering");
 assertRepoContains("apps/desktop/src/lib/coreBridge.ts", "event_parts", "core chat message must expose persisted structured event parts");
-assertRepoContains("apps/desktop/src/App.tsx", "mapCoreChatEventParts", "desktop app must hydrate persisted structured event parts");
+assertRepoContains("apps/desktop/src/lib/appCoreMappers.ts", "mapCoreChatEventParts", "desktop app must hydrate persisted structured event parts");
+assertRepoContains("apps/desktop/src/App.tsx", "mapCoreChatMessage", "desktop app must hydrate persisted messages through the core mapper owner");
 assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "eventPartToLegacyMarker", "ChatView must not synthesize legacy markers from structured event parts");
 assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "visibleStreamingText", "streaming messages must keep prose text separate from structured event parts");
 assertRepoContains("apps/desktop/src/components/ChatView.tsx", "shouldDropStructuredMarkerDelta", "ChatView must drop legacy marker deltas after receiving structured event parts");
