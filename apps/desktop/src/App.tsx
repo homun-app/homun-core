@@ -56,6 +56,7 @@ import { useTaskQueueController } from "./lib/useTaskQueueController";
 import { useBackgroundStreams } from "./lib/useBackgroundStreams";
 import { useAppNavigation } from "./lib/useAppNavigation";
 import { useThreadAttentionController } from "./lib/useThreadAttentionController";
+import { useOperationalReadModelPoller } from "./lib/useOperationalReadModelPoller";
 import type {
   ChatAttachment,
   ChatMessage,
@@ -701,29 +702,11 @@ function AuthenticatedApp() {
     applyThreadAttentionRows(await coreBridge.threadAttentions());
   }
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function refreshOperationalReadModels() {
-      if (!activeThreadId) return;
-      try {
-        await refreshRuntimeReadModels();
-        if (!cancelled) {
-          await refreshChatReadModels(activeThreadId);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.warn("operational_read_models_poll unavailable", error);
-        }
-      }
-    }
-
-    const interval = window.setInterval(refreshOperationalReadModels, 2_500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [activeThreadId]);
+  useOperationalReadModelPoller({
+    activeThreadId,
+    refreshRuntimeReadModels,
+    refreshChatReadModels,
+  });
 
   useEffect(() => {
     let cancelled = false;

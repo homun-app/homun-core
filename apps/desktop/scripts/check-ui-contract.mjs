@@ -1135,12 +1135,14 @@ assertContains("src/App.tsx", "useTaskQueueController", "App must delegate task 
 assertContains("src/App.tsx", "useBackgroundStreams", "App must delegate active stream polling to the background streams hook");
 assertContains("src/App.tsx", "useAppNavigation", "App must delegate shell navigation/search state to the navigation hook");
 assertContains("src/App.tsx", "useThreadAttentionController", "App must delegate thread attention state to the attention controller");
+assertContains("src/App.tsx", "useOperationalReadModelPoller", "App must delegate operational read model polling to the poller hook");
 assertNotContains("src/App.tsx", "coreBridge.setupStatus", "App must not own setup status fetching directly");
 assertNotContains("src/App.tsx", "coreBridge.plugins()", "App must not own plugin state fetching directly");
 assertNotContains("src/App.tsx", "coreBridge.activeStreams", "App must not own active stream polling directly");
 assertNotContains("src/App.tsx", "coreBridge.markThreadSeen", "App must not own thread seen mutations directly");
 assertNotContains("src/App.tsx", "hydrateThreadAttentionState", "App must not own thread attention hydration directly");
 assertNotContains("src/App.tsx", "projectConversationAttention", "App must not own thread attention projection directly");
+assertNotContains("src/App.tsx", "operational_read_models_poll unavailable", "App must not own operational read model polling directly");
 assertNotContains("src/App.tsx", "useState<ViewId>", "App must not own shell view state directly");
 assertNotContains("src/App.tsx", "setSearchOpen", "App must not own search modal state directly");
 assertNotContains("src/App.tsx", "coreBridge.taskQueue", "App must not own task queue fetching directly");

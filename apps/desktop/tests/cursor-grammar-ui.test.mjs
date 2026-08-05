@@ -205,6 +205,13 @@ const threadAttentionController = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const operationalReadModelPoller = await readFile(
+  new URL("../src/lib/useOperationalReadModelPoller.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -850,6 +857,14 @@ test("App delegates thread attention ownership to useThreadAttentionController",
   assert.match(threadAttentionController, /createThreadAttentionState/);
   assert.match(threadAttentionController, /hydrateThreadAttentionState/);
   assert.match(threadAttentionController, /coreBridge[\s\S]*?\.markThreadSeen/);
+});
+
+test("App delegates operational read-model polling to useOperationalReadModelPoller", () => {
+  assert.match(app, /from "\.\/lib\/useOperationalReadModelPoller";/);
+  assert.doesNotMatch(app, /operational_read_models_poll unavailable/);
+  assert.doesNotMatch(app, /window\.setInterval\(refreshOperationalReadModels, 2_500\)/);
+  assert.match(operationalReadModelPoller, /export function useOperationalReadModelPoller/);
+  assert.match(operationalReadModelPoller, /window\.setInterval\(refreshOperationalReadModels, 2_500\)/);
 });
 
 test("App delegates workspace view rendering to AppWorkspace", () => {
