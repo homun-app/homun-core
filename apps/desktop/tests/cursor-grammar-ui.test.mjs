@@ -156,6 +156,13 @@ const chatThreadCreation = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatReadModelController = await readFile(
+  new URL("../src/lib/useChatReadModelController.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const threadAttentionNotifications = await readFile(
   new URL("../src/lib/useThreadAttentionNotifications.ts", import.meta.url),
   "utf8",
@@ -747,9 +754,12 @@ test("App delegates template workflow prompt routing to templateWorkflowPrompt",
 });
 
 test("App delegates optimistic chat message preservation to chatMessagePreservation", () => {
-  assert.match(app, /from "\.\/lib\/chatMessagePreservation";/);
+  assert.match(app, /from "\.\/lib\/useChatReadModelController";/);
+  assert.doesNotMatch(app, /from "\.\/lib\/chatMessagePreservation";/);
   assert.doesNotMatch(app, /function hasPendingLocalMessages\(/);
   assert.doesNotMatch(app, /function shouldPreserveLocalMessages\(/);
+  assert.match(chatReadModelController, /from "\.\/chatMessagePreservation";/);
+  assert.match(chatReadModelController, /shouldPreserveLocalMessages/);
   assert.match(chatMessagePreservation, /export function hasPendingLocalMessages/);
   assert.match(chatMessagePreservation, /export function shouldPreserveLocalMessages/);
 });
@@ -905,6 +915,20 @@ test("App delegates thread attention ownership to useThreadAttentionController",
   assert.match(threadAttentionController, /coreBridge[\s\S]*?\.markThreadSeen/);
   assert.match(threadAttentionNotifications, /notificationPermission/);
   assert.match(threadAttentionNotifications, /showSystemNotification/);
+});
+
+test("App delegates chat read-model lifecycle to useChatReadModelController", () => {
+  assert.match(app, /from "\.\/lib\/useChatReadModelController";/);
+  assert.doesNotMatch(app, /coreBridge\.selectChatThread/);
+  assert.doesNotMatch(app, /coreBridge\.chatThreads/);
+  assert.doesNotMatch(app, /coreBridge\.chatMessages/);
+  assert.doesNotMatch(app, /reconcileChatMessages/);
+  assert.doesNotMatch(app, /reconcileChatThreads/);
+  assert.doesNotMatch(app, /updateThreadPreview/);
+  assert.match(chatReadModelController, /coreBridge\.selectChatThread/);
+  assert.match(chatReadModelController, /reconcileChatMessages/);
+  assert.match(chatReadModelController, /updateThreadPreview/);
+  assert.match(chatReadModelController, /mapCoreChatMessage/);
 });
 
 test("App delegates operational read-model polling to useOperationalReadModelPoller", () => {

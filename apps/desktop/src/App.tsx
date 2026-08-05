@@ -10,22 +10,8 @@ import {
   navItems as staticNavItems,
 } from "./data/mockData";
 import { pluginRegistry, type PluginHost } from "./plugins/registry";
-import {
-  coreBridge,
-} from "./lib/coreBridge";
 import { useSetting } from "./lib/settingsStore";
-import { reconcileChatMessages, reconcileChatThreads } from "./lib/uiSnapshot";
-import {
-  currentTimestampSeconds,
-  mapCoreChatMessage,
-  mapCoreChatThread,
-  starterMessages,
-  updateThreadPreview,
-} from "./lib/appCoreMappers";
-import {
-  hasPendingLocalMessages,
-  shouldPreserveLocalMessages,
-} from "./lib/chatMessagePreservation";
+import { currentTimestampSeconds } from "./lib/appCoreMappers";
 import {
   composePluginNavItems,
   enabledRegistryPlugins,
@@ -52,6 +38,7 @@ import {
   type PendingTemplateAutoSubmit,
 } from "./lib/useChatThreadCreation";
 import { useThreadAttentionNotifications } from "./lib/useThreadAttentionNotifications";
+import { useChatReadModelController } from "./lib/useChatReadModelController";
 import type {
   ChatMessage,
   ChatThread,
@@ -113,6 +100,9 @@ function AuthenticatedApp() {
     useState<IncomingBackgroundTurn | null>(null);
   const pendingLocalMessageThreadIdsRef = useRef<Set<string>>(new Set());
   const busyThreadIdsRef = useRef<Set<string>>(new Set());
+  const refreshChatReadModelsRef = useRef<
+    (preferredThreadId?: string) => Promise<void>
+  >(async () => {});
   const { showOnboarding, completeOnboarding } = useOnboardingSetupGate();
   const { pluginStates, reloadPlugins } = usePluginController();
   const { drawerOpen, expandDrawer, toggleDrawer } = useResponsiveDrawer();
@@ -126,6 +116,9 @@ function AuthenticatedApp() {
     [activeThreadId, chatThreads],
   );
   const automationWorkspaceId = activeThread.workspaceId ?? undefined;
+  function refreshChatReadModels(preferredThreadId?: string) {
+    return refreshChatReadModelsRef.current(preferredThreadId);
+  }
   const {
     automationItems,
     handleCreateteAutomation,
@@ -183,70 +176,31 @@ function AuthenticatedApp() {
     uncertainEffectItems,
     busyThreadIds,
   });
-  const activeMessages =
-    threadMessages[activeThread.threadId] ?? starterMessages(activeThread);
   const isSettings = activeView === "settings";
 
-  function setThreadMessagesFromBackend(
-    threadId: string,
-    incomingMessages: ChatMessage[],
-    options: { force?: boolean } = {},
-  ) {
-    setThreadMessages((current) => {
-      const currentMessages = current[threadId];
-      if (
-        options.force !== true &&
-        shouldPreserveLocalMessages({
-          currentMessages,
-          incomingMessages,
-          isProtected:
-            pendingLocalMessageThreadIdsRef.current.has(threadId) ||
-            busyThreadIdsRef.current.has(threadId),
-        })
-      ) {
-        return current;
-      }
-      pendingLocalMessageThreadIdsRef.current.delete(threadId);
-      const reconciled = reconcileChatMessages(currentMessages, incomingMessages);
-      if (reconciled === currentMessages) return current;
-      return {
-        ...current,
-        [threadId]: reconciled,
-      };
-    });
-  }
-
-  async function handleSelectThread(threadId: string) {
-    const fallback = chatThreads.find((item) => item.threadId === threadId);
-    // Optimistic + instant: switch the center to the thread NOW, before any network. If its
-    // messages are already in memory the switch is truly immediate (no spinner, no refetch).
-    setActiveThreadId(threadId);
-    markSelectedThreadSeen(threadId);
-    setActiveView("chat");
-    try {
-      // `select_chat_thread` is workspace-aware (returns the target thread's workspace snapshot),
-      // so a cross-workspace thread switches context here with no full page reload.
-      const snapshot = await coreBridge.selectChatThread(threadId);
-      const mappedThreads = snapshot.threads.map(mapCoreChatThread);
-      const selectedThread = mappedThreads.find((item) => item.threadId === threadId) ?? fallback;
-      // Functional form: the snapshot lands after an await, so `chatThreads` from
-      // the render closure is already stale — and reconciling keeps the array
-      // identity when the selection changed nothing in the list itself.
-      setChatThreads((current) =>
-        mappedThreads.length ? reconcileChatThreads(current, mappedThreads) : current,
-      );
-      const attention = await coreBridge.threadAttentions(selectedThread?.workspaceId ?? undefined);
-      applyThreadAttentionRows(attention);
-      markSelectedThreadSeen(threadId);
-      // Fetch messages only when we don't already have them — re-selecting a thread is instant.
-      if (!threadMessages[threadId]) {
-        const messages = await coreBridge.chatMessages(threadId);
-        setThreadMessagesFromBackend(threadId, messages.messages.map(mapCoreChatMessage));
-      }
-    } catch (error) {
-      console.warn("select_chat_thread unavailable", error);
-    }
-  }
+  const {
+    activeMessages,
+    setThreadMessagesFromBackend,
+    handleSelectThread,
+    refreshThreadInBackground,
+    handleMessagesChange,
+    refreshChatReadModels: refreshChatReadModelsFromController,
+  } = useChatReadModelController({
+    activeThread,
+    activeThreadId,
+    chatThreads,
+    threadMessages,
+    defaultThread: defaultChatThread,
+    pendingLocalMessageThreadIdsRef,
+    busyThreadIdsRef,
+    setChatThreads,
+    setThreadMessages,
+    setActiveThreadId,
+    setActiveView,
+    applyThreadAttentionRows,
+    markSelectedThreadSeen,
+  });
+  refreshChatReadModelsRef.current = refreshChatReadModelsFromController;
 
   useThreadAttentionNotifications({
     chatThreads,
@@ -258,42 +212,6 @@ function AuthenticatedApp() {
     },
     onSelectThread: handleSelectThread,
   });
-
-  async function refreshThreadInBackground(
-    threadId: string,
-    workspaceId?: string,
-    options: { forceMessages?: boolean } = {},
-  ) {
-    try {
-      const [snapshot, messages, attention] = await Promise.all([
-        coreBridge.chatThreads(workspaceId),
-        coreBridge.chatMessages(threadId),
-        coreBridge.threadAttentions(workspaceId),
-      ]);
-      const mappedThreads = snapshot.threads.map(mapCoreChatThread);
-      // Keep App's active-workspace list scoped. Cross-workspace rows are owned
-      // by ProjectsNav and refresh on its next visible load; their attention is
-      // still updated immediately here.
-      if (
-        mappedThreads.some((thread) => thread.threadId === activeThreadId) ||
-        workspaceId === activeThread.workspaceId
-      ) {
-        // Fires on every turn/thread.updated stream event, so it is even hotter
-        // than the 2.5s poll: reconcile instead of re-creating the whole list.
-        setChatThreads((current) =>
-          mappedThreads.length ? reconcileChatThreads(current, mappedThreads) : current,
-        );
-      }
-      setThreadMessagesFromBackend(
-        threadId,
-        messages.messages.map(mapCoreChatMessage),
-        { force: options.forceMessages === true },
-      );
-      applyThreadAttentionRows(attention);
-    } catch (error) {
-      console.warn("refresh_thread_in_background unavailable", error);
-    }
-  }
 
   useAppEventSubscription({
     activeThreadId,
@@ -352,46 +270,6 @@ function AuthenticatedApp() {
     setActiveThreadId,
     setThreadMessages,
   });
-
-  function handleMessagesChange(
-    threadId: string,
-    messages: ChatMessage[],
-    options: { advanceActivity?: boolean } = {},
-  ) {
-    if (options.advanceActivity === true) {
-      pendingLocalMessageThreadIdsRef.current.delete(threadId);
-    } else if (hasPendingLocalMessages(messages)) {
-      pendingLocalMessageThreadIdsRef.current.add(threadId);
-    }
-    setThreadMessages((current) => ({
-      ...current,
-      [threadId]: messages,
-    }));
-    setChatThreads((current) =>
-      current.map((thread) =>
-        thread.threadId === threadId
-          ? updateThreadPreview(thread, messages, options)
-          : thread,
-      ),
-    );
-  }
-
-  async function refreshChatReadModels(preferredThreadId = activeThreadId) {
-    const snapshot = await coreBridge.chatThreads();
-    const mappedThreads = snapshot.threads.map(mapCoreChatThread);
-    // This runs on the 2.5s operational poll: hand React the previous array back
-    // when nothing changed, or App/Sidebar/Shell/ChatView re-render every tick.
-    const desired = mappedThreads.length ? mappedThreads : [defaultChatThread];
-    setChatThreads((current) => reconcileChatThreads(current, desired));
-    const preferred = mappedThreads.find((thread) => thread.threadId === preferredThreadId);
-    if (!preferred) return;
-    const messages = await coreBridge.chatMessages(preferred.threadId);
-    setThreadMessagesFromBackend(
-      preferred.threadId,
-      messages.messages.map(mapCoreChatMessage),
-    );
-    applyThreadAttentionRows(await coreBridge.threadAttentions());
-  }
 
   useOperationalReadModelPoller({
     activeThreadId,

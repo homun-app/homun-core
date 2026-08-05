@@ -1003,7 +1003,7 @@ assertNotContains("src/components/Sidebar.tsx", "threadMenu.thread.pinned ? \"Re
 assertNotContains("src/components/Sidebar.tsx", "runThreadAction(() => onArchiveChatThread(threadMenu.thread.threadId))", "thread overflow menu must not duplicate hover archive action");
 assertNotContains("src/components/Sidebar.tsx", "setSwitcherOpen", "project navigation must not be primarily driven by a workspace dropdown");
 assertContains("src/lib/useChatThreadCreation.ts", "summarizeThreadTitle", "frontend optimistic chat titles must be synthesized, not first-prompt slices");
-assertContains("src/App.tsx", "advanceActivity === true", "chat preview ordering must advance only from explicit completed assistant turns");
+assertContains("src/lib/useChatReadModelController.ts", "advanceActivity === true", "chat preview ordering must advance only from explicit completed assistant turns");
 assertNotContains("src/App.tsx", "nextActivityMessageCount > thread.messageCount", "opening/loading an existing chat must not infer new activity from message count");
 assertContains("src/components/ChatView.tsx", "onMessagesChange(promptMessages)", "chat title must update as soon as the user prompt is accepted");
 assertContains("src/components/ChatView.tsx", "advanceActivity: true", "completed assistant turns must explicitly advance chat activity ordering");
@@ -1141,6 +1141,7 @@ assertContains("src/App.tsx", "useAppEventSubscription", "App must delegate app-
 assertContains("src/App.tsx", "useInitialChatThreadsLoader", "App must delegate initial chat snapshot loading to the loader hook");
 assertContains("src/App.tsx", "useChatThreadMutations", "App must delegate chat thread mutations to the mutation hook");
 assertContains("src/App.tsx", "useChatThreadCreation", "App must delegate chat creation workflows to the creation hook");
+assertContains("src/App.tsx", "useChatReadModelController", "App must delegate chat read-model lifecycle to the read-model controller");
 assertNotContains("src/App.tsx", "coreBridge.setupStatus", "App must not own setup status fetching directly");
 assertNotContains("src/App.tsx", "coreBridge.plugins()", "App must not own plugin state fetching directly");
 assertNotContains("src/App.tsx", "coreBridge.activeStreams", "App must not own active stream polling directly");
@@ -1158,6 +1159,11 @@ assertNotContains("src/App.tsx", "coreBridge.archiveChatThread", "App must not o
 assertNotContains("src/App.tsx", "coreBridge.unarchiveChatThread", "App must not own chat thread unarchive mutations directly");
 assertNotContains("src/App.tsx", "coreBridge.deleteChatThread", "App must not own chat thread delete mutations directly");
 assertNotContains("src/App.tsx", "create_chat_thread unavailable", "App must not own chat thread creation directly");
+assertNotContains("src/App.tsx", "coreBridge.selectChatThread", "App must not own chat thread selection directly");
+assertNotContains("src/App.tsx", "coreBridge.chatMessages", "App must not own chat message fetching directly");
+assertNotContains("src/App.tsx", "coreBridge.chatThreads", "App must not own chat thread read-model fetching directly");
+assertNotContains("src/App.tsx", "reconcileChatMessages", "App must not own backend message reconciliation directly");
+assertNotContains("src/App.tsx", "updateThreadPreview", "App must not own chat preview mutation directly");
 assertNotContains("src/App.tsx", "useState<ViewId>", "App must not own shell view state directly");
 assertNotContains("src/App.tsx", "setSearchOpen", "App must not own search modal state directly");
 assertNotContains("src/App.tsx", "coreBridge.taskQueue", "App must not own task queue fetching directly");
@@ -1453,7 +1459,7 @@ assertContains("src/lib/busyThreadProjection.mjs", "const ids = new Set(backgrou
 assertContains("src/lib/busyThreadProjection.mjs", "if (streamingThreadId) ids.add(streamingThreadId)", "sidebar busy state must include the active visible stream");
 assertContains("src/lib/busyThreadProjection.mjs", "task.status === \"running\" || task.status === \"queued\"", "sidebar busy state must ignore completed or failed tasks");
 assertContains("src/App.tsx", "pendingLocalMessageThreadIdsRef", "chat polling must know which threads have optimistic local messages");
-assertContains("src/App.tsx", "shouldPreserveLocalMessages", "backend refresh must not wipe visible local messages before gateway persistence");
+assertContains("src/lib/useChatReadModelController.ts", "shouldPreserveLocalMessages", "backend refresh must not wipe visible local messages before gateway persistence");
 assertContains("src/App.tsx", "setThreadMessagesFromBackend", "backend chat snapshots must pass through the stale-safe message updater");
 assertContains("src/App.tsx", "pendingTemplateAutoSubmit", "template workflows must be handed to the visible chat renderer");
 assertContains("src/App.tsx", "onAutoSubmitConsumed", "template auto-submit triggers must be consumed after entering the chat pipeline");
@@ -1499,7 +1505,7 @@ assertRepoContains("apps/desktop/src/components/ChatView.tsx", "listenChatStream
 assertRepoContains("apps/desktop/src/components/ChatView.tsx", "eventParts", "ChatView must pass structured event parts into assistant rendering");
 assertRepoContains("apps/desktop/src/lib/coreBridge.ts", "event_parts", "core chat message must expose persisted structured event parts");
 assertRepoContains("apps/desktop/src/lib/appCoreMappers.ts", "mapCoreChatEventParts", "desktop app must hydrate persisted structured event parts");
-assertRepoContains("apps/desktop/src/App.tsx", "mapCoreChatMessage", "desktop app must hydrate persisted messages through the core mapper owner");
+assertRepoContains("apps/desktop/src/lib/useChatReadModelController.ts", "mapCoreChatMessage", "desktop app must hydrate persisted messages through the core mapper owner");
 assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "eventPartToLegacyMarker", "ChatView must not synthesize legacy markers from structured event parts");
 assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "visibleStreamingText", "streaming messages must keep prose text separate from structured event parts");
 assertRepoContains("apps/desktop/src/components/ChatView.tsx", "shouldDropStructuredMarkerDelta", "ChatView must drop legacy marker deltas after receiving structured event parts");
