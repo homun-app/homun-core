@@ -149,6 +149,7 @@ import { MessageAttachmentList } from "./MessageAttachmentList";
 import { MessageActionBar } from "./MessageActionBar";
 import { MessageEditBox } from "./MessageEditBox";
 import { MessageMetaCopy } from "./MessageMetaCopy";
+import { MessageStatusBadges } from "./MessageStatusBadges";
 import { MessageActivity } from "./MessageActivity";
 import { AssistantThinkingState, type ChatStreamStatus } from "./AssistantThinkingState";
 import { InlineUncertainEffectPanel } from "./InlineUncertainEffectPanel";
@@ -2874,19 +2875,10 @@ export function ChatView({
                 />
               )}
               {displayMessage.text && !isStreamingMessage && (
-                <>
-                {assistantMessage && incompleteMessage && (
-                  <div className="message-incomplete-note" role="note">
-                    {t("chat.responseLikelyInterrupted")}
-                  </div>
-                )}
-                {autoContinueMessageId === displayMessage.id && (
-                  <div className="auto-continue-status" role="status" aria-live="polite">
-                    <Sparkles size={14} />
-                    <span>{t("chat.autoCompleting")}</span>
-                  </div>
-                )}
-                </>
+                <MessageStatusBadges
+                  incomplete={assistantMessage && incompleteMessage}
+                  autoContinuing={autoContinueMessageId === displayMessage.id}
+                />
               )}
               {!isStreamingMessage &&
                 (() => {

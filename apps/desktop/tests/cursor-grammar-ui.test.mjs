@@ -141,6 +141,13 @@ const messageMetaCopy = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageStatusBadges = await readFile(
+  new URL("../src/components/MessageStatusBadges.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageActivity = await readFile(
   new URL("../src/components/MessageActivity.tsx", import.meta.url),
   "utf8",
@@ -913,6 +920,18 @@ test("ChatView delegates message metadata copy to MessageMetaCopy", () => {
   assert.match(messageMetaCopy, /MemoryUsagePopover/);
   assert.match(messageMetaCopy, /formatChatDuration/);
   assert.match(messageMetaCopy, /visibleMessageMetadata/);
+});
+
+test("ChatView delegates post-message status badges to MessageStatusBadges", () => {
+  assert.match(chatView, /from "\.\/MessageStatusBadges";/);
+  assert.match(chatView, /<MessageStatusBadges/);
+  assert.doesNotMatch(chatView, /className="message-incomplete-note"/);
+  assert.doesNotMatch(chatView, /className="auto-continue-status"/);
+  assert.match(messageStatusBadges, /export function MessageStatusBadges/);
+  assert.match(messageStatusBadges, /className="message-incomplete-note"/);
+  assert.match(messageStatusBadges, /className="auto-continue-status"/);
+  assert.match(messageStatusBadges, /chat\.responseLikelyInterrupted/);
+  assert.match(messageStatusBadges, /chat\.autoCompleting/);
 });
 
 test("ChatView delegates message activity rendering to MessageActivity", () => {
