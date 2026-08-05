@@ -71,6 +71,13 @@ const chatViewTypes = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatConversationScroll = await readFile(
+  new URL("../src/components/useChatConversationScroll.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const appWorkspace = await readFile(
   new URL("../src/components/AppWorkspace.tsx", import.meta.url),
@@ -1800,6 +1807,19 @@ test("ChatView delegates transcript surface rendering to ChatTranscript", () => 
   assert.match(chatTranscript, /className="thread-scroll"/);
   assert.match(chatTranscript, /className="thread-message-list"/);
   assert.match(chatTranscript, /className="chat-jump-bottom"/);
+});
+
+test("ChatView delegates conversation scroll ownership to useChatConversationScroll", () => {
+  assert.match(chatView, /from "\.\/useChatConversationScroll";/);
+  assert.match(chatView, /useChatConversationScroll\(\{\s*threadId:\s*thread\.threadId,/);
+  assert.match(chatView, /onJumpToBottom=\{jumpToBottom\}/);
+  assert.doesNotMatch(chatView, /const \[showJumpToBottom,\s*setShowJumpToBottom\]/);
+  assert.doesNotMatch(chatView, /streamingFrameRef\s*=\s*useRef/);
+  assert.doesNotMatch(chatView, /shouldStickToBottomRef\s*=\s*useRef/);
+  assert.match(chatConversationScroll, /export function useChatConversationScroll/);
+  assert.match(chatConversationScroll, /const \[showJumpToBottom,\s*setShowJumpToBottom\]/);
+  assert.match(chatConversationScroll, /scrollConversationToBottomIfPinned/);
+  assert.match(chatConversationScroll, /window\.addEventListener\("resize", handleResize\)/);
 });
 
 test("ChatView delegates resume marker persistence to chatResumeMarkers", () => {

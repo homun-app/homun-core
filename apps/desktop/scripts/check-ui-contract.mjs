@@ -1302,7 +1302,7 @@ assertContains("src/styles.css", ".thread-message-list", "chat transcript must s
 assertContains("src/styles.css", ".thread-message-row", "chat transcript rows must not be absolutely positioned");
 assertNotContains("src/components/ChatView.tsx", "useVirtualizer", "chat transcript must not use old Tauri-era virtualization in the base Electron path");
 assertNotContains("src/styles.css", ".virtual-message-row", "chat transcript must not use absolute virtual rows in the base Electron path");
-assertContains("src/components/ChatView.tsx", "streamingFrameRef", "chat streaming must throttle visible updates in Electron");
+assertContains("src/components/useChatConversationScroll.ts", "streamingFrameRef", "chat streaming must throttle visible updates in Electron");
 assertContains("src/components/ChatView.tsx", "setOptimisticMessages", "chat streaming must keep visible text in the React message state");
 assertContains("src/components/ChatMessageContent.tsx", "<AssistantMessageBody", "streaming answers must render through the normal message body component");
 assertContains("src/components/ChatView.tsx", "browser_budget_exceeded", "browser budget has an actionable Activity state");
@@ -1411,7 +1411,9 @@ assertContains("src/components/AssistantMessageBody.tsx", "{readable && <RichMes
 assertContains("src/components/RichMessage.tsx", "visibleMessageText(text)", "raw reasoning must be filtered before transcript rendering");
 assertNotContains("src/components/RichMessage.tsx", "ReasoningBlock", "raw reasoning must never render as transcript content");
 assertContains("src/components/AssistantMessageBody.tsx", "{planPropose && !streaming && onChoose && (", "actionable plan proposal cards must wait for a completed non-streaming message");
-assertContains("src/components/ChatView.tsx", "streamingUserPinnedRef", "chat must keep new streaming responses visible");
+assertContains("src/components/useChatConversationScroll.ts", "streamingUserPinnedRef", "chat must keep new streaming responses visible");
+assertContains("src/components/ChatView.tsx", "markStreamingPinnedFromCurrentPosition", "streaming must reuse the conversation scroll owner");
+assertNotContains("src/components/ChatView.tsx", "streamingUserPinnedRef", "ChatView must not own conversation scroll pinning");
 assertNotContains("src/components/ChatView.tsx", "STREAM_TYPEWRITER_INTERVAL_MS", "chat streaming must not use timer-based typewriter rendering");
 assertNotContains("src/components/ChatView.tsx", "streamingTextRef", "chat streaming must not bypass React with a manual DOM text node");
 

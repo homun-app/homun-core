@@ -123,6 +123,7 @@ import {
   latestPlanMarkdown,
   parsePlanSteps,
 } from "./ChatPayloadParsers";
+import { useChatConversationScroll } from "./useChatConversationScroll";
 import {
   projectWorkspaceSections,
 } from "../lib/workspaceIslandSections";
@@ -238,7 +239,6 @@ export function ChatView({
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[] | null>(null);
   const [streamHasVisibleText, setStreamHasVisibleText] = useState(false);
   const [autoContinueMessageId, setAutoContinueMessageId] = useState<string | null>(null);
-  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   // Bumped when the user asks for the activity list; the adaptive island opens that exact section.
   const [activityNonce, setActivityNonce] = useState(0);
   const [inspector, dispatchInspector] = useReducer(inspectorWorkspaceReducer,
@@ -274,11 +274,7 @@ export function ChatView({
   const titledThreadsRef = useRef<Set<string>>(new Set());
   const resumedThreadsRef = useRef<Set<string>>(new Set());
   const consumedAutoSubmitIdsRef = useRef<Set<string>>(new Set());
-  const conversationRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLElement>(null);
-  const shouldStickToBottomRef = useRef(true);
-  const streamingUserPinnedRef = useRef(false);
-  const streamingFrameRef = useRef<number | null>(null);
   const cancelStreamingRequestRef = useRef<(() => void) | null>(null);
   const cancelledStreamIdsRef = useRef<Set<string>>(new Set());
   // Tracks whether THIS ChatView instance is still mounted. The chat stream
@@ -374,6 +370,23 @@ export function ChatView({
     const base = optimisticMessages ?? messages;
     return base.filter((m) => !(m.role === "assistant" && m.id.endsWith("_ready")));
   }, [optimisticMessages, messages]);
+  const {
+    afterStreamingFramePaint,
+    cancelScheduledStreamingFrame,
+    clearStreamingFrame,
+    clearStreamingPin,
+    conversationRef,
+    forceStreamingPin,
+    jumpToBottom,
+    markStreamingPinnedFromCurrentPosition,
+    requestStreamingFrame,
+    scrollConversationToBottomIfPinned,
+    showJumpToBottom,
+  } = useChatConversationScroll({
+    threadId: thread.threadId,
+    threadMessages,
+    streamingAssistantId,
+  });
   // Transcript lookups, resolved ONCE per render instead of once per row. The
   // action bar asks "does this message have a user message before it?" and the
   // branch picker asks "is there a branch point on this node?" for every row of
@@ -785,45 +798,9 @@ export function ChatView({
     }),
     [computerSession],
   );
-  function scrollConversationToBottom(behavior: ScrollBehavior) {
-    const node = conversationRef.current;
-    if (!node) return;
-    node.scrollTo({ top: node.scrollHeight, behavior });
-  }
-
-  function conversationBottomDistance() {
-    const node = conversationRef.current;
-    if (!node) return 0;
-    return node.scrollHeight - node.scrollTop - node.clientHeight;
-  }
-
-  function shouldAutoScrollConversation() {
-    return streamingUserPinnedRef.current || shouldStickToBottomRef.current;
-  }
-
-  function scrollConversationToBottomIfPinned(behavior: ScrollBehavior) {
-    if (!shouldAutoScrollConversation()) return;
-    scrollConversationToBottom(behavior);
-  }
-
   function resetStreamingState(initialText = "") {
     setStreamHasVisibleText(Boolean(initialText));
     cancelScheduledStreamingFrame();
-  }
-
-  function cancelScheduledStreamingFrame() {
-    if (streamingFrameRef.current !== null) {
-      window.cancelAnimationFrame(streamingFrameRef.current);
-      streamingFrameRef.current = null;
-    }
-  }
-
-  // "instant", never "auto": per CSSOM-View, "auto" resolves to the element's computed
-  // scroll-behavior, so with a smooth scroller every rAF flush started an animation the
-  // next frame cancelled — the viewport trailed the text and rubber-banded for the whole
-  // answer. Same reasoning for every other non-user-initiated jump below.
-  function afterStreamingFramePaint() {
-    scrollConversationToBottomIfPinned("instant");
   }
 
   async function runComputerControl(
@@ -915,7 +892,7 @@ export function ChatView({
     let unlistenStream: (() => void) | undefined;
     let cancelledLocally = false;
     const flushStreamingMessage = () => {
-      streamingFrameRef.current = null;
+      clearStreamingFrame();
       setOptimisticMessages([
         ...promptMessages,
         {
@@ -927,8 +904,7 @@ export function ChatView({
       afterStreamingFramePaint();
     };
     const scheduleStreamingMessage = () => {
-      if (streamingFrameRef.current !== null) return;
-      streamingFrameRef.current = window.requestAnimationFrame(flushStreamingMessage);
+      requestStreamingFrame(flushStreamingMessage);
     };
     const debugStream = (stage: string, detail?: string) => {
       void coreBridge.debugChatStream(requestId, {
@@ -977,7 +953,7 @@ export function ChatView({
       setLivePlanMarkdown(null);
       setStreamingAssistantId(streamingMessage.id);
       notifyStreaming(true);
-      streamingUserPinnedRef.current = conversationBottomDistance() < 220;
+      markStreamingPinnedFromCurrentPosition();
       window.setTimeout(() => scrollConversationToBottomIfPinned("instant"), 0);
       cancelStreamingRequestRef.current = cancelStreamingRequest;
       // Record an active stream so a reload mid-answer can reattach (resume).
@@ -1186,7 +1162,7 @@ export function ChatView({
       cancelScheduledStreamingFrame();
       unlistenStream?.();
       if (!cancelledLocally) {
-        streamingUserPinnedRef.current = false;
+        clearStreamingPin();
         setStreamingAssistantId(null);
         resetStreamingState("");
         setLiveActivitySteps([]);
@@ -1301,7 +1277,7 @@ export function ChatView({
     let streamEventParts: ChatEventPart[] = [];
     let unlistenStream: (() => void) | undefined;
     const flushStreamingMessage = () => {
-      streamingFrameRef.current = null;
+      clearStreamingFrame();
       setOptimisticMessages([
         ...promptMessages,
         {
@@ -1313,8 +1289,7 @@ export function ChatView({
       afterStreamingFramePaint();
     };
     const scheduleStreamingMessage = () => {
-      if (streamingFrameRef.current !== null) return;
-      streamingFrameRef.current = window.requestAnimationFrame(flushStreamingMessage);
+      requestStreamingFrame(flushStreamingMessage);
     };
 
     setPromptSubmitting(true);
@@ -1322,7 +1297,7 @@ export function ChatView({
     resetStreamingState("");
     setStreamingAssistantId(streamingMessage.id);
     notifyStreaming(true);
-    streamingUserPinnedRef.current = true;
+    forceStreamingPin();
     setStreamStatus({
       requestId,
       phase: "thinking",
@@ -1408,7 +1383,7 @@ export function ChatView({
     } finally {
       cancelScheduledStreamingFrame();
       unlistenStream?.();
-      streamingUserPinnedRef.current = false;
+      clearStreamingPin();
       setStreamingAssistantId(null);
       resetStreamingState("");
       setStreamStatus((current) => (current?.requestId === requestId ? null : current));
@@ -1808,7 +1783,7 @@ export function ChatView({
     let streamEventParts: ChatEventPart[] = [];
     let unlistenStream: (() => void) | undefined;
     const flushStreamingMessage = () => {
-      streamingFrameRef.current = null;
+      clearStreamingFrame();
       setOptimisticMessages(
         baseMessages.map((item) =>
           item.id === message.id
@@ -1823,8 +1798,7 @@ export function ChatView({
       afterStreamingFramePaint();
     };
     const scheduleStreamingMessage = () => {
-      if (streamingFrameRef.current !== null) return;
-      streamingFrameRef.current = window.requestAnimationFrame(flushStreamingMessage);
+      requestStreamingFrame(flushStreamingMessage);
     };
     const cancelStreamingRequest = () => {
       cancelledStreamIdsRef.current.add(requestId);
@@ -1845,7 +1819,7 @@ export function ChatView({
     setStreamingAssistantId(message.id);
     notifyStreaming(true);
     resetStreamingState("");
-    streamingUserPinnedRef.current = conversationBottomDistance() < 220;
+    markStreamingPinnedFromCurrentPosition();
     window.setTimeout(() => scrollConversationToBottomIfPinned("instant"), 0);
     setStreamStatus({
       requestId,
@@ -1891,7 +1865,7 @@ export function ChatView({
     } finally {
       cancelScheduledStreamingFrame();
       unlistenStream?.();
-      streamingUserPinnedRef.current = false;
+      clearStreamingPin();
       setStreamingAssistantId(null);
       resetStreamingState("");
       setPromptSubmitting(false);
@@ -2133,7 +2107,7 @@ export function ChatView({
     let unlistenStream: (() => void) | undefined;
     let cancelledLocally = false;
     const flushStreamingMessage = () => {
-      streamingFrameRef.current = null;
+      clearStreamingFrame();
       setOptimisticMessages(
         baseMessages.map((item) =>
           item.id === message.id
@@ -2148,8 +2122,7 @@ export function ChatView({
       afterStreamingFramePaint();
     };
     const scheduleStreamingMessage = () => {
-      if (streamingFrameRef.current !== null) return;
-      streamingFrameRef.current = window.requestAnimationFrame(flushStreamingMessage);
+      requestStreamingFrame(flushStreamingMessage);
     };
     const cancelStreamingRequest = () => {
       cancelledLocally = true;
@@ -2162,7 +2135,7 @@ export function ChatView({
     setStreamingAssistantId(message.id);
     notifyStreaming(true);
     resetStreamingState(message.text);
-    streamingUserPinnedRef.current = conversationBottomDistance() < 220;
+    markStreamingPinnedFromCurrentPosition();
     window.setTimeout(() => scrollConversationToBottomIfPinned("instant"), 0);
     setStreamStatus({
       requestId,
@@ -2226,7 +2199,7 @@ export function ChatView({
     } finally {
       cancelScheduledStreamingFrame();
       unlistenStream?.();
-      streamingUserPinnedRef.current = false;
+      clearStreamingPin();
       setStreamingAssistantId(null);
       resetStreamingState("");
       setStreamStatus((current) =>
@@ -2302,14 +2275,6 @@ export function ChatView({
     };
   }, [computerSessionId]);
 
-  // Opening a thread lands at the bottom, it does not animate its way down: an animated
-  // first-paint scroll across a long transcript is exactly the sluggishness we're removing.
-  useEffect(() => {
-    shouldStickToBottomRef.current = true;
-    streamingUserPinnedRef.current = false;
-    window.setTimeout(() => scrollConversationToBottom("instant"), 0);
-  }, [thread.threadId]);
-
   useEffect(() => {
     let cancelled = false;
     const artifactId = computerSession.previewArtifactId;
@@ -2350,26 +2315,6 @@ export function ChatView({
       setActiveSurface(computerSession.activeSurface);
     }
   }, [activeSurface, computerSession.activeSurface, computerSession.surfaces]);
-
-  useEffect(() => {
-    const node = conversationRef.current;
-    if (!node) return undefined;
-    const scrollNode = node;
-
-    function updateStickToBottom() {
-      const bottomDistance = conversationBottomDistance();
-      shouldStickToBottomRef.current = bottomDistance < 140;
-      if (streamingUserPinnedRef.current && bottomDistance > 160) {
-        streamingUserPinnedRef.current = false;
-      }
-      // Show a "jump to latest" affordance once the user scrolls well away.
-      setShowJumpToBottom(bottomDistance > 260);
-    }
-
-    updateStickToBottom();
-    scrollNode.addEventListener("scroll", updateStickToBottom, { passive: true });
-    return () => scrollNode.removeEventListener("scroll", updateStickToBottom);
-  }, []);
 
   // Dynamic follow-up suggestions: once the latest assistant answer is complete,
   // ask the model for a few short next-questions (once per message).
@@ -2434,32 +2379,6 @@ export function ChatView({
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incomingBackgroundTurn, messages, promptSubmitting, streamingAssistantId, thread.threadId]);
-
-  useEffect(() => {
-    // A resize is a continuous gesture: re-pinning must track the drag frame by frame, so it
-    // is instant. While streaming the transcript grows every frame → instant for the same
-    // reason. Only the settled, non-streaming case (a committed message landing) glides.
-    const handleResize = () => scrollConversationToBottomIfPinned("instant");
-    const behavior: ScrollBehavior = streamingAssistantId ? "instant" : "smooth";
-
-    const frame = window.requestAnimationFrame(() =>
-      scrollConversationToBottomIfPinned(behavior),
-    );
-    const timeout = streamingAssistantId
-      ? undefined
-      : window.setTimeout(() => scrollConversationToBottomIfPinned("smooth"), 120);
-    window.addEventListener("resize", handleResize);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      if (timeout !== undefined) {
-        window.clearTimeout(timeout);
-      }
-      window.removeEventListener("resize", handleResize);
-    };
-  }, [
-    threadMessages,
-    streamingAssistantId,
-  ]);
 
   const lastAssistantEffectiveModel = useMemo(() => {
     const model = latestAssistantEffectiveModel(threadMessages);
@@ -2590,10 +2509,7 @@ export function ChatView({
         onApproveApprovel={onApproveApprovel}
         onRejectApprovel={onRejectApprovel}
         onResolveEffect={onResolveEffect}
-        onJumpToBottom={() => {
-          shouldStickToBottomRef.current = true;
-          scrollConversationToBottom("smooth");
-        }}
+        onJumpToBottom={jumpToBottom}
       />
 
       <ChatInspectorDock
