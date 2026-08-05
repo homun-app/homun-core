@@ -281,6 +281,13 @@ const chatResumeMarkers = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatEventParts = await readFile(
+  new URL("../src/lib/chatEventParts.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatViewMessages = await readFile(
   new URL("../src/lib/chatViewMessages.ts", import.meta.url),
   "utf8",
@@ -961,6 +968,22 @@ test("ChatView delegates resume marker persistence to chatResumeMarkers", () => 
   assert.match(chatResumeMarkers, /window\.localStorage\.setItem/);
   assert.match(chatResumeMarkers, /window\.localStorage\.getItem/);
   assert.match(chatResumeMarkers, /window\.localStorage\.removeItem/);
+});
+
+test("ChatView delegates chat event projection helpers to chatEventParts", () => {
+  assert.match(chatView, /from "\.\.\/lib\/chatEventParts";/);
+  assert.doesNotMatch(chatView, /function chatEventPartFromStream/);
+  assert.doesNotMatch(chatView, /function normalizeChatEventParts/);
+  assert.doesNotMatch(chatView, /function shouldDropStructuredMarkerDelta/);
+  assert.doesNotMatch(chatView, /function replayStatusFromProjection/);
+  assert.doesNotMatch(chatView, /function threadTailAwaitsUser/);
+  assert.doesNotMatch(chatView, /interface ActiveTurnProjection/);
+  assert.match(chatEventParts, /export function chatEventPartFromStream/);
+  assert.match(chatEventParts, /export function normalizeChatEventParts/);
+  assert.match(chatEventParts, /export function shouldDropStructuredMarkerDelta/);
+  assert.match(chatEventParts, /export function replayStatusFromProjection/);
+  assert.match(chatEventParts, /export function threadTailAwaitsUser/);
+  assert.match(chatEventParts, /export interface ActiveTurnProjection/);
 });
 
 test("InspectorView delegates operational plan preview rendering and parsing", () => {

@@ -43,7 +43,6 @@ import {
   type ActiveModelInfo,
   type ChatAttachmentInput,
   type CoreBranchPoint,
-  type CoreChatStreamEvent,
   type CoreComputerSessionSnapshot,
   type CoreUncertainEffectOutcome,
   type MemoryArtifactView,
@@ -77,7 +76,6 @@ import {
   createTurnReplayState,
   prepareHitlResumeMessages,
   type TurnReplayState,
-  type TurnReplayStatus,
 } from "../lib/turnReplayState";
 import { deriveTurnLifecycle } from "../lib/chat-runtime/lifecycle";
 import { deriveComposerMode } from "../lib/chat-runtime/composerMode";
@@ -136,6 +134,14 @@ import {
   writeResumeMarker,
   type ResumeMarker,
 } from "../lib/chatResumeMarkers";
+import {
+  chatEventPartFromStream,
+  normalizeChatEventParts,
+  replayStatusFromProjection,
+  shouldDropStructuredMarkerDelta,
+  threadTailAwaitsUser,
+  type ActiveTurnProjection,
+} from "../lib/chatEventParts";
 // Persisted artifact rows need a storage-aware projection before previewing.
 // @ts-expect-error JavaScript sibling intentionally has no declaration file.
 import * as artifactProjection from "../lib/artifactProjection.mjs";
@@ -143,7 +149,6 @@ import * as artifactProjection from "../lib/artifactProjection.mjs";
 // them without a build step, which is why they carry no type declaration.
 // @ts-expect-error JavaScript sibling intentionally has no declaration file.
 import * as messageIndex from "../lib/messageIndex.mjs";
-import { STRUCTURED_MARKER_DELTA_RE } from "../lib/markers";
 import {
   parseArtifacts,
   artifactExt,
@@ -179,7 +184,6 @@ import { AssistantMessageBody } from "./AssistantMessageBody";
 import {
   latestActivitySteps,
   latestPlanMarkdown,
-  parseChoicePromptPayload,
   parsePlanSteps,
 } from "./ChatPayloadParsers";
 import {
@@ -284,131 +288,6 @@ interface ReplyContext {
 }
 
 type MessageFeedback = NonNullable<ChatMessage["feedback"]>;
-
-function chatEventPartFromStream(event: CoreChatStreamEvent): ChatEventPart | null {
-  switch (event.type) {
-    case "reasoning":
-      return null;
-    case "activity":
-      return { type: "activity", text: event.text };
-    case "plan_update":
-      return { type: "plan_update", markdown: event.markdown };
-    case "choice_prompt":
-    case "vault_propose":
-    case "vault_reveal":
-    case "payment_approval":
-    case "tool_result":
-    case "recall":
-    case "diff":
-      return { type: event.type, payload: event.payload } as ChatEventPart;
-    default:
-      return null;
-  }
-}
-
-function normalizeChatEventParts(parts: unknown[] | undefined): ChatEventPart[] {
-  if (!Array.isArray(parts)) return [];
-  return parts.flatMap((part): ChatEventPart[] => {
-    if (!part || typeof part !== "object") return [];
-    const item = part as Record<string, unknown>;
-    switch (item.type) {
-      case "reasoning":
-        return [];
-      case "activity":
-        return typeof item.text === "string" ? [{ type: item.type, text: item.text }] : [];
-      case "plan_update":
-        return typeof item.markdown === "string"
-          ? [{ type: "plan_update", markdown: item.markdown }]
-          : [];
-      case "choice_prompt":
-      case "vault_propose":
-      case "vault_reveal":
-      case "payment_approval":
-      case "tool_result":
-      case "recall":
-      case "diff":
-        return [{ type: item.type, payload: item.payload } as ChatEventPart];
-      case "actionable_card":
-        // Gateway persists Free HITL as actionable_card; map Choice shapes to choice_prompt
-        // so ChoicesCard still renders when the marker was stripped from message text.
-        // Clarify stays machine-owned (prose is the UI); awaiting-user is detected from
-        // the marker text / raw actionable_card kind, not a second card widget.
-        if (item.kind === "CHOICES" && item.payload !== undefined) {
-          const choices = parseChoicePromptPayload(item.payload);
-          return choices ? [{ type: "choice_prompt", payload: choices }] : [];
-        }
-        if (
-          item.kind === "AWAIT_USER" &&
-          item.payload &&
-          typeof item.payload === "object" &&
-          (item.payload as { kind?: string }).kind === "choice"
-        ) {
-          const { kind: _k, ...choicePayload } = item.payload as Record<string, unknown>;
-          const choices = parseChoicePromptPayload(choicePayload);
-          return choices ? [{ type: "choice_prompt", payload: choices }] : [];
-        }
-        return [];
-      default:
-        return [];
-    }
-  });
-}
-
-function shouldDropStructuredMarkerDelta(delta: string) {
-  return STRUCTURED_MARKER_DELTA_RE.test(delta.trim());
-}
-
-// UI-local until the durable activity projection lands in the generated client type.
-// Missing backend fields stay absent; the view never invents retry/backoff metadata.
-interface ActiveTurnProjection {
-  turn_id: string;
-  last_event_seq: number;
-  status: string;
-  attempt: number;
-  max_attempts: number;
-  not_before: number | null;
-  blocked_reason: string | null;
-  updated_at: number;
-}
-
-function replayStatusFromProjection(status: string): TurnReplayStatus {
-  if (status === "completed") return "completed";
-  if (status === "failed") return "failed";
-  if (status === "cancelled") return "cancelled";
-  if (["retrying", "retry_waiting"].includes(status)) return "retrying";
-  return "running";
-}
-
-/** True when the chat frontier awaits the user (Free HITL), not a later user reply. */
-function threadTailAwaitsUser(messages: ChatMessage[]): boolean {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message.role === "user") return false;
-    if (message.role !== "assistant") continue;
-    if (
-      message.text.includes("‹‹CHOICES››") ||
-      message.text.includes("‹‹CLARIFY››") ||
-      message.text.includes("‹‹AWAIT_USER››")
-    ) {
-      return true;
-    }
-    const rawParts = message.eventParts as Array<Record<string, unknown>> | undefined;
-    if (
-      rawParts?.some((part) => {
-        if (part.type !== "actionable_card") return false;
-        if (part.kind === "CHOICES" || part.kind === "CLARIFY") return true;
-        if (part.kind !== "AWAIT_USER") return false;
-        const payload = part.payload as { kind?: string } | undefined;
-        return payload?.kind === "choice" || payload?.kind === "clarify";
-      })
-    ) {
-      return true;
-    }
-    const parts = normalizeChatEventParts(rawParts as unknown[] | undefined);
-    return parts.some((part) => part.type === "choice_prompt");
-  }
-  return false;
-}
 
 interface ChatTurnState {
   phase: string;
