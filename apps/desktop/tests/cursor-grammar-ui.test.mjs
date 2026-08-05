@@ -246,6 +246,13 @@ const goalsPanel = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatViewMessages = await readFile(
+  new URL("../src/lib/chatViewMessages.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -816,6 +823,20 @@ test("ChatView delegates the goals workbench panel to GoalsPanel", () => {
   assert.match(goalsPanel, /function dedupeGoalDrafts/);
   assert.match(goalsPanel, /coreBridge\.addGoal/);
   assert.match(goalsPanel, /coreBridge\.promoteGoals/);
+});
+
+test("ChatView delegates message and formatting helpers to chatViewMessages", () => {
+  assert.match(chatView, /from "\.\.\/lib\/chatViewMessages";/);
+  assert.doesNotMatch(chatView, /function describeBridgeError\(/);
+  assert.doesNotMatch(chatView, /function withChatMetrics\(/);
+  assert.doesNotMatch(chatView, /function formatChatDuration\(/);
+  assert.doesNotMatch(chatView, /function messageContentKind\(/);
+  assert.doesNotMatch(chatView, /function fileLocalPath\(/);
+  assert.match(chatViewMessages, /export function describeBridgeError/);
+  assert.match(chatViewMessages, /export function withChatMetrics/);
+  assert.match(chatViewMessages, /export function chatMessageFromAssistantResult/);
+  assert.match(chatViewMessages, /export function fileLocalPath/);
+  assert.match(chatViewMessages, /fileLocalPathFromBridge/);
 });
 
 test("ChatView delegates operational plan preview rendering and parsing", () => {

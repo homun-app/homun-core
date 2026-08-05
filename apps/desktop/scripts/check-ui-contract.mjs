@@ -1014,7 +1014,8 @@ assertNotContains("src/App.tsx", "pendingEventThreadIdsRef", "background event r
 assertContains("src/App.tsx", "refreshThreadInBackground", "background events must refresh their own durable cache");
 assertContains("src/App.tsx", "event.type === \"thread.turn_started\"", "desktop client must handle visible turn start events");
 assertContains("src/lib/coreBridge.ts", "assistant_message_id?: string", "app event contract must expose persisted assistant message ids");
-assertContains("src/components/ChatView.tsx", "eventParts: normalizeChatEventParts(result.assistant_message.event_parts)", "completed chat turns must preserve structured event parts from the gateway result");
+assertContains("src/components/ChatView.tsx", "normalizeChatEventParts(result.assistant_message.event_parts)", "completed chat turns must normalize structured event parts from the gateway result");
+assertContains("src/lib/chatViewMessages.ts", "eventParts,", "completed chat turns must preserve structured event parts in the assistant message builder");
 assertContains("src/lib/chatApi.ts", "export async function cancelTurn(", "chat cancellation must call the broker cancel_turn endpoint (DELETE /turns/{id})");
 assertContains("src/lib/coreBridge.ts", "await cancelTurn(`turn_${requestId}`)", "Stop must cancel the running turn on the broker by its derived turn id, not a client-side socket close");
 assertContains("src/plugins/registry.tsx", "navSection?: \"work\" | \"create\" | \"workspace\" | \"more\"", "plugin manifest must declare sidebar placement by operational role");
