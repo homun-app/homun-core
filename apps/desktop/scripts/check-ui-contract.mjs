@@ -1026,7 +1026,7 @@ assertContains("src/components/Shell.tsx", "{drawerOpen && !isSettings && (", "m
 assertContains("src/components/Sidebar.tsx", "drawer-profile", "open drawer footer must show the user profile + settings");
 assertContains("src/components/ComposerShell.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
 assertContains("src/components/ComputerDetailPanel.tsx", "export function ComputerDetailPanel", "active task must expose local computer activity through the inspector");
-assertContains("src/components/ChatView.tsx", "timelineCollapsed", "computer timeline must keep collapsed state");
+assertNotContains("src/components/ChatView.tsx", "timelineCollapsed", "retired computer timeline state must stay out of ChatView");
 assertContains("src/components/ChatView.tsx", 'view.key === "computer"', "local computer activity must remain discoverable as an inspector view");
 assertContains("src/components/SettingsView.tsx", "secret_value: manualSecretValue.trim()", "Vault manual entry must send raw secret material through the encrypted gateway path");
 assertContains("src/components/SettingsView.tsx", "pin: manualSecretPin", "Vault manual entry must require the local PIN when saving secret material");

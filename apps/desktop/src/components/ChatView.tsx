@@ -364,7 +364,6 @@ export function ChatView({
   // re-fired `thread.turn_started` or a messages re-render never double-attaches the same turn.
   const handledBackgroundTurnsRef = useRef<Set<string>>(new Set());
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
-  const [chatExported, setChatExported] = useState(false);
   const [replyContext, setReplyContext] = useState<ReplyContext | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
@@ -373,8 +372,6 @@ export function ChatView({
   // ‹ n/m › switcher. Replaces the old ephemeral, reload-lossy "variants".
   const [branches, setBranches] = useState<CoreBranchPoint[]>([]);
   const [branchBusy, setBranchBusy] = useState(false);
-  const [modelOpen, setModelOpen] = useState(false);
-  const [timelineCollapsed, setTimelineCollapsed] = useState(true);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[] | null>(null);
   const [streamHasVisibleText, setStreamHasVisibleText] = useState(false);
   const [autoContinueMessageId, setAutoContinueMessageId] = useState<string | null>(null);
@@ -1317,7 +1314,6 @@ export function ChatView({
         return;
       }
       setComputerSession(mapCoreComputerSession(result.computer_session));
-      setTimelineCollapsed(!result.plan);
       // Only gateway evidence may identify the model that produced this turn.
       // The requested override remains next-turn input, not execution provenance.
       const turnModel = effectiveModelFromGateway(result.effective_model) ?? undefined;
@@ -1957,11 +1953,7 @@ export function ChatView({
       const who = m.role === "user" ? "Utente" : m.role === "assistant" ? "Homun" : m.role;
       lines.push(`## ${who}`, "", strip(m.text ?? "") || "_(vuoto)_", "");
     }
-    const ok = await copyText(lines.join("\n"));
-    if (ok) {
-      setChatExported(true);
-      window.setTimeout(() => setChatExported(false), 1_800);
-    }
+    await copyText(lines.join("\n"));
   }
 
   // Capture the whole app window to a PNG and reveal it in Finder — the user can then
@@ -2117,7 +2109,6 @@ export function ChatView({
       if (cancelledStreamIdsRef.current.has(requestId)) return;
       cancelScheduledStreamingFrame();
       setComputerSession(mapCoreComputerSession(result.computer_session));
-      setTimelineCollapsed(!result.plan);
       // The new answer is now a sibling in the tree; resync the real path + switcher.
       await refreshAfterChatSubmit();
       setOptimisticMessages(null);
@@ -2458,7 +2449,6 @@ export function ChatView({
         item.id === message.id ? updatedMessage : item,
       );
       setComputerSession(mapCoreComputerSession(result.computer_session));
-      setTimelineCollapsed(!result.plan);
       setOptimisticMessages(nextMessages);
       onMessagesChange(nextMessages, { advanceActivity: true });
       return nextMessages;

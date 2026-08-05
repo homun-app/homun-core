@@ -1028,6 +1028,14 @@ test("ChatView does not retain retired topbar status props", () => {
   assert.doesNotMatch(app, /task=\{selectedTask\}/);
 });
 
+test("ChatView does not retain retired unused UI flags", () => {
+  assert.doesNotMatch(chatView, /modelOpen/);
+  assert.doesNotMatch(chatView, /timelineCollapsed/);
+  assert.doesNotMatch(chatView, /setTimelineCollapsed/);
+  assert.doesNotMatch(chatView, /chatExported/);
+  assert.doesNotMatch(chatView, /setChatExported/);
+});
+
 test("ChatView delegates workspace island section bodies", () => {
   assert.match(chatView, /from "\.\/WorkspaceIslandSections";/);
   assert.match(chatView, /<WorkspaceIslandSections/);
