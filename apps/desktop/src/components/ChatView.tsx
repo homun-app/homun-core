@@ -4229,68 +4229,6 @@ function planPreviewItems(
     .slice(0, 5);
 }
 
-function InlineTimeline({
-  collapsed,
-  onToggle,
-  session,
-}: {
-  collapsed: boolean;
-  onToggle: () => void;
-  session: ComputerSession;
-}) {
-  const { t } = useTranslation();
-  if (session.timeline.length === 0) {
-    return null;
-  }
-
-  const visibleTimeline = collapsed ? session.timeline.slice(-2) : session.timeline;
-
-  return (
-    <div
-      className={`inline-timeline ${collapsed ? "timeline-collapsed" : ""}`}
-      aria-label={t("chat.activityProgress")}
-    >
-      <div className="timeline-header">
-        <div>
-          <strong>{t("chat.computerActivity")}</strong>
-          <span>
-            {session.progressCurrent} / {session.progressTotal}
-          </span>
-        </div>
-        <button
-          className="timeline-toggle"
-          type="button"
-          aria-expanded={!collapsed}
-          onClick={onToggle}
-        >
-          <span>{collapsed ? t("chat.showDetails") : t("chat.hide")}</span>
-          <ChevronDown
-            className={collapsed ? "" : "timeline-toggle-icon-open"}
-            size={15}
-          />
-        </button>
-      </div>
-      {visibleTimeline.map((item) => {
-        const Icon = surfaceIcons[item.surface];
-        return (
-          <div className={`timeline-step ${item.status}`} key={item.id}>
-            <span className="timeline-state">
-              {item.status === "done" ? <Check size={12} /> : <Clock3 size={12} />}
-            </span>
-            <div>
-              <strong>{item.title}</strong>
-              <small>
-                <Icon size={13} />
-                {item.detail}
-              </small>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 /** A pending write action the model proposed, carried in the message text.
  *  `kind` routes execution to the right backend: Composio vs an MCP server tool. */
 interface ComposioPendingAction {

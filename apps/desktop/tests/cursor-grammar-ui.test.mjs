@@ -569,6 +569,10 @@ test("ChatView delegates empty-thread hero rendering to ChatEmptyHero", () => {
   assert.match(chatEmptyHero, /chat-hero-prompt/);
 });
 
+test("ChatView does not keep the retired unused inline computer timeline component", () => {
+  assert.doesNotMatch(chatView, /function InlineTimeline\(/);
+});
+
 test("composer.css exclusively owns the compact prompt geometry", () => {
   assert.match(
     main,
