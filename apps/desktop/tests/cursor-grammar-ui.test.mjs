@@ -134,6 +134,13 @@ const messageEditBox = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageMetaCopy = await readFile(
+  new URL("../src/components/MessageMetaCopy.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageActivity = await readFile(
   new URL("../src/components/MessageActivity.tsx", import.meta.url),
   "utf8",
@@ -893,6 +900,19 @@ test("ChatView delegates inline message editing to MessageEditBox", () => {
   assert.match(messageEditBox, /className="message-edit"/);
   assert.match(messageEditBox, /event\.key === "Enter" && \(event\.metaKey \|\| event\.ctrlKey\)/);
   assert.match(messageEditBox, /event\.key === "Escape"/);
+});
+
+test("ChatView delegates message metadata copy to MessageMetaCopy", () => {
+  assert.match(chatView, /from "\.\/MessageMetaCopy";/);
+  assert.match(chatView, /<MessageMetaCopy/);
+  assert.doesNotMatch(chatView, /className="chat-message-meta-copy"/);
+  assert.doesNotMatch(chatView, /MemoryUsagePopover/);
+  assert.doesNotMatch(chatView, /formatChatDuration/);
+  assert.match(messageMetaCopy, /export function MessageMetaCopy/);
+  assert.match(messageMetaCopy, /className="chat-message-meta-copy"/);
+  assert.match(messageMetaCopy, /MemoryUsagePopover/);
+  assert.match(messageMetaCopy, /formatChatDuration/);
+  assert.match(messageMetaCopy, /visibleMessageMetadata/);
 });
 
 test("ChatView delegates message activity rendering to MessageActivity", () => {

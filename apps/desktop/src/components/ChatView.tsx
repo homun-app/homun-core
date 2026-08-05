@@ -90,8 +90,6 @@ import {
   currentTimestampSeconds,
   describeBridgeError,
   fileLocalPath,
-  formatChatDuration,
-  formatMessageTimestamp,
   isLikelyIncompleteMessage,
   isPlaceholderThreadTitle,
   isUserVisibleComputerEvent,
@@ -99,7 +97,6 @@ import {
   messageRoleLabel,
   shortModelName,
   toMessageAttachment,
-  visibleMessageMetadata,
   withChatMetrics,
   type MessageContentKind,
 } from "../lib/chatViewMessages";
@@ -143,7 +140,6 @@ import {
   isRestorableInspectorTab,
   type IslandSource,
 } from "./InspectorView";
-import { MemoryUsagePopover } from "./MemoryUsagePopover";
 import { ComposerContainer } from "./ComposerContainer";
 import { ChatEmptyHero } from "./ChatEmptyHero";
 import { ChatTopbar } from "./ChatTopbar";
@@ -152,6 +148,7 @@ import { ChatFollowUps } from "./ChatFollowUps";
 import { MessageAttachmentList } from "./MessageAttachmentList";
 import { MessageActionBar } from "./MessageActionBar";
 import { MessageEditBox } from "./MessageEditBox";
+import { MessageMetaCopy } from "./MessageMetaCopy";
 import { MessageActivity } from "./MessageActivity";
 import { AssistantThinkingState, type ChatStreamStatus } from "./AssistantThinkingState";
 import { InlineUncertainEffectPanel } from "./InlineUncertainEffectPanel";
@@ -2919,55 +2916,11 @@ export function ChatView({
                 <MessageAttachmentList attachments={displayMessage.attachments} />
               )}
               <footer className="chat-message-meta">
-                <div className="chat-message-meta-copy">
-                  <span>{formatMessageTimestamp(displayMessage.timestamp)}</span>
-                  {displayMessage.model && <span>{displayMessage.model}</span>}
-                {displayMessage.role === "assistant" ? (
-                  <>
-                    {/* Model provenance comes from the message-scoped effective model.
-                        Duration+tokens are robust: the cloud path
-                        leaves elapsed_seconds=0 but total_elapsed_seconds is the real
-                        wall-clock; tokens are estimated from text when not provided. */}
-                    {(() => {
-                      const m = displayMessage.metrics;
-                      if (!m) return null;
-                      const secs =
-                        m.elapsedSeconds > 0 ? m.elapsedSeconds : m.totalElapsedSeconds ?? 0;
-                      if (secs <= 0) return null;
-                      const tokens =
-                        m.generationTokens > 0
-                          ? m.generationTokens
-                          : Math.max(1, Math.round((displayMessage.text?.length ?? 0) / 4));
-                      return (
-                        <span>
-                          {formatChatDuration(secs)} · {tokens} token
-                        </span>
-                      );
-                    })()}
-                    {/* The button exposes message-scoped provenance on demand; recalled
-                        text is never copied into a hover tooltip. */}
-                    {(() => {
-                      const recallHits =
-                        displayMessage.eventParts?.flatMap((part) =>
-                          part.type === "recall" ? part.payload.hits : [],
-                        ) ?? [];
-                      if (recallHits.length === 0) return null;
-                      return (
-                        <MemoryUsagePopover
-                          hits={recallHits}
-                          buttonLabel={t("chat.memoryBadge", { count: recallHits.length })}
-                          consumerWorkspaceId={thread.workspaceId}
-                          onPublicationApproved={refreshAfterChatSubmit}
-                        />
-                      );
-                    })()}
-                  </>
-                ) : (
-                  visibleMessageMetadata(displayMessage.metadata) && (
-                    <span>{visibleMessageMetadata(displayMessage.metadata)}</span>
-                  )
-                )}
-                </div>
+                <MessageMetaCopy
+                  message={displayMessage}
+                  consumerWorkspaceId={thread.workspaceId}
+                  onMemoryPublicationApproved={refreshAfterChatSubmit}
+                />
                 <div className="chat-message-actions-slot">
                   {displayMessage.text && !isStreamingMessage && (
                     <MessageActionBar
