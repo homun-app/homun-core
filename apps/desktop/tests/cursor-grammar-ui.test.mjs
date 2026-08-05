@@ -99,6 +99,13 @@ const chatTopbar = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatTranscript = await readFile(
+  new URL("../src/components/ChatTranscript.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageAttachmentList = await readFile(
   new URL("../src/components/MessageAttachmentList.tsx", import.meta.url),
   "utf8",
@@ -567,7 +574,7 @@ test("sidebar styles load after shared menus and own sidebar selectors", () => {
 });
 
 test("the transcript uses the flat role and operational message grammar", () => {
-  const transcriptMarkup = `${chatView}\n${chatMessageRow}\n${assistantMessageBody}\n${messageActionFooter}`;
+  const transcriptMarkup = `${chatTranscript}\n${chatMessageRow}\n${assistantMessageBody}\n${messageActionFooter}`;
   for (const className of [
     "chat-message-agent",
     "chat-message-user-band",
@@ -876,8 +883,9 @@ test("InspectorView delegates local computer inspector rendering to ComputerDeta
 });
 
 test("ChatView delegates empty-thread hero rendering to ChatEmptyHero", () => {
-  assert.match(chatView, /import \{ ChatEmptyHero \} from "\.\/ChatEmptyHero";/);
-  assert.match(chatView, /<ChatEmptyHero[\s\S]*?sessionSeed=\{CHAT_VIEW_SESSION_ID\}/);
+  assert.doesNotMatch(chatView, /import \{ ChatEmptyHero \} from "\.\/ChatEmptyHero";/);
+  assert.match(chatTranscript, /import \{ ChatEmptyHero \} from "\.\/ChatEmptyHero";/);
+  assert.match(chatTranscript, /<ChatEmptyHero[\s\S]*?sessionSeed=\{sessionSeed\}/);
   assert.doesNotMatch(chatView, /function ChatEmptyHero\(/);
   assert.match(chatEmptyHero, /export function ChatEmptyHero/);
   assert.match(chatEmptyHero, /selectGreetingKey/);
@@ -1006,8 +1014,10 @@ test("ChatView delegates system message headers to ChatSystemMessageHeader", () 
 });
 
 test("ChatView delegates pending assistant rendering to PendingAssistantMessage", () => {
-  assert.match(chatView, /from "\.\/PendingAssistantMessage";/);
-  assert.match(chatView, /<PendingAssistantMessage/);
+  assert.doesNotMatch(chatView, /from "\.\/PendingAssistantMessage";/);
+  assert.doesNotMatch(chatView, /<PendingAssistantMessage/);
+  assert.match(chatTranscript, /from "\.\/PendingAssistantMessage";/);
+  assert.match(chatTranscript, /<PendingAssistantMessage/);
   assert.doesNotMatch(chatView, /className="message chat-message-agent pending"/);
   assert.doesNotMatch(chatView, /Sparkles/);
   assert.match(pendingAssistantMessage, /export function PendingAssistantMessage/);
@@ -1183,14 +1193,29 @@ test("ChatView delegates post-content message controls to ChatMessageAfterConten
 });
 
 test("ChatView delegates each transcript row to ChatMessageRow", () => {
-  assert.match(chatView, /from "\.\/ChatMessageRow";/);
-  assert.match(chatView, /<ChatMessageRow[\s\S]*?onSaveAsGoal=\{saveMessageAsGoal\}/);
+  assert.doesNotMatch(chatView, /from "\.\/ChatMessageRow";/);
+  assert.doesNotMatch(chatView, /<ChatMessageRow/);
+  assert.match(chatTranscript, /from "\.\/ChatMessageRow";/);
+  assert.match(chatTranscript, /<ChatMessageRow[\s\S]*?onSaveAsGoal=\{onSaveAsGoal\}/);
   assert.doesNotMatch(chatView, /messageSurfaceClass/);
   assert.doesNotMatch(chatView, /className="thread-message-row"/);
   assert.doesNotMatch(chatView, /isLikelyIncompleteMessage\(displayMessage\)/);
   assert.match(chatMessageRow, /export function ChatMessageRow/);
   assert.match(chatMessageRow, /className="thread-message-row"/);
   assert.match(chatMessageRow, /isLikelyIncompleteMessage\(message\)/);
+});
+
+test("ChatView delegates transcript surface rendering to ChatTranscript", () => {
+  assert.match(chatView, /from "\.\/ChatTranscript";/);
+  assert.match(chatView, /<ChatTranscript[\s\S]*?conversationRef=\{conversationRef\}/);
+  assert.match(chatView, /<ChatTranscript[\s\S]*?sessionSeed=\{CHAT_VIEW_SESSION_ID\}/);
+  assert.doesNotMatch(chatView, /className="thread-scroll"/);
+  assert.doesNotMatch(chatView, /className="thread-message-list"/);
+  assert.doesNotMatch(chatView, /className="chat-jump-bottom"/);
+  assert.match(chatTranscript, /export function ChatTranscript/);
+  assert.match(chatTranscript, /className="thread-scroll"/);
+  assert.match(chatTranscript, /className="thread-message-list"/);
+  assert.match(chatTranscript, /className="chat-jump-bottom"/);
 });
 
 test("ChatView delegates resume marker persistence to chatResumeMarkers", () => {
@@ -1358,8 +1383,10 @@ test("ChatView delegates Composio reconnect rendering to MessageComposioReconnec
 });
 
 test("ChatView delegates uncertain effect verification to InlineUncertainEffectPanel", () => {
-  assert.match(chatView, /from "\.\/InlineUncertainEffectPanel";/);
-  assert.match(chatView, /<InlineUncertainEffectPanel\s+effects=\{uncertainEffects\}/);
+  assert.doesNotMatch(chatView, /from "\.\/InlineUncertainEffectPanel";/);
+  assert.doesNotMatch(chatView, /<InlineUncertainEffectPanel/);
+  assert.match(chatTranscript, /from "\.\/InlineUncertainEffectPanel";/);
+  assert.match(chatTranscript, /<InlineUncertainEffectPanel\s+effects=\{uncertainEffects\}/);
   assert.doesNotMatch(chatView, /function InlineUncertainEffectPanel\(/);
   assert.doesNotMatch(chatView, /function effectFamilyLabel\(/);
   assert.doesNotMatch(chatView, /function formatEffectTime\(/);
@@ -1370,8 +1397,10 @@ test("ChatView delegates uncertain effect verification to InlineUncertainEffectP
 });
 
 test("ChatView delegates inline approvals to InlineApprovelPanel", () => {
-  assert.match(chatView, /from "\.\/InlineApprovelPanel";/);
-  assert.match(chatView, /<InlineApprovelPanel[\s\S]*approvals=\{activeApprovels\}/);
+  assert.doesNotMatch(chatView, /from "\.\/InlineApprovelPanel";/);
+  assert.doesNotMatch(chatView, /<InlineApprovelPanel/);
+  assert.match(chatTranscript, /from "\.\/InlineApprovelPanel";/);
+  assert.match(chatTranscript, /<InlineApprovelPanel[\s\S]*approvals=\{activeApprovels\}/);
   assert.doesNotMatch(chatView, /function InlineApprovelPanel\(/);
   assert.doesNotMatch(chatView, /const surfaceIcons:/);
   assert.match(inlineApprovelPanel, /export function InlineApprovelPanel/);

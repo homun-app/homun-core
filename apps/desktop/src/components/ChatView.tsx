@@ -1,7 +1,4 @@
-import {
-  ChevronDown,
-  Loader2,
-} from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRuntimeContext } from "../lib/useRuntimeContext";
@@ -137,13 +134,9 @@ import {
   type IslandSource,
 } from "./InspectorView";
 import { ComposerContainer } from "./ComposerContainer";
-import { ChatEmptyHero } from "./ChatEmptyHero";
 import { ChatTopbar } from "./ChatTopbar";
-import { ChatMessageRow } from "./ChatMessageRow";
-import { PendingAssistantMessage } from "./PendingAssistantMessage";
+import { ChatTranscript } from "./ChatTranscript";
 import { type ChatStreamStatus } from "./AssistantThinkingState";
-import { InlineUncertainEffectPanel } from "./InlineUncertainEffectPanel";
-import { InlineApprovelPanel } from "./InlineApprovelPanel";
 import { WorkspaceIslandSections } from "./WorkspaceIslandSections";
 import {
   latestActivitySteps,
@@ -2765,100 +2758,67 @@ export function ChatView({
         <ChatComputerPanel threadId={thread.threadId} onLiveChange={setComputerLiveStatus} />
       </div>
 
-      <div className="thread-scroll" aria-label={t("chat.activeThread")} ref={conversationRef}>
-        <div className="thread-content">
-          <div className="thread-message-list">
-          {threadMessages.length === 0 && !promptSubmitting && (
-            <ChatEmptyHero
-              thread={thread}
-              sessionSeed={CHAT_VIEW_SESSION_ID}
-              onOpenUsageSettings={onOpenUsageSettings}
-              onUseForTask={(providerId, modelId) => setUsageSuggestedModel({
-                value: `${providerId}::${modelId}`,
-                nonce: Date.now(),
-              })}
-            />
-          )}
-          {threadMessages.map((message) => (
-            <ChatMessageRow
-              key={message.id}
-              message={message}
-              streamingAssistantId={streamingAssistantId}
-              editingMessageId={editingMessageId}
-              editingText={editingText}
-              streamHasVisibleText={streamHasVisibleText}
-              hasActiveTurnState={Boolean(chatTurnState)}
-              streamStatus={streamStatus}
-              threadId={thread.threadId}
-              cancelLabel="Cancel"
-              saveLabel={t("chat.saveAndSend")}
-              autoContinueMessageId={autoContinueMessageId}
-              branchIndex={branchIndex}
-              branchBusy={branchBusy}
-              followUps={followUps}
-              followUpsFor={followUpsFor}
-              copiedMessageId={copiedMessageId}
-              previousUserMessageIndex={previousUserMessageIndex}
-              threadIsProject={threadIsProject}
-              consumerWorkspaceId={thread.workspaceId}
-              onEditingTextChange={setEditingText}
-              onCancelEdit={cancelEditMessage}
-              onSaveEdit={saveEditedMessage}
-              onOpenArtifact={openArtifactTab}
-              onSubmitChoiceAnswer={submitChoiceAnswer}
-              onHandleProactiveAnswer={handleProactiveAnswer}
-              onSwitchBranch={switchBranch}
-              onRenameBranch={renameBranch}
-              onSelectFollowUp={selectFollowUp}
-              onCopy={copyMessageText}
-              onContinue={continueAssistantResponse}
-              onExpand={expandAssistantResponse}
-              onAskAboutAssistantResponse={askAboutAssistantResponse}
-              onFeedback={setMessageFeedback}
-              onReply={replyToMessage}
-              onEdit={startEditMessage}
-              onRegenerate={regenerateAnswer}
-              onSaveToMemory={saveMessageToMemory}
-              onSaveAsGoal={saveMessageAsGoal}
-              onMemoryPublicationApproved={refreshAfterChatSubmit}
-            />
-          ))}
-          </div>
-
-          {promptSubmitting && !streamingAssistantId && !chatTurnState && (
-            <PendingAssistantMessage status={streamStatus} />
-          )}
-
-          <InlineApprovelPanel
-            approvals={activeApprovels}
-            busyId={approvalBusyId}
-            session={visibleComputerSession}
-            onApprove={onApproveApprovel}
-            onReject={onRejectApprovel}
-          />
-          <InlineUncertainEffectPanel
-            effects={uncertainEffects}
-            busyId={effectResolutionBusyId}
-            hasError={effectResolutionError !== null}
-            onResolve={onResolveEffect}
-          />
-        </div>
-      </div>
-
-      {showJumpToBottom && (
-        <button
-          className="chat-jump-bottom"
-          type="button"
-          aria-label={t("chat.jumpToLast")}
-          title={t("chat.jumpToBottom")}
-          onClick={() => {
-            shouldStickToBottomRef.current = true;
-            scrollConversationToBottom("smooth");
-          }}
-        >
-          <ChevronDown size={18} />
-        </button>
-      )}
+      <ChatTranscript
+        conversationRef={conversationRef}
+        thread={thread}
+        threadMessages={threadMessages}
+        sessionSeed={CHAT_VIEW_SESSION_ID}
+        promptSubmitting={promptSubmitting}
+        showPendingAssistant={promptSubmitting && !streamingAssistantId && !chatTurnState}
+        streamingAssistantId={streamingAssistantId}
+        editingMessageId={editingMessageId}
+        editingText={editingText}
+        streamHasVisibleText={streamHasVisibleText}
+        hasActiveTurnState={Boolean(chatTurnState)}
+        streamStatus={streamStatus}
+        autoContinueMessageId={autoContinueMessageId}
+        branchIndex={branchIndex}
+        branchBusy={branchBusy}
+        followUps={followUps}
+        followUpsFor={followUpsFor}
+        copiedMessageId={copiedMessageId}
+        previousUserMessageIndex={previousUserMessageIndex}
+        threadIsProject={threadIsProject}
+        activeApprovels={activeApprovels}
+        approvalBusyId={approvalBusyId}
+        visibleComputerSession={visibleComputerSession}
+        uncertainEffects={uncertainEffects}
+        effectResolutionBusyId={effectResolutionBusyId}
+        effectResolutionError={effectResolutionError}
+        showJumpToBottom={showJumpToBottom}
+        onOpenUsageSettings={onOpenUsageSettings}
+        onUseForTask={(providerId, modelId) => setUsageSuggestedModel({
+          value: `${providerId}::${modelId}`,
+          nonce: Date.now(),
+        })}
+        onEditingTextChange={setEditingText}
+        onCancelEdit={cancelEditMessage}
+        onSaveEdit={saveEditedMessage}
+        onOpenArtifact={openArtifactTab}
+        onSubmitChoiceAnswer={submitChoiceAnswer}
+        onHandleProactiveAnswer={handleProactiveAnswer}
+        onSwitchBranch={switchBranch}
+        onRenameBranch={renameBranch}
+        onSelectFollowUp={selectFollowUp}
+        onCopy={copyMessageText}
+        onContinue={continueAssistantResponse}
+        onExpand={expandAssistantResponse}
+        onAskAboutAssistantResponse={askAboutAssistantResponse}
+        onFeedback={setMessageFeedback}
+        onReply={replyToMessage}
+        onEdit={startEditMessage}
+        onRegenerate={regenerateAnswer}
+        onSaveToMemory={saveMessageToMemory}
+        onSaveAsGoal={saveMessageAsGoal}
+        onMemoryPublicationApproved={refreshAfterChatSubmit}
+        onApproveApprovel={onApproveApprovel}
+        onRejectApprovel={onRejectApprovel}
+        onResolveEffect={onResolveEffect}
+        onJumpToBottom={() => {
+          shouldStickToBottomRef.current = true;
+          scrollConversationToBottom("smooth");
+        }}
+      />
 
       <InspectorWorkspace
         layoutRef={layoutRef}

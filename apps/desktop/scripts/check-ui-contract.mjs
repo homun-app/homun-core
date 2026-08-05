@@ -761,9 +761,14 @@ assertContains(
   "Uncertain effects must be resolved in their owning conversation",
 );
 assertContains(
-  "src/components/ChatView.tsx",
+  "src/components/ChatTranscript.tsx",
   "<InlineUncertainEffectPanel",
-  "ChatView must delegate uncertain-effect resolution into the conversation surface",
+  "ChatTranscript must delegate uncertain-effect resolution into the conversation surface",
+);
+assertContains(
+  "src/components/ChatView.tsx",
+  "<ChatTranscript",
+  "ChatView must delegate transcript rendering into the transcript owner",
 );
 assertContains(
   "src/App.tsx",
@@ -1068,7 +1073,11 @@ assertContains("src/components/ChatComputerPanel.tsx", "const browserRunning = B
 assertContains("src/components/ChatComputerPanel.tsx", "view_only=1&viewer=csp-external-v1", "chat computer must invalidate the CSP-blocked inline viewer cached by older desktop releases");
 assertOccurrences("src/components/ChatView.tsx", "<ActiveTurnStatus", 1, "active turn status must have one canonical composer mount");
 assertNotContains("src/components/ChatView.tsx", 'variant="assistant-footer"', "active turn status must not duplicate inside the transcript");
-assertContains("src/components/ChatView.tsx", "!chatTurnState &&", "durable active turn status must suppress the duplicate transcript thinking state");
+assertContains(
+  "src/components/ChatView.tsx",
+  "showPendingAssistant={promptSubmitting && !streamingAssistantId && !chatTurnState}",
+  "durable active turn status must suppress the duplicate transcript thinking state",
+);
 assertContains("src/components/ActiveTurnStatus.tsx", 't("chat.inspector.views.activity")', "active turn activity action must use the valid localized inspector key");
 assertContains("src/components/PendingSteeringQueue.tsx", "pending-steering-strip", "queued steering must render as a compact request strip");
 assertContains("src/lib/coreBridge.ts", "SteeringQueuedDuringSubmissionError", "a submit/steering race must have a typed benign outcome");
