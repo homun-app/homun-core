@@ -1002,7 +1002,7 @@ assertContains("src/components/Sidebar.tsx", "onCreateteChatThread(project.id)",
 assertNotContains("src/components/Sidebar.tsx", "threadMenu.thread.pinned ? \"Remove pin\" : \"Pin\"", "thread overflow menu must not duplicate hover pin action");
 assertNotContains("src/components/Sidebar.tsx", "runThreadAction(() => onArchiveChatThread(threadMenu.thread.threadId))", "thread overflow menu must not duplicate hover archive action");
 assertNotContains("src/components/Sidebar.tsx", "setSwitcherOpen", "project navigation must not be primarily driven by a workspace dropdown");
-assertContains("src/App.tsx", "summarizeThreadTitle", "frontend optimistic chat titles must be synthesized, not first-prompt slices");
+assertContains("src/lib/useChatThreadCreation.ts", "summarizeThreadTitle", "frontend optimistic chat titles must be synthesized, not first-prompt slices");
 assertContains("src/App.tsx", "advanceActivity === true", "chat preview ordering must advance only from explicit completed assistant turns");
 assertNotContains("src/App.tsx", "nextActivityMessageCount > thread.messageCount", "opening/loading an existing chat must not infer new activity from message count");
 assertContains("src/components/ChatView.tsx", "onMessagesChange(promptMessages)", "chat title must update as soon as the user prompt is accepted");
@@ -1139,6 +1139,7 @@ assertContains("src/App.tsx", "useOperationalReadModelPoller", "App must delegat
 assertContains("src/App.tsx", "useAppEventSubscription", "App must delegate app-event websocket subscription to the subscription hook");
 assertContains("src/App.tsx", "useInitialChatThreadsLoader", "App must delegate initial chat snapshot loading to the loader hook");
 assertContains("src/App.tsx", "useChatThreadMutations", "App must delegate chat thread mutations to the mutation hook");
+assertContains("src/App.tsx", "useChatThreadCreation", "App must delegate chat creation workflows to the creation hook");
 assertNotContains("src/App.tsx", "coreBridge.setupStatus", "App must not own setup status fetching directly");
 assertNotContains("src/App.tsx", "coreBridge.plugins()", "App must not own plugin state fetching directly");
 assertNotContains("src/App.tsx", "coreBridge.activeStreams", "App must not own active stream polling directly");
@@ -1153,6 +1154,7 @@ assertNotContains("src/App.tsx", "coreBridge.setChatThreadPinned", "App must not
 assertNotContains("src/App.tsx", "coreBridge.archiveChatThread", "App must not own chat thread archive mutations directly");
 assertNotContains("src/App.tsx", "coreBridge.unarchiveChatThread", "App must not own chat thread unarchive mutations directly");
 assertNotContains("src/App.tsx", "coreBridge.deleteChatThread", "App must not own chat thread delete mutations directly");
+assertNotContains("src/App.tsx", "create_chat_thread unavailable", "App must not own chat thread creation directly");
 assertNotContains("src/App.tsx", "useState<ViewId>", "App must not own shell view state directly");
 assertNotContains("src/App.tsx", "setSearchOpen", "App must not own search modal state directly");
 assertNotContains("src/App.tsx", "coreBridge.taskQueue", "App must not own task queue fetching directly");
@@ -1201,15 +1203,15 @@ assertNotContains("src/components/TemplateCard.tsx", "allowRecolor", "the recolo
 assertContains("src/components/TemplateGallery.tsx", "entry.category", "template gallery tabs must filter by the catalog's category field, not kind/source");
 assertContains("src/components/BrandKitPanel.tsx", "TemplateCatalogGallery", "BrandKitPanel must stay a thin compositor wiring the gallery + brand chip/drawer");
 assertContains("src/plugins/registry.tsx", "startTemplateWorkflow", "plugin host must expose a typed template workflow handoff");
-assertContains("src/App.tsx", "handleStartTemplateWorkflow", "App must own the template workflow chat creation path");
+assertContains("src/lib/useChatThreadCreation.ts", "handleStartTemplateWorkflow", "Chat creation hook must own the template workflow chat creation path");
 assertContains("src/lib/templateWorkflowPrompt.mjs", "template_ref=", "template workflow prompt must preserve the canonical template reference");
 assertContains("src/lib/templateWorkflowPrompt.mjs", "Do not generate the deck yet.", "template workflow must start with discovery and planning, not immediate deck generation");
 assertContains("src/lib/templateWorkflowPrompt.mjs", "make_document", "document packs must route to make_document from Use template");
 assertNotContains("src/App.tsx", "Aiutami a creare una presentazione", "template workflow default visible prompt must remain English");
-// S2 T6: Use template builds a deterministic routing binding (App.tsx uses the
+// S2 T6: Use template builds a deterministic routing binding (the creation hook uses the
 // camelCase field per TS convention; the wire-format lock below on chatApi.ts guards
 // the literal `routing_binding` key the Rust gateway's EnqueueTurnRequest reads).
-assertContains("src/App.tsx", "routingBinding", "Use template must build a deterministic routing binding");
+assertContains("src/lib/useChatThreadCreation.ts", "routingBinding", "Use template must build a deterministic routing binding");
 assertContains("src/lib/templateWorkflowPrompt.mjs", "presentations.template_deck", "Use template must route presentation templates to the deck workflow");
 assertContains("src/lib/templateWorkflowPrompt.mjs", "presentations.template_document", "Use template must route document templates to the document workflow");
 assertContains("src/lib/coreBridge.ts", "importPptxTemplate", "Desktop bridge must expose PPTX template import");

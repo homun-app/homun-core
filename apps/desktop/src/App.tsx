@@ -12,10 +12,6 @@ import {
 import { pluginRegistry, type PluginHost } from "./plugins/registry";
 import {
   coreBridge,
-  type ChatAttachmentInput,
-  type ProactivitySuggestion,
-  type RoutingBindingInput,
-  type TemplateCatalogEntry,
 } from "./lib/coreBridge";
 import { useSetting } from "./lib/settingsStore";
 import { showSystemNotification, notificationPermission } from "./lib/systemNotifications";
@@ -24,12 +20,9 @@ import {
   currentTimestampSeconds,
   mapCoreChatMessage,
   mapCoreChatThread,
-  pendingChatAttachmentFromInput,
   starterMessages,
-  summarizeThreadTitle,
   updateThreadPreview,
 } from "./lib/appCoreMappers";
-import { buildTemplateWorkflowAutoSubmit } from "./lib/templateWorkflowPrompt";
 import {
   hasPendingLocalMessages,
   shouldPreserveLocalMessages,
@@ -39,7 +32,6 @@ import {
   enabledRegistryPlugins,
 } from "./lib/appPluginNavigation";
 import { projectBusyThreadIds } from "./lib/busyThreadProjection";
-import { buildProactivityChatSeed } from "./lib/proactivityChatSeed";
 import { useAutomationController } from "./lib/useAutomationController";
 import { useCapabilityController } from "./lib/useCapabilityController";
 import { useOnboardingSetupGate } from "./lib/useOnboardingSetupGate";
@@ -56,8 +48,11 @@ import {
 } from "./lib/useAppEventSubscription";
 import { useInitialChatThreadsLoader } from "./lib/useInitialChatThreadsLoader";
 import { useChatThreadMutations } from "./lib/useChatThreadMutations";
+import {
+  useChatThreadCreation,
+  type PendingTemplateAutoSubmit,
+} from "./lib/useChatThreadCreation";
 import type {
-  ChatAttachment,
   ChatMessage,
   ChatThread,
   NavItem,
@@ -106,18 +101,8 @@ function AuthenticatedApp() {
   >({
     [defaultChatThread.threadId]: chatMessages,
   });
-  const [pendingTemplateAutoSubmit, setPendingTemplateAutoSubmit] = useState<{
-    id: string;
-    threadId: string;
-    prompt: string;
-    visibleText: string;
-    attachments: ChatAttachmentInput[];
-    visibleAttachments?: ChatAttachment[];
-    mode?: string;
-    // S2: deterministic routing binding for this template launch — carried only on
-    // the first auto-submitted turn (see handleStartTemplateWorkflow).
-    routingBinding?: RoutingBindingInput;
-  } | null>(null);
+  const [pendingTemplateAutoSubmit, setPendingTemplateAutoSubmit] =
+    useState<PendingTemplateAutoSubmit | null>(null);
   // Bumped on a `thread.updated` for the open thread → ChatView re-fetches its island
   // projection, so a BACKGROUND channel turn's finished activity folds in (it isn't streamed).
   const [islandRefreshNonce, setIslandRefreshNonce] = useState(0);
@@ -334,117 +319,20 @@ function AuthenticatedApp() {
     bumpIslandRefreshNonce: () => setIslandRefreshNonce((n) => n + 1),
   });
 
-  async function handleCreateteChatThread(workspaceId?: string) {
-    try {
-      const targetWorkspace = workspaceId?.trim();
-      if (targetWorkspace) {
-        await coreBridge.selectWorkspace(targetWorkspace);
-        const created = mapCoreChatThread(
-          await coreBridge.createChatThread(targetWorkspace),
-        );
-        await coreBridge.selectChatThread(created.threadId);
-        window.location.reload();
-        return;
-      }
-      const created = mapCoreChatThread(await coreBridge.createChatThread());
-      const messages = await coreBridge.chatMessages(created.threadId);
-      setChatThreads((current) => [
-        created,
-        ...current.filter((thread) => thread.threadId !== created.threadId),
-      ]);
-      setThreadMessages((current) => ({
-        ...current,
-        [created.threadId]: messages.messages.map(mapCoreChatMessage),
-      }));
-      setActiveThreadId(created.threadId);
-      setActiveView("chat");
-    } catch (error) {
-      const fallback: ChatThread = {
-        ...defaultChatThread,
-        threadId: `thread_preview_${Date.now()}`,
-        computerSessionId: "computer_active_prompt",
-        taskId: "task_prompt_session",
-        subtitle: "Electron with local gateway in extraction",
-        updatedAt: "ora",
-        messageCount: 1,
-      };
-      setChatThreads((current) => [fallback, ...current]);
-      setThreadMessages((current) => ({
-        ...current,
-        [fallback.threadId]: starterMessages(fallback),
-      }));
-      setActiveThreadId(fallback.threadId);
-      setActiveView("chat");
-      console.warn("create_chat_thread unavailable", error);
-    }
-  }
-
-  // Engage a proactivity card (ADR 0011 §7): open a fresh chat in the card's scope,
-  // pre-seeded with its context. This is what dissolves the proactive-task workspace
-  // problem — the supervisor runs centrally and tags scope; the heavy chat
-  // materializes on demand in the right place. Personal cards map to the base
-  // ("local-workspace") which IS the memory "__personal__" scope; projects pass through.
-  async function handleOpenSuggestion(suggestion: ProactivitySuggestion) {
-    const { workspaceId, question, seedEventParts } = buildProactivityChatSeed(
-      suggestion,
-      PERSONAL_WORKSPACE_ID,
-    );
-    try {
-      await coreBridge.selectWorkspace(workspaceId);
-      const created = mapCoreChatThread(await coreBridge.createChatThread(workspaceId));
-      const seeded = await coreBridge.seedAssistantMessage(created.threadId, question, seedEventParts);
-      setChatThreads((current) => [
-        created,
-        ...current.filter((thread) => thread.threadId !== created.threadId),
-      ]);
-      setThreadMessages((current) => ({
-        ...current,
-        [created.threadId]: seeded.messages.map(mapCoreChatMessage),
-      }));
-      setActiveThreadId(created.threadId);
-      setActiveView("chat");
-    } catch (error) {
-      console.warn("open_suggestion unavailable", error);
-    }
-  }
-
-  async function handleStartTemplateWorkflow(input: {
-    template: TemplateCatalogEntry;
-    attachment?: ChatAttachmentInput;
-  }) {
-    const workflow = buildTemplateWorkflowAutoSubmit(input);
-    try {
-      const created = mapCoreChatThread(await coreBridge.createChatThread());
-      const messages = await coreBridge.chatMessages(created.threadId);
-      const timestamp = currentTimestampSeconds();
-      setChatThreads((current) => [
-        {
-          ...created,
-          title: summarizeThreadTitle(workflow.visiblePrompt),
-          messageCount: Math.max(created.messageCount, messages.messages.length),
-          updatedAt: timestamp,
-        },
-        ...current.filter((thread) => thread.threadId !== created.threadId),
-      ]);
-      setThreadMessagesFromBackend(created.threadId, messages.messages.map(mapCoreChatMessage));
-      setActiveThreadId(created.threadId);
-      setActiveView("chat");
-      setPendingTemplateAutoSubmit({
-        id: `template_auto_submit_${created.threadId}_${Date.now()}`,
-        threadId: created.threadId,
-        prompt: workflow.operativePrompt,
-        visibleText: workflow.visiblePrompt,
-        attachments: input.attachment ? [input.attachment] : [],
-        visibleAttachments: input.attachment
-          ? [pendingChatAttachmentFromInput(input.attachment)]
-          : undefined,
-        mode: "plan",
-        routingBinding: workflow.routingBinding,
-      });
-    } catch (error) {
-      console.warn("start_template_workflow unavailable", error);
-    }
-  }
+  const {
+    handleCreateteChatThread,
+    handleOpenSuggestion,
+    handleStartTemplateWorkflow,
+  } = useChatThreadCreation({
+    defaultThread: defaultChatThread,
+    personalWorkspaceId: PERSONAL_WORKSPACE_ID,
+    setChatThreads,
+    setThreadMessages,
+    setActiveThreadId,
+    setActiveView,
+    setThreadMessagesFromBackend,
+    setPendingTemplateAutoSubmit,
+  });
 
   // A registry plugin is shown unless the backend says it's disabled (default-on).
   const enabledPlugins = enabledRegistryPlugins(pluginRegistry, pluginStates);

@@ -149,6 +149,13 @@ const chatThreadMutations = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatThreadCreation = await readFile(
+  new URL("../src/lib/useChatThreadCreation.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const initialThreadSelection = await readFile(
   new URL("../src/lib/initialThreadSelection.mjs", import.meta.url),
   "utf8",
@@ -721,10 +728,12 @@ test("AppWorkspace delegates context budget display helpers to contextBudgetDisp
 });
 
 test("App delegates template workflow prompt routing to templateWorkflowPrompt", () => {
-  assert.match(app, /from "\.\/lib\/templateWorkflowPrompt";/);
+  assert.match(app, /from "\.\/lib\/useChatThreadCreation";/);
+  assert.doesNotMatch(app, /from "\.\/lib\/templateWorkflowPrompt";/);
   assert.doesNotMatch(app, /const operativePrompt = \[/);
   assert.doesNotMatch(app, /const routingBinding: RoutingBindingInput =/);
   assert.doesNotMatch(app, /Do not generate the deck yet/);
+  assert.match(chatThreadCreation, /buildTemplateWorkflowAutoSubmit/);
   assert.match(templateWorkflowPrompt, /export function buildTemplateWorkflowAutoSubmit/);
   assert.match(templateWorkflowPrompt, /presentations\.template_deck/);
   assert.match(templateWorkflowPrompt, /presentations\.template_document/);
@@ -763,9 +772,11 @@ test("App delegates conversation attention overlay to conversationAttention", ()
 });
 
 test("App delegates proactivity chat seeding to proactivityChatSeed", () => {
-  assert.match(app, /from "\.\/lib\/proactivityChatSeed";/);
+  assert.match(app, /from "\.\/lib\/useChatThreadCreation";/);
+  assert.doesNotMatch(app, /from "\.\/lib\/proactivityChatSeed";/);
   assert.doesNotMatch(app, /scope === "__personal__"/);
   assert.doesNotMatch(app, /type: "choice_prompt"/);
+  assert.match(chatThreadCreation, /buildProactivityChatSeed/);
   assert.match(proactivityChatSeed, /export function buildProactivityChatSeed/);
 });
 
