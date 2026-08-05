@@ -274,6 +274,13 @@ const assistantMessageBody = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatResumeMarkers = await readFile(
+  new URL("../src/lib/chatResumeMarkers.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatViewMessages = await readFile(
   new URL("../src/lib/chatViewMessages.ts", import.meta.url),
   "utf8",
@@ -942,6 +949,18 @@ test("ChatView delegates assistant message body rendering to AssistantMessageBod
   assert.match(assistantMessageBody, /export const AssistantMessageBody = memo/);
   assert.match(assistantMessageBody, /parseComposioConfirm\(text, eventParts\)/);
   assert.match(assistantMessageBody, /visibleMessageText\(visible\)/);
+});
+
+test("ChatView delegates resume marker persistence to chatResumeMarkers", () => {
+  assert.match(chatView, /from "\.\.\/lib\/chatResumeMarkers";/);
+  assert.doesNotMatch(chatView, /RESUME_MARKER_TTL_MS/);
+  assert.doesNotMatch(chatView, /function resumeMarkerKey/);
+  assert.doesNotMatch(chatView, /window\.localStorage\.(?:setItem|getItem|removeItem)/);
+  assert.match(chatResumeMarkers, /export interface ResumeMarker/);
+  assert.match(chatResumeMarkers, /RESUME_MARKER_TTL_MS/);
+  assert.match(chatResumeMarkers, /window\.localStorage\.setItem/);
+  assert.match(chatResumeMarkers, /window\.localStorage\.getItem/);
+  assert.match(chatResumeMarkers, /window\.localStorage\.removeItem/);
 });
 
 test("InspectorView delegates operational plan preview rendering and parsing", () => {

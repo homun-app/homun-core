@@ -129,6 +129,13 @@ import {
   withChatMetrics,
   type MessageContentKind,
 } from "../lib/chatViewMessages";
+import {
+  clearResumeMarker,
+  isOwnResumeMarker,
+  readResumeMarker,
+  writeResumeMarker,
+  type ResumeMarker,
+} from "../lib/chatResumeMarkers";
 // Persisted artifact rows need a storage-aware projection before previewing.
 // @ts-expect-error JavaScript sibling intentionally has no declaration file.
 import * as artifactProjection from "../lib/artifactProjection.mjs";
@@ -1331,7 +1338,7 @@ export function ChatView({
         requestId,
         userText: userVisibleText,
         assistantMessageId: streamingMessage.id,
-      });
+      }, CHAT_VIEW_SESSION_ID);
       unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
         if (payload.request_id !== requestId) return;
         if (cancelledStreamIdsRef.current.has(requestId)) return;
@@ -2793,7 +2800,7 @@ export function ChatView({
     if (promptSubmitting || streamingAssistantId) return;
     const marker = readResumeMarker(thread.threadId);
     if (!marker) return;
-    const commitResult = !isOwnResumeMarker(marker);
+    const commitResult = !isOwnResumeMarker(marker, CHAT_VIEW_SESSION_ID);
     resumedThreadsRef.current.add(thread.threadId);
     void resumeActiveStream(marker, { commitResult });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3553,56 +3560,3 @@ const CHAT_MODES: {
   { key: "ask", label: "Ask", desc: "Replies and converses, without tools or actions", icon: MessageCircle },
   { key: "debug", label: "Debug", desc: "Systematic debugging (code projects)", icon: Bug, projectOnly: true },
 ];
-
-interface ResumeMarker {
-  requestId: string;
-  userText: string;
-  assistantMessageId: string;
-  ownerId?: string;
-  createdAt?: number;
-}
-
-const RESUME_MARKER_TTL_MS = 5 * 60 * 1000;
-
-function resumeMarkerKey(threadId: string) {
-  return `lfpa.resume.${threadId}`;
-}
-
-function writeResumeMarker(threadId: string, marker: ResumeMarker) {
-  try {
-    window.localStorage.setItem(
-      resumeMarkerKey(threadId),
-      JSON.stringify({ ...marker, ownerId: CHAT_VIEW_SESSION_ID, createdAt: Date.now() }),
-    );
-  } catch {
-    /* storage unavailable → resume simply won't be offered */
-  }
-}
-
-function isOwnResumeMarker(marker: ResumeMarker): boolean {
-  return marker.ownerId === CHAT_VIEW_SESSION_ID;
-}
-
-function clearResumeMarker(threadId: string) {
-  try {
-    window.localStorage.removeItem(resumeMarkerKey(threadId));
-  } catch {
-    /* ignore */
-  }
-}
-
-function readResumeMarker(threadId: string): ResumeMarker | null {
-  try {
-    const raw = window.localStorage.getItem(resumeMarkerKey(threadId));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as ResumeMarker;
-    if (!parsed.createdAt || Date.now() - parsed.createdAt > RESUME_MARKER_TTL_MS) {
-      clearResumeMarker(threadId);
-      return null;
-    }
-    if (parsed && parsed.requestId && parsed.assistantMessageId) return parsed;
-  } catch {
-    /* ignore malformed */
-  }
-  return null;
-}
