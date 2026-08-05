@@ -71,6 +71,10 @@ import {
   contextBudgetSummary,
 } from "./lib/contextBudgetDisplay";
 import { buildTemplateWorkflowAutoSubmit } from "./lib/templateWorkflowPrompt";
+import {
+  hasPendingLocalMessages,
+  shouldPreserveLocalMessages,
+} from "./lib/chatMessagePreservation";
 import type {
   ApprovelItem,
   ChatAttachment,
@@ -270,26 +274,6 @@ function AuthenticatedApp() {
     threadMessages[activeThread.threadId] ?? starterMessages(activeThread);
   const isSettings = activeView === "settings";
 
-  function hasPendingLocalMessages(messages: ChatMessage[]): boolean {
-    return messages.some((message) => message.id.startsWith("local_"));
-  }
-
-  function shouldPreserveLocalMessages(
-    threadId: string,
-    currentMessages: ChatMessage[] | undefined,
-    incomingMessages: ChatMessage[],
-  ): boolean {
-    if (!currentMessages?.length) return false;
-    const isProtected =
-      pendingLocalMessageThreadIdsRef.current.has(threadId) ||
-      busyThreadIdsRef.current.has(threadId);
-    if (!isProtected) return false;
-    const incomingIds = new Set(incomingMessages.map((message) => message.id));
-    return currentMessages.some(
-      (message) => message.id.startsWith("local_") && !incomingIds.has(message.id),
-    );
-  }
-
   function setThreadMessagesFromBackend(
     threadId: string,
     incomingMessages: ChatMessage[],
@@ -299,7 +283,13 @@ function AuthenticatedApp() {
       const currentMessages = current[threadId];
       if (
         options.force !== true &&
-        shouldPreserveLocalMessages(threadId, currentMessages, incomingMessages)
+        shouldPreserveLocalMessages({
+          currentMessages,
+          incomingMessages,
+          isProtected:
+            pendingLocalMessageThreadIdsRef.current.has(threadId) ||
+            busyThreadIdsRef.current.has(threadId),
+        })
       ) {
         return current;
       }

@@ -79,6 +79,13 @@ const templateWorkflowPrompt = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatMessagePreservation = await readFile(
+  new URL("../src/lib/chatMessagePreservation.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -566,6 +573,14 @@ test("App delegates template workflow prompt routing to templateWorkflowPrompt",
   assert.match(templateWorkflowPrompt, /export function buildTemplateWorkflowAutoSubmit/);
   assert.match(templateWorkflowPrompt, /presentations\.template_deck/);
   assert.match(templateWorkflowPrompt, /presentations\.template_document/);
+});
+
+test("App delegates optimistic chat message preservation to chatMessagePreservation", () => {
+  assert.match(app, /from "\.\/lib\/chatMessagePreservation";/);
+  assert.doesNotMatch(app, /function hasPendingLocalMessages\(/);
+  assert.doesNotMatch(app, /function shouldPreserveLocalMessages\(/);
+  assert.match(chatMessagePreservation, /export function hasPendingLocalMessages/);
+  assert.match(chatMessagePreservation, /export function shouldPreserveLocalMessages/);
 });
 
 test("the sidebar uses the canonical persisted thread filter projection", () => {
