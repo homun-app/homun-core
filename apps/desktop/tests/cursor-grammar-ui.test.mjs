@@ -141,6 +141,13 @@ const chatSteeringQueueHook = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatActivityProjectionHook = await readFile(
+  new URL("../src/components/useChatActivityProjection.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const appWorkspace = await readFile(
   new URL("../src/components/AppWorkspace.tsx", import.meta.url),
@@ -1776,7 +1783,8 @@ test("ChatView delegates message and formatting helpers to chatViewMessages", ()
 });
 
 test("ChatView delegates structured payload parsing to ChatPayloadParsers", () => {
-  assert.match(chatView, /from "\.\/ChatPayloadParsers";/);
+  assert.match(chatActivityProjectionHook, /from "\.\/ChatPayloadParsers";/);
+  assert.doesNotMatch(chatView, /from "\.\/ChatPayloadParsers";/);
   assert.doesNotMatch(chatView, /function eventPayload\(/);
   assert.doesNotMatch(chatView, /function parseVaultProposalPayload\(/);
   assert.doesNotMatch(chatView, /function parseVaultRevealPayload\(/);
@@ -1789,6 +1797,28 @@ test("ChatView delegates structured payload parsing to ChatPayloadParsers", () =
   assert.match(chatPayloadParsers, /export function parsePaymentApprovalPayload/);
   assert.match(chatPayloadParsers, /export function parseChoicePromptPayload/);
   assert.match(chatPayloadParsers, /export function latestActivitySteps/);
+});
+
+test("ChatView delegates durable activity projection ownership to useChatActivityProjection", () => {
+  assert.match(chatView, /from "\.\/useChatActivityProjection";/);
+  assert.match(chatView, /useChatActivityProjection\(\{/);
+  assert.doesNotMatch(chatView, /fetchThreadActivity/);
+  assert.doesNotMatch(chatView, /latestPlanMarkdown/);
+  assert.doesNotMatch(chatView, /latestActivitySteps/);
+  assert.doesNotMatch(chatView, /parsePlanSteps/);
+  assert.doesNotMatch(chatView, /setProjectedActivity/);
+  assert.doesNotMatch(chatView, /setProjectedPlan/);
+  assert.doesNotMatch(chatView, /setProjectedTurnStatus/);
+  assert.doesNotMatch(chatView, /setProjectedSubagents/);
+  assert.doesNotMatch(chatView, /setProjectedActiveTurn/);
+  assert.doesNotMatch(chatView, /setProjectionLoaded/);
+  assert.match(chatActivityProjectionHook, /export function useChatActivityProjection/);
+  assert.match(chatActivityProjectionHook, /fetchThreadActivity/);
+  assert.match(chatActivityProjectionHook, /latestPlanMarkdown/);
+  assert.match(chatActivityProjectionHook, /latestActivitySteps/);
+  assert.match(chatActivityProjectionHook, /parsePlanSteps/);
+  assert.match(chatActivityProjectionHook, /createTurnReplayState/);
+  assert.match(chatActivityProjectionHook, /replayStatusFromProjection/);
 });
 
 test("ChatView delegates steering prompt edit assembly to chatSteeringPrompt", () => {

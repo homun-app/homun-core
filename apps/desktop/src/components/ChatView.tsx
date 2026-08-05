@@ -11,9 +11,7 @@ import { wsSubscription } from "../lib/wsSubscription";
 import {
   cancelTurn,
   enqueueTurn,
-  fetchThreadActivity,
   SteeringConflictError,
-  type SubagentInfo,
   type TurnSteeringRecord,
 } from "../lib/chatApi";
 import {
@@ -61,10 +59,8 @@ import {
 import {
   chatEventPartFromStream,
   normalizeChatEventParts,
-  replayStatusFromProjection,
   shouldDropStructuredMarkerDelta,
   threadTailAwaitsUser,
-  type ActiveTurnProjection,
 } from "../lib/chatEventParts";
 import {
   buildBranchIndex,
@@ -87,11 +83,7 @@ import type {
 } from "./ChatViewTypes";
 import { useChatActiveTurnElapsed } from "./useChatActiveTurnElapsed";
 import { useChatBranches } from "./useChatBranches";
-import {
-  latestActivitySteps,
-  latestPlanMarkdown,
-  parsePlanSteps,
-} from "./ChatPayloadParsers";
+import { useChatActivityProjection } from "./useChatActivityProjection";
 import { useChatComputerSession } from "./useChatComputerSession";
 import { useChatConversationScroll } from "./useChatConversationScroll";
 import { useChatFollowUps } from "./useChatFollowUps";
@@ -176,15 +168,6 @@ export function ChatView({
   // Cleared on submit; superseded by the persisted values when streaming ends.
   const [liveActivitySteps, setLiveActivitySteps] = useState<string[]>([]);
   const [livePlanMarkdown, setLivePlanMarkdown] = useState<string | null>(null);
-  // Durable cross-turn projection over turn_events (the canonical log), fetched at rest so
-  // the island reflects the thread's real plan/activity after turn-end/reload/thread-switch —
-  // NOT the lossy message-text markers (absent for workflow deliverables; plan emitted once).
-  const [projectedActivity, setProjectedActivity] = useState<string[]>([]);
-  const [projectedPlan, setProjectedPlan] = useState<string | null>(null);
-  const [projectedTurnStatus, setProjectedTurnStatus] = useState<string | null>(null);
-  const [projectedSubagents, setProjectedSubagents] = useState<SubagentInfo[]>([]);
-  const [projectedActiveTurn, setProjectedActiveTurn] =
-    useState<ActiveTurnProjection | null>(null);
   const {
     runtimeContext,
     runtimeContextLoading,
@@ -194,10 +177,6 @@ export function ChatView({
     threadId: thread.threadId,
     runtimeContextRevision,
   });
-  // Once the projection has loaded for a thread we TRUST it — including a null plan (a new
-  // plan-less task must clear the previous task's plan). Before it loads we fall back to the
-  // text markers to avoid a blank flash. Reset per thread.
-  const [projectionLoaded, setProjectionLoaded] = useState(false);
   // Track the active turn_id for WS event filtering. Set when a turn starts,
   // cleared when it ends. Used by the wsSubscription subscriber to route events.
   const activeTurnIdRef = useRef<string | null>(null);
@@ -266,40 +245,6 @@ export function ChatView({
     streamingAssistantId,
     threadId: thread.threadId,
   });
-  // The global WS provides a second observation of turn state. The monotonic
-  // reducer makes it safe to overlap with the durable per-turn stream; content
-  // rendering stays on that replayable stream, while WS terminal/abort state
-  // keeps the cockpit current across windows.
-  useEffect(() => {
-    const unsub = wsSubscription.subscribe((msg) => {
-      if (msg.type !== "turn.event") return;
-      const turnId = msg.turn_id as string | undefined;
-      if (!turnId || turnId !== activeTurnIdRef.current) return;
-      const kind = msg.kind as string;
-      const payload = msg.payload as Record<string, unknown> | undefined;
-      const seq = Number(msg.seq);
-      if (!Number.isFinite(seq)) return;
-      const current = turnReplayRef.current?.turnId === turnId
-        ? turnReplayRef.current
-        : createTurnReplayState(turnId);
-      const next = applyTurnEvent(current, {
-        turn_id: turnId,
-        seq,
-        kind,
-        payload,
-      });
-      if (next === current) return;
-      turnReplayRef.current = next;
-      if (kind === "aborted") {
-        setLiveActivitySteps([]);
-        setLivePlanMarkdown(null);
-      }
-      if (["completed", "failed", "cancelled"].includes(next.status)) {
-        setProjectedTurnStatus(next.status);
-      }
-    });
-    return unsub;
-  }, []);
   // The backend seeds a placeholder "ready" greeting on every new thread (id ends
   // "_ready"). The designed new-chat experience is the centered hero, so hide that
   // greeting: a thread whose only message is the greeting then renders as empty →
@@ -378,15 +323,66 @@ export function ChatView({
     workbenchArtifacts,
     workspaceId: thread.workspaceId,
   });
-  // The agent's operational plan for this conversation (latest update_plan), shown
-  // in the Workbench "Piano" panel. Merge of two lines:
-  //  - Piano UI C2 (persisted): the fallback derives from PERSISTED `messages`, NOT
-  //    `threadMessages` (which changes every stream frame → churn).
-  //  - unified-WS live island: during streaming, prefer the live-accumulated
-  //    plan/activity from the stream events so the island updates in real-time.
-  // Net: live while streaming, persisted-from-`messages` at rest.
-  const persistedPlan = useMemo(() => latestPlanMarkdown(messages), [messages]);
-  const persistedActivity = useMemo(() => latestActivitySteps(messages), [messages]);
+  const activeStreamInProgress = Boolean(promptSubmitting || streamingAssistantId);
+  const {
+    browserBudgetAssistantId,
+    browserBudgetMessage,
+    clearProjectedActiveTurn,
+    conversationActivity,
+    conversationPlan,
+    markProjectedTurnStatus,
+    projectedActiveTurn,
+    projectedSubagents,
+    projectedTurnStatus,
+    projectionLoaded,
+    workspacePlanSteps,
+  } = useChatActivityProjection({
+    activeTurnIdRef,
+    islandRefreshNonce,
+    isStreaming: activeStreamInProgress,
+    liveActivitySteps,
+    livePlanMarkdown,
+    messages,
+    streamOwnerTurnRef,
+    threadId: thread.threadId,
+    threadMessages,
+    translate: t,
+    turnReplayRef,
+  });
+  // The global WS provides a second observation of turn state. The monotonic
+  // reducer makes it safe to overlap with the durable per-turn stream; content
+  // rendering stays on that replayable stream, while WS terminal/abort state
+  // keeps the cockpit current across windows.
+  useEffect(() => {
+    const unsub = wsSubscription.subscribe((msg) => {
+      if (msg.type !== "turn.event") return;
+      const turnId = msg.turn_id as string | undefined;
+      if (!turnId || turnId !== activeTurnIdRef.current) return;
+      const kind = msg.kind as string;
+      const payload = msg.payload as Record<string, unknown> | undefined;
+      const seq = Number(msg.seq);
+      if (!Number.isFinite(seq)) return;
+      const current = turnReplayRef.current?.turnId === turnId
+        ? turnReplayRef.current
+        : createTurnReplayState(turnId);
+      const next = applyTurnEvent(current, {
+        turn_id: turnId,
+        seq,
+        kind,
+        payload,
+      });
+      if (next === current) return;
+      turnReplayRef.current = next;
+      if (kind === "aborted") {
+        setLiveActivitySteps([]);
+        setLivePlanMarkdown(null);
+      }
+      if (["completed", "failed", "cancelled"].includes(next.status)) {
+        markProjectedTurnStatus(next.status);
+      }
+    });
+    return unsub;
+  }, [markProjectedTurnStatus]);
   // Free HITL (CHOICES / CLARIFY / AWAIT_USER) does not hold the thread busy (Always Contract),
   // so the projection often has no waiting_user_approval — detect the open wait from the chat tail.
   const threadTailAwaitsHitl = useMemo(
@@ -427,51 +423,6 @@ export function ChatView({
     setStreamingAssistantId(null);
     setStreamStatus(null);
   }, [turnAwaitingUser, streamingAssistantId]);
-  // Island source, converged on the durable projection:
-  //  - live: live WS events (current turn) layered over the projection (prior turns);
-  //  - at rest: the projection alone, falling back to the lossy text markers only if the
-  //    projection is empty (older turns whose events predate turn_events, or edge cases).
-  // Plan: while streaming, ONLY the live plan of the CURRENT turn (never fall back to the
-  // projection — a new plan-less task must not keep showing the previous task's plan). At
-  // rest, trust the loaded projection (which is scoped to the latest turn), else the marker.
-  const conversationPlan = isStreaming
-    ? livePlanMarkdown
-    : projectionLoaded
-      ? projectedPlan
-      : persistedPlan;
-  // Activity accumulates across the thread: projection (prior turns) + live (current turn).
-  const rawConversationActivity = isStreaming
-    ? [...projectedActivity, ...liveActivitySteps]
-    : projectionLoaded
-      ? projectedActivity
-      : persistedActivity;
-  const rawLatestActivity = rawConversationActivity[rawConversationActivity.length - 1] ?? "";
-  const browserBudgetReason = rawLatestActivity.startsWith("browser_budget_exceeded:")
-    ? rawLatestActivity.slice("browser_budget_exceeded:".length)
-    : null;
-  const browserBudgetMessage = browserBudgetReason === "wall_clock"
-    ? t("chat.browserBudget.wallClock")
-    : browserBudgetReason === "failed_navigations"
-      ? t("chat.browserBudget.failedNavigations")
-      : browserBudgetReason === "no_progress"
-        ? t("chat.browserBudget.noProgress")
-        : browserBudgetReason
-          ? t("chat.browserBudget.default")
-          : null;
-  const conversationActivity = rawConversationActivity.map((step) =>
-    step.startsWith("browser_budget_exceeded:")
-      ? step.endsWith(":wall_clock")
-        ? t("chat.browserBudget.wallClock")
-        : step.endsWith(":failed_navigations")
-          ? t("chat.browserBudget.failedNavigations")
-          : step.endsWith(":no_progress")
-            ? t("chat.browserBudget.noProgress")
-            : t("chat.browserBudget.default")
-      : step,
-  );
-  const browserBudgetAssistantId = browserBudgetReason
-    ? [...threadMessages].reverse().find((message) => message.role === "assistant")?.id ?? null
-    : null;
   const chatTurnState = useMemo<ChatTurnState | null>(() => {
     if (!hasActiveTurn) return null;
     return {
@@ -498,78 +449,6 @@ export function ChatView({
     t,
     turnAwaitingUser,
   ]);
-  const workspacePlanSteps = useMemo(() => {
-    const steps = conversationPlan ? parsePlanSteps(conversationPlan) : [];
-    // A concluded successful turn has nothing actively "doing": weak local models often
-    // leave the frontier step marked doing without a final done update, so the durable
-    // plan still carries a `[-]` step after the turn ended. Reconcile it to done so the
-    // cockpit doesn't show a perpetual in-progress step (and Progress reflects reality).
-    // Only for a `completed` turn at rest — a failed/cancelled turn keeps its raw state.
-    if (!isStreaming && projectedTurnStatus === "completed") {
-      return steps.map((step) =>
-        step.status === "doing" ? { ...step, status: "done" as const } : step,
-      );
-    }
-    return steps;
-  }, [conversationPlan, isStreaming, projectedTurnStatus]);
-  // Clear the projection the instant the thread switches so a new (possibly still-streaming)
-  // thread never briefly shows the previous thread's plan/activity before its own fetch lands.
-  useEffect(() => {
-    setProjectedActivity([]);
-    setProjectedPlan(null);
-    setProjectedTurnStatus(null);
-    setProjectedSubagents([]);
-    setProjectedActiveTurn(null);
-    turnReplayRef.current = null;
-    streamOwnerTurnRef.current = null;
-    setProjectionLoaded(false);
-  }, [thread.threadId]);
-  // Load the durable island projection on thread change and when a turn ENDS (isStreaming →
-  // false, so the just-finished turn folds in). Deliberately NOT during streaming: the live
-  // WS events carry the active turn; fetching mid-stream would double-count it against the
-  // projection. Best-effort — live + the text-marker fallback cover a failed fetch.
-  useEffect(() => {
-    if (isStreaming) return;
-    let cancelled = false;
-    fetchThreadActivity(thread.threadId)
-      .then((projection) => {
-        if (cancelled) return;
-        setProjectedActivity(projection.activity);
-        setProjectedPlan(projection.plan_markdown);
-        setProjectedTurnStatus(projection.latest_turn_status);
-        setProjectedSubagents(projection.subagents ?? []);
-        const activeTurn = (
-          projection as typeof projection & { active_turn?: ActiveTurnProjection | null }
-        ).active_turn ?? null;
-        setProjectedActiveTurn(activeTurn);
-        if (activeTurn) {
-          activeTurnIdRef.current = activeTurn.turn_id;
-          const currentReplay = turnReplayRef.current;
-          if (
-            currentReplay?.turnId !== activeTurn.turn_id
-            || currentReplay.lastSeq < activeTurn.last_event_seq
-          ) {
-            turnReplayRef.current = createTurnReplayState(activeTurn.turn_id, {
-              lastSeq: activeTurn.last_event_seq,
-              status: replayStatusFromProjection(activeTurn.status),
-              text: currentReplay?.turnId === activeTurn.turn_id ? currentReplay.text : "",
-            });
-          }
-        }
-        setProjectionLoaded(true);
-      })
-      .catch(() => {
-        /* projection unavailable → island falls back to live + persisted markers */
-      });
-    return () => {
-      cancelled = true;
-    };
-    // `islandRefreshNonce` (bumped by App on a `thread.updated` for THIS open thread) so a
-    // BACKGROUND turn — e.g. a channel/Telegram reply this client never streamed — re-fetches
-    // the durable island projection when it finishes, instead of leaving the island frozen on
-    // the previous turn's activity. (The message COUNT is stable: the assistant placeholder is
-    // updated in place, so it can't be the trigger.)
-  }, [thread.threadId, isStreaming, islandRefreshNonce]);
   // Files the user uploaded in THIS conversation (e.g. the patente PDF), derived
   // from message attachments — the chat-context "File" tab of the Workbench.
   const uploadedFiles = useMemo(() => buildUploadedFiles(messages), [messages]);
@@ -936,7 +815,7 @@ export function ChatView({
       if (error instanceof SteeringQueuedDuringSubmissionError) {
         setPromptError(null);
         setOptimisticMessages(null);
-        setProjectedActiveTurn(null);
+        clearProjectedActiveTurn();
         onMessagesChange(conversationBase);
         await Promise.all([
           refreshPendingSteering().catch(() => undefined),
@@ -1024,7 +903,7 @@ export function ChatView({
     if (!turnId) return;
     try {
       await cancelTurn(turnId);
-      setProjectedActiveTurn(null);
+      clearProjectedActiveTurn();
       await refreshPendingSteering().catch(() => undefined);
     } catch (error) {
       setPromptError(describeBridgeError(error));
@@ -1275,7 +1154,7 @@ export function ChatView({
   ): Promise<boolean> {
     setStreamingAssistantId(null);
     setStreamStatus(null);
-    setProjectedActiveTurn(null);
+    clearProjectedActiveTurn();
     return submitComposerPrompt(answer, [], {
       forceNewTurn: true,
       resumeAssistantMessageId: assistantMessageId,
@@ -1323,7 +1202,7 @@ export function ChatView({
     if (forceNewTurn) {
       setStreamingAssistantId(null);
       setStreamStatus(null);
-      setProjectedActiveTurn(null);
+      clearProjectedActiveTurn();
     }
 
     // A Choice/Clarify answer must start a real next turn even if the UI still thinks work is
@@ -1351,7 +1230,7 @@ export function ChatView({
         if (result.status === "queued") {
           setReplyContext(null);
           setPromptError(null);
-          setProjectedActiveTurn(null);
+          clearProjectedActiveTurn();
           try {
             await onThreadChanged();
           } catch (error) {

@@ -1305,7 +1305,7 @@ assertNotContains("src/styles.css", ".virtual-message-row", "chat transcript mus
 assertContains("src/components/useChatConversationScroll.ts", "streamingFrameRef", "chat streaming must throttle visible updates in Electron");
 assertContains("src/components/ChatView.tsx", "setOptimisticMessages", "chat streaming must keep visible text in the React message state");
 assertContains("src/components/ChatMessageContent.tsx", "<AssistantMessageBody", "streaming answers must render through the normal message body component");
-assertContains("src/components/ChatView.tsx", "browser_budget_exceeded", "browser budget has an actionable Activity state");
+assertContains("src/components/useChatActivityProjection.ts", "browser_budget_exceeded", "browser budget has an actionable Activity state");
 assertContains("src/i18n/locales/it.json", "Tempo massimo del browser raggiunto", "browser timeout is localized");
 assertMatches(
   "src/components/ChatMessageContent.tsx",
@@ -1393,6 +1393,23 @@ assertNotContains("src/components/ChatView.tsx", "setActiveTurnElapsedSeconds", 
 assertContains("src/components/useChatStreamingNotifier.ts", "onStreamingChangeRef", "streaming parent notifications must have one focused owner");
 assertContains("src/components/ChatView.tsx", "useChatStreamingNotifier(onStreamingChange)", "ChatView must consume the focused streaming notifier owner");
 assertNotContains("src/components/ChatView.tsx", "onStreamingChangeRef", "ChatView must not own streaming notification refs");
+assertContains("src/components/useChatActivityProjection.ts", "fetchThreadActivity", "durable activity projection fetch must have one focused owner");
+assertContains("src/components/useChatActivityProjection.ts", "latestPlanMarkdown", "activity projection marker fallback must have one focused owner");
+assertContains("src/components/useChatActivityProjection.ts", "latestActivitySteps", "activity projection marker fallback must have one focused owner");
+assertContains("src/components/useChatActivityProjection.ts", "parsePlanSteps", "workspace plan steps must have one focused owner");
+assertContains("src/components/useChatActivityProjection.ts", "createTurnReplayState", "activity projection replay seeding must have one focused owner");
+assertContains("src/components/useChatActivityProjection.ts", "replayStatusFromProjection", "activity projection replay status mapping must have one focused owner");
+assertContains("src/components/ChatView.tsx", "useChatActivityProjection({", "ChatView must consume the focused durable activity projection owner");
+assertNotContains("src/components/ChatView.tsx", "fetchThreadActivity", "ChatView must not own durable activity projection fetch");
+assertNotContains("src/components/ChatView.tsx", "latestPlanMarkdown", "ChatView must not own plan marker fallback parsing");
+assertNotContains("src/components/ChatView.tsx", "latestActivitySteps", "ChatView must not own activity marker fallback parsing");
+assertNotContains("src/components/ChatView.tsx", "parsePlanSteps", "ChatView must not own workspace plan parsing");
+assertNotContains("src/components/ChatView.tsx", "setProjectedActivity", "ChatView must not own durable projected activity state");
+assertNotContains("src/components/ChatView.tsx", "setProjectedPlan", "ChatView must not own durable projected plan state");
+assertNotContains("src/components/ChatView.tsx", "setProjectedTurnStatus", "ChatView must not own durable projected turn status state");
+assertNotContains("src/components/ChatView.tsx", "setProjectedSubagents", "ChatView must not own durable projected subagent state");
+assertNotContains("src/components/ChatView.tsx", "setProjectedActiveTurn", "ChatView must not own durable projected active turn state");
+assertNotContains("src/components/ChatView.tsx", "setProjectionLoaded", "ChatView must not own durable projection load state");
 assertContains("src/components/useChatBranches.ts", "coreBridge.chatBranches", "chat branch state must have one focused owner");
 assertContains("src/components/useChatBranches.ts", "coreBridge.setActiveLeaf", "chat branch switching must have one focused owner");
 assertContains("src/components/useChatBranches.ts", "coreBridge.setBranchLabel", "chat branch naming must have one focused owner");
