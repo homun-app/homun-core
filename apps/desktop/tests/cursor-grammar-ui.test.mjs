@@ -78,6 +78,13 @@ const composerContainer = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const computerDetailPanel = await readFile(
+  new URL("../src/components/ComputerDetailPanel.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const runtimeContextPanel = await readFile(
   new URL("../src/components/RuntimeContextPanel.tsx", import.meta.url),
   "utf8",
@@ -532,6 +539,16 @@ test("ChatView delegates composer state and submit ownership to ComposerContaine
   assert.match(composerContainer, /<ComposerShell/);
   assert.match(composerContainer, /selectedModelAfterSubmission/);
   assert.match(composerContainer, /coreBridge\.runtimeModels/);
+});
+
+test("ChatView delegates local computer inspector rendering to ComputerDetailPanel", () => {
+  assert.match(chatView, /import \{ ComputerDetailPanel \} from "\.\/ComputerDetailPanel";/);
+  assert.match(chatView, /<ComputerDetailPanel[\s\S]*?session=\{computerSession\}/);
+  assert.doesNotMatch(chatView, /function ComputerDetailPanel\(/);
+  assert.match(computerDetailPanel, /export function ComputerDetailPanel/);
+  assert.match(computerDetailPanel, /className="computer-detail-panel"/);
+  assert.match(computerDetailPanel, /onSelectSurface\(surface\.id\)/);
+  assert.match(computerDetailPanel, /onClick=\{paused \? onResume : onPause\}/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {

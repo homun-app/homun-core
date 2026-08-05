@@ -1019,7 +1019,7 @@ assertContains("src/components/ChatView.tsx", "{sidebarCollapsed && (", "chat he
 assertContains("src/components/Shell.tsx", "{drawerOpen && !isSettings && (", "main drawer must render when open");
 assertContains("src/components/Sidebar.tsx", "drawer-profile", "open drawer footer must show the user profile + settings");
 assertContains("src/components/ComposerShell.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
-assertContains("src/components/ChatView.tsx", "function ComputerDetailPanel", "active task must expose local computer activity through the inspector");
+assertContains("src/components/ComputerDetailPanel.tsx", "export function ComputerDetailPanel", "active task must expose local computer activity through the inspector");
 assertContains("src/components/ChatView.tsx", "timelineCollapsed", "computer timeline must keep collapsed state");
 assertContains("src/components/ChatView.tsx", 'view.key === "computer"', "local computer activity must remain discoverable as an inspector view");
 assertContains("src/components/SettingsView.tsx", "secret_value: manualSecretValue.trim()", "Vault manual entry must send raw secret material through the encrypted gateway path");
