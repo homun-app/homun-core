@@ -57,9 +57,7 @@ import {
   type ResumeMarker,
 } from "../lib/chatResumeMarkers";
 import {
-  chatEventPartFromStream,
   normalizeChatEventParts,
-  shouldDropStructuredMarkerDelta,
   threadTailAwaitsUser,
 } from "../lib/chatEventParts";
 import {
@@ -84,6 +82,7 @@ import type {
 import { useChatActiveTurnElapsed } from "./useChatActiveTurnElapsed";
 import { useChatBranches } from "./useChatBranches";
 import { useChatActivityProjection } from "./useChatActivityProjection";
+import { projectChatStreamEvent } from "./chatStreamEventProjection";
 import { useChatComputerSession } from "./useChatComputerSession";
 import { useChatConversationScroll } from "./useChatConversationScroll";
 import { useChatFollowUps } from "./useChatFollowUps";
@@ -646,18 +645,6 @@ export function ChatView({
       unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
         if (payload.request_id !== requestId) return;
         if (cancelledStreamIdsRef.current.has(requestId)) return;
-        if (payload.type === "aborted") {
-          streamedText = "";
-          streamEventParts = [];
-          setStreamStatus({
-            requestId,
-            phase: "thinking",
-            title: t("chat.resumingResponse"),
-            detail: t("chat.reattachingGeneration"),
-          });
-          scheduleStreamingMessage();
-          return;
-        }
         if (payload.type === "retry" || payload.type === "queued") {
           setStreamStatus({
             requestId,
@@ -669,19 +656,34 @@ export function ChatView({
           });
           return;
         }
-        if (payload.type === "done" && payload.text !== undefined) {
-          streamedText = payload.text;
-          streamEventParts = [];
+        const projectedStream = projectChatStreamEvent(
+          { text: streamedText, eventParts: streamEventParts },
+          payload,
+          { acceptControlEvents: true },
+        );
+        if (projectedStream.kind === "ignored") return;
+        streamedText = projectedStream.draft.text;
+        streamEventParts = projectedStream.draft.eventParts;
+        if (projectedStream.kind === "aborted") {
+          setStreamStatus({
+            requestId,
+            phase: "thinking",
+            title: t("chat.resumingResponse"),
+            detail: t("chat.reattachingGeneration"),
+          });
           scheduleStreamingMessage();
           return;
         }
-        const part = chatEventPartFromStream(payload);
-        if (part) {
+        if (projectedStream.kind === "done") {
+          scheduleStreamingMessage();
+          return;
+        }
+        if (projectedStream.kind === "part") {
           // ADR 0022 (Piano UI A2): quando arriva un evento recall, mostra la fase
           // "Sto controllando la memoria…" (precedenza su thinking/writing).
-          if (part.type === "recall") {
-            const count = part.payload?.hits?.length ?? 0;
-            const memoryStatus = part.payload?.status ?? (count > 0 ? "ready" : "empty");
+          if (projectedStream.part.type === "recall") {
+            const count = projectedStream.part.payload?.hits?.length ?? 0;
+            const memoryStatus = projectedStream.part.payload?.status ?? (count > 0 ? "ready" : "empty");
             const detail =
               memoryStatus === "unavailable"
                 ? t("chat.recallingUnavailable")
@@ -699,21 +701,18 @@ export function ChatView({
               detail,
             });
           }
-          streamEventParts = [...streamEventParts, part];
-          // Feed the island in real-time from live activity/plan events.
-          if (part.type === "activity" && part.text) {
-            setLiveActivitySteps((prev) => [...prev, part.text!.trim()].filter((s) => s.length > 0));
-          } else if (part.type === "plan_update" && part.markdown) {
-            setLivePlanMarkdown(part.markdown);
+          if (projectedStream.liveActivityText) {
+            setLiveActivitySteps((prev) =>
+              [...prev, projectedStream.liveActivityText!].filter((step) => step.length > 0),
+            );
+          } else if (projectedStream.livePlanMarkdown) {
+            setLivePlanMarkdown(projectedStream.livePlanMarkdown);
           }
           scheduleStreamingMessage();
           return;
         }
-        if (payload.type !== "delta") return;
-        if (shouldDropStructuredMarkerDelta(payload.delta)) return;
-        const firstDelta = streamedText.length === 0;
+        const firstDelta = projectedStream.firstDelta;
         streamChunks += 1;
-        streamedText += payload.delta;
         if (firstDelta) {
           setStreamStatus({
             requestId,
@@ -988,12 +987,6 @@ export function ChatView({
     try {
       unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
         if (payload.request_id !== requestId) return;
-        if (payload.type === "aborted") {
-          streamedText = "";
-          streamEventParts = [];
-          scheduleStreamingMessage();
-          return;
-        }
         if (payload.type === "retry" || payload.type === "queued") {
           setStreamStatus({
             requestId,
@@ -1005,21 +998,22 @@ export function ChatView({
           });
           return;
         }
-        if (payload.type === "done" && payload.text !== undefined) {
-          streamedText = payload.text;
-          streamEventParts = [];
+        const projectedStream = projectChatStreamEvent(
+          { text: streamedText, eventParts: streamEventParts },
+          payload,
+          { acceptControlEvents: true },
+        );
+        if (projectedStream.kind === "ignored") return;
+        streamedText = projectedStream.draft.text;
+        streamEventParts = projectedStream.draft.eventParts;
+        if (projectedStream.kind === "aborted" || projectedStream.kind === "done") {
           scheduleStreamingMessage();
           return;
         }
-        const part = chatEventPartFromStream(payload);
-        if (part) {
-          streamEventParts = [...streamEventParts, part];
+        if (projectedStream.kind === "part") {
           scheduleStreamingMessage();
           return;
         }
-        if (payload.type !== "delta") return;
-        if (shouldDropStructuredMarkerDelta(payload.delta)) return;
-        streamedText += payload.delta;
         setStreamHasVisibleText(true);
         scheduleStreamingMessage();
       });
@@ -1408,15 +1402,18 @@ export function ChatView({
     unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
       if (payload.request_id !== requestId) return;
       if (cancelledStreamIdsRef.current.has(requestId)) return;
-      const part = chatEventPartFromStream(payload);
-      if (part) {
-        streamEventParts = [...streamEventParts, part];
+      const projectedStream = projectChatStreamEvent(
+        { text: streamedText, eventParts: streamEventParts },
+        payload,
+      );
+      if (projectedStream.kind === "ignored") return;
+      streamedText = projectedStream.draft.text;
+      streamEventParts = projectedStream.draft.eventParts;
+      if (projectedStream.kind === "aborted" || projectedStream.kind === "done") return;
+      if (projectedStream.kind === "part") {
         scheduleStreamingMessage();
         return;
       }
-      if (payload.type !== "delta") return;
-      if (shouldDropStructuredMarkerDelta(payload.delta)) return;
-      streamedText += payload.delta;
       setStreamHasVisibleText(true);
       scheduleStreamingMessage();
     });
@@ -1660,16 +1657,20 @@ export function ChatView({
     unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
       if (payload.request_id !== requestId) return;
       if (cancelledStreamIdsRef.current.has(requestId)) return;
-      const part = chatEventPartFromStream(payload);
-      if (part) {
-        streamEventParts = [...streamEventParts, part];
+      const projectedStream = projectChatStreamEvent(
+        { text: streamedText, eventParts: streamEventParts },
+        payload,
+        { initialTextLength: message.text.length },
+      );
+      if (projectedStream.kind === "ignored") return;
+      streamedText = projectedStream.draft.text;
+      streamEventParts = projectedStream.draft.eventParts;
+      if (projectedStream.kind === "aborted" || projectedStream.kind === "done") return;
+      if (projectedStream.kind === "part") {
         scheduleStreamingMessage();
         return;
       }
-      if (payload.type !== "delta") return;
-      if (shouldDropStructuredMarkerDelta(payload.delta)) return;
-      const firstDelta = streamedText.length === message.text.length;
-      streamedText += payload.delta;
+      const firstDelta = projectedStream.firstDelta;
       if (firstDelta) {
         setStreamStatus({
           requestId,

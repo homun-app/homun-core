@@ -1593,7 +1593,11 @@ assertRepoContains("apps/desktop/src/lib/appCoreMappers.ts", "mapCoreChatEventPa
 assertRepoContains("apps/desktop/src/lib/useChatReadModelController.ts", "mapCoreChatMessage", "desktop app must hydrate persisted messages through the core mapper owner");
 assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "eventPartToLegacyMarker", "ChatView must not synthesize legacy markers from structured event parts");
 assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "visibleStreamingText", "streaming messages must keep prose text separate from structured event parts");
-assertRepoContains("apps/desktop/src/components/ChatView.tsx", "shouldDropStructuredMarkerDelta", "ChatView must drop legacy marker deltas after receiving structured event parts");
+assertRepoContains("apps/desktop/src/components/chatStreamEventProjection.ts", "shouldDropStructuredMarkerDelta", "stream event projection must drop legacy marker deltas after receiving structured event parts");
+assertRepoContains("apps/desktop/src/components/chatStreamEventProjection.ts", "chatEventPartFromStream", "stream event projection must own structured stream event conversion");
+assertRepoContains("apps/desktop/src/components/ChatView.tsx", "projectChatStreamEvent(", "ChatView must consume the focused stream event projection owner");
+assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "chatEventPartFromStream", "ChatView must not own structured stream event conversion");
+assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "shouldDropStructuredMarkerDelta", "ChatView must not own structured marker delta filtering");
 assertNotContains("src/App.tsx", "‹‹CHOICES››", "new proactivity choice prompts must use structured event parts, not marker text");
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/tasks/queue", "desktop gateway must expose task queue read model endpoint");
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/tasks/executor", "desktop gateway must expose task executor status endpoint");

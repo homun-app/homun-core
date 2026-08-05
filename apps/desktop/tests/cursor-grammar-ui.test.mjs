@@ -148,6 +148,13 @@ const chatActivityProjectionHook = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatStreamEventProjection = await readFile(
+  new URL("../src/components/chatStreamEventProjection.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const appWorkspace = await readFile(
   new URL("../src/components/AppWorkspace.tsx", import.meta.url),
@@ -1821,6 +1828,16 @@ test("ChatView delegates durable activity projection ownership to useChatActivit
   assert.match(chatActivityProjectionHook, /replayStatusFromProjection/);
 });
 
+test("ChatView delegates stream event projection ownership to chatStreamEventProjection", () => {
+  assert.match(chatView, /from "\.\/chatStreamEventProjection";/);
+  assert.match(chatView, /projectChatStreamEvent\(/);
+  assert.doesNotMatch(chatView, /chatEventPartFromStream/);
+  assert.doesNotMatch(chatView, /shouldDropStructuredMarkerDelta/);
+  assert.match(chatStreamEventProjection, /export function projectChatStreamEvent/);
+  assert.match(chatStreamEventProjection, /chatEventPartFromStream/);
+  assert.match(chatStreamEventProjection, /shouldDropStructuredMarkerDelta/);
+});
+
 test("ChatView delegates steering prompt edit assembly to chatSteeringPrompt", () => {
   assert.match(chatSteeringQueueHook, /from "\.\.\/lib\/chatSteeringPrompt";/);
   assert.doesNotMatch(chatView, /from "\.\.\/lib\/chatSteeringPrompt";/);
@@ -2071,9 +2088,9 @@ test("RichMessageRenderer imports typed markdown helpers", () => {
 
 test("ChatView delegates chat event projection helpers to chatEventParts", () => {
   assert.match(chatView, /from "\.\.\/lib\/chatEventParts";/);
-  assert.doesNotMatch(chatView, /function chatEventPartFromStream/);
+  assert.doesNotMatch(chatView, /chatEventPartFromStream/);
   assert.doesNotMatch(chatView, /function normalizeChatEventParts/);
-  assert.doesNotMatch(chatView, /function shouldDropStructuredMarkerDelta/);
+  assert.doesNotMatch(chatView, /shouldDropStructuredMarkerDelta/);
   assert.doesNotMatch(chatView, /function replayStatusFromProjection/);
   assert.doesNotMatch(chatView, /function threadTailAwaitsUser/);
   assert.doesNotMatch(chatView, /interface ActiveTurnProjection/);
