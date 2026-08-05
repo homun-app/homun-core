@@ -260,6 +260,13 @@ const memoryView = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const inspectorView = await readFile(
+  new URL("../src/components/InspectorView.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatViewMessages = await readFile(
   new URL("../src/lib/chatViewMessages.ts", import.meta.url),
   "utf8",
@@ -744,9 +751,10 @@ test("ChatView delegates composer state and submit ownership to ComposerContaine
   assert.match(composerContainer, /coreBridge\.runtimeModels/);
 });
 
-test("ChatView delegates local computer inspector rendering to ComputerDetailPanel", () => {
-  assert.match(chatView, /import \{ ComputerDetailPanel \} from "\.\/ComputerDetailPanel";/);
-  assert.match(chatView, /<ComputerDetailPanel[\s\S]*?session=\{computerSession\}/);
+test("InspectorView delegates local computer inspector rendering to ComputerDetailPanel", () => {
+  assert.doesNotMatch(chatView, /import \{ ComputerDetailPanel \} from "\.\/ComputerDetailPanel";/);
+  assert.match(inspectorView, /import \{ ComputerDetailPanel \} from "\.\/ComputerDetailPanel";/);
+  assert.match(inspectorView, /<ComputerDetailPanel[\s\S]*?session=\{computerSession\}/);
   assert.doesNotMatch(chatView, /function ComputerDetailPanel\(/);
   assert.match(computerDetailPanel, /export function ComputerDetailPanel/);
   assert.match(computerDetailPanel, /className="computer-detail-panel"/);
@@ -829,9 +837,11 @@ test("ChatView delegates generated artifact rendering to MessageArtifacts", () =
   assert.match(messageArtifacts, /msg-artifacts/);
 });
 
-test("ChatView delegates the artifacts workbench panel to ArtifactsPanel", () => {
-  assert.match(chatView, /from "\.\/ArtifactsPanel";/);
-  assert.match(chatView, /<ArtifactsPanel[\s\S]*artifacts=\{\[resourceArtifact\]\}/);
+test("InspectorView delegates the artifacts workbench panel to ArtifactsPanel", () => {
+  assert.match(chatView, /from "\.\/InspectorView";/);
+  assert.doesNotMatch(chatView, /from "\.\/ArtifactsPanel";/);
+  assert.match(inspectorView, /from "\.\/ArtifactsPanel";/);
+  assert.match(inspectorView, /<ArtifactsPanel[\s\S]*artifacts=\{\[resourceArtifact\]\}/);
   assert.doesNotMatch(chatView, /function ArtifactsPanel\(/);
   assert.doesNotMatch(chatView, /function applyPreview\(/);
   assert.match(artifactsPanel, /export function ArtifactsPanel/);
@@ -841,9 +851,11 @@ test("ChatView delegates the artifacts workbench panel to ArtifactsPanel", () =>
   assert.match(artifactsPanel, /triggerArtifactDownload/);
 });
 
-test("ChatView delegates the goals workbench panel to GoalsPanel", () => {
-  assert.match(chatView, /from "\.\/GoalsPanel";/);
-  assert.match(chatView, /<GoalsPanel[\s\S]*data=\{goalsData\}/);
+test("InspectorView delegates the goals workbench panel to GoalsPanel", () => {
+  assert.match(chatView, /from "\.\/InspectorView";/);
+  assert.doesNotMatch(chatView, /from "\.\/GoalsPanel";/);
+  assert.match(inspectorView, /from "\.\/GoalsPanel";/);
+  assert.match(inspectorView, /<GoalsPanel[\s\S]*data=\{goalsData\}/);
   assert.doesNotMatch(chatView, /function GoalsPanel\(/);
   assert.doesNotMatch(chatView, /function normalizeGoalText\(/);
   assert.doesNotMatch(chatView, /function dedupeGoalDrafts\(/);
@@ -854,9 +866,11 @@ test("ChatView delegates the goals workbench panel to GoalsPanel", () => {
   assert.match(goalsPanel, /coreBridge\.promoteGoals/);
 });
 
-test("ChatView delegates memory graph rendering to MemoryGraphPanel", () => {
-  assert.match(chatView, /from "\.\/MemoryGraphPanel";/);
-  assert.match(chatView, /<MemoryGraphPanel threadId=\{threadId\} layoutSignal=\{layoutSignal\}/);
+test("InspectorView delegates memory graph rendering to MemoryGraphPanel", () => {
+  assert.match(chatView, /from "\.\/InspectorView";/);
+  assert.doesNotMatch(chatView, /from "\.\/MemoryGraphPanel";/);
+  assert.match(inspectorView, /from "\.\/MemoryGraphPanel";/);
+  assert.match(inspectorView, /<MemoryGraphPanel threadId=\{threadId\} layoutSignal=\{layoutSignal\}/);
   assert.doesNotMatch(chatView, /function MemoryGraphPanel\(/);
   assert.doesNotMatch(chatView, /react-force-graph-2d/);
   assert.doesNotMatch(chatView, /const GRAPH_KIND_STYLE/);
@@ -866,6 +880,19 @@ test("ChatView delegates memory graph rendering to MemoryGraphPanel", () => {
   assert.match(memoryGraphPanel, /resizeFitTimer/);
   assert.match(memoryView, /from "\.\/MemoryGraphPanel";/);
   assert.doesNotMatch(memoryView, /from "\.\/ChatView";/);
+});
+
+test("ChatView delegates inspector body rendering to InspectorView", () => {
+  assert.match(chatView, /from "\.\/InspectorView";/);
+  assert.match(chatView, /<InspectorView[\s\S]*descriptor=\{tab\}/);
+  assert.doesNotMatch(chatView, /function InspectorView\(/);
+  assert.doesNotMatch(chatView, /fileStatus === "missing"/);
+  assert.doesNotMatch(chatView, /coreBridge\.taskQueue/);
+  assert.doesNotMatch(chatView, /coreBridge\.fsList/);
+  assert.match(inspectorView, /export function InspectorView/);
+  assert.match(inspectorView, /fileStatus === "missing"/);
+  assert.match(inspectorView, /\.taskQueue\(/);
+  assert.match(inspectorView, /\.fsList\(/);
 });
 
 test("ChatView delegates message and formatting helpers to chatViewMessages", () => {
@@ -898,10 +925,10 @@ test("ChatView delegates structured payload parsing to ChatPayloadParsers", () =
   assert.match(chatPayloadParsers, /export function latestActivitySteps/);
 });
 
-test("ChatView delegates operational plan preview rendering and parsing", () => {
-  assert.match(chatView, /from "\.\/OperationalPlanPreview";/);
-  assert.match(chatView, /<OperationalPlanPreview collapsed=\{false\} markdown=\{operationalPlanMarkdown\}/);
-  assert.match(chatView, /parseOperationalPlanItems\(operationalPlanMarkdown\)/);
+test("InspectorView delegates operational plan preview rendering and parsing", () => {
+  assert.match(inspectorView, /from "\.\/OperationalPlanPreview";/);
+  assert.match(inspectorView, /<OperationalPlanPreview collapsed=\{false\} markdown=\{operationalPlanMarkdown\}/);
+  assert.match(inspectorView, /parseOperationalPlanItems\(operationalPlanMarkdown\)/);
   assert.doesNotMatch(chatView, /function OperationalPlanPreview\(/);
   assert.doesNotMatch(chatView, /function parseOperationalPlanItems\(/);
   assert.doesNotMatch(chatView, /function planPreviewItems\(/);
