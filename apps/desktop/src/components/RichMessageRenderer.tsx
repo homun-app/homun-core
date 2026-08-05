@@ -11,34 +11,13 @@ import type { Components } from "react-markdown";
 import type { Mermaid } from "mermaid";
 
 import { copyText } from "../lib/clipboard";
-// The splitter is a plain .mjs sibling so `node --test` can exercise it without
-// a build step, which is why it carries no type declaration.
-// @ts-expect-error JavaScript sibling intentionally has no declaration file.
-import * as markdownBlocks from "../lib/markdownBlocks.mjs";
-// @ts-expect-error JavaScript sibling intentionally has no declaration file.
-import * as settledText from "../lib/settledText.mjs";
+import { splitMarkdownBlocks } from "../lib/markdownBlocks";
+import { nextSettledValue } from "../lib/settledText";
 import "highlight.js/styles/github.css";
 
 // highlight.js (via lowlight) → hAST → real React elements (no innerHTML).
 // `common` covers ~37 mainstream languages, enough for chat code blocks.
 const lowlight = createLowlight(common);
-
-interface MarkdownBlockSlice {
-  key: string;
-  text: string;
-  closed: boolean;
-}
-
-const splitMarkdownBlocks = markdownBlocks.splitMarkdownBlocks as (
-  text: string,
-) => MarkdownBlockSlice[];
-
-const nextSettledValue = settledText.nextSettledValue as (input: {
-  current: string;
-  settled: string | undefined;
-  elapsedMs: number;
-  quietMs: number;
-}) => string;
 
 // Module-level, NOT inline literals: a fresh array on every render is a new prop
 // identity, which defeats the unified processor's own caching and forces a full

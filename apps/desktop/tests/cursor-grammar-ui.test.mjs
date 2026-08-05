@@ -232,6 +232,13 @@ const chatMessageContent = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const richMessageRenderer = await readFile(
+  new URL("../src/components/RichMessageRenderer.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatMessageAfterContent = await readFile(
   new URL("../src/components/ChatMessageAfterContent.tsx", import.meta.url),
   "utf8",
@@ -1508,6 +1515,13 @@ test("ChatView imports typed transcript indexes from messageIndex", () => {
   assert.match(chatView, /from "\.\.\/lib\/messageIndex";/);
   assert.doesNotMatch(chatView, /import \* as messageIndex/);
   assert.doesNotMatch(chatView, /messageIndex\.buildBranchIndex as/);
+});
+
+test("RichMessageRenderer imports typed markdown helpers", () => {
+  assert.match(richMessageRenderer, /from "\.\.\/lib\/markdownBlocks";/);
+  assert.match(richMessageRenderer, /from "\.\.\/lib\/settledText";/);
+  assert.doesNotMatch(richMessageRenderer, /import \* as markdownBlocks/);
+  assert.doesNotMatch(richMessageRenderer, /import \* as settledText/);
 });
 
 test("ChatView delegates chat event projection helpers to chatEventParts", () => {
