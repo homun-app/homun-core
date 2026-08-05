@@ -141,6 +141,13 @@ const messagePlanProposeCard = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageDiffCard = await readFile(
+  new URL("../src/components/MessageDiffCard.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -727,6 +734,15 @@ test("ChatView does not retain the retired inline operational plan progress card
   assert.doesNotMatch(chatView, /function PlanProgressCard\(/);
   assert.match(chatView, /interface PlanStep/);
   assert.match(chatView, /parsePlanSteps\(markdown: string\): PlanStep\[\]/);
+});
+
+test("ChatView delegates diff message rendering to MessageDiffCard", () => {
+  assert.match(chatView, /from "\.\/MessageDiffCard";/);
+  assert.match(chatView, /<DiffCard key=\{`diff-\$\{index\}`\} payload=\{part\.payload\}/);
+  assert.doesNotMatch(chatView, /function DiffCard\(/);
+  assert.match(messageDiffCard, /export function DiffCard/);
+  assert.match(messageDiffCard, /DiffEventPayload/);
+  assert.match(messageDiffCard, /diff-card/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
