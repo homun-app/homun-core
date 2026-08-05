@@ -232,6 +232,13 @@ const messageVaultProposeCard = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const artifactsPanel = await readFile(
+  new URL("../src/components/ArtifactsPanel.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -766,7 +773,6 @@ test("ChatView delegates assistant thinking rendering to AssistantThinkingState"
 test("ChatView delegates generated artifact rendering to MessageArtifacts", () => {
   assert.match(chatView, /from "\.\/MessageArtifacts";/);
   assert.match(chatView, /<MessageArtifacts text=\{text\} onOpen=\{onOpenArtifact\}/);
-  assert.match(chatView, /<ArtifactPreviewBody[\s\S]*?preview=\{preview\}/);
   assert.doesNotMatch(chatView, /function MessageArtifacts\(/);
   assert.doesNotMatch(chatView, /function ArtifactCardRow\(/);
   assert.doesNotMatch(chatView, /function InlineArtifactPreview\(/);
@@ -778,6 +784,18 @@ test("ChatView delegates generated artifact rendering to MessageArtifacts", () =
   assert.match(messageArtifacts, /export async function buildArtifactPreview/);
   assert.match(messageArtifacts, /export async function triggerArtifactDownload/);
   assert.match(messageArtifacts, /msg-artifacts/);
+});
+
+test("ChatView delegates the artifacts workbench panel to ArtifactsPanel", () => {
+  assert.match(chatView, /from "\.\/ArtifactsPanel";/);
+  assert.match(chatView, /<ArtifactsPanel[\s\S]*artifacts=\{\[resourceArtifact\]\}/);
+  assert.doesNotMatch(chatView, /function ArtifactsPanel\(/);
+  assert.doesNotMatch(chatView, /function applyPreview\(/);
+  assert.match(artifactsPanel, /export function ArtifactsPanel/);
+  assert.match(artifactsPanel, /<ArtifactPreviewBody[\s\S]*?preview=\{preview\}/);
+  assert.match(artifactsPanel, /coreBridge\.artifactVersions/);
+  assert.match(artifactsPanel, /diffStats/);
+  assert.match(artifactsPanel, /triggerArtifactDownload/);
 });
 
 test("ChatView delegates operational plan preview rendering and parsing", () => {
