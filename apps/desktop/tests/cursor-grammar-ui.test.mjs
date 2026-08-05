@@ -218,6 +218,13 @@ const messageComposioConfirmCard = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageConnectSuggestCard = await readFile(
+  new URL("../src/components/MessageConnectSuggestCard.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -921,6 +928,19 @@ test("ChatView delegates Composio and MCP confirmations to MessageComposioConfir
   assert.match(messageComposioConfirmCard, /coreBridge\.composioExecute/);
   assert.match(messageComposioConfirmCard, /coreBridge\.mcpExecute/);
   assert.match(messageComposioConfirmCard, /confirmDestructiveAction/);
+});
+
+test("ChatView delegates capability suggestions to MessageConnectSuggestCard", () => {
+  assert.match(chatView, /from "\.\/MessageConnectSuggestCard";/);
+  assert.match(chatView, /<ConnectSuggestCard[\s\S]*suggest=\{connectSuggest\}/);
+  assert.doesNotMatch(chatView, /function ConnectSuggestCard\(/);
+  assert.doesNotMatch(chatView, /function ConnectSuggestRow\(/);
+  assert.doesNotMatch(chatView, /const CONNECT_KIND_META:/);
+  assert.match(messageConnectSuggestCard, /export interface ConnectSuggest/);
+  assert.match(messageConnectSuggestCard, /export function ConnectSuggestCard/);
+  assert.match(messageConnectSuggestCard, /coreBridge\.mcpConnect/);
+  assert.match(messageConnectSuggestCard, /coreBridge\.catalogInstall/);
+  assert.match(messageConnectSuggestCard, /connectComposioToolkit/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
