@@ -65,13 +65,12 @@ import { usePluginController } from "./lib/usePluginController";
 import { useResponsiveDrawer } from "./lib/useResponsiveDrawer";
 import { useTaskQueueController } from "./lib/useTaskQueueController";
 import { useBackgroundStreams } from "./lib/useBackgroundStreams";
+import { useAppNavigation } from "./lib/useAppNavigation";
 import type {
   ChatAttachment,
   ChatMessage,
   ChatThread,
   NavItem,
-  SettingsSectionId,
-  ViewId,
 } from "./types";
 
 const defaultChatThread: ChatThread = {
@@ -92,14 +91,20 @@ function AuthenticatedApp() {
   const { t } = useTranslation();
   // System notifications opt-in (the SettingsView General pane wires permission).
   const [systemNotifEnabled] = useSetting<boolean>("general.systemNotifications", false);
-  const [activeView, setActiveView] = useState<ViewId>("chat");
-  const [previousView, setPreviousView] = useState<ViewId>("chat");
-  const [settingsSection, setSettingsSection] =
-    useState<SettingsSectionId>("account");
-  // Active sub-item within a section that has an inline expandable submenu (e.g.
-  // Model & Runtime → routing|decisions|providers). A single free-form string
-  // keeps this generic for future sections (Connectors, etc.).
-  const [settingsSub, setSettingsSub] = useState<string>("");
+  const {
+    activeView,
+    settingsSection,
+    settingsSub,
+    searchOpen,
+    setActiveView,
+    setSettingsSection,
+    setSettingsSub,
+    handleNavigate,
+    backFromSettings,
+    openUsageSettings,
+    openSearch,
+    closeSearch,
+  } = useAppNavigation();
   const [chatThreads, setChatThreads] = useState<ChatThread[]>([
     defaultChatThread,
   ]);
@@ -142,9 +147,6 @@ function AuthenticatedApp() {
     createThreadAttentionState(defaultChatThread.threadId),
   );
   const threadAttentionRef = useRef(threadAttention);
-  // Search modal lifted here (was in Shell) so BOTH the sidebar and the collapsed in-header
-  // controls can open it via one owner.
-  const [searchOpen, setSearchOpen] = useState(false);
   const { showOnboarding, completeOnboarding } = useOnboardingSetupGate();
   const { pluginStates, reloadPlugins } = usePluginController();
   const { drawerOpen, expandDrawer, toggleDrawer } = useResponsiveDrawer();
@@ -277,13 +279,6 @@ function AuthenticatedApp() {
         .then((row) => applyThreadAttentionRows([row]))
         .catch((error) => console.warn("mark_thread_seen unavailable", error));
     }
-  }
-
-  function handleNavigate(view: ViewId) {
-    if (view === "settings" && activeView !== "settings") {
-      setPreviousView(activeView);
-    }
-    setActiveView(view);
   }
 
   async function handleSelectThread(threadId: string) {
@@ -834,7 +829,7 @@ function AuthenticatedApp() {
       onCreateteChatThread={handleCreateteChatThread}
       onArchiveChatThread={handleArchiveChatThread}
       onRenameChatThread={handleRenameChatThread}
-      onBackFromSettings={() => setActiveView(previousView)}
+      onBackFromSettings={backFromSettings}
       onDeleteChatThread={handleDeleteChatThread}
       navItems={composedNavItems}
       onNavigate={handleNavigate}
@@ -842,7 +837,7 @@ function AuthenticatedApp() {
       onThreadAttention={applyThreadAttentionRows}
       onSetChatThreadPinned={handleSetChatThreadPinned}
       onToggleDrawer={toggleDrawer}
-      onSearchChat={() => setSearchOpen(true)}
+      onSearchChat={openSearch}
       onUnarchiveChatThread={handleUnarchiveChatThread}
       onSelectSettingsSection={setSettingsSection}
       settingsSection={settingsSection}
@@ -885,13 +880,8 @@ function AuthenticatedApp() {
         enabledPlugins={enabledPlugins}
         pluginHost={pluginHost}
         onExpandSidebar={expandDrawer}
-        onOpenSearch={() => setSearchOpen(true)}
-        onOpenUsageSettings={() => {
-          setPreviousView("chat");
-          setSettingsSection("usage");
-          setSettingsSub("");
-          setActiveView("settings");
-        }}
+        onOpenSearch={openSearch}
+        onOpenUsageSettings={openUsageSettings}
         onMessagesChange={(messages) =>
           handleMessagesChange(activeThread.threadId, messages)
         }
@@ -918,9 +908,9 @@ function AuthenticatedApp() {
       {searchOpen && (
         <ChatSearchModal
           chatThreads={chatThreads}
-          onClose={() => setSearchOpen(false)}
+          onClose={closeSearch}
           onSelectThread={(threadId) => {
-            setSearchOpen(false);
+            closeSearch();
             void handleSelectThread(threadId);
           }}
         />

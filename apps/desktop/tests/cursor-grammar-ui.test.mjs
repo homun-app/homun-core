@@ -191,6 +191,13 @@ const backgroundStreams = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const appNavigation = await readFile(
+  new URL("../src/lib/useAppNavigation.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -808,6 +815,18 @@ test("App delegates background stream polling to useBackgroundStreams", () => {
   assert.doesNotMatch(app, /setBackgroundStreamIds/);
   assert.match(backgroundStreams, /export function useBackgroundStreams/);
   assert.match(backgroundStreams, /\.activeStreams\(\)/);
+});
+
+test("App delegates shell navigation state to useAppNavigation", () => {
+  assert.match(app, /from "\.\/lib\/useAppNavigation";/);
+  assert.doesNotMatch(app, /useState<ViewId>/);
+  assert.doesNotMatch(app, /useState<SettingsSectionId>/);
+  assert.doesNotMatch(app, /setSearchOpen/);
+  assert.doesNotMatch(app, /function handleNavigate/);
+  assert.match(appNavigation, /export function useAppNavigation/);
+  assert.match(appNavigation, /useState<ViewId>\("chat"\)/);
+  assert.match(appNavigation, /useState<SettingsSectionId>\("account"\)/);
+  assert.match(appNavigation, /function openUsageSettings/);
 });
 
 test("App delegates workspace view rendering to AppWorkspace", () => {
