@@ -168,12 +168,12 @@ assertSource("src/components/PendingSteeringQueue.tsx", ["onEdit", "onDelete", "
 assertSource("src/components/ChatComposerDock.tsx", ["<ActiveTurnStatus", "<PendingSteeringQueue", "<ComposerContainer"]);
 assertSource("src/components/ChatView.tsx", ["<ChatComposerDock", "pendingSteering"]);
 assertNotContains(
-  "src/App.tsx",
+  "src/lib/useAppEventSubscription.ts",
   "navigateToThread(eventThreadId",
   "background events cannot navigate",
 );
 assertContains(
-  "src/App.tsx",
+  "src/lib/useAppEventSubscription.ts",
   "refreshThreadInBackground(eventThreadId)",
   "background events refresh only their cache",
 );
@@ -1021,7 +1021,7 @@ assertRepoContains("crates/desktop-gateway/src/main.rs", "run_agent_turn_into_me
 assertRepoContains("crates/desktop-gateway/src/main.rs", "OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing", "chat loop must maintain the canonical plan through update_plan and continue in the same turn");
 assertNotContains("src/App.tsx", "pendingEventThreadIdsRef", "background event refresh must not depend on a navigation race window");
 assertContains("src/App.tsx", "refreshThreadInBackground", "background events must refresh their own durable cache");
-assertContains("src/App.tsx", "event.type === \"thread.turn_started\"", "desktop client must handle visible turn start events");
+assertContains("src/lib/useAppEventSubscription.ts", "event.type === \"thread.turn_started\"", "desktop client must handle visible turn start events");
 assertContains("src/lib/coreBridge.ts", "assistant_message_id?: string", "app event contract must expose persisted assistant message ids");
 assertContains("src/components/ChatView.tsx", "normalizeChatEventParts(result.assistant_message.event_parts)", "completed chat turns must normalize structured event parts from the gateway result");
 assertContains("src/lib/chatViewMessages.ts", "eventParts,", "completed chat turns must preserve structured event parts in the assistant message builder");
@@ -1136,6 +1136,7 @@ assertContains("src/App.tsx", "useBackgroundStreams", "App must delegate active 
 assertContains("src/App.tsx", "useAppNavigation", "App must delegate shell navigation/search state to the navigation hook");
 assertContains("src/App.tsx", "useThreadAttentionController", "App must delegate thread attention state to the attention controller");
 assertContains("src/App.tsx", "useOperationalReadModelPoller", "App must delegate operational read model polling to the poller hook");
+assertContains("src/App.tsx", "useAppEventSubscription", "App must delegate app-event websocket subscription to the subscription hook");
 assertNotContains("src/App.tsx", "coreBridge.setupStatus", "App must not own setup status fetching directly");
 assertNotContains("src/App.tsx", "coreBridge.plugins()", "App must not own plugin state fetching directly");
 assertNotContains("src/App.tsx", "coreBridge.activeStreams", "App must not own active stream polling directly");
@@ -1143,6 +1144,8 @@ assertNotContains("src/App.tsx", "coreBridge.markThreadSeen", "App must not own 
 assertNotContains("src/App.tsx", "hydrateThreadAttentionState", "App must not own thread attention hydration directly");
 assertNotContains("src/App.tsx", "projectConversationAttention", "App must not own thread attention projection directly");
 assertNotContains("src/App.tsx", "operational_read_models_poll unavailable", "App must not own operational read model polling directly");
+assertNotContains("src/App.tsx", "appEventHandlerRef", "App must not own app-event websocket dispatch directly");
+assertNotContains("src/App.tsx", "wsSubscription", "App must not own websocket subscription directly");
 assertNotContains("src/App.tsx", "useState<ViewId>", "App must not own shell view state directly");
 assertNotContains("src/App.tsx", "setSearchOpen", "App must not own search modal state directly");
 assertNotContains("src/App.tsx", "coreBridge.taskQueue", "App must not own task queue fetching directly");

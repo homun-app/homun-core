@@ -212,6 +212,13 @@ const operationalReadModelPoller = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const appEventSubscription = await readFile(
+  new URL("../src/lib/useAppEventSubscription.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -865,6 +872,17 @@ test("App delegates operational read-model polling to useOperationalReadModelPol
   assert.doesNotMatch(app, /window\.setInterval\(refreshOperationalReadModels, 2_500\)/);
   assert.match(operationalReadModelPoller, /export function useOperationalReadModelPoller/);
   assert.match(operationalReadModelPoller, /window\.setInterval\(refreshOperationalReadModels, 2_500\)/);
+});
+
+test("App delegates WebSocket app-event subscription to useAppEventSubscription", () => {
+  assert.match(app, /from "\.\/lib\/useAppEventSubscription";/);
+  assert.doesNotMatch(app, /wsSubscription/);
+  assert.doesNotMatch(app, /appEventHandlerRef/);
+  assert.doesNotMatch(app, /event\.type === "thread\.turn_started"/);
+  assert.match(appEventSubscription, /export function useAppEventSubscription/);
+  assert.match(appEventSubscription, /wsSubscription\.connect\(\)/);
+  assert.match(appEventSubscription, /event\.type === "thread\.turn_started"/);
+  assert.match(appEventSubscription, /refreshThreadInBackground\(eventThreadId, event\.workspace/);
 });
 
 test("App delegates workspace view rendering to AppWorkspace", () => {

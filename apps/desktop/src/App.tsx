@@ -12,7 +12,6 @@ import {
 import { pluginRegistry, type PluginHost } from "./plugins/registry";
 import {
   coreBridge,
-  type AppEvent,
   type ChatAttachmentInput,
   type CoreChatThreadSnapshot,
   type CoreThreadAttention,
@@ -20,7 +19,6 @@ import {
   type RoutingBindingInput,
   type TemplateCatalogEntry,
 } from "./lib/coreBridge";
-import { wsSubscription } from "./lib/wsSubscription";
 import { useSetting } from "./lib/settingsStore";
 import { showSystemNotification, notificationPermission } from "./lib/systemNotifications";
 import { reconcileChatMessages, reconcileChatThreads } from "./lib/uiSnapshot";
@@ -57,6 +55,10 @@ import { useBackgroundStreams } from "./lib/useBackgroundStreams";
 import { useAppNavigation } from "./lib/useAppNavigation";
 import { useThreadAttentionController } from "./lib/useThreadAttentionController";
 import { useOperationalReadModelPoller } from "./lib/useOperationalReadModelPoller";
+import {
+  useAppEventSubscription,
+  type IncomingBackgroundTurn,
+} from "./lib/useAppEventSubscription";
 import type {
   ChatAttachment,
   ChatMessage,
@@ -125,12 +127,8 @@ function AuthenticatedApp() {
   // Set on a `thread.turn_started` for the open thread → ChatView attaches to that turn's live
   // stream (island + transcript update in real time), for turns THIS client didn't launch —
   // e.g. a Telegram/WhatsApp/scheduled reply, or a turn started from another window.
-  const [incomingBackgroundTurn, setIncomingBackgroundTurn] = useState<{
-    turnId: string;
-    threadId: string;
-    userMessageId: string;
-    assistantMessageId: string;
-  } | null>(null);
+  const [incomingBackgroundTurn, setIncomingBackgroundTurn] =
+    useState<IncomingBackgroundTurn | null>(null);
   const pendingLocalMessageThreadIdsRef = useRef<Set<string>>(new Set());
   const busyThreadIdsRef = useRef<Set<string>>(new Set());
   const notifiedAttentionThreadIdsRef = useRef<Set<string> | null>(null);
@@ -325,91 +323,19 @@ function AuthenticatedApp() {
     }
   }
 
-  // Real-time channel events update the owning thread's durable cache and
-  // attention indicator. Selection remains exclusively user-owned. A ref keeps
-  // the handler fresh without re-subscribing on every render.
-  const appEventHandlerRef = useRef<(event: AppEvent) => void>(() => {});
-  appEventHandlerRef.current = (event: AppEvent) => {
-    if (!event.thread_id) return;
-    // The "homun" thread is retired as a proactive surface (its curiosities/onboarding
-    // now flow as proactivity cards) — ignore its events; it has no nav entry to update.
-    if (event.thread_id === "homun") {
-      return;
-    }
-    const eventThreadId = event.thread_id;
-    const isVisibleTurn = event.type === "thread.turn_started";
-    const isThreadCreated = event.type === "thread.upserted";
-    if (isVisibleTurn || isThreadCreated) {
-      // Alert the user when something arrived/finished while the app wasn't in
-      // front (a channel message, or a scheduled task that produced a result).
-      // Skip when focused — the thread list + bell already surface it there.
-      if (
-        systemNotifEnabled &&
-        document.hidden &&
-        notificationPermission() === "granted"
-      ) {
-        const threadId = event.thread_id;
-        void showSystemNotification({
-          title: event.title || t("notifications.newActivity"),
-          body:
-            event.channel === "scheduled"
-              ? t("notifications.scheduledReady")
-              : t("notifications.newMessage"),
-          tag: threadId,
-          onClick: () => void handleSelectThread(threadId),
-        });
-      }
-      if (isVisibleTurn) {
-        // Attach only when this is already the user-selected task. A background
-        // turn updates its cache and sidebar state without touching the view.
-        if (
-          eventThreadId === activeThreadId &&
-          event.turn_id &&
-          event.user_message_id &&
-          event.assistant_message_id
-        ) {
-          setIncomingBackgroundTurn({
-            turnId: event.turn_id,
-            threadId: eventThreadId,
-            userMessageId: event.user_message_id,
-            assistantMessageId: event.assistant_message_id,
-          });
-        }
-      }
-      void refreshThreadInBackground(eventThreadId, event.workspace, {
-        forceMessages: isVisibleTurn,
-      });
-    } else if (event.type === "thread.updated") {
-      if (event.workspace) {
-        void refreshThreadInBackground(eventThreadId, event.workspace);
-      } else {
-        void refreshThreadInBackground(eventThreadId);
-      }
-      if (eventThreadId === activeThreadId) {
-        setIslandRefreshNonce((n) => n + 1);
-      }
-    }
-  };
-  useEffect(() => {
-    // Unified WebSocket: persistent channel for ALL server→client events.
-    // Replaces subscribeAppEvents (NDJSON /api/events) + listenChatStreamEvent.
-    wsSubscription.connect();
-    const unsub = wsSubscription.subscribe((msg) => {
-      // Dispatch app events (thread.updated, thread.turn_started, project_graph.ready)
-      if (msg.type === "app.event") {
-        const event = msg.event as Record<string, unknown>;
-        appEventHandlerRef.current(event as unknown as Parameters<typeof appEventHandlerRef.current>[0]);
-      }
-    });
-    return () => {
-      // Drop only this component's handler. The WS is a process-lifetime
-      // singleton ("connect at boot / disconnect at shutdown"): a React unmount
-      // is NOT app shutdown. Under StrictMode's mount→unmount→remount, calling
-      // disconnect() here closed a still-CONNECTING socket and left the singleton
-      // wedged (isConnecting stuck true), permanently dead-locking connect().
-      unsub();
-    };
-  }, []);
+  useAppEventSubscription({
+    activeThreadId,
+    systemNotifEnabled,
+    labels: {
+      newActivity: t("notifications.newActivity"),
+      scheduledReady: t("notifications.scheduledReady"),
+      newMessage: t("notifications.newMessage"),
+    },
+    onSelectThread: handleSelectThread,
+    refreshThreadInBackground,
+    setIncomingBackgroundTurn,
+    bumpIslandRefreshNonce: () => setIslandRefreshNonce((n) => n + 1),
+  });
 
   async function handleCreateteChatThread(workspaceId?: string) {
     try {
