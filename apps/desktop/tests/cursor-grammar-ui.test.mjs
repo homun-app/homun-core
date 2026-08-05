@@ -127,6 +127,13 @@ const operationalPlanPreview = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageChoiceCard = await readFile(
+  new URL("../src/components/MessageChoiceCard.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -685,6 +692,16 @@ test("ChatView delegates operational plan preview rendering and parsing", () => 
   assert.match(operationalPlanPreview, /export function OperationalPlanPreview/);
   assert.match(operationalPlanPreview, /export function parseOperationalPlanItems/);
   assert.match(operationalPlanPreview, /operational-plan-preview/);
+});
+
+test("ChatView delegates choice prompt rendering to MessageChoiceCard", () => {
+  assert.match(chatView, /from "\.\/MessageChoiceCard";/);
+  assert.match(chatView, /<ChoicesCard prompt=\{choices\} onChoose=\{onChoose\}/);
+  assert.doesNotMatch(chatView, /function ChoicesCard\(/);
+  assert.doesNotMatch(chatView, /interface ChoicePrompt/);
+  assert.match(messageChoiceCard, /export interface ChoicePrompt/);
+  assert.match(messageChoiceCard, /export function ChoicesCard/);
+  assert.match(messageChoiceCard, /choices-card/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {

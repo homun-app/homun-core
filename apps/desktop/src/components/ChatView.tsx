@@ -45,10 +45,8 @@ import {
   Share2,
   Tag,
   Target,
-  CheckSquare,
   ShieldCheck,
   Sparkles,
-  Square,
   SquareTerminal,
   X,
 } from "lucide-react";
@@ -216,6 +214,7 @@ import {
   OperationalPlanPreview,
   parseOperationalPlanItems,
 } from "./OperationalPlanPreview";
+import { ChoicesCard, type ChoicePrompt } from "./MessageChoiceCard";
 import {
   projectWorkspaceSections,
   type WorkspaceSectionId,
@@ -3825,17 +3824,6 @@ const CHAT_MODES: {
   { key: "debug", label: "Debug", desc: "Systematic debugging (code projects)", icon: Bug, projectOnly: true },
 ];
 
-/** A single/multi-choice question the model asks the user (Claude-Code style). */
-interface ChoicePrompt {
-  question: string;
-  multi: boolean;
-  options: string[];
-  /** Set for PROACTIVITY-origin questions (onboarding, follow-up, …): answering captures
-   *  the pick as memory instead of running an agent turn. Absent for model-emitted,
-   *  in-task choices (those still continue the turn normally). */
-  purpose?: string;
-}
-
 /** A plan the model proposes BEFORE executing (plan-mode): the card gates execution
  *  behind Accetta / Edit. */
 interface PlanProposal {
@@ -7006,70 +6994,6 @@ function PlanProgressCard({ steps }: { steps: PlanStep[] }) {
           </li>
         ))}
       </ul>
-    </div>
-  );
-}
-
-/** Single/multi-choice question card. Single: each option is a button that sends the
- *  answer on click. Multi: toggle chips + a Confirm button that sends the joined
- *  selection. The answer becomes the next user message (like Claude Code's choices). */
-function ChoicesCard({
-  prompt,
-  onChoose,
-}: {
-  prompt: ChoicePrompt;
-  onChoose: (answer: string, purpose?: string) => void;
-}) {
-  const [picked, setPicked] = useState<string[]>([]);
-  const [sent, setSent] = useState(false);
-  if (sent) {
-    return (
-      <div className="choices-card done">
-        <Check size={14} />
-        <span>{picked.join(", ")}</span>
-      </div>
-    );
-  }
-  const toggle = (option: string) =>
-    setPicked((cur) =>
-      cur.includes(option) ? cur.filter((o) => o !== option) : [...cur, option],
-    );
-  const send = (answer: string[]) => {
-    if (answer.length === 0) return;
-    setPicked(answer);
-    setSent(true);
-    onChoose(answer.join(", "), prompt.purpose);
-  };
-  return (
-    <div className="choices-card">
-      {prompt.question && <p className="choices-question">{prompt.question}</p>}
-      <div className="choices-options">
-        {prompt.options.map((option) => {
-          const active = picked.includes(option);
-          return (
-            <button
-              key={option}
-              type="button"
-              className={`choices-option ${active ? "active" : ""}`}
-              onClick={() => (prompt.multi ? toggle(option) : send([option]))}
-            >
-              {prompt.multi &&
-                (active ? <CheckSquare size={15} /> : <Square size={15} />)}
-              <span>{option}</span>
-            </button>
-          );
-        })}
-      </div>
-      {prompt.multi && (
-        <button
-          type="button"
-          className="choices-confirm"
-          disabled={picked.length === 0}
-          onClick={() => send(picked)}
-        >
-          Confirm{picked.length > 0 ? ` (${picked.length})` : ""}
-        </button>
-      )}
     </div>
   );
 }
