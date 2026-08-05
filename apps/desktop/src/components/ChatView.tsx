@@ -140,12 +140,8 @@ import { ComposerContainer } from "./ComposerContainer";
 import { ChatEmptyHero } from "./ChatEmptyHero";
 import { ChatSystemMessageHeader } from "./ChatSystemMessageHeader";
 import { ChatTopbar } from "./ChatTopbar";
-import { ChatBranchPicker } from "./ChatBranchPicker";
-import { ChatFollowUps } from "./ChatFollowUps";
-import { MessageAttachmentList } from "./MessageAttachmentList";
-import { MessageActionFooter } from "./MessageActionFooter";
 import { ChatMessageContent } from "./ChatMessageContent";
-import { MessageStatusBadges } from "./MessageStatusBadges";
+import { ChatMessageAfterContent } from "./ChatMessageAfterContent";
 import { PendingAssistantMessage } from "./PendingAssistantMessage";
 import { type ChatStreamStatus } from "./AssistantThinkingState";
 import { InlineUncertainEffectPanel } from "./InlineUncertainEffectPanel";
@@ -1692,6 +1688,11 @@ export function ChatView({
     });
   }
 
+  function selectFollowUp(suggestion: string) {
+    setFollowUps([]);
+    void submitPrompt(suggestion, []);
+  }
+
   async function submitComposerPrompt(
     prompt: string,
     attachments: ChatAttachmentInput[],
@@ -2819,46 +2820,22 @@ export function ChatView({
                 onSubmitChoiceAnswer={submitChoiceAnswer}
                 onHandleProactiveAnswer={handleProactiveAnswer}
               />
-              {displayMessage.text && !isStreamingMessage && (
-                <MessageStatusBadges
-                  incomplete={assistantMessage && incompleteMessage}
-                  autoContinuing={autoContinueMessageId === displayMessage.id}
-                />
-              )}
-              {!isStreamingMessage &&
-                (() => {
-                  const point = branchIndex.get(displayMessage.id);
-                  if (!point || point.options.length < 2) return null;
-                  return (
-                    <ChatBranchPicker
-                      point={point}
-                      busy={branchBusy}
-                      onSwitch={(direction) => void switchBranch(point, direction)}
-                      onRename={(label) => void renameBranch(displayMessage.id, label)}
-                    />
-                  );
-                })()}
-              {!isStreamingMessage &&
-                followUpsFor === displayMessage.id &&
-                followUps.length > 0 && (
-                  <ChatFollowUps
-                    suggestions={followUps}
-                    onSelect={(suggestion) => {
-                      setFollowUps([]);
-                      void submitPrompt(suggestion, []);
-                    }}
-                  />
-                )}
-              {displayMessage.attachments && displayMessage.attachments.length > 0 && (
-                <MessageAttachmentList attachments={displayMessage.attachments} />
-              )}
-              <MessageActionFooter
+              <ChatMessageAfterContent
                 message={displayMessage}
                 isStreaming={isStreamingMessage}
+                incomplete={incompleteMessage}
+                autoContinuing={autoContinueMessageId === displayMessage.id}
+                branchPoint={branchIndex.get(displayMessage.id)}
+                branchBusy={branchBusy}
+                followUps={followUps}
+                followUpsFor={followUpsFor}
                 copied={copiedMessageId === displayMessage.id}
-                previousUserMessage={previousUserMessageIndex.get(displayMessage.id)}
+                previousUserMessageIndex={previousUserMessageIndex}
                 threadIsProject={threadIsProject}
                 consumerWorkspaceId={thread.workspaceId}
+                onSwitchBranch={switchBranch}
+                onRenameBranch={renameBranch}
+                onSelectFollowUp={selectFollowUp}
                 onCopy={copyMessageText}
                 onContinue={continueAssistantResponse}
                 onExpand={expandAssistantResponse}

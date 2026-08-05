@@ -127,6 +127,13 @@ const chatMessageContent = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatMessageAfterContent = await readFile(
+  new URL("../src/components/ChatMessageAfterContent.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatBranchPicker = await readFile(
   new URL("../src/components/ChatBranchPicker.tsx", import.meta.url),
   "utf8",
@@ -887,8 +894,9 @@ test("ChatView does not keep the retired unused inline computer timeline compone
 });
 
 test("ChatView delegates message attachment rendering to MessageAttachmentList", () => {
-  assert.match(chatView, /import \{ MessageAttachmentList \} from "\.\/MessageAttachmentList";/);
-  assert.match(chatView, /<MessageAttachmentList attachments=\{displayMessage\.attachments\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageAttachmentList";/);
+  assert.match(chatMessageAfterContent, /from "\.\/MessageAttachmentList";/);
+  assert.match(chatMessageAfterContent, /<MessageAttachmentList attachments=\{message\.attachments\}/);
   assert.doesNotMatch(chatView, /function MessageAttachmentList\(/);
   assert.match(messageAttachmentList, /export function MessageAttachmentList/);
   assert.match(messageAttachmentList, /message-image-attachment/);
@@ -897,8 +905,9 @@ test("ChatView delegates message attachment rendering to MessageAttachmentList",
 });
 
 test("ChatView delegates message action footer rendering to MessageActionFooter", () => {
-  assert.match(chatView, /from "\.\/MessageActionFooter";/);
-  assert.match(chatView, /<MessageActionFooter[\s\S]*?onSaveAsGoal=\{saveMessageAsGoal\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageActionFooter";/);
+  assert.match(chatMessageAfterContent, /from "\.\/MessageActionFooter";/);
+  assert.match(chatMessageAfterContent, /<MessageActionFooter[\s\S]*?onSaveAsGoal=\{onSaveAsGoal\}/);
   assert.doesNotMatch(chatView, /from "\.\/MessageActionBar";/);
   assert.doesNotMatch(chatView, /<MessageActionBar/);
   assert.doesNotMatch(chatView, /className="chat-message-actions-slot"/);
@@ -915,8 +924,9 @@ test("ChatView delegates message action footer rendering to MessageActionFooter"
 });
 
 test("ChatView delegates branch variant controls to ChatBranchPicker", () => {
-  assert.match(chatView, /from "\.\/ChatBranchPicker";/);
-  assert.match(chatView, /<ChatBranchPicker/);
+  assert.doesNotMatch(chatView, /from "\.\/ChatBranchPicker";/);
+  assert.match(chatMessageAfterContent, /from "\.\/ChatBranchPicker";/);
+  assert.match(chatMessageAfterContent, /<ChatBranchPicker/);
   assert.doesNotMatch(chatView, /className="branch-picker"/);
   assert.doesNotMatch(chatView, /branch-rename/);
   assert.match(chatBranchPicker, /export function ChatBranchPicker/);
@@ -925,8 +935,9 @@ test("ChatView delegates branch variant controls to ChatBranchPicker", () => {
 });
 
 test("ChatView delegates follow-up suggestion rendering to ChatFollowUps", () => {
-  assert.match(chatView, /from "\.\/ChatFollowUps";/);
-  assert.match(chatView, /<ChatFollowUps/);
+  assert.doesNotMatch(chatView, /from "\.\/ChatFollowUps";/);
+  assert.match(chatMessageAfterContent, /from "\.\/ChatFollowUps";/);
+  assert.match(chatMessageAfterContent, /<ChatFollowUps/);
   assert.doesNotMatch(chatView, /className="chat-followups"/);
   assert.match(chatFollowUps, /export function ChatFollowUps/);
   assert.match(chatFollowUps, /className="chat-followups"/);
@@ -963,8 +974,9 @@ test("ChatView delegates message metadata copy to MessageMetaCopy", () => {
 });
 
 test("ChatView delegates post-message status badges to MessageStatusBadges", () => {
-  assert.match(chatView, /from "\.\/MessageStatusBadges";/);
-  assert.match(chatView, /<MessageStatusBadges/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageStatusBadges";/);
+  assert.match(chatMessageAfterContent, /from "\.\/MessageStatusBadges";/);
+  assert.match(chatMessageAfterContent, /<MessageStatusBadges/);
   assert.doesNotMatch(chatView, /className="message-incomplete-note"/);
   assert.doesNotMatch(chatView, /className="auto-continue-status"/);
   assert.match(messageStatusBadges, /export function MessageStatusBadges/);
@@ -1147,6 +1159,17 @@ test("ChatView delegates message content state rendering to ChatMessageContent",
   assert.match(chatMessageContent, /isStreaming \?/);
   assert.match(chatMessageContent, /if \(isEditing\)/);
   assert.match(chatMessageContent, /onHandleProactiveAnswer\(message\.text, answer\)/);
+});
+
+test("ChatView delegates post-content message controls to ChatMessageAfterContent", () => {
+  assert.match(chatView, /from "\.\/ChatMessageAfterContent";/);
+  assert.match(chatView, /<ChatMessageAfterContent[\s\S]*?onSelectFollowUp=\{selectFollowUp\}/);
+  assert.match(chatView, /<ChatMessageAfterContent[\s\S]*?onSaveAsGoal=\{saveMessageAsGoal\}/);
+  assert.doesNotMatch(chatView, /followUpsFor === displayMessage\.id/);
+  assert.doesNotMatch(chatView, /previousUserMessageIndex\.get\(displayMessage\.id\)/);
+  assert.match(chatMessageAfterContent, /export function ChatMessageAfterContent/);
+  assert.match(chatMessageAfterContent, /branchPoint\.options\.length >= 2/);
+  assert.match(chatMessageAfterContent, /onSelectFollowUp\(suggestion\)/);
 });
 
 test("ChatView delegates resume marker persistence to chatResumeMarkers", () => {
