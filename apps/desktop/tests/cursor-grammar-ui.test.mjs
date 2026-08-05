@@ -128,6 +128,13 @@ const taskQueueProjection = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const taskQueueController = await readFile(
+  new URL("../src/lib/useTaskQueueController.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const threadSnapshotProjection = await readFile(
   new URL("../src/lib/threadSnapshotProjection.mjs", import.meta.url),
   "utf8",
@@ -726,8 +733,17 @@ test("App does not retain retired memory dashboard state", () => {
 });
 
 test("App delegates task queue snapshot projection to taskQueueProjection", () => {
-  assert.match(app, /from "\.\/lib\/taskQueueProjection";/);
-  assert.doesNotMatch(app, /const nextTasks = \[/);
+  assert.match(app, /from "\.\/lib\/useTaskQueueController";/);
+  assert.doesNotMatch(app, /useState<TaskItem/);
+  assert.doesNotMatch(app, /useState<ApprovelItem/);
+  assert.doesNotMatch(app, /setUncertainEffectItems/);
+  assert.doesNotMatch(app, /coreBridge\.taskQueue/);
+  assert.doesNotMatch(app, /coreBridge\.approveApprovel/);
+  assert.doesNotMatch(app, /coreBridge\.rejectApprovel/);
+  assert.doesNotMatch(app, /coreBridge\.resolveUncertainEffect/);
+  assert.doesNotMatch(app, /projectTaskQueueSnapshot/);
+  assert.match(taskQueueController, /from "\.\/taskQueueProjection";/);
+  assert.match(taskQueueController, /coreBridge\.taskQueue/);
   assert.match(taskQueueProjection, /export function projectTaskQueueSnapshot/);
 });
 

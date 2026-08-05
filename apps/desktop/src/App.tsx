@@ -6,10 +6,8 @@ import { ChatSearchModal } from "./components/Sidebar";
 import { LoginGate } from "./components/LoginGate";
 import { AppWorkspace } from "./components/AppWorkspace";
 import {
-  approvals,
   chatMessages,
   navItems as staticNavItems,
-  tasks,
 } from "./data/mockData";
 import { pluginRegistry, type PluginHost } from "./plugins/registry";
 import {
@@ -18,8 +16,6 @@ import {
   type ChatAttachmentInput,
   type CoreChatThreadSnapshot,
   type CoreThreadAttention,
-  type CoreTaskQueueSnapshot,
-  type CoreUncertainEffectOutcome,
   type ProactivitySuggestion,
   type RoutingBindingInput,
   type TemplateCatalogEntry,
@@ -41,12 +37,9 @@ import {
 import { sidebarWorkspaceIsActive } from "./lib/sidebarFilterState";
 import {
   currentTimestampSeconds,
-  mapCoreApprovel,
   mapCoreChatMessage,
   mapCoreChatThread,
-  mapCoreTask,
   mapCoreThreadAttention,
-  mapCoreUncertainEffect,
   pendingChatAttachmentFromInput,
   starterMessages,
   summarizeThreadTitle,
@@ -61,10 +54,6 @@ import {
   composePluginNavItems,
   enabledRegistryPlugins,
 } from "./lib/appPluginNavigation";
-import {
-  projectEffectResolutionError,
-  projectTaskQueueSnapshot,
-} from "./lib/taskQueueProjection";
 import { projectThreadSnapshotSelection } from "./lib/threadSnapshotProjection";
 import { projectBusyThreadIds } from "./lib/busyThreadProjection";
 import { buildProactivityChatSeed } from "./lib/proactivityChatSeed";
@@ -74,15 +63,13 @@ import { useCapabilityController } from "./lib/useCapabilityController";
 import { useOnboardingSetupGate } from "./lib/useOnboardingSetupGate";
 import { usePluginController } from "./lib/usePluginController";
 import { useResponsiveDrawer } from "./lib/useResponsiveDrawer";
+import { useTaskQueueController } from "./lib/useTaskQueueController";
 import type {
-  ApprovelItem,
   ChatAttachment,
   ChatMessage,
   ChatThread,
   NavItem,
   SettingsSectionId,
-  TaskItem,
-  UncertainEffectItem,
   ViewId,
 } from "./types";
 
@@ -123,19 +110,6 @@ function AuthenticatedApp() {
   >({
     [defaultChatThread.threadId]: chatMessages,
   });
-  const [taskItems, setTaskItems] = useState<TaskItem[]>(tasks);
-  const [approvalItems, setApprovelItems] = useState<ApprovelItem[]>(approvals);
-  const [uncertainEffectItems, setUncertainEffectItems] = useState<
-    UncertainEffectItem[]
-  >([]);
-  const [approvalBusyId, setApprovelBusyId] = useState<string | null>(null);
-  const [effectResolutionBusyId, setEffectResolutionBusyId] = useState<string | null>(
-    null,
-  );
-  const [effectResolutionError, setEffectResolutionError] = useState<{
-    receiptId: string;
-    message: string;
-  } | null>(null);
   const [pendingTemplateAutoSubmit, setPendingTemplateAutoSubmit] = useState<{
     id: string;
     threadId: string;
@@ -188,10 +162,6 @@ function AuthenticatedApp() {
       defaultChatThread,
     [activeThreadId, chatThreads],
   );
-  const activeUncertainEffects = useMemo(
-    () => uncertainEffectItems.filter((effect) => effect.threadId === activeThread.threadId),
-    [activeThread.threadId, uncertainEffectItems],
-  );
   const automationWorkspaceId = activeThread.workspaceId ?? undefined;
   const {
     automationItems,
@@ -204,6 +174,25 @@ function AuthenticatedApp() {
     enabled: activeView === "automations",
   });
   const { connectionItems } = useCapabilityController();
+  const {
+    taskItems,
+    approvalItems,
+    uncertainEffectItems,
+    approvalBusyId,
+    effectResolutionBusyId,
+    effectResolutionError,
+    refreshRuntimeReadModels,
+    handleApproveApprovel,
+    handleRejectApprovel,
+    handleResolveUncertainEffect,
+  } = useTaskQueueController({
+    activeThreadId: activeThread.threadId,
+    refreshChatReadModels,
+  });
+  const activeUncertainEffects = useMemo(
+    () => uncertainEffectItems.filter((effect) => effect.threadId === activeThread.threadId),
+    [activeThread.threadId, uncertainEffectItems],
+  );
   // Threads "busy": a real-time streaming signal (from ChatView, sub-poll) UNION
   // the taskQueue snapshot (running/queued tasks linked to a thread). The union
   // covers both the chat-stream case and the durable-background-task case.
@@ -750,34 +739,6 @@ function AuthenticatedApp() {
     );
   }
 
-  function applyTaskQueueSnapshot(snapshot: CoreTaskQueueSnapshot) {
-    const projection = projectTaskQueueSnapshot({
-      snapshot,
-      fallbackTasks: tasks,
-      mapTask: mapCoreTask,
-      mapApproval: mapCoreApprovel,
-      mapUncertainEffect: mapCoreUncertainEffect,
-    });
-    setTaskItems(projection.taskItems);
-    setApprovelItems(projection.approvelItems);
-    setUncertainEffectItems(projection.uncertainEffectItems);
-    setEffectResolutionError((current) =>
-      projectEffectResolutionError(current, projection.uncertainEffectItems),
-    );
-  }
-
-  async function loadTaskQueue() {
-    try {
-      applyTaskQueueSnapshot(await coreBridge.taskQueue());
-    } catch (error) {
-      console.warn("task_queue_snapshot unavailable", error);
-    }
-  }
-
-  async function refreshRuntimeReadModels() {
-    await loadTaskQueue();
-  }
-
   async function refreshChatReadModels(preferredThreadId = activeThreadId) {
     const snapshot = await coreBridge.chatThreads();
     const mappedThreads = snapshot.threads.map(mapCoreChatThread);
@@ -795,70 +756,11 @@ function AuthenticatedApp() {
     applyThreadAttentionRows(await coreBridge.threadAttentions());
   }
 
-  async function handleApproveApprovel(
-    approvalId: string,
-    options?: {
-      scope?: "once" | "always";
-      browser_visibility?: "auto" | "visible" | "headless";
-    },
-  ) {
-    setApprovelBusyId(approvalId);
-    try {
-      applyTaskQueueSnapshot(await coreBridge.approveApprovel(approvalId, options));
-      await refreshRuntimeReadModels();
-      await refreshChatReadModels(activeThread.threadId);
-    } catch (error) {
-      console.warn("approval_approve unavailable", error);
-    } finally {
-      setApprovelBusyId(null);
-    }
-  }
-
-  async function handleRejectApprovel(approvalId: string) {
-    setApprovelBusyId(approvalId);
-    try {
-      applyTaskQueueSnapshot(
-        await coreBridge.rejectApprovel(
-          approvalId,
-          "Rejected by the user from the desktop UI.",
-        ),
-      );
-    } catch (error) {
-      console.warn("approval_reject unavailable", error);
-    } finally {
-      setApprovelBusyId(null);
-    }
-  }
-
-  async function handleResolveUncertainEffect(
-    effect: UncertainEffectItem,
-    outcome: CoreUncertainEffectOutcome,
-  ) {
-    setEffectResolutionBusyId(effect.id);
-    setEffectResolutionError(null);
-    try {
-      await coreBridge.resolveUncertainEffect(effect.core, outcome);
-      await loadTaskQueue();
-      if (effect.threadId) {
-        await refreshChatReadModels(effect.threadId);
-      }
-    } catch (error) {
-      setEffectResolutionError({
-        receiptId: effect.id,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setEffectResolutionBusyId(null);
-    }
-  }
-
   useEffect(() => {
     const pollActiveStreams = () =>
       void coreBridge.activeStreams().then((ids) => setBackgroundStreamIds(new Set(ids)));
-    void loadTaskQueue();
     pollActiveStreams();
     const interval = window.setInterval(() => {
-      void loadTaskQueue();
       pollActiveStreams();
     }, 4_000);
     return () => window.clearInterval(interval);
@@ -870,7 +772,7 @@ function AuthenticatedApp() {
     async function refreshOperationalReadModels() {
       if (!activeThreadId) return;
       try {
-        await loadTaskQueue();
+        await refreshRuntimeReadModels();
         if (!cancelled) {
           await refreshChatReadModels(activeThreadId);
         }

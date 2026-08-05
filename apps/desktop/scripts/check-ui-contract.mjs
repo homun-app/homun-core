@@ -773,17 +773,17 @@ assertContains(
   "ChatView must delegate transcript rendering into the transcript owner",
 );
 assertContains(
-  "src/App.tsx",
+  "src/lib/useTaskQueueController.ts",
   "await coreBridge.resolveUncertainEffect(effect.core, outcome);",
   "Resolution must complete before refreshing canonical read models",
 );
 assertContains(
-  "src/App.tsx",
+  "src/lib/useTaskQueueController.ts",
   "await loadTaskQueue();",
   "Resolution must refresh the canonical task queue",
 );
 assertMatches(
-  "src/App.tsx",
+  "src/lib/useTaskQueueController.ts",
   /if \(effect\.threadId\) \{\s*await refreshChatReadModels\(effect\.threadId\);\s*\}/,
   "Resolution must refresh its related thread without navigating",
 );
@@ -1131,8 +1131,12 @@ assertNotContains("src/App.tsx", "coreBridge.capabilities", "App must not own ca
 assertContains("src/App.tsx", "useOnboardingSetupGate", "App must delegate onboarding setup checks to the setup gate hook");
 assertContains("src/App.tsx", "usePluginController", "App must delegate plugin state loading to the plugin controller");
 assertContains("src/App.tsx", "useResponsiveDrawer", "App must delegate responsive drawer state to the drawer hook");
+assertContains("src/App.tsx", "useTaskQueueController", "App must delegate task queue state and approvals to the task queue controller");
 assertNotContains("src/App.tsx", "coreBridge.setupStatus", "App must not own setup status fetching directly");
 assertNotContains("src/App.tsx", "coreBridge.plugins()", "App must not own plugin state fetching directly");
+assertNotContains("src/App.tsx", "coreBridge.taskQueue", "App must not own task queue fetching directly");
+assertNotContains("src/App.tsx", "coreBridge.approveApprovel", "App must not own approval mutations directly");
+assertNotContains("src/App.tsx", "coreBridge.resolveUncertainEffect", "App must not own uncertain effect resolution directly");
 assertNotContains("src/App.tsx", "window.innerWidth > 1024", "App must not own responsive drawer viewport logic directly");
 assertContains("src/components/AutomationsView.tsx", "t(\"automations.ifThis\")", "Event automation builder must expose the IF part explicitly");
 assertContains("src/components/AutomationsView.tsx", "t(\"automations.filter\")", "Event automation builder must expose the FILTER part explicitly");
