@@ -79,6 +79,7 @@ import {
   composePluginNavItems,
   enabledRegistryPlugins,
 } from "./lib/appPluginNavigation";
+import { projectBusyThreadIds } from "./lib/busyThreadProjection";
 import type {
   ApprovelItem,
   ChatAttachment,
@@ -234,17 +235,13 @@ function AuthenticatedApp() {
   // Threads "busy": a real-time streaming signal (from ChatView, sub-poll) UNION
   // the taskQueue snapshot (running/queued tasks linked to a thread). The union
   // covers both the chat-stream case and the durable-background-task case.
-  const busyThreadIds = useMemo(() => {
-    const ids = new Set<string>(backgroundStreamIds);
-    if (streamingThreadId) ids.add(streamingThreadId);
-    for (const thread of chatThreads) {
-      const task = taskItems.find((item) => item.id === thread.taskId);
-      if (task && (task.status === "running" || task.status === "queued")) {
-        ids.add(thread.threadId);
-      }
-    }
-    return ids;
-  }, [streamingThreadId, backgroundStreamIds, chatThreads, taskItems]);
+  const busyThreadIds = useMemo(
+    () =>
+      projectBusyThreadIds({
+        backgroundStreamIds, streamingThreadId, chatThreads, taskItems,
+      }),
+    [streamingThreadId, backgroundStreamIds, chatThreads, taskItems],
+  );
   useEffect(() => {
     busyThreadIdsRef.current = busyThreadIds;
   }, [busyThreadIds]);

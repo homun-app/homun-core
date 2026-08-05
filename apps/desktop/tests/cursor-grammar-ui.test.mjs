@@ -93,6 +93,13 @@ const appPluginNavigation = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const busyThreadProjection = await readFile(
+  new URL("../src/lib/busyThreadProjection.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -596,6 +603,13 @@ test("App delegates plugin navigation projection to appPluginNavigation", () => 
   assert.doesNotMatch(app, /\.\.\.enabledPlugins\.map\(/);
   assert.match(appPluginNavigation, /export function enabledRegistryPlugins/);
   assert.match(appPluginNavigation, /export function composePluginNavItems/);
+});
+
+test("App delegates busy thread projection to busyThreadProjection", () => {
+  assert.match(app, /from "\.\/lib\/busyThreadProjection";/);
+  assert.doesNotMatch(app, /const ids = new Set<string>\(backgroundStreamIds\);/);
+  assert.doesNotMatch(app, /task\.status === "running" \|\| task\.status === "queued"/);
+  assert.match(busyThreadProjection, /export function projectBusyThreadIds/);
 });
 
 test("the sidebar uses the canonical persisted thread filter projection", () => {
