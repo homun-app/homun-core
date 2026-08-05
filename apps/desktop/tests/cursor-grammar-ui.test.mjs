@@ -113,6 +113,13 @@ const chatStreamingNotifier = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatBranchesHook = await readFile(
+  new URL("../src/components/useChatBranches.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const appWorkspace = await readFile(
   new URL("../src/components/AppWorkspace.tsx", import.meta.url),
@@ -1909,6 +1916,20 @@ test("ChatView delegates streaming mount notifications to useChatStreamingNotifi
   assert.match(chatStreamingNotifier, /export function useChatStreamingNotifier/);
   assert.match(chatStreamingNotifier, /const onStreamingChangeRef = useRef\(onStreamingChange\)/);
   assert.match(chatStreamingNotifier, /notifyStreaming\(false\)/);
+});
+
+test("ChatView delegates branch state ownership to useChatBranches", () => {
+  assert.match(chatView, /from "\.\/useChatBranches";/);
+  assert.match(chatView, /useChatBranches\(\{/);
+  assert.doesNotMatch(chatView, /const \[branches,\s*setBranches\]/);
+  assert.doesNotMatch(chatView, /const \[branchBusy,\s*setBranchBusy\]/);
+  assert.doesNotMatch(chatView, /coreBridge\s*\.\s*chatBranches/);
+  assert.doesNotMatch(chatView, /coreBridge\s*\.\s*setActiveLeaf/);
+  assert.doesNotMatch(chatView, /coreBridge\s*\.\s*setBranchLabel/);
+  assert.match(chatBranchesHook, /export function useChatBranches/);
+  assert.match(chatBranchesHook, /coreBridge\s*\.\s*chatBranches/);
+  assert.match(chatBranchesHook, /coreBridge\s*\.\s*setActiveLeaf/);
+  assert.match(chatBranchesHook, /coreBridge\s*\.\s*setBranchLabel/);
 });
 
 test("ChatView delegates resume marker persistence to chatResumeMarkers", () => {

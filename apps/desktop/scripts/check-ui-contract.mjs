@@ -1386,6 +1386,13 @@ assertNotContains("src/components/ChatView.tsx", "setActiveTurnElapsedSeconds", 
 assertContains("src/components/useChatStreamingNotifier.ts", "onStreamingChangeRef", "streaming parent notifications must have one focused owner");
 assertContains("src/components/ChatView.tsx", "useChatStreamingNotifier(onStreamingChange)", "ChatView must consume the focused streaming notifier owner");
 assertNotContains("src/components/ChatView.tsx", "onStreamingChangeRef", "ChatView must not own streaming notification refs");
+assertContains("src/components/useChatBranches.ts", "coreBridge.chatBranches", "chat branch state must have one focused owner");
+assertContains("src/components/useChatBranches.ts", "coreBridge.setActiveLeaf", "chat branch switching must have one focused owner");
+assertContains("src/components/useChatBranches.ts", "coreBridge.setBranchLabel", "chat branch naming must have one focused owner");
+assertContains("src/components/ChatView.tsx", "useChatBranches({", "ChatView must consume the focused branch owner");
+assertNotContains("src/components/ChatView.tsx", "coreBridge.chatBranches", "ChatView must not own branch loading");
+assertNotContains("src/components/ChatView.tsx", "coreBridge.setActiveLeaf", "ChatView must not own branch switching");
+assertNotContains("src/components/ChatView.tsx", "coreBridge.setBranchLabel", "ChatView must not own branch naming");
 assertNotContains("src/components/ChatView.tsx", "memoryArtifactsRevision", "artifact validation must not use an unconditional revision counter");
 assertContains("src/components/ArtifactsPanel.tsx", "selectedResourceRevision", "artifact preview reloads must follow a semantic resource revision");
 assertNotContains("src/components/ChatView.tsx", "setArtifactsOpen", "legacy open boolean must not compete with inspector state");

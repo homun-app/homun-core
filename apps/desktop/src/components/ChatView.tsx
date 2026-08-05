@@ -5,7 +5,6 @@ import {
   coreBridge,
   SteeringQueuedDuringSubmissionError,
   type ChatAttachmentInput,
-  type CoreBranchPoint,
   type CoreComputerSessionSnapshot,
   type RoutingBindingInput,
 } from "../lib/coreBridge";
@@ -117,6 +116,7 @@ import type {
   ReplyContext,
 } from "./ChatViewTypes";
 import { useChatActiveTurnElapsed } from "./useChatActiveTurnElapsed";
+import { useChatBranches } from "./useChatBranches";
 import {
   latestActivitySteps,
   latestPlanMarkdown,
@@ -233,11 +233,6 @@ export function ChatView({
   const [replyContext, setReplyContext] = useState<ReplyContext | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
-  // Persisted conversation branches (non-destructive edit + regenerate). Each
-  // entry is a node on the active path that has alternative siblings, driving the
-  // ‹ n/m › switcher. Replaces the old ephemeral, reload-lossy "variants".
-  const [branches, setBranches] = useState<CoreBranchPoint[]>([]);
-  const [branchBusy, setBranchBusy] = useState(false);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[] | null>(null);
   const [streamHasVisibleText, setStreamHasVisibleText] = useState(false);
   const [autoContinueMessageId, setAutoContinueMessageId] = useState<string | null>(null);
@@ -278,6 +273,23 @@ export function ChatView({
   const cancelStreamingRequestRef = useRef<(() => void) | null>(null);
   const cancelledStreamIdsRef = useRef<Set<string>>(new Set());
   const { isMountedRef, notifyStreaming } = useChatStreamingNotifier(onStreamingChange);
+  const {
+    branchBusy,
+    branches,
+    refreshBranches,
+    renameBranch,
+    switchBranch,
+  } = useChatBranches({
+    branchLabelPrompt: t("chat.branchLabelPrompt"),
+    isMountedRef,
+    messages,
+    onThreadChanged,
+    promptSubmitting,
+    setOptimisticMessages,
+    setPromptError,
+    streamingAssistantId,
+    threadId: thread.threadId,
+  });
   const refreshPendingSteering = useCallback(async () => {
     const rows = await fetchThreadSteering(thread.threadId);
     if (!isMountedRef.current) return;
@@ -1681,55 +1693,6 @@ export function ChatView({
   // share the image to show the actual UI / pagination / a broken state.
   async function captureScreenshot() {
     await captureAppScreenshot();
-  }
-
-  // Refresh the persisted branch map for this thread (which nodes have siblings).
-  const refreshBranches = useCallback(async () => {
-    try {
-      const next = await coreBridge.chatBranches(thread.threadId);
-      if (isMountedRef.current) setBranches(next);
-    } catch {
-      /* switcher is best-effort; ignore */
-    }
-  }, [thread.threadId]);
-
-  // Reload whenever the persisted conversation changes (after a send, edit,
-  // regenerate or switch). Optimistic streaming doesn't touch `messages`, so this
-  // doesn't fire mid-stream.
-  useEffect(() => {
-    void refreshBranches();
-  }, [refreshBranches, messages]);
-
-  // Switch the displayed branch at a node: point the thread's active leaf at the
-  // chosen sibling's tip, then resync the (mapped) messages from the gateway.
-  async function switchBranch(point: CoreBranchPoint, direction: number) {
-    if (branchBusy || promptSubmitting || streamingAssistantId) return;
-    const index = point.active_index + direction;
-    if (index < 0 || index >= point.options.length) return;
-    setBranchBusy(true);
-    try {
-      await coreBridge.setActiveLeaf(thread.threadId, point.options[index].leaf_id);
-      setOptimisticMessages(null);
-      await onThreadChanged();
-      await refreshBranches();
-    } catch (error) {
-      setPromptError(describeBridgeError(error));
-    } finally {
-      setBranchBusy(false);
-    }
-  }
-
-  // Phase 4: name (or clear) a branch so the switcher labels it — handy for the
-  // coding workflow ("try A" vs "try B"). Minimal inline prompt.
-  async function renameBranch(childId: string, current: string | null) {
-    const input = window.prompt(t("chat.branchLabelPrompt"), current ?? "");
-    if (input === null) return;
-    const label = input.trim();
-    try {
-      setBranches(await coreBridge.setBranchLabel(thread.threadId, childId, label || null));
-    } catch (error) {
-      setPromptError(describeBridgeError(error));
-    }
   }
 
   // Regenerate an assistant answer as a persisted SIBLING branch under its user
