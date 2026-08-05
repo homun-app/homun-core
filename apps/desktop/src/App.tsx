@@ -44,11 +44,10 @@ import {
   selectThread,
   type ThreadAttentionSnapshot,
   type ThreadAttentionState,
-  type ThreadAttentionStatus,
 } from "./lib/threadAttentionState";
 import {
   attentionRequiredThreadIds,
-  mergeConversationAttention,
+  projectConversationAttention,
 } from "./lib/conversationAttention";
 import { sidebarWorkspaceIsActive } from "./lib/sidebarFilterState";
 import {
@@ -249,17 +248,15 @@ function AuthenticatedApp() {
     () => attentionRequiredThreadIds(chatThreads, approvalItems, uncertainEffectItems),
     [approvalItems, chatThreads, uncertainEffectItems],
   );
-  const attentionByThread = useMemo(() => {
-    const attention: Record<string, ThreadAttentionStatus> = {
-      ...threadAttention.byThread,
-    };
-    for (const threadId of busyThreadIds) {
-      if (!attention[threadId] || attention[threadId] === "idle") {
-        attention[threadId] = "working";
-      }
-    }
-    return mergeConversationAttention(attention, pendingAttentionThreadIds);
-  }, [busyThreadIds, pendingAttentionThreadIds, threadAttention.byThread]);
+  const attentionByThread = useMemo(
+    () =>
+      projectConversationAttention(
+        threadAttention.byThread,
+        busyThreadIds,
+        pendingAttentionThreadIds,
+      ),
+    [busyThreadIds, pendingAttentionThreadIds, threadAttention.byThread],
+  );
   const selectedTask = useMemo(
     () =>
       taskItems.find((task) => task.id === selectedTaskId) ?? {

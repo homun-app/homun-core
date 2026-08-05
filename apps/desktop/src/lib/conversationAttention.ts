@@ -17,6 +17,13 @@ export const mergeConversationAttention = implementation.mergeConversationAttent
   attentionRequired: Set<string>,
 ) => Record<string, ThreadAttentionStatus>;
 
+export const projectConversationAttention =
+  implementation.projectConversationAttention as (
+    base: Record<string, ThreadAttentionStatus>,
+    busyThreadIds: Set<string>,
+    attentionRequired: Set<string>,
+  ) => Record<string, ThreadAttentionStatus>;
+
 export const requiresAttention = implementation.requiresAttention as (
   status: ThreadAttentionStatus,
 ) => boolean;

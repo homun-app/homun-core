@@ -53,6 +53,13 @@ const sidebarFilterState = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const conversationAttention = await readFile(
+  new URL("../src/lib/conversationAttention.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatView = await readFile(
   new URL("../src/components/ChatView.tsx", import.meta.url),
   "utf8",
@@ -617,6 +624,13 @@ test("App delegates busy thread projection to busyThreadProjection", () => {
   assert.doesNotMatch(app, /const ids = new Set<string>\(backgroundStreamIds\);/);
   assert.doesNotMatch(app, /task\.status === "running" \|\| task\.status === "queued"/);
   assert.match(busyThreadProjection, /export function projectBusyThreadIds/);
+});
+
+test("App delegates conversation attention overlay to conversationAttention", () => {
+  assert.match(app, /projectConversationAttention/);
+  assert.doesNotMatch(app, /const attention: Record<string, ThreadAttentionStatus>/);
+  assert.doesNotMatch(app, /attention\[threadId\] = "working"/);
+  assert.match(conversationAttention, /export function projectConversationAttention/);
 });
 
 test("App delegates proactivity chat seeding to proactivityChatSeed", () => {

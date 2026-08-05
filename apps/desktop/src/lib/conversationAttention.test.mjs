@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   attentionRequiredThreadIds,
   mergeConversationAttention,
+  projectConversationAttention,
   requiresAttention,
 } from "./conversationAttention.mjs";
 
@@ -40,6 +41,26 @@ test("a durable intervention projects waiting user without erasing unrelated sta
       "thread-a": "waiting_user",
       "thread-b": "waiting_user",
       "thread-c": "failed",
+    },
+  );
+});
+
+test("projectConversationAttention overlays working and waiting states", () => {
+  assert.deepEqual(
+    projectConversationAttention(
+      {
+        "thread-a": "idle",
+        "thread-b": "completed_unread",
+        "thread-c": "failed",
+      },
+      new Set(["thread-a", "thread-b", "thread-d"]),
+      new Set(["thread-b"]),
+    ),
+    {
+      "thread-a": "working",
+      "thread-b": "waiting_user",
+      "thread-c": "failed",
+      "thread-d": "working",
     },
   );
 });

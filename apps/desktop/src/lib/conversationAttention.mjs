@@ -20,6 +20,16 @@ export function mergeConversationAttention(base, attentionRequired) {
   return merged;
 }
 
+export function projectConversationAttention(base, busyThreadIds, attentionRequired) {
+  const attention = { ...base };
+  for (const threadId of busyThreadIds) {
+    if (!attention[threadId] || attention[threadId] === "idle") {
+      attention[threadId] = "working";
+    }
+  }
+  return mergeConversationAttention(attention, attentionRequired);
+}
+
 export function requiresAttention(status) {
   return status === "waiting_user" || status === "failed";
 }
