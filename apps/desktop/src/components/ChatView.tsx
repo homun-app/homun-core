@@ -91,12 +91,10 @@ import {
   isLikelyIncompleteMessage,
   isPlaceholderThreadTitle,
   isUserVisibleComputerEvent,
-  messageContentKind,
   messageRoleLabel,
   shortModelName,
   toMessageAttachment,
   withChatMetrics,
-  type MessageContentKind,
 } from "../lib/chatViewMessages";
 import {
   clearResumeMarker,
@@ -145,9 +143,8 @@ import { ChatTopbar } from "./ChatTopbar";
 import { ChatBranchPicker } from "./ChatBranchPicker";
 import { ChatFollowUps } from "./ChatFollowUps";
 import { MessageAttachmentList } from "./MessageAttachmentList";
-import { MessageActionBar } from "./MessageActionBar";
+import { MessageActionFooter } from "./MessageActionFooter";
 import { MessageEditBox } from "./MessageEditBox";
-import { MessageMetaCopy } from "./MessageMetaCopy";
 import { MessageStatusBadges } from "./MessageStatusBadges";
 import { MessageActivity } from "./MessageActivity";
 import { PendingAssistantMessage } from "./PendingAssistantMessage";
@@ -2788,12 +2785,7 @@ export function ChatView({
           {threadMessages.map((message) => {
             const isStreamingMessage = message.id === streamingAssistantId;
             const displayMessage = message;
-            const contentKind = messageContentKind(displayMessage);
-            const assistantTextMessage =
-              displayMessage.role === "assistant" && contentKind === "text";
             const assistantMessage = displayMessage.role === "assistant";
-            const assistantOperationalMessage =
-              displayMessage.role === "assistant" && contentKind !== "system";
             const incompleteMessage = isLikelyIncompleteMessage(displayMessage);
             const messageSurfaceClass =
               displayMessage.role === "assistant"
@@ -2903,73 +2895,25 @@ export function ChatView({
               {displayMessage.attachments && displayMessage.attachments.length > 0 && (
                 <MessageAttachmentList attachments={displayMessage.attachments} />
               )}
-              <footer className="chat-message-meta">
-                <MessageMetaCopy
-                  message={displayMessage}
-                  consumerWorkspaceId={thread.workspaceId}
-                  onMemoryPublicationApproved={refreshAfterChatSubmit}
-                />
-                <div className="chat-message-actions-slot">
-                  {displayMessage.text && !isStreamingMessage && (
-                    <MessageActionBar
-                      contentKind={contentKind}
-                      copied={copiedMessageId === displayMessage.id}
-                      canContinue={
-                        assistantMessage && Boolean(displayMessage.text) && incompleteMessage
-                      }
-                      canRegenerate={
-                        displayMessage.role === "assistant" &&
-                        Boolean(previousUserMessageIndex.get(displayMessage.id))
-                      }
-                      canReply={displayMessage.role !== "system" && Boolean(displayMessage.text)}
-                      canEdit={displayMessage.role === "user" && Boolean(displayMessage.text)}
-                      canExpand={assistantTextMessage}
-                      canSaveToMemory={assistantOperationalMessage}
-                      canSaveAsGoal={assistantOperationalMessage && threadIsProject}
-                      feedback={displayMessage.feedback}
-                      metrics={displayMessage.metrics}
-                      savedToMemory={Boolean(displayMessage.savedMemoryRef)}
-                      onCopy={() => copyMessageText(displayMessage)}
-                      onContinue={() => continueAssistantResponse(displayMessage.id)}
-                      onExpand={() => expandAssistantResponse(displayMessage.id)}
-                      onExplainCode={() =>
-                        askAboutAssistantResponse(
-                          displayMessage.id,
-                          "Explain code",
-                          "Explain the previous code briefly and operationally.",
-                        )
-                      }
-                      onExplainDiagram={() =>
-                        askAboutAssistantResponse(
-                          displayMessage.id,
-                          "Explain diagram",
-                          "Explain the previous diagram briefly and operationally.",
-                        )
-                      }
-                      onFeedback={(feedback) => void setMessageFeedback(displayMessage, feedback)}
-                      onImproveCode={() =>
-                        askAboutAssistantResponse(
-                          displayMessage.id,
-                          "Improve code",
-                          "Improve the previous code keeping it short and including a fenced markdown block.",
-                        )
-                      }
-                      onReply={() => replyToMessage(displayMessage)}
-                      onEdit={() => startEditMessage(displayMessage)}
-                      onRegenerate={() => regenerateAnswer(displayMessage.id)}
-                      onReviseDiagram={() =>
-                        askAboutAssistantResponse(
-                          displayMessage.id,
-                          "Edit diagram",
-                          "Propose an improved version of the previous diagram in a fenced mermaid markdown block.",
-                        )
-                      }
-                      onSaveToMemory={() => void saveMessageToMemory(displayMessage)}
-                      onSaveAsGoal={() => saveMessageAsGoal(displayMessage.text)}
-                    />
-                  )}
-                </div>
-              </footer>
+              <MessageActionFooter
+                message={displayMessage}
+                isStreaming={isStreamingMessage}
+                copied={copiedMessageId === displayMessage.id}
+                previousUserMessage={previousUserMessageIndex.get(displayMessage.id)}
+                threadIsProject={threadIsProject}
+                consumerWorkspaceId={thread.workspaceId}
+                onCopy={copyMessageText}
+                onContinue={continueAssistantResponse}
+                onExpand={expandAssistantResponse}
+                onAskAboutAssistantResponse={askAboutAssistantResponse}
+                onFeedback={setMessageFeedback}
+                onReply={replyToMessage}
+                onEdit={startEditMessage}
+                onRegenerate={regenerateAnswer}
+                onSaveToMemory={saveMessageToMemory}
+                onSaveAsGoal={saveMessageAsGoal}
+                onMemoryPublicationApproved={refreshAfterChatSubmit}
+              />
             </article>
             </div>
             );

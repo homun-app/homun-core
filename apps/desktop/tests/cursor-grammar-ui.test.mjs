@@ -113,6 +113,13 @@ const messageActionBar = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageActionFooter = await readFile(
+  new URL("../src/components/MessageActionFooter.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatBranchPicker = await readFile(
   new URL("../src/components/ChatBranchPicker.tsx", import.meta.url),
   "utf8",
@@ -539,7 +546,7 @@ test("sidebar styles load after shared menus and own sidebar selectors", () => {
 });
 
 test("the transcript uses the flat role and operational message grammar", () => {
-  const transcriptMarkup = `${chatView}\n${assistantMessageBody}`;
+  const transcriptMarkup = `${chatView}\n${assistantMessageBody}\n${messageActionFooter}`;
   for (const className of [
     "chat-message-agent",
     "chat-message-user-band",
@@ -882,11 +889,18 @@ test("ChatView delegates message attachment rendering to MessageAttachmentList",
   assert.match(messageAttachmentList, /formatFileSize\(attachment\.sizeBytes\)/);
 });
 
-test("ChatView delegates message action rendering to MessageActionBar", () => {
-  assert.match(chatView, /import \{ MessageActionBar \} from "\.\/MessageActionBar";/);
-  assert.match(chatView, /<MessageActionBar[\s\S]*?onSaveAsGoal=\{\(\) => saveMessageAsGoal\(displayMessage\.text\)\}/);
+test("ChatView delegates message action footer rendering to MessageActionFooter", () => {
+  assert.match(chatView, /from "\.\/MessageActionFooter";/);
+  assert.match(chatView, /<MessageActionFooter[\s\S]*?onSaveAsGoal=\{saveMessageAsGoal\}/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageActionBar";/);
+  assert.doesNotMatch(chatView, /<MessageActionBar/);
+  assert.doesNotMatch(chatView, /className="chat-message-actions-slot"/);
   assert.doesNotMatch(chatView, /function MessageActionBar\(/);
   assert.doesNotMatch(chatView, /resolveMessageActionMenuPlacement/);
+  assert.match(messageActionFooter, /export function MessageActionFooter/);
+  assert.match(messageActionFooter, /<MessageActionBar/);
+  assert.match(messageActionFooter, /messageContentKind\(message\)/);
+  assert.match(messageActionFooter, /onSaveAsGoal=\{\(\) => onSaveAsGoal\(message\.text\)\}/);
   assert.match(messageActionBar, /export function MessageActionBar/);
   assert.match(messageActionBar, /message-action-menu-feedback/);
   assert.match(messageActionBar, /message-latency-summary/);
@@ -924,11 +938,14 @@ test("ChatView delegates inline message editing to MessageEditBox", () => {
 });
 
 test("ChatView delegates message metadata copy to MessageMetaCopy", () => {
-  assert.match(chatView, /from "\.\/MessageMetaCopy";/);
-  assert.match(chatView, /<MessageMetaCopy/);
+  assert.doesNotMatch(chatView, /from "\.\/MessageMetaCopy";/);
+  assert.doesNotMatch(chatView, /<MessageMetaCopy/);
   assert.doesNotMatch(chatView, /className="chat-message-meta-copy"/);
   assert.doesNotMatch(chatView, /MemoryUsagePopover/);
   assert.doesNotMatch(chatView, /formatChatDuration/);
+  assert.match(messageActionFooter, /from "\.\/MessageMetaCopy";/);
+  assert.match(messageActionFooter, /<MessageMetaCopy/);
+  assert.match(messageActionFooter, /onMemoryPublicationApproved=\{onMemoryPublicationApproved\}/);
   assert.match(messageMetaCopy, /export function MessageMetaCopy/);
   assert.match(messageMetaCopy, /className="chat-message-meta-copy"/);
   assert.match(messageMetaCopy, /MemoryUsagePopover/);

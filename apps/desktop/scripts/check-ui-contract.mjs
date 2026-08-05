@@ -1351,9 +1351,9 @@ assertContains("src/components/ChatView.tsx", "streamingUserPinnedRef", "chat mu
 assertNotContains("src/components/ChatView.tsx", "STREAM_TYPEWRITER_INTERVAL_MS", "chat streaming must not use timer-based typewriter rendering");
 assertNotContains("src/components/ChatView.tsx", "streamingTextRef", "chat streaming must not bypass React with a manual DOM text node");
 
-assertContains("src/components/ChatView.tsx", "messageContentKind", "message actions must derive from response content type");
-assertContains("src/components/ChatView.tsx", "onExplainCode", "code responses must expose code-specific contextual actions");
-assertContains("src/components/ChatView.tsx", "onImproveCode", "code responses must expose code improvement action");
+assertContains("src/components/MessageActionFooter.tsx", "messageContentKind", "message actions must derive from response content type");
+assertContains("src/components/MessageActionFooter.tsx", "onExplainCode", "code responses must expose code-specific contextual actions");
+assertContains("src/components/MessageActionFooter.tsx", "onImproveCode", "code responses must expose code improvement action");
 assertContains("src/components/ComposerShell.tsx", "reply-context-card", "composer must show the active reply context before submit");
 assertContains("src/components/MessageActionBar.tsx", "message-action-menu", "secondary message actions must stay behind a compact menu");
 assertContains("src/components/MessageActionBar.tsx", "runMessageMenuAction", "message overflow actions must close the menu before running");
