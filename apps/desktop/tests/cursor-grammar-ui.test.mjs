@@ -149,6 +149,13 @@ const automationController = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const capabilityController = await readFile(
+  new URL("../src/lib/useCapabilityController.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -725,6 +732,16 @@ test("App delegates automation state and actions to useAutomationController", ()
   assert.doesNotMatch(app, /coreBridge\.deleteAutomation/);
   assert.match(automationController, /export function useAutomationController/);
   assert.match(automationController, /coreBridge\.automations/);
+});
+
+test("App delegates capability state to useCapabilityController", () => {
+  assert.match(app, /from "\.\/lib\/useCapabilityController";/);
+  assert.doesNotMatch(app, /useState<ConnectionItem/);
+  assert.doesNotMatch(app, /coreBridge\.capabilities/);
+  assert.doesNotMatch(app, /mapCoreCapabilitySnapshot/);
+  assert.match(capabilityController, /export function useCapabilityController/);
+  assert.match(capabilityController, /coreBridge\.capabilities/);
+  assert.match(capabilityController, /mapCoreCapabilitySnapshot/);
 });
 
 test("App delegates workspace view rendering to AppWorkspace", () => {

@@ -8,7 +8,6 @@ import { AppWorkspace } from "./components/AppWorkspace";
 import {
   approvals,
   chatMessages,
-  connections,
   navItems as staticNavItems,
   tasks,
 } from "./data/mockData";
@@ -44,7 +43,6 @@ import { sidebarWorkspaceIsActive } from "./lib/sidebarFilterState";
 import {
   currentTimestampSeconds,
   mapCoreApprovel,
-  mapCoreCapabilitySnapshot,
   mapCoreChatMessage,
   mapCoreChatThread,
   mapCoreTask,
@@ -73,12 +71,12 @@ import { projectBusyThreadIds } from "./lib/busyThreadProjection";
 import { buildProactivityChatSeed } from "./lib/proactivityChatSeed";
 import { selectInitialThreadFromSnapshot } from "./lib/initialThreadSelection";
 import { useAutomationController } from "./lib/useAutomationController";
+import { useCapabilityController } from "./lib/useCapabilityController";
 import type {
   ApprovelItem,
   ChatAttachment,
   ChatMessage,
   ChatThread,
-  ConnectionItem,
   NavItem,
   SettingsSectionId,
   TaskItem,
@@ -133,8 +131,6 @@ function AuthenticatedApp() {
   const [uncertainEffectItems, setUncertainEffectItems] = useState<
     UncertainEffectItem[]
   >([]);
-  const [connectionItems, setConnectionItems] =
-    useState<ConnectionItem[]>(connections);
   const [approvalBusyId, setApprovelBusyId] = useState<string | null>(null);
   const [effectResolutionBusyId, setEffectResolutionBusyId] = useState<string | null>(
     null,
@@ -208,6 +204,7 @@ function AuthenticatedApp() {
     workspaceId: automationWorkspaceId,
     enabled: activeView === "automations",
   });
+  const { connectionItems } = useCapabilityController();
   // Threads "busy": a real-time streaming signal (from ChatView, sub-poll) UNION
   // the taskQueue snapshot (running/queued tasks linked to a thread). The union
   // covers both the chat-stream case and the durable-background-task case.
@@ -798,17 +795,6 @@ function AuthenticatedApp() {
     }
   }
 
-  async function loadCapabilities() {
-    try {
-      const nextConnections = mapCoreCapabilitySnapshot(
-        await coreBridge.capabilities(),
-      );
-      setConnectionItems(nextConnections.length ? nextConnections : connections);
-    } catch (error) {
-      console.warn("capability_snapshot unavailable", error);
-    }
-  }
-
   async function refreshRuntimeReadModels() {
     await loadTaskQueue();
   }
@@ -900,7 +886,6 @@ function AuthenticatedApp() {
   useEffect(() => {
     const pollActiveStreams = () =>
       void coreBridge.activeStreams().then((ids) => setBackgroundStreamIds(new Set(ids)));
-    void loadCapabilities();
     void loadTaskQueue();
     pollActiveStreams();
     const interval = window.setInterval(() => {

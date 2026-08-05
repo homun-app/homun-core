@@ -1126,6 +1126,8 @@ assertContains("src/components/ProjectAccessDialog.tsx", "capability_denies: sel
 assertContains("src/components/ProjectAccessDialog.tsx", "updateGrantCapabilityDeny", "Project Access must allow editing capability denies on existing grants");
 assertContains("src/App.tsx", "useAutomationController", "App must delegate automation read/actions to the automation controller");
 assertNotContains("src/App.tsx", "coreBridge.automations", "App must not own automation dashboard fetching directly");
+assertContains("src/App.tsx", "useCapabilityController", "App must delegate capability read model loading to the capability controller");
+assertNotContains("src/App.tsx", "coreBridge.capabilities", "App must not own capability fetching directly");
 assertContains("src/components/AutomationsView.tsx", "t(\"automations.ifThis\")", "Event automation builder must expose the IF part explicitly");
 assertContains("src/components/AutomationsView.tsx", "t(\"automations.filter\")", "Event automation builder must expose the FILTER part explicitly");
 assertContains("src/i18n/locales/en.json", "\"ifThis\": \"If this happens\"", "Event automation IF label must be localized in English");
@@ -1221,7 +1223,7 @@ assertContains("src/components/SettingsView.tsx", "coreBridge.vaultPinSetup", "V
 assertContains("src/components/MessageVaultProposeCard.tsx", "coreBridge.vaultProposalAccept", "Vault proposal card must expose an accept action");
 assertContains("src/components/MessageVaultProposeCard.tsx", "Save to Vault", "Vault proposal card must offer an explicit save action");
 assertContains("src/components/MemoryView.tsx", "coreBridge.memoryDashboard", "desktop memory page must own the gateway memory dashboard read model");
-assertContains("src/App.tsx", "mapCoreCapabilitySnapshot", "desktop connections page must map the gateway capability read model");
+assertContains("src/lib/useCapabilityController.ts", "mapCoreCapabilitySnapshot", "desktop connections page must map the gateway capability read model");
 assertContains("src/lib/chatApi.ts", "/api/chat/threads", "chat threads must load from the local Rust gateway first");
 assertContains("src/lib/chatApi.ts", "hydrateThreadSnapshot", "chat API must keep a local cache synchronized with gateway thread snapshots");
 assertContains("src/lib/chatApi.ts", "localThreads", "chat threads must keep an Electron-safe fallback cache");
