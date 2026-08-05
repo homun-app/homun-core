@@ -275,8 +275,18 @@ test("runtime context refresh follows the durable terminal cursor", () => {
     /runtimeContextRevision=\{\s*threadAttention\.terminalEventIds\[activeThread\.threadId\]\s*\?\?\s*0\s*\}/,
   );
   assert.match(chatView, /runtimeContextRevision:\s*number/);
-  assert.match(chatView, /\[thread\.threadId,\s*runtimeContextRevision\]/);
+  assert.match(chatView, /const refreshRuntimeContext = useCallback/);
+  assert.match(chatView, /\[refreshRuntimeContext,\s*runtimeContextRevision\]/);
   assert.doesNotMatch(chatView, /runtimeContextRefreshKey/);
+});
+
+test("runtime context refreshes when the composer dialog is opened", () => {
+  assert.match(chatView, /onRefreshRuntimeContext=\{refreshRuntimeContext\}/);
+  assert.match(composerShell, /onRefreshRuntimeContext:\s*\(\)\s*=>\s*void\s*\|\s*Promise<void>/);
+  assert.match(
+    composerShell,
+    /id="composer-runtime-trigger"[\s\S]*?onClick=\{\(\)\s*=>\s*\{[\s\S]*?props\.onRefreshRuntimeContext\(\);[\s\S]*?openRoot\("runtime"\)/,
+  );
 });
 
 test("composer runtime uses the exclusive dialog chain and renders factual context inline", () => {
@@ -572,8 +582,9 @@ test("composer keeps prior effective-model provenance separate from the next-tur
   assert.match(chatView, /threadMessages[\s\S]*?role\s*===\s*"assistant"[\s\S]*?\.model/);
   assert.match(composerShell, /selectedNextTurnModel/);
   assert.match(composerShell, /effectiveModelLabel/);
-  assert.match(composerShell, /modelButtonLabel/);
-  assert.match(chatView, /const modelButtonLabel = selectedModel[\s\S]*?activeModel[\s\S]*?effectiveModelLabel;/);
+  assert.match(composerShell, /composerModelButtonLabel/);
+  assert.doesNotMatch(composerShell, /modelButtonLabel:\s*string/);
+  assert.doesNotMatch(chatView, /const modelButtonLabel = selectedModel[\s\S]*?activeModel[\s\S]*?effectiveModelLabel;/);
   assert.doesNotMatch(
     composerShell,
     /effectiveModelLabel\s*=\s*[^\n]*selectedNextTurnModel/,

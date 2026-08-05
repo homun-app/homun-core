@@ -3461,6 +3461,28 @@ fn browser_done_parser_unwraps_provider_text_wrapped_string_fields() {
 }
 
 #[test]
+fn browser_done_parser_preserves_evidence_without_status_as_partial() {
+    let payload = super::parse_browser_done_payload(
+        r#"{
+                "answer":"Example Domain",
+                "items":[{"document_title":"Example Domain"}],
+                "sources":["https://example.com/"],
+                "evidence":["title: Example Domain"]
+            }"#,
+    )
+    .expect("missing status with evidence should be preserved");
+
+    assert_eq!(
+        payload.status,
+        local_first_engine::browse::BrowserDoneStatus::Partial
+    );
+    assert_eq!(payload.answer, "Example Domain");
+    assert_eq!(payload.items[0]["document_title"], "Example Domain");
+    assert_eq!(payload.sources, vec!["https://example.com/"]);
+    assert_eq!(payload.evidence, vec!["title: Example Domain"]);
+}
+
+#[test]
 fn invalid_browser_done_payload_fails_closed() {
     assert!(super::parse_browser_done_payload("not json").is_err());
 }

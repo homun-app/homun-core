@@ -537,6 +537,7 @@ export function ChatView({
   const [runtimeContext, setRuntimeContext] = useState<RuntimeContextResponse | null>(null);
   const [runtimeContextLoading, setRuntimeContextLoading] = useState(true);
   const [runtimeContextError, setRuntimeContextError] = useState(false);
+  const runtimeContextRequestRef = useRef(0);
   const [activeTurnElapsedSeconds, setActiveTurnElapsedSeconds] = useState(0);
   const [pendingSteering, setPendingSteering] = useState<SteeringQueueState>(() =>
     createSteeringQueueState(),
@@ -958,28 +959,29 @@ export function ChatView({
     // the previous turn's activity. (The message COUNT is stable: the assistant placeholder is
     // updated in place, so it can't be the trigger.)
   }, [thread.threadId, isStreaming, islandRefreshNonce]);
-  useEffect(() => {
-    let cancelled = false;
+  const refreshRuntimeContext = useCallback(() => {
+    const requestId = runtimeContextRequestRef.current + 1;
+    runtimeContextRequestRef.current = requestId;
     setRuntimeContext(null);
     setRuntimeContextLoading(true);
     setRuntimeContextError(false);
-    coreBridge.runtimeContext(thread.threadId)
+    return coreBridge.runtimeContext(thread.threadId)
       .then((context) => {
-        if (!cancelled) setRuntimeContext(context);
+        if (runtimeContextRequestRef.current === requestId) setRuntimeContext(context);
       })
       .catch(() => {
-        if (!cancelled) {
+        if (runtimeContextRequestRef.current === requestId) {
           setRuntimeContext(null);
           setRuntimeContextError(true);
         }
       })
       .finally(() => {
-        if (!cancelled) setRuntimeContextLoading(false);
+        if (runtimeContextRequestRef.current === requestId) setRuntimeContextLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [thread.threadId, runtimeContextRevision]);
+  }, [thread.threadId]);
+  useEffect(() => {
+    void refreshRuntimeContext();
+  }, [refreshRuntimeContext, runtimeContextRevision]);
   // Files the user uploaded in THIS conversation (e.g. the patente PDF), derived
   // from message attachments — the chat-context "File" tab of the Workbench.
   const uploadedFiles = useMemo(() => {
@@ -3577,6 +3579,7 @@ export function ChatView({
           onCancelStreaming={cancelActiveStreaming}
           onClearReply={() => setReplyContext(null)}
           onManualModelSelection={() => setUsageSuggestedModel(null)}
+          onRefreshRuntimeContext={refreshRuntimeContext}
           onSuggestedModelConsumed={() => setUsageSuggestedModel(null)}
           onSubmit={submitComposerPrompt}
         />
@@ -9543,6 +9546,7 @@ function Composer({
   onCancelStreaming,
   onClearReply,
   onManualModelSelection,
+  onRefreshRuntimeContext,
   onSuggestedModelConsumed,
   onSubmit,
 }: {
@@ -9561,6 +9565,7 @@ function Composer({
   onCancelStreaming: () => void;
   onClearReply: () => void;
   onManualModelSelection: () => void;
+  onRefreshRuntimeContext: () => void | Promise<void>;
   onSuggestedModelConsumed: () => void;
   onSubmit: (
     prompt: string,
@@ -10057,12 +10062,6 @@ function Composer({
     icon: option.icon,
     available: !option.projectOnly || linkedFolder != null,
   }));
-  const modelButtonLabel = selectedModel
-    ? shortModelName(selectedModel)
-    : activeModel
-      ? shortModelName(activeModel)
-      : effectiveModelLabel;
-
   return (
     <ComposerShell
       value={value}
@@ -10092,7 +10091,6 @@ function Composer({
       models={models}
       modelGroups={modelGroups}
       selectedNextTurnModel={selectedModel}
-      modelButtonLabel={modelButtonLabel}
       effectiveModelLabel={effectiveModelLabel}
       runtimeContext={runtimeContext}
       runtimeContextLoading={runtimeContextLoading}
@@ -10128,6 +10126,7 @@ function Composer({
       onLinkFolder={(path) => void linkFolderPath(path)}
       onUnlinkFolder={unlinkFolder}
       onRefreshModels={() => void refreshModels()}
+      onRefreshRuntimeContext={onRefreshRuntimeContext}
       onSelectModel={(model) => {
         onManualModelSelection();
         setSelectedModel(model);

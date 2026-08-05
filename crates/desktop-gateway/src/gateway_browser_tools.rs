@@ -373,6 +373,25 @@ pub(crate) fn parse_browser_done_payload(
         object.insert("status".to_string(), serde_json::json!(normalized));
     }
 
+    if !object.contains_key("status") {
+        let has_content = |value: &serde_json::Value| match value {
+            serde_json::Value::Array(values) => values.iter().any(|item| match item {
+                serde_json::Value::String(text) => !text.trim().is_empty(),
+                serde_json::Value::Object(object) => !object.is_empty(),
+                other => provider_wrapped_text(other).is_some_and(|text| !text.trim().is_empty()),
+            }),
+            serde_json::Value::Object(object) => !object.is_empty(),
+            serde_json::Value::String(text) => !text.trim().is_empty(),
+            other => provider_wrapped_text(other).is_some_and(|text| !text.trim().is_empty()),
+        };
+        let has_evidence = ["answer", "items", "sources", "evidence"]
+            .iter()
+            .any(|key| object.get(*key).is_some_and(has_content));
+        if has_evidence {
+            object.insert("status".to_string(), serde_json::json!("partial"));
+        }
+    }
+
     match object.get_mut("items") {
         Some(items @ serde_json::Value::Object(_)) => {
             *items = serde_json::Value::Array(vec![items.take()]);

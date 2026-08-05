@@ -16,6 +16,16 @@ export const effectiveModelFromGateway = implementation.effectiveModelFromGatewa
   value: string | null | undefined,
 ) => string | null;
 
+export const modelLabelFromSelection = implementation.modelLabelFromSelection as (
+  value: string | null | undefined,
+) => string | null;
+
+export const composerModelButtonLabel = implementation.composerModelButtonLabel as (
+  effectiveModelLabel: string | null | undefined,
+  selectedNextModel: string | null | undefined,
+  unavailableLabel: string | null | undefined,
+) => string;
+
 export const latestAssistantEffectiveModel = implementation.latestAssistantEffectiveModel as (
   messages: AssistantModelEvidence[],
 ) => string | null;

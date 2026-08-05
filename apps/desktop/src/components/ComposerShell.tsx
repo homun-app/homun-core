@@ -41,6 +41,7 @@ import type {
   SkillsSummary,
 } from "../lib/coreBridge";
 import { modelIsCloud } from "../lib/coreBridge";
+import { composerModelButtonLabel } from "../lib/composerTurnContract";
 import { runtimeContextView } from "../lib/runtimeContext";
 import { RuntimeContextPanel } from "./RuntimeContextPanel";
 import { IconButton } from "./ui/IconButton";
@@ -94,7 +95,6 @@ export interface ComposerShellProps {
   models: string[];
   modelGroups: ProviderModelsGroup[];
   selectedNextTurnModel: string | null;
-  modelButtonLabel: string;
   effectiveModelLabel: string;
   runtimeContext: RuntimeContextResponse | null;
   runtimeContextLoading: boolean;
@@ -125,6 +125,7 @@ export interface ComposerShellProps {
   onLinkFolder: (path: string) => void;
   onUnlinkFolder: () => void;
   onRefreshModels: () => void;
+  onRefreshRuntimeContext: () => void | Promise<void>;
   onSelectModel: (model: string | null) => void;
   onSelectMode: (mode: string) => void;
   onImprovePrompt: () => void;
@@ -152,11 +153,6 @@ function menuReducer(state: layeredMenuState.LayeredMenuState, action: MenuActio
   }
   if (action.type === "close-current") return layeredMenuState.escapeLayer(state);
   return layeredMenuState.closeAllLayers(state);
-}
-
-function shortModelName(model: string) {
-  const tail = model.includes("/") ? model.slice(model.lastIndexOf("/") + 1) : model;
-  return tail.length > 22 ? `${tail.slice(0, 21)}...` : tail;
 }
 
 function formatFileSize(size: number) {
@@ -233,6 +229,11 @@ export function ComposerShell(props: ComposerShellProps) {
   const modeLabel = availableModes.find((option) => option.key === props.mode)?.label ?? props.mode;
   const canSend = Boolean(props.value.trim() || props.images.length > 0);
   const hasModels = props.models.length > 0 || props.modelGroups.some((group) => group.models.length > 0);
+  const modelButtonLabel = composerModelButtonLabel(
+    props.effectiveModelLabel,
+    props.selectedNextTurnModel,
+    t("composer.runtime.unavailable"),
+  );
   const runtimeView = runtimeContextView(props.runtimeContext, props.selectedNextTurnModel);
 
   const selectModel = (model: string | null) => {
@@ -400,9 +401,9 @@ export function ComposerShell(props: ComposerShellProps) {
 
       <div className="composer-metadata-row">
         <button id="composer-mode-trigger" ref={modeRef} type="button" aria-label={t("composer.mode")} aria-haspopup="menu" aria-expanded={rootOpen("mode")} onClick={() => openRoot("mode")}><Bot size={13} /><span>{modeLabel}</span></button>
-        <button id="composer-model-trigger" ref={modelRef} className="composer-model-button" type="button" aria-label={t("composer.model")} aria-haspopup="menu" aria-expanded={rootOpen("model")} onClick={() => openRoot("model")}><span>{props.modelButtonLabel}</span><Settings2 size={13} /></button>
+        <button id="composer-model-trigger" ref={modelRef} className="composer-model-button" type="button" aria-label={t("composer.model")} aria-haspopup="menu" aria-expanded={rootOpen("model")} onClick={() => openRoot("model")}><span>{modelButtonLabel}</span><Settings2 size={13} /></button>
         <span className="composer-metadata-item" aria-label={t("composer.environment")}><Monitor size={13} /><span>{props.environmentLabel}</span></span>
-        <button id="composer-runtime-trigger" ref={runtimeRef} className="composer-runtime-button" type="button" aria-label={t("composer.runtimeContext")} title={t("composer.runtimeContext")} aria-haspopup="dialog" aria-expanded={rootOpen("runtime")} onClick={() => openRoot("runtime")}><Settings2 size={13} /></button>
+        <button id="composer-runtime-trigger" ref={runtimeRef} className="composer-runtime-button" type="button" aria-label={t("composer.runtimeContext")} title={t("composer.runtimeContext")} aria-haspopup="dialog" aria-expanded={rootOpen("runtime")} onClick={() => { props.onRefreshRuntimeContext(); openRoot("runtime"); }}><Settings2 size={13} /></button>
       </div>
 
       <MenuSurface id="composer-add-menu" chainId="composer" label={t("composer.add")} open={rootOpen("add")} anchorRef={addRef} search={{ value: addQuery, onChange: setAddQuery, placeholder: t("composer.searchAdd") }} onCloseCurrent={closeCurrent} onCloseAll={closeAll}>
