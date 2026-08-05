@@ -253,6 +253,13 @@ const chatViewMessages = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatPayloadParsers = await readFile(
+  new URL("../src/components/ChatPayloadParsers.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -763,10 +770,11 @@ test("ChatView delegates message action rendering to MessageActionBar", () => {
 });
 
 test("ChatView delegates message activity rendering to MessageActivity", () => {
-  assert.match(chatView, /import \{ MessageActivity, parseActivitySteps \} from "\.\/MessageActivity";/);
+  assert.match(chatView, /import \{ MessageActivity \} from "\.\/MessageActivity";/);
   assert.match(chatView, /<MessageActivity text=\{displayMessage\.text\} live=\{false\}/);
   assert.doesNotMatch(chatView, /function MessageActivity\(/);
   assert.doesNotMatch(chatView, /function parseActivitySteps\(/);
+  assert.match(chatPayloadParsers, /import \{ parseActivitySteps \} from "\.\/MessageActivity";/);
   assert.match(messageActivity, /export function MessageActivity/);
   assert.match(messageActivity, /export function parseActivitySteps/);
   assert.match(messageActivity, /msg-activity-steps/);
@@ -839,6 +847,22 @@ test("ChatView delegates message and formatting helpers to chatViewMessages", ()
   assert.match(chatViewMessages, /fileLocalPathFromBridge/);
 });
 
+test("ChatView delegates structured payload parsing to ChatPayloadParsers", () => {
+  assert.match(chatView, /from "\.\/ChatPayloadParsers";/);
+  assert.doesNotMatch(chatView, /function eventPayload\(/);
+  assert.doesNotMatch(chatView, /function parseVaultProposalPayload\(/);
+  assert.doesNotMatch(chatView, /function parseVaultRevealPayload\(/);
+  assert.doesNotMatch(chatView, /function parsePaymentApprovalPayload\(/);
+  assert.doesNotMatch(chatView, /function parseChoicePromptPayload\(/);
+  assert.doesNotMatch(chatView, /function latestPlanMarkdown\(/);
+  assert.doesNotMatch(chatView, /function latestActivitySteps\(/);
+  assert.match(chatPayloadParsers, /export function eventPayload/);
+  assert.match(chatPayloadParsers, /export function parseVaultProposalPayload/);
+  assert.match(chatPayloadParsers, /export function parsePaymentApprovalPayload/);
+  assert.match(chatPayloadParsers, /export function parseChoicePromptPayload/);
+  assert.match(chatPayloadParsers, /export function latestActivitySteps/);
+});
+
 test("ChatView delegates operational plan preview rendering and parsing", () => {
   assert.match(chatView, /from "\.\/OperationalPlanPreview";/);
   assert.match(chatView, /<OperationalPlanPreview collapsed=\{false\} markdown=\{operationalPlanMarkdown\}/);
@@ -875,8 +899,10 @@ test("ChatView does not retain the retired inline operational plan progress card
   assert.doesNotMatch(chatView, /from "\.\/MessagePlanProgressCard";/);
   assert.doesNotMatch(chatView, /<PlanProgressCard/);
   assert.doesNotMatch(chatView, /function PlanProgressCard\(/);
-  assert.match(chatView, /interface PlanStep/);
-  assert.match(chatView, /parsePlanSteps\(markdown: string\): PlanStep\[\]/);
+  assert.doesNotMatch(chatView, /interface PlanStep/);
+  assert.doesNotMatch(chatView, /function parsePlanSteps\(/);
+  assert.match(chatPayloadParsers, /export interface PlanStep/);
+  assert.match(chatPayloadParsers, /export function parsePlanSteps\(markdown: string\): PlanStep\[\]/);
 });
 
 test("ChatView delegates diff message rendering to MessageDiffCard", () => {

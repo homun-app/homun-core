@@ -67,7 +67,6 @@ import {
   type MemoryGraphNode,
   type MemoryHygieneSuggestion,
   type MemoryWikiPage,
-  type PaymentApprovalSnapshot,
   type ProjectSubdir,
   modelIsCloud,
   type ProviderModelsGroup,
@@ -208,7 +207,7 @@ import { ComputerDetailPanel } from "./ComputerDetailPanel";
 import { ChatEmptyHero } from "./ChatEmptyHero";
 import { MessageAttachmentList } from "./MessageAttachmentList";
 import { MessageActionBar } from "./MessageActionBar";
-import { MessageActivity, parseActivitySteps } from "./MessageActivity";
+import { MessageActivity } from "./MessageActivity";
 import { AssistantThinkingState, type ChatStreamStatus } from "./AssistantThinkingState";
 import {
   OperationalPlanPreview,
@@ -243,6 +242,18 @@ import {
   type VaultProposal,
 } from "./MessageVaultProposeCard";
 import { GoalsPanel } from "./GoalsPanel";
+import {
+  eventPayload,
+  latestActivitySteps,
+  latestPlanMarkdown,
+  latestPlanUpdateMarkdown,
+  parseChoicePromptPayload,
+  parsePaymentApprovalPayload,
+  parsePlanSteps,
+  parseVaultProposalPayload,
+  parseVaultRevealPayload,
+  type PlanStep,
+} from "./ChatPayloadParsers";
 import {
   projectWorkspaceSections,
   type WorkspaceSectionId,
@@ -3621,134 +3632,6 @@ const CHAT_MODES: {
   { key: "ask", label: "Ask", desc: "Replies and converses, without tools or actions", icon: MessageCircle },
   { key: "debug", label: "Debug", desc: "Systematic debugging (code projects)", icon: Bug, projectOnly: true },
 ];
-
-/** One step of the live operational plan (update_plan), used by workspace plan projections. */
-interface PlanStep {
-  status: "todo" | "doing" | "done" | "blocked";
-  title: string;
-  detail: string;
-}
-
-function eventPayload(parts: ChatEventPart[] | undefined, type: ChatEventPart["type"]) {
-  const part = parts?.find((item) => item.type === type);
-  return part && "payload" in part ? part.payload : null;
-}
-
-function latestPlanUpdateMarkdown(parts: ChatEventPart[] | undefined) {
-  const plans = (parts ?? []).filter(
-    (item): item is Extract<ChatEventPart, { type: "plan_update" }> =>
-      item.type === "plan_update",
-  );
-  return plans.length > 0 ? plans[plans.length - 1].markdown : null;
-}
-
-function parseVaultProposalPayload(payload: unknown): VaultProposal | null {
-  const parsed = payload as Partial<VaultProposal> | null;
-  if (
-    parsed &&
-    typeof parsed.category === "string" &&
-    typeof parsed.label === "string" &&
-    typeof parsed.redacted_preview === "string"
-  ) {
-    return {
-      category: parsed.category,
-      label: parsed.label,
-      redacted_preview: parsed.redacted_preview,
-      ...(typeof parsed.pending_id === "string" ? { pending_id: parsed.pending_id } : {}),
-    };
-  }
-  return null;
-}
-
-function parseVaultRevealPayload(payload: unknown): VaultRevealProposal | null {
-  const parsed = payload as Partial<VaultRevealProposal> | null;
-  if (
-    parsed &&
-    typeof parsed.record_id === "string" &&
-    typeof parsed.category === "string" &&
-    typeof parsed.label === "string" &&
-    typeof parsed.redacted_preview === "string"
-  ) {
-    return {
-      record_id: parsed.record_id,
-      category: parsed.category,
-      label: parsed.label,
-      redacted_preview: parsed.redacted_preview,
-    };
-  }
-  return null;
-}
-
-function parsePaymentApprovalPayload(payload: unknown): PaymentApprovalProposal | null {
-  const parsed = payload as { snapshot?: Partial<PaymentApprovalSnapshot> } | null;
-  const snapshot = parsed?.snapshot;
-  if (
-    snapshot &&
-    typeof snapshot.approval_id === "string" &&
-    typeof snapshot.merchant === "string" &&
-    typeof snapshot.domain === "string" &&
-    typeof snapshot.amount_minor === "number" &&
-    typeof snapshot.currency === "string" &&
-    typeof snapshot.product_summary === "string" &&
-    typeof snapshot.payment_method_label === "string" &&
-    typeof snapshot.checkout_fingerprint === "string"
-  ) {
-    return { snapshot: snapshot as PaymentApprovalSnapshot };
-  }
-  return null;
-}
-
-function parseChoicePromptPayload(payload: unknown): ChoicePrompt | null {
-  const parsed = payload as Partial<ChoicePrompt> | null;
-  if (!parsed || !Array.isArray(parsed.options) || parsed.options.length === 0) return null;
-  return {
-    question: typeof parsed.question === "string" ? parsed.question : "",
-    multi: parsed.multi === true,
-    options: parsed.options.filter((option) => typeof option === "string" && option.trim()),
-    purpose: typeof parsed.purpose === "string" ? parsed.purpose : undefined,
-  };
-}
-
-/** Parses the ‹‹PLAN›› markdown (`- [x] **Title** (`s1`): detail`) into typed steps. */
-function parsePlanSteps(markdown: string): PlanStep[] {
-  const out: PlanStep[] = [];
-  for (const raw of markdown.split("\n")) {
-    const m = raw.match(/^-\s*\[(.)\]\s*\*\*(.+?)\*\*\s*(?:\(`[^`]*`\))?\s*:?\s*(.*)$/);
-    if (!m) continue;
-    const marker = m[1];
-    const status: PlanStep["status"] =
-      marker === "x" ? "done" : marker === "-" ? "doing" : marker === "!" ? "blocked" : "todo";
-    out.push({ status, title: m[2].trim(), detail: m[3].trim() });
-  }
-  return out;
-}
-
-// Operational plan emitted by the agent via the update_plan tool (‹‹PLAN›› markers).
-// The latest one in the conversation drives the Workbench "Piano" panel.
-
-function latestPlanMarkdown(messages: { text?: string; eventParts?: ChatEventPart[] }[]): string | null {
-  let latest: string | null = null;
-  for (const message of messages) {
-    const structuredPlan = latestPlanUpdateMarkdown(message.eventParts);
-    if (structuredPlan) {
-      latest = structuredPlan;
-      continue;
-    }
-    const text = message.text ?? "";
-    if (!text.includes("‹‹PLAN››")) continue;
-    for (const match of text.matchAll(PLAN_RE)) latest = match[1].trim();
-  }
-  return latest && latest.length > 0 ? latest : null;
-}
-
-function latestActivitySteps(messages: { text?: string }[]): string[] {
-  let latest: string[] = [];
-  for (const message of messages) {
-    const steps = parseActivitySteps(message.text ?? "");
-    if (steps.length > 0) latest = steps;
-  }
-  return latest;
-}
 
 /** Artifacts workspace: a side panel listing the conversation's generated files
  *  and rendering each by type (markdown, code, csv table, image, pdf) — the
