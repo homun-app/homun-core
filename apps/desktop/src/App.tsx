@@ -64,6 +64,7 @@ import { useOnboardingSetupGate } from "./lib/useOnboardingSetupGate";
 import { usePluginController } from "./lib/usePluginController";
 import { useResponsiveDrawer } from "./lib/useResponsiveDrawer";
 import { useTaskQueueController } from "./lib/useTaskQueueController";
+import { useBackgroundStreams } from "./lib/useBackgroundStreams";
 import type {
   ChatAttachment,
   ChatMessage,
@@ -122,10 +123,6 @@ function AuthenticatedApp() {
     // the first auto-submitted turn (see handleStartTemplateWorkflow).
     routingBinding?: RoutingBindingInput;
   } | null>(null);
-  // The thread currently generating a chat answer (real-time signal from ChatView,
-  // sub-polling cadence). Used to mark the thread busy in the sidebar immediately,
-  // before the 2.5s taskQueue polling catches up.
-  const [streamingThreadId, setStreamingThreadId] = useState<string | null>(null);
   // Bumped on a `thread.updated` for the open thread → ChatView re-fetches its island
   // projection, so a BACKGROUND channel turn's finished activity folds in (it isn't streamed).
   const [islandRefreshNonce, setIslandRefreshNonce] = useState(0);
@@ -141,10 +138,6 @@ function AuthenticatedApp() {
   const pendingLocalMessageThreadIdsRef = useRef<Set<string>>(new Set());
   const busyThreadIdsRef = useRef<Set<string>>(new Set());
   const notifiedAttentionThreadIdsRef = useRef<Set<string> | null>(null);
-  // Thread ids generating in the BACKGROUND (a chat left mid-answer while another is
-  // on screen). Polled from the gateway's resume registry so the sidebar dots light
-  // up on every working chat, not only the active one.
-  const [backgroundStreamIds, setBackgroundStreamIds] = useState<Set<string>>(new Set());
   const [threadAttention, setThreadAttention] = useState<ThreadAttentionState>(() =>
     createThreadAttentionState(defaultChatThread.threadId),
   );
@@ -155,6 +148,8 @@ function AuthenticatedApp() {
   const { showOnboarding, completeOnboarding } = useOnboardingSetupGate();
   const { pluginStates, reloadPlugins } = usePluginController();
   const { drawerOpen, expandDrawer, toggleDrawer } = useResponsiveDrawer();
+  const { backgroundStreamIds, streamingThreadId, setStreamingThreadId } =
+    useBackgroundStreams();
   const activeThread = useMemo(
     () =>
       chatThreads.find((thread) => thread.threadId === activeThreadId) ??
@@ -755,16 +750,6 @@ function AuthenticatedApp() {
     );
     applyThreadAttentionRows(await coreBridge.threadAttentions());
   }
-
-  useEffect(() => {
-    const pollActiveStreams = () =>
-      void coreBridge.activeStreams().then((ids) => setBackgroundStreamIds(new Set(ids)));
-    pollActiveStreams();
-    const interval = window.setInterval(() => {
-      pollActiveStreams();
-    }, 4_000);
-    return () => window.clearInterval(interval);
-  }, []);
 
   useEffect(() => {
     let cancelled = false;

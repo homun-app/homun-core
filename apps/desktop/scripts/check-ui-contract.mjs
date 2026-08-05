@@ -1132,8 +1132,10 @@ assertContains("src/App.tsx", "useOnboardingSetupGate", "App must delegate onboa
 assertContains("src/App.tsx", "usePluginController", "App must delegate plugin state loading to the plugin controller");
 assertContains("src/App.tsx", "useResponsiveDrawer", "App must delegate responsive drawer state to the drawer hook");
 assertContains("src/App.tsx", "useTaskQueueController", "App must delegate task queue state and approvals to the task queue controller");
+assertContains("src/App.tsx", "useBackgroundStreams", "App must delegate active stream polling to the background streams hook");
 assertNotContains("src/App.tsx", "coreBridge.setupStatus", "App must not own setup status fetching directly");
 assertNotContains("src/App.tsx", "coreBridge.plugins()", "App must not own plugin state fetching directly");
+assertNotContains("src/App.tsx", "coreBridge.activeStreams", "App must not own active stream polling directly");
 assertNotContains("src/App.tsx", "coreBridge.taskQueue", "App must not own task queue fetching directly");
 assertNotContains("src/App.tsx", "coreBridge.approveApprovel", "App must not own approval mutations directly");
 assertNotContains("src/App.tsx", "coreBridge.resolveUncertainEffect", "App must not own uncertain effect resolution directly");

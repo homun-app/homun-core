@@ -184,6 +184,13 @@ const responsiveDrawer = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const backgroundStreams = await readFile(
+  new URL("../src/lib/useBackgroundStreams.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -793,6 +800,14 @@ test("App delegates shell setup and plugin state to focused controllers", () => 
   assert.match(onboardingSetupGate, /coreBridge\.setupStatus/);
   assert.match(pluginController, /coreBridge\.plugins\(\)/);
   assert.match(responsiveDrawer, /window\.innerWidth > breakpoint/);
+});
+
+test("App delegates background stream polling to useBackgroundStreams", () => {
+  assert.match(app, /from "\.\/lib\/useBackgroundStreams";/);
+  assert.doesNotMatch(app, /coreBridge\.activeStreams/);
+  assert.doesNotMatch(app, /setBackgroundStreamIds/);
+  assert.match(backgroundStreams, /export function useBackgroundStreams/);
+  assert.match(backgroundStreams, /\.activeStreams\(\)/);
 });
 
 test("App delegates workspace view rendering to AppWorkspace", () => {
