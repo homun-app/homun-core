@@ -1124,6 +1124,8 @@ assertContains("src/components/ProjectAccessDialog.tsx", "can_receive_artifacts:
 assertContains("src/components/ProjectAccessDialog.tsx", "project-access-denies", "Project Access must expose explicit capability deny controls");
 assertContains("src/components/ProjectAccessDialog.tsx", "capability_denies: selectedCapabilityDenies", "Project Access grants must persist selected capability denies");
 assertContains("src/components/ProjectAccessDialog.tsx", "updateGrantCapabilityDeny", "Project Access must allow editing capability denies on existing grants");
+assertContains("src/App.tsx", "useAutomationController", "App must delegate automation read/actions to the automation controller");
+assertNotContains("src/App.tsx", "coreBridge.automations", "App must not own automation dashboard fetching directly");
 assertContains("src/components/AutomationsView.tsx", "t(\"automations.ifThis\")", "Event automation builder must expose the IF part explicitly");
 assertContains("src/components/AutomationsView.tsx", "t(\"automations.filter\")", "Event automation builder must expose the FILTER part explicitly");
 assertContains("src/i18n/locales/en.json", "\"ifThis\": \"If this happens\"", "Event automation IF label must be localized in English");

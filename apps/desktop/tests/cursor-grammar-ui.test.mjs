@@ -142,6 +142,13 @@ const initialThreadSelection = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const automationController = await readFile(
+  new URL("../src/lib/useAutomationController.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -706,6 +713,18 @@ test("App delegates initial thread selection to initialThreadSelection", () => {
   assert.match(app, /from "\.\/lib\/initialThreadSelection";/);
   assert.doesNotMatch(app, /mapped\.find\(\(thread\) => thread\.threadId === snapshot\.active_thread_id\)/);
   assert.match(initialThreadSelection, /export function selectInitialThreadFromSnapshot/);
+});
+
+test("App delegates automation state and actions to useAutomationController", () => {
+  assert.match(app, /from "\.\/lib\/useAutomationController";/);
+  assert.doesNotMatch(app, /useState<ManagedAutomation/);
+  assert.doesNotMatch(app, /coreBridge\.automations/);
+  assert.doesNotMatch(app, /coreBridge\.createAutomation/);
+  assert.doesNotMatch(app, /coreBridge\.updateAutomation/);
+  assert.doesNotMatch(app, /coreBridge\.toggleAutomation/);
+  assert.doesNotMatch(app, /coreBridge\.deleteAutomation/);
+  assert.match(automationController, /export function useAutomationController/);
+  assert.match(automationController, /coreBridge\.automations/);
 });
 
 test("App delegates workspace view rendering to AppWorkspace", () => {

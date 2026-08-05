@@ -16,9 +16,7 @@ import { pluginRegistry, type PluginHost } from "./plugins/registry";
 import {
   coreBridge,
   type AppEvent,
-  type AutomationCreateteInput,
   type ChatAttachmentInput,
-  type ManagedAutomation,
   type CoreChatThreadSnapshot,
   type CoreThreadAttention,
   type CoreTaskQueueSnapshot,
@@ -74,6 +72,7 @@ import { projectThreadSnapshotSelection } from "./lib/threadSnapshotProjection";
 import { projectBusyThreadIds } from "./lib/busyThreadProjection";
 import { buildProactivityChatSeed } from "./lib/proactivityChatSeed";
 import { selectInitialThreadFromSnapshot } from "./lib/initialThreadSelection";
+import { useAutomationController } from "./lib/useAutomationController";
 import type {
   ApprovelItem,
   ChatAttachment,
@@ -134,7 +133,6 @@ function AuthenticatedApp() {
   const [uncertainEffectItems, setUncertainEffectItems] = useState<
     UncertainEffectItem[]
   >([]);
-  const [automationItems, setAutomationItems] = useState<ManagedAutomation[]>([]);
   const [connectionItems, setConnectionItems] =
     useState<ConnectionItem[]>(connections);
   const [approvalBusyId, setApprovelBusyId] = useState<string | null>(null);
@@ -200,6 +198,16 @@ function AuthenticatedApp() {
     [activeThread.threadId, uncertainEffectItems],
   );
   const automationWorkspaceId = activeThread.workspaceId ?? undefined;
+  const {
+    automationItems,
+    handleCreateteAutomation,
+    handleUpdateAutomation,
+    handleToggleAutomation,
+    handleDeleteAutomation,
+  } = useAutomationController({
+    workspaceId: automationWorkspaceId,
+    enabled: activeView === "automations",
+  });
   // Threads "busy": a real-time streaming signal (from ChatView, sub-poll) UNION
   // the taskQueue snapshot (running/queued tasks linked to a thread). The union
   // covers both the chat-stream case and the durable-background-task case.
@@ -790,53 +798,6 @@ function AuthenticatedApp() {
     }
   }
 
-  async function loadAutomations() {
-    try {
-      setAutomationItems(await coreBridge.automations(automationWorkspaceId));
-    } catch (error) {
-      console.warn("automations unavailable", error);
-    }
-  }
-
-  async function handleCreateteAutomation(input: AutomationCreateteInput) {
-    try {
-      await coreBridge.createAutomation({
-        ...input,
-        workspace_id: input.workspace_id ?? automationWorkspaceId,
-      });
-      await loadAutomations();
-    } catch (error) {
-      console.warn("create automation failed", error);
-    }
-  }
-
-  async function handleUpdateAutomation(id: string, input: Partial<AutomationCreateteInput>) {
-    try {
-      await coreBridge.updateAutomation(id, input, automationWorkspaceId);
-      await loadAutomations();
-    } catch (error) {
-      console.warn("update automation failed", error);
-    }
-  }
-
-  async function handleToggleAutomation(id: string) {
-    try {
-      await coreBridge.toggleAutomation(id, automationWorkspaceId);
-      await loadAutomations();
-    } catch (error) {
-      console.warn("toggle automation failed", error);
-    }
-  }
-
-  async function handleDeleteAutomation(id: string) {
-    try {
-      await coreBridge.deleteAutomation(id, automationWorkspaceId);
-      await loadAutomations();
-    } catch (error) {
-      console.warn("delete automation failed", error);
-    }
-  }
-
   async function loadCapabilities() {
     try {
       const nextConnections = mapCoreCapabilitySnapshot(
@@ -941,7 +902,6 @@ function AuthenticatedApp() {
       void coreBridge.activeStreams().then((ids) => setBackgroundStreamIds(new Set(ids)));
     void loadCapabilities();
     void loadTaskQueue();
-    void loadAutomations();
     pollActiveStreams();
     const interval = window.setInterval(() => {
       void loadTaskQueue();
@@ -949,11 +909,6 @@ function AuthenticatedApp() {
     }, 4_000);
     return () => window.clearInterval(interval);
   }, []);
-
-  useEffect(() => {
-    if (activeView === "automations") void loadAutomations();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView, automationWorkspaceId]);
 
   useEffect(() => {
     let cancelled = false;
