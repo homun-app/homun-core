@@ -197,6 +197,13 @@ const messagePaymentApprovalCard = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageFsAuthorizeCard = await readFile(
+  new URL("../src/components/MessageFsAuthorizeCard.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -866,6 +873,15 @@ test("ChatView delegates payment approval rendering to MessagePaymentApprovalCar
   assert.match(messagePaymentApprovalCard, /export function PaymentApprovalCard/);
   assert.match(messagePaymentApprovalCard, /coreBridge\.vaultPaymentApprovalApprove/);
   assert.match(messagePaymentApprovalCard, /formatPaymentAmount/);
+});
+
+test("ChatView delegates filesystem authorization rendering to MessageFsAuthorizeCard", () => {
+  assert.match(chatView, /from "\.\/MessageFsAuthorizeCard";/);
+  assert.match(chatView, /<FsAuthorizeCard[\s\S]*path=\{fsAuthorize\.path\}/);
+  assert.doesNotMatch(chatView, /function FsAuthorizeCard\(/);
+  assert.match(messageFsAuthorizeCard, /export function FsAuthorizeCard/);
+  assert.match(messageFsAuthorizeCard, /coreBridge\.fsAuthorize/);
+  assert.match(messageFsAuthorizeCard, /chat\.authorizationFailed/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
