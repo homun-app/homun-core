@@ -1321,6 +1321,8 @@ test("ChatView delegates workspace artifact and source projections to ChatWorksp
   assert.match(chatWorkspaceProjections, /export function buildWorkbenchArtifacts/);
   assert.match(chatWorkspaceProjections, /export function buildUploadedFiles/);
   assert.match(chatWorkspaceProjections, /export function buildIslandSources/);
+  assert.match(chatWorkspaceProjections, /from "\.\.\/lib\/artifactProjection";/);
+  assert.doesNotMatch(chatWorkspaceProjections, /import \* as artifactProjection/);
   assert.match(chatWorkspaceProjections, /projectMemoryArtifact/);
 });
 

@@ -7,15 +7,7 @@ import {
   parseArtifacts,
   type ParsedArtifact,
 } from "./MessageArtifacts";
-
-// Persisted artifact rows need a storage-aware projection before previewing.
-// @ts-expect-error JavaScript sibling intentionally has no declaration file.
-import * as artifactProjection from "../lib/artifactProjection.mjs";
-
-const projectMemoryArtifact = artifactProjection.projectMemoryArtifact as (
-  artifact: MemoryArtifactView,
-  currentThread: string,
-) => ParsedArtifact;
+import { projectMemoryArtifact } from "../lib/artifactProjection";
 
 export function buildConversationArtifacts(messages: ChatMessage[]): ParsedArtifact[] {
   const seen = new Set<string>();
