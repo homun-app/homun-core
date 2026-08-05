@@ -211,6 +211,13 @@ const messageSandboxEscalateCard = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageComposioConfirmCard = await readFile(
+  new URL("../src/components/MessageComposioConfirmCard.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -898,6 +905,22 @@ test("ChatView delegates sandbox escalation rendering to MessageSandboxEscalateC
   assert.match(messageSandboxEscalateCard, /export function SandboxEscalateCard/);
   assert.match(messageSandboxEscalateCard, /coreBridge\.runEscalate/);
   assert.match(messageSandboxEscalateCard, /Run without sandbox/);
+});
+
+test("ChatView delegates Composio and MCP confirmations to MessageComposioConfirmCard", () => {
+  assert.match(chatView, /from "\.\/MessageComposioConfirmCard";/);
+  assert.match(chatView, /<ComposioConfirmCard action=\{action\}/);
+  assert.doesNotMatch(chatView, /function ComposioConfirmCard\(/);
+  assert.doesNotMatch(chatView, /const COMPOSIO_FIELD_LABELS:/);
+  assert.doesNotMatch(chatView, /const OPAQUE_FIELD_KEYS =/);
+  assert.doesNotMatch(chatView, /function humanizeFieldKey\(/);
+  assert.doesNotMatch(chatView, /function humanizeToolName\(/);
+  assert.match(messageComposioConfirmCard, /export interface ComposioPendingAction/);
+  assert.match(messageComposioConfirmCard, /export function ComposioConfirmCard/);
+  assert.match(messageComposioConfirmCard, /export function humanizeToolName/);
+  assert.match(messageComposioConfirmCard, /coreBridge\.composioExecute/);
+  assert.match(messageComposioConfirmCard, /coreBridge\.mcpExecute/);
+  assert.match(messageComposioConfirmCard, /confirmDestructiveAction/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
