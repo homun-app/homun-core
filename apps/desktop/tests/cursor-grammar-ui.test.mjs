@@ -142,6 +142,13 @@ const threadSnapshotProjection = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatThreadMutations = await readFile(
+  new URL("../src/lib/useChatThreadMutations.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const initialThreadSelection = await readFile(
   new URL("../src/lib/initialThreadSelection.mjs", import.meta.url),
   "utf8",
@@ -792,8 +799,10 @@ test("App delegates task queue snapshot projection to taskQueueProjection", () =
 });
 
 test("App delegates thread snapshot selection to threadSnapshotProjection", () => {
-  assert.match(app, /from "\.\/lib\/threadSnapshotProjection";/);
+  assert.match(app, /from "\.\/lib\/useChatThreadMutations";/);
+  assert.doesNotMatch(app, /from "\.\/lib\/threadSnapshotProjection";/);
   assert.doesNotMatch(app, /const preservedThread = mappedThreads\.find/);
+  assert.match(chatThreadMutations, /projectThreadSnapshotSelection/);
   assert.match(threadSnapshotProjection, /export function projectThreadSnapshotSelection/);
 });
 

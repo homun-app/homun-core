@@ -3,6 +3,10 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
+const chatThreadMutations = await readFile(
+  new URL("../src/lib/useChatThreadMutations.ts", import.meta.url),
+  "utf8",
+);
 const sidebar = await readFile(new URL("../src/components/Sidebar.tsx", import.meta.url), "utf8");
 const sidebarFilters = await readFile(
   new URL("../src/components/SidebarFilters.tsx", import.meta.url),
@@ -27,9 +31,10 @@ const locales = await Promise.all(
 test("unarchive routes the owning workspace and isolates nonactive project snapshots", () => {
   assert.match(sidebar, /onUnarchiveChatThread\([^,]+,\s*workspaceId\)/);
   assert.match(sidebar, /mergeSidebarUnarchiveResult/);
-  assert.match(app, /const ownerIsActive = sidebarWorkspaceIsActive\(/);
-  assert.match(app, /if \(ownerIsActive\) \{\s*await applyThreadSnapshot/);
-  assert.match(app, /appliedToActive: ownerIsActive/);
+  assert.match(app, /useChatThreadMutations/);
+  assert.match(chatThreadMutations, /const ownerIsActive = sidebarWorkspaceIsActive\(/);
+  assert.match(chatThreadMutations, /if \(ownerIsActive\) \{\s*await applyThreadSnapshot/);
+  assert.match(chatThreadMutations, /appliedToActive: ownerIsActive/);
   assert.match(sidebar, /if \(result\.appliedToActive\) return/);
   assert.doesNotMatch(sidebar, /const ownerIsActive = sidebarWorkspaceIsActive/);
 });
