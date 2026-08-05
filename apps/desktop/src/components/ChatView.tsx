@@ -108,19 +108,11 @@ import {
   threadTailAwaitsUser,
   type ActiveTurnProjection,
 } from "../lib/chatEventParts";
-// Persisted artifact rows need a storage-aware projection before previewing.
-// @ts-expect-error JavaScript sibling intentionally has no declaration file.
-import * as artifactProjection from "../lib/artifactProjection.mjs";
 // Transcript indexes live in a plain .mjs sibling so `node --test` can exercise
 // them without a build step, which is why they carry no type declaration.
 // @ts-expect-error JavaScript sibling intentionally has no declaration file.
 import * as messageIndex from "../lib/messageIndex.mjs";
-import {
-  parseArtifacts,
-  artifactExt,
-  ARTIFACT_IMAGE_EXT,
-  type ParsedArtifact,
-} from "./MessageArtifacts";
+import { type ParsedArtifact } from "./MessageArtifacts";
 import { ChatComputerPanel } from "./ChatComputerPanel";
 import { AdaptiveWorkspaceIsland } from "./AdaptiveWorkspaceIsland";
 import { ActiveTurnStatus } from "./ActiveTurnStatus";
@@ -146,6 +138,12 @@ import {
 import {
   projectWorkspaceSections,
 } from "../lib/workspaceIslandSections";
+import {
+  buildConversationArtifacts,
+  buildIslandSources,
+  buildUploadedFiles,
+  buildWorkbenchArtifacts,
+} from "./ChatWorkspaceProjections";
 import type {
   ChatMessage,
   ChatEventPart,
@@ -164,11 +162,6 @@ const buildPreviousUserMessageIndex = messageIndex.buildPreviousUserMessageIndex
 const buildBranchIndex = messageIndex.buildBranchIndex as (
   branches: CoreBranchPoint[],
 ) => Map<string, CoreBranchPoint>;
-
-const projectMemoryArtifact = artifactProjection.projectMemoryArtifact as (
-  artifact: MemoryArtifactView,
-  currentThread: string,
-) => ParsedArtifact;
 
 const CHAT_VIEW_SESSION_ID =
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -508,35 +501,11 @@ export function ChatView({
   // Così questo memo NON ricalcola durante lo streaming del messaggio corrente —
   // il vero riduttore di jank su thread lunghi. Gli artifact del messaggio streaming
   // si vedono quando viene persisted.
-  const conversationArtifacts = useMemo(() => {
-    const seen = new Set<string>();
-    const out: ParsedArtifact[] = [];
-    for (const message of messages) {
-      if (message.role === "assistant" && message.id.endsWith("_ready")) continue;
-      for (const artifact of parseArtifacts(message.text ?? "")) {
-        if (!seen.has(artifact.name)) {
-          seen.add(artifact.name);
-          out.push(artifact);
-        }
-      }
-    }
-    return out;
-  }, [messages]);
-  const workbenchArtifacts = useMemo(() => {
-    const seen = new Set<string>();
-    const out: ParsedArtifact[] = [];
-    for (const artifact of conversationArtifacts) {
-      seen.add(artifact.name);
-      out.push(artifact);
-    }
-    for (const artifact of memoryArtifacts) {
-      const displayName = artifact.project_relative_path || artifact.name;
-      if (!displayName || seen.has(displayName)) continue;
-      seen.add(displayName);
-      out.push(projectMemoryArtifact(artifact, thread.threadId));
-    }
-    return out;
-  }, [conversationArtifacts, memoryArtifacts, thread.threadId]);
+  const conversationArtifacts = useMemo(() => buildConversationArtifacts(messages), [messages]);
+  const workbenchArtifacts = useMemo(
+    () => buildWorkbenchArtifacts(conversationArtifacts, memoryArtifacts, thread.threadId),
+    [conversationArtifacts, memoryArtifacts, thread.threadId],
+  );
   // The agent's operational plan for this conversation (latest update_plan), shown
   // in the Workbench "Piano" panel. Merge of two lines:
   //  - Piano UI C2 (persisted): the fallback derives from PERSISTED `messages`, NOT
@@ -742,46 +711,13 @@ export function ChatView({
   }, [thread.threadId, isStreaming, islandRefreshNonce]);
   // Files the user uploaded in THIS conversation (e.g. the patente PDF), derived
   // from message attachments — the chat-context "File" tab of the Workbench.
-  const uploadedFiles = useMemo(() => {
-    const seen = new Set<string>();
-    const out: ChatAttachment[] = [];
-    for (const message of messages) {
-      if (message.role === "assistant" && message.id.endsWith("_ready")) continue;
-      for (const attachment of message.attachments ?? []) {
-        if (!seen.has(attachment.title)) {
-          seen.add(attachment.title);
-          out.push(attachment);
-        }
-      }
-    }
-    return out;
-  }, [messages]);
+  const uploadedFiles = useMemo(() => buildUploadedFiles(messages), [messages]);
   // "Sources" projection for the island: generated artifacts + uploaded files, monochrome.
   // `kind` only picks the glyph (image vs document); `meta` is a one-word provenance hint.
-  const islandSources = useMemo<IslandSource[]>(() => {
-    const out: IslandSource[] = [];
-    for (const artifact of workbenchArtifacts) {
-      const name = artifact.projectRelativePath || artifact.name;
-      const isImage = ARTIFACT_IMAGE_EXT.includes(artifactExt(name));
-      out.push({
-        name,
-        kind: isImage ? "image" : "artifact",
-        meta: artifact.updated ? "updated" : artifact.source === "project" ? "project" : "artifact",
-        action: "artifact",
-        artifactThread: artifact.thread,
-        artifactName: artifact.name,
-      });
-    }
-    for (const file of uploadedFiles) {
-      out.push({
-        name: file.title,
-        kind: file.kind === "image" ? "image" : "file",
-        meta: "uploaded",
-        action: "files",
-      });
-    }
-    return out;
-  }, [workbenchArtifacts, uploadedFiles]);
+  const islandSources = useMemo(
+    () => buildIslandSources(workbenchArtifacts, uploadedFiles),
+    [workbenchArtifacts, uploadedFiles],
+  );
   const activeApprovels = approvals.filter((approval) =>
     approval.requestedBy.includes(computerSessionId),
   );

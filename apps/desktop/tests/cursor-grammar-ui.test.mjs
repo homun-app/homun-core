@@ -106,6 +106,13 @@ const chatTranscript = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatWorkspaceProjections = await readFile(
+  new URL("../src/components/ChatWorkspaceProjections.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageAttachmentList = await readFile(
   new URL("../src/components/MessageAttachmentList.tsx", import.meta.url),
   "utf8",
@@ -1066,6 +1073,23 @@ test("ChatView delegates generated artifact rendering to MessageArtifacts", () =
   assert.match(messageArtifacts, /export async function buildArtifactPreview/);
   assert.match(messageArtifacts, /export async function triggerArtifactDownload/);
   assert.match(messageArtifacts, /msg-artifacts/);
+});
+
+test("ChatView delegates workspace artifact and source projections to ChatWorkspaceProjections", () => {
+  assert.match(chatView, /from "\.\/ChatWorkspaceProjections";/);
+  assert.match(chatView, /buildConversationArtifacts\(messages\)/);
+  assert.match(chatView, /buildWorkbenchArtifacts\(/);
+  assert.match(chatView, /buildUploadedFiles\(messages\)/);
+  assert.match(chatView, /buildIslandSources\(/);
+  assert.doesNotMatch(chatView, /artifactProjection/);
+  assert.doesNotMatch(chatView, /projectMemoryArtifact/);
+  assert.doesNotMatch(chatView, /ARTIFACT_IMAGE_EXT\.includes/);
+  assert.doesNotMatch(chatView, /file\.kind === "image"/);
+  assert.match(chatWorkspaceProjections, /export function buildConversationArtifacts/);
+  assert.match(chatWorkspaceProjections, /export function buildWorkbenchArtifacts/);
+  assert.match(chatWorkspaceProjections, /export function buildUploadedFiles/);
+  assert.match(chatWorkspaceProjections, /export function buildIslandSources/);
+  assert.match(chatWorkspaceProjections, /projectMemoryArtifact/);
 });
 
 test("InspectorView delegates the artifacts workbench panel to ArtifactsPanel", () => {
