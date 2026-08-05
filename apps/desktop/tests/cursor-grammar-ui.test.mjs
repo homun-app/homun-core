@@ -176,6 +176,13 @@ const messageComposioReconnectCard = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const inlineUncertainEffectPanel = await readFile(
+  new URL("../src/components/InlineUncertainEffectPanel.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -811,6 +818,18 @@ test("ChatView delegates Composio reconnect rendering to MessageComposioReconnec
   assert.match(messageComposioReconnectCard, /export function ComposioReconnectCard/);
   assert.match(messageComposioReconnectCard, /connectComposioToolkit/);
   assert.match(messageComposioReconnectCard, /chat\.openingReconnection/);
+});
+
+test("ChatView delegates uncertain effect verification to InlineUncertainEffectPanel", () => {
+  assert.match(chatView, /from "\.\/InlineUncertainEffectPanel";/);
+  assert.match(chatView, /<InlineUncertainEffectPanel\s+effects=\{uncertainEffects\}/);
+  assert.doesNotMatch(chatView, /function InlineUncertainEffectPanel\(/);
+  assert.doesNotMatch(chatView, /function effectFamilyLabel\(/);
+  assert.doesNotMatch(chatView, /function formatEffectTime\(/);
+  assert.match(inlineUncertainEffectPanel, /export function InlineUncertainEffectPanel/);
+  assert.match(inlineUncertainEffectPanel, /effectFamilyLabel/);
+  assert.match(inlineUncertainEffectPanel, /formatEffectTime/);
+  assert.match(inlineUncertainEffectPanel, /verifiedNotApplied/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {

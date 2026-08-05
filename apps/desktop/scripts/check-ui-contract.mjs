@@ -756,9 +756,14 @@ assertContains(
   "Manual verification must submit the canonical not-applied resolution",
 );
 assertContains(
-  "src/components/ChatView.tsx",
-  "function InlineUncertainEffectPanel",
+  "src/components/InlineUncertainEffectPanel.tsx",
+  "export function InlineUncertainEffectPanel",
   "Uncertain effects must be resolved in their owning conversation",
+);
+assertContains(
+  "src/components/ChatView.tsx",
+  "<InlineUncertainEffectPanel",
+  "ChatView must delegate uncertain-effect resolution into the conversation surface",
 );
 assertContains(
   "src/App.tsx",
@@ -790,22 +795,22 @@ assertNotContains(
   "Tasks must not remain a desktop route",
 );
 assertContains(
-  "src/components/ChatView.tsx",
+  "src/components/InlineUncertainEffectPanel.tsx",
   'className="uncertain-effect-card"',
   "The owning conversation must render uncertain effects separately from approvals",
 );
 assertContains(
-  "src/components/ChatView.tsx",
+  "src/components/InlineUncertainEffectPanel.tsx",
   't("chat.verifiedApplied")',
   "The conversation must expose the verified-applied command",
 );
 assertContains(
-  "src/components/ChatView.tsx",
+  "src/components/InlineUncertainEffectPanel.tsx",
   't("chat.verifiedNotApplied")',
   "The conversation must expose the verified-not-applied command",
 );
 assertContains(
-  "src/components/ChatView.tsx",
+  "src/components/InlineUncertainEffectPanel.tsx",
   "busyId === effect.id",
   "Both uncertain-effect actions must share one in-flight guard",
 );
