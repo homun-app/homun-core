@@ -120,6 +120,13 @@ const assistantThinkingState = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const operationalPlanPreview = await readFile(
+  new URL("../src/components/OperationalPlanPreview.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -666,6 +673,18 @@ test("ChatView delegates generated artifact rendering to MessageArtifacts", () =
   assert.match(messageArtifacts, /export async function buildArtifactPreview/);
   assert.match(messageArtifacts, /export async function triggerArtifactDownload/);
   assert.match(messageArtifacts, /msg-artifacts/);
+});
+
+test("ChatView delegates operational plan preview rendering and parsing", () => {
+  assert.match(chatView, /from "\.\/OperationalPlanPreview";/);
+  assert.match(chatView, /<OperationalPlanPreview collapsed=\{false\} markdown=\{operationalPlanMarkdown\}/);
+  assert.match(chatView, /parseOperationalPlanItems\(operationalPlanMarkdown\)/);
+  assert.doesNotMatch(chatView, /function OperationalPlanPreview\(/);
+  assert.doesNotMatch(chatView, /function parseOperationalPlanItems\(/);
+  assert.doesNotMatch(chatView, /function planPreviewItems\(/);
+  assert.match(operationalPlanPreview, /export function OperationalPlanPreview/);
+  assert.match(operationalPlanPreview, /export function parseOperationalPlanItems/);
+  assert.match(operationalPlanPreview, /operational-plan-preview/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
