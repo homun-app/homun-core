@@ -5,7 +5,6 @@ import {
   coreBridge,
   SteeringQueuedDuringSubmissionError,
   type ChatAttachmentInput,
-  type CoreComputerSessionSnapshot,
   type RoutingBindingInput,
 } from "../lib/coreBridge";
 import { wsSubscription } from "../lib/wsSubscription";
@@ -44,11 +43,6 @@ import {
 import { deriveTurnLifecycle } from "../lib/chat-runtime/lifecycle";
 import { deriveComposerMode } from "../lib/chat-runtime/composerMode";
 import { visiblePendingSteeringRows } from "../lib/chat-runtime/steering";
-import {
-  createLoadingComputerSession,
-  createUnavailableComputerSession,
-  mapCoreComputerSession,
-} from "../lib/localComputerViewModel";
 import { captureAppScreenshot, IS_DESKTOP } from "../lib/gatewayConfig";
 import { copyText } from "../lib/clipboard";
 import {
@@ -63,7 +57,6 @@ import {
   describeBridgeError,
   isLikelyIncompleteMessage,
   isPlaceholderThreadTitle,
-  isUserVisibleComputerEvent,
   messageRoleLabel,
   shortModelName,
   toMessageAttachment,
@@ -110,6 +103,7 @@ import {
   latestPlanMarkdown,
   parsePlanSteps,
 } from "./ChatPayloadParsers";
+import { useChatComputerSession } from "./useChatComputerSession";
 import { useChatConversationScroll } from "./useChatConversationScroll";
 import { useChatFollowUps } from "./useChatFollowUps";
 import { useChatInspectorWorkspace } from "./useChatInspectorWorkspace";
@@ -130,8 +124,6 @@ import type {
   ChatEventPart,
   ChatAttachment,
   ChatThread,
-  ComputerSession,
-  ComputerSurfaceKind,
 } from "../types";
 
 const CHAT_VIEW_SESSION_ID =
@@ -167,15 +159,24 @@ export function ChatView({
   onAutoSubmitConsumed,
 }: ChatViewProps) {
   const { t } = useTranslation();
-  const [computerSession, setComputerSession] = useState<ComputerSession>(() =>
-    createLoadingComputerSession(computerSessionId),
-  );
-  const [activeSurface, setActiveSurface] = useState<ComputerSurfaceKind>(
-    computerSession.activeSurface,
-  );
-  const [computerControlBusy, setComputerControlBusy] = useState(false);
-  const [computerControlError, setComputerControlError] = useState<string | null>(null);
-  const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
+  const {
+    activeSurface,
+    applyComputerSessionSnapshot,
+    computerControlBusy,
+    computerControlError,
+    computerLiveStatus,
+    computerSession,
+    pauseComputer,
+    previewDataUrl,
+    resumeComputer,
+    setActiveSurface,
+    setComputerLiveStatus,
+    takeoverComputer,
+    visibleComputerSession,
+  } = useChatComputerSession({
+    computerSessionId,
+    unavailableMessage: t("chat.noComputerSessionFound"),
+  });
   const [promptSubmitting, setPromptSubmitting] = useState(false);
   const [promptError, setPromptError] = useState<string | null>(null);
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
@@ -241,10 +242,6 @@ export function ChatView({
     setGoalSeed,
     threadIsProject,
   } = useChatProjectContext(thread.threadId);
-  const [computerLiveStatus, setComputerLiveStatus] = useState<{
-    active: boolean;
-    activity: string | null;
-  }>({ active: false, activity: null });
   const titledThreadsRef = useRef<Set<string>>(new Set());
   const resumedThreadsRef = useRef<Set<string>>(new Set());
   const consumedAutoSubmitIdsRef = useRef<Set<string>>(new Set());
@@ -642,31 +639,9 @@ export function ChatView({
     ],
   );
 
-  const visibleComputerSession = useMemo(
-    () => ({
-      ...computerSession,
-      timeline: computerSession.timeline.filter(isUserVisibleComputerEvent),
-    }),
-    [computerSession],
-  );
   function resetStreamingState(initialText = "") {
     setStreamHasVisibleText(Boolean(initialText));
     cancelScheduledStreamingFrame();
-  }
-
-  async function runComputerControl(
-    action: (sessionId: string) => Promise<CoreComputerSessionSnapshot>,
-  ) {
-    setComputerControlBusy(true);
-    setComputerControlError(null);
-    try {
-      const snapshot = await action(computerSessionId);
-      setComputerSession(mapCoreComputerSession(snapshot));
-    } catch (error) {
-      setComputerControlError(describeBridgeError(error));
-    } finally {
-      setComputerControlBusy(false);
-    }
   }
 
   async function submitPrompt(
@@ -946,7 +921,7 @@ export function ChatView({
       if (cancelledStreamIdsRef.current.has(requestId)) {
         return;
       }
-      setComputerSession(mapCoreComputerSession(result.computer_session));
+      applyComputerSessionSnapshot(result.computer_session);
       // Only gateway evidence may identify the model that produced this turn.
       // The requested override remains next-turn input, not execution provenance.
       const turnModel = effectiveModelFromGateway(result.effective_model) ?? undefined;
@@ -1657,7 +1632,7 @@ export function ChatView({
       );
       if (cancelledStreamIdsRef.current.has(requestId)) return;
       cancelScheduledStreamingFrame();
-      setComputerSession(mapCoreComputerSession(result.computer_session));
+      applyComputerSessionSnapshot(result.computer_session);
       // The new answer is now a sibling in the tree; resync the real path + switcher.
       await refreshAfterChatSubmit();
       setOptimisticMessages(null);
@@ -1930,7 +1905,7 @@ export function ChatView({
       const nextMessages = baseMessages.map((item) =>
         item.id === message.id ? updatedMessage : item,
       );
-      setComputerSession(mapCoreComputerSession(result.computer_session));
+      applyComputerSessionSnapshot(result.computer_session);
       setOptimisticMessages(nextMessages);
       onMessagesChange(nextMessages, { advanceActivity: true });
       return nextMessages;
@@ -1976,83 +1951,6 @@ export function ChatView({
     });
     void submitPrompt(followUpPrompt, [], [], visibleText);
   }
-
-  useEffect(() => {
-    let cancelled = false;
-    setComputerSession(createLoadingComputerSession(computerSessionId));
-    setPreviewDataUrl(null);
-
-    async function loadLocalComputerSession() {
-      try {
-        const snapshot = await coreBridge.localComputerSession(computerSessionId);
-        if (cancelled) return;
-        setComputerSession(
-          snapshot
-            ? mapCoreComputerSession(snapshot)
-            : createUnavailableComputerSession(
-                computerSessionId,
-                t("chat.noComputerSessionFound"),
-              ),
-        );
-      } catch (error) {
-        if (cancelled) return;
-        setComputerSession(
-          createUnavailableComputerSession(
-            computerSessionId,
-            describeBridgeError(error),
-          ),
-        );
-      }
-    }
-
-    void loadLocalComputerSession();
-    const interval = window.setInterval(loadLocalComputerSession, 4_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [computerSessionId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const artifactId = computerSession.previewArtifactId;
-    if (!artifactId || computerSession.source !== "core") {
-      setPreviewDataUrl(null);
-      return () => {
-        cancelled = true;
-      };
-    }
-    const previewArtifactId = artifactId;
-
-    async function loadPreview() {
-      try {
-        const preview = await coreBridge.localComputerArtifactPreview(
-          computerSession.id,
-          previewArtifactId,
-        );
-        if (!cancelled) {
-          setPreviewDataUrl(preview?.data_url ?? null);
-        }
-      } catch {
-        if (!cancelled) {
-          setPreviewDataUrl(null);
-        }
-      }
-    }
-
-    void loadPreview();
-    return () => {
-      cancelled = true;
-    };
-  }, [computerSession.id, computerSession.previewArtifactId, computerSession.source]);
-
-  useEffect(() => {
-    if (
-      !computerSession.surfaces.some((surface) => surface.id === activeSurface)
-    ) {
-      setActiveSurface(computerSession.activeSurface);
-    }
-  }, [activeSurface, computerSession.activeSurface, computerSession.surfaces]);
 
   // After a reload, reattach to an answer that was still streaming (resume).
   useEffect(() => {
@@ -2256,12 +2154,10 @@ export function ChatView({
         onOpenFilesIndex={() => openUtilityTab("file")}
         onOpenArtifact={openArtifactTab}
         onRetryArtifactCatalog={retryMemoryArtifacts}
-        onPauseComputer={() => runComputerControl(coreBridge.pauseLocalComputerSession)}
-        onResumeComputer={() => runComputerControl(coreBridge.resumeLocalComputerSession)}
+        onPauseComputer={pauseComputer}
+        onResumeComputer={resumeComputer}
         onSelectSurface={setActiveSurface}
-        onTakeoverComputer={() =>
-          runComputerControl(coreBridge.requestLocalComputerTakeover)
-        }
+        onTakeoverComputer={takeoverComputer}
       />
 
       <ChatComposerDock

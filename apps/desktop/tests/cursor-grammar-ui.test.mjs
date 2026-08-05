@@ -127,6 +127,13 @@ const chatInspectorWorkspace = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatComputerSessionHook = await readFile(
+  new URL("../src/components/useChatComputerSession.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const appWorkspace = await readFile(
   new URL("../src/components/AppWorkspace.tsx", import.meta.url),
@@ -1955,6 +1962,28 @@ test("ChatView delegates inspector workspace ownership to useChatInspectorWorksp
   assert.match(chatInspectorWorkspace, /saveInspectorState/);
   assert.match(chatInspectorWorkspace, /saveInspectorWidthRatio/);
   assert.match(chatInspectorWorkspace, /coreBridge\s*\.\s*fsFile/);
+});
+
+test("ChatView delegates local computer session ownership to useChatComputerSession", () => {
+  assert.match(chatView, /from "\.\/useChatComputerSession";/);
+  assert.match(chatView, /useChatComputerSession\(\{/);
+  assert.doesNotMatch(chatView, /createLoadingComputerSession/);
+  assert.doesNotMatch(chatView, /createUnavailableComputerSession/);
+  assert.doesNotMatch(chatView, /mapCoreComputerSession/);
+  assert.doesNotMatch(chatView, /coreBridge\s*\.\s*localComputerSession/);
+  assert.doesNotMatch(chatView, /coreBridge\s*\.\s*localComputerArtifactPreview/);
+  assert.doesNotMatch(chatView, /coreBridge\s*\.\s*pauseLocalComputerSession/);
+  assert.doesNotMatch(chatView, /coreBridge\s*\.\s*resumeLocalComputerSession/);
+  assert.doesNotMatch(chatView, /coreBridge\s*\.\s*requestLocalComputerTakeover/);
+  assert.match(chatComputerSessionHook, /export function useChatComputerSession/);
+  assert.match(chatComputerSessionHook, /createLoadingComputerSession/);
+  assert.match(chatComputerSessionHook, /createUnavailableComputerSession/);
+  assert.match(chatComputerSessionHook, /mapCoreComputerSession/);
+  assert.match(chatComputerSessionHook, /coreBridge\s*\.\s*localComputerSession/);
+  assert.match(chatComputerSessionHook, /coreBridge\s*\.\s*localComputerArtifactPreview/);
+  assert.match(chatComputerSessionHook, /coreBridge\s*\.\s*pauseLocalComputerSession/);
+  assert.match(chatComputerSessionHook, /coreBridge\s*\.\s*resumeLocalComputerSession/);
+  assert.match(chatComputerSessionHook, /coreBridge\s*\.\s*requestLocalComputerTakeover/);
 });
 
 test("ChatView delegates resume marker persistence to chatResumeMarkers", () => {
