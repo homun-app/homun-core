@@ -1137,6 +1137,7 @@ assertContains("src/App.tsx", "useAppNavigation", "App must delegate shell navig
 assertContains("src/App.tsx", "useThreadAttentionController", "App must delegate thread attention state to the attention controller");
 assertContains("src/App.tsx", "useOperationalReadModelPoller", "App must delegate operational read model polling to the poller hook");
 assertContains("src/App.tsx", "useAppEventSubscription", "App must delegate app-event websocket subscription to the subscription hook");
+assertContains("src/App.tsx", "useInitialChatThreadsLoader", "App must delegate initial chat snapshot loading to the loader hook");
 assertNotContains("src/App.tsx", "coreBridge.setupStatus", "App must not own setup status fetching directly");
 assertNotContains("src/App.tsx", "coreBridge.plugins()", "App must not own plugin state fetching directly");
 assertNotContains("src/App.tsx", "coreBridge.activeStreams", "App must not own active stream polling directly");
@@ -1146,6 +1147,7 @@ assertNotContains("src/App.tsx", "projectConversationAttention", "App must not o
 assertNotContains("src/App.tsx", "operational_read_models_poll unavailable", "App must not own operational read model polling directly");
 assertNotContains("src/App.tsx", "appEventHandlerRef", "App must not own app-event websocket dispatch directly");
 assertNotContains("src/App.tsx", "wsSubscription", "App must not own websocket subscription directly");
+assertNotContains("src/App.tsx", "chat_thread_snapshot unavailable", "App must not own initial chat snapshot loading directly");
 assertNotContains("src/App.tsx", "useState<ViewId>", "App must not own shell view state directly");
 assertNotContains("src/App.tsx", "setSearchOpen", "App must not own search modal state directly");
 assertNotContains("src/App.tsx", "coreBridge.taskQueue", "App must not own task queue fetching directly");

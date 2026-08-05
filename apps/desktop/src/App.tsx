@@ -14,7 +14,6 @@ import {
   coreBridge,
   type ChatAttachmentInput,
   type CoreChatThreadSnapshot,
-  type CoreThreadAttention,
   type ProactivitySuggestion,
   type RoutingBindingInput,
   type TemplateCatalogEntry,
@@ -44,7 +43,6 @@ import {
 import { projectThreadSnapshotSelection } from "./lib/threadSnapshotProjection";
 import { projectBusyThreadIds } from "./lib/busyThreadProjection";
 import { buildProactivityChatSeed } from "./lib/proactivityChatSeed";
-import { selectInitialThreadFromSnapshot } from "./lib/initialThreadSelection";
 import { useAutomationController } from "./lib/useAutomationController";
 import { useCapabilityController } from "./lib/useCapabilityController";
 import { useOnboardingSetupGate } from "./lib/useOnboardingSetupGate";
@@ -59,6 +57,7 @@ import {
   useAppEventSubscription,
   type IncomingBackgroundTurn,
 } from "./lib/useAppEventSubscription";
+import { useInitialChatThreadsLoader } from "./lib/useInitialChatThreadsLoader";
 import type {
   ChatAttachment,
   ChatMessage,
@@ -634,48 +633,15 @@ function AuthenticatedApp() {
     refreshChatReadModels,
   });
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadChatThreads() {
-      try {
-        const snapshot = await coreBridge.chatThreads();
-        if (cancelled) return;
-        const mapped = snapshot.threads.map(mapCoreChatThread);
-        const { desiredThreads, selectedThread } = selectInitialThreadFromSnapshot({
-          mappedThreads: mapped,
-          snapshotActiveThreadId: snapshot.active_thread_id,
-          defaultThread: defaultChatThread,
-        });
-        let selectedMessages = starterMessages(selectedThread);
-        let attention: CoreThreadAttention[] = [];
-        try {
-          const [messages, attentionRows] = await Promise.all([
-            coreBridge.chatMessages(selectedThread.threadId),
-            coreBridge.threadAttentions(selectedThread.workspaceId ?? undefined),
-          ]);
-          selectedMessages = messages.messages.map(mapCoreChatMessage);
-          attention = attentionRows;
-        } catch (error) {
-          console.warn("active chat_messages unavailable", error);
-        }
-        if (cancelled) return;
-        setChatThreads(desiredThreads);
-        setActiveThreadId(selectedThread.threadId);
-        setThreadMessagesFromBackend(selectedThread.threadId, selectedMessages);
-        selectThreadAttention(selectedThread.threadId);
-        applyThreadAttentionRows(attention);
-        markSelectedThreadSeen(selectedThread.threadId);
-      } catch (error) {
-        console.warn("chat_thread_snapshot unavailable", error);
-      }
-    }
-
-    void loadChatThreads();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  useInitialChatThreadsLoader({
+    defaultThread: defaultChatThread,
+    setChatThreads,
+    setActiveThreadId,
+    setThreadMessagesFromBackend,
+    selectThreadAttention,
+    applyThreadAttentionRows,
+    markSelectedThreadSeen,
+  });
 
   return (
     <>

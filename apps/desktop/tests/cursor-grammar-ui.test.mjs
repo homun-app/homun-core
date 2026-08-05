@@ -149,6 +149,13 @@ const initialThreadSelection = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const initialChatThreadsLoader = await readFile(
+  new URL("../src/lib/useInitialChatThreadsLoader.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const automationController = await readFile(
   new URL("../src/lib/useAutomationController.ts", import.meta.url),
   "utf8",
@@ -791,8 +798,10 @@ test("App delegates thread snapshot selection to threadSnapshotProjection", () =
 });
 
 test("App delegates initial thread selection to initialThreadSelection", () => {
-  assert.match(app, /from "\.\/lib\/initialThreadSelection";/);
+  assert.match(app, /from "\.\/lib\/useInitialChatThreadsLoader";/);
+  assert.doesNotMatch(app, /from "\.\/lib\/initialThreadSelection";/);
   assert.doesNotMatch(app, /mapped\.find\(\(thread\) => thread\.threadId === snapshot\.active_thread_id\)/);
+  assert.match(initialChatThreadsLoader, /selectInitialThreadFromSnapshot/);
   assert.match(initialThreadSelection, /export function selectInitialThreadFromSnapshot/);
 });
 
