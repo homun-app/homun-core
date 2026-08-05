@@ -1504,6 +1504,12 @@ test("ChatView delegates resume marker persistence to chatResumeMarkers", () => 
   assert.match(chatResumeMarkers, /window\.localStorage\.removeItem/);
 });
 
+test("ChatView imports typed transcript indexes from messageIndex", () => {
+  assert.match(chatView, /from "\.\.\/lib\/messageIndex";/);
+  assert.doesNotMatch(chatView, /import \* as messageIndex/);
+  assert.doesNotMatch(chatView, /messageIndex\.buildBranchIndex as/);
+});
+
 test("ChatView delegates chat event projection helpers to chatEventParts", () => {
   assert.match(chatView, /from "\.\.\/lib\/chatEventParts";/);
   assert.doesNotMatch(chatView, /function chatEventPartFromStream/);

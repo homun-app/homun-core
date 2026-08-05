@@ -97,10 +97,10 @@ import {
   threadTailAwaitsUser,
   type ActiveTurnProjection,
 } from "../lib/chatEventParts";
-// Transcript indexes live in a plain .mjs sibling so `node --test` can exercise
-// them without a build step, which is why they carry no type declaration.
-// @ts-expect-error JavaScript sibling intentionally has no declaration file.
-import * as messageIndex from "../lib/messageIndex.mjs";
+import {
+  buildBranchIndex,
+  buildPreviousUserMessageIndex,
+} from "../lib/messageIndex";
 import { type ParsedArtifact } from "./MessageArtifacts";
 import { ChatComposerDock, type ChatTurnState } from "./ChatComposerDock";
 import { ChatInspectorDock } from "./ChatInspectorDock";
@@ -138,14 +138,6 @@ import type {
   ApprovelItem,
   UncertainEffectItem,
 } from "../types";
-
-const buildPreviousUserMessageIndex = messageIndex.buildPreviousUserMessageIndex as (
-  messages: ChatMessage[],
-) => Map<string, ChatMessage | null>;
-
-const buildBranchIndex = messageIndex.buildBranchIndex as (
-  branches: CoreBranchPoint[],
-) => Map<string, CoreBranchPoint>;
 
 const CHAT_VIEW_SESSION_ID =
   typeof crypto !== "undefined" && "randomUUID" in crypto
