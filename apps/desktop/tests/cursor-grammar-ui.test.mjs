@@ -246,6 +246,20 @@ const goalsPanel = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const memoryGraphPanel = await readFile(
+  new URL("../src/components/MemoryGraphPanel.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
+const memoryView = await readFile(
+  new URL("../src/components/MemoryView.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatViewMessages = await readFile(
   new URL("../src/lib/chatViewMessages.ts", import.meta.url),
   "utf8",
@@ -831,6 +845,20 @@ test("ChatView delegates the goals workbench panel to GoalsPanel", () => {
   assert.match(goalsPanel, /function dedupeGoalDrafts/);
   assert.match(goalsPanel, /coreBridge\.addGoal/);
   assert.match(goalsPanel, /coreBridge\.promoteGoals/);
+});
+
+test("ChatView delegates memory graph rendering to MemoryGraphPanel", () => {
+  assert.match(chatView, /from "\.\/MemoryGraphPanel";/);
+  assert.match(chatView, /<MemoryGraphPanel threadId=\{threadId\} layoutSignal=\{layoutSignal\}/);
+  assert.doesNotMatch(chatView, /function MemoryGraphPanel\(/);
+  assert.doesNotMatch(chatView, /react-force-graph-2d/);
+  assert.doesNotMatch(chatView, /const GRAPH_KIND_STYLE/);
+  assert.match(memoryGraphPanel, /export function MemoryGraphPanel/);
+  assert.match(memoryGraphPanel, /react-force-graph-2d/);
+  assert.match(memoryGraphPanel, /const GRAPH_KIND_STYLE/);
+  assert.match(memoryGraphPanel, /resizeFitTimer/);
+  assert.match(memoryView, /from "\.\/MemoryGraphPanel";/);
+  assert.doesNotMatch(memoryView, /from "\.\/ChatView";/);
 });
 
 test("ChatView delegates message and formatting helpers to chatViewMessages", () => {

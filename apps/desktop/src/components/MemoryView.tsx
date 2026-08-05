@@ -8,7 +8,7 @@ import {
   type CoreMemoryItem,
   type CoreMemoryScope,
 } from "../lib/coreBridge";
-import { MemoryGraphPanel } from "./ChatView";
+import { MemoryGraphPanel } from "./MemoryGraphPanel";
 
 // The memory "brain": filter by project, search, scrub a per-month timeline (height =
 // how much was learned), then inspect the period — list (with delete) + the graph/wiki
