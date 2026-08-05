@@ -155,6 +155,13 @@ const messageGoalProposeCard = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageVaultRevealCard = await readFile(
+  new URL("../src/components/MessageVaultRevealCard.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageArtifacts = await readFile(
   new URL("../src/components/MessageArtifacts.tsx", import.meta.url),
   "utf8",
@@ -760,6 +767,17 @@ test("ChatView delegates proposed goal rendering to MessageGoalProposeCard", () 
   assert.match(messageGoalProposeCard, /coreBridge\.projectGoals/);
   assert.match(messageGoalProposeCard, /\.addGoal/);
   assert.match(messageGoalProposeCard, /goal-propose-card/);
+});
+
+test("ChatView delegates vault reveal rendering to MessageVaultRevealCard", () => {
+  assert.match(chatView, /from "\.\/MessageVaultRevealCard";/);
+  assert.match(chatView, /<VaultRevealCard proposal=\{vaultReveal\}/);
+  assert.doesNotMatch(chatView, /function VaultRevealCard\(/);
+  assert.doesNotMatch(chatView, /interface VaultRevealProposal/);
+  assert.match(messageVaultRevealCard, /export interface VaultRevealProposal/);
+  assert.match(messageVaultRevealCard, /export function VaultRevealCard/);
+  assert.match(messageVaultRevealCard, /coreBridge\.vaultRecordReveal/);
+  assert.match(messageVaultRevealCard, /Vault unlock required/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
