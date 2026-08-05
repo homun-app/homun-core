@@ -198,6 +198,13 @@ const appNavigation = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const threadAttentionController = await readFile(
+  new URL("../src/lib/useThreadAttentionController.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -719,9 +726,11 @@ test("App delegates busy thread projection to busyThreadProjection", () => {
 });
 
 test("App delegates conversation attention overlay to conversationAttention", () => {
-  assert.match(app, /projectConversationAttention/);
+  assert.match(app, /useThreadAttentionController/);
+  assert.doesNotMatch(app, /projectConversationAttention/);
   assert.doesNotMatch(app, /const attention: Record<string, ThreadAttentionStatus>/);
   assert.doesNotMatch(app, /attention\[threadId\] = "working"/);
+  assert.match(threadAttentionController, /projectConversationAttention/);
   assert.match(conversationAttention, /export function projectConversationAttention/);
 });
 
@@ -827,6 +836,20 @@ test("App delegates shell navigation state to useAppNavigation", () => {
   assert.match(appNavigation, /useState<ViewId>\("chat"\)/);
   assert.match(appNavigation, /useState<SettingsSectionId>\("account"\)/);
   assert.match(appNavigation, /function openUsageSettings/);
+});
+
+test("App delegates thread attention ownership to useThreadAttentionController", () => {
+  assert.match(app, /from "\.\/lib\/useThreadAttentionController";/);
+  assert.doesNotMatch(app, /createThreadAttentionState/);
+  assert.doesNotMatch(app, /hydrateThreadAttentionState/);
+  assert.doesNotMatch(app, /mapCoreThreadAttention/);
+  assert.doesNotMatch(app, /attentionRequiredThreadIds/);
+  assert.doesNotMatch(app, /projectConversationAttention/);
+  assert.doesNotMatch(app, /coreBridge\.markThreadSeen/);
+  assert.match(threadAttentionController, /export function useThreadAttentionController/);
+  assert.match(threadAttentionController, /createThreadAttentionState/);
+  assert.match(threadAttentionController, /hydrateThreadAttentionState/);
+  assert.match(threadAttentionController, /coreBridge[\s\S]*?\.markThreadSeen/);
 });
 
 test("App delegates workspace view rendering to AppWorkspace", () => {

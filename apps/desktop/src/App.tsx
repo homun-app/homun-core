@@ -24,22 +24,11 @@ import { wsSubscription } from "./lib/wsSubscription";
 import { useSetting } from "./lib/settingsStore";
 import { showSystemNotification, notificationPermission } from "./lib/systemNotifications";
 import { reconcileChatMessages, reconcileChatThreads } from "./lib/uiSnapshot";
-import {
-  createThreadAttentionState,
-  hydrateThreadAttentionState,
-  selectThread,
-  type ThreadAttentionState,
-} from "./lib/threadAttentionState";
-import {
-  attentionRequiredThreadIds,
-  projectConversationAttention,
-} from "./lib/conversationAttention";
 import { sidebarWorkspaceIsActive } from "./lib/sidebarFilterState";
 import {
   currentTimestampSeconds,
   mapCoreChatMessage,
   mapCoreChatThread,
-  mapCoreThreadAttention,
   pendingChatAttachmentFromInput,
   starterMessages,
   summarizeThreadTitle,
@@ -66,6 +55,7 @@ import { useResponsiveDrawer } from "./lib/useResponsiveDrawer";
 import { useTaskQueueController } from "./lib/useTaskQueueController";
 import { useBackgroundStreams } from "./lib/useBackgroundStreams";
 import { useAppNavigation } from "./lib/useAppNavigation";
+import { useThreadAttentionController } from "./lib/useThreadAttentionController";
 import type {
   ChatAttachment,
   ChatMessage,
@@ -143,10 +133,6 @@ function AuthenticatedApp() {
   const pendingLocalMessageThreadIdsRef = useRef<Set<string>>(new Set());
   const busyThreadIdsRef = useRef<Set<string>>(new Set());
   const notifiedAttentionThreadIdsRef = useRef<Set<string> | null>(null);
-  const [threadAttention, setThreadAttention] = useState<ThreadAttentionState>(() =>
-    createThreadAttentionState(defaultChatThread.threadId),
-  );
-  const threadAttentionRef = useRef(threadAttention);
   const { showOnboarding, completeOnboarding } = useOnboardingSetupGate();
   const { pluginStates, reloadPlugins } = usePluginController();
   const { drawerOpen, expandDrawer, toggleDrawer } = useResponsiveDrawer();
@@ -203,19 +189,20 @@ function AuthenticatedApp() {
   useEffect(() => {
     busyThreadIdsRef.current = busyThreadIds;
   }, [busyThreadIds]);
-  const pendingAttentionThreadIds = useMemo(
-    () => attentionRequiredThreadIds(chatThreads, approvalItems, uncertainEffectItems),
-    [approvalItems, chatThreads, uncertainEffectItems],
-  );
-  const attentionByThread = useMemo(
-    () =>
-      projectConversationAttention(
-        threadAttention.byThread,
-        busyThreadIds,
-        pendingAttentionThreadIds,
-      ),
-    [busyThreadIds, pendingAttentionThreadIds, threadAttention.byThread],
-  );
+  const {
+    threadAttention,
+    pendingAttentionThreadIds,
+    attentionByThread,
+    applyThreadAttentionRows,
+    markSelectedThreadSeen,
+    selectThreadAttention,
+  } = useThreadAttentionController({
+    initialThreadId: defaultChatThread.threadId,
+    chatThreads,
+    approvalItems,
+    uncertainEffectItems,
+    busyThreadIds,
+  });
   const activeMessages =
     threadMessages[activeThread.threadId] ?? starterMessages(activeThread);
   const isSettings = activeView === "settings";
@@ -247,38 +234,6 @@ function AuthenticatedApp() {
         [threadId]: reconciled,
       };
     });
-  }
-
-  function applyThreadAttentionRows(rows: CoreThreadAttention[]) {
-    const current = threadAttentionRef.current;
-    const next = hydrateThreadAttentionState(
-      current,
-      rows.map(mapCoreThreadAttention),
-    );
-    threadAttentionRef.current = next;
-    setThreadAttention(next);
-    const selectedThreadId = next.selectedThreadId;
-    const seenTerminalEventId = next.seenTerminalEventIds[selectedThreadId] ?? 0;
-    if (seenTerminalEventId > (current.seenTerminalEventIds[selectedThreadId] ?? 0)) {
-      void coreBridge
-        .markThreadSeen(selectedThreadId, seenTerminalEventId)
-        .then((row) => applyThreadAttentionRows([row]))
-        .catch((error) => console.warn("mark_thread_seen unavailable", error));
-    }
-  }
-
-  function markSelectedThreadSeen(threadId: string) {
-    const current = threadAttentionRef.current;
-    const next = selectThread(current, threadId);
-    threadAttentionRef.current = next;
-    setThreadAttention(next);
-    const terminalEventId = next.seenTerminalEventIds[threadId] ?? 0;
-    if (terminalEventId > (current.seenTerminalEventIds[threadId] ?? 0)) {
-      void coreBridge
-        .markThreadSeen(threadId, terminalEventId)
-        .then((row) => applyThreadAttentionRows([row]))
-        .catch((error) => console.warn("mark_thread_seen unavailable", error));
-    }
   }
 
   async function handleSelectThread(threadId: string) {
@@ -799,12 +754,7 @@ function AuthenticatedApp() {
         setChatThreads(desiredThreads);
         setActiveThreadId(selectedThread.threadId);
         setThreadMessagesFromBackend(selectedThread.threadId, selectedMessages);
-        const selectedAttention = selectThread(
-          threadAttentionRef.current,
-          selectedThread.threadId,
-        );
-        threadAttentionRef.current = selectedAttention;
-        setThreadAttention(selectedAttention);
+        selectThreadAttention(selectedThread.threadId);
         applyThreadAttentionRows(attention);
         markSelectedThreadSeen(selectedThread.threadId);
       } catch (error) {
