@@ -5,17 +5,13 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Bot,
-  Bug,
   Clock3,
   ExternalLink,
   FileImage,
   FileText,
   AlertTriangle,
   HardDrive,
-  ListTodo,
   Loader2,
-  MessageCircle,
   Mic,
   Monitor,
   Plus,
@@ -3416,26 +3412,3 @@ export function ChatView({
     </section>
   );
 }
-
-function isLatestAssistantMessage(messages: ChatMessage[], messageId: string) {
-  const latestAssistant = [...messages]
-    .reverse()
-    .find((message) => message.role === "assistant" && Boolean(message.text));
-  return latestAssistant?.id === messageId;
-}
-
-/** Composer interaction modes (Cursor-style, adapted for a general assistant).
- *  Debug is project-only (coding context); the others fit any chat. */
-type ChatMode = "agent" | "plan" | "ask" | "debug";
-const CHAT_MODES: {
-  key: ChatMode;
-  label: string;
-  desc: string;
-  icon: typeof Bot;
-  projectOnly?: boolean;
-}[] = [
-  { key: "agent", label: "Agent", desc: "Reasons, uses tools and acts", icon: Bot },
-  { key: "plan", label: "Plan", desc: "Proposes a plan and waits for OK before acting", icon: ListTodo },
-  { key: "ask", label: "Ask", desc: "Replies and converses, without tools or actions", icon: MessageCircle },
-  { key: "debug", label: "Debug", desc: "Systematic debugging (code projects)", icon: Bug, projectOnly: true },
-];

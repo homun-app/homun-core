@@ -986,6 +986,13 @@ test("ChatView delegates chat event projection helpers to chatEventParts", () =>
   assert.match(chatEventParts, /export interface ActiveTurnProjection/);
 });
 
+test("ChatView does not retain retired unused chat mode helpers", () => {
+  assert.doesNotMatch(chatView, /function isLatestAssistantMessage/);
+  assert.doesNotMatch(chatView, /const CHAT_MODES:/);
+  assert.doesNotMatch(chatView, /type ChatMode =/);
+  assert.doesNotMatch(chatView, /Systematic debugging \(code projects\)/);
+});
+
 test("InspectorView delegates operational plan preview rendering and parsing", () => {
   assert.match(inspectorView, /from "\.\/OperationalPlanPreview";/);
   assert.match(inspectorView, /<OperationalPlanPreview collapsed=\{false\} markdown=\{operationalPlanMarkdown\}/);
