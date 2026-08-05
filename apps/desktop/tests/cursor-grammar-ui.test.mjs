@@ -100,6 +100,13 @@ const busyThreadProjection = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const proactivityChatSeed = await readFile(
+  new URL("../src/lib/proactivityChatSeed.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -610,6 +617,13 @@ test("App delegates busy thread projection to busyThreadProjection", () => {
   assert.doesNotMatch(app, /const ids = new Set<string>\(backgroundStreamIds\);/);
   assert.doesNotMatch(app, /task\.status === "running" \|\| task\.status === "queued"/);
   assert.match(busyThreadProjection, /export function projectBusyThreadIds/);
+});
+
+test("App delegates proactivity chat seeding to proactivityChatSeed", () => {
+  assert.match(app, /from "\.\/lib\/proactivityChatSeed";/);
+  assert.doesNotMatch(app, /scope === "__personal__"/);
+  assert.doesNotMatch(app, /type: "choice_prompt"/);
+  assert.match(proactivityChatSeed, /export function buildProactivityChatSeed/);
 });
 
 test("the sidebar uses the canonical persisted thread filter projection", () => {

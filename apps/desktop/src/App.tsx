@@ -80,10 +80,10 @@ import {
   enabledRegistryPlugins,
 } from "./lib/appPluginNavigation";
 import { projectBusyThreadIds } from "./lib/busyThreadProjection";
+import { buildProactivityChatSeed } from "./lib/proactivityChatSeed";
 import type {
   ApprovelItem,
   ChatAttachment,
-  ChatEventPart,
   ChatMessage,
   ChatThread,
   ConnectionItem,
@@ -585,30 +585,10 @@ function AuthenticatedApp() {
   // materializes on demand in the right place. Personal cards map to the base
   // ("local-workspace") which IS the memory "__personal__" scope; projects pass through.
   async function handleOpenSuggestion(suggestion: ProactivitySuggestion) {
-    const workspaceId =
-      suggestion.scope === "__personal__" ? "local-workspace" : suggestion.scope;
-    // Open the chat with Homun's question already posted as an assistant message,
-    // so the conversation starts with the assistant asking (not a composer draft /
-    // generic empty-state). The follow-up is grounded by the auto-injected memory.
-    const question = (suggestion.body ?? "").trim() || suggestion.title;
-    // Question cards carry quick-reply options as structured event parts; marker
-    // parsing stays only as historical fallback in ChatView.
-    const options = (suggestion.choices ?? []).filter((o) => o.trim().length > 0);
-    const seedEventParts: ChatEventPart[] =
-      options.length > 0
-        ? [{
-            type: "choice_prompt",
-            payload: {
-              question: "",
-              multi: false,
-              options,
-              // Marks this as a PROACTIVITY question (onboarding, follow-up, …). Answering
-              // it captures the pick as memory instead of running an agent turn — see the
-              // `purpose` branch in ChatView's onChoose. Carries the card kind for context.
-              purpose: suggestion.kind,
-            },
-          }]
-        : [];
+    const { workspaceId, question, seedEventParts } = buildProactivityChatSeed(
+      suggestion,
+      PERSONAL_WORKSPACE_ID,
+    );
     try {
       await coreBridge.selectWorkspace(workspaceId);
       const created = mapCoreChatThread(await coreBridge.createChatThread(workspaceId));
