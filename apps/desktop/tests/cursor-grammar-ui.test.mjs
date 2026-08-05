@@ -121,13 +121,6 @@ const proactivityChatSeed = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
-const selectedTaskProjection = await readFile(
-  new URL("../src/lib/selectedTaskProjection.mjs", import.meta.url),
-  "utf8",
-).catch((error) => {
-  if (error.code === "ENOENT") return "";
-  throw error;
-});
 const taskQueueProjection = await readFile(
   new URL("../src/lib/taskQueueProjection.mjs", import.meta.url),
   "utf8",
@@ -683,10 +676,10 @@ test("App delegates proactivity chat seeding to proactivityChatSeed", () => {
   assert.match(proactivityChatSeed, /export function buildProactivityChatSeed/);
 });
 
-test("App delegates selected task fallback to selectedTaskProjection", () => {
-  assert.match(app, /from "\.\/lib\/selectedTaskProjection";/);
-  assert.doesNotMatch(app, /kind: "prompt_session",\n        status: "queued"/);
-  assert.match(selectedTaskProjection, /export function projectSelectedTask/);
+test("App does not retain retired selected task projection state", () => {
+  assert.doesNotMatch(app, /from "\.\/lib\/selectedTaskProjection";/);
+  assert.doesNotMatch(app, /selectedTaskId/);
+  assert.doesNotMatch(app, /selectedTask/);
 });
 
 test("App delegates task queue snapshot projection to taskQueueProjection", () => {

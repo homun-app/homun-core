@@ -37,7 +37,6 @@ import {
   createThreadAttentionState,
   hydrateThreadAttentionState,
   selectThread,
-  type ThreadAttentionSnapshot,
   type ThreadAttentionState,
 } from "./lib/threadAttentionState";
 import {
@@ -69,7 +68,6 @@ import {
   composePluginNavItems,
   enabledRegistryPlugins,
 } from "./lib/appPluginNavigation";
-import { projectSelectedTask } from "./lib/selectedTaskProjection";
 import {
   projectEffectResolutionError,
   projectTaskQueueSnapshot,
@@ -191,7 +189,6 @@ function AuthenticatedApp() {
     createThreadAttentionState(defaultChatThread.threadId),
   );
   const threadAttentionRef = useRef(threadAttention);
-  const [selectedTaskId, setSelectedTaskId] = useState("task_prompt_session");
   const [drawerOpen, setDrawerOpen] = useState(() => window.innerWidth > 1024);
   // Search modal lifted here (was in Shell) so BOTH the sidebar and the collapsed in-header
   // controls can open it via one owner.
@@ -233,16 +230,6 @@ function AuthenticatedApp() {
         pendingAttentionThreadIds,
       ),
     [busyThreadIds, pendingAttentionThreadIds, threadAttention.byThread],
-  );
-  const selectedTask = useMemo(
-    () =>
-      projectSelectedTask({
-        taskItems,
-        selectedTaskId,
-        activeThread,
-        fallbackTask: tasks[0],
-      }),
-    [activeThread.taskId, activeThread.title, selectedTaskId, taskItems],
   );
   const activeMessages =
     threadMessages[activeThread.threadId] ?? starterMessages(activeThread);
@@ -322,7 +309,6 @@ function AuthenticatedApp() {
     // messages are already in memory the switch is truly immediate (no spinner, no refetch).
     setActiveThreadId(threadId);
     markSelectedThreadSeen(threadId);
-    if (fallback) setSelectedTaskId(fallback.taskId);
     setActiveView("chat");
     try {
       // `select_chat_thread` is workspace-aware (returns the target thread's workspace snapshot),
@@ -336,7 +322,6 @@ function AuthenticatedApp() {
       setChatThreads((current) =>
         mappedThreads.length ? reconcileChatThreads(current, mappedThreads) : current,
       );
-      if (selectedThread) setSelectedTaskId(selectedThread.taskId);
       const attention = await coreBridge.threadAttentions(selectedThread?.workspaceId ?? undefined);
       applyThreadAttentionRows(attention);
       markSelectedThreadSeen(threadId);
@@ -528,7 +513,6 @@ function AuthenticatedApp() {
         [created.threadId]: messages.messages.map(mapCoreChatMessage),
       }));
       setActiveThreadId(created.threadId);
-      setSelectedTaskId(created.taskId);
       setActiveView("chat");
     } catch (error) {
       const fallback: ChatThread = {
@@ -546,7 +530,6 @@ function AuthenticatedApp() {
         [fallback.threadId]: starterMessages(fallback),
       }));
       setActiveThreadId(fallback.threadId);
-      setSelectedTaskId(fallback.taskId);
       setActiveView("chat");
       console.warn("create_chat_thread unavailable", error);
     }
@@ -575,7 +558,6 @@ function AuthenticatedApp() {
         [created.threadId]: seeded.messages.map(mapCoreChatMessage),
       }));
       setActiveThreadId(created.threadId);
-      setSelectedTaskId(created.taskId);
       setActiveView("chat");
     } catch (error) {
       console.warn("open_suggestion unavailable", error);
@@ -602,7 +584,6 @@ function AuthenticatedApp() {
       ]);
       setThreadMessagesFromBackend(created.threadId, messages.messages.map(mapCoreChatMessage));
       setActiveThreadId(created.threadId);
-      setSelectedTaskId(created.taskId);
       setActiveView("chat");
       setPendingTemplateAutoSubmit({
         id: `template_auto_submit_${created.threadId}_${Date.now()}`,
@@ -652,7 +633,6 @@ function AuthenticatedApp() {
     if (!selection.preservedThread) {
       const selectedThread = selection.selectedThread;
       setActiveThreadId(selectedThread.threadId);
-      setSelectedTaskId(selectedThread.taskId);
     }
     if (!threadMessages[selection.selectedThread.threadId]) {
       try {
@@ -709,7 +689,6 @@ function AuthenticatedApp() {
         const nextThread = nextThreads.find((thread) => thread.status === "active");
         if (nextThread) {
           setActiveThreadId(nextThread.threadId);
-          setSelectedTaskId(nextThread.taskId);
         }
       }
       console.warn("chat_thread_archive unavailable", error);
@@ -741,10 +720,6 @@ function AuthenticatedApp() {
           ),
         );
         setActiveThreadId(threadId);
-        const restoredThread = chatThreads.find((thread) => thread.threadId === threadId);
-        if (restoredThread) {
-          setSelectedTaskId(restoredThread.taskId);
-        }
       }
       console.warn("chat_thread_unarchive unavailable", error);
       return { threads: null, appliedToActive: ownerIsActive };
@@ -764,7 +739,6 @@ function AuthenticatedApp() {
       const nextThread = chatThreads.find((thread) => thread.threadId !== threadId);
       if (nextThread) {
         setActiveThreadId(nextThread.threadId);
-        setSelectedTaskId(nextThread.taskId);
       }
     }
     try {
@@ -1045,7 +1019,6 @@ function AuthenticatedApp() {
         if (cancelled) return;
         setChatThreads(desiredThreads);
         setActiveThreadId(selectedThread.threadId);
-        setSelectedTaskId(selectedThread.taskId);
         setThreadMessagesFromBackend(selectedThread.threadId, selectedMessages);
         const selectedAttention = selectThread(
           threadAttentionRef.current,
