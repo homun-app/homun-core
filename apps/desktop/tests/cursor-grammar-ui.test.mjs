@@ -128,6 +128,13 @@ const taskQueueProjection = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const threadSnapshotProjection = await readFile(
+  new URL("../src/lib/threadSnapshotProjection.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStyles = await readFile(new URL("../src/styles/chat.css", import.meta.url), "utf8").catch(
   (error) => {
     if (error.code === "ENOENT") return "";
@@ -664,6 +671,12 @@ test("App delegates task queue snapshot projection to taskQueueProjection", () =
   assert.match(app, /from "\.\/lib\/taskQueueProjection";/);
   assert.doesNotMatch(app, /const nextTasks = \[/);
   assert.match(taskQueueProjection, /export function projectTaskQueueSnapshot/);
+});
+
+test("App delegates thread snapshot selection to threadSnapshotProjection", () => {
+  assert.match(app, /from "\.\/lib\/threadSnapshotProjection";/);
+  assert.doesNotMatch(app, /const preservedThread = mappedThreads\.find/);
+  assert.match(threadSnapshotProjection, /export function projectThreadSnapshotSelection/);
 });
 
 test("the sidebar uses the canonical persisted thread filter projection", () => {

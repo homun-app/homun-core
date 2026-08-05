@@ -83,6 +83,7 @@ import {
   projectEffectResolutionError,
   projectTaskQueueSnapshot,
 } from "./lib/taskQueueProjection";
+import { projectThreadSnapshotSelection } from "./lib/threadSnapshotProjection";
 import { projectBusyThreadIds } from "./lib/busyThreadProjection";
 import { buildProactivityChatSeed } from "./lib/proactivityChatSeed";
 import type {
@@ -670,26 +671,24 @@ function AuthenticatedApp() {
 
   async function applyThreadSnapshot(snapshot: CoreChatThreadSnapshot) {
     const mappedThreads = snapshot.threads.map(mapCoreChatThread);
-    const preservedThread = mappedThreads.find((thread) => thread.threadId === activeThreadId
-      && thread.status === "active");
-    const selectedThread =
-      preservedThread ??
-      mappedThreads.find((thread) => thread.threadId === snapshot.active_thread_id
-        && thread.status === "active") ??
-      mappedThreads.find((thread) => thread.status === "active") ??
-      defaultChatThread;
-    const desired = mappedThreads.length ? mappedThreads : [defaultChatThread];
-    setChatThreads((current) => reconcileChatThreads(current, desired));
-    if (!preservedThread) {
+    const selection = projectThreadSnapshotSelection({
+      mappedThreads,
+      activeThreadId,
+      snapshotActiveThreadId: snapshot.active_thread_id,
+      defaultThread: defaultChatThread,
+    });
+    setChatThreads((current) => reconcileChatThreads(current, selection.desiredThreads));
+    if (!selection.preservedThread) {
+      const selectedThread = selection.selectedThread;
       setActiveThreadId(selectedThread.threadId);
       setSelectedTaskId(selectedThread.taskId);
     }
-    if (!threadMessages[selectedThread.threadId]) {
+    if (!threadMessages[selection.selectedThread.threadId]) {
       try {
-        const messages = await coreBridge.chatMessages(selectedThread.threadId);
+        const messages = await coreBridge.chatMessages(selection.selectedThread.threadId);
         setThreadMessages((current) => ({
           ...current,
-          [selectedThread.threadId]: messages.messages.map(mapCoreChatMessage),
+          [selection.selectedThread.threadId]: messages.messages.map(mapCoreChatMessage),
         }));
       } catch (error) {
         console.warn("chat_messages unavailable after thread action", error);

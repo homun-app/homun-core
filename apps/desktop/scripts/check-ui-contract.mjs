@@ -177,11 +177,12 @@ assertContains(
   "refreshThreadInBackground(eventThreadId)",
   "background events refresh only their cache",
 );
-assertContains(
-  "src/App.tsx",
-  "const preservedThread = mappedThreads.find((thread) => thread.threadId === activeThreadId",
-  "non-selection thread actions must preserve the user-owned active task",
-);
+assertSource("src/lib/threadSnapshotProjection.mjs", [
+  "export function projectThreadSnapshotSelection",
+  "const preservedThread = mappedThreads.find(",
+  "thread.threadId === activeThreadId",
+  'thread.status === "active"',
+]);
 assertContains(
   "src/styles/sidebar.css",
   ".thread-status-dot.completed-unread",
