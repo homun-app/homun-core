@@ -126,6 +126,7 @@ import { useChatConversationScroll } from "./useChatConversationScroll";
 import { useChatFollowUps } from "./useChatFollowUps";
 import { useChatMemoryArtifacts } from "./useChatMemoryArtifacts";
 import { useChatProjectContext } from "./useChatProjectContext";
+import { useChatStreamingNotifier } from "./useChatStreamingNotifier";
 import {
   projectWorkspaceSections,
 } from "../lib/workspaceIslandSections";
@@ -276,32 +277,7 @@ export function ChatView({
   const layoutRef = useRef<HTMLElement>(null);
   const cancelStreamingRequestRef = useRef<(() => void) | null>(null);
   const cancelledStreamIdsRef = useRef<Set<string>>(new Set());
-  // Tracks whether THIS ChatView instance is still mounted. The chat stream
-  // (submitChat) keeps running in the background after the user navigates to
-  // another thread (the gateway persists the answer; the client still commits
-  // it). This guard prevents a detached instance from touching dead state — the
-  // final commit lands via the same closure, but UI updates are skipped.
-  const isMountedRef = useRef(true);
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
-  // Notifies the parent of streaming start/stop. A ref holds the latest callback
-  // so the unmount cleanup ([]) fires only on REAL unmount — not on every render,
-  // which would immediately undo a `notifyStreaming(true)` and flicker the dot off.
-  const onStreamingChangeRef = useRef(onStreamingChange);
-  onStreamingChangeRef.current = onStreamingChange;
-  const notifyStreaming = useCallback((busy: boolean) => {
-    if (!isMountedRef.current && busy) return;
-    onStreamingChangeRef.current?.(busy);
-  }, []);
-  useEffect(() => {
-    return () => {
-      notifyStreaming(false);
-    };
-  }, [notifyStreaming]);
+  const { isMountedRef, notifyStreaming } = useChatStreamingNotifier(onStreamingChange);
   const refreshPendingSteering = useCallback(async () => {
     const rows = await fetchThreadSteering(thread.threadId);
     if (!isMountedRef.current) return;

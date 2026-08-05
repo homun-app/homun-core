@@ -1383,6 +1383,9 @@ assertNotContains("src/components/ChatView.tsx", "coreBridge.chatSuggestions", "
 assertContains("src/components/useChatActiveTurnElapsed.ts", "window.setInterval(updateElapsed, 1000)", "active-turn elapsed timing must have one focused owner");
 assertContains("src/components/ChatView.tsx", "useChatActiveTurnElapsed({", "ChatView must consume the focused active-turn timer owner");
 assertNotContains("src/components/ChatView.tsx", "setActiveTurnElapsedSeconds", "ChatView must not own active-turn elapsed state");
+assertContains("src/components/useChatStreamingNotifier.ts", "onStreamingChangeRef", "streaming parent notifications must have one focused owner");
+assertContains("src/components/ChatView.tsx", "useChatStreamingNotifier(onStreamingChange)", "ChatView must consume the focused streaming notifier owner");
+assertNotContains("src/components/ChatView.tsx", "onStreamingChangeRef", "ChatView must not own streaming notification refs");
 assertNotContains("src/components/ChatView.tsx", "memoryArtifactsRevision", "artifact validation must not use an unconditional revision counter");
 assertContains("src/components/ArtifactsPanel.tsx", "selectedResourceRevision", "artifact preview reloads must follow a semantic resource revision");
 assertNotContains("src/components/ChatView.tsx", "setArtifactsOpen", "legacy open boolean must not compete with inspector state");

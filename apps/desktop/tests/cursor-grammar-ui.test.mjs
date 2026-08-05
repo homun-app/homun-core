@@ -106,6 +106,13 @@ const chatActiveTurnElapsed = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatStreamingNotifier = await readFile(
+  new URL("../src/components/useChatStreamingNotifier.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const appWorkspace = await readFile(
   new URL("../src/components/AppWorkspace.tsx", import.meta.url),
@@ -1892,6 +1899,16 @@ test("ChatView delegates active-turn elapsed timing to useChatActiveTurnElapsed"
   assert.match(chatActiveTurnElapsed, /export function useChatActiveTurnElapsed/);
   assert.match(chatActiveTurnElapsed, /window\.setInterval\(updateElapsed,\s*1000\)/);
   assert.match(chatActiveTurnElapsed, /projectedUpdatedAt/);
+});
+
+test("ChatView delegates streaming mount notifications to useChatStreamingNotifier", () => {
+  assert.match(chatView, /from "\.\/useChatStreamingNotifier";/);
+  assert.match(chatView, /useChatStreamingNotifier\(onStreamingChange\)/);
+  assert.doesNotMatch(chatView, /onStreamingChangeRef/);
+  assert.doesNotMatch(chatView, /useRef\(onStreamingChange\)/);
+  assert.match(chatStreamingNotifier, /export function useChatStreamingNotifier/);
+  assert.match(chatStreamingNotifier, /const onStreamingChangeRef = useRef\(onStreamingChange\)/);
+  assert.match(chatStreamingNotifier, /notifyStreaming\(false\)/);
 });
 
 test("ChatView delegates resume marker persistence to chatResumeMarkers", () => {
