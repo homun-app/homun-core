@@ -39,7 +39,6 @@ import {
   Minimize2,
   Monitor,
   MoreHorizontal,
-  Paperclip,
   Plus,
   Pencil,
   Play,
@@ -208,6 +207,7 @@ import { MemoryUsagePopover } from "./MemoryUsagePopover";
 import { ComposerContainer } from "./ComposerContainer";
 import { ComputerDetailPanel } from "./ComputerDetailPanel";
 import { ChatEmptyHero } from "./ChatEmptyHero";
+import { MessageAttachmentList } from "./MessageAttachmentList";
 import {
   projectWorkspaceSections,
   type WorkspaceSectionId,
@@ -4080,32 +4080,6 @@ function isLatestAssistantMessage(messages: ChatMessage[], messageId: string) {
     .reverse()
     .find((message) => message.role === "assistant" && Boolean(message.text));
   return latestAssistant?.id === messageId;
-}
-
-function MessageAttachmentList({ attachments }: { attachments: ChatAttachment[] }) {
-  const { t } = useTranslation();
-  return (
-    <div className="message-attachment-list" aria-label={t("chat.messageAttachments")}>
-      {attachments.map((attachment) =>
-        attachment.kind === "image" && attachment.previewUrl ? (
-          <img
-            className="message-image-attachment"
-            key={attachment.artifactId}
-            src={attachment.previewUrl}
-            alt={attachment.title}
-          />
-        ) : (
-          <span className="message-attachment-chip" key={attachment.artifactId}>
-            <Paperclip size={13} />
-            <span>{attachment.title}</span>
-            <small>
-              {attachment.kind} · {formatFileSize(attachment.sizeBytes)}
-            </small>
-          </span>
-        ),
-      )}
-    </div>
-  );
 }
 
 function toMessageAttachment(attachment: ChatAttachmentInput): ChatAttachment {

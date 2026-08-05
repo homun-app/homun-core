@@ -92,6 +92,13 @@ const chatEmptyHero = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageAttachmentList = await readFile(
+  new URL("../src/components/MessageAttachmentList.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const runtimeContextPanel = await readFile(
   new URL("../src/components/RuntimeContextPanel.tsx", import.meta.url),
   "utf8",
@@ -571,6 +578,16 @@ test("ChatView delegates empty-thread hero rendering to ChatEmptyHero", () => {
 
 test("ChatView does not keep the retired unused inline computer timeline component", () => {
   assert.doesNotMatch(chatView, /function InlineTimeline\(/);
+});
+
+test("ChatView delegates message attachment rendering to MessageAttachmentList", () => {
+  assert.match(chatView, /import \{ MessageAttachmentList \} from "\.\/MessageAttachmentList";/);
+  assert.match(chatView, /<MessageAttachmentList attachments=\{displayMessage\.attachments\}/);
+  assert.doesNotMatch(chatView, /function MessageAttachmentList\(/);
+  assert.match(messageAttachmentList, /export function MessageAttachmentList/);
+  assert.match(messageAttachmentList, /message-image-attachment/);
+  assert.match(messageAttachmentList, /message-attachment-chip/);
+  assert.match(messageAttachmentList, /formatFileSize\(attachment\.sizeBytes\)/);
 });
 
 test("composer.css exclusively owns the compact prompt geometry", () => {
