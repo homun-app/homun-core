@@ -122,6 +122,7 @@ import {
   parsePlanSteps,
 } from "./ChatPayloadParsers";
 import { useChatConversationScroll } from "./useChatConversationScroll";
+import { useChatFollowUps } from "./useChatFollowUps";
 import { useChatMemoryArtifacts } from "./useChatMemoryArtifacts";
 import { useChatProjectContext } from "./useChatProjectContext";
 import {
@@ -269,8 +270,6 @@ export function ChatView({
     active: boolean;
     activity: string | null;
   }>({ active: false, activity: null });
-  const [followUps, setFollowUps] = useState<string[]>([]);
-  const [followUpsFor, setFollowUpsFor] = useState<string | null>(null);
   const titledThreadsRef = useRef<Set<string>>(new Set());
   const resumedThreadsRef = useRef<Set<string>>(new Set());
   const consumedAutoSubmitIdsRef = useRef<Set<string>>(new Set());
@@ -396,6 +395,15 @@ export function ChatView({
     () => buildPreviousUserMessageIndex(threadMessages),
     [threadMessages],
   );
+  const {
+    clearFollowUps,
+    followUps,
+    followUpsFor,
+  } = useChatFollowUps({
+    previousUserMessageIndex,
+    streamingAssistantId,
+    threadMessages,
+  });
   const branchIndex = useMemo(() => buildBranchIndex(branches), [branches]);
   // All artifacts generated in this conversation (from persisted ‹‹ARTIFACT››
   // markers) — drives the Artifacts workspace panel.
@@ -1481,7 +1489,7 @@ export function ChatView({
   }
 
   function selectFollowUp(suggestion: string) {
-    setFollowUps([]);
+    clearFollowUps();
     void submitPrompt(suggestion, []);
   }
 
@@ -2251,31 +2259,6 @@ export function ChatView({
       setActiveSurface(computerSession.activeSurface);
     }
   }, [activeSurface, computerSession.activeSurface, computerSession.surfaces]);
-
-  // Dynamic follow-up suggestions: once the latest assistant answer is complete,
-  // ask the model for a few short next-questions (once per message).
-  useEffect(() => {
-    if (streamingAssistantId) return undefined;
-    const latest = [...threadMessages]
-      .reverse()
-      .find((message) => message.role === "assistant" && Boolean(message.text?.trim()));
-    if (!latest || latest.id === followUpsFor) return undefined;
-    const previousUser = previousUserMessageIndex.get(latest.id);
-    let cancelled = false;
-    setFollowUps([]);
-    setFollowUpsFor(latest.id);
-    void coreBridge
-      .chatSuggestions(previousUser?.text ?? "", latest.text)
-      .then((items) => {
-        if (!cancelled) setFollowUps(items);
-      })
-      .catch(() => {
-        if (!cancelled) setFollowUps([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [threadMessages, previousUserMessageIndex, streamingAssistantId, followUpsFor]);
 
   // After a reload, reattach to an answer that was still streaming (resume).
   useEffect(() => {

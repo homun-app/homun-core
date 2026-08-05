@@ -1377,6 +1377,9 @@ assertContains("src/components/useChatMemoryArtifacts.ts", "reconcileMemoryArtif
 assertContains("src/components/ChatView.tsx", "useChatMemoryArtifacts(thread.threadId, messages)", "ChatView must consume the focused artifact catalog owner");
 assertNotContains("src/components/ChatView.tsx", "coreBridge.memoryArtifacts", "ChatView must not own artifact catalog loading");
 assertNotContains("src/components/ChatView.tsx", "setMemoryArtifactsReloadNonce", "ChatView must not own artifact catalog retry state");
+assertContains("src/components/useChatFollowUps.ts", ".chatSuggestions", "follow-up suggestions must have one focused owner");
+assertContains("src/components/ChatView.tsx", "useChatFollowUps({", "ChatView must consume the focused follow-up suggestion owner");
+assertNotContains("src/components/ChatView.tsx", "coreBridge.chatSuggestions", "ChatView must not own follow-up suggestion loading");
 assertNotContains("src/components/ChatView.tsx", "memoryArtifactsRevision", "artifact validation must not use an unconditional revision counter");
 assertContains("src/components/ArtifactsPanel.tsx", "selectedResourceRevision", "artifact preview reloads must follow a semantic resource revision");
 assertNotContains("src/components/ChatView.tsx", "setArtifactsOpen", "legacy open boolean must not compete with inspector state");
