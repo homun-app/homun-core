@@ -127,6 +127,13 @@ const chatFollowUps = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const messageEditBox = await readFile(
+  new URL("../src/components/MessageEditBox.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const messageActivity = await readFile(
   new URL("../src/components/MessageActivity.tsx", import.meta.url),
   "utf8",
@@ -875,6 +882,17 @@ test("ChatView delegates follow-up suggestion rendering to ChatFollowUps", () =>
   assert.match(chatFollowUps, /export function ChatFollowUps/);
   assert.match(chatFollowUps, /className="chat-followups"/);
   assert.match(chatFollowUps, /chat\.followUpQuestions/);
+});
+
+test("ChatView delegates inline message editing to MessageEditBox", () => {
+  assert.match(chatView, /from "\.\/MessageEditBox";/);
+  assert.match(chatView, /<MessageEditBox/);
+  assert.doesNotMatch(chatView, /className="message-edit"/);
+  assert.doesNotMatch(chatView, /message-edit-actions/);
+  assert.match(messageEditBox, /export function MessageEditBox/);
+  assert.match(messageEditBox, /className="message-edit"/);
+  assert.match(messageEditBox, /event\.key === "Enter" && \(event\.metaKey \|\| event\.ctrlKey\)/);
+  assert.match(messageEditBox, /event\.key === "Escape"/);
 });
 
 test("ChatView delegates message activity rendering to MessageActivity", () => {

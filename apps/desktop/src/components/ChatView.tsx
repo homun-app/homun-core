@@ -151,6 +151,7 @@ import { ChatBranchPicker } from "./ChatBranchPicker";
 import { ChatFollowUps } from "./ChatFollowUps";
 import { MessageAttachmentList } from "./MessageAttachmentList";
 import { MessageActionBar } from "./MessageActionBar";
+import { MessageEditBox } from "./MessageEditBox";
 import { MessageActivity } from "./MessageActivity";
 import { AssistantThinkingState, type ChatStreamStatus } from "./AssistantThinkingState";
 import { InlineUncertainEffectPanel } from "./InlineUncertainEffectPanel";
@@ -2840,34 +2841,14 @@ export function ChatView({
                   )}
                 </>
               ) : editingMessageId === displayMessage.id ? (
-                <div className="message-edit">
-                  <textarea
-                    autoFocus
-                    value={editingText}
-                    onChange={(event) => setEditingText(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                        event.preventDefault();
-                        saveEditedMessage();
-                      } else if (event.key === "Escape") {
-                        cancelEditMessage();
-                      }
-                    }}
-                  />
-                  <div className="message-edit-actions">
-                    <button type="button" onClick={cancelEditMessage}>
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="primary"
-                      disabled={!editingText.trim()}
-                      onClick={saveEditedMessage}
-                    >
-                      {t("chat.saveAndSend")}
-                    </button>
-                  </div>
-                </div>
+                <MessageEditBox
+                  value={editingText}
+                  cancelLabel="Cancel"
+                  saveLabel={t("chat.saveAndSend")}
+                  onChange={setEditingText}
+                  onCancel={cancelEditMessage}
+                  onSave={saveEditedMessage}
+                />
               ) : displayMessage.text ? (
                 <>
                   {/* The ‹‹ACT››…‹‹/ACT›› trace markers are already persisted inside
