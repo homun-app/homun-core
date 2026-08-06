@@ -90,6 +90,7 @@ import { useChatInspectorWorkspace } from "./useChatInspectorWorkspace";
 import { useChatMemoryArtifacts } from "./useChatMemoryArtifacts";
 import { useChatProjectContext } from "./useChatProjectContext";
 import { useChatSteeringQueue } from "./useChatSteeringQueue";
+import { useChatStreamLifecycle } from "./useChatStreamLifecycle";
 import { useChatStreamingNotifier } from "./useChatStreamingNotifier";
 import {
   projectWorkspaceSections,
@@ -189,7 +190,6 @@ export function ChatView({
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[] | null>(null);
-  const [streamHasVisibleText, setStreamHasVisibleText] = useState(false);
   const [autoContinueMessageId, setAutoContinueMessageId] = useState<string | null>(null);
   // Bumped when the user asks for the activity list; the adaptive island opens that exact section.
   const [activityNonce, setActivityNonce] = useState(0);
@@ -211,8 +211,6 @@ export function ChatView({
   const resumedThreadsRef = useRef<Set<string>>(new Set());
   const consumedAutoSubmitIdsRef = useRef<Set<string>>(new Set());
   const layoutRef = useRef<HTMLElement>(null);
-  const cancelStreamingRequestRef = useRef<(() => void) | null>(null);
-  const cancelledStreamIdsRef = useRef<Set<string>>(new Set());
   const { isMountedRef, notifyStreaming } = useChatStreamingNotifier(onStreamingChange);
   const {
     pendingSteering,
@@ -269,6 +267,20 @@ export function ChatView({
     threadId: thread.threadId,
     threadMessages,
     streamingAssistantId,
+  });
+  const {
+    cancelActiveStreaming,
+    clearActiveStreamingCancel,
+    clearStreamCancelled,
+    hasActiveStreamingCancel,
+    isStreamCancelled,
+    markStreamCancelled,
+    markStreamHasVisibleText,
+    resetStreamingState,
+    setActiveStreamingCancel,
+    streamHasVisibleText,
+  } = useChatStreamLifecycle({
+    cancelScheduledStreamingFrame,
   });
   // Transcript lookups, resolved ONCE per render instead of once per row. The
   // action bar asks "does this message have a user message before it?" and the
@@ -493,11 +505,6 @@ export function ChatView({
     ],
   );
 
-  function resetStreamingState(initialText = "") {
-    setStreamHasVisibleText(Boolean(initialText));
-    cancelScheduledStreamingFrame();
-  }
-
   async function submitPrompt(
     prompt: string,
     attachments: ChatAttachmentInput[],
@@ -597,7 +604,7 @@ export function ChatView({
     };
     const cancelStreamingRequest = () => {
       cancelledLocally = true;
-      cancelledStreamIdsRef.current.add(requestId);
+      markStreamCancelled(requestId);
       debugStream("paint_cancelled");
       void coreBridge.cancelChatPromptStream(requestId).catch(() => undefined);
       unlistenStream?.();
@@ -635,7 +642,7 @@ export function ChatView({
       notifyStreaming(true);
       markStreamingPinnedFromCurrentPosition();
       window.setTimeout(() => scrollConversationToBottomIfPinned("instant"), 0);
-      cancelStreamingRequestRef.current = cancelStreamingRequest;
+      setActiveStreamingCancel(cancelStreamingRequest);
       // Record an active stream so a reload mid-answer can reattach (resume).
       writeResumeMarker(thread.threadId, {
         requestId,
@@ -644,7 +651,7 @@ export function ChatView({
       }, CHAT_VIEW_SESSION_ID);
       unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
         if (payload.request_id !== requestId) return;
-        if (cancelledStreamIdsRef.current.has(requestId)) return;
+        if (isStreamCancelled(requestId)) return;
         if (payload.type === "retry" || payload.type === "queued") {
           setStreamStatus({
             requestId,
@@ -724,7 +731,7 @@ export function ChatView({
         if (firstDelta) {
           debugStream("paint_first_delta");
         }
-        setStreamHasVisibleText(true);
+        markStreamHasVisibleText();
         scheduleStreamingMessage();
       });
       setStreamStatus({
@@ -746,7 +753,7 @@ export function ChatView({
         branchFromId,
         routingBinding,
       );
-      if (cancelledStreamIdsRef.current.has(requestId)) {
+      if (isStreamCancelled(requestId)) {
         return;
       }
       streamedText = result.assistant_message.text || streamedText;
@@ -772,7 +779,7 @@ export function ChatView({
       }
       cancelScheduledStreamingFrame();
       debugStream("paint_done_before_commit");
-      if (cancelledStreamIdsRef.current.has(requestId)) {
+      if (isStreamCancelled(requestId)) {
         return;
       }
       applyComputerSessionSnapshot(result.computer_session);
@@ -808,7 +815,7 @@ export function ChatView({
       setOptimisticMessages(null);
     } catch (error) {
       cancelScheduledStreamingFrame();
-      if (cancelledLocally || cancelledStreamIdsRef.current.has(requestId)) {
+      if (cancelledLocally || isStreamCancelled(requestId)) {
         return;
       }
       if (error instanceof SteeringQueuedDuringSubmissionError) {
@@ -853,10 +860,8 @@ export function ChatView({
         setPromptSubmitting(false);
       }
       notifyStreaming(false);
-      if (cancelStreamingRequestRef.current === cancelStreamingRequest) {
-        cancelStreamingRequestRef.current = null;
-      }
-      cancelledStreamIdsRef.current.delete(requestId);
+      clearActiveStreamingCancel(cancelStreamingRequest);
+      clearStreamCancelled(requestId);
       activeTurnIdRef.current = null;
       if (streamOwnerTurnRef.current === localTurnId) {
         streamOwnerTurnRef.current = null;
@@ -889,12 +894,8 @@ export function ChatView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSubmit, promptSubmitting, streamingAssistantId, thread.threadId]);
 
-  function cancelActiveStreaming() {
-    cancelStreamingRequestRef.current?.();
-  }
-
   async function stopActiveTurn() {
-    if (cancelStreamingRequestRef.current) {
+    if (hasActiveStreamingCancel()) {
       cancelActiveStreaming();
       return;
     }
@@ -1014,7 +1015,7 @@ export function ChatView({
           scheduleStreamingMessage();
           return;
         }
-        setStreamHasVisibleText(true);
+        markStreamHasVisibleText();
         scheduleStreamingMessage();
       });
       const result = await coreBridge.resumeChatPromptStream(
@@ -1372,7 +1373,7 @@ export function ChatView({
       requestStreamingFrame(flushStreamingMessage);
     };
     const cancelStreamingRequest = () => {
-      cancelledStreamIdsRef.current.add(requestId);
+      markStreamCancelled(requestId);
       void coreBridge.cancelChatPromptStream(requestId).catch(() => undefined);
       unlistenStream?.();
       cancelScheduledStreamingFrame();
@@ -1398,10 +1399,10 @@ export function ChatView({
       title: t("chat.regeneratingResponse"),
       detail: t("chat.generatingAlternativeVariant"),
     });
-    cancelStreamingRequestRef.current = cancelStreamingRequest;
+    setActiveStreamingCancel(cancelStreamingRequest);
     unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
       if (payload.request_id !== requestId) return;
-      if (cancelledStreamIdsRef.current.has(requestId)) return;
+      if (isStreamCancelled(requestId)) return;
       const projectedStream = projectChatStreamEvent(
         { text: streamedText, eventParts: streamEventParts },
         payload,
@@ -1414,7 +1415,7 @@ export function ChatView({
         scheduleStreamingMessage();
         return;
       }
-      setStreamHasVisibleText(true);
+      markStreamHasVisibleText();
       scheduleStreamingMessage();
     });
 
@@ -1427,7 +1428,7 @@ export function ChatView({
         userMessage.id,
         context,
       );
-      if (cancelledStreamIdsRef.current.has(requestId)) return;
+      if (isStreamCancelled(requestId)) return;
       cancelScheduledStreamingFrame();
       applyComputerSessionSnapshot(result.computer_session);
       // The new answer is now a sibling in the tree; resync the real path + switcher.
@@ -1445,10 +1446,8 @@ export function ChatView({
       setPromptSubmitting(false);
       setStreamStatus((current) => (current?.requestId === requestId ? null : current));
       notifyStreaming(false);
-      if (cancelStreamingRequestRef.current === cancelStreamingRequest) {
-        cancelStreamingRequestRef.current = null;
-      }
-      cancelledStreamIdsRef.current.delete(requestId);
+      clearActiveStreamingCancel(cancelStreamingRequest);
+      clearStreamCancelled(requestId);
     }
   }
 
@@ -1636,7 +1635,7 @@ export function ChatView({
     };
     const cancelStreamingRequest = () => {
       cancelledLocally = true;
-      cancelledStreamIdsRef.current.add(requestId);
+      markStreamCancelled(requestId);
       void coreBridge.cancelChatPromptStream(requestId).catch(() => undefined);
       unlistenStream?.();
       cancelScheduledStreamingFrame();
@@ -1653,10 +1652,10 @@ export function ChatView({
       title: t("chat.continuingResponse"),
       detail: t("chat.generationLimitReached", { attempt }),
     });
-    cancelStreamingRequestRef.current = cancelStreamingRequest;
+    setActiveStreamingCancel(cancelStreamingRequest);
     unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
       if (payload.request_id !== requestId) return;
-      if (cancelledStreamIdsRef.current.has(requestId)) return;
+      if (isStreamCancelled(requestId)) return;
       const projectedStream = projectChatStreamEvent(
         { text: streamedText, eventParts: streamEventParts },
         payload,
@@ -1679,7 +1678,7 @@ export function ChatView({
           detail: t("chat.completingInSameMessage"),
         });
       }
-      setStreamHasVisibleText(true);
+      markStreamHasVisibleText();
       scheduleStreamingMessage();
     });
 
@@ -1692,7 +1691,7 @@ export function ChatView({
         message.text,
         message.model,
       );
-      if (cancelledStreamIdsRef.current.has(requestId)) {
+      if (isStreamCancelled(requestId)) {
         return baseMessages;
       }
       streamedText = result.assistant_message.text || streamedText;
@@ -1720,10 +1719,8 @@ export function ChatView({
         current?.requestId === requestId ? null : current,
       );
       notifyStreaming(false);
-      if (cancelStreamingRequestRef.current === cancelStreamingRequest) {
-        cancelStreamingRequestRef.current = null;
-      }
-      cancelledStreamIdsRef.current.delete(requestId);
+      clearActiveStreamingCancel(cancelStreamingRequest);
+      clearStreamCancelled(requestId);
     }
   }
 

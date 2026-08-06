@@ -1527,7 +1527,11 @@ assertContains("src/i18n/locales/it.json", "\"searchCapability\"", "Italian chat
 assertContains("src/components/ComposerShell.tsx", "props.value.trim() && matchesAdd", "composer improve prompt action must only render when there is prompt text to improve");
 assertNotContains("src/components/ChatView.tsx", "/^fn\\s+", "code-specific message actions must not rely on fragile plain-text Rust heuristics");
 assertNotContains("src/components/ChatView.tsx", "/^let\\s+", "code-specific message actions must not rely on fragile plain-text variable heuristics");
-assertContains("src/components/ChatView.tsx", "cancelStreamingRequestRef", "chat must allow users to stop a visible streaming response");
+assertContains("src/components/useChatStreamLifecycle.ts", "cancelStreamingRequestRef", "chat stream lifecycle must allow users to stop a visible streaming response");
+assertContains("src/components/ChatView.tsx", "useChatStreamLifecycle({", "ChatView must consume the focused stream lifecycle owner");
+assertNotContains("src/components/ChatView.tsx", "cancelStreamingRequestRef", "ChatView must not own streaming cancel refs");
+assertNotContains("src/components/ChatView.tsx", "cancelledStreamIdsRef", "ChatView must not own streaming cancellation ids");
+assertNotContains("src/components/ChatView.tsx", "setStreamHasVisibleText", "ChatView must not own streaming visible-text state");
 assertContains("src/components/ComposerContainer.tsx", "catalogsMissingModels", "chat must refresh an empty provider catalog even when an active model is already known");
 assertContains("src/components/ComposerContainer.tsx", "RUNTIME_MODELS_CHANGED_EVENT", "chat model picker must react immediately to provider changes without a page refresh");
 assertContains("src/components/SettingsView.tsx", "refreshEmptyLocalOllamaCatalogs", "settings must discover local Ollama models automatically when its catalog is empty");

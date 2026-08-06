@@ -155,6 +155,13 @@ const chatStreamEventProjection = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatStreamLifecycleHook = await readFile(
+  new URL("../src/components/useChatStreamLifecycle.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const appWorkspace = await readFile(
   new URL("../src/components/AppWorkspace.tsx", import.meta.url),
@@ -1836,6 +1843,21 @@ test("ChatView delegates stream event projection ownership to chatStreamEventPro
   assert.match(chatStreamEventProjection, /export function projectChatStreamEvent/);
   assert.match(chatStreamEventProjection, /chatEventPartFromStream/);
   assert.match(chatStreamEventProjection, /shouldDropStructuredMarkerDelta/);
+});
+
+test("ChatView delegates stream lifecycle ownership to useChatStreamLifecycle", () => {
+  assert.match(chatView, /from "\.\/useChatStreamLifecycle";/);
+  assert.match(chatView, /useChatStreamLifecycle\(\{/);
+  assert.doesNotMatch(chatView, /cancelStreamingRequestRef/);
+  assert.doesNotMatch(chatView, /cancelledStreamIdsRef/);
+  assert.doesNotMatch(chatView, /setStreamHasVisibleText/);
+  assert.doesNotMatch(chatView, /function resetStreamingState/);
+  assert.doesNotMatch(chatView, /function cancelActiveStreaming/);
+  assert.match(chatStreamLifecycleHook, /export function useChatStreamLifecycle/);
+  assert.match(chatStreamLifecycleHook, /cancelStreamingRequestRef/);
+  assert.match(chatStreamLifecycleHook, /cancelledStreamIdsRef/);
+  assert.match(chatStreamLifecycleHook, /resetStreamingState/);
+  assert.match(chatStreamLifecycleHook, /cancelActiveStreaming/);
 });
 
 test("ChatView delegates steering prompt edit assembly to chatSteeringPrompt", () => {
