@@ -653,7 +653,7 @@ def build_plan(env: dict[str, str]) -> list[Step]:
                 "steering",
             ],
         ),
-        Step("desktop cursor grammar", ["npm", "run", "test:cursor-grammar"], cwd=DESKTOP),
+        Step("desktop unit tests", ["npm", "test"], cwd=DESKTOP),
         Step("desktop ui contract", ["npm", "run", "test:ui-contract"], cwd=DESKTOP),
         Step("desktop build", ["npm", "run", "build"], cwd=DESKTOP),
     ]

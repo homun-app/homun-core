@@ -14,12 +14,15 @@ class PreReleaseGateTests(unittest.TestCase):
         self.assertIn("desktop dependency audit", labels)
         self.assertIn("task runtime tests", labels)
         self.assertIn("engine tests", labels)
-        self.assertIn("desktop attention tests", labels)
-        self.assertIn("desktop replay tests", labels)
-        self.assertIn("desktop visible content tests", labels)
-        self.assertIn("desktop electron tests", labels)
-        self.assertIn("contained computer package tests", labels)
+        self.assertIn("desktop unit tests", labels)
         self.assertIn("stability soak unit tests", labels)
+
+    def test_desktop_unit_tests_use_the_umbrella_route(self):
+        by_label = {step.label: step for step in gate.build_plan({})}
+
+        step = by_label["desktop unit tests"]
+        self.assertEqual(step.command, ["npm", "test"])
+        self.assertEqual(step.cwd, gate.DESKTOP)
 
     def test_live_stability_soak_is_last_when_enabled(self):
         plan = gate.build_plan({"HOMUN_RUN_STABILITY_SOAK": "1"})
@@ -123,12 +126,7 @@ class PreReleaseGateTests(unittest.TestCase):
                 "engine tests",
                 "gateway tests",
                 "memorybench provider",
-                "desktop attention tests",
-                "desktop replay tests",
-                "desktop visible content tests",
-                "desktop electron tests",
-                "contained computer package tests",
-                "host computer package tests",
+                "desktop unit tests",
                 "ui contract",
             ],
         )

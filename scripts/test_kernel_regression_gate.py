@@ -15,7 +15,7 @@ class KernelRegressionGateTests(unittest.TestCase):
         self.assertIn("task runtime finalizing fence", labels)
         self.assertIn("task runtime enqueue", labels)
         self.assertIn("gateway steering cleanup", labels)
-        self.assertIn("desktop cursor grammar", labels)
+        self.assertIn("desktop unit tests", labels)
         self.assertIn("desktop ui contract", labels)
         self.assertIn("desktop build", labels)
         self.assertNotIn("live gateway browser smoke", labels)
@@ -25,7 +25,8 @@ class KernelRegressionGateTests(unittest.TestCase):
 
         self.assertEqual(by_label["task runtime turn lifecycle"].cwd, gate.ROOT)
         self.assertEqual(by_label["gateway steering cleanup"].cwd, gate.ROOT)
-        self.assertEqual(by_label["desktop cursor grammar"].cwd, gate.DESKTOP)
+        self.assertEqual(by_label["desktop unit tests"].command, ["npm", "test"])
+        self.assertEqual(by_label["desktop unit tests"].cwd, gate.DESKTOP)
         self.assertEqual(by_label["desktop ui contract"].cwd, gate.DESKTOP)
         self.assertEqual(by_label["desktop build"].cwd, gate.DESKTOP)
 
@@ -68,7 +69,7 @@ class KernelRegressionGateTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(calls, labels[: stop_index + 1])
         self.assertIn("gateway main ownership contract", calls)
-        self.assertNotIn("desktop cursor grammar", calls)
+        self.assertNotIn("desktop unit tests", calls)
         self.assertNotIn("desktop build", calls)
 
 

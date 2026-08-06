@@ -85,12 +85,7 @@ def build_plan(env: dict[str, str]) -> list[Step]:
         Step("engine tests", ["cargo", "test", "-p", "local-first-engine", "--", "--nocapture"]),
         Step("gateway tests", ["cargo", "test", "-p", "local-first-desktop-gateway", "--", "--nocapture"]),
         Step("memorybench provider", ["npm", "test"], cwd=MEMORYBENCH_PROVIDER),
-        Step("desktop attention tests", ["node", "--test", "src/lib/threadAttentionState.test.mjs"], cwd=DESKTOP),
-        Step("desktop replay tests", ["node", "--test", "src/lib/turnReplayState.test.mjs"], cwd=DESKTOP),
-        Step("desktop visible content tests", ["node", "--test", "src/lib/chatVisibleContent.test.mjs"], cwd=DESKTOP),
-        Step("desktop electron tests", ["npm", "run", "test:electron"], cwd=DESKTOP),
-        Step("contained computer package tests", ["npm", "run", "test:contained-computer-package"], cwd=DESKTOP),
-        Step("host computer package tests", ["npm", "run", "test:host-computer-package"], cwd=DESKTOP),
+        Step("desktop unit tests", ["npm", "test"], cwd=DESKTOP),
         Step("ui contract", ["npm", "run", "test:ui-contract"], cwd=DESKTOP),
         Step("desktop build", ["npm", "run", "build"], cwd=DESKTOP),
         Step(
