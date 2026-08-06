@@ -89,6 +89,7 @@ import { useChatConversationScroll } from "./useChatConversationScroll";
 import { useChatFollowUps } from "./useChatFollowUps";
 import { useChatInspectorWorkspace } from "./useChatInspectorWorkspace";
 import { useChatMemoryArtifacts } from "./useChatMemoryArtifacts";
+import { useChatMessageEditing } from "./useChatMessageEditing";
 import { useChatProjectContext } from "./useChatProjectContext";
 import { useChatSteeringQueue } from "./useChatSteeringQueue";
 import { useChatStreamLifecycle } from "./useChatStreamLifecycle";
@@ -188,8 +189,6 @@ export function ChatView({
   const handledBackgroundTurnsRef = useRef<Set<string>>(new Set());
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [replyContext, setReplyContext] = useState<ReplyContext | null>(null);
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [editingText, setEditingText] = useState("");
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[] | null>(null);
   const [autoContinueMessageId, setAutoContinueMessageId] = useState<string | null>(null);
   // Bumped when the user asks for the activity list; the adaptive island opens that exact section.
@@ -254,6 +253,19 @@ export function ChatView({
     const base = optimisticMessages ?? messages;
     return base.filter((m) => !(m.role === "assistant" && m.id.endsWith("_ready")));
   }, [optimisticMessages, messages]);
+  const {
+    cancelEditMessage,
+    editingMessageId,
+    editingText,
+    saveEditedMessage,
+    setEditingText,
+    startEditMessage,
+  } = useChatMessageEditing({
+    promptSubmitting,
+    setOptimisticMessages,
+    submitEditedPrompt: submitPrompt,
+    threadMessages,
+  });
   const {
     afterStreamingFramePaint,
     cancelScheduledStreamingFrame,
@@ -1442,51 +1454,6 @@ export function ChatView({
       role: message.role,
       preview: createReplyPreview(message.text),
     });
-  }
-
-  function startEditMessage(message: ChatMessage) {
-    if (promptSubmitting) return;
-    setEditingMessageId(message.id);
-    setEditingText(message.text);
-  }
-
-  function cancelEditMessage() {
-    setEditingMessageId(null);
-    setEditingText("");
-  }
-
-  // Edit a user message non-destructively: commit the edited turn as a SIBLING
-  // branch. The original message and its answer stay in the tree, reachable via
-  // the ‹ n/m › switcher — nothing is lost. The gateway resolves the original's
-  // parent from `branchFromId`, so the new turn is a true sibling.
-  function saveEditedMessage() {
-    const id = editingMessageId;
-    const text = editingText.trim();
-    if (!id || !text || promptSubmitting) return;
-    const index = threadMessages.findIndex((message) => message.id === id);
-    if (index < 0) {
-      cancelEditMessage();
-      return;
-    }
-    const base = threadMessages.slice(0, index);
-    const original = threadMessages[index];
-    setEditingMessageId(null);
-    setEditingText("");
-    // Optimistically show the context BEFORE the edited turn; the new turn streams
-    // in and the refetch swaps in the persisted branch. We don't push `base` to the
-    // parent (no onMessagesChange) so the original branch is never dropped.
-    setOptimisticMessages(base);
-    void submitPrompt(
-      text,
-      [],
-      original.attachments ?? [],
-      undefined,
-      undefined,
-      undefined,
-      base,
-      undefined,
-      id,
-    );
   }
 
   async function setMessageFeedback(

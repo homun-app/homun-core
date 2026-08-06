@@ -169,6 +169,13 @@ const chatAutoTitleHook = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatMessageEditingHook = await readFile(
+  new URL("../src/components/useChatMessageEditing.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const appWorkspace = await readFile(
   new URL("../src/components/AppWorkspace.tsx", import.meta.url),
@@ -1877,6 +1884,25 @@ test("ChatView delegates auto-title ownership to useChatAutoTitle", () => {
   assert.match(chatAutoTitleHook, /export function useChatAutoTitle/);
   assert.match(chatAutoTitleHook, /titledThreadsRef/);
   assert.match(chatAutoTitleHook, /coreBridge\.autoTitleThread/);
+});
+
+test("ChatView delegates message editing ownership to useChatMessageEditing", () => {
+  assert.match(chatView, /from "\.\/useChatMessageEditing";/);
+  assert.match(chatView, /useChatMessageEditing\(\{/);
+  assert.match(chatView, /editingMessageId/);
+  assert.match(chatView, /onEditingTextChange=\{setEditingText\}/);
+  assert.match(chatView, /onCancelEdit=\{cancelEditMessage\}/);
+  assert.match(chatView, /onSaveEdit=\{saveEditedMessage\}/);
+  assert.match(chatView, /onEdit=\{startEditMessage\}/);
+  assert.doesNotMatch(chatView, /const \[editingMessageId, setEditingMessageId\]/);
+  assert.doesNotMatch(chatView, /const \[editingText, setEditingText\]/);
+  assert.doesNotMatch(chatView, /function startEditMessage/);
+  assert.doesNotMatch(chatView, /function cancelEditMessage/);
+  assert.doesNotMatch(chatView, /function saveEditedMessage/);
+  assert.match(chatMessageEditingHook, /export function useChatMessageEditing/);
+  assert.match(chatMessageEditingHook, /setOptimisticMessages\(base\)/);
+  assert.match(chatMessageEditingHook, /submitEditedPrompt\(/);
+  assert.match(chatMessageEditingHook, /branchFromId/);
 });
 
 test("ChatView delegates steering prompt edit assembly to chatSteeringPrompt", () => {

@@ -1012,6 +1012,15 @@ assertContains("src/components/ChatView.tsx", "persistAutoTitleForCompletedTurn(
 assertContains("src/components/useChatAutoTitle.ts", "coreBridge.autoTitleThread", "auto-title persistence must have one focused owner");
 assertNotContains("src/components/ChatView.tsx", "coreBridge.autoTitleThread", "ChatView must not own auto-title persistence");
 assertNotContains("src/components/ChatView.tsx", "titledThreadsRef", "ChatView must not own auto-title dedupe state");
+assertContains("src/components/useChatMessageEditing.ts", "export function useChatMessageEditing", "message editing must have one focused owner");
+assertContains("src/components/useChatMessageEditing.ts", "submitEditedPrompt(", "message editing owner must submit edited turns through the provided gateway path");
+assertContains("src/components/useChatMessageEditing.ts", "setOptimisticMessages(base)", "message editing owner must preserve sibling-branch optimistic context");
+assertContains("src/components/ChatView.tsx", "useChatMessageEditing({", "ChatView must consume the focused message editing owner");
+assertNotContains("src/components/ChatView.tsx", "const [editingMessageId, setEditingMessageId]", "ChatView must not own message editing selected state");
+assertNotContains("src/components/ChatView.tsx", "const [editingText, setEditingText]", "ChatView must not own message editing draft state");
+assertNotContains("src/components/ChatView.tsx", "function startEditMessage", "ChatView must not own message editing start handler");
+assertNotContains("src/components/ChatView.tsx", "function cancelEditMessage", "ChatView must not own message editing cancel handler");
+assertNotContains("src/components/ChatView.tsx", "function saveEditedMessage", "ChatView must not own message editing branch submit handler");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "is_placeholder_chat_title(&thread.title)", "autotitle endpoint must be a no-op for already titled chats");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "\"type\": \"thread.turn_started\"", "external turns must publish a visible-turn event after messages are persisted");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "start_visible_conversation_turn", "external channels and scheduled work must use the shared visible-turn helper");
