@@ -1009,7 +1009,9 @@ assertContains("src/components/ChatView.tsx", "onMessagesChange(promptMessages)"
 assertContains("src/components/ChatView.tsx", "advanceActivity: true", "completed assistant turns must explicitly advance chat activity ordering");
 assertContains("src/components/ChatView.tsx", "const shouldAutoTitleAfterSubmit = isPlaceholderThreadTitle(thread.title)", "auto-title must be authorized only by a real submitted turn, not by opening a historical chat");
 assertContains("src/components/ChatView.tsx", "persistAutoTitleForCompletedTurn(", "auto-title must persist from the completed chat stream path");
-assertNotContains("src/components/ChatView.tsx", "coreBridge\n      .autoTitleThread", "auto-title must not be driven by a mount/update effect on historical messages");
+assertContains("src/components/useChatAutoTitle.ts", "coreBridge.autoTitleThread", "auto-title persistence must have one focused owner");
+assertNotContains("src/components/ChatView.tsx", "coreBridge.autoTitleThread", "ChatView must not own auto-title persistence");
+assertNotContains("src/components/ChatView.tsx", "titledThreadsRef", "ChatView must not own auto-title dedupe state");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "is_placeholder_chat_title(&thread.title)", "autotitle endpoint must be a no-op for already titled chats");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "\"type\": \"thread.turn_started\"", "external turns must publish a visible-turn event after messages are persisted");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "start_visible_conversation_turn", "external channels and scheduled work must use the shared visible-turn helper");

@@ -162,6 +162,13 @@ const chatStreamLifecycleHook = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatAutoTitleHook = await readFile(
+  new URL("../src/components/useChatAutoTitle.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const appWorkspace = await readFile(
   new URL("../src/components/AppWorkspace.tsx", import.meta.url),
@@ -1858,6 +1865,18 @@ test("ChatView delegates stream lifecycle ownership to useChatStreamLifecycle", 
   assert.match(chatStreamLifecycleHook, /cancelledStreamIdsRef/);
   assert.match(chatStreamLifecycleHook, /resetStreamingState/);
   assert.match(chatStreamLifecycleHook, /cancelActiveStreaming/);
+});
+
+test("ChatView delegates auto-title ownership to useChatAutoTitle", () => {
+  assert.match(chatView, /from "\.\/useChatAutoTitle";/);
+  assert.match(chatView, /useChatAutoTitle\(\{/);
+  assert.match(chatView, /persistAutoTitleForCompletedTurn\(/);
+  assert.doesNotMatch(chatView, /function persistAutoTitleForCompletedTurn/);
+  assert.doesNotMatch(chatView, /titledThreadsRef/);
+  assert.doesNotMatch(chatView, /coreBridge\.autoTitleThread/);
+  assert.match(chatAutoTitleHook, /export function useChatAutoTitle/);
+  assert.match(chatAutoTitleHook, /titledThreadsRef/);
+  assert.match(chatAutoTitleHook, /coreBridge\.autoTitleThread/);
 });
 
 test("ChatView delegates steering prompt edit assembly to chatSteeringPrompt", () => {

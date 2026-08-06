@@ -80,6 +80,7 @@ import type {
   ReplyContext,
 } from "./ChatViewTypes";
 import { useChatActiveTurnElapsed } from "./useChatActiveTurnElapsed";
+import { useChatAutoTitle } from "./useChatAutoTitle";
 import { useChatBranches } from "./useChatBranches";
 import { useChatActivityProjection } from "./useChatActivityProjection";
 import { projectChatStreamEvent } from "./chatStreamEventProjection";
@@ -207,7 +208,6 @@ export function ChatView({
     setGoalSeed,
     threadIsProject,
   } = useChatProjectContext(thread.threadId);
-  const titledThreadsRef = useRef<Set<string>>(new Set());
   const resumedThreadsRef = useRef<Set<string>>(new Set());
   const consumedAutoSubmitIdsRef = useRef<Set<string>>(new Set());
   const layoutRef = useRef<HTMLElement>(null);
@@ -240,6 +240,9 @@ export function ChatView({
     setOptimisticMessages,
     setPromptError,
     streamingAssistantId,
+    threadId: thread.threadId,
+  });
+  const { persistAutoTitleForCompletedTurn } = useChatAutoTitle({
     threadId: thread.threadId,
   });
   // The backend seeds a placeholder "ready" greeting on every new thread (id ends
@@ -1102,25 +1105,6 @@ export function ChatView({
       await refreshAfterChatSubmit();
     } catch (error) {
       setPromptError(describeBridgeError(error));
-    }
-  }
-
-  async function persistAutoTitleForCompletedTurn(
-    promptMessages: ChatMessage[],
-    assistantText: string,
-    shouldAutoTitle: boolean,
-  ) {
-    if (!shouldAutoTitle) return;
-    if (titledThreadsRef.current.has(thread.threadId)) return;
-    const firstUser = promptMessages.find(
-      (message) => message.role === "user" && Boolean(message.text?.trim()),
-    );
-    if (!firstUser || !assistantText.trim()) return;
-    titledThreadsRef.current.add(thread.threadId);
-    try {
-      await coreBridge.autoTitleThread(thread.threadId, firstUser.text, assistantText);
-    } catch {
-      /* keep existing title on failure */
     }
   }
 
