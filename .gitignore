@@ -17,6 +17,7 @@ apps/desktop/src-tauri/gen/
 # editor/tooling scratch and run artifacts
 .commandcode/
 .cursor/
+.qoder/
 output/
 last_prompt_*.txt
 last_response_*.txt
