@@ -59,6 +59,16 @@ jobs:
       - name: Deterministic pre-release gate
         run: python3 scripts/pre_release_gate.py
 
+      # Ownership + kernel invariants must gate every PR, not just the manual
+      # anti-regression protocol: the contract check keeps extracted startup
+      # owners out of gateway `main.rs`, and the kernel gate re-runs the
+      # per-owner turn/gateway regression tests. Non-zero exit fails the job.
+      - name: Gateway main ownership contract
+        run: python3 scripts/check_gateway_main_contract.py
+
+      - name: Kernel regression gate
+        run: python3 scripts/kernel_regression_gate.py
+
       - name: Rust dependency audit
         uses: rustsec/audit-check@858dc40f52ca2b8570b7a997c1c4e35c6fc9a432
         with:

@@ -41,6 +41,10 @@ class PreReleaseGateTests(unittest.TestCase):
         )
         self.assertEqual(
             plan[1].command,
+            [gate.PYTHON, "scripts/check_gateway_main_contract.py"],
+        )
+        self.assertEqual(
+            plan[2].command,
             [
                 "cargo",
                 "clippy",
@@ -52,10 +56,10 @@ class PreReleaseGateTests(unittest.TestCase):
                 "warnings",
             ],
         )
-        self.assertEqual(plan[2].command, ["npm", "ci"])
-        self.assertEqual(plan[2].cwd, gate.DESKTOP)
-        self.assertEqual(plan[3].command, ["npm", "audit", "--audit-level=high"])
+        self.assertEqual(plan[3].command, ["npm", "ci"])
         self.assertEqual(plan[3].cwd, gate.DESKTOP)
+        self.assertEqual(plan[4].command, ["npm", "audit", "--audit-level=high"])
+        self.assertEqual(plan[4].cwd, gate.DESKTOP)
         self.assertIn("capability tests", labels)
         self.assertIn("orchestrator tests", labels)
         self.assertIn("gateway tests", labels)
@@ -109,6 +113,7 @@ class PreReleaseGateTests(unittest.TestCase):
             calls,
             [
                 "rust format",
+                "gateway main ownership contract",
                 "rust clippy",
                 "desktop dependency install",
                 "desktop dependency audit",

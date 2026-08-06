@@ -60,18 +60,16 @@ class KernelRegressionGateTests(unittest.TestCase):
 
         ok = gate.run_plan(gate.build_plan({}), fake_run)
 
+        # The plan stops at the first failing step: everything before
+        # "gateway steering cleanup" must have run, nothing after it.
+        labels = [step.label for step in gate.build_plan({})]
+        stop_index = labels.index("gateway steering cleanup")
+
         self.assertFalse(ok)
-        self.assertEqual(
-            calls,
-            [
-                "rust format",
-                "task runtime turn lifecycle",
-                "task runtime active chat turn",
-                "task runtime finalizing fence",
-                "task runtime enqueue",
-                "gateway steering cleanup",
-            ],
-        )
+        self.assertEqual(calls, labels[: stop_index + 1])
+        self.assertIn("gateway main ownership contract", calls)
+        self.assertNotIn("desktop cursor grammar", calls)
+        self.assertNotIn("desktop build", calls)
 
 
 if __name__ == "__main__":

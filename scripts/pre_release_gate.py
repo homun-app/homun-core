@@ -50,6 +50,10 @@ def build_plan(env: dict[str, str]) -> list[Step]:
     plan = [
         Step("rust format", ["cargo", "fmt", "--all", "--", "--check"]),
         Step(
+            "gateway main ownership contract",
+            [PYTHON, "scripts/check_gateway_main_contract.py"],
+        ),
+        Step(
             "rust clippy",
             [
                 "cargo",
