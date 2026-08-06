@@ -176,6 +176,13 @@ const chatMessageEditingHook = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatMessageActionsHook = await readFile(
+  new URL("../src/components/useChatMessageActions.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const appWorkspace = await readFile(
   new URL("../src/components/AppWorkspace.tsx", import.meta.url),
@@ -1903,6 +1910,32 @@ test("ChatView delegates message editing ownership to useChatMessageEditing", ()
   assert.match(chatMessageEditingHook, /setOptimisticMessages\(base\)/);
   assert.match(chatMessageEditingHook, /submitEditedPrompt\(/);
   assert.match(chatMessageEditingHook, /branchFromId/);
+});
+
+test("ChatView delegates message action ownership to useChatMessageActions", () => {
+  assert.match(chatView, /from "\.\/useChatMessageActions";/);
+  assert.match(chatView, /useChatMessageActions\(\{/);
+  assert.match(chatView, /copiedMessageId/);
+  assert.match(chatView, /onCaptureScreenshot=\{IS_DESKTOP \? \(\) => void captureScreenshot\(\) : undefined\}/);
+  assert.match(chatView, /onCopy=\{copyMessageText\}/);
+  assert.match(chatView, /onFeedback=\{setMessageFeedback\}/);
+  assert.match(chatView, /onSaveToMemory=\{saveMessageToMemory\}/);
+  assert.match(chatView, /onSaveAsGoal=\{saveMessageAsGoal\}/);
+  assert.doesNotMatch(chatView, /const \[copiedMessageId, setCopiedMessageId\]/);
+  assert.doesNotMatch(chatView, /function copyMessageText/);
+  assert.doesNotMatch(chatView, /function exportChatMarkdown/);
+  assert.doesNotMatch(chatView, /function captureScreenshot/);
+  assert.doesNotMatch(chatView, /function setMessageFeedback/);
+  assert.doesNotMatch(chatView, /function saveMessageAsGoal/);
+  assert.doesNotMatch(chatView, /function saveMessageToMemory/);
+  assert.doesNotMatch(chatView, /copyText\(/);
+  assert.doesNotMatch(chatView, /buildChatMarkdown/);
+  assert.doesNotMatch(chatView, /captureAppScreenshot\(/);
+  assert.match(chatMessageActionsHook, /export function useChatMessageActions/);
+  assert.match(chatMessageActionsHook, /copyText\(/);
+  assert.match(chatMessageActionsHook, /captureAppScreenshot\(/);
+  assert.match(chatMessageActionsHook, /coreBridge\.setChatMessageFeedback/);
+  assert.match(chatMessageActionsHook, /coreBridge\.saveChatMessageToMemory/);
 });
 
 test("ChatView delegates steering prompt edit assembly to chatSteeringPrompt", () => {

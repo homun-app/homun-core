@@ -30,13 +30,11 @@ import {
 import { deriveTurnLifecycle } from "../lib/chat-runtime/lifecycle";
 import { deriveComposerMode } from "../lib/chat-runtime/composerMode";
 import { visiblePendingSteeringRows } from "../lib/chat-runtime/steering";
-import { captureAppScreenshot, IS_DESKTOP } from "../lib/gatewayConfig";
-import { copyText } from "../lib/clipboard";
+import { IS_DESKTOP } from "../lib/gatewayConfig";
 import {
   effectiveModelFromGateway,
   latestAssistantEffectiveModel,
 } from "../lib/composerTurnContract";
-import { buildChatMarkdown } from "../lib/chatExportMarkdown";
 import {
   chatMessageFromAssistantResult,
   createReplyPreview,
@@ -76,7 +74,6 @@ import { ChatTranscript } from "./ChatTranscript";
 import { type ChatStreamStatus } from "./AssistantThinkingState";
 import type {
   ChatViewProps,
-  MessageFeedback,
   ReplyContext,
 } from "./ChatViewTypes";
 import { useChatActiveTurnElapsed } from "./useChatActiveTurnElapsed";
@@ -89,6 +86,7 @@ import { useChatConversationScroll } from "./useChatConversationScroll";
 import { useChatFollowUps } from "./useChatFollowUps";
 import { useChatInspectorWorkspace } from "./useChatInspectorWorkspace";
 import { useChatMemoryArtifacts } from "./useChatMemoryArtifacts";
+import { useChatMessageActions } from "./useChatMessageActions";
 import { useChatMessageEditing } from "./useChatMessageEditing";
 import { useChatProjectContext } from "./useChatProjectContext";
 import { useChatSteeringQueue } from "./useChatSteeringQueue";
@@ -187,7 +185,6 @@ export function ChatView({
   // Turn ids of background turns we've already attached to (via incomingBackgroundTurn), so a
   // re-fired `thread.turn_started` or a messages re-render never double-attaches the same turn.
   const handledBackgroundTurnsRef = useRef<Set<string>>(new Set());
-  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [replyContext, setReplyContext] = useState<ReplyContext | null>(null);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[] | null>(null);
   const [autoContinueMessageId, setAutoContinueMessageId] = useState<string | null>(null);
@@ -348,6 +345,23 @@ export function ChatView({
     translate: t,
     workbenchArtifacts,
     workspaceId: thread.workspaceId,
+  });
+  const {
+    captureScreenshot,
+    copiedMessageId,
+    copyMessageText,
+    saveMessageAsGoal,
+    saveMessageToMemory,
+    setMessageFeedback,
+  } = useChatMessageActions({
+    onMessagesChange,
+    onRuntimeChanged,
+    onThreadChanged,
+    openGoalsTab: () => openUtilityTab("goals"),
+    setGoalSeed,
+    setPromptError,
+    threadId: thread.threadId,
+    threadMessages,
   });
   const activeStreamInProgress = Boolean(promptSubmitting || streamingAssistantId);
   const {
@@ -1309,24 +1323,6 @@ export function ChatView({
     return true;
   }
 
-  async function copyMessageText(message: ChatMessage) {
-    if (!message.text) return;
-    const ok = await copyText(message.text);
-    if (!ok) return;
-    setCopiedMessageId(message.id);
-    window.setTimeout(() => setCopiedMessageId(null), 1_400);
-  }
-
-  async function exportChatMarkdown() {
-    await copyText(buildChatMarkdown(thread.title, threadMessages));
-  }
-
-  // Capture the whole app window to a PNG and reveal it in Finder — the user can then
-  // share the image to show the actual UI / pagination / a broken state.
-  async function captureScreenshot() {
-    await captureAppScreenshot();
-  }
-
   // Regenerate an assistant answer as a persisted SIBLING branch under its user
   // message — streamed into the same slot, then committed to the chat tree.
   function regenerateAnswer(messageId: string) {
@@ -1454,57 +1450,6 @@ export function ChatView({
       role: message.role,
       preview: createReplyPreview(message.text),
     });
-  }
-
-  async function setMessageFeedback(
-    message: ChatMessage,
-    feedback: MessageFeedback,
-  ) {
-    if (message.role !== "assistant") return;
-    const nextFeedback = message.feedback === feedback ? undefined : feedback;
-    const optimisticMessages = threadMessages.map((item) =>
-      item.id === message.id ? { ...item, feedback: nextFeedback } : item,
-    );
-    onMessagesChange(optimisticMessages);
-    setPromptError(null);
-    try {
-      await coreBridge.setChatMessageFeedback(
-        thread.threadId,
-        message.id,
-        nextFeedback ?? null,
-      );
-      await onThreadChanged();
-    } catch (error) {
-      onMessagesChange(threadMessages);
-      setPromptError(describeBridgeError(error));
-    }
-  }
-
-  // Promote a chat message to a project objective: hand the text off to the Obiettivi
-  // panel's compose (open Workbench → Obiettivi tab, pre-filled) so the user trims and
-  // confirms with the polished UI — never auto-saving long prose verbatim.
-  function saveMessageAsGoal(text?: string | null) {
-    const seed = (text ?? "").trim();
-    if (!seed) return;
-    setGoalSeed(seed);
-    openUtilityTab("goals");
-  }
-
-  async function saveMessageToMemory(message: ChatMessage) {
-    if (message.role !== "assistant" || message.savedMemoryRef) return;
-    const optimisticMessages = threadMessages.map((item) =>
-      item.id === message.id ? { ...item, savedMemoryRef: "pending" } : item,
-    );
-    onMessagesChange(optimisticMessages);
-    setPromptError(null);
-    try {
-      await coreBridge.saveChatMessageToMemory(thread.threadId, message.id);
-      await onRuntimeChanged();
-      await onThreadChanged();
-    } catch (error) {
-      onMessagesChange(threadMessages);
-      setPromptError(describeBridgeError(error));
-    }
   }
 
   function continueAssistantResponse(messageId: string) {
