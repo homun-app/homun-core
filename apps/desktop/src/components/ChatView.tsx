@@ -28,7 +28,7 @@ import {
   type TurnReplayState,
 } from "../lib/turnReplayState";
 import { deriveTurnLifecycle } from "../lib/chat-runtime/lifecycle";
-import { deriveComposerMode } from "../lib/chat-runtime/composerMode";
+import { routeComposerSubmission } from "../lib/chat-runtime/submissionRouting";
 import { visiblePendingSteeringRows } from "../lib/chat-runtime/steering";
 import { IS_DESKTOP } from "../lib/gatewayConfig";
 import {
@@ -1196,14 +1196,16 @@ export function ChatView({
     const model = options?.model;
 
     // Open HITL Free wait → always a new turn (ResumeBinding), never steer.
-    const composerMode = deriveComposerMode({
+    const submissionRoute = routeComposerSubmission({
       promptSubmitting,
       streamingAssistantId,
-      turnAwaitingUser,
-      terminalTurnAtRest,
-      hasActiveTurn,
+      projectedActiveTurn,
+      projectedTurnStatus,
+      projectionLoaded,
+      threadTailAwaitsHitl,
+      explicitForceNewTurn: options?.forceNewTurn,
     });
-    const forceNewTurn = Boolean(options?.forceNewTurn || composerMode.forceNewTurn);
+    const forceNewTurn = submissionRoute.forceNewTurn;
     if (forceNewTurn) {
       setStreamingAssistantId(null);
       setStreamStatus(null);
@@ -1213,7 +1215,7 @@ export function ChatView({
     // A Choice/Clarify answer must start a real next turn even if the UI still thinks work is
     // in progress (streaming just ended / projected active turn lag) — otherwise the
     // answer becomes steering and the browser session context is mishandled.
-    if (workInProgress && !forceNewTurn) {
+    if (submissionRoute.routesToSteering) {
       const promptWithReplyContext = buildSteeringPrompt({
         skillPrefix,
         contextPrefix,
