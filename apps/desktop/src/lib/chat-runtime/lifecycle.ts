@@ -36,11 +36,16 @@ export const TERMINAL_TURN_STATUSES = new Set([
   "expired",
 ]);
 
+const NON_WORK_ACTIVE_STATUSES = new Set([
+  "parked",
+]);
+
 export function deriveTurnLifecycle(input: TurnLifecycleInput): TurnLifecycleView {
   const isStreaming = Boolean(input.promptSubmitting || input.streamingAssistantId);
   const threadTailAwaitsHitl = Boolean(input.threadTailAwaitsHitl);
   const activeStatus = input.projectedActiveTurn?.status ?? null;
   const turnAwaitingUser = activeStatus === "waiting_user_approval" || threadTailAwaitsHitl;
+  const activeButNotModelWork = activeStatus !== null && NON_WORK_ACTIVE_STATUSES.has(activeStatus);
   const terminalTurnAtRest = Boolean(
     input.projectionLoaded
       && !input.projectedActiveTurn
@@ -48,7 +53,10 @@ export function deriveTurnLifecycle(input: TurnLifecycleInput): TurnLifecycleVie
       && TERMINAL_TURN_STATUSES.has(input.projectedTurnStatus),
   );
   const hasActiveTurn = Boolean(isStreaming || input.projectedActiveTurn || threadTailAwaitsHitl);
-  const workInProgress = Boolean(isStreaming || (input.projectedActiveTurn && !turnAwaitingUser));
+  const workInProgress = Boolean(
+    isStreaming
+      || (input.projectedActiveTurn && !turnAwaitingUser && !activeButNotModelWork),
+  );
   const canStop = Boolean(isStreaming || (input.projectedActiveTurn && !turnAwaitingUser));
 
   return {
