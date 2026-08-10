@@ -1,3 +1,4 @@
+use crate::turn_reducer::{REDUCED_TERMINAL_TURN_EVENT_KIND_SQL_LIST, turn_event_kind_is_terminal};
 use crate::{
     ActiveTurnProjection, AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus,
     ApprovalRequest, Automation, AutomationRun, BrowserCheckpointRecord, EffectReceiptClaim,
@@ -68,25 +69,25 @@ fn first_terminal_event_on(
     connection: &Connection,
     turn_id: &str,
 ) -> TaskRuntimeResult<Option<TurnEvent>> {
-    let row = connection
-        .query_row(
-            "SELECT event_id, turn_id, seq, kind, payload_json, created_at
+    let query = format!(
+        "SELECT event_id, turn_id, seq, kind, payload_json, created_at
                FROM turn_events
-              WHERE turn_id = ?1 AND kind IN ('done', 'error', 'cancelled')
+              WHERE turn_id = ?1 AND kind IN ({})
               ORDER BY seq ASC
               LIMIT 1",
-            params![turn_id],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, i64>(5)?,
-                ))
-            },
-        )
+        REDUCED_TERMINAL_TURN_EVENT_KIND_SQL_LIST,
+    );
+    let row = connection
+        .query_row(&query, params![turn_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)?,
+            ))
+        })
         .optional()?;
     row.map(|(event_id, turn_id, seq, kind, payload_json, created_at)| {
         let kind = TurnEventKind::parse(&kind).ok_or_else(|| {
@@ -2948,10 +2949,7 @@ impl TaskStore {
         kind: TurnEventKind,
         payload: Value,
     ) -> TaskRuntimeResult<TerminalWrite> {
-        if !matches!(
-            kind,
-            TurnEventKind::Done | TurnEventKind::Error | TurnEventKind::Cancelled
-        ) {
+        if !turn_event_kind_is_terminal(kind) {
             return Err(TaskRuntimeError::InvalidTransition(
                 "non-terminal turn event kind".to_string(),
             ));
@@ -2987,10 +2985,8 @@ impl TaskStore {
             tx.commit()?;
             return Ok(TerminalWrite::Existing(existing));
         }
-        if matches!(
-            kind,
-            TurnEventKind::Done | TurnEventKind::Error | TurnEventKind::Cancelled
-        ) && let Some(mut existing) = first_terminal_event_on(&tx, turn_id)?
+        if turn_event_kind_is_terminal(kind)
+            && let Some(mut existing) = first_terminal_event_on(&tx, turn_id)?
         {
             let may_adopt_matching_legacy_terminal = existing.kind == kind
                 && existing
@@ -3932,16 +3928,20 @@ impl TaskStore {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
-        let latest_terminal_event_id = self.connection.query_row(
+        let latest_terminal_event_query = format!(
             "SELECT MAX(te.event_id)
                FROM turn_events te
                JOIN tasks t ON t.task_id = te.turn_id
               WHERE t.thread_id = ?1
                 AND t.kind = 'chat_turn'
-                AND te.kind IN ('done', 'error', 'cancelled')",
-            params![thread_id],
-            |row| row.get::<_, Option<i64>>(0),
-        )?;
+                AND te.kind IN ({})",
+            REDUCED_TERMINAL_TURN_EVENT_KIND_SQL_LIST,
+        );
+        let latest_terminal_event_id =
+            self.connection
+                .query_row(&latest_terminal_event_query, params![thread_id], |row| {
+                    row.get::<_, Option<i64>>(0)
+                })?;
         let (status, updated_at) = latest_task.unwrap_or_else(|| ("idle".to_string(), 0));
 
         Ok(ThreadAttention {
@@ -7387,12 +7387,15 @@ mod query_plan_tests {
 
         let plan = explain_query_plan(
             &store.connection,
-            "SELECT MAX(te.event_id)
+            &format!(
+                "SELECT MAX(te.event_id)
                FROM turn_events te
                JOIN tasks t ON t.task_id = te.turn_id
               WHERE t.thread_id = 'thread-1'
                 AND t.kind = 'chat_turn'
-                AND te.kind IN ('done', 'error', 'cancelled')",
+                AND te.kind IN ({})",
+                REDUCED_TERMINAL_TURN_EVENT_KIND_SQL_LIST,
+            ),
         );
         assert_uses_index(&plan, None, "thread_attention terminal event JOIN");
     }

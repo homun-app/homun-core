@@ -1,4 +1,7 @@
-use local_first_task_runtime::{ReducedTurnStatus, TurnEvent, TurnEventKind, reduce_turn_events};
+use local_first_task_runtime::{
+    REDUCED_TERMINAL_TURN_EVENT_KIND_SQL_LIST, ReducedTurnStatus, TurnEvent, TurnEventKind,
+    reduce_turn_events, turn_event_kind_is_terminal,
+};
 use serde_json::json;
 
 fn event(seq: i64, kind: TurnEventKind, payload: serde_json::Value) -> TurnEvent {
@@ -120,5 +123,39 @@ fn failed_terminal_without_visible_reason_is_a_contradiction() {
     assert_eq!(
         snapshot.contradictions[0].owner_to_remove,
         "execution_projection"
+    );
+}
+
+#[test]
+fn terminal_kind_authority_is_public_and_matches_sql_boundary() {
+    let terminals = [
+        TurnEventKind::Done,
+        TurnEventKind::Error,
+        TurnEventKind::Cancelled,
+    ];
+    for kind in terminals {
+        assert!(turn_event_kind_is_terminal(kind));
+    }
+
+    for kind in [
+        TurnEventKind::Delta,
+        TurnEventKind::Reasoning,
+        TurnEventKind::Activity,
+        TurnEventKind::PlanUpdate,
+        TurnEventKind::Tool,
+        TurnEventKind::Recall,
+        TurnEventKind::Suspended,
+        TurnEventKind::Aborted,
+        TurnEventKind::Retry,
+        TurnEventKind::Queued,
+        TurnEventKind::StepAdvance,
+        TurnEventKind::Heartbeat,
+    ] {
+        assert!(!turn_event_kind_is_terminal(kind), "{kind:?}");
+    }
+
+    assert_eq!(
+        REDUCED_TERMINAL_TURN_EVENT_KIND_SQL_LIST,
+        "'done', 'error', 'cancelled'"
     );
 }

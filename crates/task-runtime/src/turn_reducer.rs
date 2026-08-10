@@ -1,5 +1,7 @@
 use crate::{TurnEvent, TurnEventKind};
 
+pub const REDUCED_TERMINAL_TURN_EVENT_KIND_SQL_LIST: &str = "'done', 'error', 'cancelled'";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReducedTurnStatus {
     Empty,
@@ -51,7 +53,7 @@ pub fn reduce_turn_events(events: &[TurnEvent]) -> TurnStateSnapshot {
     for event in ordered {
         snapshot.last_seq = snapshot.last_seq.max(event.seq);
         if snapshot.is_terminal {
-            if is_terminal(event.kind) {
+            if turn_event_kind_is_terminal(event.kind) {
                 snapshot.contradictions.push(TurnContradiction {
                     code: "multiple_terminal_events",
                     detail: format!(
@@ -148,7 +150,7 @@ pub fn reduce_turn_events(events: &[TurnEvent]) -> TurnStateSnapshot {
     snapshot
 }
 
-fn is_terminal(kind: TurnEventKind) -> bool {
+pub fn turn_event_kind_is_terminal(kind: TurnEventKind) -> bool {
     matches!(
         kind,
         TurnEventKind::Done | TurnEventKind::Error | TurnEventKind::Cancelled

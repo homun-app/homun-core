@@ -1091,6 +1091,7 @@ mod tests {
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
+    use crate::turn_reducer::turn_event_kind_is_terminal;
     use crate::{
         AgentRunStatus, EffectReceiptClaim, NewAgentRun, NewExecutionEffectReceipt, TaskRecord,
         TaskStatus, TaskStore, UserId, WorkspaceId,
@@ -1189,10 +1190,11 @@ mod recovery_tests {
         let events = s.read_turn_events("turn_stale", 0).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, TurnEventKind::Aborted);
-        assert!(events.iter().all(|event| !matches!(
-            event.kind,
-            TurnEventKind::Done | TurnEventKind::Error | TurnEventKind::Cancelled
-        )));
+        assert!(
+            events
+                .iter()
+                .all(|event| !turn_event_kind_is_terminal(event.kind))
+        );
         assert!(matches!(
             s.claim_effect_receipt(&receipt.receipt_ref).unwrap(),
             EffectReceiptClaim::Resolve(_)
