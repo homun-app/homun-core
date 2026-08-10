@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Browser, BrowserContext, Dialog, Locator, Page } from "playwright-core";
 import { chromium } from "playwright-core";
 import { BrowserAutomationError } from "../contracts.js";
-import { executeAction, requireRef, type BrowserActRequest, type BrowserActionResult } from "./actions.js";
+import { executeAction, requireRef, resolveAutoComplete, type BrowserActRequest, type BrowserActionResult } from "./actions.js";
 import { BrowserArtifactRoot } from "./artifacts.js";
 import { assertNavigationAllowed } from "./navigation_guard.js";
 import {
@@ -98,6 +98,9 @@ type PageState = {
   // delta->delta sequences, collapsing delta mode into a full-page dump.
   lastFullSnapshot?: string;
   lastSnapshotFingerprint?: string;
+  // Fase 2.2: ref IDs from the previous observation so new refs can be
+  // marked with a `*` suffix in the next snapshot display text.
+  previousRefs?: Set<string>;
   consoleMessages: ConsoleEntry[];
   pendingDialog?: Dialog;
   dialogWaiters: Array<(dialog: Dialog) => void>;
@@ -314,10 +317,13 @@ export class BrowserSessionManager {
       ...params,
       previousSnapshot: state.lastFullSnapshot,
       generation: state.generation,
+      previousRefs: state.previousRefs,
     });
     state.refs = snapshot.refLocators;
     state.lastFullSnapshot = snapshot.rawSnapshot;
     state.lastSnapshotFingerprint = snapshot.fingerprint;
+    // Track current ref IDs for new-ref marking on the next observation.
+    state.previousRefs = new Set(snapshot.refs.map((r) => r.ref));
     this.rememberTarget(params.targetId, state, state.label);
     return {
       targetId: snapshot.targetId,
@@ -589,19 +595,24 @@ export class BrowserSessionManager {
     }
     await waitForPageToSettle(state.page, action);
     state.generation += 1;
+    // Post-act observation: use `extract` (40k cap, full content) after a `type` with
+    // auto_complete=false so the autocomplete dropdown options are visible in the snapshot.
+    // The larger window ensures the model can see and click the correct suggestion. For all
+    // other actions, use `interact` (interactive-only, ~6k cap) to keep per-step latency low.
+    const postActObservationMode =
+      action.kind === "type" && !resolveAutoComplete(action) ? "extract" : "interact";
     const snapshot = await createSnapshot(state.page, action.targetId, {
-      // The observation returned AFTER an action must stay CONTENT-preserving at full size: the model
-      // reads results straight from it (e.g. the cards that appear after a search submit), so shrinking
-      // it here truncates the very data the task needs. Per-step latency is instead reduced by cutting
-      // the NUMBER of steps (one-bundle form fills) and by reading structured results from the network
-      // (browser.read_network), not by starving this observation.
+      observationMode: postActObservationMode,
       ...(action as Record<string, unknown>),
       previousSnapshot: state.lastFullSnapshot,
       generation: state.generation,
+      previousRefs: state.previousRefs,
     } as BrowserSnapshotOptions);
     state.refs = snapshot.refLocators;
     state.lastFullSnapshot = snapshot.rawSnapshot;
     state.lastSnapshotFingerprint = snapshot.fingerprint;
+    // Track current ref IDs for new-ref marking on the next observation.
+    state.previousRefs = new Set(snapshot.refs.map((r) => r.ref));
     this.rememberTarget(action.targetId, state, state.label);
     return {
       ...result,

@@ -96,6 +96,7 @@ mod gateway_vault_key;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod inference_transport;
 mod model_client;
+mod model_error_mapping;
 mod provider_usage;
 mod runtime_context;
 mod usage_pricing;
@@ -317,8 +318,10 @@ use gateway_recall_context::{
     recall_stream_payload_from_hits, recall_stream_payload_from_pack, sanitize_dedup_key,
     seed_loop_memory_reads,
 };
+// `memory_service_flag` is resolved via `crate::` from cfg(test) code only.
+#[cfg_attr(not(test), allow(unused_imports))]
 use gateway_runtime_flags::{
-    memory_service_enabled, plan_autoadvance_from_evidence_enabled,
+    memory_service_enabled, memory_service_flag, plan_autoadvance_from_evidence_enabled,
     plan_reconcile_on_delivery_enabled, plan_stall_abort_enabled, turn_trace_enabled,
     turn_trace_max_bytes,
 };
@@ -390,7 +393,7 @@ use local_first_engine::markers::{VAULT_REVEAL_CLOSE, VAULT_REVEAL_OPEN};
 use local_first_engine::plan::{
     build_plan_markdown, enforce_monotonic_plan_progress, parse_plan_marker, plan_done_count,
     plan_incomplete_reason, plan_is_complete, plan_is_settled, plan_next_open, plan_step_id,
-    plan_step_status, plan_step_title, plan_value_steps,
+    plan_step_status, plan_step_title, plan_value_goal, plan_value_steps,
 };
 // Engine helpers exercised ONLY by this crate's tests (their non-test callers moved into
 // `engine::run_turn` at 5.D2). `#[cfg(test)]`-gated so they're in scope for `super::…` in `mod tests`
@@ -488,7 +491,8 @@ pub(crate) struct AppState {
     browser_url_policies: Arc<Mutex<BrowserUrlPolicyStore>>,
     memory_facade: Arc<MemoryFacade>,
     /// ADR 0022 (Tappa 1): service memoria che incapsula brief/recall/learn.
-    /// `Some` solo quando `HOMUN_MEMORY_SERVICE=on`; `None` → orchestrazione inline attuale.
+    /// `Some` di default; `None` solo con opt-out esplicito
+    /// (`HOMUN_MEMORY_SERVICE=0`/`off`/`false`) → orchestrazione inline.
     memory_service: Option<Arc<dyn MemoryRecallService>>,
     vault_store: Arc<Mutex<SQLiteVaultStore>>,
     /// 32-byte key that WRAPS the vault master key (ADR: system-usable vault
@@ -541,6 +545,73 @@ impl gateway_health::GatewayHealthState for AppState {
 
     fn recovered_stores(&self) -> Vec<String> {
         self.recovered_stores.as_ref().clone()
+    }
+
+    /// Model provider reachability is derived from the persisted provider
+    /// registry (a lightweight file read — no DB query). `reachable` is true
+    /// when an active provider with a non-empty base URL exists. The
+    /// `last_successful_inference` timestamp comes from the process-wide
+    /// cache updated by the model client after each successful response.
+    fn model_provider_health(&self) -> gateway_health::ModelProviderHealth {
+        let registry = load_provider_registry();
+        let provider = registry.active().or_else(|| registry.providers.first());
+        gateway_health::ModelProviderHealth {
+            reachable: provider.is_some_and(|p| !p.base_url.is_empty()),
+            last_successful_inference: gateway_health::last_successful_inference(),
+            provider_name: provider.map(|p| {
+                if p.label.is_empty() {
+                    p.id.clone()
+                } else {
+                    p.label.clone()
+                }
+            }),
+        }
+    }
+
+    /// Memory store health: the facade is always available (it's an `Arc`),
+    /// so the pool is considered healthy. The schema version is the known
+    /// constant from the memory crate (8) — querying the actual version
+    /// would require a DB read, which the health handler avoids.
+    fn memory_store_health(&self) -> gateway_health::MemoryStoreHealth {
+        gateway_health::MemoryStoreHealth {
+            pool_healthy: true,
+            schema_version: 8,
+        }
+    }
+
+    /// Sidecar status: browser automation is "running" when a sidecar
+    /// client has been spawned (the `browser_capability_client` is `Some`).
+    /// The contained computer is "running" when the setup coordinator
+    /// reports `Ready` (the container is verified healthy) OR the container
+    /// is live per Docker itself (e.g. started externally / by a later
+    /// bootstrap path the coordinator doesn't know about). PIDs are not
+    /// directly available from these in-memory holders.
+    fn sidecar_health(&self) -> gateway_health::SidecarHealth {
+        let browser_running = self
+            .browser_capability_client
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_some();
+        let contained_running =
+            self.setup_computer.status().ready || crate::sandbox::container_up();
+        gateway_health::SidecarHealth {
+            browser_automation: gateway_health::SidecarStatus {
+                running: browser_running,
+                pid: None,
+            },
+            contained_computer: gateway_health::SidecarStatus {
+                running: contained_running,
+                pid: None,
+            },
+        }
+    }
+
+    /// Lease counts come from the process-wide cache updated by the task
+    /// executor after lease acquisition / recovery. The health handler
+    /// reads this cached snapshot instead of locking the task_store,
+    /// preserving the lock-free liveness invariant.
+    fn lease_health(&self) -> gateway_health::LeaseHealth {
+        gateway_health::lease_health_snapshot()
     }
 }
 
@@ -1411,9 +1482,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     migrate_legacy_mcp_http_header_secrets(&state)
         .map_err(|error| std::io::Error::other(error.message))?;
-    // ADR 0022 — Tappa 1: se il flag è ON, costruisci il service memoria che
-    // incapsula brief/recall/learn. Costruito dopo il letterale perché
-    // `InProcessMemoryRecallService` prende in prestito lo stesso `AppState`.
+    // ADR 0022 — Tappa 1: il service memoria è ON di default — costruisci
+    // l'istanza che incapsula brief/recall/learn. Costruito dopo il letterale
+    // perché `InProcessMemoryRecallService` prende in prestito lo stesso
+    // `AppState`. Opt-out via `HOMUN_MEMORY_SERVICE=0`/`off`/`false`.
     let embedding: Arc<dyn local_first_memory::EmbeddingClient> =
         gateway_embedding_client(state.http.clone());
     let llm: Arc<dyn local_first_memory::LlmClient> = gateway_llm_client(state.http.clone());
@@ -1912,9 +1984,8 @@ fn episode_metadata_matches_scope(
         && metadata.get("workspace").and_then(|value| value.as_str()) == Some(workspace_id)
 }
 
-/// ADR 0022 — Tappa 1: apprendimento post-turno. Quando `HOMUN_MEMORY_SERVICE=on`
-/// ADR 0022 — Tappa 1/4: apprendimento post-turno. Quando il service è ON
-/// (`HOMUN_MEMORY_SERVICE`) instrada via `MemoryRecallService::learn`; anche nel
+/// ADR 0022 — Tappa 1/4: apprendimento post-turno. Di default (service ON)
+/// instrada via `MemoryRecallService::learn`; anche nel
 /// path OFF usa le STESSE fn del crate (3 fasi: prepare_learn_prompt →
 /// LlmClient.chat → persist_learn_extraction) con capability client costruiti
 /// al volo — così `learn_from_exchange` non è più duplicata nel gateway.
@@ -2199,7 +2270,7 @@ fn plan_steps_reconciled_on_delivery(
 #[cfg(test)]
 fn reconcile_final_plan_marker_on_delivery(plan: &ExecutionPlan, text: &str) -> String {
     match plan_steps_reconciled_on_delivery(plan, text) {
-        Some(plan_steps) => replace_latest_plan_marker(text, &plan_steps),
+        Some(plan_steps) => replace_latest_plan_marker(text, None, &plan_steps),
         None => text.to_string(),
     }
 }
@@ -2429,8 +2500,10 @@ fn runtime_plan_memory_metadata(
 /// frontier advance and the "keep going, your next step is X" nudge, i.e. exactly the harness nets
 /// that must fire when the model stops calling `step_advance` itself. With no step ever closing,
 /// the per-step budgets never reset and elapsed time became the only limit the turn had left.
-fn canonical_plan_value(steps: &[serde_json::Value]) -> serde_json::Value {
-    serde_json::json!({ "steps": steps })
+/// Carries the plan's optional `goal` (the user's objective in one sentence) alongside the
+/// steps — the same shape persisted in `runtime_plans.plan_json` (`{"goal", "steps"}`).
+fn canonical_plan_value(goal: Option<&str>, steps: &[serde_json::Value]) -> serde_json::Value {
+    serde_json::json!({ "goal": goal, "steps": steps })
 }
 
 /// The gateway's typed `ExecutionPlan` from `LoopState.plan` (ADR 0024 inc 5, P5). The loop carries
@@ -3579,15 +3652,25 @@ fn runtime_plan_memory_matches(memory: &MemoryRecord, thread_key: &str) -> bool 
 /// before a turn ends), so a CONTINUATION turn can inherit `{done,doing,…}` even before the
 /// prior turn's ‹‹PLAN›› message has been persisted/streamed into the next turn's context.
 /// Returns the steps (with verified statuses) or empty if the thread has no open plan.
+#[cfg(test)]
 fn load_runtime_plan_from_state(
     state: &AppState,
     thread_id: Option<&str>,
 ) -> Vec<serde_json::Value> {
-    let Some((user_id, workspace_id, thread_id)) = runtime_plan_control_scope(state, thread_id)
-    else {
-        return Vec::new();
-    };
-    state
+    runtime_plan_record_from_state(state, thread_id)
+        .map(|(_, steps)| steps)
+        .unwrap_or_default()
+}
+
+/// Shared reader of the thread's open runtime plan: the steps + the optional goal. Tolerates BOTH
+/// persistence shapes — the current `{"goal", "steps"}` object and the LEGACY bare step array —
+/// so plans written before the goal upgrade keep loading unchanged.
+fn runtime_plan_record_from_state(
+    state: &AppState,
+    thread_id: Option<&str>,
+) -> Option<(Option<String>, Vec<serde_json::Value>)> {
+    let (user_id, workspace_id, thread_id) = runtime_plan_control_scope(state, thread_id)?;
+    let plan = state
         .task_store
         .lock()
         .ok()
@@ -3597,9 +3680,10 @@ fn load_runtime_plan_from_state(
                 .ok()
                 .flatten()
         })
-        .filter(|plan| plan.status == "open")
-        .and_then(|plan| plan.plan_json.as_array().cloned())
-        .unwrap_or_default()
+        .filter(|plan| plan.status == "open")?;
+    let goal = local_first_engine::plan::plan_value_goal(&plan.plan_json);
+    let steps = local_first_engine::plan::plan_value_steps(&plan.plan_json);
+    Some((goal, steps))
 }
 
 /// F4 turn-start: update the cross-turn stall bookkeeping on the RESUMED plan's memory and
@@ -4112,6 +4196,7 @@ fn upsert_runtime_plan_memory(
 fn upsert_runtime_plan_memory_from_state(
     state: &AppState,
     thread_id: Option<&str>,
+    goal: Option<&str>,
     plan: &[serde_json::Value],
 ) {
     let Some((user_id, workspace_id, thread_key)) = runtime_plan_control_scope(state, thread_id)
@@ -4124,7 +4209,9 @@ fn upsert_runtime_plan_memory_from_state(
     } else {
         "open"
     };
-    let plan_json = serde_json::Value::Array(plan.to_vec());
+    // Canonical persistence shape: `{"goal": <string|null>, "steps": [...]}` (readers tolerate the
+    // legacy bare-array form).
+    let plan_json = serde_json::json!({ "goal": goal, "steps": plan });
     let canonical_write_ok = state
         .task_store
         .lock()
@@ -4252,7 +4339,10 @@ fn merge_plan(plan: &mut Vec<serde_json::Value>, sent: &[serde_json::Value]) -> 
     claims
 }
 
-fn plan_tool_sent(name: &str, args_raw: &str) -> Result<Vec<serde_json::Value>, String> {
+fn plan_tool_sent(
+    name: &str,
+    args_raw: &str,
+) -> Result<(Option<String>, Vec<serde_json::Value>), String> {
     let args: serde_json::Value = serde_json::from_str(args_raw)
         .map_err(|_| format!("{name} requires valid JSON arguments"))?;
     if name == "step_advance" {
@@ -4275,17 +4365,30 @@ fn plan_tool_sent(name: &str, args_raw: &str) -> Result<Vec<serde_json::Value>, 
             "pending" => "todo",
             status => status,
         };
-        return Ok(vec![serde_json::json!({
-            "id": id,
-            "status": status,
-            "detail": args.get("detail").and_then(serde_json::Value::as_str).unwrap_or(""),
-        })]);
+        return Ok((
+            None,
+            vec![serde_json::json!({
+                "id": id,
+                "status": status,
+                "detail": args.get("detail").and_then(serde_json::Value::as_str).unwrap_or(""),
+            })],
+        ));
     }
-    Ok(args
-        .get("steps")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default())
+    // The optional top-level `goal` (the user's objective in one sentence, set when the plan is
+    // created). null/empty/whitespace → None → the canonical plan KEEPS its stored goal.
+    let goal = args
+        .get("goal")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|goal| !goal.is_empty())
+        .map(str::to_string);
+    Ok((
+        goal,
+        args.get("steps")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+    ))
 }
 
 /// Searches the user's long-term memory (personal + active project) for the query
@@ -7298,9 +7401,10 @@ save/export a file to a folder, call save_artifact(file, destination)."
         // (personal scope) and the active project, so the chat is continuous instead
         // of starting cold every turn. Sensitive items are excluded here by design.
         //
-        // ADR 0022 — Tappa 1: quando `HOMUN_MEMORY_SERVICE=on`, l'assemblaggio del
-        // briefing è incapsulato in `MemoryRecallService::brief` (che delega alle
-        // stesse funzioni, nello stesso ordine). Flag OFF → path inline attuale.
+        // ADR 0022 — Tappa 1: di default l'assemblaggio del briefing è
+        // incapsulato in `MemoryRecallService::brief` (che delega alle stesse
+        // funzioni, nello stesso ordine). Opt-out
+        // `HOMUN_MEMORY_SERVICE=0`/`off`/`false` → path inline.
         let system = if let Some(service) = state.memory_service.as_ref() {
             let scope = memory_scope_for_turn(request.thread_id.as_deref());
             let pack = service.brief(&scope, &request.prompt);
@@ -7509,7 +7613,9 @@ Use update_plan to update the step status (doing→done), shown in the \
 \"Plan\" panel. To move a step's status (e.g. doing→done) call step_advance with its id (shown in \
 parentheses after the title in the plan card) and the new status — this updates that ONE step \
 WITHOUT re-sending the plan, so steps never duplicate; use update_plan only to CREATE or revise \
-the plan. The plan is ALREADY shown to the user as a CARD: do NOT \
+the plan. GOAL: when CREATING the plan you MUST set the top-level `goal` field to the user's \
+objective in ONE sentence, written in the USER'S language (use null when you are only updating \
+step statuses of an existing plan). The plan is ALREADY shown to the user as a CARD: do NOT \
 repeat it in the reply text too — no list or table of the steps in prose (at most one \
 line of context). For single-step requests no plan is needed. \
 STEP-AT-A-TIME EXECUTION: work the plan ONE step at a time — do, then VERIFY that step's \
@@ -8212,17 +8318,22 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // reading only the context marker made a continuation turn resume 0 steps and revert
     // done→doing (the "il piano riparta" symptom). Fall back to the context marker for a
     // thread-less turn or a store miss.
-    let mut resume_plan: Vec<serde_json::Value> = {
-        let from_store = load_runtime_plan_from_state(state, thread_id.as_deref());
-        if !from_store.is_empty() {
-            from_store
+    let (mut resume_plan, resume_goal): (Vec<serde_json::Value>, Option<String>) = {
+        let from_store = runtime_plan_record_from_state(state, thread_id.as_deref());
+        if let Some((goal, steps)) = from_store
+            && !steps.is_empty()
+        {
+            (steps, goal)
         } else {
-            effective_context
+            // A marker-resumed plan carries no goal line (it was never part of the checklist
+            // grammar) — without a durable goal the canonical plan starts goal-less.
+            let steps = effective_context
                 .iter()
                 .rev()
                 .find(|m| m.text.contains("‹‹PLAN››"))
                 .map(|m| parse_plan_marker(&m.text))
-                .unwrap_or_default()
+                .unwrap_or_default();
+            (steps, None)
         }
     };
     // F4: a RESUMED plan that closes no new step across turns is stuck (the per-turn recovery
@@ -8233,7 +8344,12 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     if applies_new_input && !resume_plan.is_empty() && plan_stall_abort_enabled() {
         let stalled = plan_stall_check_and_bump(state, thread_id.as_deref(), &resume_plan);
         if stalled && let Some(title) = block_stalled_step(&mut resume_plan) {
-            upsert_runtime_plan_memory_from_state(state, thread_id.as_deref(), &resume_plan);
+            upsert_runtime_plan_memory_from_state(
+                state,
+                thread_id.as_deref(),
+                resume_goal.as_deref(),
+                &resume_plan,
+            );
             if verbose_debug() {
                 eprintln!(
                     "[plan] F4: blocked stalled step after {MAX_PLAN_STALL_RESUMES} no-progress resumes: «{title}»"
@@ -8309,7 +8425,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         // F2 verification, F5 next-step and the ‹‹PLAN›› marker all read THIS. Seeded from
         // the prior conversation (F4 resume). A step is `done` only after F2 verified it.
         // P5: carried as an opaque `Value` in `LoopState` (engine-safe); seeded here from the resume.
-        ls.plan = canonical_plan_value(&resume_plan);
+        ls.plan = canonical_plan_value(resume_goal.as_deref(), &resume_plan);
         if verbose_debug() {
             let done = resume_plan
                 .iter()
@@ -8814,6 +8930,10 @@ async fn run_agent_rounds(
         execution_contract: effect_contract.clone(),
         effect_run_id: effect_run_id.clone(),
         turn_id: effect_turn_id.clone(),
+        step_memory: None,
+        auto_screenshot: false,
+        screenshot_on_stall: false,
+        consecutive_snapshot_count: 0,
     };
     let plan_progress = GatewayPlanProgress {
         state: state_owned.clone(),
@@ -9731,7 +9851,8 @@ fn persist_hitl_wait_payload(
         .load_runtime_plan(user_id.as_str(), &workspace_id, thread_id)
         .map_err(|error| format!("HITL runtime plan lookup failed: {error}"))?
         .filter(|plan| plan.status == "open")
-        .and_then(|plan| plan.plan_json.as_array().cloned())
+        // Tolerates both persistence shapes: `{"goal", "steps"}` and the legacy bare step array.
+        .map(|plan| local_first_engine::plan::plan_value_steps(&plan.plan_json))
         .unwrap_or_default();
     let remaining_plan = hitl_resume::bounded_remaining_plan(plan);
     let browser_checkpoint_generation = task_store
@@ -9938,6 +10059,19 @@ fn turn_event_from_stream_value(
             serde_json::json!({ "markdown": value.get("markdown").and_then(|t| t.as_str()).unwrap_or("") }),
         ),
         "tool_result" => (local_first_task_runtime::TurnEventKind::Tool, value.clone()),
+        "step_advance" => (
+            local_first_task_runtime::TurnEventKind::StepAdvance,
+            // Frontend contract (exact): step_id, title, from (null for a new step), to,
+            // verified (F2 verdict, null for plain moves), note.
+            serde_json::json!({
+                "step_id": value.get("step_id").and_then(|v| v.as_str()).unwrap_or(""),
+                "title": value.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                "from": value.get("from").cloned().filter(|v| !v.is_null()).unwrap_or(serde_json::Value::Null),
+                "to": value.get("to").and_then(|v| v.as_str()).unwrap_or(""),
+                "verified": value.get("verified").cloned().filter(|v| !v.is_null()).unwrap_or(serde_json::Value::Null),
+                "note": value.get("note").cloned().filter(|v| !v.is_null()).unwrap_or(serde_json::Value::Null),
+            }),
+        ),
         "recall" => (
             local_first_task_runtime::TurnEventKind::Recall,
             value
@@ -9946,11 +10080,11 @@ fn turn_event_from_stream_value(
                 .unwrap_or(serde_json::Value::Null),
         ),
         "error" => (
-            local_first_task_runtime::TurnEventKind::Activity,
+            local_first_task_runtime::TurnEventKind::Error,
             serde_json::json!({
-                "phase": "stream_error",
+                "code": value.get("code").and_then(Value::as_str).unwrap_or(""),
                 "message": value.get("message").and_then(Value::as_str).unwrap_or(""),
-                "transport": value,
+                "retryable": value.get("retryable").and_then(Value::as_bool).unwrap_or(false),
             }),
         ),
         // unknown event types (e.g. choice_prompt, vault_propose) are not turn events
@@ -10342,12 +10476,18 @@ pub(crate) struct GatewayPlanProgress {
 }
 
 impl local_first_engine::PlanProgress for GatewayPlanProgress {
-    async fn persist_plan(&self, thread: Option<&str>, steps: &[serde_json::Value]) {
+    async fn persist_plan(
+        &self,
+        thread: Option<&str>,
+        goal: Option<&str>,
+        steps: &[serde_json::Value],
+    ) {
         let st = self.state.clone();
         let thread = thread.map(str::to_string);
+        let goal = goal.map(str::to_string);
         let steps = steps.to_vec();
         let _ = tokio::task::spawn_blocking(move || {
-            upsert_runtime_plan_memory_from_state(&st, thread.as_deref(), &steps);
+            upsert_runtime_plan_memory_from_state(&st, thread.as_deref(), goal.as_deref(), &steps);
         })
         .await;
     }
@@ -10387,10 +10527,14 @@ impl local_first_engine::PlanProgress for GatewayPlanProgress {
         plan_steps_reconciled_on_delivery(&plan_value_from(plan), delivered)
     }
 
-    fn plan_value_from_steps(&self, steps: &[serde_json::Value]) -> serde_json::Value {
+    fn plan_value_from_steps(
+        &self,
+        goal: Option<&str>,
+        steps: &[serde_json::Value],
+    ) -> serde_json::Value {
         // The other half of the bridge (5.D1c.5): a fresh step list as the canonical plan Value —
         // the shape the loop reads back. Pure — no `self.state` needed.
-        canonical_plan_value(steps)
+        canonical_plan_value(goal, steps)
     }
 }
 
@@ -10467,10 +10611,7 @@ impl local_first_engine::TurnPolicy for GatewayTurnPolicy {
         // text-only. `Unknown` still sends — a screenshot wasted on a blind model costs one round,
         // whereas withholding it from a model that CAN see blinds the whole browsing turn. (The user's
         // own uploads make the opposite trade: see `vision::plan_attachments`.)
-        !matches!(
-            model_vision_support(base_url, model),
-            vision::VisionSupport::No
-        )
+        model_supports_vision(base_url, model)
     }
 }
 
@@ -20469,7 +20610,15 @@ fn resolve_role_for_task(goal: &str, role: &str) -> Option<ResolvedRole> {
             .join("\n");
         let prompt = format!(
             "You are a model router. Choose the model that performs BEST on this task, \
-             based on what each model excels at.\n\nTask:\n{goal}\n\nCandidate models:\n{list}\n\n\
+             based on what each model excels at.
+
+Task:
+{goal}
+
+Candidate models:
+{list}
+
+\
              Reply ONLY with JSON: {{\"model_id\": \"<exactly one of the listed ids>\"}}."
         );
         let request = GenerateJsonRequest {
@@ -27203,7 +27352,11 @@ async fn ensure_contained_browser_or_host_fallback(state: &AppState, tx: &Stream
         },
     )
     .await;
-    let _ = tokio::task::spawn_blocking(crate::sandbox::ensure_contained_computer).await;
+    match tokio::task::spawn_blocking(crate::sandbox::ensure_contained_computer).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => tracing::warn!("sandbox: contained-computer bootstrap failed: {e}"),
+        Err(e) => tracing::warn!("sandbox: contained-computer bootstrap task failed: {e}"),
+    }
     // Cold Docker + container start can take a while; poll up to the timeout the user asked for.
     for _ in 0..CONTAINED_BROWSER_START_POLLS {
         tokio::time::sleep(std::time::Duration::from_millis(1000)).await;

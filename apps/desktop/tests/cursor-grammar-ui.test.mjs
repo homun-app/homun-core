@@ -64,6 +64,27 @@ const chatView = await readFile(
   new URL("../src/components/ChatView.tsx", import.meta.url),
   "utf8",
 );
+const useChatTurnStateMachine = await readFile(
+  new URL("../src/components/useChatTurnStateMachine.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
+const useChatTurnSubmissionHook = await readFile(
+  new URL("../src/components/useChatTurnSubmission.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
+const useChatStreamResumeHook = await readFile(
+  new URL("../src/components/useChatStreamResume.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatViewTypes = await readFile(
   new URL("../src/components/ChatViewTypes.ts", import.meta.url),
   "utf8",
@@ -136,6 +157,20 @@ const chatComputerSessionHook = await readFile(
 });
 const chatSteeringQueueHook = await readFile(
   new URL("../src/components/useChatSteeringQueue.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
+const useChatApprovalFlowHook = await readFile(
+  new URL("../src/components/useChatApprovalFlow.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
+const chatBrowserActivityLifecycleHook = await readFile(
+  new URL("../src/components/useChatBrowserActivityLifecycle.ts", import.meta.url),
   "utf8",
 ).catch((error) => {
   if (error.code === "ENOENT") return "";
@@ -1692,7 +1727,7 @@ test("ChatView delegates message activity rendering to MessageActivity", () => {
 });
 
 test("ChatView delegates assistant thinking rendering to AssistantThinkingState", () => {
-  assert.match(chatView, /import \{ type ChatStreamStatus \} from "\.\/AssistantThinkingState";/);
+  assert.match(useChatTurnStateMachine, /import type \{ ChatStreamStatus \} from "\.\/AssistantThinkingState";/);
   assert.doesNotMatch(chatView, /<AssistantThinkingState/);
   assert.match(chatMessageContent, /from "\.\/AssistantThinkingState";/);
   assert.match(chatMessageContent, /<AssistantThinkingState status=\{streamStatus\}/);
@@ -1834,9 +1869,13 @@ test("ChatView delegates structured payload parsing to ChatPayloadParsers", () =
   assert.match(chatPayloadParsers, /export function latestActivitySteps/);
 });
 
-test("ChatView delegates durable activity projection ownership to useChatActivityProjection", () => {
-  assert.match(chatView, /from "\.\/useChatActivityProjection";/);
-  assert.match(chatView, /useChatActivityProjection\(\{/);
+test("ChatView delegates browser/activity lifecycle ownership to useChatBrowserActivityLifecycle", () => {
+  assert.match(chatView, /from "\.\/useChatBrowserActivityLifecycle";/);
+  assert.match(chatView, /useChatBrowserActivityLifecycle\(\{/);
+  assert.doesNotMatch(chatView, /from "\.\/useChatActivityProjection";/);
+  assert.doesNotMatch(chatView, /useChatActivityProjection\(\{/);
+  assert.doesNotMatch(chatView, /from "\.\/useChatComputerSession";/);
+  assert.doesNotMatch(chatView, /useChatComputerSession\(\{/);
   assert.doesNotMatch(chatView, /fetchThreadActivity/);
   assert.doesNotMatch(chatView, /latestPlanMarkdown/);
   assert.doesNotMatch(chatView, /latestActivitySteps/);
@@ -1847,18 +1886,28 @@ test("ChatView delegates durable activity projection ownership to useChatActivit
   assert.doesNotMatch(chatView, /setProjectedSubagents/);
   assert.doesNotMatch(chatView, /setProjectedActiveTurn/);
   assert.doesNotMatch(chatView, /setProjectionLoaded/);
+  assert.doesNotMatch(chatView, /createLoadingComputerSession/);
+  assert.doesNotMatch(chatView, /createUnavailableComputerSession/);
+  assert.doesNotMatch(chatView, /mapCoreComputerSession/);
+  assert.doesNotMatch(chatView, /coreBridge\s*\.\s*localComputerSession/);
+  assert.doesNotMatch(chatView, /coreBridge\s*\.\s*localComputerArtifactPreview/);
+  assert.doesNotMatch(chatView, /coreBridge\s*\.\s*pauseLocalComputerSession/);
+  assert.doesNotMatch(chatView, /coreBridge\s*\.\s*resumeLocalComputerSession/);
+  assert.doesNotMatch(chatView, /coreBridge\s*\.\s*requestLocalComputerTakeover/);
+  // The lifecycle hook composes both sub-hooks
+  assert.match(chatBrowserActivityLifecycleHook, /from "\.\/useChatComputerSession";/);
+  assert.match(chatBrowserActivityLifecycleHook, /from "\.\/useChatActivityProjection";/);
+  assert.match(chatBrowserActivityLifecycleHook, /export function useChatBrowserActivityLifecycle/);
+  // The sub-hooks still own their internals
   assert.match(chatActivityProjectionHook, /export function useChatActivityProjection/);
   assert.match(chatActivityProjectionHook, /fetchThreadActivity/);
-  assert.match(chatActivityProjectionHook, /latestPlanMarkdown/);
-  assert.match(chatActivityProjectionHook, /latestActivitySteps/);
-  assert.match(chatActivityProjectionHook, /parsePlanSteps/);
-  assert.match(chatActivityProjectionHook, /createTurnReplayState/);
-  assert.match(chatActivityProjectionHook, /replayStatusFromProjection/);
+  assert.match(chatComputerSessionHook, /export function useChatComputerSession/);
+  assert.match(chatComputerSessionHook, /createLoadingComputerSession/);
 });
 
 test("ChatView delegates stream event projection ownership to chatStreamEventProjection", () => {
-  assert.match(chatView, /from "\.\/chatStreamEventProjection";/);
-  assert.match(chatView, /projectChatStreamEvent\(/);
+  assert.match(useChatTurnSubmissionHook, /from "\.\/chatStreamEventProjection";/);
+  assert.match(useChatTurnSubmissionHook, /projectChatStreamEvent\(/);
   assert.doesNotMatch(chatView, /chatEventPartFromStream/);
   assert.doesNotMatch(chatView, /shouldDropStructuredMarkerDelta/);
   assert.match(chatStreamEventProjection, /export function projectChatStreamEvent/);
@@ -1881,10 +1930,101 @@ test("ChatView delegates stream lifecycle ownership to useChatStreamLifecycle", 
   assert.match(chatStreamLifecycleHook, /cancelActiveStreaming/);
 });
 
+test("stop and resumed-stream cancel closures reconcile the active turn projection", () => {
+  // stopActiveTurn branch 1 (local streaming cancel) must clear the projected
+  // active turn before delegating to the cancel closure, otherwise the UI
+  // stays on "assistant is thinking" with a running timer after Stop.
+  assert.match(
+    useChatTurnSubmissionHook,
+    /clearProjectedActiveTurn\(\);\s*\n\s*cancelActiveStreaming\(\);/,
+  );
+  // Local cancel closures bump the island projection refresh nonce after the
+  // cancel DELETE settles, so the activity projection re-fetches and
+  // reconciles with the gateway instead of re-populating a still-active turn
+  // (fetch-vs-DELETE race).
+  assert.match(
+    useChatTurnSubmissionHook,
+    /cancelChatPromptStream\(requestId\)\s*\n\s*\.catch\(\(\) => undefined\)\s*\n\s*\.then\(\(\) => bumpIslandRefreshNonce\(\)\);/,
+  );
+  // Cancel closures must NOT bump the activity nonce: activityNonce only
+  // drives the island Activity section auto-open, and stopping a turn must
+  // never re-open the island.
+  assert.doesNotMatch(
+    useChatTurnSubmissionHook,
+    /\.then\(\(\) => bumpActivityNonce\(\)\)/,
+  );
+  assert.doesNotMatch(
+    useChatStreamResumeHook,
+    /\.then\(\(\) => bumpActivityNonce\(\)\)/,
+  );
+  // stopActiveTurn branch 2 (direct cancelTurn) resets the composer streaming
+  // state when the cancelled turn is the one owned by a local/resumed stream.
+  assert.match(
+    useChatTurnSubmissionHook,
+    /streamOwnerTurnRef\.current === turnId \|\| activeTurnIdRef\.current === turnId/,
+  );
+  // Branch 2 clears the stream status only for the cancelled turn's request
+  // (derived from the turn id), never wiping another request's status.
+  assert.match(useChatTurnSubmissionHook, /requestIdFromTurnId\(turnId\)/);
+  assert.match(
+    useChatTurnSubmissionHook,
+    /setStreamStatus\(\(current\) => clearStreamStatusForRequest\(current, cancelledRequestId\)\);/,
+  );
+  // Resumed streams must register a cancel closure so the composer Stop works
+  // during a resumed stream, and release it after.
+  assert.match(useChatStreamResumeHook, /setActiveStreamingCancel\(cancelStreamingRequest\);/);
+  assert.match(useChatStreamResumeHook, /clearActiveStreamingCancel\(cancelStreamingRequest\);/);
+  assert.match(useChatStreamResumeHook, /coreBridge\.cancelChatPromptStream\(requestId\)/);
+  assert.match(useChatStreamResumeHook, /markStreamCancelled\(requestId\);/);
+  // The resume cancel closure resets the thinking/streaming state immediately.
+  assert.match(useChatStreamResumeHook, /setStreamingAssistantId\(null\);/);
+  assert.match(useChatStreamResumeHook, /setPromptSubmitting\(false\);/);
+  assert.match(useChatStreamResumeHook, /clearStreamStatusForRequest\(current, requestId\)/);
+  // The resume cancel closure drops the synthetic optimistic layer; the
+  // persisted partial text comes back from the DB replay.
+  assert.match(useChatStreamResumeHook, /setOptimisticMessages\(null\);/);
+  // The resume catch surfaces real errors (like submitPrompt) but stays
+  // silent on local cancels.
+  assert.match(useChatStreamResumeHook, /cancelledLocally \|\| isStreamCancelled\(requestId\)/);
+  assert.match(useChatStreamResumeHook, /setPromptError\(describeBridgeError\(error\)\);/);
+  // The resume path guards both event projection and result commit on cancel.
+  assert.match(useChatStreamResumeHook, /isStreamCancelled\(requestId\)/);
+  assert.match(useChatStreamResumeHook, /clearStreamCancelled\(requestId\);/);
+});
+
+test("cancel DELETE uses the server turn id and never swallows non-2xx", () => {
+  // After a resume, POST /turns answers with the EXISTING execution id while
+  // the client holds a fresh requestId: coreBridge must remember the
+  // server-assigned turn id per requestId so the cancel closure targets the
+  // real turn instead of a `turn_${requestId}` ghost (which 404s).
+  assert.match(coreBridge, /const serverTurnIdByRequestId = new Map<string, string>\(\);/);
+  // The submit path registers the server turn id right after enqueue (covers
+  // both "queued" and "resumed" responses).
+  assert.match(coreBridge, /const turnId = enqueued\.turn_id;/);
+  assert.match(coreBridge, /serverTurnIdByRequestId\.set\(requestId, turnId\);/);
+  // The cancel closure resolves the server id first and falls back to the
+  // derived id only when the server id is unknown.
+  assert.match(
+    coreBridge,
+    /serverTurnIdByRequestId\.get\(requestId\) \?\? `turn_\$\{requestId\}`/,
+  );
+  assert.match(coreBridge, /await cancelTurn\(turnId\);/);
+  // The mapping is cleaned up once the turn's replay settles so it cannot
+  // grow unboundedly across sessions.
+  assert.match(coreBridge, /serverTurnIdByRequestId\.delete\(requestId\);/);
+  // cancelTurn must NOT swallow non-2xx: a silent 404 historically meant the
+  // server-side cancel never happened. It stays non-blocking (warn, no throw).
+  assert.match(chatApi, /export async function cancelTurn\(turnId: string\): Promise<void>/);
+  assert.match(chatApi, /if \(!response\.ok\)/);
+  assert.match(chatApi, /console\.warn\(/);
+  assert.match(chatApi, /cancelTurn DELETE \/api\/chat\/turns\/\$\{turnId\} returned HTTP \$\{response\.status\}/);
+  assert.doesNotMatch(chatApi, /cancelTurn[\s\S]*throw new Error\(.*cancel/i);
+});
+
 test("ChatView delegates auto-title ownership to useChatAutoTitle", () => {
   assert.match(chatView, /from "\.\/useChatAutoTitle";/);
   assert.match(chatView, /useChatAutoTitle\(\{/);
-  assert.match(chatView, /persistAutoTitleForCompletedTurn\(/);
+  assert.match(useChatTurnSubmissionHook, /persistAutoTitleForCompletedTurn\(/);
   assert.doesNotMatch(chatView, /function persistAutoTitleForCompletedTurn/);
   assert.doesNotMatch(chatView, /titledThreadsRef/);
   assert.doesNotMatch(chatView, /coreBridge\.autoTitleThread/);
@@ -1947,7 +2087,7 @@ test("ChatView delegates steering prompt edit assembly to chatSteeringPrompt", (
 });
 
 test("ChatView delegates model-facing prompt assembly to chatPromptAssembly", () => {
-  assert.match(chatView, /from "\.\.\/lib\/chatPromptAssembly";/);
+  assert.match(useChatTurnSubmissionHook, /from "\.\.\/lib\/chatPromptAssembly";/);
   assert.doesNotMatch(chatView, /const skillPrefix = options\?\.forcedSkillsId/);
   assert.doesNotMatch(chatView, /Apply this instruction to the active task while keeping the quoted context/);
   assert.doesNotMatch(chatView, /Reply to the quoted message keeping the context/);
@@ -2059,7 +2199,7 @@ test("ChatView delegates memory artifact loading to useChatMemoryArtifacts", () 
 test("ChatView delegates follow-up suggestion ownership to useChatFollowUps", () => {
   assert.match(chatView, /from "\.\/useChatFollowUps";/);
   assert.match(chatView, /useChatFollowUps\(\{\s*previousUserMessageIndex,/);
-  assert.match(chatView, /clearFollowUps\(\)/);
+  assert.match(useChatTurnSubmissionHook, /clearFollowUps\(\)/);
   assert.doesNotMatch(chatView, /coreBridge\s*\.\s*chatSuggestions/);
   assert.doesNotMatch(chatView, /const \[followUps,\s*setFollowUps\]/);
   assert.match(chatFollowUpsHook, /export function useChatFollowUps/);
@@ -2119,9 +2259,8 @@ test("ChatView delegates inspector workspace ownership to useChatInspectorWorksp
   assert.match(chatInspectorWorkspace, /coreBridge\s*\.\s*fsFile/);
 });
 
-test("ChatView delegates local computer session ownership to useChatComputerSession", () => {
-  assert.match(chatView, /from "\.\/useChatComputerSession";/);
-  assert.match(chatView, /useChatComputerSession\(\{/);
+test("useChatBrowserActivityLifecycle delegates computer session ownership to useChatComputerSession", () => {
+  assert.match(chatBrowserActivityLifecycleHook, /useChatComputerSession\(\{/);
   assert.doesNotMatch(chatView, /createLoadingComputerSession/);
   assert.doesNotMatch(chatView, /createUnavailableComputerSession/);
   assert.doesNotMatch(chatView, /mapCoreComputerSession/);
@@ -2141,9 +2280,12 @@ test("ChatView delegates local computer session ownership to useChatComputerSess
   assert.match(chatComputerSessionHook, /coreBridge\s*\.\s*requestLocalComputerTakeover/);
 });
 
-test("ChatView delegates steering queue ownership to useChatSteeringQueue", () => {
-  assert.match(chatView, /from "\.\/useChatSteeringQueue";/);
-  assert.match(chatView, /useChatSteeringQueue\(\{/);
+test("ChatView delegates approval flow ownership to useChatApprovalFlow", () => {
+  assert.match(chatView, /from "\.\/useChatApprovalFlow";/);
+  assert.match(chatView, /useChatApprovalFlow\(\{/);
+  assert.doesNotMatch(chatView, /from "\.\/useChatSteeringQueue";/);
+  assert.doesNotMatch(chatView, /useChatSteeringQueue\(\{/);
+  assert.doesNotMatch(chatView, /from "\.\.\/lib\/chat-runtime\/steering";/);
   assert.doesNotMatch(chatView, /createSteeringQueueState/);
   assert.doesNotMatch(chatView, /reconcileSteering/);
   assert.doesNotMatch(chatView, /applySteeringChange/);
@@ -2151,6 +2293,10 @@ test("ChatView delegates steering queue ownership to useChatSteeringQueue", () =
   assert.doesNotMatch(chatView, /updateSteering/);
   assert.doesNotMatch(chatView, /deleteSteering/);
   assert.doesNotMatch(chatView, /sendSteeringNow/);
+  assert.match(useChatApprovalFlowHook, /from "\.\/useChatSteeringQueue";/);
+  assert.match(useChatApprovalFlowHook, /useChatSteeringQueue\(\{/);
+  assert.match(useChatApprovalFlowHook, /visiblePendingSteeringRows/);
+  assert.match(useChatApprovalFlowHook, /filterActiveApprovels/);
   assert.match(chatSteeringQueueHook, /export function useChatSteeringQueue/);
   assert.match(chatSteeringQueueHook, /createSteeringQueueState/);
   assert.match(chatSteeringQueueHook, /reconcileSteering/);
@@ -2162,7 +2308,7 @@ test("ChatView delegates steering queue ownership to useChatSteeringQueue", () =
 });
 
 test("ChatView delegates resume marker persistence to chatResumeMarkers", () => {
-  assert.match(chatView, /from "\.\.\/lib\/chatResumeMarkers";/);
+  assert.match(useChatTurnSubmissionHook, /from "\.\.\/lib\/chatResumeMarkers";/);
   assert.doesNotMatch(chatView, /RESUME_MARKER_TTL_MS/);
   assert.doesNotMatch(chatView, /function resumeMarkerKey/);
   assert.doesNotMatch(chatView, /window\.localStorage\.(?:setItem|getItem|removeItem)/);
@@ -2187,7 +2333,7 @@ test("RichMessageRenderer imports typed markdown helpers", () => {
 });
 
 test("ChatView delegates chat event projection helpers to chatEventParts", () => {
-  assert.match(chatView, /from "\.\.\/lib\/chatEventParts";/);
+  assert.match(useChatTurnSubmissionHook, /from "\.\.\/lib\/chatEventParts";/);
   assert.doesNotMatch(chatView, /chatEventPartFromStream/);
   assert.doesNotMatch(chatView, /function normalizeChatEventParts/);
   assert.doesNotMatch(chatView, /shouldDropStructuredMarkerDelta/);
@@ -2351,6 +2497,13 @@ test("ChatView delegates uncertain effect verification to InlineUncertainEffectP
   assert.match(inlineUncertainEffectPanel, /effectFamilyLabel/);
   assert.match(inlineUncertainEffectPanel, /formatEffectTime/);
   assert.match(inlineUncertainEffectPanel, /verifiedNotApplied/);
+  // The browser family gets outcome-verification copy (it is a verification
+  // gate, NOT an authorization request): dedicated title + prompt keys, used
+  // ONLY for the browser family while other families keep the generic copy.
+  assert.match(inlineUncertainEffectPanel, /chat\.effectVerificationTitleBrowser/);
+  assert.match(inlineUncertainEffectPanel, /chat\.effectVerificationPromptBrowser/);
+  assert.match(inlineUncertainEffectPanel, /operationFamily === "browser"/);
+  assert.match(inlineUncertainEffectPanel, /chat\.effectVerificationPrompt"\)/);
 });
 
 test("ChatView delegates inline approvals to InlineApprovelPanel", () => {
@@ -2525,7 +2678,7 @@ test("composer spacing keeps prompt and metadata compact but distinct", () => {
 
 test("composer keeps prior effective-model provenance separate from the next-turn override", () => {
   assert.match(chatView, /lastAssistantEffectiveModel/);
-  assert.match(chatView, /threadMessages[\s\S]*?role\s*===\s*"assistant"[\s\S]*?\.model/);
+  assert.match(useChatTurnSubmissionHook, /threadMessages[\s\S]*?role\s*===\s*"assistant"[\s\S]*?\.model/);
   assert.match(composerShell, /selectedNextTurnModel/);
   assert.match(composerShell, /effectiveModelLabel/);
   assert.match(composerShell, /composerModelButtonLabel/);
@@ -2577,7 +2730,7 @@ test("accepted submissions reset every next-turn model while rejected submission
 });
 
 test("assistant model provenance uses only gateway effective_model evidence", () => {
-  assert.match(chatView, /effectiveModelFromGateway\(result\.effective_model\)/);
+  assert.match(useChatTurnSubmissionHook, /effectiveModelFromGateway\(result\.effective_model\)/);
   assert.match(chatView, /latestAssistantEffectiveModel\(threadMessages\)/);
   assert.doesNotMatch(
     chatView,
@@ -2766,4 +2919,98 @@ test("the foundation respects reduced motion", () => {
   assert.match(reducedMotion, /animation-iteration-count:/);
   assert.match(reducedMotion, /scroll-behavior:/);
   assert.match(reducedMotion, /transition-duration:/);
+});
+
+// ── Plan goal + step_advance contracts ──────────────────────────────────────
+
+const planGoalModule = await readFile(
+  new URL("../src/lib/chat-runtime/planGoal.mjs", import.meta.url),
+  "utf8",
+);
+const stepAdvanceDisplayModule = await readFile(
+  new URL("../src/lib/chat-runtime/stepAdvanceDisplay.mjs", import.meta.url),
+  "utf8",
+);
+const messageStepAdvance = await readFile(
+  new URL("../src/components/MessageStepAdvance.tsx", import.meta.url),
+  "utf8",
+);
+const planStepPulseHook = await readFile(
+  new URL("../src/components/usePlanStepPulse.ts", import.meta.url),
+  "utf8",
+);
+const appTypes = await readFile(new URL("../src/types.ts", import.meta.url), "utf8");
+
+test("parsePlanGoal pins the **Goal**: line contract and stays robust without it", () => {
+  assert.match(planGoalModule, /\^\\\*\\\*Goal\\\*\\\*:\\s\*\(\.\+\)\$\/m/);
+  assert.match(planGoalModule, /export function parsePlanGoal\(markdown\)/);
+  assert.match(chatPayloadParsers, /export \{ parsePlanGoal \} from "\.\.\/lib\/chat-runtime\/planGoal";/);
+  assert.match(chatActivityProjectionHook, /workspacePlanGoal/);
+  assert.match(chatActivityProjectionHook, /parsePlanGoal/);
+  assert.doesNotMatch(chatView, /parsePlanGoal/);
+});
+
+test("parsePlanSteps keeps the backticked step id for step_advance matching", () => {
+  assert.match(chatPayloadParsers, /\(\?:\\\(\`\(\[\^`\]\*\)\`\\\)\)\?/);
+  assert.match(chatPayloadParsers, /id\?: string;/);
+});
+
+test("the plan goal renders above the step list via the objective pattern", () => {
+  assert.match(workspaceIslandSections, /planGoal: string \| null;/);
+  assert.match(workspaceIslandSections, /chat\.planGoal/);
+  assert.match(workspaceIslandSections, /projectObjective \?\? planGoal/);
+  assert.match(workspaceIslandSections, /workspace-island-objective/);
+  assert.match(chatWorkspaceDock, /planGoal=\{planGoal\}/);
+  assert.match(chatView, /planGoal=\{workspacePlanGoal\}/);
+  assert.doesNotMatch(chatView, /workspace-island-objective/);
+});
+
+test("the step_advance wire payload is typed end to end", () => {
+  assert.match(coreBridge, /export interface StepAdvancePayload/);
+  assert.match(coreBridge, /\{ type: "step_advance"; request_id: string; payload: StepAdvancePayload; seq\?: number \}/);
+  assert.match(appTypes, /\{ type: "step_advance"; payload: StepAdvancePayload \}/);
+  assert.match(appTypes, /StepAdvancePayload,/);
+  assert.match(chatEventParts, /case "step_advance":/);
+  assert.match(chatEventParts, /isValidStepAdvancePayload/);
+  assert.match(appCoreMappers, /type === "step_advance"/);
+});
+
+test("step_advance display mapping owns the localized label selection", () => {
+  assert.match(stepAdvanceDisplayModule, /export function stepAdvanceDisplay/);
+  assert.match(stepAdvanceDisplayModule, /chat\.stepAdvance\.verified/);
+  assert.match(stepAdvanceDisplayModule, /chat\.stepAdvance\.unverified/);
+  assert.match(stepAdvanceDisplayModule, /chat\.stepAdvance\.unverifiedNoNote/);
+  assert.match(stepAdvanceDisplayModule, /chat\.stepAdvance\.transition/);
+});
+
+test("step_advance events render as visible transcript notes", () => {
+  assert.match(messageStepAdvance, /export function StepAdvanceNote/);
+  assert.match(messageStepAdvance, /step-advance-note/);
+  assert.match(messageStepAdvance, /stepAdvanceDisplay/);
+  assert.match(assistantMessageBody, /from "\.\/MessageStepAdvance";/);
+  assert.match(assistantMessageBody, /<StepAdvanceNote key=\{`step-advance-\$\{index\}`\} payload=\{part\.payload\}/);
+  assert.doesNotMatch(chatView, /StepAdvanceNote/);
+});
+
+test("step_advance pulses the matching plan step in the island", () => {
+  assert.match(planStepPulseHook, /export function usePlanStepPulse/);
+  assert.match(planStepPulseHook, /listenChatStreamEvent/);
+  assert.match(chatView, /usePlanStepPulse/);
+  assert.match(chatView, /planStepPulseId=\{planStepPulseId\}/);
+  assert.match(workspaceIslandSections, /plan-step-pulse/);
+  assert.match(workspaceIslandStyles, /plan-step-pulse/);
+});
+
+test("the plan goal and step_advance labels are localized in every catalog", async () => {
+  for (const lng of ["it", "en", "de", "es", "fr"]) {
+    const catalog = JSON.parse(
+      await readFile(new URL(`../src/i18n/locales/${lng}.json`, import.meta.url), "utf8"),
+    );
+    assert.ok(typeof catalog.chat.planGoal === "string" && catalog.chat.planGoal, `${lng}: chat.planGoal`);
+    assert.ok(catalog.chat.stepAdvance.verified.includes("{{title}}"), `${lng}: verified label interpolates title`);
+    assert.ok(catalog.chat.stepAdvance.unverified.includes("{{note}}"), `${lng}: unverified label interpolates note`);
+    assert.ok(catalog.chat.stepAdvance.unverifiedNoNote.includes("{{title}}"), `${lng}: noteless label interpolates title`);
+    assert.ok(catalog.chat.stepAdvance.transition.includes("{{from}}"), `${lng}: transition label interpolates from`);
+    assert.ok(catalog.chat.stepAdvance.transition.includes("{{to}}"), `${lng}: transition label interpolates to`);
+  }
 });

@@ -8,13 +8,18 @@ pub(crate) fn update_plan_tool_schema() -> serde_json::Value {
             "description": "Create or update the operational step-by-step PLAN of a NON-trivial task \
     (multi-step: development, refactor, in-depth research). It appears in the \"Plan\" panel and the user \
     follows progress. Call it at the START with ALL steps (status \"todo\", the first \"doing\") and UPDATE \
-    IT as you proceed (move to \"done\" what you completed, set \"doing\" the current step). Do NOT use it \
+    IT as you proceed (move to \"done\" what you completed, set \"doing\" the current step). When CREATING the \
+    plan, set `goal` to the user's objective in ONE sentence (the user's language). Do NOT use it \
     for single-step requests.",
             "strict": true,
             "parameters": {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                    "goal": {
+                        "type": ["string", "null"],
+                        "description": "The user's objective in ONE sentence, in the user's language. REQUIRED when CREATING the plan; use null when merely updating steps of an existing plan (the stored goal is kept)."
+                    },
                     "steps": {
                         "type": "array",
                         "description": "The plan steps, in order.",
@@ -74,6 +79,19 @@ mod tests {
         let update = update_plan_tool_schema();
         assert_eq!(update["function"]["name"], serde_json::json!("update_plan"));
         assert_eq!(update["function"]["strict"], serde_json::json!(true));
+        // `goal` is an OPTIONAL top-level property (nullable string); `required` stays ["steps"].
+        assert_eq!(
+            update["function"]["parameters"]["properties"]["goal"]["type"],
+            serde_json::json!(["string", "null"])
+        );
+        assert_eq!(
+            update["function"]["parameters"]["required"],
+            serde_json::json!(["steps"])
+        );
+        assert_eq!(
+            update["function"]["parameters"]["additionalProperties"],
+            serde_json::json!(false)
+        );
         assert_eq!(
             update["function"]["parameters"]["properties"]["steps"]["items"]["required"],
             serde_json::json!([

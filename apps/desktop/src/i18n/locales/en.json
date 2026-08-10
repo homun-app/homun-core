@@ -660,6 +660,8 @@
     "effectVerificationAria": "Pending outcome verifications",
     "needsVerification": "Needs verification",
     "effectVerificationPrompt": "Homun cannot confirm whether this external action completed. Check the result and indicate what happened.",
+    "effectVerificationPromptBrowser": "A browser action was interrupted and Homun could not verify its outcome on the page. This is not a permission request: check the page and indicate whether the action really took place.",
+    "effectVerificationTitleBrowser": "Verify browser action outcome",
     "effectResolutionError": "The verification could not be recorded. Try again.",
     "uncertainSince": "Outcome uncertain since {{time}}",
     "verifiedNotApplied": "Not completed",
@@ -697,6 +699,15 @@
     "markNotHelpful": "Mark response not helpful",
     "messageMetrics": "Message performance metrics",
     "activityProgress": "Activity progress",
+    "planningIndicator": "Planning…",
+    "browsingIndicator": "Browsing…",
+    "planGoal": "Goal",
+    "stepAdvance": {
+      "verified": "✓ Step verified: {{title}}",
+      "unverified": "✗ Step unverified: {{title}} — {{note}}",
+      "unverifiedNoNote": "✗ Step unverified: {{title}}",
+      "transition": "→ Step {{title}}: {{from}} → {{to}}"
+    },
     "resizePanel": "Resize panel",
     "closePanel": "Close panel",
     "inspector": {

@@ -443,12 +443,58 @@ fn running_image_hash() -> Option<String> {
     (!hash.is_empty() && hash != "<no value>").then_some(hash)
 }
 
+/// The `homun.cc_hash` label baked into the LOCAL IMAGE (None when the image
+/// doesn't exist yet). This is what makes cold starts cheap: the container runs
+/// `--rm` so it's normally gone at boot, but the image survives — when its label
+/// matches the current definition we can `docker run` straight away instead of
+/// rebuilding for minutes.
+fn image_hash() -> Option<String> {
+    let out = Command::new(docker_bin())
+        .args([
+            "image",
+            "inspect",
+            CONTAINED_IMAGE,
+            "--format",
+            "{{index .Config.Labels \"homun.cc_hash\"}}",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let hash = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!hash.is_empty() && hash != "<no value>").then_some(hash)
+}
+
+/// True when an image (e.g. the base image) already exists locally, so its
+/// network pull can be skipped entirely.
+fn image_exists_locally(image: &str) -> bool {
+    Command::new(docker_bin())
+        .args(["image", "inspect", image])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// True when the running container was built from the CURRENT image definition. If
 /// the current hash can't be computed, assume fresh (keep today's behavior).
 fn container_definition_fresh() -> bool {
     match contained_computer_def_hash() {
         Some(want) => running_image_hash().as_deref() == Some(want.as_str()),
         None => true,
+    }
+}
+
+/// True when the LOCAL IMAGE (not necessarily a running container) matches the
+/// current definition hash — i.e. the build can be skipped and we only need to
+/// `docker run`. Returns false when the definition hash can't be computed, so we
+/// never skip the build on ambiguous state.
+fn image_definition_fresh() -> bool {
+    match contained_computer_def_hash() {
+        Some(want) => image_hash().as_deref() == Some(want.as_str()),
+        None => false,
     }
 }
 
@@ -499,15 +545,103 @@ fn contained_computer_run_args(config: &ContainedComputerRunConfig) -> Vec<Strin
     args
 }
 
+/// Formats a docker failure with the tail of its stderr so errors are diagnosable.
+fn docker_error_message(failure: &str, stderr: &str) -> String {
+    let lines: Vec<&str> = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let tail: Vec<&str> = lines.iter().rev().take(5).copied().collect();
+    if tail.is_empty() {
+        failure.to_string()
+    } else {
+        let joined = tail.iter().rev().copied().collect::<Vec<_>>().join(" | ");
+        format!("{failure} docker said: {joined}")
+    }
+}
+
 fn run_docker_checked(args: &[String], failure: &str) -> Result<(), String> {
     let output = Command::new(docker_bin())
         .args(args)
         .output()
-        .map_err(|_| failure.to_string())?;
+        .map_err(|e| format!("{failure} (failed to start docker: {e})"))?;
     if output.status.success() {
         Ok(())
     } else {
-        Err(failure.to_string())
+        Err(docker_error_message(
+            failure,
+            &String::from_utf8_lossy(&output.stderr),
+        ))
+    }
+}
+
+/// How long the base-image pull may take before it's killed and treated as
+/// non-fatal (the build may still hit the local cache). Overridable via
+/// `HOMUN_CC_PULL_TIMEOUT_SECS`.
+fn docker_pull_timeout_secs() -> u64 {
+    std::env::var("HOMUN_CC_PULL_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|&v| v > 0)
+        .unwrap_or(180)
+}
+
+/// How long the image build may take before it's killed. Overridable via
+/// `HOMUN_CC_BUILD_TIMEOUT_SECS`.
+fn docker_build_timeout_secs() -> u64 {
+    std::env::var("HOMUN_CC_BUILD_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|&v| v > 0)
+        .unwrap_or(900)
+}
+
+/// Runs a long docker command (pull/build) with a BOUNDED wait: the child is
+/// polled and killed after `timeout_secs`, so a wedged network can't hang the
+/// bootstrap forever. stderr is drained on a reader thread (avoids pipe
+/// deadlock) and its tail is included in the error message on failure.
+fn run_docker_bounded(args: &[String], failure: &str, timeout_secs: u64) -> Result<(), String> {
+    let mut child = Command::new(docker_bin())
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("{failure} (failed to start docker: {e})"))?;
+    let stderr_pipe = child.stderr.take();
+    let reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut stream) = stderr_pipe {
+            use std::io::Read;
+            let _ = stream.read_to_end(&mut buf);
+        }
+        buf
+    });
+    let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let stderr_bytes = reader.join().unwrap_or_default();
+                if status.success() {
+                    return Ok(());
+                }
+                return Err(docker_error_message(
+                    failure,
+                    &String::from_utf8_lossy(&stderr_bytes),
+                ));
+            }
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "{failure} (timed out after {timeout_secs}s and was killed)"
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            Err(e) => return Err(format!("{failure} ({e})")),
+        }
     }
 }
 
@@ -529,10 +663,18 @@ fn build_contained_computer_image() -> Result<(), String> {
     let no_pull = std::env::var("HOMUN_CC_NO_PULL")
         .ok()
         .is_some_and(|value| !value.trim().is_empty());
-    if !no_cache && !no_pull {
-        let _ = Command::new(docker_bin())
-            .args(["pull", CONTAINED_BASE_IMAGE])
-            .output();
+    // Base-image pull is best-effort and NON-FATAL: skip it entirely when the
+    // image is already local, and bound the network wait so a flaky connection
+    // can't stall bootstrap (the build still works from the local cache).
+    if !no_cache && !no_pull && !image_exists_locally(CONTAINED_BASE_IMAGE) {
+        let pull_args = vec!["pull".to_string(), CONTAINED_BASE_IMAGE.to_string()];
+        if let Err(e) = run_docker_bounded(
+            &pull_args,
+            "Base image pull failed.",
+            docker_pull_timeout_secs(),
+        ) {
+            tracing::warn!("sandbox: base image pull skipped (non-fatal): {e}");
+        }
     }
     let mut args = vec!["build".to_string()];
     if no_cache {
@@ -545,7 +687,11 @@ fn build_contained_computer_image() -> Result<(), String> {
         CONTAINED_IMAGE.to_string(),
         dir.to_string_lossy().into_owned(),
     ]);
-    run_docker_checked(&args, "Homun Computer image build failed.")
+    run_docker_bounded(
+        &args,
+        "Homun Computer image build failed.",
+        docker_build_timeout_secs(),
+    )
 }
 
 fn start_contained_computer_container() -> Result<(), String> {
@@ -590,16 +736,37 @@ pub enum ContainedComputerBootstrapPhase {
     StartingContainer,
 }
 
+/// Serializes the whole contained-computer bootstrap across every caller (boot
+/// coordinator, browse gate, CDP self-heal, skill `run_command`) so concurrent
+/// callers can't run duplicate builds or race `docker rm -f` / `docker run --name`.
+static BOOTSTRAP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Ensures the contained computer is running and built from the current
 /// definition using only the Docker CLI, identically on Windows, macOS, and Linux.
+///
+/// Freshness ladder: (1) running container with matching hash → nothing to do;
+/// (2) local IMAGE with matching hash (the usual cold start: container is gone
+/// because of `--rm`, image survives) → skip the multi-minute build and just
+/// `docker run` (~2s); (3) otherwise build, then run.
 pub fn ensure_contained_computer_with_progress(
     mut report: impl FnMut(ContainedComputerBootstrapPhase),
 ) -> Result<(), String> {
+    let _guard = BOOTSTRAP_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     report(ContainedComputerBootstrapPhase::CheckingDocker);
     ensure_docker()?;
     if container_up() && container_definition_fresh() {
+        tracing::info!("sandbox: contained computer already up and fresh");
         return Ok(());
     }
+    if image_definition_fresh() {
+        tracing::info!("sandbox: image fresh, skipping build");
+        report(ContainedComputerBootstrapPhase::StartingContainer);
+        start_contained_computer_container()?;
+        return wait_for_container_running();
+    }
+    tracing::info!("sandbox: building contained-computer image (this may take minutes)");
     report(ContainedComputerBootstrapPhase::PreparingImage);
     build_contained_computer_image()?;
     report(ContainedComputerBootstrapPhase::StartingContainer);
@@ -668,9 +835,30 @@ fn host_tools_path() -> String {
 /// heavy/vendored trees out of the very first commit (a fresh `git init` + add-all would
 /// otherwise capture .env/keys). Only written when the folder has no .gitignore.
 const DEFAULT_GITIGNORE: &str = "# Generated by Homun when versioning was enabled.\n\
-.env\n.env.*\n*.key\n*.pem\n*.p12\n*.pfx\nsecrets/\n.secrets/\ncredentials*\n\
-.DS_Store\nnode_modules/\n.venv/\nvenv/\n__pycache__/\n*.pyc\ntarget/\ndist/\n\
-build/\n.next/\ncoverage/\n*.log\n";
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+.secrets/
+credentials*
+\
+.DS_Store
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+target/
+dist/
+\
+build/
+.next/
+coverage/
+*.log
+";
 
 /// Ensure a project folder is under git, so versioning + history-back + the git change
 /// signal work uniformly across ALL projects. Respects an EXISTING repo (never re-inits,

@@ -1,0 +1,28 @@
+{
+  "comment": "Known-good shape for an execution plan. Mirrors TS CorePromptExecutionPlan (coreBridge.ts), which is embedded in CorePromptSubmissionResult.plan and emitted as a 'plan_update' stream event. Each step is CorePromptPlanStep (step_id/title/detail/surface/action_kind/requires_user_approval/target_url?). All fields snake_case — the Rust side serializes execution-plan DTOs as serde_json::json! with snake_case keys.",
+  "payload": {
+    "title": "Deploy the landing page",
+    "summary": "Build the static assets, push to the CDN, and verify the live URL.",
+    "risk_level": "medium",
+    "steps": [
+      {
+        "step_id": "step_1",
+        "title": "Build static assets",
+        "detail": "Run the production build and capture the dist/ output.",
+        "surface": "host",
+        "action_kind": "shell",
+        "requires_user_approval": false,
+        "target_url": null
+      },
+      {
+        "step_id": "step_2",
+        "title": "Publish to CDN",
+        "detail": "Upload dist/ to the configured edge origin.",
+        "surface": "browser",
+        "action_kind": "navigate",
+        "requires_user_approval": true,
+        "target_url": "https://edge.homun.app/upload"
+      }
+    ]
+  }
+}

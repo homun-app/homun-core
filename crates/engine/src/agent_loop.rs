@@ -22,7 +22,8 @@ use crate::contract::{
 };
 use crate::events::{GenerateStreamEvent, TokenMetrics};
 use crate::execution_journal::{
-    AgentExecutionEvent, classify_tool_result, tool_family, tool_result_fingerprint,
+    AgentExecutionEvent, classify_tool_result, external_action_evidence_marker, tool_family,
+    tool_result_fingerprint,
 };
 use crate::hitl::{
     HitlEnvelope, HitlKind, NoToolsClassification, classify_no_tools_stop,
@@ -35,8 +36,8 @@ use crate::markers::{
 use crate::model_normalize;
 use crate::plan::{
     advance_plan_frontier, build_plan_markdown, collapse_plan_markers, plan_next_open,
-    plan_step_status, plan_step_title, plan_value_steps, replace_latest_plan_marker,
-    should_nudge_for_open_plan,
+    plan_step_id, plan_step_status, plan_step_title, plan_value_goal, plan_value_steps,
+    replace_latest_plan_marker, should_nudge_for_open_plan,
 };
 use crate::text::{extract_source_urls, fonti_section, is_low_value_source_url};
 use crate::tools::{connected_capability_execution_trace_line, summarize_tool_action};
@@ -203,7 +204,10 @@ async fn try_advance_frontier_from_evidence(
         plan_progress
             .record_step_outcome(thread_id, &verified_step, &ls.step_evidence)
             .await;
-        ls.plan = plan_progress.plan_value_from_steps(&plan_steps);
+        // The plan's goal rides the canonical Value; carry it across the step-only rebuild so the
+        // frontier advance never drops it.
+        let plan_goal = plan_value_goal(&ls.plan);
+        ls.plan = plan_progress.plan_value_from_steps(plan_goal.as_deref(), &plan_steps);
         ls.progress_anchor_round = verification.round; // F1: real progress → reset the stall guard
         event_sink
             .emit(GenerateStreamEvent::Delta {
@@ -213,13 +217,33 @@ async fn try_advance_frontier_from_evidence(
                 ),
             })
             .await;
+        // Per-step visible event (frontend contract): the harness just closed this step, F2-verified.
+        // Rides the same stream channel as the ‹‹ACT››✓ delta above — the gateway's
+        // `turn_event_from_stream_value` maps it to the durable `step_advance` turn event.
+        event_sink
+            .emit(GenerateStreamEvent::StepAdvance {
+                step_id: plan_step_id(&plan_steps[idx])
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("s{}", idx + 1)),
+                title: title.clone(),
+                from: Some("doing".to_string()),
+                to: "done".to_string(),
+                verified: Some(true),
+                note: None,
+            })
+            .await;
         // The canonical live plan card (→ plan_update event) + durable runtime plan, exactly like
         // the model's own step_advance path.
-        let plan_mark = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
+        let plan_mark = format!(
+            "‹‹PLAN››{}‹‹/PLAN››",
+            build_plan_markdown(plan_goal.as_deref(), &plan_steps)
+        );
         event_sink
             .emit(GenerateStreamEvent::Delta { text: plan_mark })
             .await;
-        plan_progress.persist_plan(thread_id, &plan_steps).await;
+        plan_progress
+            .persist_plan(thread_id, plan_goal.as_deref(), &plan_steps)
+            .await;
         execution_journal.record(AgentExecutionEvent::PlanUpdated {
             round: verification.round,
             source: "verified_evidence".to_string(),
@@ -266,6 +290,98 @@ fn evidence_argument_provenance(name: &str, args_raw: &str) -> Option<String> {
 
 fn is_plan_bookkeeping_tool(name: &str) -> bool {
     matches!(name, "update_plan" | "step_advance")
+}
+
+/// Tools that are introspective or planning-related — the plan-before-act gate must NOT fire for
+/// these because they are part of the planning/memory/discovery cycle, not "work" that acts on the
+/// world. Distinct from [`is_plan_bookkeeping_tool`] which is narrower (only `update_plan` /
+/// `step_advance`) and is used for evidence-tracking exclusion.
+fn is_introspective_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "update_plan"
+            | "step_advance"
+            | "recall_memory"
+            | "find_capability"
+            | "suggest_capabilities"
+            | "use_skill"
+    )
+}
+
+/// Rough count of imperative signals in a user message: exclamation marks plus distinct
+/// action-verb matches. Used by [`request_is_complex`] as a proxy for "2+ imperative sentences".
+/// Pure heuristic — never the sole gate (the length and multi-tool conditions also apply).
+fn count_imperative_signals(text: &str) -> usize {
+    let exclamatory = text.matches('!').count();
+    const ACTION_VERBS: &[&str] = &[
+        "create",
+        "write",
+        "build",
+        "generate",
+        "run",
+        "execute",
+        "update",
+        "delete",
+        "send",
+        "make",
+        "deploy",
+        "configure",
+        "install",
+        "download",
+        "analyze",
+        "implement",
+        "fix",
+        "refactor",
+        "test",
+        "compile",
+        "search",
+        "find",
+        "read",
+        "edit",
+        "move",
+        "copy",
+        "convert",
+        "transform",
+        "add",
+        "remove",
+        "check",
+        "verify",
+        "scan",
+        "extract",
+        "set up",
+    ];
+    let text_lower = text.to_lowercase();
+    let verb_count = ACTION_VERBS
+        .iter()
+        .filter(|verb| text_lower.contains(*verb))
+        .count();
+    exclamatory + verb_count
+}
+
+/// The plan-before-act gate's complexity heuristic. Only activate the gate when the request
+/// seems non-trivial, so simple one-shot interactions pass straight through. Three independent
+/// conditions (any one suffices):
+/// 1. User message longer than 80 characters.
+/// 2. 2+ imperative signals (exclamation marks or action-verb matches — see [`count_imperative_signals`]).
+/// 3. The model already called 2+ different tools in this round (a multi-step signal).
+///
+/// Pure (no IO); tested independently.
+fn request_is_complex(user_message: &str, calls: &[serde_json::Value]) -> bool {
+    if user_message.trim().chars().count() > 80 {
+        return true;
+    }
+    if count_imperative_signals(user_message) >= 2 {
+        return true;
+    }
+    let distinct_tools: std::collections::BTreeSet<&str> = calls
+        .iter()
+        .filter_map(|c| {
+            c.get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+        })
+        .collect();
+    distinct_tools.len() >= 2
 }
 
 /// Run ONE agent turn: the bounded guarded ReAct loop + forced synthesis. GENERIC over the seams so
@@ -323,6 +439,18 @@ where
     let mut choices_card_nudges: u32 = 0;
     let mut clarify_card_nudges: u32 = 0;
     let mut resolved_hitl_nudges: u32 = 0;
+    // Plan-before-act gate: fires at most once per turn. When the model tries to execute a
+    // "work" tool before creating a plan (and the request is complex), the gate blocks the
+    // call, injects a "plan first" directive, and lets the loop re-ask the model. Once fired
+    // it stays `true` so the model gets exactly one chance — if it ignores the nudge the next
+    // work tool passes through (no infinite block loop).
+    let mut plan_gate_fired = false;
+    // Task #8/#9: replan directive injection — fires at most once per turn. When consecutive
+    // tool failures (same family or cross-family) exceed the threshold, inject a "revise the plan"
+    // directive and continue the loop instead of stopping. Once fired, stays true so the model
+    // gets exactly one replan chance per turn — subsequent failures fall through to the existing
+    // stop-for-no-progress forced synthesis.
+    let mut replan_injected_this_turn = false;
     let mut protocol_failure = None;
     let turn_started_at = Instant::now();
     // The per-progress stall clock: reset to `now` on every real browser progress (see the
@@ -791,6 +919,62 @@ again to find the right control). Keep working on the task — do not stop and d
                         None => name,
                     };
 
+                    // Plan-before-act gate (ADR 0021, single-loop): before dispatching a
+                    // “work” tool, check if a plan exists. If not AND the request is complex,
+                    // block the call and ask the model to plan first. Fires at most once per
+                    // turn (`plan_gate_fired`). Introspective/planning tools are exempt — the
+                    // gate must never fire for `update_plan`, `recall_memory`, etc. Follows
+                    // the same pattern as the `stopped_without_plan` nudge (below) but acts
+                    // BEFORE dispatch instead of after a premature stop.
+                    if !plan_gate_fired
+                        && !is_introspective_tool(name)
+                        && plan_value_steps(&ls.plan).is_empty()
+                        && request_is_complex(&memory_user_message, &calls)
+                    {
+                        plan_gate_fired = true;
+                        turn_trace.record(crate::turn_trace::TurnEvent::Nudge {
+                            reason: "plan_before_act_gate".into(),
+                            next_step: String::new(),
+                        });
+                        // Block the current call: push a tool result so the assistant’s
+                        // tool_calls array is satisfied (OpenAI-compat requires one tool
+                        // message per tool_call_id).
+                        ls.messages.push(serde_json::json!({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": "BLOCKED: no plan exists yet. Create a plan with \
+                                update_plan before executing work tools.",
+                        }));
+                        // Skip every remaining call in this round — they are all blocked
+                        // for the same reason. Same pattern as the steering interrupt.
+                        for skipped in calls.iter().skip(idx + 1) {
+                            ls.messages.push(serde_json::json!({
+                                "role": "tool",
+                                "tool_call_id": skipped
+                                    .get("id")
+                                    .and_then(|id| id.as_str())
+                                    .unwrap_or(""),
+                                "content": "SKIPPED: create a plan with update_plan first.",
+                            }));
+                        }
+                        // Inject the directive — the model sees this on the next round
+                        // and should call update_plan before any work tool.
+                        ls.messages.push(serde_json::json!({
+                            "role": "system",
+                            "content": "Before executing any tools, you must first create \
+                                a structured plan. Call update_plan with clear steps, \
+                                dependencies, and done criteria for each step. Then proceed \
+                                with execution.",
+                        }));
+                        let _ = event_sink
+                            .emit(GenerateStreamEvent::Delta {
+                                text: "‹‹ACT››📋 Plan required before action — asking the model to plan first‹‹/ACT››"
+                                    .to_string(),
+                            })
+                            .await;
+                        continue 'rounds;
+                    }
+
                     if let Some(blocked) = turn_policy.route_blocked(name) {
                         // Parity harness: the blocked arm pushes a tool message then
                         // `continue`s, jumping over the normal record block below. The
@@ -1038,6 +1222,10 @@ again to find the right control). Keep working on the task — do not stop and d
                         let no_progress_count =
                             ls.observe_tool_outcome(&tool_family(name), outcome);
                         if no_progress_count > 0 {
+                            // Task #9: cross-family consecutive failure counter. Each
+                            // no-progress tool outcome increments; success or plan progress resets.
+                            ls.consecutive_step_failures =
+                                ls.consecutive_step_failures.saturating_add(1);
                             if no_progress_count == 2 {
                                 nudge_no_progress = true;
                             } else if no_progress_count >= 3 {
@@ -1046,6 +1234,9 @@ again to find the right control). Keep working on the task — do not stop and d
                         }
                     }
                     if matches!(name, "update_plan" | "step_advance") {
+                        // Task #9: the model is actively replanning — reset the failure streak
+                        // so a fresh plan approach gets a clean slate.
+                        ls.consecutive_step_failures = 0;
                         execution_journal.record(AgentExecutionEvent::PlanUpdated {
                             round,
                             source: name.to_string(),
@@ -1105,6 +1296,16 @@ again to find the right control). Keep working on the task — do not stop and d
                             .push(format!("{evidence_name} → {snippet}"));
                         if ls.step_evidence.len() > 60 {
                             ls.step_evidence.remove(0);
+                        }
+                        // Structured external-action marker (browser/channel): the F2
+                        // deterministic backstop reads these to refuse a `done` claim
+                        // whose evidence is only FAILED external actions. Pushed beside
+                        // the plain entry, same 60-entry bound.
+                        if let Some(marker) = external_action_evidence_marker(name, outcome) {
+                            ls.step_evidence.push(marker);
+                            if ls.step_evidence.len() > 60 {
+                                ls.step_evidence.remove(0);
+                            }
                         }
                         // Harness-derived progress: advance the plan frontier when the gathered
                         // evidence VERIFIES the current step (the weak browser model never does).
@@ -1271,6 +1472,54 @@ again to find the right control). Keep working on the task — do not stop and d
                 }
                 loop_exit = Some("pending_user_confirmation");
                 break;
+            }
+            // Task #8/#9: Replan nudge on stall / consecutive failures.
+            // When the same-family stall guard fires (3+ consecutive no-progress in one
+            // tool family) OR the cross-family consecutive failure counter exceeds 2,
+            // inject a replan directive and CONTINUE the loop instead of stopping. The
+            // model gets one chance to revise the plan; if it fails again the
+            // `replan_injected_this_turn` flag prevents a second injection and the
+            // existing stop_for_no_progress break fires.
+            if !replan_injected_this_turn
+                && !is_final_round
+                && (stop_for_no_progress || ls.consecutive_step_failures > 2)
+            {
+                replan_injected_this_turn = true;
+                let replan_message = if stop_for_no_progress {
+                    let step_title =
+                        crate::plan::plan_next_open(&crate::plan::plan_value_steps(&ls.plan))
+                            .unwrap_or_else(|| "current step".to_string());
+                    format!(
+                        "Step \u{00ab}{step_title}\u{00bb} is blocked after multiple attempts with \
+                         no progress. Revise your plan using `update_plan`: remove, replace, or \
+                         break down the blocked step into smaller sub-steps. Then continue with \
+                         the revised plan."
+                    )
+                } else {
+                    let n = ls.consecutive_step_failures;
+                    format!(
+                        "You have failed {n} consecutive steps. The current plan approach is \
+                         not working. Generate a fundamentally different approach using \
+                         `update_plan`. Consider: simpler steps, different tools, or asking the \
+                         user for clarification."
+                    )
+                };
+                turn_trace.record(crate::turn_trace::TurnEvent::Nudge {
+                    reason: "replan_on_stall".into(),
+                    next_step: String::new(),
+                });
+                ls.messages.push(serde_json::json!({
+                    "role": "system",
+                    "content": replan_message,
+                }));
+                let _ = event_sink
+                    .emit(GenerateStreamEvent::Delta {
+                        text: "\u{2039}\u{2039}ACT\u{203a}\u{203a}\u{1f504} Replan: asking the model to revise \
+                               the plan\u{2039}\u{2039}/ACT\u{203a}\u{203a}"
+                            .to_string(),
+                    })
+                    .await;
+                continue 'rounds;
             }
             if stop_for_no_progress {
                 let _ = event_sink
@@ -1440,6 +1689,8 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
                 .count();
             if done_after > done_before {
                 plan_nudges = 0;
+                // Task #9: verified plan progress — reset the consecutive failure streak.
+                ls.consecutive_step_failures = 0;
             }
         }
         if !is_final_round && plan_nudges < MAX_PLAN_NUDGES {
@@ -1593,7 +1844,10 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
         let final_delivered_chars = delivered.trim().chars().count();
         let delivered = match plan_progress.reconcile_on_delivery(&ls.plan, &delivered) {
             Some(reconciled) => {
-                plan_progress.persist_plan(thread_id, &reconciled).await;
+                let plan_goal = plan_value_goal(&ls.plan);
+                plan_progress
+                    .persist_plan(thread_id, plan_goal.as_deref(), &reconciled)
+                    .await;
                 turn_trace.record(crate::turn_trace::TurnEvent::Reconcile {
                     fired: true,
                     step: String::new(), // the whole plan is reconciled here, not a single named step
@@ -1601,7 +1855,7 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
                     delivered_chars: final_delivered_chars,
                     threshold: crate::plan::MIN_DELIVERED_CHARS_TO_CONCLUDE,
                 });
-                replace_latest_plan_marker(&delivered, &reconciled)
+                replace_latest_plan_marker(&delivered, plan_goal.as_deref(), &reconciled)
             }
             None => delivered,
         };
@@ -1908,8 +2162,15 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
                     let delivered = match plan_progress.reconcile_on_delivery(&ls.plan, &delivered)
                     {
                         Some(reconciled) => {
-                            plan_progress.persist_plan(thread_id, &reconciled).await;
-                            replace_latest_plan_marker(&delivered, &reconciled)
+                            let plan_goal = plan_value_goal(&ls.plan);
+                            plan_progress
+                                .persist_plan(thread_id, plan_goal.as_deref(), &reconciled)
+                                .await;
+                            replace_latest_plan_marker(
+                                &delivered,
+                                plan_goal.as_deref(),
+                                &reconciled,
+                            )
                         }
                         None => delivered,
                     };
@@ -3454,7 +3715,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
 
     struct NoPlan;
     impl PlanProgress for NoPlan {
-        async fn persist_plan(&self, _t: Option<&str>, _s: &[Value]) {}
+        async fn persist_plan(&self, _t: Option<&str>, _g: Option<&str>, _s: &[Value]) {}
         async fn record_step_outcome(&self, _t: Option<&str>, _s: &Value, _e: &[String]) {}
         async fn verify_step_complete(&self, _t: &str, _c: &str, _e: &str) -> (bool, String) {
             (false, String::new())
@@ -3462,14 +3723,14 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         fn reconcile_on_delivery(&self, _p: &Value, _d: &str) -> Option<Vec<Value>> {
             None
         }
-        fn plan_value_from_steps(&self, _s: &[Value]) -> Value {
+        fn plan_value_from_steps(&self, _g: Option<&str>, _s: &[Value]) -> Value {
             Value::Null
         }
     }
     #[derive(Default)]
     struct RecordingPlan(Mutex<Vec<Vec<Value>>>);
     impl PlanProgress for RecordingPlan {
-        async fn persist_plan(&self, _t: Option<&str>, steps: &[Value]) {
+        async fn persist_plan(&self, _t: Option<&str>, _g: Option<&str>, steps: &[Value]) {
             self.0.lock().unwrap().push(steps.to_vec());
         }
         async fn record_step_outcome(&self, _t: Option<&str>, _s: &Value, _e: &[String]) {}
@@ -3479,8 +3740,8 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         fn reconcile_on_delivery(&self, _p: &Value, _d: &str) -> Option<Vec<Value>> {
             None
         }
-        fn plan_value_from_steps(&self, steps: &[Value]) -> Value {
-            json!({"steps": steps})
+        fn plan_value_from_steps(&self, goal: Option<&str>, steps: &[Value]) -> Value {
+            json!({"goal": goal, "steps": steps})
         }
     }
     struct DoneJudge;
@@ -3690,6 +3951,75 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         assert!(is_plan_bookkeeping_tool("update_plan"));
         assert!(is_plan_bookkeeping_tool("step_advance"));
         assert!(!is_plan_bookkeeping_tool("run_in_project"));
+    }
+
+    #[test]
+    fn introspective_tools_are_exempt_from_plan_gate() {
+        // Planning tools — must never trigger the gate.
+        assert!(is_introspective_tool("update_plan"));
+        assert!(is_introspective_tool("step_advance"));
+        assert!(is_introspective_tool("recall_memory"));
+        assert!(is_introspective_tool("find_capability"));
+        assert!(is_introspective_tool("suggest_capabilities"));
+        assert!(is_introspective_tool("use_skill"));
+        // Work tools — the gate SHOULD fire for these.
+        assert!(!is_introspective_tool("make_document"));
+        assert!(!is_introspective_tool("run_in_project"));
+        assert!(!is_introspective_tool("browser_navigate"));
+        assert!(!is_introspective_tool("connector_send"));
+        assert!(!is_introspective_tool("read_file"));
+    }
+
+    #[test]
+    fn imperative_signal_count_combines_exclamations_and_verbs() {
+        // No signals.
+        assert_eq!(count_imperative_signals("hello world"), 0);
+        // One exclamation.
+        assert_eq!(count_imperative_signals("do it now!"), 1);
+        // Two exclamations.
+        assert_eq!(count_imperative_signals("do this! then that!"), 2);
+        // One action verb (no exclamation).
+        assert_eq!(count_imperative_signals("please create the file"), 1);
+        // Two distinct action verbs.
+        assert_eq!(count_imperative_signals("create and deploy the app"), 2);
+        // Exclamation + verb = 2 signals (complex).
+        assert_eq!(count_imperative_signals("create the report now!"), 2);
+        // Repeated verb counts once (distinct verbs only).
+        assert_eq!(count_imperative_signals("create and create again"), 1);
+    }
+
+    #[test]
+    fn request_is_complex_heuristic() {
+        // --- Simple requests: all conditions false → not complex ---
+        let simple = "hi";
+        assert!(!request_is_complex(simple, &[]));
+        // Short message, single tool → not complex.
+        let one_tool = vec![json!({"function": {"name": "make_document"}})];
+        assert!(!request_is_complex(simple, &one_tool));
+
+        // --- Complex by length ---
+        let long_msg = "a".repeat(81);
+        assert!(request_is_complex(&long_msg, &[]));
+        // Exactly 80 is NOT complex (boundary).
+        let exactly_80 = "a".repeat(80);
+        assert!(!request_is_complex(&exactly_80, &[]));
+
+        // --- Complex by imperative signals ---
+        assert!(request_is_complex("create the report and deploy it", &[]));
+        assert!(request_is_complex("do this! then that!", &[]));
+
+        // --- Complex by multi-tool (2+ distinct tools) ---
+        let two_tools = vec![
+            json!({"function": {"name": "make_document"}}),
+            json!({"function": {"name": "run_in_project"}}),
+        ];
+        assert!(request_is_complex("short", &two_tools));
+        // Same tool twice is only 1 distinct → not complex by this condition.
+        let same_tool_twice = vec![
+            json!({"function": {"name": "make_document"}}),
+            json!({"function": {"name": "make_document"}}),
+        ];
+        assert!(!request_is_complex("short", &same_tool_twice));
     }
 
     #[test]
@@ -4643,6 +4973,511 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         assert_eq!(
             done_count, 1,
             "expected exactly one Done event (clean termination)"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Plan-before-act gate integration tests
+    // ------------------------------------------------------------------
+
+    /// A tool executor that handles `update_plan` (sets a plan with one done step via
+    /// `ToolEffects`) and counts `make_document` calls. Used by the gate integration tests.
+    #[derive(Default)]
+    struct PlanAwareCountingTool {
+        make_document_calls: std::sync::atomic::AtomicUsize,
+        update_plan_calls: std::sync::atomic::AtomicUsize,
+    }
+    impl CapabilityExecutor for PlanAwareCountingTool {
+        async fn execute_tool(
+            &self,
+            name: &str,
+            _a: &str,
+            _c: &str,
+            _s: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            if name == "make_document" {
+                self.make_document_calls
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            if name == "update_plan" {
+                self.update_plan_calls
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                return Ok(ToolOutcome {
+                    result: "plan created".to_string(),
+                    effects: ToolEffects {
+                        plan: Some(json!({
+                            "steps": [
+                                {"id": "s1", "title": "Create document", "status": "done", "detail": ""}
+                            ]
+                        })),
+                        ..ToolEffects::default()
+                    },
+                });
+            }
+            Ok(ToolOutcome {
+                result: format!("ran {name}"),
+                effects: ToolEffects::default(),
+            })
+        }
+    }
+
+    /// Round 0: emit a `make_document` tool call. Round 1+: answer "Done!".
+    #[derive(Default)]
+    struct WorkThenAnswerModel {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+    impl ModelClient for WorkThenAnswerModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if n == 0 {
+                Ok(ModelRoundOutput {
+                    message: json!({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_0",
+                            "type": "function",
+                            "function": { "name": "make_document", "arguments": "{}" },
+                        }],
+                    }),
+                    provider,
+                    finish_reason: Some("tool_calls".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                })
+            } else {
+                on_delta("Done!");
+                Ok(ModelRoundOutput {
+                    message: json!({ "role": "assistant", "content": "Done!" }),
+                    provider,
+                    finish_reason: Some("stop".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                })
+            }
+        }
+    }
+
+    /// Round 0: `make_document` (gate should block). Round 1: `update_plan` (plan created).
+    /// Round 2: `make_document` (executes — plan exists). Round 3+: answer "Done!".
+    /// Captures round-1 messages so the test can assert the gate directive was injected.
+    #[derive(Default)]
+    struct ComplexGateModel {
+        calls: std::sync::atomic::AtomicUsize,
+        round1_messages: Mutex<Vec<Value>>,
+    }
+    impl ModelClient for ComplexGateModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            let message = match n {
+                0 => json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "work_0",
+                        "type": "function",
+                        "function": { "name": "make_document", "arguments": "{}" },
+                    }],
+                }),
+                1 => {
+                    *self.round1_messages.lock().unwrap() = call.messages.to_vec();
+                    json!({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "plan_0",
+                            "type": "function",
+                            "function": { "name": "update_plan", "arguments": "{}" },
+                        }],
+                    })
+                }
+                2 => json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "work_1",
+                        "type": "function",
+                        "function": { "name": "make_document", "arguments": "{}" },
+                    }],
+                }),
+                _ => {
+                    on_delta("Done!");
+                    json!({ "role": "assistant", "content": "Done!" })
+                }
+            };
+            Ok(ModelRoundOutput {
+                message,
+                provider,
+                finish_reason: Some(if n <= 2 { "tool_calls" } else { "stop" }.to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    /// Round 0: `make_document` (gate blocks). Round 1: `make_document` again (gate does NOT
+    /// re-fire — `plan_gate_fired` is true). Round 2+: answer "Done!".
+    #[derive(Default)]
+    struct ComplexIgnoreGateModel {
+        calls: std::sync::atomic::AtomicUsize,
+        round1_messages: Mutex<Vec<Value>>,
+    }
+    impl ModelClient for ComplexIgnoreGateModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if n <= 1 {
+                if n == 1 {
+                    *self.round1_messages.lock().unwrap() = call.messages.to_vec();
+                }
+                Ok(ModelRoundOutput {
+                    message: json!({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": format!("work_{n}"),
+                            "type": "function",
+                            "function": { "name": "make_document", "arguments": "{}" },
+                        }],
+                    }),
+                    provider,
+                    finish_reason: Some("tool_calls".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                })
+            } else {
+                on_delta("Done!");
+                Ok(ModelRoundOutput {
+                    message: json!({ "role": "assistant", "content": "Done!" }),
+                    provider,
+                    finish_reason: Some("stop".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                })
+            }
+        }
+    }
+
+    const COMPLEX_USER_MSG: &str = "Please create a detailed quarterly financial report with charts, analysis, and \
+        recommendations for the board. Include revenue breakdowns, expense categories, and \
+        year-over-year comparisons.";
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn plan_gate_simple_request_passes_through() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "hi" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let model = WorkThenAnswerModel::default();
+        let tool = CountingTool::default();
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 4;
+        turn_cfg.max_rounds = 4;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &tool,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "hi".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        // The tool executed (gate did NOT fire for a simple request).
+        assert_eq!(
+            tool.make_document_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "simple request must pass through the gate"
+        );
+        assert!(
+            outcome.memory_answer.contains("Done!"),
+            "expected the model's answer, got: {:?}",
+            outcome.memory_answer
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn plan_gate_complex_request_without_plan_triggers_gate() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": COMPLEX_USER_MSG }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let model = ComplexGateModel::default();
+        let tool = PlanAwareCountingTool::default();
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 6;
+        turn_cfg.max_rounds = 6;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &tool,
+            &mut browser,
+            &RecordingPlan::default(),
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            COMPLEX_USER_MSG.to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        // The gate blocked round 0's work tool; only round 2's tool executed.
+        assert_eq!(
+            tool.make_document_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "make_document must execute exactly once (round 2), not in the blocked round 0"
+        );
+        // The model created a plan after the gate fired.
+        assert_eq!(
+            tool.update_plan_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "update_plan must be called exactly once after the gate"
+        );
+        // The gate's system directive was injected into the conversation.
+        let msgs = model.round1_messages.lock().unwrap();
+        let has_directive = msgs.iter().any(|m| {
+            m.get("role").and_then(|r| r.as_str()) == Some("system")
+                && m.get("content")
+                    .and_then(|c| c.as_str())
+                    .is_some_and(|c| c.contains("create a structured plan"))
+        });
+        let has_blocked = msgs.iter().any(|m| {
+            m.get("role").and_then(|r| r.as_str()) == Some("tool")
+                && m.get("content")
+                    .and_then(|c| c.as_str())
+                    .is_some_and(|c| c.contains("BLOCKED"))
+        });
+        assert!(
+            has_directive,
+            "round 1 messages must contain the gate's system directive"
+        );
+        assert!(
+            has_blocked,
+            "round 1 messages must contain the blocked tool result"
+        );
+        assert!(
+            outcome.memory_answer.contains("Done!"),
+            "expected the model's final answer, got: {:?}",
+            outcome.memory_answer
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn plan_gate_complex_request_with_existing_plan_passes_through() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": COMPLEX_USER_MSG }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        // Pre-seed the plan so the gate sees a non-empty plan and does NOT fire.
+        ls.plan = json!({
+            "steps": [
+                {"id": "s1", "title": "Create report", "status": "done", "detail": ""}
+            ]
+        });
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let model = WorkThenAnswerModel::default();
+        let tool = CountingTool::default();
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 4;
+        turn_cfg.max_rounds = 4;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &tool,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            COMPLEX_USER_MSG.to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        // The tool executed immediately — the gate did NOT fire because a plan already existed.
+        assert_eq!(
+            tool.make_document_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "complex request with an existing plan must pass through the gate"
+        );
+        assert!(
+            outcome.memory_answer.contains("Done!"),
+            "expected the model's answer, got: {:?}",
+            outcome.memory_answer
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn plan_gate_fires_only_once_per_turn() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": COMPLEX_USER_MSG }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let model = ComplexIgnoreGateModel::default();
+        let tool = CountingTool::default();
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 5;
+        turn_cfg.max_rounds = 5;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &tool,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            COMPLEX_USER_MSG.to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        // Round 0's work tool was BLOCKED by the gate; round 1's work tool EXECUTED
+        // (the gate did not re-fire). Total: exactly one make_document execution.
+        assert_eq!(
+            tool.make_document_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "gate must fire only once: round 0 blocked, round 1 executes"
+        );
+        // The gate's directive was injected on round 0 (visible in round 1's messages).
+        let msgs = model.round1_messages.lock().unwrap();
+        let has_directive = msgs.iter().any(|m| {
+            m.get("role").and_then(|r| r.as_str()) == Some("system")
+                && m.get("content")
+                    .and_then(|c| c.as_str())
+                    .is_some_and(|c| c.contains("create a structured plan"))
+        });
+        assert!(
+            has_directive,
+            "round 1 messages must contain the gate's directive from round 0"
+        );
+        assert!(
+            outcome.memory_answer.contains("Done!"),
+            "expected the model's final answer, got: {:?}",
+            outcome.memory_answer
         );
     }
 
@@ -6475,5 +7310,408 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             !events.iter().any(|e| e.contains("ForcedSynthesis")),
             "no forced synthesis after CLARIFY: {events:?}"
         );
+    }
+
+    // ─── Task #8/#9: Replan nudge + consecutive failure tracking ───
+
+    /// A tool executor that ALWAYS returns no-progress, simulating repeated failures.
+    #[derive(Default)]
+    struct AlwaysFailingTool;
+    impl CapabilityExecutor for AlwaysFailingTool {
+        async fn execute_tool(
+            &self,
+            name: &str,
+            _a: &str,
+            _c: &str,
+            _s: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            Ok(ToolOutcome {
+                result: format!("{name} failed: no usable result"),
+                effects: ToolEffects {
+                    outcome_hint: Some(crate::contract::ToolOutcomeHint::NoProgress),
+                    ..ToolEffects::default()
+                },
+            })
+        }
+    }
+
+    /// A model that keeps calling the same tool (same family), simulating a stuck agent.
+    /// After `max_calls` it gives a final text answer.
+    #[derive(Default)]
+    struct RepeatingToolModel {
+        calls: AtomicUsize,
+        max_calls: usize,
+        captured_messages: Mutex<Vec<Vec<Value>>>,
+    }
+    impl ModelClient for RepeatingToolModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, crate::contract::ModelCallError> {
+            let idx = self.calls.fetch_add(1, Ordering::SeqCst);
+            self.captured_messages
+                .lock()
+                .unwrap()
+                .push(call.messages.to_vec());
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if idx < self.max_calls {
+                return Ok(ModelRoundOutput {
+                    message: json!({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": format!("call_{idx}"),
+                            "type": "function",
+                            "function": {
+                                "name": "search_web",
+                                "arguments": "{\"query\":\"test\"}"
+                            }
+                        }]
+                    }),
+                    provider,
+                    finish_reason: Some("tool_calls".into()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                });
+            }
+            on_delta("Final answer after failures.");
+            Ok(ModelRoundOutput {
+                message: json!({
+                    "role": "assistant",
+                    "content": "Final answer after failures."
+                }),
+                provider,
+                finish_reason: Some("stop".into()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    /// A model that alternates between DIFFERENT tool families on each call,
+    /// simulating cross-family consecutive failures.
+    #[derive(Default)]
+    struct CrossFamilyFailingModel {
+        calls: AtomicUsize,
+        captured_messages: Mutex<Vec<Vec<Value>>>,
+    }
+    impl ModelClient for CrossFamilyFailingModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, crate::contract::ModelCallError> {
+            let idx = self.calls.fetch_add(1, Ordering::SeqCst);
+            self.captured_messages
+                .lock()
+                .unwrap()
+                .push(call.messages.to_vec());
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if idx < 4 {
+                // Alternate between two different tool families so each family's
+                // per-family counter never reaches 3, but the cross-family counter does.
+                let tool_name = if idx.is_multiple_of(2) {
+                    "search_web"
+                } else {
+                    "write_file"
+                };
+                return Ok(ModelRoundOutput {
+                    message: json!({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": format!("call_{idx}"),
+                            "type": "function",
+                            "function": {
+                                "name": tool_name,
+                                "arguments": "{}"
+                            }
+                        }]
+                    }),
+                    provider,
+                    finish_reason: Some("tool_calls".into()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                });
+            }
+            on_delta("Final cross-family answer.");
+            Ok(ModelRoundOutput {
+                message: json!({
+                    "role": "assistant",
+                    "content": "Final cross-family answer."
+                }),
+                provider,
+                finish_reason: Some("stop".into()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    /// A PlanProgress that provides pre-seeded plan steps (so the replan directive
+    /// can reference a real step title).
+    #[derive(Default)]
+    struct SeededPlan {
+        _steps: Vec<Value>,
+    }
+    impl crate::contract::PlanProgress for SeededPlan {
+        async fn persist_plan(&self, _t: Option<&str>, _g: Option<&str>, _s: &[Value]) {}
+        async fn record_step_outcome(&self, _t: Option<&str>, _s: &Value, _e: &[String]) {}
+        async fn verify_step_complete(
+            &self,
+            _title: &str,
+            _criterion: &str,
+            _evidence: &str,
+        ) -> (bool, String) {
+            (false, String::new())
+        }
+        fn reconcile_on_delivery(&self, _plan: &Value, _delivered: &str) -> Option<Vec<Value>> {
+            None
+        }
+        fn plan_value_from_steps(&self, goal: Option<&str>, steps: &[Value]) -> Value {
+            json!({"goal": goal, "steps": steps})
+        }
+    }
+
+    fn seeded_plan_with_steps(steps: Vec<Value>) -> (SeededPlan, Value) {
+        let plan = SeededPlan {
+            _steps: steps.clone(),
+        };
+        let plan_value = json!({"steps": steps});
+        (plan, plan_value)
+    }
+
+    fn higher_budget_cfg() -> TurnConfig {
+        TurnConfig {
+            hard_round_ceiling: 12,
+            max_rounds: 8,
+            ..cfg()
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn replan_nudge_injected_when_same_family_stalls() {
+        let mut ls = LoopState::new();
+        let (plan_progress, plan_value) = seeded_plan_with_steps(vec![
+            json!({"id":"s1","title":"Search for data","status":"doing","detail":""}),
+            json!({"id":"s2","title":"Write report","status":"todo","detail":""}),
+        ]);
+        ls.plan = plan_value;
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "find data and write report" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = RepeatingToolModel {
+            max_calls: 5,
+            ..Default::default()
+        };
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+
+        let _outcome = run_turn(
+            ls,
+            higher_budget_cfg(),
+            &usage_context(),
+            &model,
+            &AlwaysFailingTool,
+            &mut browser,
+            &plan_progress,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "find data and write report".into(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        // Verify a replan system message was injected into the conversation.
+        let captured = model.captured_messages.lock().unwrap();
+        let has_replan_msg = captured.iter().any(|msgs| {
+            msgs.iter().any(|m| {
+                m.get("role").and_then(|r| r.as_str()) == Some("system")
+                    && m.get("content")
+                        .and_then(|c| c.as_str())
+                        .map(|c| c.contains("blocked after multiple attempts"))
+                        .unwrap_or(false)
+            })
+        });
+        assert!(
+            has_replan_msg,
+            "expected a replan system directive when same-family tool stalls"
+        );
+        // The model must have been called MORE than 3 times (replan injected → loop continued).
+        assert!(
+            model.calls.load(Ordering::SeqCst) > 3,
+            "replan nudge should let the loop continue, got {} calls",
+            model.calls.load(Ordering::SeqCst)
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn forced_replan_injected_on_cross_family_consecutive_failures() {
+        let mut ls = LoopState::new();
+        let (plan_progress, plan_value) = seeded_plan_with_steps(vec![
+            json!({"id":"s1","title":"Gather info","status":"doing","detail":""}),
+        ]);
+        ls.plan = plan_value;
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "do a complex task" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = CrossFamilyFailingModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+
+        let _outcome = run_turn(
+            ls,
+            higher_budget_cfg(),
+            &usage_context(),
+            &model,
+            &AlwaysFailingTool,
+            &mut browser,
+            &plan_progress,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "do a complex task".into(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        // Verify a forced replan message was injected (cross-family).
+        let captured = model.captured_messages.lock().unwrap();
+        let has_forced_replan = captured.iter().any(|msgs| {
+            msgs.iter().any(|m| {
+                m.get("role").and_then(|r| r.as_str()) == Some("system")
+                    && m.get("content")
+                        .and_then(|c| c.as_str())
+                        .map(|c| c.contains("consecutive steps"))
+                        .unwrap_or(false)
+            })
+        });
+        assert!(
+            has_forced_replan,
+            "expected a forced replan message on cross-family consecutive failures"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn replan_nudge_fires_only_once_per_turn() {
+        let mut ls = LoopState::new();
+        let (plan_progress, plan_value) = seeded_plan_with_steps(vec![
+            json!({"id":"s1","title":"Search for data","status":"doing","detail":""}),
+        ]);
+        ls.plan = plan_value;
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "find data" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        // Model keeps calling tools even after the replan — the second stall must NOT
+        // inject another replan (the flag prevents it).
+        let model = RepeatingToolModel {
+            max_calls: 8,
+            ..Default::default()
+        };
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+
+        let _outcome = run_turn(
+            ls,
+            higher_budget_cfg(),
+            &usage_context(),
+            &model,
+            &AlwaysFailingTool,
+            &mut browser,
+            &plan_progress,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "find data".into(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        // Count replan system messages in the LAST captured message snapshot (which
+        // is the most complete view of the conversation). Each snapshot is cumulative,
+        // so only the last one tells us the total count of replan directives injected.
+        let captured = model.captured_messages.lock().unwrap();
+        let last_snapshot = captured.last().expect("at least one model call");
+        let replan_count = last_snapshot
+            .iter()
+            .filter(|m| {
+                m.get("role").and_then(|r| r.as_str()) == Some("system")
+                    && m.get("content")
+                        .and_then(|c| c.as_str())
+                        .map(|c| {
+                            c.contains("blocked after multiple attempts")
+                                || c.contains("consecutive steps")
+                        })
+                        .unwrap_or(false)
+            })
+            .count();
+        assert!(
+            replan_count <= 1,
+            "replan must fire at most once per turn, found {replan_count}"
+        );
+        // Verify at least one replan WAS injected.
+        assert_eq!(replan_count, 1, "expected exactly one replan directive");
     }
 }

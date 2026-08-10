@@ -162,7 +162,7 @@ assertNotContains("src/components/ChatView.tsx", "EMPTY_HERO_CHIPS", "New chat m
 assertNotContains("src/components/ChatView.tsx", "chat-hero-chip", "New chat must not render canned prompt buttons");
 assertContains("src/components/ChatEmptyHero.tsx", "<ChatUsageOverview", "Empty hero must mount compact usage");
 assertContains("src/components/ChatView.tsx", "onUseForTask", "Confirmed task suggestions must reach the composer model override");
-assertContains("src/components/ChatView.tsx", "enqueueTurn(thread.threadId, requestId, promptWithReplyContext", "Active task instructions must be queued as steering");
+assertContains("src/components/useChatTurnSubmission.ts", "enqueueTurn(thread.threadId, requestId, promptWithReplyContext", "Active task instructions must be queued as steering");
 assertSource("src/components/ActiveTurnStatus.tsx", ["chat.inspector.views.activity", "onStop", "attempt"]);
 assertSource("src/components/PendingSteeringQueue.tsx", ["onEdit", "onDelete", "onSendNow"]);
 assertSource("src/components/ChatComposerDock.tsx", ["<ActiveTurnStatus", "<PendingSteeringQueue", "<ComposerContainer"]);
@@ -188,11 +188,11 @@ assertContains(
   ".thread-status-dot.completed-unread",
   "completion uses a fixed teal dot",
 );
-assertSource("src/components/ChatView.tsx", [
-  'function openActivityIsland() {\n    hideInspector();\n    setActivityNonce((n) => n + 1);',
-  "onOpenActivity={openActivityIsland}",
+assertSource("src/components/useChatTurnSubmission.ts", [
+  'function openActivityIsland() {\n    hideInspector();\n    bumpActivityNonce();',
   'if (result.status === "queued")',
 ]);
+assertContains("src/components/ChatView.tsx", "onOpenActivity={openActivityIsland}", "ChatView must wire openActivityIsland to the activity handler");
 assertNotContains(
   "src/components/ChatView.tsx",
   "setIslandOpen",
@@ -1005,10 +1005,10 @@ assertNotContains("src/components/Sidebar.tsx", "setSwitcherOpen", "project navi
 assertContains("src/lib/useChatThreadCreation.ts", "summarizeThreadTitle", "frontend optimistic chat titles must be synthesized, not first-prompt slices");
 assertContains("src/lib/useChatReadModelController.ts", "advanceActivity === true", "chat preview ordering must advance only from explicit completed assistant turns");
 assertNotContains("src/App.tsx", "nextActivityMessageCount > thread.messageCount", "opening/loading an existing chat must not infer new activity from message count");
-assertContains("src/components/ChatView.tsx", "onMessagesChange(promptMessages)", "chat title must update as soon as the user prompt is accepted");
-assertContains("src/components/ChatView.tsx", "advanceActivity: true", "completed assistant turns must explicitly advance chat activity ordering");
-assertContains("src/components/ChatView.tsx", "const shouldAutoTitleAfterSubmit = isPlaceholderThreadTitle(thread.title)", "auto-title must be authorized only by a real submitted turn, not by opening a historical chat");
-assertContains("src/components/ChatView.tsx", "persistAutoTitleForCompletedTurn(", "auto-title must persist from the completed chat stream path");
+assertContains("src/components/useChatTurnSubmission.ts", "onMessagesChange(promptMessages)", "chat title must update as soon as the user prompt is accepted");
+assertContains("src/components/useChatTurnSubmission.ts", "advanceActivity: true", "completed assistant turns must explicitly advance chat activity ordering");
+assertContains("src/components/useChatTurnSubmission.ts", "const shouldAutoTitleAfterSubmit = isPlaceholderThreadTitle(thread.title)", "auto-title must be authorized only by a real submitted turn, not by opening a historical chat");
+assertContains("src/components/useChatTurnSubmission.ts", "persistAutoTitleForCompletedTurn(", "auto-title must persist from the completed chat stream path");
 assertContains("src/components/useChatAutoTitle.ts", "coreBridge.autoTitleThread", "auto-title persistence must have one focused owner");
 assertNotContains("src/components/ChatView.tsx", "coreBridge.autoTitleThread", "ChatView must not own auto-title persistence");
 assertNotContains("src/components/ChatView.tsx", "titledThreadsRef", "ChatView must not own auto-title dedupe state");
@@ -1050,10 +1050,12 @@ assertNotContains("src/App.tsx", "pendingEventThreadIdsRef", "background event r
 assertContains("src/App.tsx", "refreshThreadInBackground", "background events must refresh their own durable cache");
 assertContains("src/lib/useAppEventSubscription.ts", "event.type === \"thread.turn_started\"", "desktop client must handle visible turn start events");
 assertContains("src/lib/coreBridge.ts", "assistant_message_id?: string", "app event contract must expose persisted assistant message ids");
-assertContains("src/components/ChatView.tsx", "normalizeChatEventParts(result.assistant_message.event_parts)", "completed chat turns must normalize structured event parts from the gateway result");
+assertContains("src/components/useChatTurnSubmission.ts", "normalizeChatEventParts(result.assistant_message.event_parts)", "completed chat turns must normalize structured event parts from the gateway result");
 assertContains("src/lib/chatViewMessages.ts", "eventParts,", "completed chat turns must preserve structured event parts in the assistant message builder");
 assertContains("src/lib/chatApi.ts", "export async function cancelTurn(", "chat cancellation must call the broker cancel_turn endpoint (DELETE /turns/{id})");
-assertContains("src/lib/coreBridge.ts", "await cancelTurn(`turn_${requestId}`)", "Stop must cancel the running turn on the broker by its derived turn id, not a client-side socket close");
+assertContains("src/lib/coreBridge.ts", "await cancelTurn(turnId);", "Stop must cancel the running turn on the broker via DELETE, not a client-side socket close");
+assertContains("src/lib/coreBridge.ts", "serverTurnIdByRequestId.get(requestId) ?? `turn_${requestId}`", "Stop must prefer the server-assigned turn id (resume keeps the existing execution id) and only fall back to the request-derived one");
+assertContains("src/lib/chatApi.ts", "console.warn", "cancelTurn must surface non-2xx responses instead of swallowing them silently");
 assertContains("src/plugins/registry.tsx", "navSection?: \"work\" | \"create\" | \"workspace\" | \"more\"", "plugin manifest must declare sidebar placement by operational role");
 assertContains("src/plugins/presentations/index.tsx", "navSection: \"create\"", "presentations addon must be promoted into the create section");
 assertContains("src/plugins/proattivita/index.tsx", "navSection: \"work\"", "proactivity addon must be promoted into the work section");
@@ -1112,7 +1114,7 @@ assertContains(
 assertContains("src/components/ActiveTurnStatus.tsx", 't("chat.inspector.views.activity")', "active turn activity action must use the valid localized inspector key");
 assertContains("src/components/PendingSteeringQueue.tsx", "pending-steering-strip", "queued steering must render as a compact request strip");
 assertContains("src/lib/coreBridge.ts", "SteeringQueuedDuringSubmissionError", "a submit/steering race must have a typed benign outcome");
-assertContains("src/components/ChatView.tsx", "error instanceof SteeringQueuedDuringSubmissionError", "the submit/steering race must clear optimistic UI instead of rendering an error");
+assertContains("src/components/useChatTurnSubmission.ts", "error instanceof SteeringQueuedDuringSubmissionError", "the submit/steering race must clear optimistic UI instead of rendering an error");
 assertNotContains("src/lib/coreBridge.ts", "Instruction queued on the active task; no second stream was started.", "successful steering must not be represented by a user-visible error");
 assertContains("src/components/SettingsView.tsx", "catalogDisplayIdentity(target)", "skill preview must preserve the publisher-qualified target while loading or failing");
 assertContains("src/components/ChatComputerPanel.tsx", "const terminalRunning = Boolean(live?.terminal_active || terminal.some((entry) => entry.running))", "terminal dock must be driven by running terminal activity, not completed history");
@@ -1257,7 +1259,7 @@ assertContains("src/lib/coreBridge.ts", "importPptxTemplate", "Desktop bridge mu
 assertContains("src/lib/coreBridge.ts", "templateSourceAttachment", "Desktop bridge must resolve local template attachments without exposing paths in the catalog");
 assertContains("src/lib/coreBridge.ts", "attachments?: CoreChatAttachment[]", "streamed prompt commits must be able to preserve user attachments");
 
-assertContains("src/components/ChatView.tsx", "coreBridge.submitChatPromptStream", "composer must submit prompts through the local chat transport");
+assertContains("src/components/useChatTurnSubmission.ts", "coreBridge.submitChatPromptStream", "composer must submit prompts through the local chat transport");
 assertContains("src/lib/coreBridge.ts", "submitBrowserRuntimeChatPromptStream", "Electron bridge must stream from the local Gemma runtime through Electron-safe transport");
 assertContains("src/lib/coreBridge.ts", "enqueueTurn(", "Electron bridge must submit chat turns through the Rust gateway's turn broker");
 assertContains("src/lib/chatApi.ts", "/api/chat/turns", "broker turn API must POST turns to the local gateway endpoint");
@@ -1312,8 +1314,8 @@ assertContains("src/lib/contextBudget.ts", "context compressed: earlier chat", "
 assertContains("src/lib/chatApi.ts", "rawRecentChatContext(threadId", "Electron gateway requests must include recent thread context");
 assertContains("src/lib/chatApi.ts", "streamListeners", "chat streaming must use local browser listener dispatch");
 assertContains("src/lib/chatApi.ts", "publishedStreamSequences.accept(payload)", "chat streaming must deduplicate sequenced publication before listener side effects");
-assertContains("src/components/ChatView.tsx", "handledBackgroundTurnsRef.current.add(localTurnId)", "locally started turns must be claimed before background attachment can race");
-assertContains("src/components/ChatView.tsx", "streamOwnerTurnRef.current = localTurnId", "a local turn must have one visible stream owner");
+assertContains("src/components/useChatTurnSubmission.ts", "handledBackgroundTurnsRef.current.add(localTurnId)", "locally started turns must be claimed before background attachment can race");
+assertContains("src/components/useChatTurnSubmission.ts", "streamOwnerTurnRef.current = localTurnId", "a local turn must have one visible stream owner");
 assertContains("src/lib/chatApi.ts", "/create_task", "chat message task actions must call the local gateway");
 assertNotContains("src/lib/coreBridge.ts", "invoke<", "frontend bridge must not call removed native invoke");
 assertNotContains("src/lib/coreBridge.ts", removedShellGlobal, "frontend bridge must not inspect removed shell globals");
@@ -1341,7 +1343,7 @@ assertMatches(
 );
 assertContains("src/components/ChatView.tsx", "workspacePlanSteps", "adaptive activity must derive progress from the durable plan projection");
 assertContains("src/components/ChatView.tsx", "projectWorkspaceSections({", "island visibility must use the pure factual projection");
-assertContains("src/components/ChatView.tsx", "snapshotVerified: Boolean(previewDataUrl)", "inactive browser visibility requires a verified preview");
+assertContains("src/lib/chat-runtime/browserActivityLifecycle.mjs", "snapshotVerified: Boolean(previewDataUrl)", "inactive browser visibility requires a verified preview");
 assertContains("src/components/ChatWorkspaceDock.tsx", "openSectionRequest={{ section: \"activity\", nonce: openActivityNonce }}", "Activity actions must target the adaptive activity section");
 assertContains("src/components/AdaptiveWorkspaceIsland.tsx", "useState<WorkspaceSectionId | null>(null)", "adaptive island must be collapsed by default");
 assertContains("src/components/AdaptiveWorkspaceIsland.tsx", "setActiveSection(null);\n  }, [threadId]);", "adaptive island state must reset per thread");
@@ -1426,7 +1428,7 @@ assertContains("src/components/useChatActivityProjection.ts", "latestActivitySte
 assertContains("src/components/useChatActivityProjection.ts", "parsePlanSteps", "workspace plan steps must have one focused owner");
 assertContains("src/components/useChatActivityProjection.ts", "createTurnReplayState", "activity projection replay seeding must have one focused owner");
 assertContains("src/components/useChatActivityProjection.ts", "replayStatusFromProjection", "activity projection replay status mapping must have one focused owner");
-assertContains("src/components/ChatView.tsx", "useChatActivityProjection({", "ChatView must consume the focused durable activity projection owner");
+assertContains("src/components/useChatBrowserActivityLifecycle.ts", "useChatActivityProjection({", "browser activity lifecycle must consume the focused durable activity projection owner");
 assertNotContains("src/components/ChatView.tsx", "fetchThreadActivity", "ChatView must not own durable activity projection fetch");
 assertNotContains("src/components/ChatView.tsx", "latestPlanMarkdown", "ChatView must not own plan marker fallback parsing");
 assertNotContains("src/components/ChatView.tsx", "latestActivitySteps", "ChatView must not own activity marker fallback parsing");
@@ -1450,8 +1452,8 @@ assertContains("src/components/useChatComputerSession.ts", "coreBridge.pauseLoca
 assertContains("src/components/useChatComputerSession.ts", "coreBridge.resumeLocalComputerSession", "local computer resume control must have one focused owner");
 assertContains("src/components/useChatComputerSession.ts", "coreBridge.requestLocalComputerTakeover", "local computer takeover control must have one focused owner");
 assertContains("src/components/useChatComputerSession.ts", "applyComputerSessionSnapshot", "streamed turn computer snapshots must update through the focused owner");
-assertContains("src/components/ChatView.tsx", "useChatComputerSession({", "ChatView must consume the focused local computer session owner");
-assertContains("src/components/ChatView.tsx", "applyComputerSessionSnapshot(result.computer_session)", "streamed prompt results must refresh the local computer read model through the focused owner");
+assertContains("src/components/useChatBrowserActivityLifecycle.ts", "useChatComputerSession({", "browser activity lifecycle must consume the focused local computer session owner");
+assertContains("src/components/useChatTurnSubmission.ts", "applyComputerSessionSnapshot(result.computer_session)", "streamed prompt results must refresh the local computer read model through the focused owner");
 assertNotContains("src/components/ChatView.tsx", "createLoadingComputerSession", "ChatView must not own local computer loading state");
 assertNotContains("src/components/ChatView.tsx", "createUnavailableComputerSession", "ChatView must not own local computer unavailable state");
 assertNotContains("src/components/ChatView.tsx", "mapCoreComputerSession", "ChatView must not own local computer read-model mapping");
@@ -1466,8 +1468,8 @@ assertContains("src/components/useChatSteeringQueue.ts", "deleteSteering", "stee
 assertContains("src/components/useChatSteeringQueue.ts", "sendSteeringNow", "steering queue send-now must have one focused owner");
 assertContains("src/components/useChatSteeringQueue.ts", "applySteeringChange", "steering queue change reconciliation must have one focused owner");
 assertContains("src/components/useChatSteeringQueue.ts", "steeringPromptWithEdit", "steering edit prompt assembly must have one focused owner");
-assertContains("src/components/ChatView.tsx", "useChatSteeringQueue({", "ChatView must consume the focused steering queue owner");
-assertContains("src/components/ChatView.tsx", "applyPendingSteeringChange(returnedRecord)", "queued steering returned by submit must update through the focused owner");
+assertContains("src/components/useChatApprovalFlow.ts", "useChatSteeringQueue({", "approval flow must consume the focused steering queue owner");
+assertContains("src/components/useChatTurnSubmission.ts", "applyPendingSteeringChange(returnedRecord)", "queued steering returned by submit must update through the focused owner");
 assertNotContains("src/components/ChatView.tsx", "createSteeringQueueState", "ChatView must not own steering queue initialization");
 assertNotContains("src/components/ChatView.tsx", "reconcileSteering", "ChatView must not own steering queue reconciliation");
 assertNotContains("src/components/ChatView.tsx", "applySteeringChange", "ChatView must not own steering queue change application");
@@ -1580,7 +1582,7 @@ assertContains("src/App.tsx", "setThreadMessagesFromBackend", "backend chat snap
 assertContains("src/App.tsx", "pendingTemplateAutoSubmit", "template workflows must be handed to the visible chat renderer");
 assertContains("src/App.tsx", "onAutoSubmitConsumed", "template auto-submit triggers must be consumed after entering the chat pipeline");
 assertContains("src/components/ChatViewTypes.ts", "autoSubmit?: ChatAutoSubmit | null", "ChatView must accept external chat-start triggers without bypassing streaming UI");
-assertContains("src/components/ChatView.tsx", "submitPrompt(\n      autoSubmit.prompt", "external chat-start triggers must reuse the normal visible submit pipeline");
+assertContains("src/components/useChatTurnStateMachine.ts", "submitPrompt(\n      autoSubmit.prompt", "external chat-start triggers must reuse the normal visible submit pipeline");
 assertNotContains("src/App.tsx", "template_workflow_", "template workflows must not start a parallel invisible stream from App");
 // The dock now has ONE enlarge/contract control (right-aligned): fullscreen ⇄ back.
 assertContains("src/components/ChatComputerPanel.tsx", "setView(fullscreen ? \"expanded\" : \"full\")", "Computer dock must expose a single enlarge/contract control (fullscreen ⇄ expanded)");
@@ -1617,8 +1619,8 @@ assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "gateway_prom
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/chat/turns", "desktop gateway must expose the broker turn endpoint (the only chat path)");
 assertRepoContains("apps/desktop/src/lib/coreBridge.ts", "export type CoreChatStreamEvent", "desktop renderer must expose structured chat stream events");
 assertRepoContains("apps/desktop/src/lib/chatApi.ts", "listenChatStreamEvent", "chat API must expose structured chat stream subscription");
-assertRepoContains("apps/desktop/src/components/ChatView.tsx", "listenChatStreamEvent", "ChatView must consume structured chat stream events");
-assertRepoContains("apps/desktop/src/components/ChatView.tsx", "eventParts", "ChatView must pass structured event parts into assistant rendering");
+assertRepoContains("apps/desktop/src/components/useChatTurnSubmission.ts", "listenChatStreamEvent", "turn submission must consume structured chat stream events");
+assertRepoContains("apps/desktop/src/components/useChatTurnSubmission.ts", "eventParts", "turn submission must pass structured event parts into assistant rendering");
 assertRepoContains("apps/desktop/src/lib/coreBridge.ts", "event_parts", "core chat message must expose persisted structured event parts");
 assertRepoContains("apps/desktop/src/lib/appCoreMappers.ts", "mapCoreChatEventParts", "desktop app must hydrate persisted structured event parts");
 assertRepoContains("apps/desktop/src/lib/useChatReadModelController.ts", "mapCoreChatMessage", "desktop app must hydrate persisted messages through the core mapper owner");
@@ -1626,7 +1628,7 @@ assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "eventPartToLe
 assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "visibleStreamingText", "streaming messages must keep prose text separate from structured event parts");
 assertRepoContains("apps/desktop/src/components/chatStreamEventProjection.ts", "shouldDropStructuredMarkerDelta", "stream event projection must drop legacy marker deltas after receiving structured event parts");
 assertRepoContains("apps/desktop/src/components/chatStreamEventProjection.ts", "chatEventPartFromStream", "stream event projection must own structured stream event conversion");
-assertRepoContains("apps/desktop/src/components/ChatView.tsx", "projectChatStreamEvent(", "ChatView must consume the focused stream event projection owner");
+assertRepoContains("apps/desktop/src/components/useChatTurnSubmission.ts", "projectChatStreamEvent(", "turn submission must consume the focused stream event projection owner");
 assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "chatEventPartFromStream", "ChatView must not own structured stream event conversion");
 assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "shouldDropStructuredMarkerDelta", "ChatView must not own structured marker delta filtering");
 assertNotContains("src/App.tsx", "‹‹CHOICES››", "new proactivity choice prompts must use structured event parts, not marker text");

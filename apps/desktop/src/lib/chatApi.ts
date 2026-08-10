@@ -1084,10 +1084,21 @@ export async function fetchThreadActivity(
  * Cancel a running turn: DELETE /api/chat/turns/{id}. The broker marks the turn
  * cancelled and notifies the executor. 202 = accepted, 404 = no active turn
  * (already finished) — both are fine for a best-effort Stop, so we don't throw.
+ * Non-2xx responses are NOT swallowed silently: a 404 here historically meant the
+ * caller derived a wrong turn id (e.g. `turn_${requestId}` after a resume kept
+ * the existing execution id) and the server-side cancel never happened.
  */
 export async function cancelTurn(turnId: string): Promise<void> {
-  await fetch(`${DESKTOP_GATEWAY_URL}/api/chat/turns/${encodeURIComponent(turnId)}`, {
-    method: "DELETE",
-    headers: gatewayHeaders(),
-  });
+  const response = await fetch(
+    `${DESKTOP_GATEWAY_URL}/api/chat/turns/${encodeURIComponent(turnId)}`,
+    {
+      method: "DELETE",
+      headers: gatewayHeaders(),
+    },
+  );
+  if (!response.ok) {
+    console.warn(
+      `[chatApi] cancelTurn DELETE /api/chat/turns/${turnId} returned HTTP ${response.status}`,
+    );
+  }
 }

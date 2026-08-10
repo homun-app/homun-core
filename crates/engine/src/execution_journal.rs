@@ -254,6 +254,47 @@ pub fn tool_family(name: &str) -> String {
         .to_string()
 }
 
+/// Structured evidence marker pushed into `step_evidence` when an external
+/// side-effecting action FAILS (error, not-applied/uncertain receipt, blocked,
+/// empty, or no-progress outcome). The F2 deterministic backstop scans the step
+/// evidence for these and refuses a `done` claim when the step's criterion is an
+/// ACTION criterion and no external action succeeded.
+pub const EXTERNAL_ACTION_FAILED_MARKER: &str = "[external_action_failed]";
+
+/// Success twin of [`EXTERNAL_ACTION_FAILED_MARKER`]: at least one external
+/// side-effecting action produced a successful outcome in this step's evidence
+/// window. Its presence disarms the F2 deterministic backstop (the judge decides).
+pub const EXTERNAL_ACTION_OK_MARKER: &str = "[external_action_ok]";
+
+/// Small, deliberate list of tools whose execution performs an EXTERNAL
+/// side-effecting action (browser acting on a page, delegated browse, channel
+/// delivery). Observation-only tools (snapshot/screenshot/tabs) and pure
+/// bookkeeping are excluded: this feeds a conservative completion backstop, so
+/// only tools whose failure means "the external result does not exist" qualify.
+pub fn is_external_action_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "browser_act" | "browser_navigate" | "browse" | "send_message"
+    )
+}
+
+/// Builds the structured evidence entry for one external-action tool result:
+/// `"[external_action_failed] operation=<name>"` on any non-success outcome,
+/// `"[external_action_ok] operation=<name>"` on success, `None` for tools that
+/// are not external actions. `outcome` is the loop's classified result outcome
+/// (`success` / `no_progress` / `error` / `empty` / `blocked`).
+pub fn external_action_evidence_marker(name: &str, outcome: &str) -> Option<String> {
+    if !is_external_action_tool(name) {
+        return None;
+    }
+    let kind = if outcome == "success" {
+        EXTERNAL_ACTION_OK_MARKER
+    } else {
+        EXTERNAL_ACTION_FAILED_MARKER
+    };
+    Some(format!("{kind} operation={name}"))
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoopExecutionJournal;
 
@@ -508,5 +549,53 @@ mod tests {
         assert!(!fingerprint.contains("secret"));
         assert_eq!(tool_family("browser_navigate"), "browser");
         assert_eq!(tool_family("shell"), "shell");
+    }
+
+    #[test]
+    fn external_action_markers_track_external_tools_only() {
+        // External action tools get a structured ok/failed marker per outcome.
+        assert_eq!(
+            external_action_evidence_marker("browser_act", "success").as_deref(),
+            Some("[external_action_ok] operation=browser_act")
+        );
+        for outcome in ["error", "empty", "blocked", "no_progress"] {
+            assert_eq!(
+                external_action_evidence_marker("browser_act", outcome).as_deref(),
+                Some("[external_action_failed] operation=browser_act")
+            );
+        }
+        assert_eq!(
+            external_action_evidence_marker("browse", "no_progress").as_deref(),
+            Some("[external_action_failed] operation=browse")
+        );
+        assert_eq!(
+            external_action_evidence_marker("send_message", "error").as_deref(),
+            Some("[external_action_failed] operation=send_message")
+        );
+        assert_eq!(
+            external_action_evidence_marker("browser_navigate", "success").as_deref(),
+            Some("[external_action_ok] operation=browser_navigate")
+        );
+        // Non-external tools (including observation-only browser tools) get none.
+        for name in [
+            "browser_snapshot",
+            "browser_screenshot",
+            "browser_tabs",
+            "recall_memory",
+            "update_plan",
+            "shell",
+        ] {
+            assert!(
+                external_action_evidence_marker(name, "success").is_none(),
+                "{name} must not be marked as an external action"
+            );
+            assert!(
+                external_action_evidence_marker(name, "error").is_none(),
+                "{name} must not be marked as an external action"
+            );
+        }
+        // The markers are distinct substrings (an ok marker never reads as failed).
+        assert!(!EXTERNAL_ACTION_OK_MARKER.contains(EXTERNAL_ACTION_FAILED_MARKER));
+        assert!(!EXTERNAL_ACTION_FAILED_MARKER.contains(EXTERNAL_ACTION_OK_MARKER));
     }
 }

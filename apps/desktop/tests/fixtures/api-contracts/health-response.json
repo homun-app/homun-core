@@ -1,0 +1,11 @@
+{
+  "comment": "Known-good response body for GET /api/health. Mirrors the Rust HealthResponse struct (gateway_health.rs): { ok, service, local_first, auth_required, recovered_stores, projection_worker_error }. Serialized with default snake_case (struct fields are snake_case). The frontend consumes this loosely (no dedicated TS interface) so this fixture is the canonical contract for the wire shape.",
+  "payload": {
+    "ok": true,
+    "service": "local-first-desktop-gateway",
+    "local_first": true,
+    "auth_required": true,
+    "recovered_stores": [],
+    "projection_worker_error": null
+  }
+}

@@ -15,6 +15,7 @@ import type { ChatMessage } from "../types";
 import {
   latestActivitySteps,
   latestPlanMarkdown,
+  parsePlanGoal,
   parsePlanSteps,
 } from "./ChatPayloadParsers";
 
@@ -109,6 +110,12 @@ export function useChatActivityProjection({
     return steps;
   }, [conversationPlan, isStreaming, projectedTurnStatus]);
 
+  // Goal line (`**Goal**: ...`) prepended by the kernel to plan markdown.
+  const workspacePlanGoal = useMemo(
+    () => (conversationPlan ? parsePlanGoal(conversationPlan) : null),
+    [conversationPlan],
+  );
+
   const clearProjectedActiveTurn = useCallback(() => {
     setProjectedActiveTurn(null);
   }, []);
@@ -180,6 +187,7 @@ export function useChatActivityProjection({
     projectedSubagents,
     projectedTurnStatus,
     projectionLoaded,
+    workspacePlanGoal,
     workspacePlanSteps,
   };
 }

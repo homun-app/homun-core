@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { Shell } from "./components/Shell";
@@ -85,6 +85,13 @@ function AuthenticatedApp() {
   // Bumped on a `thread.updated` for the open thread → ChatView re-fetches its island
   // projection, so a BACKGROUND channel turn's finished activity folds in (it isn't streamed).
   const [islandRefreshNonce, setIslandRefreshNonce] = useState(0);
+  // Stable bump for the projection refresh nonce. Bumped by app events above,
+  // and also by the chat cancel closures after their cancel DELETE settles so
+  // the island projection re-fetches and reconciles (it never opens the island).
+  const bumpIslandRefreshNonce = useCallback(
+    () => setIslandRefreshNonce((n) => n + 1),
+    [],
+  );
   // Set on a `thread.turn_started` for the open thread → ChatView attaches to that turn's live
   // stream (island + transcript update in real time), for turns THIS client didn't launch —
   // e.g. a Telegram/WhatsApp/scheduled reply, or a turn started from another window.
@@ -216,7 +223,7 @@ function AuthenticatedApp() {
     onSelectThread: handleSelectThread,
     refreshThreadInBackground,
     setIncomingBackgroundTurn,
-    bumpIslandRefreshNonce: () => setIslandRefreshNonce((n) => n + 1),
+    bumpIslandRefreshNonce,
   });
 
   const {
@@ -319,6 +326,7 @@ function AuthenticatedApp() {
             : null
         }
         islandRefreshNonce={islandRefreshNonce}
+        bumpIslandRefreshNonce={bumpIslandRefreshNonce}
         runtimeContextRevision={
           threadAttention.terminalEventIds[activeThread.threadId] ?? 0
         }

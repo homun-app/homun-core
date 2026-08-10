@@ -1,0 +1,42 @@
+{
+  "comment": "Known-good shape for an episodic memory recall result, delivered as a CoreChatStreamEvent of type 'recall' over the turn NDJSON stream (GET /api/chat/turns/{id}/stream). Mirrors TS RecallEventPayload (coreBridge.ts) wrapping RecallHitPayload[]. Each hit carries its grant/policy/revision attestation for linked-memory access. scope is 'personal' | 'project'. status is optional (absent on legacy persisted events).",
+  "payload": {
+    "type": "recall",
+    "request_id": "req_1719900000",
+    "payload": {
+      "query": "preferred deployment region",
+      "hits": [
+        {
+          "ref": "mem_0001",
+          "text": "User prefers eu-west-1 for all production deployments.",
+          "score": 0.91,
+          "type": "preference",
+          "source_workspace_id": "__personal__",
+          "source_label": "Personale",
+          "collection": "preferences",
+          "grant_id": null,
+          "policy_version": null,
+          "source_revision": null,
+          "conflict": false,
+          "graph_path": ["mem_0001", "mem_0010"]
+        },
+        {
+          "ref": "mem_0042",
+          "text": "Q3 infra decision: pin workloads to eu-west-1 until SOC2 audit completes.",
+          "score": 0.78,
+          "type": "decision",
+          "source_workspace_id": "ws_project_alpha",
+          "source_label": "Progetto Alpha",
+          "collection": "decisions",
+          "grant_id": "grant_0017",
+          "policy_version": 3,
+          "source_revision": "rev_5f3a",
+          "conflict": true,
+          "graph_path": null
+        }
+      ],
+      "scope": "personal",
+      "status": "ready"
+    }
+  }
+}

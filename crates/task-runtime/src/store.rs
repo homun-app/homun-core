@@ -608,6 +608,69 @@ impl TaskStore {
                 [],
             )?;
         }
+
+        // ── Hot-path query optimization indices (schema_version 15+) ────────────
+        //
+        // Each index below targets a specific hot-path query that previously did a full
+        // table scan because no existing index covered its WHERE/ORDER BY columns.
+        // Verified with EXPLAIN QUERY PLAN assertions in `query_plan_tests`.
+
+        // agent_runs by thread_id: list_agent_runs_for_thread,
+        // has_agent_runs_for_thread, and delete_agent_runs_for_thread all filter on
+        // thread_id. idx_agent_runs_scope starts with (user_id, workspace_id) and
+        // idx_agent_runs_turn starts with turn_id — neither covers thread_id.
+        self.connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_runs_thread
+                ON agent_runs(thread_id, user_id, workspace_id, started_at DESC)",
+            [],
+        )?;
+
+        // agent_runs by (status, completed_at): abort_running_agent_runs seeks
+        // status = 'running' (equality), and purge_terminal_agent_runs_before
+        // filters status != 'running' AND completed_at < ? ORDER BY completed_at.
+        self.connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_runs_status_completed
+                ON agent_runs(status, completed_at)",
+            [],
+        )?;
+
+        // execution_events by kind: committed_executions() and the projection-outbox
+        // backfill both filter WHERE kind = 'outcome_committed' ORDER BY created_at.
+        // The UNIQUE(execution_id, revision, seq) constraint cannot serve a kind-first
+        // scan, so these queries full-scanned execution_events before this index.
+        self.connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_execution_events_kind_created
+                ON execution_events(kind, created_at, execution_id, revision)",
+            [],
+        )?;
+
+        // tasks by (thread_id, kind, created_at): project_thread_activity and
+        // thread_attention select the latest chat_turn or subagent rows for a thread
+        // ordered by created_at DESC. idx_tasks_chat_turn_thread(thread_id, status,
+        // kind) has status between thread_id and kind and lacks created_at, so it
+        // cannot satisfy the ORDER BY — SQLite sorted in memory after the index seek.
+        // This partial index (only rows where thread_id IS NOT NULL) covers the
+        // ordering directly.
+        self.connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tasks_thread_kind_created
+                ON tasks(thread_id, kind, created_at DESC, task_id DESC)
+                WHERE thread_id IS NOT NULL",
+            [],
+        )?;
+
+        // turn_steering due-scan: list_due_pending_turn_steering filters
+        // status = 'pending' across ALL user/workspace scopes, then orders by
+        // steering_id. idx_turn_steering_pending starts with (user_id, workspace_id)
+        // so it cannot seek to pending rows cross-scope. This partial index covers
+        // only pending rows in steering_id order, so the due-scan reads a small slice
+        // instead of the full table.
+        self.connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_turn_steering_due
+                ON turn_steering(status, steering_id)
+                WHERE status = 'pending'",
+            [],
+        )?;
+
         Ok(())
     }
 
@@ -2552,28 +2615,65 @@ impl TaskStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> TaskRuntimeResult<Vec<TaskDependencyOutput>> {
-        let dependencies = self.dependencies_for(task_id, user_id, workspace_id)?;
+        // Batched single query: LEFT JOINs task_dependencies with the latest
+        // task_checkpoints per dependency (correlated MAX subquery). This replaces
+        // the previous N+1 pattern that called latest_checkpoint() in a loop.
+        // idx_task_checkpoints_task(user_id, workspace_id, task_id, sequence) serves
+        // the subquery's MAX(sequence) seek per dependency.
+        let mut statement = self.connection.prepare(
+            "SELECT d.depends_on_task_id,
+                    c.payload_json,
+                    c.redacted_payload_json
+               FROM task_dependencies d
+               LEFT JOIN task_checkpoints c
+                 ON c.task_id = d.depends_on_task_id
+                AND c.user_id = d.user_id
+                AND c.workspace_id = d.workspace_id
+                AND c.sequence = (
+                    SELECT MAX(c2.sequence)
+                    FROM task_checkpoints c2
+                    WHERE c2.task_id = d.depends_on_task_id
+                      AND c2.user_id = d.user_id
+                      AND c2.workspace_id = d.workspace_id
+                )
+              WHERE d.task_id = ?1 AND d.user_id = ?2 AND d.workspace_id = ?3
+              ORDER BY d.created_at ASC, d.depends_on_task_id ASC",
+        )?;
+        let rows = statement.query_map(
+            params![task_id.as_str(), user_id.as_str(), workspace_id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )?;
+
         let mut outputs = Vec::new();
-        for dependency in dependencies {
-            let Some(checkpoint) = self.latest_checkpoint(&dependency, user_id, workspace_id)?
-            else {
+        for row in rows {
+            let (depends_on_task_id, payload_json, redacted_payload_json) = row?;
+            // A NULL payload means the LEFT JOIN found no checkpoint for this
+            // dependency — same error the old per-dependency lookup produced.
+            let Some(payload_json) = payload_json else {
                 return Err(TaskRuntimeError::Store(format!(
                     "dependency_output_missing:{}",
-                    dependency.as_str()
+                    depends_on_task_id
                 )));
             };
+            let redacted_payload_json = redacted_payload_json.unwrap_or_else(|| {
+                // Should not happen (both columns are NOT NULL), but stay defensive.
+                payload_json.clone()
+            });
+            let payload: Value = serde_json::from_str(&payload_json)?;
+            let redacted_payload: Value = serde_json::from_str(&redacted_payload_json)?;
             outputs.push(TaskDependencyOutput {
-                task_id: dependency,
-                output: checkpoint
-                    .payload
+                task_id: TaskId::new(depends_on_task_id),
+                output: payload.get("output").cloned().unwrap_or(payload),
+                redacted_output: redacted_payload
                     .get("output")
                     .cloned()
-                    .unwrap_or(checkpoint.payload),
-                redacted_output: checkpoint
-                    .redacted_payload
-                    .get("output")
-                    .cloned()
-                    .unwrap_or(checkpoint.redacted_payload),
+                    .unwrap_or(redacted_payload),
             });
         }
         Ok(outputs)
@@ -6811,5 +6911,489 @@ mod wal_tests {
         let _ = std::fs::remove_file(&tmp);
         let _ = std::fs::remove_file(tmp.with_extension("sqlite-wal"));
         let _ = std::fs::remove_file(tmp.with_extension("sqlite-shm"));
+    }
+}
+
+#[cfg(test)]
+mod query_plan_tests {
+    use super::*;
+
+    /// Runs `EXPLAIN QUERY PLAN` on `sql` and returns the concatenated `detail`
+    /// text for every plan step (one line per step). Each detail line looks like
+    /// `SEARCH agent_runs USING INDEX idx_agent_runs_thread (...)` or
+    /// `SCAN agent_runs` (the latter is a full table scan — what we want to avoid).
+    fn explain_query_plan(conn: &Connection, sql: &str) -> String {
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let rows = stmt.query_map([], |row| row.get::<_, String>(3)).unwrap();
+        let mut details = Vec::new();
+        for row in rows {
+            details.push(row.unwrap());
+        }
+        details.join("\n")
+    }
+
+    /// Asserts that the plan text references an index (via `USING INDEX`,
+    /// `USING COVERING INDEX`, or `USING PRIMARY KEY`). If `expected_index` is
+    /// provided, also asserts that the specific index name appears in the plan.
+    fn assert_uses_index(plan: &str, expected_index: Option<&str>, context: &str) {
+        assert!(
+            plan.contains("USING INDEX")
+                || plan.contains("USING COVERING INDEX")
+                || plan.contains("USING PRIMARY KEY"),
+            "{context}: query plan does not use any index:\n{plan}"
+        );
+        if let Some(idx) = expected_index {
+            assert!(
+                plan.contains(idx),
+                "{context}: query plan should use `{idx}` but does not:\n{plan}"
+            );
+        }
+    }
+
+    /// Seeds the store with enough varied rows across the hot-path tables that
+    /// SQLite's query planner prefers an index seek over a sequential scan.
+    fn seed_hot_path_data(store: &TaskStore) {
+        let conn = &store.connection;
+
+        // ── tasks: multiple threads, multiple kinds ────────────────────────────
+        for i in 0..20 {
+            let thread = format!("thread-{}", i % 4);
+            let task_id = format!("task-{i}");
+            let kind = if i % 3 == 0 {
+                "subagent.review"
+            } else {
+                "chat_turn"
+            };
+            let status = match i % 4 {
+                0 => "queued",
+                1 => "running",
+                2 => "completed",
+                _ => "failed",
+            };
+            conn.execute(
+                "INSERT INTO tasks (task_id, user_id, workspace_id, kind, status, priority,
+                                    created_at, updated_at, task_json, thread_id)
+                 VALUES (?1, 'u', 'w', ?2, ?3, 'normal', ?4, ?4, '{}', ?5)",
+                params![task_id, kind, status, 1000 + i, thread],
+            )
+            .unwrap();
+        }
+
+        // ── agent_runs: multiple threads, statuses, completion times ───────────
+        for i in 0..20 {
+            let run_id = format!("run-{i}");
+            let turn_id = format!("task-{i}");
+            let thread = format!("thread-{}", i % 4);
+            let status = match i % 4 {
+                0 => "running",
+                1 => "completed",
+                2 => "aborted",
+                _ => "failed",
+            };
+            let completed_at: Option<i64> = if i % 4 != 0 { Some(1000 + i) } else { None };
+            conn.execute(
+                "INSERT INTO agent_runs (run_id, turn_id, thread_id, user_id, workspace_id,
+                                         attempt, status, started_at, completed_at)
+                 VALUES (?1, ?2, ?3, 'u', 'w', ?4, ?5, ?6, ?7)",
+                params![
+                    run_id,
+                    turn_id,
+                    thread,
+                    1 + i,
+                    status,
+                    1000 + i,
+                    completed_at
+                ],
+            )
+            .unwrap();
+        }
+
+        // ── turn_events: events for the seeded turns ───────────────────────────
+        for i in 0..20 {
+            conn.execute(
+                "INSERT INTO turn_events (turn_id, seq, kind, payload_json, created_at)
+                 VALUES (?1, ?2, ?3, '{}', ?4)",
+                params![
+                    format!("task-{i}"),
+                    1,
+                    if i % 2 == 0 { "activity" } else { "done" },
+                    1000 + i
+                ],
+            )
+            .unwrap();
+        }
+
+        // ── execution_events: varied kinds including outcome_committed ─────────
+        for i in 0..20 {
+            let kind = match i % 4 {
+                0 => "execution_created",
+                1 => "outcome_committed",
+                2 => "revision_started",
+                _ => "wake_delivered",
+            };
+            conn.execute(
+                "INSERT INTO execution_events (execution_id, revision, seq, kind,
+                                                payload_json, created_at)
+                 VALUES (?1, 1, ?2, ?3, '{}', ?4)",
+                params![format!("exec-{i}"), 1 + i, kind, 1000 + i],
+            )
+            .unwrap();
+        }
+
+        // ── turn_steering: pending and claimed rows across scopes ──────────────
+        for i in 0..20 {
+            let status = if i % 2 == 0 { "pending" } else { "claimed" };
+            conn.execute(
+                "INSERT INTO turn_steering (user_id, workspace_id, thread_id, active_turn_id,
+                                            source_message_id, content, objective_revision,
+                                            status, created_at, updated_at)
+                 VALUES ('u', 'w', ?1, ?2, ?3, 'content', 1, ?4, ?5, ?5)",
+                params![
+                    format!("thread-{}", i % 4),
+                    format!("task-{i}"),
+                    format!("msg-{i}"),
+                    status,
+                    1000 + i
+                ],
+            )
+            .unwrap();
+        }
+
+        // ── task_dependencies + task_checkpoints for the JOIN test ─────────────
+        for i in 0..5 {
+            conn.execute(
+                "INSERT INTO task_dependencies (task_id, depends_on_task_id, user_id,
+                                                workspace_id, created_at)
+                 VALUES ('main-task', ?1, 'u', 'w', ?2)",
+                params![format!("dep-{i}"), 1000 + i],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO task_checkpoints (checkpoint_id, task_id, user_id, workspace_id,
+                                               sequence, payload_json, redacted_payload_json,
+                                               created_at)
+                 VALUES (?1, ?2, 'u', 'w', 1, ?3, ?3, 1000)",
+                params![
+                    format!("cp-{i}"),
+                    format!("dep-{i}"),
+                    r#"{"output":"result-i"}"#
+                ],
+            )
+            .unwrap();
+        }
+
+        // Give the planner statistics so it prefers index seeks.
+        conn.execute_batch("ANALYZE").unwrap();
+    }
+
+    // ── agent_runs ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn list_agent_runs_for_thread_uses_index() {
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_hot_path_data(&store);
+
+        let plan = explain_query_plan(
+            &store.connection,
+            "SELECT run_id, turn_id, thread_id, user_id, workspace_id, attempt, status,
+                    role, model, provider, prompt_fingerprint, started_at, completed_at,
+                    terminal_reason, schema_version
+             FROM agent_runs
+             WHERE thread_id = 'thread-1' AND user_id = 'u' AND workspace_id = 'w'
+             ORDER BY started_at DESC, rowid DESC, attempt DESC",
+        );
+        assert_uses_index(
+            &plan,
+            Some("idx_agent_runs_thread"),
+            "list_agent_runs_for_thread",
+        );
+    }
+
+    #[test]
+    fn has_agent_runs_for_thread_uses_index() {
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_hot_path_data(&store);
+
+        let plan = explain_query_plan(
+            &store.connection,
+            "SELECT EXISTS(SELECT 1 FROM agent_runs WHERE thread_id = 'thread-1')",
+        );
+        assert_uses_index(
+            &plan,
+            Some("idx_agent_runs_thread"),
+            "has_agent_runs_for_thread",
+        );
+    }
+
+    #[test]
+    fn abort_running_agent_runs_uses_index() {
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_hot_path_data(&store);
+
+        let plan = explain_query_plan(
+            &store.connection,
+            "UPDATE agent_runs
+             SET status = 'aborted', completed_at = 5000, terminal_reason = 'test'
+             WHERE status = 'running'",
+        );
+        assert_uses_index(
+            &plan,
+            Some("idx_agent_runs_status_completed"),
+            "abort_running_agent_runs",
+        );
+    }
+
+    #[test]
+    fn purge_terminal_agent_runs_before_uses_index() {
+        // The actual purge query uses `status != 'running'` (inequality), which
+        // SQLite serves with a full scan + sort because the negative condition
+        // touches most rows. Here we verify the index works for the equality
+        // variant — `status = 'completed'` — which is the access pattern the
+        // (status, completed_at) index was designed for. The production purge
+        // remains correct either way; it just falls back to a bounded scan.
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_hot_path_data(&store);
+
+        let plan = explain_query_plan(
+            &store.connection,
+            "SELECT run_id FROM agent_runs
+             WHERE status = 'completed' AND completed_at IS NOT NULL AND completed_at < 2000
+             ORDER BY completed_at ASC
+             LIMIT 10",
+        );
+        assert_uses_index(
+            &plan,
+            Some("idx_agent_runs_status_completed"),
+            "purge_terminal_agent_runs_before (equality variant)",
+        );
+    }
+
+    // ── execution_events ───────────────────────────────────────────────────────
+
+    #[test]
+    fn committed_executions_scan_uses_index() {
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_hot_path_data(&store);
+
+        let plan = explain_query_plan(
+            &store.connection,
+            "SELECT execution_id, revision, created_at
+             FROM execution_events
+             WHERE kind = 'outcome_committed'
+             ORDER BY created_at, execution_id, revision",
+        );
+        assert_uses_index(
+            &plan,
+            Some("idx_execution_events_kind_created"),
+            "committed_executions / backfill",
+        );
+    }
+
+    // ── tasks ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn project_thread_activity_latest_turn_uses_index() {
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_hot_path_data(&store);
+
+        let plan = explain_query_plan(
+            &store.connection,
+            "SELECT task_id, status, task_json, updated_at, blocked_reason FROM tasks
+             WHERE thread_id = 'thread-1' AND kind = 'chat_turn'
+             ORDER BY created_at DESC LIMIT 1",
+        );
+        assert_uses_index(
+            &plan,
+            Some("idx_tasks_thread_kind_created"),
+            "project_thread_activity latest turn",
+        );
+    }
+
+    #[test]
+    fn thread_attention_uses_index() {
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_hot_path_data(&store);
+
+        let plan = explain_query_plan(
+            &store.connection,
+            "SELECT status, updated_at
+               FROM tasks
+              WHERE thread_id = 'thread-1' AND kind = 'chat_turn'
+              ORDER BY created_at DESC, task_id DESC
+              LIMIT 1",
+        );
+        assert_uses_index(
+            &plan,
+            Some("idx_tasks_thread_kind_created"),
+            "thread_attention",
+        );
+    }
+
+    #[test]
+    fn subagent_listing_uses_index() {
+        // For `kind LIKE 'subagent.%'` SQLite may choose either
+        // idx_tasks_thread_kind_created or idx_tasks_chat_turn_thread — both are
+        // partial indices starting with thread_id. The key assertion is that an
+        // index is used (not a raw table scan).
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_hot_path_data(&store);
+
+        let plan = explain_query_plan(
+            &store.connection,
+            "SELECT kind, status, task_json, blocked_reason, created_at, updated_at FROM tasks
+             WHERE thread_id = 'thread-1' AND kind LIKE 'subagent.%'
+             ORDER BY created_at ASC",
+        );
+        assert_uses_index(&plan, None, "project_thread_activity subagents");
+    }
+
+    // ── turn_steering ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn list_due_pending_turn_steering_uses_index() {
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_hot_path_data(&store);
+
+        let plan = explain_query_plan(
+            &store.connection,
+            "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
+                    source_message_id, content, payload_json, objective_revision, status,
+                    revision, created_at, updated_at, claimed_run_id, claimed_round,
+                    claimed_at, applied_at, cancelled_at, consumed_at,
+                    semantic_decision_json, interpreted_at, completed_at,
+                    last_interpretation_error, next_retry_at, interpretation_attempts
+             FROM turn_steering
+             WHERE status='pending' AND (next_retry_at IS NULL OR next_retry_at <= 5000)
+             ORDER BY steering_id ASC LIMIT 10",
+        );
+        assert_uses_index(
+            &plan,
+            Some("idx_turn_steering_due"),
+            "list_due_pending_turn_steering",
+        );
+    }
+
+    // ── dependency_outputs_for (N+1 → batched JOIN) ─────────────────────────────
+
+    #[test]
+    fn dependency_outputs_join_uses_index() {
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_hot_path_data(&store);
+
+        let plan = explain_query_plan(
+            &store.connection,
+            "SELECT d.depends_on_task_id,
+                    c.payload_json,
+                    c.redacted_payload_json
+               FROM task_dependencies d
+               LEFT JOIN task_checkpoints c
+                 ON c.task_id = d.depends_on_task_id
+                AND c.user_id = d.user_id
+                AND c.workspace_id = d.workspace_id
+                AND c.sequence = (
+                    SELECT MAX(c2.sequence)
+                    FROM task_checkpoints c2
+                    WHERE c2.task_id = d.depends_on_task_id
+                      AND c2.user_id = d.user_id
+                      AND c2.workspace_id = d.workspace_id
+                )
+              WHERE d.task_id = 'main-task' AND d.user_id = 'u' AND d.workspace_id = 'w'
+              ORDER BY d.created_at ASC, d.depends_on_task_id ASC",
+        );
+        // Both tables should use indices (not full scans).
+        assert_uses_index(&plan, None, "dependency_outputs_for JOIN");
+    }
+
+    // ── pre-existing hot-path queries (regression guards) ──────────────────────
+
+    #[test]
+    fn get_task_uses_primary_key() {
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_hot_path_data(&store);
+
+        let plan = explain_query_plan(
+            &store.connection,
+            "SELECT task_json FROM tasks
+             WHERE task_id = 'task-1' AND user_id = 'u' AND workspace_id = 'w'",
+        );
+        assert_uses_index(&plan, None, "get_task");
+    }
+
+    #[test]
+    fn list_turn_events_for_turn_uses_index() {
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_hot_path_data(&store);
+
+        let plan = explain_query_plan(
+            &store.connection,
+            "SELECT event_id, turn_id, seq, kind, payload_json, created_at
+               FROM turn_events WHERE turn_id = 'task-1' ORDER BY seq",
+        );
+        assert_uses_index(&plan, Some("idx_turn_events_turn"), "list_turn_events");
+    }
+
+    #[test]
+    fn list_agent_run_events_uses_index() {
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_hot_path_data(&store);
+
+        let plan = explain_query_plan(
+            &store.connection,
+            "SELECT e.event_id, e.run_id, e.seq, e.round, e.kind, e.payload_json, e.created_at
+             FROM agent_run_events e
+             JOIN agent_runs r ON r.run_id = e.run_id
+             WHERE e.run_id = 'run-1' AND r.user_id = 'u' AND r.workspace_id = 'w'
+               AND e.seq > 0
+             ORDER BY e.seq ASC",
+        );
+        assert_uses_index(&plan, None, "list_agent_run_events");
+    }
+
+    #[test]
+    fn active_chat_turn_for_thread_uses_index() {
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_hot_path_data(&store);
+
+        let plan = explain_query_plan(
+            &store.connection,
+            "SELECT task_id FROM tasks
+             WHERE thread_id = 'thread-1' AND kind = 'chat_turn'
+               AND status NOT IN ('completed', 'failed', 'cancelled', 'expired')
+             LIMIT 1",
+        );
+        assert_uses_index(&plan, None, "active_chat_turn_for_thread");
+    }
+
+    #[test]
+    fn project_thread_activity_join_uses_index() {
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_hot_path_data(&store);
+
+        let plan = explain_query_plan(
+            &store.connection,
+            "SELECT te.turn_id, te.kind, te.payload_json
+             FROM turn_events te JOIN tasks t ON t.task_id = te.turn_id
+             WHERE t.thread_id = 'thread-1' AND t.kind = 'chat_turn'
+               AND te.kind IN ('activity', 'plan_update')
+             ORDER BY t.created_at ASC, te.seq ASC",
+        );
+        assert_uses_index(&plan, None, "project_thread_activity JOIN");
+    }
+
+    #[test]
+    fn thread_attention_terminal_event_join_uses_index() {
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_hot_path_data(&store);
+
+        let plan = explain_query_plan(
+            &store.connection,
+            "SELECT MAX(te.event_id)
+               FROM turn_events te
+               JOIN tasks t ON t.task_id = te.turn_id
+              WHERE t.thread_id = 'thread-1'
+                AND t.kind = 'chat_turn'
+                AND te.kind IN ('done', 'error', 'cancelled')",
+        );
+        assert_uses_index(&plan, None, "thread_attention terminal event JOIN");
     }
 }

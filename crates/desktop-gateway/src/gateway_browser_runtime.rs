@@ -110,6 +110,58 @@ pub(crate) fn browser_thread_workspace_id(state: &AppState, thread_id: &str) -> 
         .ok()
 }
 
+/// Conservative classification of a failed effectful browser sidecar call,
+/// mirroring the channel's `ChannelSendFailureKind` pattern. ONLY failures that
+/// are provably PRE-dispatch — the Act request never reached the sidecar, or the
+/// sidecar verified it never touched the page — qualify as
+/// `ConnectFailedBeforeDispatch` (receipt can return to `prepared`, no user
+/// verification, retry is safe). Anything after the sidecar could have accepted
+/// the Act request stays `UnknownRemoteOutcome` → `mark_uncertain`, because an
+/// ExternalWrite may already be applied and a blind retry risks double-execution.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BrowserActFailureKind {
+    ConnectFailedBeforeDispatch,
+    UnknownRemoteOutcome,
+}
+
+impl BrowserActFailureKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::ConnectFailedBeforeDispatch => "connect_failed_before_dispatch",
+            Self::UnknownRemoteOutcome => "unknown_remote_outcome",
+        }
+    }
+}
+
+/// Classifies the error string returned by `chat_browser_call_checkpointed`
+/// (the typed `BrowserAutomationError` is flattened to its `Display` text by
+/// `chat_browser_call`). Deliberately conservative:
+///
+/// PRE-dispatch (release_not_applied):
+/// - `sidecar stdin closed` / `broken pipe` — the stdin write of the Act request
+///   failed, so the request line never reached the sidecar's read loop;
+/// - `BROWSER_NOT_STARTED` — the sidecar answered with `requireContext`
+///   rejecting the call before any page interaction (no session at all);
+/// - `BROWSER_TAB_NOT_FOUND` — the sidecar answered with `resolvePage`
+///   rejecting the call before any action runs (target tab does not exist).
+///
+/// Everything else (sidecar timeouts, `sidecar closed unexpectedly`,
+/// `sidecar unresponsive`, page/Playwright errors, sidecar error codes thrown
+/// mid-action) is `UnknownRemoteOutcome`: the sidecar may already have started
+/// executing the action, so the receipt must stay uncertain.
+pub(crate) fn browser_act_failure_kind(error: &str) -> BrowserActFailureKind {
+    let error = error.to_lowercase();
+    if error.contains("sidecar stdin closed")
+        || error.contains("broken pipe")
+        || error.contains("browser_not_started")
+        || error.contains("browser_tab_not_found")
+    {
+        BrowserActFailureKind::ConnectFailedBeforeDispatch
+    } else {
+        BrowserActFailureKind::UnknownRemoteOutcome
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct BrowserCheckpointTelemetry<'a> {
     pub(crate) journal: &'a agent_journal::GatewayJournal,
@@ -631,14 +683,16 @@ pub(crate) fn browser_chat_snapshot_params(target_id: &str) -> serde_json::Value
     })
 }
 
-/// ACTING observation: content-preserving but SMALLER (compact + a tighter 9k cap) than the full
-/// reading snapshot. Pure interactive-only filtering (what browser-use/OpenClaw serialize) would be
-/// even smaller, but Homun's aria-role filter drops the autocomplete SUGGESTIONS and typed values a
-/// weak model needs to complete a field — so acting keeps content and just trims the page tail. On a
-/// slow/local model this is the per-step latency lever (each generation ~2x cheaper than the 20k
-/// dump). Used after navigate and after a stale-ref recovery; the post-`act` observation gets the
-/// same treatment sidecar-side (session_manager `act`). Reading a full results table is the SEPARATE,
-/// larger `browser_chat_snapshot_params`, reached only by the explicit `browser_snapshot` tool.
+/// ACTING observation: interactive-only (interact mode, ~6k cap). After an action — especially
+/// `type` into an autocomplete field — the model needs to see what it can CLICK next (suggestion
+/// options, buttons, inputs), not the entire page. A 40k `extract` dump drowns weak models:
+/// they lose the suggestion refs in noise and never click the dropdown. Interact mode shows only
+/// interactive roles (button, link, option, textbox, …), which includes autocomplete suggestions
+/// (role=option) with their refs. When the model needs to READ full page content (e.g. search
+/// results), it calls the explicit `browser_snapshot` tool with mode=extract.
+/// Used after navigate, after a stale-ref recovery, and for `browser_snapshot` with default
+/// interact mode; the post-`act` observation gets the same treatment sidecar-side (session_manager
+/// `act` sets `observationMode: "interact"`).
 pub(crate) fn browser_chat_act_snapshot_params(target_id: &str) -> serde_json::Value {
     serde_json::json!({
         "target_id": target_id,
@@ -648,6 +702,7 @@ pub(crate) fn browser_chat_act_snapshot_params(target_id: &str) -> serde_json::V
         "depth": 12,
         "max_chars": 9_000,
         "timeout_ms": 8_000,
+        "observation_mode": "interact",
     })
 }
 

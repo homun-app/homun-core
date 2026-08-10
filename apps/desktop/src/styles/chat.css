@@ -336,6 +336,29 @@
   border-top: 1px solid var(--line);
 }
 
+/* Inline kernel `step_advance` notices (plan step state changes). */
+.step-advance-note {
+  margin: 4px 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.step-advance-note.is-verified {
+  color: var(--success, #2f9e63);
+}
+
+.step-advance-note.is-unverified {
+  color: var(--danger, #c4452f);
+}
+
+.step-advance-note.is-transition {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
 .msg-artifacts {
   display: block;
   max-width: 100%;

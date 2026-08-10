@@ -43,23 +43,33 @@ export function AdaptiveWorkspaceIsland({
   const { t } = useTranslation();
   const shellRef = useRef<HTMLElement>(null);
   const layoutRef = useRef<HTMLElement | null>(null);
+  const lastConsumedNonceRef = useRef<number | null>(null);
   const [activeSection, setActiveSection] = useState<WorkspaceSectionId | null>(null);
 
+  // The <aside> only mounts once sections are available, so the surrounding
+  // layout may not exist at first mount. Resolve it lazily on cleanup instead
+  // of capturing a possibly-null reference here.
   useEffect(() => {
-    const layout = shellRef.current?.closest(".active-task-layout") as HTMLElement | null;
-    layoutRef.current = layout;
     return () => {
+      const layout = layoutRef.current;
       if (!layout) return;
       delete layout.dataset.workspaceIslandOpen;
       layout.style.removeProperty("--workspace-island-panel-width");
+      layoutRef.current = null;
     };
   }, []);
 
+  // Resolve the layout at runtime (not from a stale mount-time ref) so the
+  // mutual-exclusion dataset flag is written even when the island mounts after
+  // the layout already exists. Fall back to the cached layout when the <aside>
+  // is unmounted (disabled or no sections): shellRef is detached then, and the
+  // flag must still be reset to "false" or the computer dock stays hidden.
   useEffect(() => {
-    if (layoutRef.current) {
-      layoutRef.current.dataset.workspaceIslandOpen =
-        !disabled && activeSection ? "true" : "false";
-    }
+    const layout =
+      (shellRef.current?.closest(".active-task-layout") as HTMLElement | null) ?? layoutRef.current;
+    if (!layout) return;
+    layoutRef.current = layout;
+    layout.dataset.workspaceIslandOpen = !disabled && activeSection ? "true" : "false";
   }, [activeSection, disabled]);
 
   useEffect(() => {
@@ -72,11 +82,16 @@ export function AdaptiveWorkspaceIsland({
     }
   }, [activeSection, sections]);
 
+  // Consume each open-section request exactly once per nonce. `sections` can
+  // change identity every render, so without the nonce guard this effect would
+  // keep re-opening the requested section and override a manual close.
   useEffect(() => {
     if (
       openSectionRequest?.nonce
+      && openSectionRequest.nonce !== lastConsumedNonceRef.current
       && sections.some((section) => section.id === openSectionRequest.section)
     ) {
+      lastConsumedNonceRef.current = openSectionRequest.nonce;
       setActiveSection(openSectionRequest.section);
     }
   }, [openSectionRequest?.nonce, openSectionRequest?.section, sections]);
@@ -177,7 +192,7 @@ export function AdaptiveWorkspaceIsland({
                 setActiveSection(nextWorkspaceSection(activeSection, section.id));
               }}
             >
-              <Icon size={16} aria-hidden="true" />
+              <Icon size={10} aria-hidden="true" />
               {section.badge ? (
                 <span className="workspace-island-badge" aria-hidden="true">
                   {section.badge > 99 ? "99+" : section.badge}

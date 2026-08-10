@@ -24,7 +24,22 @@ pub enum HealthCheck {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RestartPolicy {
     Disabled,
-    Bounded { max_restarts: u32, backoff_ms: u64 },
+    Bounded {
+        max_restarts: u32,
+        backoff_ms: u64,
+        #[serde(default = "default_backoff_max_ms")]
+        backoff_max_ms: u64,
+        #[serde(default = "default_uptime_reset_ms")]
+        uptime_reset_ms: u64,
+    },
+}
+
+fn default_backoff_max_ms() -> u64 {
+    30_000
+}
+
+fn default_uptime_reset_ms() -> u64 {
+    300_000
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -80,6 +80,7 @@ async function dispatch(request: BrowserRequest): Promise<unknown> {
         timeoutMs: optionalNumber(request.params, "timeout_ms"),
         maxChars: optionalNumber(request.params, "max_chars"),
         urls: optionalBoolean(request.params, "urls"),
+        observationMode: optionalObservationMode(request.params, "observation_mode"),
       });
     case "browser.checkpoint":
       return await manager.checkpoint({
@@ -302,6 +303,24 @@ function optionalSnapshotMode(
   throw new BrowserAutomationError({
     code: "BROWSER_INVALID_REQUEST",
     message: `${key} must be efficient`,
+    retryable: false,
+  });
+}
+
+function optionalObservationMode(
+  params: Record<string, unknown> | undefined,
+  key: string,
+): "interact" | "delta" | "extract" | undefined {
+  const value = params?.[key];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "interact" || value === "delta" || value === "extract") {
+    return value;
+  }
+  throw new BrowserAutomationError({
+    code: "BROWSER_INVALID_REQUEST",
+    message: `${key} must be interact, delta, or extract`,
     retryable: false,
   });
 }

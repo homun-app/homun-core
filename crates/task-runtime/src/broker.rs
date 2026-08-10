@@ -3,9 +3,10 @@
 
 use crate::{
     NewTurnSteering, ResourceClass, ResourceRequirement, RetryPolicy, TaskId, TaskPriority,
-    TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, TaskStore, TurnEventKind,
-    TurnSteeringRecord, UserId, WorkspaceId,
+    TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, TaskStore, TerminalWrite,
+    TurnEvent, TurnEventKind, TurnSteeringRecord, UserId, WorkspaceId,
 };
+use local_first_execution_protocol::{CancelReason, ExecutionOutcome, ValidatedExecutionOutcome};
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
 use time::OffsetDateTime;
@@ -820,24 +821,44 @@ impl CancelNotify for NoopCancelNotify {
     fn notify_cancel(&self, _turn_id: &str) {}
 }
 
+/// Outcome of [`cancel_chat_turn`].
+#[derive(Debug, Clone)]
+pub struct CancelChatTurnOutcome {
+    /// True when the task transitioned to `Cancelled` (it was not already terminal).
+    pub cancelled: bool,
+    /// The canonical `cancelled` terminal event, ONLY when this call inserted it
+    /// (`TerminalWrite::Inserted`). `None` on a no-op cancel or when a terminal
+    /// event already existed — in both cases the caller must NOT broadcast it:
+    /// the original writer owns the live fan-out.
+    pub terminal_event: Option<TurnEvent>,
+}
+
 /// Marks a chat_turn as Cancelled (durable source of truth) and notifies the in-process
 /// executor via hook. Idempotent: no-op if already terminal (Completed/Failed/Cancelled).
 /// Writes a `cancelled` event in turn_events for subscribers.
+///
+/// Returns the persisted terminal event in [`CancelChatTurnOutcome::terminal_event`]
+/// when THIS call inserted it: the caller owns broadcasting it live (the executor's
+/// later `Cancelled` emit is silenced by the terminal-once guard).
 pub fn cancel_chat_turn(
     store: &TaskStore,
     user_id: &UserId,
     workspace_id: &WorkspaceId,
     task_id: &TaskId,
     notify: &dyn CancelNotify,
-) -> TaskRuntimeResult<bool> {
+) -> TaskRuntimeResult<CancelChatTurnOutcome> {
+    let no_cancel = CancelChatTurnOutcome {
+        cancelled: false,
+        terminal_event: None,
+    };
     let Some(mut task) = store.get_task(task_id, user_id, workspace_id)? else {
-        return Ok(false);
+        return Ok(no_cancel);
     };
     if matches!(
         task.status,
         TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled
     ) {
-        return Ok(false); // idempotent
+        return Ok(no_cancel); // idempotent
     }
     let was_running = task.status == TaskStatus::Running;
     let now = OffsetDateTime::now_utc();
@@ -872,14 +893,48 @@ pub fn cancel_chat_turn(
         .unwrap_or("full");
     store.hold_pending_turn_steering(user_id.as_str(), workspace_id.as_str(), task_id.as_str())?;
     store.insert_chat_turn(&task, &thread_id, &request_id, source, approval)?;
-    let _ = store.insert_terminal_event_once(
+    let terminal_event = match store.insert_terminal_event_once(
         task_id.as_str(),
         TurnEventKind::Cancelled,
         serde_json::json!({ "reason": "user_cancel", "at": now.unix_timestamp() }),
-    )?;
+    )? {
+        TerminalWrite::Inserted(event) => Some(event),
+        // A racing writer already persisted the canonical terminal event and owns
+        // its live broadcast — stay silent to keep the terminal-once contract.
+        TerminalWrite::Existing(_) => None,
+    };
+    // A suspended turn keeps a pending wake in `execution_wakes`: delivering it
+    // later would flip this cancelled task back to `queued`
+    // (`project_legacy_task_ready_on`) and resurrect the same execution on the
+    // next matching message. Discard the pending wakes, and commit the
+    // `Cancelled` outcome on the execution's current revision when that revision
+    // still has no outcome (wake already delivered but no attempt committed,
+    // or created-but-never-run). A revision that already committed a
+    // `Suspended` outcome is journal-sealed: with the wake gone it can never
+    // be delivered again, and the task status + terminal turn event above are
+    // the canonical cancel record.
+    store.discard_pending_execution_wakes(task_id.as_str())?;
+    if let Some(record) = store
+        .execution(task_id.as_str())?
+        .filter(|record| record.outcome.is_none())
+    {
+        let validated = ValidatedExecutionOutcome::new(
+            ExecutionOutcome::Cancelled {
+                reason: CancelReason::User,
+            },
+            &record.contract,
+        )
+        .map_err(|error| {
+            TaskRuntimeError::Store(format!("cancelled execution outcome is invalid: {error}"))
+        })?;
+        store.commit_execution_outcome(&validated)?;
+    }
     // notify the in-process executor (instant); no-op if not active
     notify.notify_cancel(task_id.as_str());
-    Ok(true)
+    Ok(CancelChatTurnOutcome {
+        cancelled: true,
+        terminal_event,
+    })
 }
 
 #[cfg(test)]
@@ -1314,7 +1369,7 @@ mod cancel_tests {
         let notify = RecordingNotify {
             turns: turns.clone(),
         };
-        let ok = cancel_chat_turn(
+        let outcome = cancel_chat_turn(
             &s,
             &UserId::new("u"),
             &WorkspaceId::new("w"),
@@ -1322,7 +1377,16 @@ mod cancel_tests {
             &notify,
         )
         .unwrap();
-        assert!(ok);
+        assert!(outcome.cancelled);
+        // The caller receives the persisted terminal event so it can broadcast it
+        // live (the executor's own Cancelled emit is silenced by terminal-once).
+        let event = outcome.terminal_event.expect("inserted terminal event");
+        assert_eq!(event.kind, TurnEventKind::Cancelled);
+        assert_eq!(event.turn_id, r.task_id.as_str());
+        assert_eq!(
+            event.payload.get("reason").and_then(Value::as_str),
+            Some("user_cancel")
+        );
         let t = s
             .get_task(&r.task_id, &UserId::new("u"), &WorkspaceId::new("w"))
             .unwrap()
@@ -1330,6 +1394,15 @@ mod cancel_tests {
         assert_eq!(t.status, TaskStatus::Cancelled);
         let events = s.read_turn_events(r.task_id.as_str(), 0).unwrap();
         assert!(events.iter().any(|e| e.kind == TurnEventKind::Cancelled));
+        assert_eq!(
+            events
+                .iter()
+                .find(|e| e.kind == TurnEventKind::Cancelled)
+                .unwrap()
+                .seq,
+            event.seq,
+            "the surfaced event is the persisted one"
+        );
         assert_eq!(
             turns.lock().unwrap().clone(),
             vec![r.task_id.as_str().to_string()]
@@ -1355,7 +1428,7 @@ mod cancel_tests {
         )
         .unwrap();
         let notify = NoopCancelNotify;
-        let ok = cancel_chat_turn(
+        let outcome = cancel_chat_turn(
             &s,
             &UserId::new("u"),
             &WorkspaceId::new("w"),
@@ -1363,7 +1436,11 @@ mod cancel_tests {
             &notify,
         )
         .unwrap();
-        assert!(!ok, "no-op on already-terminal turn");
+        assert!(!outcome.cancelled, "no-op on already-terminal turn");
+        assert!(
+            outcome.terminal_event.is_none(),
+            "no terminal event to broadcast on a no-op cancel"
+        );
     }
 
     #[test]
@@ -1380,7 +1457,11 @@ mod cancel_tests {
             1
         );
 
-        assert!(cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap());
+        assert!(
+            cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify)
+                .unwrap()
+                .cancelled
+        );
 
         assert_eq!(
             s.resource_usage(&user, &workspace, ResourceClass::BrowserSession)
@@ -1407,7 +1488,11 @@ mod cancel_tests {
             1
         );
 
-        assert!(cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap());
+        assert!(
+            cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify)
+                .unwrap()
+                .cancelled
+        );
 
         let cancelled = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
         assert_eq!(cancelled.status, TaskStatus::Cancelled);
@@ -1452,9 +1537,15 @@ mod cancel_tests {
             "park already released the browser_session slot"
         );
 
+        let parked_cancel =
+            cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap();
         assert!(
-            cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap(),
+            parked_cancel.cancelled,
             "a parked turn is still cancellable"
+        );
+        assert!(
+            parked_cancel.terminal_event.is_some(),
+            "the cancel that inserted the terminal event surfaces it for broadcast"
         );
 
         let cancelled = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
@@ -1471,8 +1562,11 @@ mod cancel_tests {
         );
 
         // Idempotent: cancelling the now-Cancelled turn again is a no-op and does
-        // not mint a second terminal event.
-        assert!(!cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap());
+        // not mint a second terminal event (nor surface one to broadcast).
+        let recancel =
+            cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap();
+        assert!(!recancel.cancelled);
+        assert!(recancel.terminal_event.is_none());
         let events_after = s.read_turn_events(r.task_id.as_str(), 0).unwrap();
         assert_eq!(
             events_after
@@ -1510,6 +1604,144 @@ mod cancel_tests {
         assert!(stored.lease_owner.is_none());
         assert!(stored.lease_expires_at.is_none());
         assert!(stored.last_heartbeat_at.is_none());
+    }
+
+    /// Builds the execution-protocol fixtures a suspended chat turn needs:
+    /// validated contract + `Suspended` outcome carrying a `User` wake.
+    fn suspend_execution_with_user_wake(
+        s: &TaskStore,
+        task: &TaskRecord,
+        thread_id: &str,
+    ) -> local_first_execution_protocol::WakeCondition {
+        use local_first_execution_protocol::{
+            CheckpointDataRef, CheckpointEnvelope, DurableDataRef, ExecutionContract,
+            ExecutionScope, ValidatedExecutionContract,
+        };
+        let contract = ValidatedExecutionContract::try_from(ExecutionContract::new(
+            task.task_id.as_str(),
+            "chat_turn",
+            ExecutionScope {
+                user_id: task.user_id.as_str().into(),
+                workspace_id: task.workspace_id.as_str().into(),
+                thread_id: Some(thread_id.into()),
+            },
+            serde_json::to_value(task).unwrap(),
+        ))
+        .unwrap();
+        let wake = local_first_execution_protocol::WakeCondition::User {
+            wait_ref: format!("{}:1:user", task.task_id.as_str()),
+        };
+        let suspended = ValidatedExecutionOutcome::new(
+            ExecutionOutcome::Suspended {
+                wake: wake.clone(),
+                checkpoint: CheckpointEnvelope::new(
+                    task.task_id.as_str(),
+                    1,
+                    "chat_turn",
+                    1,
+                    CheckpointDataRef::Public {
+                        record_ref: DurableDataRef::from_store_id(
+                            "0123456789abcdef0123456789abcdef",
+                        )
+                        .unwrap(),
+                    },
+                ),
+            },
+            &contract,
+        )
+        .unwrap();
+        s.create_execution(&contract).unwrap();
+        s.commit_execution_outcome(&suspended).unwrap();
+        wake
+    }
+
+    #[test]
+    fn cancel_of_a_suspended_turn_discards_pending_wakes() {
+        // The Stop-flow resurrection bug: a suspended turn keeps a pending wake
+        // in `execution_wakes`; if a cancel leaves it behind, delivering it
+        // later flips the cancelled task back to `queued`. Cancel must discard
+        // every pending wake of the execution.
+        let s = TaskStore::open_in_memory().unwrap();
+        let user = UserId::new("u");
+        let workspace = WorkspaceId::new("w");
+        let r = enqueue_chat_turn(&s, &user, &workspace, &make_input("r1", "t1")).unwrap();
+        let task = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
+        suspend_execution_with_user_wake(&s, &task, "t1");
+        assert_eq!(
+            s.pending_execution_wakes(user.as_str(), workspace.as_str(), Some("t1"))
+                .unwrap()
+                .len(),
+            1,
+            "precondition: the suspended revision registered a pending user wake"
+        );
+
+        let outcome =
+            cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap();
+        assert!(outcome.cancelled);
+        assert!(
+            s.pending_execution_wakes(user.as_str(), workspace.as_str(), Some("t1"))
+                .unwrap()
+                .is_empty(),
+            "cancel must discard the pending wake or the cancelled turn resurrects"
+        );
+        // The suspended revision is journal-sealed (it already committed its
+        // `Suspended` outcome): cancel must not force a second outcome onto it,
+        // and the stored outcome stays Suspended.
+        let record = s.execution(r.task_id.as_str()).unwrap().unwrap();
+        let sealed_outcome = record
+            .outcome
+            .clone()
+            .expect("suspended revision has an outcome")
+            .into_inner();
+        assert!(
+            matches!(sealed_outcome, ExecutionOutcome::Suspended { .. }),
+            "the sealed revision keeps its Suspended outcome"
+        );
+    }
+
+    #[test]
+    fn cancel_commits_cancelled_outcome_on_an_outcomeless_execution() {
+        // Created-but-never-finished execution (no outcome on the current
+        // revision): cancel seals it with a `Cancelled` outcome instead of
+        // leaving the execution projection dangling.
+        let s = TaskStore::open_in_memory().unwrap();
+        let user = UserId::new("u");
+        let workspace = WorkspaceId::new("w");
+        let r = enqueue_chat_turn(&s, &user, &workspace, &make_input("r1", "t1")).unwrap();
+        let task = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
+        let contract = local_first_execution_protocol::ValidatedExecutionContract::try_from(
+            local_first_execution_protocol::ExecutionContract::new(
+                task.task_id.as_str(),
+                "chat_turn",
+                local_first_execution_protocol::ExecutionScope {
+                    user_id: user.as_str().into(),
+                    workspace_id: workspace.as_str().into(),
+                    thread_id: Some("t1".into()),
+                },
+                serde_json::to_value(&task).unwrap(),
+            ),
+        )
+        .unwrap();
+        s.create_execution(&contract).unwrap();
+
+        let outcome =
+            cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap();
+        assert!(outcome.cancelled);
+        let record = s.execution(r.task_id.as_str()).unwrap().unwrap();
+        let committed = record
+            .outcome
+            .clone()
+            .expect("cancel commits an outcome on the execution")
+            .into_inner();
+        assert!(
+            matches!(
+                committed,
+                ExecutionOutcome::Cancelled {
+                    reason: CancelReason::User
+                }
+            ),
+            "the outcomeless revision is sealed with a user Cancelled outcome"
+        );
     }
 }
 

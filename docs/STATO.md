@@ -111,7 +111,7 @@ Autorità del residuo: **fence OS + jail + shadow policy + config live**. Il pat
 - `main.rs` ~30.3k sul branch `fabio/chat-lifecycle-consolidation`; ulteriori
   tagli solo con owner contract RED e gate completo.
 - `ChatView.tsx` ~10k
-- `HOMUN_MEMORY_SERVICE` default OFF; `OrchestratorBrain` ancora materializza task
+- `HOMUN_MEMORY_SERVICE` default ON (service-object path); `OrchestratorBrain` ancora materializza task
 - Profilo locale ora ha PIN Vault QA e due record sintetici (CF + targa) — solo metadata in list
 - Workspace QA `sandbox-write-probe` creati in temp durante collaudo (pulibili)
 

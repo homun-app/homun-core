@@ -5,17 +5,17 @@
   top: 58px;
   right: 8px;
   bottom: 8px;
-  width: 40px;
+  width: 24px;
   min-height: 0;
   display: grid;
-  grid-template-columns: 40px;
+  grid-template-columns: 24px;
   color: var(--text);
   pointer-events: none;
 }
 
 .adaptive-workspace-island.is-open {
-  width: calc(var(--workspace-island-panel-width) + 40px);
-  grid-template-columns: minmax(280px, var(--workspace-island-panel-width)) 40px;
+  width: calc(var(--workspace-island-panel-width) + 24px);
+  grid-template-columns: minmax(280px, var(--workspace-island-panel-width)) 24px;
 }
 
 .workspace-island-rail {
@@ -24,7 +24,7 @@
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 4px 5px;
+  padding: 3px;
   border: 1px solid var(--line);
   border-radius: var(--radius-panel);
   background: var(--surface);
@@ -34,11 +34,11 @@
 
 .workspace-island-rail-button {
   position: relative;
-  width: 30px;
-  height: 30px;
+  width: 16px;
+  height: 16px;
   display: grid;
   place-items: center;
-  flex: 0 0 30px;
+  flex: 0 0 16px;
   padding: 0;
   border: 0;
   border-radius: var(--radius-control);
@@ -63,10 +63,10 @@
 .workspace-island-rail-button.status-failed::before {
   content: "";
   position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 5px;
-  height: 5px;
+  top: 2px;
+  right: 2px;
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
   background: var(--green);
 }
@@ -83,16 +83,16 @@
   position: absolute;
   right: 2px;
   bottom: 1px;
-  min-width: 13px;
-  height: 13px;
+  min-width: 10px;
+  height: 10px;
   display: grid;
   place-items: center;
   padding-inline: 2px;
   border: 1px solid var(--surface);
-  border-radius: 7px;
+  border-radius: 5px;
   color: var(--text);
   background: var(--surface-raised);
-  font-size: 9px;
+  font-size: 8px;
   line-height: 1;
 }
 
@@ -219,6 +219,24 @@
   border-top: 1px solid var(--line);
 }
 
+.workspace-island-planning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workspace-island-planning-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+  animation: msg-activity-pulse 1.2s ease-in-out infinite;
+}
+
 .workspace-island-block-title {
   display: flex;
   align-items: center;
@@ -284,6 +302,100 @@
 .workspace-island-list .status-failed .workspace-island-state {
   border-color: var(--danger, #c94545);
   background: var(--danger, #c94545);
+}
+
+/* ── Plan-step status differentiation ────────────────────────────────────
+   Plan steps use a wider status dot (to hold ✓ / ! glyphs) and stack the
+   title above the done_criterion sub-text. The dot colours are inherited
+   from the .status-* rules above; these rules add size, icon, animation,
+   title weight, and criterion styling. */
+
+.workspace-island-list li.plan-step {
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: flex-start;
+  min-height: 0;
+  padding: 3px 0;
+}
+
+.workspace-island-list li.plan-step > .workspace-island-state {
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border-width: 1.5px;
+  display: grid;
+  place-items: center;
+}
+
+/* Override the default single-line ellipsis clip so the criterion can wrap. */
+.workspace-island-list li.plan-step > .plan-step-content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+}
+
+/* doing — pulsing brand dot (reuses the global msg-activity-pulse keyframes). */
+.workspace-island-list li.plan-step.status-doing > .workspace-island-state {
+  animation: msg-activity-pulse 1.2s ease-in-out infinite;
+}
+
+.plan-step-icon {
+  color: var(--surface);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.plan-step-title {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.plan-step-title--doing {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.plan-step-title--done {
+  color: var(--faint);
+  text-decoration: line-through;
+  text-decoration-color: var(--faint);
+}
+
+.plan-step-title--blocked {
+  color: var(--danger, #c4452f);
+}
+
+.plan-step-criterion {
+  color: var(--faint);
+  font-size: 10px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.workspace-island-list li.plan-step.status-done .plan-step-criterion {
+  opacity: 0.65;
+}
+
+/* Brief highlight when a kernel `step_advance` event touches this step. */
+.workspace-island-list li.plan-step.plan-step-pulse {
+  border-radius: 6px;
+  animation: plan-step-advance-pulse 2.2s ease-out 1;
+}
+
+@keyframes plan-step-advance-pulse {
+  0% {
+    background: color-mix(in srgb, var(--brand) 24%, transparent);
+  }
+
+  100% {
+    background: transparent;
+  }
 }
 
 .workspace-island-activity-list li {
@@ -360,7 +472,7 @@
   position: absolute;
   z-index: 33;
   top: 64px;
-  right: 54px;
+  right: 38px;
   width: 320px;
   max-width: calc(100% - 108px);
   pointer-events: none;
@@ -383,4 +495,21 @@
     padding-right: var(--workspace-island-rail-reserve);
   }
 
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-island-planning-dot {
+    animation: none;
+    opacity: 0.6;
+  }
+
+  .workspace-island-list li.plan-step.status-doing > .workspace-island-state {
+    animation: none;
+    opacity: 0.7;
+  }
+
+  .workspace-island-list li.plan-step.plan-step-pulse {
+    animation: none;
+    background: color-mix(in srgb, var(--brand) 14%, transparent);
+  }
 }

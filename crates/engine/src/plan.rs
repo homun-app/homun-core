@@ -26,11 +26,27 @@ pub fn plan_status_marker(status: &str) -> char {
 /// The step array of a whole-plan `Value` (the serialized `ExecutionPlan`, `{route,steps,…}`).
 /// The Value form of the gateway's `execution_plan_steps` adapter, so the loop can read steps off
 /// `LoopState.plan` without converting back to the gateway's typed plan. Missing/malformed → empty.
+/// Tolerates the LEGACY bare-step-array shape (pre-goal `runtime_plans.plan_json`) so old plans
+/// keep reading back after the `{goal, steps}` persistence upgrade.
 pub fn plan_value_steps(plan: &Value) -> Vec<Value> {
+    if let Some(steps) = plan.as_array() {
+        return steps.clone();
+    }
     plan.get("steps")
         .and_then(|s| s.as_array())
         .cloned()
         .unwrap_or_default()
+}
+
+/// The plan's optional one-sentence `goal` (the user's objective in their language, set when the
+/// plan is created). Empty/whitespace-only/missing → `None`. Legacy plans (bare step arrays, no
+/// `goal` key) read back as `None`.
+pub fn plan_value_goal(plan: &Value) -> Option<String> {
+    plan.get("goal")
+        .and_then(|g| g.as_str())
+        .map(str::trim)
+        .filter(|g| !g.is_empty())
+        .map(str::to_string)
 }
 
 /// Parse the latest ‹‹PLAN›› marker back into a canonical plan (id/title/status/detail
@@ -204,8 +220,10 @@ pub fn advance_plan_frontier(steps: &mut [Value]) -> Option<usize> {
 }
 
 /// Render the canonical plan to the ‹‹PLAN›› marker's inner markdown checklist
-/// (`- [m] **Title** (`id`): detail`). The inverse of `parse_plan_marker`.
-pub fn build_plan_markdown(steps: &[Value]) -> String {
+/// (`- [m] **Title** (`id`): detail`). The inverse of `parse_plan_marker`. When `goal` is present
+/// (and non-empty) it is the FIRST line, EXACTLY `**Goal**: <text>` followed by a blank line, then
+/// the unchanged checkbox lines — the frontend parses that exact line, do NOT change the format.
+pub fn build_plan_markdown(goal: Option<&str>, steps: &[Value]) -> String {
     let mut lines = Vec::new();
     for (index, step) in steps.iter().enumerate() {
         let title = step
@@ -241,7 +259,12 @@ pub fn build_plan_markdown(steps: &[Value]) -> String {
             detail
         ));
     }
-    lines.join("\n")
+    let body = lines.join("\n");
+    let goal = goal.map(str::trim).filter(|g| !g.is_empty());
+    match goal {
+        Some(goal) => format!("**Goal**: {goal}\n\n{body}"),
+        None => body,
+    }
 }
 
 /// Collapse repeated ‹‹PLAN›› markers to a SINGLE one at the first marker's position, carrying the
@@ -282,7 +305,7 @@ pub fn collapse_plan_markers(text: &str) -> String {
 
 /// Replace the latest ‹‹PLAN›› marker in `text` with one rendered from `steps` (the canonical,
 /// verified state) — so the delivered answer shows the plan's true final status. Pure (ADR 0024).
-pub fn replace_latest_plan_marker(text: &str, steps: &[Value]) -> String {
+pub fn replace_latest_plan_marker(text: &str, goal: Option<&str>, steps: &[Value]) -> String {
     const OPEN: &str = "‹‹PLAN››";
     const CLOSE: &str = "‹‹/PLAN››";
     let (Some(start), Some(close_start)) = (text.rfind(OPEN), text.rfind(CLOSE)) else {
@@ -292,7 +315,7 @@ pub fn replace_latest_plan_marker(text: &str, steps: &[Value]) -> String {
         return text.to_string();
     }
     let close_end = close_start + CLOSE.len();
-    let marker = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(steps));
+    let marker = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(goal, steps));
     let mut out = String::with_capacity(text.len() + marker.len());
     out.push_str(&text[..start]);
     out.push_str(&marker);
@@ -337,9 +360,47 @@ mod tests {
         let steps = plan_value_steps(&plan);
         assert_eq!(steps.len(), 2);
         assert_eq!(plan_step_status(&steps[1]), "doing");
+        // Legacy bare step array (pre-goal persistence shape) still reads back.
+        let legacy = serde_json::json!([{"id":"s1","title":"A","status":"done"}]);
+        assert_eq!(plan_value_steps(&legacy).len(), 1);
         // Missing/Null/malformed → empty (never panics).
         assert!(plan_value_steps(&Value::Null).is_empty());
         assert!(plan_value_steps(&serde_json::json!({"route":"X"})).is_empty());
+    }
+
+    #[test]
+    fn plan_value_goal_reads_the_goal_and_tolerates_legacy_plans() {
+        let with_goal = serde_json::json!({
+            "goal": "Trovare un volo economico",
+            "steps": [{"id":"s1","title":"A","status":"doing"}],
+        });
+        assert_eq!(
+            plan_value_goal(&with_goal).as_deref(),
+            Some("Trovare un volo economico")
+        );
+        // Null / empty / whitespace-only → None; legacy shapes (no `goal` key) → None.
+        assert!(plan_value_goal(&serde_json::json!({"goal": null, "steps": []})).is_none());
+        assert!(plan_value_goal(&serde_json::json!({"goal": "  ", "steps": []})).is_none());
+        assert!(plan_value_goal(&serde_json::json!([{"id":"s1"}])).is_none());
+        assert!(plan_value_goal(&Value::Null).is_none());
+    }
+
+    #[test]
+    fn goal_renders_as_first_markdown_line() {
+        let steps = vec![serde_json::json!({"id":"s1","title":"A","status":"doing","detail":""})];
+        let md = build_plan_markdown(Some("Prenotare il treno"), &steps);
+        assert!(
+            md.starts_with("**Goal**: Prenotare il treno\n\n- [-] **A** (`s1`): —"),
+            "exact first-line format the frontend parses: {md}"
+        );
+        // No goal (or empty) → unchanged checkbox-only body.
+        let bare = build_plan_markdown(None, &steps);
+        assert_eq!(bare, "- [-] **A** (`s1`): —");
+        assert_eq!(build_plan_markdown(Some(""), &steps), bare);
+        // The goal line never breaks the marker round-trip (parse skips non-checkbox lines).
+        let parsed = parse_plan_marker(&format!("‹‹PLAN››{md}‹‹/PLAN››"));
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(plan_step_title(&parsed[0]), "A");
     }
 
     #[test]
@@ -348,7 +409,7 @@ mod tests {
             serde_json::json!({"id":"s1","title":"Read quote","status":"done","detail":"5.6c"}),
             serde_json::json!({"id":"s2","title":"Next market","status":"doing","detail":""}),
         ];
-        let md = build_plan_markdown(&steps);
+        let md = build_plan_markdown(None, &steps);
         let wrapped = format!("‹‹PLAN››{md}‹‹/PLAN››");
         let parsed = parse_plan_marker(&wrapped);
         assert_eq!(plan_step_title(&parsed[0]), "Read quote");

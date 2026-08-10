@@ -116,6 +116,7 @@ pub(crate) async fn drain_available(state: &AppState) -> Result<usize, LocalTask
         processed = processed.saturating_add(1);
     }
     refresh_health_from_store(state, processed > 0)?;
+    crate::gateway_health::record_projection_drain();
     Ok(processed)
 }
 

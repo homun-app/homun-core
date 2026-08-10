@@ -169,9 +169,8 @@ fn facade_searches_embeddings_through_vector_index_contract() {
     assert!(hits[0].score > hits[1].score);
 }
 
-#[cfg(feature = "usearch-index")]
 #[test]
-fn facade_uses_usearch_as_default_vector_index_backend() {
+fn facade_uses_exact_backend_for_small_vector_datasets() {
     let store = SQLiteMemoryStore::open_in_memory().unwrap();
     let facade = MemoryFacade::new(store);
     let user = UserId::new("user_1");
@@ -191,9 +190,10 @@ fn facade_uses_usearch_as_default_vector_index_backend() {
         .unwrap();
 
     assert_eq!(hits[0].memory_ref, memory_ref);
+    // Small datasets (< 100 vectors) correctly fall back to exact search.
     assert_eq!(
         facade.vector_index_backend_for_tests(&user, &workspace),
-        Some("usearch")
+        Some("exact")
     );
 }
 

@@ -11,6 +11,7 @@ use axum::{
     routing::{delete, get, post, put},
 };
 
+use crate::agent_journal::debug_turn_journal;
 use crate::gateway_chat_branches::{chat_branches, set_active_leaf, set_branch_label};
 use crate::gateway_chat_memory::save_chat_message_to_memory;
 use crate::gateway_chat_tasks::create_task_from_chat_message;
@@ -646,6 +647,10 @@ pub(crate) fn build_gateway_router(state: AppState) -> Router {
         .route(
             "/api/chat/turns/{turn_id}/stream",
             get(subscribe_turn_stream),
+        )
+        .route(
+            "/api/debug/turns/{turn_id}/journal",
+            get(debug_turn_journal),
         );
     let chat_routes = chat_routes.route_layer(middleware::from_fn_with_state(
         state.clone(),

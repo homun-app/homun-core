@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
-const chat = await readFile(new URL("../src/components/ChatView.tsx", import.meta.url), "utf8");
+const effectPanel = await readFile(new URL("../src/components/InlineUncertainEffectPanel.tsx", import.meta.url), "utf8");
 const nav = await readFile(new URL("../src/data/mockData.ts", import.meta.url), "utf8");
 const sidebar = await readFile(new URL("../src/components/SidebarFilters.tsx", import.meta.url), "utf8");
 
@@ -13,7 +13,7 @@ test("Tasks is not a top-level route or navigation destination", () => {
 });
 
 test("pending effect resolution lives in the owning conversation", () => {
-  assert.match(chat, /function InlineUncertainEffectPanel/);
+  assert.match(effectPanel, /function InlineUncertainEffectPanel/);
   assert.match(app, /uncertainEffects={activeUncertainEffects}/);
 });
 

@@ -84,8 +84,9 @@ pub use contract::{
     TurnControlDecision, TurnControlDisposition, TurnPolicy,
 };
 pub use execution_journal::{
-    AgentExecutionEvent, NoopExecutionJournal, PromptMessageSnapshot, PromptSnapshot,
-    PromptToolSnapshot, build_prompt_snapshot,
+    AgentExecutionEvent, EXTERNAL_ACTION_FAILED_MARKER, EXTERNAL_ACTION_OK_MARKER,
+    NoopExecutionJournal, PromptMessageSnapshot, PromptSnapshot, PromptToolSnapshot,
+    build_prompt_snapshot, external_action_evidence_marker, is_external_action_tool,
 };
 pub use hitl::{
     AWAIT_USER_MARKER, HitlEnvelope, HitlKind, HoldPolicy, NoToolsClassification,

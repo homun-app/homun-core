@@ -15,6 +15,8 @@ fn process_spec_serializes_stable_contracts() {
         .with_restart_policy(RestartPolicy::Bounded {
             max_restarts: 3,
             backoff_ms: 250,
+            backoff_max_ms: 5_000,
+            uptime_reset_ms: 60_000,
         });
 
     let json = serde_json::to_value(&spec).unwrap();

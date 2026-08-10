@@ -46,10 +46,10 @@ test("the project graph listens for its events on the WebSocket", () => {
   // BOTH the NDJSON channel and the WS registry as an `app.event` envelope. Reading
   // them off the WS therefore requires unwrapping msg.event — asserting the envelope
   // guards against a "fix" that subscribes but reads the raw message.
-  const chatView = readFileSync(join(src, "components", "ChatView.tsx"), "utf8");
-  const graphEffect = chatView.slice(
-    chatView.indexOf("project_graph.ready") - 4000,
-    chatView.indexOf("project_graph.ready"),
+  const graphPanel = readFileSync(join(src, "components", "MemoryGraphPanel.tsx"), "utf8");
+  const graphEffect = graphPanel.slice(
+    Math.max(0, graphPanel.indexOf("project_graph.ready") - 4000),
+    graphPanel.indexOf("project_graph.ready"),
   );
   assert.match(graphEffect, /wsSubscription\.subscribe\(/, "must subscribe on the WS");
   assert.match(graphEffect, /"app\.event"/, "must unwrap the app.event envelope");

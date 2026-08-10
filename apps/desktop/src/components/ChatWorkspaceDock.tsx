@@ -14,6 +14,8 @@ interface ChatWorkspaceDockProps {
   disabled: boolean;
   fileSources: IslandSource[];
   openActivityNonce: number;
+  planGoal: string | null;
+  planStepPulseId: string | null;
   planSteps: PlanStep[];
   previewDataUrl: string | null;
   previewTitle: string;
@@ -36,6 +38,8 @@ export function ChatWorkspaceDock({
   disabled,
   fileSources,
   openActivityNonce,
+  planGoal,
+  planStepPulseId,
   planSteps,
   previewDataUrl,
   previewTitle,
@@ -60,6 +64,8 @@ export function ChatWorkspaceDock({
           <WorkspaceIslandSections
             section={section}
             projectObjective={projectObjective}
+            planGoal={planGoal}
+            planStepPulseId={planStepPulseId}
             planSteps={planSteps}
             subagents={subagents}
             activity={activity}

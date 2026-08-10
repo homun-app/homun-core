@@ -110,6 +110,12 @@ type BrowserActRequestInner =
       // autocompletes require); "enter" just presses Enter; "none" disables.
       // When unset, autocomplete comboboxes are auto-confirmed with arrow_enter.
       commit?: "arrow_enter" | "enter" | "none";
+      // When false (the default), skip the automatic confirmAutocomplete() call
+      // after typing. The dropdown (if any) stays open so the model can inspect
+      // it in the post-action snapshot and click the desired option itself.
+      // Set true to enable auto-confirmation (rarely reliable — prefer manual click).
+      autoComplete?: boolean;
+      auto_complete?: boolean;
     }
   | {
       // Higher-level "widget work in the system" (vs the model driving a calendar click-by-click):
@@ -346,7 +352,7 @@ async function executeActionUnchecked(
         await locator.press("ArrowDown", { timeout });
         await page.waitForTimeout(120);
         await locator.press("Enter", { timeout });
-      } else if (explicit !== "none") {
+      } else if (explicit !== "none" && resolveAutoComplete(action)) {
         const outcome = await confirmAutocomplete(page, locator, action.text, timeout);
         committedOption = outcome.committed;
         suggestions = outcome.options.length ? outcome.options : undefined;
@@ -663,6 +669,17 @@ function actionTimeout(value: number | undefined): number {
   return boundedTimeout(value, DEFAULT_ACTION_TIMEOUT_MS, MAX_ACTION_TIMEOUT_MS);
 }
 
+/// Resolves the autoComplete flag from either camelCase (autoComplete) or
+/// snake_case (auto_complete), matching the SnapshotAfterAction dual-name
+/// convention. Default false: autocomplete is NOT confirmed automatically;
+/// the dropdown stays open so the model can inspect it and click the desired
+/// option from the post-action snapshot. Set auto_complete=true to enable
+/// auto-confirmation (rarely reliable — prefer the manual click).
+export function resolveAutoComplete(action: { autoComplete?: boolean; auto_complete?: boolean }): boolean {
+  if (action.autoComplete === true || action.auto_complete === true) return true;
+  return false;
+}
+
 function waitTimeout(value: number | undefined): number {
   return boundedTimeout(value, DEFAULT_WAIT_TIMEOUT_MS, MAX_WAIT_TIMEOUT_MS);
 }
@@ -724,7 +741,10 @@ function errorMessage(error: unknown): string {
 }
 
 export function requireRef(refs: Map<string, Locator>, ref: string): Locator {
-  const locator = refs.get(ref);
+  // Fase 2.2: the model may include a trailing `*` on new refs (e.g. `e3*`);
+  // strip it before the lookup — locator maps are keyed on bare IDs.
+  const bare = ref.replace(/\*$/, "");
+  const locator = refs.get(bare);
   if (!locator) {
     throw new BrowserAutomationError({
       code: "BROWSER_STALE_REF",
@@ -798,6 +818,23 @@ async function selectionConfirmed(
   }
 }
 
+/// When an option element (typically a <li>) contains a nested interactive
+/// element (button, anchor), the click handler is often on that INNER element.
+/// Clicking the outer <li> does nothing — e.g. Trenitalia's station picker
+/// renders `<li role="option"><button class="el-choice">…</button></li>`.
+/// Returns the nested clickable locator when present, the original otherwise.
+async function resolveClickTarget(locator: Locator): Promise<Locator> {
+  try {
+    const inner = locator.locator('button, a[href], [role="button"]');
+    if (await inner.first().isVisible({ timeout: 200 })) {
+      return inner.first();
+    }
+  } catch {
+    /* no nested interactive — fall through to the original locator */
+  }
+  return locator;
+}
+
 /// Selects `best` among the open suggestions, robust to BOTH mouse-driven and
 /// keyboard-only widgets:
 ///   A. click the option element (fires the site's onSelect) — verify;
@@ -805,6 +842,12 @@ async function selectionConfirmed(
 ///   C. last resort: a single ArrowDown+Enter (the top suggestion).
 /// Verification after each step means we don't double-act when the first works,
 /// and we don't give up when a keyboard-only list ignored the click.
+//
+// Some real-world dropdowns (Trenitalia's station picker) render
+//   <li role="option"><button class="el-choice">Milano Centrale</button></li>
+// where the click handler is on the INNER <button>, not on the <li>. Clicking
+// the <li> does nothing. `resolveClickTarget` detects this and redirects the
+// click to the nested interactive element.
 async function selectSuggestion(
   page: Page,
   input: Locator,
@@ -820,7 +863,8 @@ async function selectSuggestion(
   allowKeyboardCommit = true,
 ): Promise<boolean> {
   try {
-    await best.locator.click({ timeout });
+    const clickTarget = await resolveClickTarget(best.locator);
+    await clickTarget.click({ timeout });
     await page.waitForTimeout(120);
     if (await selectionConfirmed(input, optionLocator, best.text)) return true;
   } catch {
@@ -963,8 +1007,26 @@ async function trySelectFromOpenList(
 // does NOT use `[class*="auto"]` (which matches Tailwind utility classes like `mx-auto`,
 // `overflow-auto` on any `ul`) nor a bare `[role="listbox"] *` (which would match any descendant of
 // any listbox on the page) — both would let it click unrelated page chrome.
-const NON_ARIA_OPTION_SELECTOR =
-  '[role="option"], [role="listbox"] li, ul[class*="suggestion" i] li, ul[class*="autocomplete" i] li, ul[class*="typeahead" i] li, [class*="suggestion" i] li, [class*="typeahead" i] li';
+//
+// Trenitalia-style dropdowns render `<li role="option"><button class="el-choice">…</button></li>`
+// where the click handler lives on the INNER button, not on the <li>. Including bare
+// `[role="option"]` would match the <li> and clicking it would NOT trigger the station selection.
+// The button-targeting selectors below ensure we find and click the actual interactive element.
+const NON_ARIA_OPTION_SELECTOR = [
+  '[role="option"]',                         // li[role=option] — legacy / plain option
+  '[role="listbox"] li',                     // li inside a listbox
+  'ul[class*="suggestion" i] li',            // suggestion-list convention
+  'ul[class*="autocomplete" i] li',          // autocomplete-list convention
+  'ul[class*="typeahead" i] li',             // typeahead-list convention
+  '[class*="suggestion" i] li',              // loose suggestion container
+  '[class*="typeahead" i] li',               // loose typeahead container
+  // Nested clickable elements inside options (Trenitalia et al.)
+  '[role="option"] button',                  // button inside li[role=option]
+  'button.el-choice',                        // Trenitalia-specific choice button
+  '[role="listbox"] button',                 // generic button inside a listbox
+  '[class*="option" i] button',              // button inside an option-like container
+  "li[role='option'] > *",                   // any direct child of an option li
+].join(', ');
 
 /// Owns the autocomplete protocol so the MODEL doesn't have to: the caller types
 /// the full value once; here we (1) try to select a matching suggestion; (2) if
@@ -1046,11 +1108,15 @@ async function confirmAutocomplete(
     // strong enough shows up in response to the full typed value, we simply
     // leave the field holding the full text — current, safe behavior.
     const nonAriaOptionLocator = page.locator(NON_ARIA_OPTION_SELECTOR).locator("visible=true");
-    // Short wait (500ms): this probe runs on every non-ARIA `type`, so it must not stall ordinary
-    // form typing waiting for a list that will never appear. `allowKeyboardCommit=false`: a
-    // non-ARIA input's Enter submits the enclosing form, so we click-only — never risk a submit the
-    // model didn't ask for (and the payment gate never judged) on a mis-scored row.
-    const fallback = await trySelectFromOpenList(page, input, nonAriaOptionLocator, typed, timeout, 3, 500, false);
+    // Wait up to 1500ms for the suggestion list: this probe runs on every non-ARIA `type`, but
+    // real-world typeaheads (e.g. Trenitalia's station picker) render asynchronously and 500ms was
+    // too short — the list appeared just after the probe gave up, so the auto-select missed its
+    // window and the dropdown auto-closed before the model could act. 1500ms is long enough for
+    // even slow AJAX suggestion endpoints without noticeably stalling ordinary form typing.
+    // `allowKeyboardCommit=false`: a non-ARIA input's Enter submits the enclosing form, so we
+    // click-only — never risk a submit the model didn't ask for (and the payment gate never
+    // judged) on a mis-scored row.
+    const fallback = await trySelectFromOpenList(page, input, nonAriaOptionLocator, typed, timeout, 3, 1500, false);
     if (fallback.committed) return { committed: fallback.committed, options: fallback.options };
     return { options: fallback.options };
   }

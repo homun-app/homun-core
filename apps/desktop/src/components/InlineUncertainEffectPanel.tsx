@@ -33,14 +33,26 @@ export function InlineUncertainEffectPanel({
       {effects.map((effect) => {
         const resolving = busyId === effect.id;
         const disabled = busyId !== null;
+        // The browser family is an OUTCOME VERIFICATION gate (did the action
+        // really happen on the page?), not an authorization request — it gets
+        // dedicated copy so users don't read it as "approve to continue".
+        const isBrowserFamily = effect.operationFamily === "browser";
         return (
           <article className="uncertain-effect-card" key={effect.id}>
             <header className="uncertain-effect-header">
               <AlertCircle size={17} aria-hidden="true" />
-              <strong>{effectFamilyLabel(effect.operationFamily, t)}</strong>
-              <span>{t("chat.needsVerification")}</span>
+              <strong>
+                {isBrowserFamily
+                  ? t("chat.effectVerificationTitleBrowser")
+                  : effectFamilyLabel(effect.operationFamily, t)}
+              </strong>
+              {!isBrowserFamily && <span>{t("chat.needsVerification")}</span>}
             </header>
-            <p className="inline-effect-copy">{t("chat.effectVerificationPrompt")}</p>
+            <p className="inline-effect-copy">
+              {isBrowserFamily
+                ? t("chat.effectVerificationPromptBrowser")
+                : t("chat.effectVerificationPrompt")}
+            </p>
             <time dateTime={new Date(effect.uncertainAt * 1_000).toISOString()}>
               {t("chat.uncertainSince", { time: formatEffectTime(effect.uncertainAt) })}
             </time>

@@ -2,6 +2,7 @@ import type { CoreChatStreamEvent } from "./coreBridge";
 import type { TurnReplayStatus } from "./turnReplayState";
 import type { ChatEventPart, ChatMessage } from "../types";
 import { STRUCTURED_MARKER_DELTA_RE } from "./markers";
+import { isValidStepAdvancePayload } from "./chat-runtime/stepAdvanceDisplay";
 import { parseChoicePromptPayload } from "../components/ChatPayloadParsers";
 
 export function chatEventPartFromStream(event: CoreChatStreamEvent): ChatEventPart | null {
@@ -12,6 +13,8 @@ export function chatEventPartFromStream(event: CoreChatStreamEvent): ChatEventPa
       return { type: "activity", text: event.text };
     case "plan_update":
       return { type: "plan_update", markdown: event.markdown };
+    case "step_advance":
+      return { type: "step_advance", payload: event.payload };
     case "choice_prompt":
     case "vault_propose":
     case "vault_reveal":
@@ -38,6 +41,11 @@ export function normalizeChatEventParts(parts: unknown[] | undefined): ChatEvent
       case "plan_update":
         return typeof item.markdown === "string"
           ? [{ type: "plan_update", markdown: item.markdown }]
+          : [];
+      case "step_advance":
+        // Persisted kernel events: keep only payloads matching the wire contract.
+        return isValidStepAdvancePayload(item.payload)
+          ? [{ type: "step_advance", payload: item.payload } as ChatEventPart]
           : [];
       case "choice_prompt":
       case "vault_propose":

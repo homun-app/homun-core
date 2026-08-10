@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const chatView = readFileSync(join(here, "..", "src", "components", "ChatView.tsx"), "utf8");
+const scrollHook = readFileSync(join(here, "..", "src", "components", "useChatConversationScroll.ts"), "utf8");
 const styles = readFileSync(join(here, "..", "src", "styles.css"), "utf8");
 const chatStyles = readFileSync(join(here, "..", "src", "styles", "chat.css"), "utf8");
 
@@ -14,8 +14,8 @@ test("the streaming auto-scroll is instant, never animated", () => {
   // `smooth` on .thread-scroll, every rAF flush restarted a scroll animation the
   // next frame cancelled — the viewport permanently trailed the text.
   assert.match(
-    chatView,
-    /function afterStreamingFramePaint\(\)\s*\{\s*scrollConversationToBottomIfPinned\("instant"\);/,
+    scrollHook,
+    /afterStreamingFramePaint\s*=\s*useCallback\(\(\)\s*=>\s*\{[\s\S]*?scrollConversationToBottomIfPinned\("instant"\);/,
     "afterStreamingFramePaint must scroll with instant",
   );
 });
@@ -30,7 +30,7 @@ test("the thread scroller does not declare smooth scroll-behavior", () => {
 });
 
 test("the explicit jump-to-bottom button stays smooth", () => {
-  assert.match(chatView, /scrollConversationToBottom\("smooth"\)/, "the manual jump stays animated");
+  assert.match(scrollHook, /scrollConversationToBottom\("smooth"\)/, "the manual jump stays animated");
 });
 
 /**

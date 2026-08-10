@@ -715,6 +715,34 @@ pub(crate) fn next_ready_task_across_workspaces(
         .next())
 }
 
+/// Count active (Running with a non-expired lease) and stale (Running with an
+/// expired lease) tasks across all non-terminal workspaces. Called on every
+/// task-executor tick to refresh the cached lease stats consumed by the
+/// lock-free health handler — this runs on the executor thread, NOT in the
+/// health handler path, so it never blocks the liveness probe.
+fn count_active_stale_leases(
+    store: &TaskStore,
+    user: &UserId,
+    now: OffsetDateTime,
+) -> (usize, usize) {
+    let mut active = 0;
+    let mut stale = 0;
+    let workspaces = store.non_terminal_workspace_ids(user).unwrap_or_default();
+    for workspace in workspaces {
+        for task in store.list_tasks(user, &workspace).unwrap_or_default() {
+            if task.status != TaskStatus::Running {
+                continue;
+            }
+            match task.lease_expires_at {
+                Some(expires) if expires <= now => stale += 1,
+                Some(_) => active += 1,
+                None => {}
+            }
+        }
+    }
+    (active, stale)
+}
+
 pub(crate) fn run_next_task_once(
     state: &AppState,
     worker_id: &str,
@@ -728,8 +756,13 @@ pub(crate) fn run_next_task_once(
     let lease_manager = LeaseManager::new(Duration::minutes(5));
     let task = {
         let store = lock_task_store(state)?;
-        next_ready_task_across_workspaces(&store, &user, now, &governor, &lease_manager)
-            .map_err(GatewayError::task)?
+        let task = next_ready_task_across_workspaces(&store, &user, now, &governor, &lease_manager)
+            .map_err(GatewayError::task)?;
+        // Refresh cached lease stats for the health handler (lightweight: runs
+        // on the executor thread, never in the health handler path).
+        let (active, stale) = count_active_stale_leases(&store, &user, now);
+        crate::gateway_health::set_lease_stats(active, stale);
+        task
     };
     let Some(task) = task else {
         return Ok(TaskRunBatchResponse {

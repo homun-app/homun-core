@@ -667,6 +667,18 @@ pub enum TurnEventKind {
     /// surface "in attesa del browser…". Emitted when the governor puts the task in
     /// WaitingResource. The turn auto-resumes (back to Queued) once the resource frees.
     Queued,
+    /// A single plan step changed status. Payload (frontend contract, exact):
+    /// `{"step_id": string, "title": string, "from": string|null, "to": string,
+    /// "verified": bool|null, "note": string|null}`. Emitted whenever a step's
+    /// canonical status changes (model step_advance/update_plan after F2, or the
+    /// harness evidence-verified frontier advance) so the frontend can render it
+    /// inline in the chat stream (distinct from the full PlanUpdate card).
+    StepAdvance,
+    /// Periodic keep-alive while the model is processing. Payload carries
+    /// elapsed_seconds (since last event) and round. Emitted every ~15s of
+    /// inactivity (no streaming tokens) so the UI can show "still thinking…"
+    /// instead of an indefinite spinner.
+    Heartbeat,
 }
 
 impl TurnEventKind {
@@ -685,6 +697,8 @@ impl TurnEventKind {
             TurnEventKind::Aborted => "aborted",
             TurnEventKind::Retry => "retry",
             TurnEventKind::Queued => "queued",
+            TurnEventKind::StepAdvance => "step_advance",
+            TurnEventKind::Heartbeat => "heartbeat",
         }
     }
 
@@ -703,6 +717,8 @@ impl TurnEventKind {
             "aborted" => Self::Aborted,
             "retry" => Self::Retry,
             "queued" => Self::Queued,
+            "step_advance" => Self::StepAdvance,
+            "heartbeat" => Self::Heartbeat,
             _ => return None,
         })
     }

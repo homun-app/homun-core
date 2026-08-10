@@ -42,9 +42,41 @@ export type BrowserSnapshot = {
   // ref-less committing action needs this rather than paymentFloorRefs (which
   // is keyed on explicit refs). Never derived from label/text.
   focusPaymentContext: boolean;
+  // Refs that are new compared to the previous observation (Fase 2.2). These
+  // are already suffixed with `*` in the snapshot text; this set carries the
+  // bare ref IDs for programmatic consumers.
+  newRefs: string[];
 };
 
 export type BrowserObservationMode = "interact" | "delta" | "extract";
+
+// In-page statistics and form-element hints collected in a single batched
+// page.evaluate (one CDP round-trip) right after the aria snapshot. The
+// header line derived from these stats is prepended to every model-facing
+// snapshot so the agent always knows scroll depth, element density, and
+// what options/format each form control expects.
+export type PageStatsAndFormHints = {
+  scrollY: number;
+  scrollHeight: number;
+  clientHeight: number;
+  interactiveCount: number;
+  totalElements: number;
+  selectOptions: Array<{ label: string; options: string[] }>;
+  dateInputs: Array<{ label: string; format: string }>;
+};
+
+const EMPTY_PAGE_STATS: PageStatsAndFormHints = {
+  scrollY: 0,
+  scrollHeight: 0,
+  clientHeight: 0,
+  interactiveCount: 0,
+  totalElements: 0,
+  selectOptions: [],
+  dateInputs: [],
+};
+
+// Exported for tests to construct minimal stats without the full type.
+export const EMPTY_PAGE_STATS_FOR_TEST: PageStatsAndFormHints = { ...EMPTY_PAGE_STATS };
 
 export type BrowserSnapshotOptions = {
   snapshotFormat?: "ai" | "legacy";
@@ -59,6 +91,10 @@ export type BrowserSnapshotOptions = {
   observationMode?: BrowserObservationMode;
   previousSnapshot?: string;
   generation?: number;
+  // Refs from the previous observation: when provided, any ref in the current
+  // snapshot that was NOT in this set is suffixed with `*` to signal novelty
+  // to the model. The session manager threads this from its PageState.
+  previousRefs?: Set<string>;
 };
 
 // `extract` is the READING budget: it must fit a full results table (train times, flight legs, a
@@ -353,7 +389,7 @@ export async function createSnapshot(
       return aiSnapshot;
     }
   }
-  return await createLegacySnapshot(page, targetId);
+  return await createLegacySnapshot(page, targetId, options);
 }
 
 async function enrichPageAccessibility(page: Page): Promise<void> {
@@ -393,6 +429,109 @@ async function enrichPageAccessibility(page: Page): Promise<void> {
   }).catch(() => undefined);
 }
 
+// Collects page statistics and form-element hints (select options, date
+// input formats) in a single page.evaluate — one CDP round-trip regardless
+// of how many selects or date inputs the page has. Failures degrade to
+// empty stats rather than blocking the snapshot.
+async function collectPageStatsAndFormHints(page: Page): Promise<PageStatsAndFormHints> {
+  return page
+    .evaluate((): PageStatsAndFormHints => {
+      const interactiveCount = document.querySelectorAll(
+        "a,button,input,select,textarea,[role=button],[role=link],[role=tab],[role=menuitem]",
+      ).length;
+      const totalElements = document.querySelectorAll("*").length;
+      const selectOptions = Array.from(document.querySelectorAll("select")).map((sel) => {
+        const opts = Array.from(sel.querySelectorAll("option"))
+          .slice(0, 5)
+          .map((o) => o.value);
+        const label =
+          (sel as HTMLSelectElement).labels?.[0]?.textContent?.trim() ||
+          sel.getAttribute("aria-label") ||
+          sel.getAttribute("name") ||
+          sel.id ||
+          "";
+        return { label: label.trim(), options: opts };
+      });
+      const dateInputs = Array.from(
+        document.querySelectorAll<HTMLInputElement>(
+          'input[type="date"],input[type="datetime-local"]',
+        ),
+      ).map((inp) => {
+        const format = inp.type === "datetime-local" ? "YYYY-MM-DDTHH:MM" : "YYYY-MM-DD";
+        const label =
+          inp.labels?.[0]?.textContent?.trim() ||
+          inp.getAttribute("aria-label") ||
+          inp.getAttribute("name") ||
+          inp.id ||
+          "";
+        return { label: label.trim(), format };
+      });
+      return {
+        scrollY: window.scrollY,
+        scrollHeight: document.documentElement.scrollHeight,
+        clientHeight: window.innerHeight,
+        interactiveCount,
+        totalElements,
+        selectOptions,
+        dateInputs,
+      };
+    })
+    .catch(() => EMPTY_PAGE_STATS);
+}
+
+// Builds the one-line page stats header from collected statistics.
+// "pages below" tells the model how much scrollable content remains unseen.
+export function buildPageStatsHeader(stats: PageStatsAndFormHints): string {
+  const remaining = stats.scrollHeight - stats.clientHeight;
+  const pagesBelow =
+    remaining > 0 ? Math.max(0, (remaining - stats.scrollY) / stats.clientHeight) : 0;
+  return `[page: ${stats.interactiveCount} interactive | scroll: ${pagesBelow.toFixed(1)} pages below | ${stats.totalElements} total]`;
+}
+
+// Appends select-option and date-format hints to matching aria tree lines.
+// Matching is by role heuristics (combobox/listbox for selects, textbox for
+// date inputs) and case-insensitive substring match on the accessible name.
+export function appendFormHintText(snapshot: string, hints: PageStatsAndFormHints): string {
+  if (hints.selectOptions.length === 0 && hints.dateInputs.length === 0) {
+    return snapshot;
+  }
+  const lines = snapshot.split("\n");
+  const result: string[] = [];
+  for (const line of lines) {
+    let hint = "";
+    if (/\b(combobox|listbox)\b/.test(line)) {
+      for (const sel of hints.selectOptions) {
+        if (sel.label && line.toLowerCase().includes(sel.label.toLowerCase())) {
+          hint = ` (options: ${sel.options.join(" | ")})`;
+          break;
+        }
+      }
+    }
+    if (!hint && /\btextbox\b/.test(line)) {
+      for (const dt of hints.dateInputs) {
+        if (dt.label && line.toLowerCase().includes(dt.label.toLowerCase())) {
+          hint = ` (format: ${dt.format})`;
+          break;
+        }
+      }
+    }
+    result.push(hint ? `${line}${hint}` : line);
+  }
+  return result.join("\n");
+}
+
+// Marks refs that are new (not in previousRefs) with a trailing `*` suffix
+// in the snapshot text. The regex matches the standard `[ref=eN]` pattern
+// and only transforms refs whose bare ID is in the newRefs set.
+export function markNewRefsInText(text: string, newRefs: Set<string>): string {
+  if (newRefs.size === 0) {
+    return text;
+  }
+  return text.replace(/\[ref=([^\]\s*]+)\]/g, (match, ref) =>
+    newRefs.has(ref) ? `[ref=${ref}*]` : match,
+  );
+}
+
 async function createAiSnapshot(
   page: Page,
   targetId: string,
@@ -402,6 +541,9 @@ async function createAiSnapshot(
   await enrichPageAccessibility(page);
   const timeout = Math.max(500, Math.min(60_000, Math.floor(options?.timeoutMs ?? 5_000)));
   const ariaSnapshot = await page.ariaSnapshot({ mode: "ai", timeout });
+  // Single batched evaluate: page stats (Fase 2.1) + select options / date
+  // format hints (Fase 2.3) — one CDP round-trip.
+  const pageStats = await collectPageStatsAndFormHints(page);
   const title = (await page.title().catch(() => "")).replace(/\s+/g, " ").trim();
   const metadata = title ? `title: ${title}\n` : "";
   // Computed once, before role filtering: the URL list is appended identically
@@ -412,40 +554,62 @@ async function createAiSnapshot(
   const rawSnapshotBody = snapshotUrls.length
     ? appendSnapshotUrls(ariaSnapshot, snapshotUrls)
     : ariaSnapshot;
+  // rawSnapshot intentionally excludes the page stats header and new-ref
+  // markers: it is the stable basis for the NEXT delta call, and including
+  // volatile per-observation data would cause spurious diffs.
   const rawSnapshot = `${metadata}${rawSnapshotBody}`;
   const roleOptions = roleSnapshotOptions(options);
-  const builtSnapshot = roleOptions
+  const builtRaw = roleOptions
     ? buildRoleSnapshotFromAiSnapshot(ariaSnapshot, roleOptions)
     : { snapshot: ariaSnapshot, refs: refsFromAiSnapshot(ariaSnapshot) };
+  // Append form hints (select options, date formats) to the display body.
+  const hintedSnapshot = appendFormHintText(builtRaw.snapshot, pageStats);
+  const builtSnapshot = { snapshot: hintedSnapshot, refs: builtRaw.refs };
   const displaySnapshotBody = snapshotUrls.length
     ? appendSnapshotUrls(builtSnapshot.snapshot, snapshotUrls)
     : builtSnapshot.snapshot;
-  const displaySnapshot = `${metadata}${displaySnapshotBody}`;
+  // Parse refs from the built (pre-marker) snapshot so refLocators carry
+  // bare IDs; new-ref `*` markers are then applied to the display text.
+  const refs = builtSnapshot.refs;
+  // Fase 2.2: determine which refs are new vs previous observation.
+  const prevRefs = options?.previousRefs;
+  const newRefIds = new Set<string>();
+  if (prevRefs) {
+    for (const r of refs) {
+      if (!prevRefs.has(r.ref)) {
+        newRefIds.add(r.ref);
+      }
+    }
+  }
+  const baseDisplay = `${metadata}${displaySnapshotBody}`;
+  const displaySnapshot = baseDisplay;
   // Delta diffs full-raw against full-raw (options.previousSnapshot must be the
   // caller's retained `rawSnapshot` from the prior call, never a displayed
   // snapshot) so ordinary interact->delta / delta->delta sequences produce a
   // small bounded delta instead of spuriously tripping the ref-churn fallback.
+  // New-ref markers are applied to the delta result so the model sees novelty
+  // even in diff mode.
   const observedSnapshot =
-    observedMode === "delta" ? structuralDelta(options?.previousSnapshot, rawSnapshot) : displaySnapshot;
+    observedMode === "delta"
+      ? structuralDelta(options?.previousSnapshot, rawSnapshot)
+      : displaySnapshot;
   const limit = limitForObservation(observedMode, options?.maxChars);
   // Say WHAT was cut and what to do about it. The bare "page too large" marker read as "this is the
   // whole page": a model that had just submitted a search saw the truncated top of the results page,
   // found no rows in it and concluded there were no results.
   const snapshot =
     observedSnapshot.length > limit
-      ? `${observedSnapshot.slice(0, limit)}\n\n[...TRUNCATED after ${limit} of ${observedSnapshot.length} characters — this is only the TOP of the page. Content further down (e.g. result rows) is NOT shown here. Scroll down and read again, or narrow the observation, before concluding anything is missing.]`
+      ? `${observedSnapshot.slice(0, limit)}\n\n[...TRUNCATED after ${limit} of ${observedSnapshot.length} characters \u2014 this is only the TOP of the page. Content further down (e.g. result rows) is NOT shown here. Scroll down and read again, or narrow the observation, before concluding anything is missing.]`
       : observedSnapshot;
   // A delta is `+`/`-`-prefixed diff text, not a snapshot: re-parsing refs out
   // of it yields ZERO refs, because `refsFromAiSnapshot` anchors on `^\s*-`
   // followed by a role token and every delta line carries a diff marker ahead
-  // of the original `- ` (an added line reads `+ - button …`, a removed one
-  // `- - button …`). Only that doubled marker keeps a REMOVED line's dead ref
-  // from being re-advertised as live — too thin a coincidence to rely on. So
+  // of the original `- ` (an added line reads `+ - button \u2026`, a removed one
+  // `- - button \u2026`). Only that doubled marker keeps a REMOVED line's dead ref
+  // from being re-advertised as live \u2014 too thin a coincidence to rely on. So
   // refs always come from the full built snapshot in delta mode. Unreachable
-  // via today's schema (delta and role-filter are never combined) — this is
-  // the guard that keeps it unreachable. See tests/snapshot_delta_refs.test.ts.
-  const refs =
-    roleOptions && observedMode !== "delta" ? refsFromAiSnapshot(snapshot) : builtSnapshot.refs;
+  // via today's schema (delta and role-filter are never combined) \u2014 this is
+  // the guard that keeps it reachable. See tests/snapshot_delta_refs.test.ts.
   const refLocators = new Map<string, Locator>();
   for (const ref of refs) {
     refLocators.set(ref.ref, page.locator(`aria-ref=${ref.ref}`));
@@ -467,6 +631,7 @@ async function createAiSnapshot(
     observationMode: observedMode,
     paymentFloorRefs,
     focusPaymentContext,
+    newRefs: [...newRefIds],
   };
 }
 
@@ -616,7 +781,7 @@ function appendSnapshotUrls(snapshot: string, urls: SnapshotUrlEntry[]): string 
   return `${snapshot}\n\nLinks:\n${lines.join("\n")}`;
 }
 
-async function createLegacySnapshot(page: Page, targetId: string): Promise<BrowserSnapshot> {
+async function createLegacySnapshot(page: Page, targetId: string, options?: BrowserSnapshotOptions): Promise<BrowserSnapshot> {
   const refs: BrowserRef[] = [];
   const refLocators = new Map<string, Locator>();
   const lines: string[] = [];
@@ -646,17 +811,29 @@ async function createLegacySnapshot(page: Page, targetId: string): Promise<Brows
   }
 
   const snapshot = lines.join("\n");
+  // Fase 2.2: new-ref marking for the legacy path.
+  const prevRefs = options?.previousRefs;
+  const newRefIds = new Set<string>();
+  if (prevRefs) {
+    for (const r of refs) {
+      if (!prevRefs.has(r.ref)) {
+        newRefIds.add(r.ref);
+      }
+    }
+  }
+  const markedSnapshot = snapshot;
   return {
     targetId,
     url: page.url(),
-    snapshot,
-    // Legacy path has no role filtering and no delta mode: raw == displayed.
+    snapshot: markedSnapshot,
+    // Legacy path has no role filtering and no delta mode: raw == displayed
+    // (before markers). The raw form excludes markers for delta stability.
     rawSnapshot: snapshot,
     refs,
     refLocators,
     refsMode: "locator",
     snapshotFormat: "legacy",
-    stats: snapshotStats(snapshot, refs.length),
+    stats: snapshotStats(markedSnapshot, refs.length),
     generation: 0,
     fingerprint: fingerprintSnapshot(snapshot),
     observationMode: "extract",
@@ -665,6 +842,7 @@ async function createLegacySnapshot(page: Page, targetId: string): Promise<Brows
     paymentFloorRefs: [],
     // Same rationale: not computed on the legacy fallback path.
     focusPaymentContext: false,
+    newRefs: [...newRefIds],
   };
 }
 

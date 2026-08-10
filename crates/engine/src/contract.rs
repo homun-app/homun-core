@@ -313,9 +313,11 @@ pub trait ExecutionJournal: Send + Sync {
 pub trait PlanProgress {
     /// Persist the thread's runtime plan durably (cross-turn continuity). The delivery reconcile and
     /// each mid-turn frontier advance call this; `None` thread = no persistence scope (a no-op impl).
+    /// `goal` is the plan's optional one-sentence objective (persisted as `{goal, steps}`).
     fn persist_plan(
         &self,
         thread: Option<&str>,
+        goal: Option<&str>,
         steps: &[Value],
     ) -> impl Future<Output = ()> + Send;
 
@@ -348,9 +350,10 @@ pub trait PlanProgress {
     /// Rebuild the plan `Value` from a fresh step list (ADR 0024 inc 5, 5.D1c.5): the other half of the
     /// Value↔ExecutionPlan bridge. When the mid-turn frontier advance produces new steps, the loop
     /// stores the canonical serialized plan via this method (gateway: `to_value(runtime_execution_plan
-    /// (steps))`). SYNC + pure, on this seam for the same reason as `reconcile_on_delivery` — the leaf
-    /// engine can't build the typed `ExecutionPlan`.
-    fn plan_value_from_steps(&self, steps: &[Value]) -> Value;
+    /// (steps))`). `goal` is carried forward so a step-only rebuild never drops it. SYNC + pure, on
+    /// this seam for the same reason as `reconcile_on_delivery` — the leaf engine can't build the
+    /// typed `ExecutionPlan`.
+    fn plan_value_from_steps(&self, goal: Option<&str>, steps: &[Value]) -> Value;
 }
 
 /// The loop's F3 context-compaction port (ADR 0024 inc 5, 5.D1c.6). When a plan step completes, the
@@ -692,7 +695,7 @@ mod tests {
         judge: bool,                             // scripted verify verdict
     }
     impl PlanProgress for RecordingPlan {
-        async fn persist_plan(&self, _thread: Option<&str>, steps: &[Value]) {
+        async fn persist_plan(&self, _thread: Option<&str>, _goal: Option<&str>, steps: &[Value]) {
             self.persisted.lock().unwrap().push(steps.len());
         }
         async fn record_step_outcome(
@@ -715,9 +718,9 @@ mod tests {
             // Scripted: report one reconciled step so the seam's sync bridge is exercised.
             Some(vec![Value::Null])
         }
-        fn plan_value_from_steps(&self, steps: &[Value]) -> Value {
+        fn plan_value_from_steps(&self, goal: Option<&str>, steps: &[Value]) -> Value {
             // Scripted: echo the steps under a `steps` key (a stand-in for the ExecutionPlan value).
-            serde_json::json!({ "steps": steps })
+            serde_json::json!({ "goal": goal, "steps": steps })
         }
     }
 
@@ -727,7 +730,7 @@ mod tests {
             judge: true,
             ..Default::default()
         };
-        plan.persist_plan(Some("t1"), &[Value::Null, Value::Null])
+        plan.persist_plan(Some("t1"), None, &[Value::Null, Value::Null])
             .await;
         let (done, _why) = plan
             .verify_step_complete("step", "crit", "did the thing")

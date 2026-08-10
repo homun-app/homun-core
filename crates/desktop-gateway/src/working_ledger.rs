@@ -87,21 +87,20 @@ pub(crate) fn render(
             "Status: `{}` · revision {} · stalled resumes {}\n\n",
             plan.status, plan.revision, plan.stall_turns
         ));
-        if let Some(steps) = plan.plan_json.as_array() {
-            for step in steps {
-                let status = step
-                    .get("status")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("todo");
-                let title = step
-                    .get("title")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("Untitled step");
-                out.push_str(&format!(
-                    "- [{status}] {}\n",
-                    title.replace(['\r', '\n'], " ")
-                ));
-            }
+        // plan_json is `{"goal": ..., "steps": [...]}` (legacy bare arrays tolerated).
+        for step in &local_first_engine::plan::plan_value_steps(&plan.plan_json) {
+            let status = step
+                .get("status")
+                .and_then(|value| value.as_str())
+                .unwrap_or("todo");
+            let title = step
+                .get("title")
+                .and_then(|value| value.as_str())
+                .unwrap_or("Untitled step");
+            out.push_str(&format!(
+                "- [{status}] {}\n",
+                title.replace(['\r', '\n'], " ")
+            ));
         }
     } else {
         out.push_str("No runtime plan.\n");

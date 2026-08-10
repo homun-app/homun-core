@@ -80,6 +80,7 @@ export type {
   RecallHitPayload,
   RecallEventPayload,
   DiffEventPayload,
+  StepAdvancePayload,
 } from "./lib/coreBridge";
 import type {
   ChoicePromptPayload,
@@ -89,11 +90,13 @@ import type {
   ToolResultPayload,
   RecallEventPayload,
   DiffEventPayload,
+  StepAdvancePayload,
 } from "./lib/coreBridge";
 
 export type ChatEventPart =
   | { type: "activity"; text: string }
   | { type: "plan_update"; markdown: string }
+  | { type: "step_advance"; payload: StepAdvancePayload }
   | { type: "choice_prompt"; payload: ChoicePromptPayload }
   | { type: "vault_propose"; payload: VaultProposePayload }
   | { type: "vault_reveal"; payload: VaultRevealPayload }

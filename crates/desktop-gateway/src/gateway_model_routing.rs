@@ -540,6 +540,63 @@ pub(crate) fn orchestration_judge_response_format(name: &str) -> serde_json::Val
     structured_response_format(name, Some(&orchestration_completion_judge_schema()))
 }
 
+/// The F2 step-completion judge's system prompt (extracted so tests can pin its
+/// rules). The failed-external-action rule guards the live anomaly where a step
+/// was marked done with "9+ browse attempts failed, no train result obtained":
+/// the judge accepted the model's analytical SUMMARY of the failures as evidence
+/// for a step whose criterion required an action result.
+pub(crate) fn step_completion_judge_system_prompt() -> &'static str {
+    "You are a STRICT completion verifier for an autonomous agent. Given a task \
+STEP, its CRITERION, and the EVIDENCE of what the agent actually did, decide if the step is \
+genuinely complete. Be skeptical: a claim with no supporting evidence is NOT complete, and a \
+failed or error-laden tool result is NOT complete. A labelled assistant candidate output is direct \
+evidence only when the step itself is to produce analytical text (for example a table, explanation, \
+or risk synthesis); it is never evidence that a command or external action ran. The evidence target must match the exact requested \
+path, URL, entity, account, or scope; success on a different target is NOT completion. If the evidence contains failed external actions (browser/channel) and no subsequent successful external result achieving the done_criterion, the step is NOT complete; a textual summary describing failures is not evidence of completion. Reply with STRICT JSON only, no prose: \
+{\"complete\": true|false, \"reason\": \"one short sentence\"}."
+}
+
+/// Small, deliberate keyword list marking a done-criterion as ANALYTICAL (its
+/// deliverable is text the model itself produces: summaries, analyses, reports,
+/// explanations). Case-insensitive substring match. Action words like
+/// "elenca"/"risultati"/"tabella"/"treni" are deliberately NOT here: those
+/// criteria require an external result to exist, which only a successful
+/// external action can provide.
+const ANALYTICAL_CRITERION_KEYWORDS: &[&str] = &[
+    "riepilog", "summar", "analizz", "analy", "report", "spieg", "explain", "motivo", "why",
+];
+
+pub(crate) fn criterion_is_analytical(criterion: &str) -> bool {
+    let lower = criterion.to_lowercase();
+    ANALYTICAL_CRITERION_KEYWORDS
+        .iter()
+        .any(|keyword| lower.contains(keyword))
+}
+
+/// Deterministic F2 backstop, applied BEFORE the LLM judge. When the step's
+/// evidence carries at least one `[external_action_failed]` marker (browser_act
+/// error/not-applied/uncertain, failed browse, failed channel send) and ZERO
+/// `[external_action_ok]` markers, an ACTION done-criterion cannot be satisfied
+/// by prose alone — refuse the done claim without consulting the judge. Returns
+/// the rejection reason, or `None` to defer to the normal judge path (including
+/// analytical criteria, where describing the failures IS the deliverable).
+pub(crate) fn external_failure_backstop(criterion: &str, evidence: &str) -> Option<String> {
+    let failures = evidence
+        .matches(local_first_engine::EXTERNAL_ACTION_FAILED_MARKER)
+        .count();
+    let successes = evidence
+        .matches(local_first_engine::EXTERNAL_ACTION_OK_MARKER)
+        .count();
+    if failures == 0 || successes > 0 || criterion_is_analytical(criterion) {
+        return None;
+    }
+    Some(format!(
+        "deterministic backstop: the evidence records {failures} failed external action(s) and no successful external result for this step, \
+so its action criterion cannot be complete. A textual summary of the failures is not completion. \
+Retry with a different approach, or replan if the action is not feasible."
+    ))
+}
+
 /// F2 verification gate: an independent LLM-judge deciding whether a plan step is
 /// ACTUALLY complete, from the step title, its done-criterion, and the EVIDENCE (tool
 /// calls + results gathered while the step ran). Cheap, non-streaming, on the fast
@@ -551,17 +608,21 @@ pub(crate) async fn verify_step_complete(
     criterion: &str,
     evidence: &str,
 ) -> (bool, String) {
+    // Deterministic backstop BEFORE any LLM call (covers both the model's
+    // step_advance/update_plan claim path and the harness evidence-autoadvance):
+    // failed external actions + action criterion = not complete, judge skipped.
+    if let Some(reason) = external_failure_backstop(criterion, evidence) {
+        tracing::info!(
+            target: "orchestration::verify_step",
+            step = %step_title,
+            "step-verify deterministic backstop rejected the done claim (failed external actions, no success)"
+        );
+        return (false, reason);
+    }
     let Some((base_url, model, api_key)) = role_openai_config("memory") else {
         return (false, "completion verifier is not configured".to_string());
     };
-    let system = "You are a STRICT completion verifier for an autonomous agent. Given a task \
-STEP, its CRITERION, and the EVIDENCE of what the agent actually did, decide if the step is \
-genuinely complete. Be skeptical: a claim with no supporting evidence is NOT complete, and a \
-failed or error-laden tool result is NOT complete. A labelled assistant candidate output is direct \
-evidence only when the step itself is to produce analytical text (for example a table, explanation, \
-or risk synthesis); it is never evidence that a command or external action ran. The evidence target must match the exact requested \
-path, URL, entity, account, or scope; success on a different target is NOT completion. Reply with STRICT JSON only, no prose: \
-{\"complete\": true|false, \"reason\": \"one short sentence\"}.";
+    let system = step_completion_judge_system_prompt();
     let user = format!(
         "STEP: {step_title}\nCRITERION: {}\n\nEVIDENCE (tool calls + results during this step):\n{}",
         if criterion.trim().is_empty() {
@@ -2296,6 +2357,14 @@ pub(crate) fn has_vision_model() -> bool {
 /// asks here. See `vision::vision_support` for why the catalog is the only signal consulted.
 pub(crate) fn model_vision_support(base_url: &str, model: &str) -> vision::VisionSupport {
     vision::vision_support(registry_model_capabilities(base_url, model).map(|caps| caps.vision))
+}
+
+/// Bool predicate for call sites that only need "should I send the image?" (the browser screenshot
+/// gate, the `OpenTurnPolicy` seam). Returns `true` unless the catalog confidently says NO — an
+/// unknown model still gets the image, because withholding it from a seeing model is worse than
+/// wasting one round on a blind one.
+pub(crate) fn model_supports_vision(base_url: &str, model: &str) -> bool {
+    !matches!(model_vision_support(base_url, model), vision::VisionSupport::No)
 }
 
 /// Provider/model for background MEMORY extraction: prefers the "memory" role

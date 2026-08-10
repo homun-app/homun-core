@@ -185,6 +185,20 @@ pub enum GenerateStreamEvent {
     PlanUpdate {
         markdown: String,
     },
+    /// A single plan step changed status (frontend contract, do not deviate):
+    /// `{"step_id": string, "title": string, "from": string|null, "to": string,
+    /// "verified": bool|null, "note": string|null}`. Emitted whenever a step's
+    /// canonical status changes (model `step_advance`/`update_plan` after F2, or the
+    /// harness evidence-verified frontier advance); the gateway fans it out as the
+    /// durable `step_advance` turn event.
+    StepAdvance {
+        step_id: String,
+        title: String,
+        from: Option<String>,
+        to: String,
+        verified: Option<bool>,
+        note: Option<String>,
+    },
     ChoicePrompt {
         payload: serde_json::Value,
     },

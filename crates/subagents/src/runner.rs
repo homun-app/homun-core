@@ -22,6 +22,10 @@ impl<R: JsonRuntime> SubagentRunner<R> {
         &self.runtime
     }
 
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
     pub fn run_generate_json(&self, task: &SubagentTask) -> SubagentResult {
         let started_at = audit_timestamp();
         if task_cancelled(task) {
