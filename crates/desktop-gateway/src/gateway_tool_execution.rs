@@ -13,19 +13,19 @@ fn tool_execution_owner_smoke() {
 }
 
 #[test]
-fn browse_subagent_prompt_documents_auto_complete_default_false() {
+fn browse_subagent_prompt_documents_autocomplete_semantic_default() {
     let prompt = browse_subagent_system_prompt(true);
     assert!(
         prompt.contains("auto_complete is"),
         "prompt must explain auto_complete behavior"
     );
     assert!(
-        prompt.contains("forced to false"),
-        "prompt must say auto_complete is forced to false"
+        prompt.contains("uses DOM semantics"),
+        "prompt must say autocomplete follows DOM semantics"
     );
     assert!(
-        !prompt.contains("Default true"),
-        "prompt must not say default true"
+        !prompt.contains("forced to false"),
+        "prompt must not force a gateway policy over the sidecar"
     );
 }
 
@@ -1344,27 +1344,6 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             serde_json::Value::String(ctx.current_target.clone()),
                         );
                     }
-                    // Force auto_complete=false for `type` actions unless the model
-                    // explicitly set it to true. The model rarely sets this flag
-                    // spontaneously, and auto-confirmation often selects the wrong
-                    // suggestion or closes the dropdown before the model can inspect
-                    // it. With auto_complete=false the dropdown stays open and the
-                    // post-action snapshot shows it (extract mode) for the model to
-                    // click the correct option itself.
-                    if action.get("kind").and_then(|v| v.as_str()) == Some("type") {
-                        let already_true = action
-                            .get("auto_complete")
-                            .and_then(|v| v.as_bool())
-                            == Some(true);
-                        if !already_true {
-                            if let Some(obj) = action.as_object_mut() {
-                                obj.insert(
-                                    "auto_complete".to_string(),
-                                    serde_json::Value::Bool(false),
-                                );
-                            }
-                        }
-                    }
                     // Single-action payment context for the CURRENT target: the best-effort
                     // focus flag OR'd with the robust last-acted-floored flag (IMPORTANT C —
                     // a cross-origin PSP OOPIF fails the focus check whenever the app isn't
@@ -1714,9 +1693,11 @@ chosen. Otherwise try a different element, scroll, or wait (kind=wait).]",
                                         // The snapshot above (in interact mode) shows clickable option elements
                                         // with their refs (e.g. [ref=e123] option "Rome Termini"). List the
                                         // visible suggestion texts so the model can match them to refs in the snapshot.
-                                        let suggestions_hint = sugg.as_array()
+                                        let suggestions_hint = sugg
+                                            .as_array()
                                             .map(|items| {
-                                                let texts: Vec<&str> = items.iter()
+                                                let texts: Vec<&str> = items
+                                                    .iter()
                                                     .filter_map(|item| {
                                                         // Suggestions are text strings from the sidecar
                                                         item.as_str()
@@ -1726,7 +1707,10 @@ chosen. Otherwise try a different element, scroll, or wait (kind=wait).]",
                                                 if texts.is_empty() {
                                                     String::new()
                                                 } else {
-                                                    format!(" Visible suggestions: {}", texts.join(", "))
+                                                    format!(
+                                                        " Visible suggestions: {}",
+                                                        texts.join(", ")
+                                                    )
                                                 }
                                             })
                                             .unwrap_or_default();
@@ -2065,8 +2049,8 @@ the page content.{legend}"
                                 // encoded ≈ 1.1MB raw).
                                 match std::fs::read(&path) {
                                     Ok(bytes) if bytes.len() <= 1_100_000 => {
-                                        let encoded =
-                                            base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                        let encoded = base64::engine::general_purpose::STANDARD
+                                            .encode(&bytes);
                                         let dataurl = format!("data:image/png;base64,{encoded}");
                                         *ctx.pending_browser_image = Some(dataurl);
                                         push_browser_step("screenshot".to_string(), "done");
@@ -5921,9 +5905,7 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
                     "Browser sub-turn terminated due to a snapshot loop.".to_string()
                 }),
                 effects: local_first_engine::ToolEffects {
-                    outcome_hint: Some(
-                        local_first_engine::contract::ToolOutcomeHint::NoProgress,
-                    ),
+                    outcome_hint: Some(local_first_engine::contract::ToolOutcomeHint::NoProgress),
                     ..Default::default()
                 },
             };
@@ -6073,12 +6055,13 @@ visibly cannot do the task at all (no relevant form/results after you actually r
 2. FILLING A SEARCH/BOOKING FORM — one field at a time, and for each station/city/airport field you MUST \
 select its suggestion before moving on:\n\
    a) kind='type' the name into the field (e.g. \"Napoli\").\n\
-   b) A suggestions dropdown appears in the observation returned by your type action as new \
-option/list items under the field. CLICK the matching suggestion immediately from this observation — \
-the dropdown stays open after type (auto_complete is forced to false). Do NOT press Enter, and do NOT type \
-the next field yet. If you type the next field before selecting the suggestion, the first field CLEARS \
-and you'll be stuck re-typing it (this is the #1 cause of a search form that never completes). If no \
-suggestion list appears after one step, then you may press Enter.\n\
+   b) After kind='type', inspect the returned observation. auto_complete is optional and by default \
+uses DOM semantics: ARIA comboboxes may be committed by the browser sidecar, while plain/non-ARIA \
+fields keep visible suggestions for you to inspect. If the action says AUTOCOMPLETE SELECTION \
+COMMITTED, move to the next field. If suggestion option/list items are visible, CLICK the matching \
+suggestion immediately from this observation. Do NOT type the next field until the current station \
+is committed; otherwise the first field may clear and you'll be stuck re-typing it. If no suggestion \
+list appears after one step, then you may press Enter.\n\
    IMPORTANT — every click (and every Enter/submit) MUST carry action_class, or it is REJECTED and nothing \
 happens: use action_class=\"ordinary\" for normal interaction like picking a suggestion, opening a menu or \
 pressing a search button; \"account\" for logging in; \"booking\" for reserving/selecting a seat or fare. \
@@ -6094,13 +6077,11 @@ one by one. Resolve a relative/partial date against today's date shown above (e.
 2026-08-18). When every field is set, click the search button. Do NOT bundle a station 'type' together \
 with other actions — after typing a station you must stop and select its suggestion first. (You MAY bundle \
 independent, non-autocomplete actions, e.g. set_date + set_time, in one browser_act `actions` array.)\n\
-After every kind='type' into an autocomplete field, the system keeps the dropdown OPEN (auto_complete is \n\
-forced to false). The post-action snapshot shows the dropdown options with their refs — you MUST inspect \n\
-it and click the correct option yourself. Do NOT expect the system to auto-select for you. Do NOT press Enter \n\
-before clicking a suggestion: that clears the field. Just read the snapshot, find the matching option element \n\
-(role=option or similar), and click it. Example: {{\"kind\":\"click\",\"ref\":\"e123\",\"action_class\":\"ordinary\"}}.\n\
-Only set auto_complete=true explicitly if the autocomplete auto-select works correctly and you want to skip \n\
-the manual click (rarely reliable — prefer the manual click).\n\
+After every kind='type' into an autocomplete field, read the post-action snapshot and the action notes. If \n\
+the field was auto-committed, continue. If a dropdown remains open, find the matching option element \n\
+(role=option or similar) and click it. Example: {{\"kind\":\"click\",\"ref\":\"e123\",\"action_class\":\"ordinary\"}}.\n\
+Use auto_complete=false only when you explicitly need to force manual dropdown inspection; use \n\
+auto_complete=true only for a known-safe non-ARIA typeahead you want the sidecar to commit.\n\
 2b. SELECTING A RESULT / CONTINUING A BOOKING — result pages (trains, flights, hotels) often expose BOTH \
 a visible solution CARD and duplicate screen-reader buttons beside it (e.g. \"Vedi i dettagli…\", \
 \"Torna alla pagina precedente\"). Prefer the control that CONTAINS the concrete option you want \

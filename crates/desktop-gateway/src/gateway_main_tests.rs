@@ -24674,20 +24674,17 @@ async fn integrity_repair_apply_creates_private_backup_without_exposing_paths() 
 fn browser_anti_loop_nudge_injects_after_threshold_consecutive_snapshots() {
     let threshold = 3;
     // First snapshot: count goes to 1, no nudge.
-    let (count, nudge, hard_capped) =
-        browser_anti_loop_nudge(0, "browser_snapshot", threshold);
+    let (count, nudge, hard_capped) = browser_anti_loop_nudge(0, "browser_snapshot", threshold);
     assert_eq!(count, 1);
     assert!(nudge.is_none());
     assert!(!hard_capped);
     // Second snapshot: count goes to 2, no nudge.
-    let (count, nudge, hard_capped) =
-        browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+    let (count, nudge, hard_capped) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
     assert_eq!(count, 2);
     assert!(nudge.is_none());
     assert!(!hard_capped);
     // Third snapshot: count reaches threshold, soft nudge injected, counter NOT reset.
-    let (count, nudge, hard_capped) =
-        browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+    let (count, nudge, hard_capped) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
     assert_eq!(count, 3);
     let msg = nudge.expect("soft nudge should be injected at threshold");
     assert!(msg.contains("ANTI-LOOP"));
@@ -24695,14 +24692,12 @@ fn browser_anti_loop_nudge_injects_after_threshold_consecutive_snapshots() {
     assert!(msg.contains("Do NOT call browser_snapshot again"));
     assert!(!hard_capped);
     // Fourth snapshot: counter stays above threshold, soft nudge repeats, NOT reset.
-    let (count, nudge, hard_capped) =
-        browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+    let (count, nudge, hard_capped) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
     assert_eq!(count, 4);
     assert!(nudge.is_some());
     assert!(!hard_capped);
     // Fifth snapshot: hard cap fires (threshold + 2 = 5), counter NOT reset, hard_capped.
-    let (count, nudge, hard_capped) =
-        browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+    let (count, nudge, hard_capped) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
     assert_eq!(count, 5);
     let msg = nudge.expect("hard cap nudge should be injected at threshold + 2");
     assert!(msg.contains("ANTI-LOOP"));
@@ -24719,8 +24714,7 @@ fn browser_anti_loop_nudge_resets_on_meaningful_action() {
     let (count, _, _) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
     assert_eq!(count, 2);
     // A browser_act (e.g. click) resets the counter to 0 — no nudge.
-    let (count, nudge, hard_capped) =
-        browser_anti_loop_nudge(count, "browser_act", threshold);
+    let (count, nudge, hard_capped) = browser_anti_loop_nudge(count, "browser_act", threshold);
     assert_eq!(count, 0);
     assert!(nudge.is_none());
     assert!(!hard_capped);
@@ -24766,23 +24760,20 @@ fn browser_anti_loop_nudge_respects_custom_threshold() {
         assert!(nudge.is_none(), "no nudge expected at count {}", i);
     }
     // Snapshot 5: soft nudge fires, counter NOT reset.
-    let (c, nudge, hard_capped) =
-        browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+    let (c, nudge, hard_capped) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
     count = c;
     assert_eq!(count, threshold);
     assert!(!hard_capped);
     let msg = nudge.expect("soft nudge at threshold");
     assert!(msg.contains("5 consecutive"));
     // Snapshot 6: soft nudge repeats, counter NOT reset.
-    let (c, nudge, hard_capped) =
-        browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+    let (c, nudge, hard_capped) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
     count = c;
     assert_eq!(count, threshold + 1);
     assert!(nudge.is_some());
     assert!(!hard_capped);
     // Snapshot 7: hard cap fires (threshold + 2 = 7).
-    let (c, nudge, hard_capped) =
-        browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+    let (c, nudge, hard_capped) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
     count = c;
     assert_eq!(count, threshold + 2);
     assert!(hard_capped);

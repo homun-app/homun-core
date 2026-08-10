@@ -352,8 +352,8 @@ async function executeActionUnchecked(
         await locator.press("ArrowDown", { timeout });
         await page.waitForTimeout(120);
         await locator.press("Enter", { timeout });
-      } else if (explicit !== "none" && resolveAutoComplete(action)) {
-        const outcome = await confirmAutocomplete(page, locator, action.text, timeout);
+      } else if (explicit !== "none") {
+        const outcome = await confirmAutocomplete(page, locator, action.text, timeout, resolveAutoComplete(action));
         committedOption = outcome.committed;
         suggestions = outcome.options.length ? outcome.options : undefined;
       }
@@ -671,13 +671,14 @@ function actionTimeout(value: number | undefined): number {
 
 /// Resolves the autoComplete flag from either camelCase (autoComplete) or
 /// snake_case (auto_complete), matching the SnapshotAfterAction dual-name
-/// convention. Default false: autocomplete is NOT confirmed automatically;
-/// the dropdown stays open so the model can inspect it and click the desired
-/// option from the post-action snapshot. Set auto_complete=true to enable
-/// auto-confirmation (rarely reliable — prefer the manual click).
-export function resolveAutoComplete(action: { autoComplete?: boolean; auto_complete?: boolean }): boolean {
+/// convention. Undefined means "use DOM semantics": ARIA comboboxes are
+/// confirmed automatically, while plain fields leave visible suggestions for
+/// the model to inspect. Explicit true enables the non-ARIA fallback; explicit
+/// false disables confirmation.
+export function resolveAutoComplete(action: { autoComplete?: boolean; auto_complete?: boolean }): boolean | undefined {
   if (action.autoComplete === true || action.auto_complete === true) return true;
-  return false;
+  if (action.autoComplete === false || action.auto_complete === false) return false;
+  return undefined;
 }
 
 function waitTimeout(value: number | undefined): number {
@@ -1095,9 +1096,16 @@ async function confirmAutocomplete(
   input: Locator,
   typed: string,
   timeout: number,
+  mode: boolean | undefined,
 ): Promise<{ committed?: string; options: string[] }> {
   const { isCombobox, listboxId } = await inputComboboxInfo(input);
+  if (mode === false) {
+    return { options: [] };
+  }
   if (!isCombobox) {
+    if (mode !== true) {
+      return { options: [] };
+    }
     // Non-ARIA fallback: real-world typeaheads (e.g. Trenitalia's station
     // picker) often render a suggestion list with zero ARIA wiring at all, so
     // inputComboboxInfo's signals never fire. We still must not GUESS — reuse

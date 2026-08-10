@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Browser, BrowserContext, Dialog, Locator, Page } from "playwright-core";
 import { chromium } from "playwright-core";
 import { BrowserAutomationError } from "../contracts.js";
-import { executeAction, requireRef, resolveAutoComplete, type BrowserActRequest, type BrowserActionResult } from "./actions.js";
+import { executeAction, requireRef, type BrowserActRequest, type BrowserActionResult } from "./actions.js";
 import { BrowserArtifactRoot } from "./artifacts.js";
 import { assertNavigationAllowed } from "./navigation_guard.js";
 import {
@@ -595,12 +595,7 @@ export class BrowserSessionManager {
     }
     await waitForPageToSettle(state.page, action);
     state.generation += 1;
-    // Post-act observation: use `extract` (40k cap, full content) after a `type` with
-    // auto_complete=false so the autocomplete dropdown options are visible in the snapshot.
-    // The larger window ensures the model can see and click the correct suggestion. For all
-    // other actions, use `interact` (interactive-only, ~6k cap) to keep per-step latency low.
-    const postActObservationMode =
-      action.kind === "type" && !resolveAutoComplete(action) ? "extract" : "interact";
+    const postActObservationMode = postActObservationModeForAction(action);
     const snapshot = await createSnapshot(state.page, action.targetId, {
       observationMode: postActObservationMode,
       ...(action as Record<string, unknown>),
@@ -1115,6 +1110,15 @@ function snapshotDelayForAction(action: BrowserActRequest): number {
     return 600;
   }
   return 250;
+}
+
+function postActObservationModeForAction(action: BrowserActRequest): "interact" | "extract" {
+  // The action result is an observation contract, not only a ref-refresh contract.
+  // Returning interact-only snapshots hid non-clickable outcomes that the action
+  // had just caused or proven visible: search results after wait(text), aria-live
+  // status text after click/fill, and hover tooltips. Callers that want the small
+  // acting view already pass observationMode=interact/delta explicitly.
+  return "extract";
 }
 
 async function waitForPageToSettle(page: Page, action: BrowserActRequest): Promise<void> {

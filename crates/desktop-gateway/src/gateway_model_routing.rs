@@ -2364,7 +2364,10 @@ pub(crate) fn model_vision_support(base_url: &str, model: &str) -> vision::Visio
 /// unknown model still gets the image, because withholding it from a seeing model is worse than
 /// wasting one round on a blind one.
 pub(crate) fn model_supports_vision(base_url: &str, model: &str) -> bool {
-    !matches!(model_vision_support(base_url, model), vision::VisionSupport::No)
+    !matches!(
+        model_vision_support(base_url, model),
+        vision::VisionSupport::No
+    )
 }
 
 /// Provider/model for background MEMORY extraction: prefers the "memory" role
