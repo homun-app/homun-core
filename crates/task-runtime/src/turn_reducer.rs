@@ -1,4 +1,4 @@
-use crate::{TurnEvent, TurnEventKind};
+use crate::{TaskStatus, TurnEvent, TurnEventKind};
 
 pub const REDUCED_TERMINAL_TURN_EVENT_KIND_SQL_LIST: &str = "'done', 'error', 'cancelled'";
 
@@ -154,5 +154,17 @@ pub fn turn_event_kind_is_terminal(kind: TurnEventKind) -> bool {
     matches!(
         kind,
         TurnEventKind::Done | TurnEventKind::Error | TurnEventKind::Cancelled
+    )
+}
+
+pub fn reduced_terminal_status_matches_task_status(
+    reduced: ReducedTurnStatus,
+    task_status: TaskStatus,
+) -> bool {
+    matches!(
+        (reduced, task_status),
+        (ReducedTurnStatus::Completed, TaskStatus::Completed)
+            | (ReducedTurnStatus::Failed, TaskStatus::Failed)
+            | (ReducedTurnStatus::Cancelled, TaskStatus::Cancelled)
     )
 }

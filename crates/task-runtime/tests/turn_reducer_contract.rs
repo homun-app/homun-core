@@ -1,6 +1,7 @@
 use local_first_task_runtime::{
-    REDUCED_TERMINAL_TURN_EVENT_KIND_SQL_LIST, ReducedTurnStatus, TurnEvent, TurnEventKind,
-    reduce_turn_events, turn_event_kind_is_terminal,
+    REDUCED_TERMINAL_TURN_EVENT_KIND_SQL_LIST, ReducedTurnStatus, TaskStatus, TurnEvent,
+    TurnEventKind, reduce_turn_events, reduced_terminal_status_matches_task_status,
+    turn_event_kind_is_terminal,
 };
 use serde_json::json;
 
@@ -158,4 +159,41 @@ fn terminal_kind_authority_is_public_and_matches_sql_boundary() {
         REDUCED_TERMINAL_TURN_EVENT_KIND_SQL_LIST,
         "'done', 'error', 'cancelled'"
     );
+}
+
+#[test]
+fn reduced_terminal_status_matches_the_persisted_task_terminal_status() {
+    assert!(reduced_terminal_status_matches_task_status(
+        ReducedTurnStatus::Completed,
+        TaskStatus::Completed,
+    ));
+    assert!(reduced_terminal_status_matches_task_status(
+        ReducedTurnStatus::Failed,
+        TaskStatus::Failed,
+    ));
+    assert!(reduced_terminal_status_matches_task_status(
+        ReducedTurnStatus::Cancelled,
+        TaskStatus::Cancelled,
+    ));
+
+    assert!(!reduced_terminal_status_matches_task_status(
+        ReducedTurnStatus::Completed,
+        TaskStatus::Failed,
+    ));
+    assert!(!reduced_terminal_status_matches_task_status(
+        ReducedTurnStatus::Failed,
+        TaskStatus::Completed,
+    ));
+    assert!(!reduced_terminal_status_matches_task_status(
+        ReducedTurnStatus::Cancelled,
+        TaskStatus::Expired,
+    ));
+    assert!(!reduced_terminal_status_matches_task_status(
+        ReducedTurnStatus::Running,
+        TaskStatus::Running,
+    ));
+    assert!(!reduced_terminal_status_matches_task_status(
+        ReducedTurnStatus::WaitingUser,
+        TaskStatus::WaitingUserApproval,
+    ));
 }
