@@ -28,6 +28,62 @@ fn subagent_name_from_kind(kind: &str) -> String {
     }
 }
 
+fn runtime_plan_markdown(plan: &Value) -> Option<String> {
+    let steps = runtime_plan_steps(plan);
+    if steps.is_empty() {
+        return None;
+    }
+    let mut lines = Vec::new();
+    if let Some(goal) = plan
+        .get("goal")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|goal| !goal.is_empty())
+    {
+        lines.push(format!("**Goal**: {goal}"));
+        lines.push(String::new());
+    }
+    for (index, step) in steps.iter().enumerate() {
+        let Some(title) = step
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+        else {
+            continue;
+        };
+        let status = step.get("status").and_then(Value::as_str).unwrap_or("todo");
+        let marker = match status {
+            "done" => "x",
+            "doing" | "in_progress" | "in-progress" => "-",
+            "blocked" => "!",
+            _ => " ",
+        };
+        let id = step
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("s{}", index + 1));
+        let detail = step
+            .get("detail")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|detail| !detail.is_empty())
+            .unwrap_or("—");
+        lines.push(format!("- [{marker}] **{title}** (`{id}`): {detail}"));
+    }
+    Some(lines.join("\n"))
+}
+
+fn runtime_plan_steps(plan: &Value) -> Vec<Value> {
+    plan.get("steps")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
 pub struct TaskStore {
     pub(crate) connection: Connection,
 }
@@ -3763,13 +3819,13 @@ impl TaskStore {
 
     /// Projects the durable per-turn log into a thread-level cockpit view for the working
     /// island (see `ThreadActivityProjection`). ONE JOIN turn_events⋈tasks(thread_id) — both
-    /// tables live in the same sqlite — yields every activity+plan_update across the thread's
+    /// tables live in the same sqlite — yields every activity+plan signal across the thread's
     /// turns in chronological order. Activity ACCUMULATES across the thread; the PLAN is scoped
     /// to the LATEST turn only (a new task that emits no plan must not leave the previous task's
-    /// plan on screen — the island has to reflect the current request, not the first one). We
-    /// read the latest turn's id+status once, then keep only plan_updates from that turn. This
-    /// is why the island survives turn-end/reload/thread-switch without parsing lossy message
-    /// markers. `activity_cap` bounds the payload by keeping the most recent steps.
+    /// plan on screen — the island has to reflect the current request, not the first one).
+    /// `runtime_plans` owns the canonical checklist when the latest turn emitted plan activity;
+    /// marker markdown remains only a legacy fallback for old rows. `activity_cap` bounds the
+    /// payload by keeping the most recent steps.
     pub fn project_thread_activity(
         &self,
         thread_id: &str,
@@ -3786,6 +3842,9 @@ impl TaskStore {
             )
             .optional()?;
         let latest_turn_id = latest_turn.as_ref().map(|(id, _, _, _, _)| id.clone());
+        let latest_turn_record = latest_turn
+            .as_ref()
+            .and_then(|(_, _, task_json, _, _)| serde_json::from_str::<TaskRecord>(task_json).ok());
         let latest_turn_status = latest_turn
             .as_ref()
             .map(|(_, status, _, _, _)| status.clone());
@@ -3805,7 +3864,10 @@ impl TaskStore {
                 if !crate::turn_lifecycle::status_has_active_turn_projection(status.as_str()) {
                     return None;
                 }
-                let task = serde_json::from_str::<TaskRecord>(task_json).ok()?;
+                let task = latest_turn_record
+                    .as_ref()
+                    .cloned()
+                    .or_else(|| serde_json::from_str::<TaskRecord>(task_json).ok())?;
                 Some(ActiveTurnProjection {
                     turn_id: turn_id.clone(),
                     last_event_seq: latest_turn_last_seq,
@@ -3823,7 +3885,7 @@ impl TaskStore {
             "SELECT te.turn_id, te.kind, te.payload_json
              FROM turn_events te JOIN tasks t ON t.task_id = te.turn_id
              WHERE t.thread_id = ?1 AND t.kind = 'chat_turn'
-               AND te.kind IN ('activity', 'plan_update')
+               AND te.kind IN ('activity', 'plan_update', 'step_advance')
              ORDER BY t.created_at ASC, te.seq ASC",
         )?;
         let rows = stmt.query_map(params![thread_id], |row| {
@@ -3834,6 +3896,7 @@ impl TaskStore {
         })?;
         let mut activity: Vec<String> = Vec::new();
         let mut plan_markdown: Option<String> = None;
+        let mut latest_turn_has_plan_event = false;
         for row in rows {
             let (turn_id, kind, payload_json) = row?;
             let payload: Value = serde_json::from_str(&payload_json)?;
@@ -3848,14 +3911,30 @@ impl TaskStore {
                 }
                 // Plan is scoped to the LATEST turn: a newer, plan-less task clears the old plan.
                 "plan_update" if Some(&turn_id) == latest_turn_id.as_ref() => {
+                    latest_turn_has_plan_event = true;
                     if let Some(md) = payload.get("markdown").and_then(|v| v.as_str())
                         && !md.trim().is_empty()
                     {
                         plan_markdown = Some(md.to_string());
                     }
                 }
+                "step_advance" if Some(&turn_id) == latest_turn_id.as_ref() => {
+                    latest_turn_has_plan_event = true;
+                }
                 _ => {}
             }
+        }
+        if latest_turn_has_plan_event
+            && let Some(task) = latest_turn_record.as_ref()
+            && let Some(runtime_plan) = load_runtime_plan_on(
+                &self.connection,
+                task.user_id.as_str(),
+                task.workspace_id.as_str(),
+                thread_id,
+            )?
+            && let Some(markdown) = runtime_plan_markdown(&runtime_plan.plan_json)
+        {
+            plan_markdown = Some(markdown);
         }
         // Bound the payload: keep the most recent `activity_cap` steps (the tail is what the
         // cockpit shows). A cap of 0 would be nonsensical here, so treat it as "no cap".
@@ -6740,6 +6819,59 @@ mod chat_turn_query_tests {
             p.activity,
             vec!["A1".to_string(), "B1 search".to_string()],
             "activity still accumulates"
+        );
+    }
+
+    #[test]
+    fn project_thread_activity_uses_runtime_plan_when_latest_turn_advanced_step() {
+        let s = store();
+        let mut task = make_chat_turn("turn_plan_state", "threadPlanState", TaskStatus::Running);
+        task.created_at = OffsetDateTime::from_unix_timestamp(100).unwrap();
+        s.insert_chat_turn(
+            &task,
+            "threadPlanState",
+            "req-plan-state",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.upsert_runtime_plan(
+            "u",
+            "w",
+            "threadPlanState",
+            0,
+            &json!({
+                "goal": "Consegnare una app stabile",
+                "steps": [
+                    {"id": "s1", "title": "Analizzare ownership", "status": "done", "detail": "mappa completata"},
+                    {"id": "s2", "title": "Consolidare PlanState", "status": "doing", "detail": "in corso"}
+                ]
+            }),
+            "open",
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_plan_state",
+            TurnEventKind::StepAdvance,
+            json!({
+                "step_id": "s1",
+                "title": "Analizzare ownership",
+                "from": "doing",
+                "to": "done",
+                "verified": true,
+                "note": null
+            }),
+        )
+        .unwrap();
+
+        let projection = s.project_thread_activity("threadPlanState", 200).unwrap();
+
+        assert_eq!(
+            projection.plan_markdown.as_deref(),
+            Some(
+                "**Goal**: Consegnare una app stabile\n\n- [x] **Analizzare ownership** (`s1`): mappa completata\n- [-] **Consolidare PlanState** (`s2`): in corso"
+            ),
+            "thread activity must render the canonical runtime plan after step_advance"
         );
     }
 
