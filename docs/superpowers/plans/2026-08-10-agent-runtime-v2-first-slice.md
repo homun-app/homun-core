@@ -201,7 +201,7 @@ fn failed_terminal_without_visible_reason_is_a_contradiction() {
 Run:
 
 ```bash
-cargo test -p local-first-task-runtime turn_reducer_contract -- --nocapture
+cargo test -p local-first-task-runtime --test turn_reducer_contract -- --nocapture
 ```
 
 Expected: FAIL because `turn_reducer` module, `ReducedTurnStatus`, and `reduce_turn_events` are not exported.
@@ -378,7 +378,7 @@ pub use turn_reducer::{
 Run:
 
 ```bash
-cargo test -p local-first-task-runtime turn_reducer_contract -- --nocapture
+cargo test -p local-first-task-runtime --test turn_reducer_contract -- --nocapture
 ```
 
 Expected: PASS.
@@ -1033,7 +1033,7 @@ Modify `/Users/fabio/Projects/Homun/app/scripts/kernel_regression_gate.py` insid
 ```python
         Step(
             "task runtime turn reducer",
-            ["cargo", "test", "-p", "local-first-task-runtime", "turn_reducer_contract"],
+            ["cargo", "test", "-p", "local-first-task-runtime", "--test", "turn_reducer_contract"],
         ),
         Step(
             "turn consistency audit unit tests",
@@ -1058,7 +1058,7 @@ Run:
 
 ```bash
 python3 -m unittest scripts.test_audit_turn_consistency -v
-cargo test -p local-first-task-runtime turn_reducer_contract -- --nocapture
+cargo test -p local-first-task-runtime --test turn_reducer_contract -- --nocapture
 python3 scripts/kernel_regression_gate.py
 ```
 
@@ -1097,7 +1097,7 @@ Run:
 
 ```bash
 cargo fmt --check
-cargo test -p local-first-task-runtime turn_reducer_contract -- --nocapture
+cargo test -p local-first-task-runtime --test turn_reducer_contract -- --nocapture
 python3 -m unittest scripts.test_audit_turn_consistency -v
 python3 -m unittest scripts.test_pre_release_gate -v
 python3 scripts/kernel_regression_gate.py
