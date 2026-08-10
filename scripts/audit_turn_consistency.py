@@ -17,6 +17,7 @@ from typing import Any
 
 
 TERMINAL_TASK_STATUSES = {"completed", "failed", "cancelled", "expired"}
+REDUCED_TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 TERMINAL_EVENT_KINDS = {"done", "error", "cancelled"}
 ACTIVE_AFTER_TERMINAL_KINDS = {
     "activity",
@@ -28,6 +29,12 @@ ACTIVE_AFTER_TERMINAL_KINDS = {
 
 def default_db_path() -> Path:
     return Path(os.path.expanduser("~/.homun/homun.sqlite"))
+
+
+def connect_read_only(db_path: Path) -> sqlite3.Connection:
+    if not db_path.exists():
+        raise FileNotFoundError(db_path)
+    return sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
 
 
 def rows(
@@ -66,6 +73,16 @@ def assistant_identity(task: dict[str, Any] | None) -> tuple[str | None, str | N
     thread_id = task.get("thread_id") or input_json.get("thread_id")
     assistant_message_id = input_json.get("assistant_message_id")
     return thread_id, assistant_message_id
+
+
+def expected_agent_run_statuses(task_status: str | None) -> set[str]:
+    if task_status == "completed":
+        return {"completed"}
+    if task_status == "failed":
+        return {"failed"}
+    if task_status in {"cancelled", "expired"}:
+        return {"aborted"}
+    return set()
 
 
 def reduce_events(events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -138,7 +155,7 @@ def reduce_events(events: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def audit_turn(db_path: Path, turn_id: str) -> dict[str, Any]:
-    conn = sqlite3.connect(db_path)
+    conn = connect_read_only(db_path)
     try:
         task = one(
             conn,
@@ -209,7 +226,21 @@ def audit_turn(db_path: Path, turn_id: str) -> dict[str, Any]:
                 }
             )
 
+        if (
+            task_status in TERMINAL_TASK_STATUSES
+            and reduced["status"] in REDUCED_TERMINAL_STATUSES
+            and task_status != reduced["status"]
+        ):
+            contradictions.append(
+                {
+                    "code": "task_reducer_terminal_status_mismatch",
+                    "detail": f"task is {task_status} but reducer terminal is {reduced['status']}",
+                    "owner_to_remove": "execution_projection",
+                }
+            )
+
         if task_status in TERMINAL_TASK_STATUSES:
+            expected_run_statuses = expected_agent_run_statuses(task_status)
             for run in runs:
                 if run["status"] == "running":
                     contradictions.append(
@@ -219,15 +250,29 @@ def audit_turn(db_path: Path, turn_id: str) -> dict[str, Any]:
                             "owner_to_remove": "agent_run_projection",
                         }
                     )
+                elif expected_run_statuses and run["status"] not in expected_run_statuses:
+                    contradictions.append(
+                        {
+                            "code": "terminal_task_agent_run_status_mismatch",
+                            "detail": f"task is {task_status} but agent run {run['run_id']} is {run['status']}",
+                            "owner_to_remove": "agent_run_projection",
+                        }
+                    )
 
         if task_status == "failed" and message:
-            if message["delivery_state"] == "failed" and not (
-                message["text"] or ""
-            ).strip():
+            if not (message["text"] or "").strip():
                 contradictions.append(
                     {
                         "code": "failed_message_empty",
                         "detail": f"assistant message {message['id']} is failed with empty text",
+                        "owner_to_remove": "execution_projection",
+                    }
+                )
+            if message["delivery_state"] != "failed":
+                contradictions.append(
+                    {
+                        "code": "failed_message_delivery_state_mismatch",
+                        "detail": f"assistant message {message['id']} delivery state is {message['delivery_state']}",
                         "owner_to_remove": "execution_projection",
                     }
                 )

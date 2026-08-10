@@ -155,6 +155,75 @@ class AuditTurnConsistencyTests(unittest.TestCase):
             {item["code"] for item in report["contradictions"]},
         )
 
+    def test_terminal_task_status_must_match_reducer_terminal_status(self):
+        path, conn = self.with_db()
+        seed_task(conn, "completed", None)
+        conn.execute(
+            "insert into turn_events (turn_id, seq, kind, payload_json, created_at) values ('turn-1', 1, 'error', ?, 2)",
+            (json.dumps({"text": "failed"}),),
+        )
+        conn.commit()
+
+        report = audit.audit_turn(path, "turn-1")
+
+        self.assertIn(
+            "task_reducer_terminal_status_mismatch",
+            {item["code"] for item in report["contradictions"]},
+        )
+
+    def test_failed_task_with_completed_agent_run_reports_run_mismatch(self):
+        path, conn = self.with_db()
+        seed_task(conn, "failed", "failed")
+        conn.execute(
+            "insert into turn_events (turn_id, seq, kind, payload_json, created_at) values ('turn-1', 1, 'error', ?, 2)",
+            (json.dumps({"text": "failed"}),),
+        )
+        conn.execute(
+            """
+            insert into agent_runs (
+                run_id, turn_id, thread_id, user_id, workspace_id, attempt, status,
+                started_at, completed_at, terminal_reason, schema_version
+            ) values ('run-1', 'turn-1', 'thread-1', 'user-1', 'workspace-1', 1, 'completed', 1, 2, 'done', 1)
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_turn(path, "turn-1")
+
+        self.assertIn(
+            "terminal_task_agent_run_status_mismatch",
+            {item["code"] for item in report["contradictions"]},
+        )
+
+    def test_failed_empty_assistant_message_is_reported_even_if_still_streaming(self):
+        path, conn = self.with_db()
+        seed_task(conn, "failed", "failed")
+        conn.execute(
+            "insert into turn_events (turn_id, seq, kind, payload_json, created_at) values ('turn-1', 1, 'error', ?, 2)",
+            (json.dumps({"text": "failed"}),),
+        )
+        conn.execute(
+            "insert into chat_messages (id, thread_id, role, text, timestamp, linked_task_id, delivery_state) values (?, 'thread-1', 'assistant', '', '2', 'turn-1', 'streaming')",
+            ("assistant-1",),
+        )
+        conn.commit()
+
+        report = audit.audit_turn(path, "turn-1")
+
+        codes = {item["code"] for item in report["contradictions"]}
+        self.assertIn("failed_message_empty", codes)
+        self.assertIn("failed_message_delivery_state_mismatch", codes)
+
+    def test_missing_database_path_is_not_created(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        path = Path(temp.name) / "missing.sqlite"
+
+        with self.assertRaises(FileNotFoundError):
+            audit.audit_turn(path, "turn-1")
+
+        self.assertFalse(path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

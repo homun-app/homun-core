@@ -814,6 +814,27 @@ python3 -m unittest scripts.test_audit_turn_consistency -v
 
 Expected: PASS.
 
+- [ ] **Step 4a: Add review-hardening audit cases**
+
+Extend `/Users/fabio/Projects/Homun/app/scripts/test_audit_turn_consistency.py`
+and `/Users/fabio/Projects/Homun/app/scripts/audit_turn_consistency.py` so the
+read-only audit also rejects:
+
+- `tasks.status=completed` with reducer terminal status `failed`;
+- `tasks.status=failed` with an agent run terminal status `completed`;
+- failed terminal turns whose assistant message text is empty while
+  `delivery_state` is still `streaming` or `delivered`;
+- missing database paths that would otherwise create an empty SQLite file.
+
+Run:
+
+```bash
+python3 -m unittest scripts.test_audit_turn_consistency -v
+python3 -m py_compile scripts/audit_turn_consistency.py scripts/test_audit_turn_consistency.py
+```
+
+Expected: PASS. The audit must open SQLite with explicit read-only semantics.
+
 - [ ] **Step 5: Run the audit against the latest local failed turn if present**
 
 Run:
