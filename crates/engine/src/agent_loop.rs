@@ -292,6 +292,46 @@ fn is_plan_bookkeeping_tool(name: &str) -> bool {
     matches!(name, "update_plan" | "step_advance")
 }
 
+fn normalize_tool_call_ids_for_round(round: usize, calls: &mut [serde_json::Value]) {
+    let mut seen = std::collections::BTreeSet::new();
+    for (idx, call) in calls.iter_mut().enumerate() {
+        let raw_id = call
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let provider_synthesized = raw_id.is_empty() || raw_id.starts_with("ollama_call_");
+        let duplicate = !provider_synthesized && !seen.insert(raw_id.to_string());
+        if !(provider_synthesized || duplicate) {
+            continue;
+        }
+
+        let prefix = if raw_id.is_empty() {
+            "tool_call".to_string()
+        } else {
+            raw_id
+                .chars()
+                .map(|ch| {
+                    if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                        ch
+                    } else {
+                        '_'
+                    }
+                })
+                .take(64)
+                .collect::<String>()
+        };
+        let mut next_id = format!("{prefix}_round_{round}_{idx}");
+        let mut salt = 0usize;
+        while !seen.insert(next_id.clone()) {
+            salt += 1;
+            next_id = format!("{prefix}_round_{round}_{idx}_{salt}");
+        }
+        if let Some(obj) = call.as_object_mut() {
+            obj.insert("id".to_string(), serde_json::Value::String(next_id));
+        }
+    }
+}
+
 /// Tools that are introspective or planning-related — the plan-before-act gate must NOT fire for
 /// these because they are part of the planning/memory/discovery cycle, not "work" that acts on the
 /// world. Distinct from [`is_plan_bookkeeping_tool`] which is narrower (only `update_plan` /
@@ -740,7 +780,7 @@ missing, give what you have and note the gap in one short line.",
             .and_then(|c| c.as_str())
             .unwrap_or("")
             .to_string();
-        let tool_calls = message
+        let mut tool_calls = message
             .get("tool_calls")
             .and_then(|value| value.as_array())
             .filter(|calls| !calls.is_empty())
@@ -770,6 +810,9 @@ missing, give what you have and note the gap in one short line.",
                     Some(model_normalize::synthesize_tool_calls(round, parsed))
                 }
             });
+        if let Some(calls) = tool_calls.as_mut() {
+            normalize_tool_call_ids_for_round(round, calls);
+        }
 
         execution_journal.record(AgentExecutionEvent::ModelResponse {
             round,
@@ -3331,6 +3374,134 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         }
 
         async fn close_session(&mut self, _browser_used: bool) {}
+    }
+
+    #[derive(Default)]
+    struct ReusedProviderToolCallIdModel {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ModelClient for ReusedProviderToolCallIdModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let call_index = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if call_index < 2 {
+                return Ok(ModelRoundOutput {
+                    message: json!({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "ollama_call_0",
+                            "type": "function",
+                            "function": {
+                                "name": "browser_act",
+                                "arguments": format!("{{\"kind\":\"type\",\"ref\":\"e{call_index}\",\"text\":\"Milano\"}}")
+                            },
+                        }],
+                    }),
+                    provider,
+                    finish_reason: Some("tool_calls".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                });
+            }
+            let content = "Browser task complete.";
+            on_delta(content);
+            Ok(ModelRoundOutput {
+                message: json!({ "role": "assistant", "content": content }),
+                provider,
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingBrowserCallIds {
+        ids: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl BrowserExecutor for RecordingBrowserCallIds {
+        async fn execute_browser(
+            &mut self,
+            _name: &str,
+            _args: &str,
+            call_id: &str,
+            state: &mut LoopState,
+        ) -> ToolOutcome {
+            state.browser_used = true;
+            self.ids.lock().unwrap().push(call_id.to_string());
+            browser_outcome(
+                "Action performed. Updated snapshot:\n[ref=e1] Next field".to_string(),
+                crate::contract::ToolOutcomeHint::Success,
+            )
+        }
+
+        async fn close_session(&mut self, _browser_used: bool) {}
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn reused_provider_tool_call_ids_are_made_unique_across_rounds() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = RecordingBrowserCallIds::default();
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 8;
+        turn_cfg.browser_max_rounds = 8;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &ReusedProviderToolCallIdModel::default(),
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
+        let ids = browser.ids.lock().unwrap().clone();
+        assert_eq!(ids.len(), 2);
+        assert_ne!(
+            ids[0], ids[1],
+            "provider-synthesized ids reused across rounds must not collapse browser effects"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
