@@ -82,6 +82,10 @@ def build_plan(env: dict[str, str]) -> list[Step]:
         ),
         Step("orchestrator tests", ["cargo", "test", "-p", "local-first-orchestrator", "--", "--nocapture"]),
         Step("task runtime tests", ["cargo", "test", "-p", "local-first-task-runtime", "--", "--nocapture"]),
+        Step(
+            "turn consistency audit unit tests",
+            [PYTHON, "-m", "unittest", "scripts.test_audit_turn_consistency", "-v"],
+        ),
         Step("engine tests", ["cargo", "test", "-p", "local-first-engine", "--", "--nocapture"]),
         Step("gateway tests", ["cargo", "test", "-p", "local-first-desktop-gateway", "--", "--nocapture"]),
         Step("memorybench provider", ["npm", "test"], cwd=MEMORYBENCH_PROVIDER),

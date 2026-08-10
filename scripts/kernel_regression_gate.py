@@ -42,6 +42,21 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ["cargo", "test", "-p", "local-first-task-runtime", "turn_lifecycle"],
         ),
         Step(
+            "task runtime turn reducer",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-task-runtime",
+                "--test",
+                "turn_reducer_contract",
+            ],
+        ),
+        Step(
+            "turn consistency audit unit tests",
+            [PYTHON, "-m", "unittest", "scripts.test_audit_turn_consistency", "-v"],
+        ),
+        Step(
             "task runtime active chat turn",
             ["cargo", "test", "-p", "local-first-task-runtime", "active_chat_turn"],
         ),

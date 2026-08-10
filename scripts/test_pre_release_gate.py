@@ -13,6 +13,7 @@ class PreReleaseGateTests(unittest.TestCase):
         self.assertIn("desktop dependency install", labels)
         self.assertIn("desktop dependency audit", labels)
         self.assertIn("task runtime tests", labels)
+        self.assertIn("turn consistency audit unit tests", labels)
         self.assertIn("engine tests", labels)
         self.assertIn("desktop unit tests", labels)
         self.assertIn("stability soak unit tests", labels)
@@ -123,6 +124,7 @@ class PreReleaseGateTests(unittest.TestCase):
                 "capability tests",
                 "orchestrator tests",
                 "task runtime tests",
+                "turn consistency audit unit tests",
                 "engine tests",
                 "gateway tests",
                 "memorybench provider",
