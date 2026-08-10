@@ -1,7 +1,7 @@
 # Homun Agent Runtime v2 Design
 
 Date: 2026-08-10
-Status: Draft for review
+Status: Baseline for implementation planning
 Scope: architectural refactor direction for the agent runtime. This is not an implementation plan and not a rewrite mandate.
 
 ## Objective
@@ -355,6 +355,47 @@ These subsystems are valuable and should be reused:
 - Do not patch one projection without adding a reducer invariant that explains the canonical state.
 - Do not add another owner for task progress.
 
+## Removal Discipline
+
+Every migration slice must remove or disable legacy ownership as part of the
+same slice, or explicitly create the next slice with the legacy path named as
+the first removal target. A slice is not complete when the new path works. It is
+complete when the old path can no longer make the same decision.
+
+Required section in every implementation plan:
+
+```text
+Kill List
+- Legacy code removed:
+- Feature flags removed or expired:
+- Compatibility fallbacks removed:
+- Old tests updated or deleted:
+- Old owner made unable to decide:
+- Historical-data compatibility retained:
+- Retained compatibility expiry/removal trigger:
+```
+
+Rules:
+
+- New owner plus old active owner is a regression risk, not a migration state.
+- Compatibility for historical rows is allowed only as read-time translation
+  with a test fixture and a removal condition.
+- Feature flags must have an owner, default, expiry condition, and test proving
+  the old path is unreachable when the flag is removed.
+- Fallbacks must be classified as `historical-data`, `provider-degraded`,
+  `migration-temporary`, or `safety-fail-closed`. Unclassified fallback code is
+  not allowed.
+- If a contract moves to a reducer, projections and UI code must lose the
+  ability to recompute that contract locally.
+- If a test asserts an old owner, update the test to assert delegation to the
+  new owner or delete it in the same slice.
+
+Release rule:
+
+> The first release candidate must contain fewer owners for turn truth than the
+> branch started with. A green gate that only adds guards without deleting a
+> stale owner is not enough.
+
 ## Migration Strategy
 
 This is a strangling refactor. No total rewrite.
@@ -379,6 +420,11 @@ The command should fail if, for example:
 - message is failed with empty text while task has a blocked reason;
 - agent run remains running after terminal task.
 
+Removal target:
+
+- no runtime behavior is moved in this phase, but the audit must name the owner
+  that should lose authority for every contradiction it reports.
+
 ### Phase 1: Typed Event Vocabulary
 
 Introduce typed Rust event structs for the canonical turn event families while continuing to persist compatible JSON payloads. Add conversion tests from old events to typed events where legacy rows exist.
@@ -387,6 +433,11 @@ Acceptance:
 
 - one reducer can classify a turn as active/waiting/terminal from events;
 - existing task status projection agrees with reducer for current fixtures.
+
+Removal target:
+
+- remove ad hoc JSON shape checks from any new code path that can consume typed
+  event helpers instead.
 
 ### Phase 2: TurnState Reducer as Authority
 
@@ -404,6 +455,11 @@ Acceptance:
 - terminal state clears active UI state in recovery/replay;
 - cancellation, failure, wait, resume, and completion scenarios pass from the same fixture format.
 
+Removal target:
+
+- delete duplicated terminal-state sets from gateway/UI code or replace them
+  with reducer calls/read-model fields in the same slice.
+
 ### Phase 3: PlanState Reducer
 
 Convert plan updates into structured plan events and render markdown plan cards from `PlanState`.
@@ -414,6 +470,11 @@ Acceptance:
 - progress cannot advance without event evidence;
 - open runnable steps cannot coexist with `TurnCompleted`;
 - waiting-user steps are represented as `blocked` or `WaitingUser`, not fake progress.
+
+Removal target:
+
+- remove markdown/marker parsing as a plan authority. Markdown may remain only
+  as a rendered projection.
 
 ### Phase 4: AgentProfile Layer
 
@@ -430,6 +491,11 @@ Acceptance:
 - changing profile changes permissions/toolset/prompt, not loop implementation;
 - all profiles use the same TurnKernel.
 
+Removal target:
+
+- remove mode-specific routing branches that implement a second loop or bypass
+  the common action/observation path.
+
 ### Phase 5: Browser as Typed Capability/Subagent
 
 Wrap browser automation behind `BrowserTask -> BrowserResult`.
@@ -439,6 +505,11 @@ Acceptance:
 - parent turn gets `found`, `partial`, `needs_user`, `failed`, or `no_result`;
 - browser uncertainty becomes `needs_user` or `failed`, not silent UI limbo;
 - browser result delivery is tested without launching the desktop UI.
+
+Removal target:
+
+- remove parent-turn completion decisions from browser sidecar/session code.
+  Browser code may produce `BrowserResult`; it may not complete the parent turn.
 
 ### Phase 6: Projection Purification
 
@@ -456,6 +527,11 @@ Acceptance:
 - external sends happen via outbox/effect receipt, not inline projection side effects;
 - projection errors are visible as projection failures, not confused with model failure.
 
+Removal target:
+
+- remove inline external send side effects from projection paths once the outbox
+  path exists and has an effect-receipt test.
+
 ### Phase 7: Desktop UI Becomes a View-Model Consumer
 
 Move UI lifecycle decisions to pure functions:
@@ -469,6 +545,11 @@ Acceptance:
 - UI has no independent terminality logic;
 - stream recovery cannot resurrect a terminal turn;
 - progress, goal, waiting, failed, and active activity all derive from one snapshot.
+
+Removal target:
+
+- remove local UI lifecycle recomputation after the view model exposes the same
+  field. Local optimistic state may exist only before the first canonical event.
 
 ## Required End-to-End Scenarios
 
@@ -582,6 +663,68 @@ The audit command should accept a `turn_id` and produce:
 
 This gives us a system-level truth checker before moving code.
 
+## First Release Path
+
+The refactor must converge toward a first release, not become an open-ended
+architecture program. The release path is deliberately smaller than the full v2
+architecture.
+
+Release candidate entry criteria:
+
+- `scripts/audit_turn_consistency.py` exists and is part of the kernel/pre-release
+  gate for fixed fixtures.
+- Failure visibility scenario passes: no terminal failed turn can produce an
+  empty assistant bubble when a canonical reason exists.
+- UI liveness scenario passes: a terminal turn cannot render as thinking,
+  waiting-for-model, or active work after replay.
+- Browser train-search scenario has a typed result boundary: `found`, `partial`,
+  `needs_user`, `failed`, or `no_result`.
+- Build-app complex scenario has at least a non-browser fixture proving a
+  runnable open plan cannot complete as `Done`.
+- Every merged runtime slice since this RFC has a Kill List entry in its plan or
+  commit notes.
+- Existing release gates remain green: pre-release gate, kernel regression gate,
+  gateway ownership contract, desktop build, and focused scenario tests.
+
+Release candidate exclusions:
+
+- Full historical-row migration is not required if read-time compatibility is
+  tested and classified.
+- Complete browser UX redesign is not required.
+- Complete extraction of large files such as `main.rs` or `ChatView.tsx` is not
+  required unless they still own turn truth after the reducer/view-model slices.
+- Memory graph expansion is not required; memory must only stay out of the
+  terminal/progress path.
+
+Release stop conditions:
+
+- any second owner can still mark a turn terminal without the reducer;
+- any projection can turn a failed/completed/cancelled turn back into active UI;
+- browser can leave the parent turn without a typed terminal browser result;
+- a new v2 path is added while the old equivalent owner remains active and
+  untracked.
+
+## Change Control
+
+This document is the working baseline for the runtime v2 refactor. It should
+not change in response to individual bugs. Change it only when one of these is
+true:
+
+- a reference implementation or current Homun code proves that a core object is
+  wrong;
+- an implementation slice cannot satisfy its Kill List without violating an
+  existing Homun caposaldo;
+- release evidence proves that a listed release criterion is insufficient or
+  impossible as written;
+- the user explicitly asks to revise the architecture baseline.
+
+Every future change to this document must include:
+
+- the reason for changing the baseline;
+- the old invariant being replaced;
+- the new invariant;
+- the release impact.
+
 ## Non Goals
 
 - No total rewrite.
@@ -591,11 +734,8 @@ This gives us a system-level truth checker before moving code.
 - No immediate migration of historical persisted rows unless a read-time compatibility layer cannot preserve correctness.
 - No broad file reshuffle before the reducer/audit contract exists.
 
-## Decision Needed
+## Adopted Working Invariant
 
-Approve or revise this target architecture before writing an implementation plan.
-
-The key decision is whether Homun adopts this invariant:
+Homun adopts this invariant for runtime v2 planning:
 
 > One TurnKernel, one typed event log, one reducer authority. Agents and capabilities extend behavior; projections and UI derive read models; no other layer owns turn truth.
-
