@@ -16,6 +16,7 @@ pub mod resources;
 pub mod scheduler;
 pub mod store;
 pub mod turn_lifecycle;
+pub mod turn_reducer;
 pub mod types;
 pub mod ui;
 
@@ -43,6 +44,9 @@ pub use recurrence::next_occurrence;
 pub use resources::{ResourceGovernor, ResourceLimits};
 pub use scheduler::TaskScheduler;
 pub use store::TaskStore;
+pub use turn_reducer::{
+    ReducedTurnStatus, TurnContradiction, TurnStateSnapshot, reduce_turn_events,
+};
 pub use types::{
     ActiveTurnProjection, AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus, ApprovalPolicy,
     Automation, AutomationRun, AutomationSource, AutomationTrigger, BrowserCheckpointRecord,
