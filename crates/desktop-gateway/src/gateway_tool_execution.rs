@@ -5674,6 +5674,101 @@ Do NOT call browser_snapshot again. Choose a concrete action now.",
     }
 }
 
+fn browser_action_repeat_signature(args_raw: &str) -> String {
+    fn field_signature(value: &serde_json::Value) -> String {
+        const KEYS: &[&str] = &[
+            "kind",
+            "ref",
+            "target",
+            "target_id",
+            "selector",
+            "text",
+            "value",
+            "key",
+        ];
+        KEYS.iter()
+            .filter_map(|key| {
+                let raw = value.get(*key)?;
+                let normalized = raw
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| raw.to_string());
+                Some(format!("{key}={normalized}"))
+            })
+            .collect::<Vec<_>>()
+            .join(";")
+    }
+
+    let value: serde_json::Value =
+        serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({ "raw": args_raw }));
+    if let Some(actions) = value.get("actions").and_then(|actions| actions.as_array()) {
+        let action_sigs = actions
+            .iter()
+            .map(field_signature)
+            .collect::<Vec<_>>()
+            .join("|");
+        if !action_sigs.is_empty() {
+            return action_sigs;
+        }
+    }
+    let signature = field_signature(&value);
+    if signature.is_empty() {
+        args_raw.split_whitespace().collect::<Vec<_>>().join(" ")
+    } else {
+        signature
+    }
+}
+
+pub(crate) fn repeated_browser_action_nudge(
+    recent_action_signatures: &mut std::collections::VecDeque<String>,
+    tool_name: &str,
+    args_raw: &str,
+    threshold: usize,
+) -> (Option<String>, bool) {
+    if tool_name != "browser_act" {
+        return (None, false);
+    }
+
+    let signature = browser_action_repeat_signature(args_raw);
+    if recent_action_signatures
+        .back()
+        .is_some_and(|last| last != &signature)
+    {
+        recent_action_signatures.clear();
+    }
+    recent_action_signatures.push_back(signature);
+    while recent_action_signatures.len() > threshold.max(1) {
+        recent_action_signatures.pop_front();
+    }
+
+    let repeated = recent_action_signatures
+        .iter()
+        .rev()
+        .take_while(|sig| {
+            recent_action_signatures
+                .back()
+                .is_some_and(|last| *sig == last)
+        })
+        .count();
+    if threshold == 0 || repeated < 2 {
+        return (None, false);
+    }
+
+    let hard_capped = repeated >= threshold;
+    let nudge = if hard_capped {
+        format!(
+            "⚠️ ANTI-LOOP: The same browser action has been repeated {repeated} times without a different action strategy. \
+The browser sub-turn has been TERMINATED due to a repeated action loop. Call browser_done with current findings or change site/source."
+        )
+    } else {
+        format!(
+            "⚠️ ANTI-LOOP: The same browser action has been repeated {repeated} times. \
+Do not repeat it again; choose a different ref/action strategy or call browser_done with current findings."
+        )
+    };
+    (Some(nudge), hard_capped)
+}
+
 /// The gateway's `BrowserExecutor` (ADR 0024 inc 5, 5.D1b slice 5b; ADR 0025 seam). OWNS the browser
 /// subsystem's turn state — the live sidecar `browser_session` (a gateway type that can't live in the
 /// engine-safe `LoopState`) plus the browser-private bookkeeping (last snapshot, current tab / opened
@@ -5732,6 +5827,7 @@ pub(crate) struct GatewayBrowserExecutor<'a> {
     // meaningful interaction. Auto-observations after browser_act/browser_navigate
     // do NOT count — only the model's own `browser_snapshot` tool calls.
     pub(crate) consecutive_snapshot_count: u32,
+    pub(crate) recent_action_signatures: std::collections::VecDeque<String>,
 }
 
 impl Drop for GatewayBrowserExecutor<'_> {
@@ -5810,11 +5906,11 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
         //
         let mut outcome_hint: Option<local_first_engine::contract::ToolOutcomeHint> = None;
         let mut suspend_effect_receipt = None;
-        // P0 fix: compute vision support once per tool call to decide whether to inject screenshot images.
-        let model_supports_vision = !matches!(
-            model_vision_support(&ls.provider.base_url, &ls.provider.model),
-            vision::VisionSupport::No
-        );
+        // Compute vision support through the single catalog gate used by the
+        // browse sub-loop policy. Browser screenshots are automatic diagnostics,
+        // so unknown vision support must fail closed here too.
+        let model_supports_vision =
+            model_supports_vision(&ls.provider.base_url, &ls.provider.model);
         let mut text = {
             let mut bctx = BrowserToolCtx {
                 browser_used: &mut ls.browser_used,
@@ -5919,6 +6015,32 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
             );
             text.push_str("\n\n");
             text.push_str(&nudge);
+        }
+        let repeated_action_threshold = std::env::var("HOMUN_BROWSER_REPEATED_ACTION_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(3);
+        let (repeat_nudge, repeat_hard_capped) = repeated_browser_action_nudge(
+            &mut self.recent_action_signatures,
+            name,
+            args_raw,
+            repeated_action_threshold,
+        );
+        if repeat_hard_capped {
+            return local_first_engine::ToolOutcome {
+                result: repeat_nudge
+                    .map(|nudge| format!("{text}\n\n{nudge}"))
+                    .unwrap_or(text),
+                effects: local_first_engine::ToolEffects {
+                    outcome_hint: Some(local_first_engine::contract::ToolOutcomeHint::NoProgress),
+                    ..Default::default()
+                },
+            };
+        }
+        if let Some(nudge) = repeat_nudge {
+            text.push_str("\n\n");
+            text.push_str(&nudge);
+            outcome_hint = Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
         }
         // Phase 4.1: auto-screenshot after successful navigate/act.
         // Phase 4.2: screenshot on stall when browser_no_progress >= 2.
@@ -6459,6 +6581,7 @@ impl GatewayBrowseExecutor<'_> {
             auto_screenshot,
             screenshot_on_stall,
             consecutive_snapshot_count: 0,
+            recent_action_signatures: std::collections::VecDeque::new(),
         }
     }
 

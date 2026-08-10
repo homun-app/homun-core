@@ -153,12 +153,15 @@ def evaluate_phases(events: list[dict], turn_id: str, thread_id: str) -> dict:
     results = {}
 
     # Phase 4: Plan created
-    plans = [e for e in events if e["kind"] == "plan"]
+    plans = [e for e in events if e["kind"] in {"plan", "plan_update"}]
     if plans:
         p = plans[0]["payload"]
-        goal = str(p.get("goal", ""))[:60]
+        markdown = str(p.get("markdown", ""))
+        goal_text = p.get("goal") or (markdown.splitlines()[0] if markdown else "")
+        goal = str(goal_text)[:60]
         steps = len(p.get("steps", []))
-        results["Plan created"] = (True, f"goal={goal}, steps={steps}")
+        sample = f"goal={goal}, steps={steps}" if steps else f"kind={plans[0]['kind']}, goal={goal}"
+        results["Plan created"] = (True, sample)
     else:
         results["Plan created"] = (False, "no plan event yet")
 

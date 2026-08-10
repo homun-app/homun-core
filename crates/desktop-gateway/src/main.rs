@@ -8934,6 +8934,7 @@ async fn run_agent_rounds(
         auto_screenshot: false,
         screenshot_on_stall: false,
         consecutive_snapshot_count: 0,
+        recent_action_signatures: std::collections::VecDeque::new(),
     };
     let plan_progress = GatewayPlanProgress {
         state: state_owned.clone(),

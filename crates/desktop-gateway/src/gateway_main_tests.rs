@@ -27,12 +27,12 @@ use super::{
     plan_incomplete_reason, plan_is_complete, plan_is_settled, plan_next_open,
     plan_stall_exhausted, plan_step_status, proactive_answer_memory_request,
     proactive_memory_request_for_suggestion_action, project_filesystem_mcp_instruction,
-    prune_browser_history, redact_sensitive_text, requeue_waiting_resource_tasks,
-    resolve_active_model, resolve_contained_computer_cdp, resolve_contained_computer_novnc,
-    response_language_instruction, rewrite_confirm_to_done, run_bash_unsandboxed_result,
-    sanitize_dedup_key, scheduled_thread_sender_for_task_id, scheduled_thread_title,
-    search_composio_catalog, should_try_tool_compatibility_fallback, skill_id_from_command,
-    strip_json_fences, suggestion_choices_json, task_effective_goal,
+    prune_browser_history, redact_sensitive_text, repeated_browser_action_nudge,
+    requeue_waiting_resource_tasks, resolve_active_model, resolve_contained_computer_cdp,
+    resolve_contained_computer_novnc, response_language_instruction, rewrite_confirm_to_done,
+    run_bash_unsandboxed_result, sanitize_dedup_key, scheduled_thread_sender_for_task_id,
+    scheduled_thread_title, search_composio_catalog, should_try_tool_compatibility_fallback,
+    skill_id_from_command, strip_json_fences, suggestion_choices_json, task_effective_goal,
     task_execution_outcome_from_executor_result, task_goal_summary, task_queue_response,
     tool_touches_calendar, tool_touches_contacts, valid_catalog_owner,
     validate_memory_source_input, validate_memory_source_overrides,
@@ -24732,6 +24732,57 @@ fn browser_anti_loop_nudge_resets_on_meaningful_action() {
     let (count, nudge, _) = browser_anti_loop_nudge(2, "browser_screenshot", threshold);
     assert_eq!(count, 0);
     assert!(nudge.is_none());
+}
+
+#[test]
+fn repeated_browser_action_nudge_survives_interleaved_snapshots() {
+    let mut recent = std::collections::VecDeque::new();
+    let same_type = r#"{"kind":"type","ref":"e65","text":"Milano","action_class":"ordinary"}"#;
+
+    let (nudge, hard_capped) =
+        repeated_browser_action_nudge(&mut recent, "browser_act", same_type, 3);
+    assert!(nudge.is_none());
+    assert!(!hard_capped);
+
+    let (nudge, hard_capped) =
+        repeated_browser_action_nudge(&mut recent, "browser_snapshot", "{}", 3);
+    assert!(nudge.is_none());
+    assert!(!hard_capped);
+
+    let (nudge, hard_capped) =
+        repeated_browser_action_nudge(&mut recent, "browser_act", same_type, 3);
+    let msg = nudge.expect("second identical browser action should nudge even after snapshot");
+    assert!(msg.contains("same browser action"));
+    assert!(!hard_capped);
+
+    let (nudge, hard_capped) =
+        repeated_browser_action_nudge(&mut recent, "browser_act", same_type, 3);
+    let msg = nudge.expect("third identical browser action should hard-cap");
+    assert!(msg.contains("TERMINATED"));
+    assert!(hard_capped);
+}
+
+#[test]
+fn repeated_browser_action_nudge_resets_on_different_action_signature() {
+    let mut recent = std::collections::VecDeque::new();
+    let milano = r#"{"kind":"type","ref":"e65","text":"Milano"}"#;
+    let roma = r#"{"kind":"type","ref":"e65","text":"Roma"}"#;
+
+    assert!(
+        repeated_browser_action_nudge(&mut recent, "browser_act", milano, 3)
+            .0
+            .is_none()
+    );
+    assert!(
+        repeated_browser_action_nudge(&mut recent, "browser_act", roma, 3)
+            .0
+            .is_none()
+    );
+    assert!(
+        repeated_browser_action_nudge(&mut recent, "browser_act", milano, 3)
+            .0
+            .is_none()
+    );
 }
 
 #[test]

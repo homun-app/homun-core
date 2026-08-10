@@ -350,9 +350,18 @@ fn project_message_state(
         .set_message_delivery_state(thread_id, assistant_message_id, delivery)
         .map_err(|error| projection_error(error.to_string()))?;
     if !updated && !matches!(outcome, ExecutionOutcome::Failed { .. }) {
-        return Err(projection_error(format!(
-            "chat projection message is missing: {assistant_message_id}"
-        )));
+        let thread_exists = state
+            .chat_store
+            .lock()
+            .map_err(projection_lock_error)?
+            .thread(thread_id)
+            .map_err(|error| projection_error(error.to_string()))?
+            .is_some();
+        if thread_exists {
+            return Err(projection_error(format!(
+                "chat projection message is missing: {assistant_message_id}"
+            )));
+        }
     }
     Ok(())
 }
@@ -770,12 +779,48 @@ mod tests {
     #[test]
     fn completed_projection_does_not_acknowledge_a_missing_message() {
         let state = crate::AppState::for_tests();
+        let thread = state
+            .chat_store
+            .lock()
+            .expect("chat store")
+            .create_thread("default")
+            .expect("thread");
         let outcome = ExecutionOutcome::completed(serde_json::json!({"answer": "done"}));
 
-        let error = project_message_state(&state, "missing-thread", "missing-message", &outcome)
+        let error = project_message_state(&state, &thread.thread_id, "missing-message", &outcome)
             .expect_err("missing completed message must keep projection pending");
 
         assert!(error.message.contains("message"));
+    }
+
+    #[test]
+    fn completed_projection_ignores_a_missing_message_after_thread_delete() {
+        let state = crate::AppState::for_tests();
+        let thread = state
+            .chat_store
+            .lock()
+            .expect("chat store")
+            .create_thread("default")
+            .expect("thread");
+        let mut assistant = local_first_desktop_gateway::seeded_ready_message(
+            &thread.thread_id,
+            "2027-01-15T08:00:00Z".to_string(),
+        );
+        assistant.id = "assistant-deleted-thread".to_string();
+        assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
+        {
+            let store = state.chat_store.lock().expect("chat store");
+            store
+                .append_assistant_message(&thread.thread_id, &assistant)
+                .expect("assistant");
+            store
+                .delete_thread(&thread.thread_id)
+                .expect("delete thread");
+        }
+        let outcome = ExecutionOutcome::completed(serde_json::json!({"answer": "done"}));
+
+        project_message_state(&state, &thread.thread_id, &assistant.id, &outcome)
+            .expect("deleted thread has no visible message left to project");
     }
 
     #[test]

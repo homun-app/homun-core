@@ -12,6 +12,35 @@ fn model_routing_owner_smoke() {
     assert!(resolve_context_budget_chars(Some(1024), None) >= 1024);
 }
 
+#[test]
+fn browser_screenshot_vision_gate_requires_confirmed_vision_support() {
+    let base_url = "https://unknown-provider.invalid/v1";
+    let model = "unknown-browser-driver-model";
+
+    assert_eq!(
+        model_vision_support(base_url, model),
+        vision::VisionSupport::Unknown
+    );
+    assert!(
+        !model_supports_vision(base_url, model),
+        "browser screenshots must not be injected into unknown-vision models"
+    );
+}
+
+#[test]
+fn browser_executor_uses_the_central_vision_gate() {
+    let source = include_str!("gateway_tool_execution.rs");
+    let compact_source = source.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        compact_source.contains("let model_supports_vision = model_supports_vision("),
+        "browser executor must call the central vision gate"
+    );
+    assert!(
+        !compact_source.contains("let model_supports_vision = !matches!"),
+        "browser executor must not carry a second local vision predicate"
+    );
+}
+
 /// Chat streaming config when an OpenAI-compatible backend is selected
 /// (`HOMUN_INFERENCE_BACKEND=openai` + base URL). Returns
 /// `(base_url, model, api_key)`, else `None` when no inference provider is configured.
@@ -2359,14 +2388,15 @@ pub(crate) fn model_vision_support(base_url: &str, model: &str) -> vision::Visio
     vision::vision_support(registry_model_capabilities(base_url, model).map(|caps| caps.vision))
 }
 
-/// Bool predicate for call sites that only need "should I send the image?" (the browser screenshot
-/// gate, the `OpenTurnPolicy` seam). Returns `true` unless the catalog confidently says NO — an
-/// unknown model still gets the image, because withholding it from a seeing model is worse than
-/// wasting one round on a blind one.
+/// Bool predicate for browser screenshots: send the image only when the catalog
+/// confirms the current driver can see. User-provided attachments keep their
+/// separate optimistic fallback in `vision::plan_attachments`; browser stall
+/// screenshots are automatic diagnostics and must not spend a live round on an
+/// unknown-vision model that may reject image input.
 pub(crate) fn model_supports_vision(base_url: &str, model: &str) -> bool {
-    !matches!(
+    matches!(
         model_vision_support(base_url, model),
-        vision::VisionSupport::No
+        vision::VisionSupport::Yes
     )
 }
 
