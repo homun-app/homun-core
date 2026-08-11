@@ -157,6 +157,24 @@ fn reduced_turn_status_token(status: ReducedTurnStatus) -> &'static str {
     }
 }
 
+fn task_status_kernel_turn_token(status: &str) -> Option<&'static str> {
+    match status {
+        "queued"
+        | "pending"
+        | "running"
+        | "waiting_resource"
+        | "waiting_time"
+        | "waiting_external_event"
+        | "parked" => Some("running"),
+        "waiting_user_approval" => Some("waiting_approval"),
+        "completed" => Some("completed"),
+        "failed" => Some("failed"),
+        "cancelled" | "expired" => Some("cancelled"),
+        "finalizing" => Some("running"),
+        _ => None,
+    }
+}
+
 fn effect_class_token(effect_class: &EffectClass) -> &'static str {
     match effect_class {
         EffectClass::Read => "read",
@@ -4243,10 +4261,17 @@ impl TaskStore {
             }
             Some(turn_id.clone())
         });
-        let turn_status = reduced_turn_status_token(reduced.turn.status).to_string();
+        let turn_status = match reduced.turn.status {
+            ReducedTurnStatus::Empty => latest_turn
+                .as_ref()
+                .and_then(|(_, status, _, _, _)| task_status_kernel_turn_token(status))
+                .unwrap_or("idle"),
+            status => reduced_turn_status_token(status),
+        }
+        .to_string();
         let composer_mode = if awaiting_user && active_turn_id.is_none() {
             "approval_only"
-        } else if turn_status == "waiting_user" {
+        } else if matches!(turn_status.as_str(), "waiting_user" | "waiting_approval") {
             "reply_to_user_wait"
         } else if active_turn_id.is_some() {
             "steer_active_turn"

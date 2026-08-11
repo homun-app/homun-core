@@ -20653,6 +20653,7 @@ fn task_queue_response_serializes_ui_read_model_for_renderer() {
                 task_id: TaskId::new("task-1"),
                 kind: "browser_automation".to_string(),
                 goal: "Find train options".to_string(),
+                thread_id: Some("thread-automation".to_string()),
                 status: TaskStatus::Queued,
                 priority: TaskPriority::High,
                 blocked_reason: None,
@@ -20678,6 +20679,10 @@ fn task_queue_response_serializes_ui_read_model_for_renderer() {
     .unwrap();
 
     assert_eq!(response.queued[0].task_id, "task-1");
+    assert_eq!(
+        response.queued[0].thread_id.as_deref(),
+        Some("thread-automation")
+    );
     assert_eq!(response.queued[0].status, "queued");
     assert_eq!(response.queued[0].priority, "high");
     assert_eq!(response.waiting_approvals[0].status, "pending");
@@ -21980,8 +21985,131 @@ fn scheduled_automation_materializes_visible_proactive_task() {
         contract.as_ref().scope.thread_id.as_deref(),
         Some(thread_id)
     );
+    let queue = local_first_task_runtime::TaskUiReadModel::new(&store)
+        .queue_snapshot(
+            &UserId::new("user_auto"),
+            &WorkspaceId::new("workspace_auto"),
+        )
+        .unwrap();
+    assert_eq!(queue.queued.len(), 1);
+    assert_eq!(queue.queued[0].thread_id.as_deref(), Some(thread_id));
+    let queue_item = super::task_item_response(queue.queued[0].clone()).unwrap();
+    assert_eq!(queue_item.thread_id.as_deref(), Some(thread_id));
+
+    let mut visible_turn = TaskRecord::new(
+        "turn_auto_sched",
+        UserId::new("user_auto"),
+        WorkspaceId::new("workspace_auto"),
+        "chat_turn",
+        "Visible automation turn",
+        serde_json::json!({ "thread_id": thread_id }),
+    );
+    visible_turn.status = TaskStatus::WaitingUserApproval;
+    store
+        .insert_chat_turn(
+            &visible_turn,
+            thread_id,
+            "req-auto-sched",
+            "automation",
+            "confirm",
+        )
+        .unwrap();
+    let projection = store.project_kernel_thread(thread_id, 200).unwrap();
+    assert_eq!(projection.thread_id, thread_id);
+    assert_eq!(
+        projection.turn.status, "waiting_approval",
+        "automation-started visible turns must use the same kernel status vocabulary as chat turns"
+    );
     assert_eq!(task.retry_policy.max_attempts, 3);
     assert_eq!(task.retry_policy.backoff_seconds, 120);
+}
+
+#[test]
+fn automation_projection_uses_kernel_contract_for_waiting_and_completed_turns() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let user = UserId::new("user_auto");
+    let workspace = WorkspaceId::new("workspace_auto");
+    let thread_id = "channel_scheduled_autorun_projection";
+    let automation_task = TaskRecord::new(
+        "autorun_projection",
+        user.clone(),
+        workspace.clone(),
+        "proactive_prompt",
+        "Run projected automation",
+        serde_json::json!({
+            "automation_id": "auto_projection",
+            "thread_id": thread_id,
+            "approval": "confirm",
+        }),
+    );
+    store.insert_task(&automation_task).unwrap();
+
+    let visible_turn = TaskRecord::new(
+        "turn_auto_projection",
+        user.clone(),
+        workspace.clone(),
+        "chat_turn",
+        "Visible projected automation turn",
+        serde_json::json!({ "thread_id": thread_id }),
+    );
+    store
+        .insert_chat_turn(
+            &visible_turn,
+            thread_id,
+            "req-auto-projection",
+            "automation",
+            "confirm",
+        )
+        .unwrap();
+    let approval = local_first_task_runtime::ApprovalGate::new()
+        .request_approval(
+            &store,
+            &visible_turn.task_id,
+            &user,
+            &workspace,
+            "connector.write",
+            "high",
+            "connector",
+            "Automation write requires confirmation",
+        )
+        .unwrap();
+
+    let queue = local_first_task_runtime::TaskUiReadModel::new(&store)
+        .queue_snapshot(&user, &workspace)
+        .unwrap();
+    assert_eq!(queue.queued[0].thread_id.as_deref(), Some(thread_id));
+    let waiting_projection = store.project_kernel_thread(thread_id, 200).unwrap();
+    assert_eq!(waiting_projection.turn.status, "waiting_approval");
+    assert_eq!(
+        waiting_projection.actions.composer_mode,
+        "reply_to_user_wait"
+    );
+    assert!(waiting_projection.attention.awaiting_user);
+
+    local_first_task_runtime::ApprovalGate::new()
+        .approve(&store, &approval.approval_id, "tester")
+        .unwrap();
+    store
+        .insert_turn_event(
+            visible_turn.task_id.as_str(),
+            local_first_task_runtime::TurnEventKind::Done,
+            serde_json::json!({ "text": "Automation completed." }),
+        )
+        .unwrap();
+    store
+        .update_task_status(
+            &visible_turn.task_id,
+            &user,
+            &workspace,
+            TaskStatus::Completed,
+            None,
+        )
+        .unwrap();
+
+    let completed_projection = store.project_kernel_thread(thread_id, 200).unwrap();
+    assert_eq!(completed_projection.turn.status, "completed");
+    assert_eq!(completed_projection.turn.active_turn_id, None);
+    assert_eq!(completed_projection.actions.composer_mode, "new_turn");
 }
 
 #[test]

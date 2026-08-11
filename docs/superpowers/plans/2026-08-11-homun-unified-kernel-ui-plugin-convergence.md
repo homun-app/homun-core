@@ -403,11 +403,11 @@ New owner: `runtimeViewModel` derived from `KernelThreadProjection`.
 - Modify: automation-related runtime files found by `rg -n "automation|scheduler|channel|adapter_output" crates apps/desktop/src`
 - Modify: `docs/architecture/kernel-v2-contract.md`
 
-- [ ] Add an automation fixture where a background trigger runs a capability, waits for approval, resumes, and completes.
-- [ ] Assert that the same `KernelThreadProjection` status vocabulary is returned for chat-started and automation-started work.
-- [ ] Ensure adapter output effects use `EffectHost::for_projection` and settle into receipts before UI attention is displayed.
-- [ ] Remove any automation-specific UI wait/progress vocabulary that bypasses the projection.
-- [ ] Run:
+- [x] Add an automation fixture where a background trigger runs a capability, waits for approval, resumes, and completes.
+- [x] Assert that the same `KernelThreadProjection` status vocabulary is returned for chat-started and automation-started work.
+- [x] Ensure adapter output effects use `EffectHost::for_projection` and settle into receipts before UI attention is displayed.
+- [x] Remove any automation-specific UI wait/progress vocabulary that bypasses the projection.
+- [x] Run:
 
 ```bash
 cargo test -p local-first-desktop-gateway automation_projection -- --nocapture

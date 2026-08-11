@@ -1723,6 +1723,21 @@ assertContains(
   "msg-activity-steps",
   "per-turn activity markup must be owned by MessageActivity"
 );
+assertContains(
+  "src/components/AutomationsView.tsx",
+  "projectAutomationRunState",
+  "automation scheduled run status must be projected from the kernel-aware mapper"
+);
+assertContains(
+  "src/components/AutomationsView.tsx",
+  "fetchKernelThreadProjection",
+  "automation scheduled runs must read their owning kernel projection"
+);
+assertNotContains(
+  "src/components/AutomationsView.tsx",
+  'task.status === "active"',
+  "automation scheduled runs must not infer progress from UI-local task status aliases"
+);
 
 assertMissing(
   "src/components/ProjectContextPanel.tsx",

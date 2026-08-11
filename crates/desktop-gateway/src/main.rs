@@ -1160,6 +1160,7 @@ struct TaskItemResponse {
     /// Human-readable label for the kind (e.g. "Automazione", "Browser: snapshot").
     label: String,
     goal: String,
+    thread_id: Option<String>,
     status: String,
     priority: String,
     blocked_reason: Option<String>,
@@ -26462,6 +26463,7 @@ fn task_detail_response(detail: TaskUiDetail) -> Result<TaskDetailResponse, Gate
             task_id: detail.task_id,
             kind: detail.kind,
             goal: detail.goal,
+            thread_id: detail.thread_id,
             status: detail.status,
             priority: detail.priority,
             blocked_reason: detail.blocked_reason,
@@ -26514,6 +26516,7 @@ fn task_item_response(item: TaskUiItem) -> Result<TaskItemResponse, GatewayError
         label: humanize_task_kind(&item.kind),
         kind: item.kind,
         goal: item.goal,
+        thread_id: item.thread_id,
         status: enum_label(&item.status)?,
         priority: enum_label(&item.priority)?,
         blocked_reason: item.blocked_reason,

@@ -321,7 +321,9 @@ export interface CoreChatMessagesSnapshot {
 export interface CoreTaskItem {
   task_id: string;
   kind: string;
+  label: string;
   goal: string;
+  thread_id: string | null;
   status: string;
   priority: string;
   blocked_reason: string | null;

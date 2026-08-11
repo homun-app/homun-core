@@ -30,6 +30,7 @@ se continuare, la persistenza registra lo stato canonico, la UI lo proietta.
 | Liveness durable | `crates/task-runtime/src/turn_lifecycle.rs`, `broker.rs`, `store.rs` | `tasks`, `turn_events`, `agent_runs.terminal_reason` | spinner, activity text |
 | Effect receipts | `crates/desktop-gateway/src/effect_host.rs` + `crates/task-runtime/src/execution_store.rs` | `execution_effect_receipts` | tool result prose, UI card |
 | Browser action outcome | `gateway_browser_tools.rs`, `gateway_tool_execution.rs`, browser sidecar result | receipt + `ToolOutcomeHint` + `browser_done`/`BrowseResult` | "activity observed" alone |
+| Automation/background run | `gateway_automation_routes.rs`, `execute_proactive_prompt_task`, `TaskUiReadModel` | visible thread `thread_id` + `KernelThreadProjection` | Automations UI status aliases, task queue labels alone |
 | Desktop projection | `apps/desktop/src/lib/chat-runtime/*`, `chatEventParts.ts`, `appCoreMappers.ts` | API/WS payloads from gateway | local inference that creates canonical progress |
 
 ## Kernel event contract
@@ -73,7 +74,11 @@ evento. Un evento non presente qui e' diagnostica, non control flow.
    pending effect resolution e active tool calls.
 9. Un final answer non-HITL non puo' essere terminale mentre rimangono step
    `todo`/`doing` runnable nel piano canonico.
-10. Ogni fix in questo perimetro deve aggiungere una fixture nell'owner canonico,
+10. Automazioni, trigger di canale, connector poll e proactive prompt non hanno
+    un vocabolario lifecycle separato. Se il lavoro produce una conversazione
+    visibile, la UI deve raggiungerla via `thread_id` e leggere la stessa
+    `KernelThreadProjection` usata dai turni chat.
+11. Ogni fix in questo perimetro deve aggiungere una fixture nell'owner canonico,
     poi passare `python3 scripts/kernel_regression_gate.py`; per browser reale,
     anche `HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py`.
 
@@ -89,6 +94,8 @@ debito strutturale:
 - il progresso piano e' ancora recuperato in parte da riconciliazioni tardive;
 - la UI deve comporre stato da stream live + durable projection e quindi puo'
   mostrare "sta lavorando" quando il backend e' terminale o sospeso.
+- automazioni e run background devono restare agganciate al thread visibile e
+  alla `KernelThreadProjection`, non a stati sintetici della lista automazioni.
 
 La chiusura di questi gap e' tracciata nel piano dedicato
 `docs/superpowers/plans/2026-08-11-kernel-v2-stability.md`, non in questa mappa
