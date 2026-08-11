@@ -11,6 +11,7 @@ import {
   replayStatusFromProjection,
   type ActiveTurnProjection,
 } from "../lib/chatEventParts";
+import { deriveConversationPlan } from "../lib/chat-runtime/browserActivityLifecycle";
 import type { ChatMessage } from "../types";
 import {
   latestActivitySteps,
@@ -60,11 +61,15 @@ export function useChatActivityProjection({
   const persistedPlan = useMemo(() => latestPlanMarkdown(messages), [messages]);
   const persistedActivity = useMemo(() => latestActivitySteps(messages), [messages]);
 
-  const conversationPlan = isStreaming
-    ? livePlanMarkdown
-    : projectionLoaded
-      ? projectedPlan
-      : persistedPlan;
+  const conversationPlan = deriveConversationPlan({
+    isStreaming,
+    livePlanMarkdown,
+    projectionLoaded,
+    projectedPlan,
+    persistedPlan,
+    projectedActiveTurnId: projectedActiveTurn?.turn_id ?? null,
+    streamOwnerTurnId: streamOwnerTurnRef.current,
+  });
 
   const rawConversationActivity = isStreaming
     ? [...projectedActivity, ...liveActivitySteps]
