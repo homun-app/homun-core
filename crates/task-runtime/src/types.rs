@@ -611,6 +611,106 @@ pub struct ThreadActivityProjection {
     pub active_turn: Option<ActiveTurnProjection>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelThreadProjection {
+    pub thread_id: String,
+    pub revision: i64,
+    pub turn: KernelTurnView,
+    pub plan: Option<KernelPlanView>,
+    pub activity: Vec<KernelActivityRow>,
+    pub browser: KernelBrowserView,
+    pub capability_runtime: KernelCapabilityRuntimeView,
+    pub attention: KernelAttentionView,
+    pub actions: KernelThreadActions,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelTurnView {
+    pub active_turn_id: Option<String>,
+    pub status: String,
+    pub last_event_seq: i64,
+    pub terminal_reason: Option<String>,
+    pub failure_text: Option<String>,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelPlanView {
+    pub goal: Option<String>,
+    pub revision: i64,
+    pub steps: Vec<KernelPlanStepView>,
+    pub markdown: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelPlanStepView {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelActivityRow {
+    pub text: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelBrowserView {
+    pub state: String,
+    pub target_id: Option<String>,
+    pub latest_progress: Option<String>,
+    pub failure_reason: Option<String>,
+    pub snapshot_verified: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelCapabilityRuntimeView {
+    pub loaded_tools: Vec<String>,
+    pub armed_sensitive_domains: Vec<String>,
+    pub pending_capability: Option<String>,
+    pub blocked_capabilities: Vec<KernelBlockedCapabilityView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelBlockedCapabilityView {
+    pub key: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelAttentionView {
+    pub awaiting_user: bool,
+    pub approvals: Vec<KernelApprovalView>,
+    pub uncertain_effects: Vec<KernelUncertainEffectView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelApprovalView {
+    pub approval_id: String,
+    pub task_id: String,
+    pub action: String,
+    pub risk_level: String,
+    pub data_boundary: String,
+    pub explanation: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelUncertainEffectView {
+    pub receipt_ref: String,
+    pub execution_id: String,
+    pub operation: String,
+    pub effect_class: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelThreadActions {
+    pub can_stop: bool,
+    pub composer_mode: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActiveTurnProjection {
     pub turn_id: String,

@@ -53,11 +53,14 @@ pub use turn_reducer::{
 pub use types::{
     ActiveTurnProjection, AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus, ApprovalPolicy,
     Automation, AutomationRun, AutomationSource, AutomationTrigger, BrowserCheckpointRecord,
-    EffectReceiptClaim, EventTrigger, ExecutionEffectReceipt, NewAgentRun, NewBrowserCheckpoint,
-    NewExecutionEffectReceipt, NewTurnSteering, ObjectiveContractRecord, ObjectiveMode,
-    ResourceClass, ResourceRequirement, RetryPolicy, RuntimePlanRecord, SubagentInfo, TaskId,
-    TaskPriority, TaskRecord, TaskStatus, TerminalWrite, ThreadActivityProjection, ThreadAttention,
-    TurnEvent, TurnEventKind, TurnSteeringRecord, TurnSteeringStatus, UserId, WorkflowId,
-    WorkspaceId,
+    EffectReceiptClaim, EventTrigger, ExecutionEffectReceipt, KernelActivityRow,
+    KernelApprovalView, KernelAttentionView, KernelBlockedCapabilityView, KernelBrowserView,
+    KernelCapabilityRuntimeView, KernelPlanStepView, KernelPlanView, KernelThreadActions,
+    KernelThreadProjection, KernelTurnView, KernelUncertainEffectView, NewAgentRun,
+    NewBrowserCheckpoint, NewExecutionEffectReceipt, NewTurnSteering, ObjectiveContractRecord,
+    ObjectiveMode, ResourceClass, ResourceRequirement, RetryPolicy, RuntimePlanRecord,
+    SubagentInfo, TaskId, TaskPriority, TaskRecord, TaskStatus, TerminalWrite,
+    ThreadActivityProjection, ThreadAttention, TurnEvent, TurnEventKind, TurnSteeringRecord,
+    TurnSteeringStatus, UserId, WorkflowId, WorkspaceId,
 };
 pub use ui::{TaskQueueSnapshot, TaskUiDetail, TaskUiItem, TaskUiReadModel};

@@ -5,12 +5,14 @@ use crate::turn_reducer::{
 use crate::{
     ActiveTurnProjection, AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus,
     ApprovalRequest, Automation, AutomationRun, BrowserCheckpointRecord, EffectReceiptClaim,
-    ExecutionEffectReceipt, NewAgentRun, NewBrowserCheckpoint, NewExecutionEffectReceipt,
-    NewTurnSteering, ObjectiveContractRecord, ObjectiveMode, ProjectionClaim, ResourceClass,
-    RuntimePlanRecord, SubagentInfo, TaskCheckpoint, TaskDependencyOutput, TaskId, TaskRecord,
-    TaskRuntimeError, TaskRuntimeResult, TaskStatus, TerminalWrite, ThreadActivityProjection,
-    ThreadAttention, TurnEvent, TurnEventKind, TurnSteeringRecord, TurnSteeringStatus, UserId,
-    WorkspaceId,
+    ExecutionEffectReceipt, KernelActivityRow, KernelApprovalView, KernelAttentionView,
+    KernelBrowserView, KernelCapabilityRuntimeView, KernelPlanStepView, KernelPlanView,
+    KernelThreadActions, KernelThreadProjection, KernelTurnView, KernelUncertainEffectView,
+    NewAgentRun, NewBrowserCheckpoint, NewExecutionEffectReceipt, NewTurnSteering,
+    ObjectiveContractRecord, ObjectiveMode, ProjectionClaim, ResourceClass, RuntimePlanRecord,
+    SubagentInfo, TaskCheckpoint, TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError,
+    TaskRuntimeResult, TaskStatus, TerminalWrite, ThreadActivityProjection, ThreadAttention,
+    TurnEvent, TurnEventKind, TurnSteeringRecord, TurnSteeringStatus, UserId, WorkspaceId,
 };
 use local_first_execution_protocol::{EffectClass, EffectReceiptRef, EffectReceiptStatus};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
@@ -85,6 +87,82 @@ fn runtime_plan_steps(plan: &Value) -> Vec<Value> {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default()
+}
+
+fn kernel_plan_view(plan: &RuntimePlanRecord) -> Option<KernelPlanView> {
+    let markdown = runtime_plan_markdown(&plan.plan_json)?;
+    let steps = runtime_plan_steps(&plan.plan_json)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, step)| {
+            let title = step
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|title| !title.is_empty())?
+                .to_string();
+            let id = step
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("s{}", index + 1));
+            let status = step
+                .get("status")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|status| !status.is_empty())
+                .unwrap_or("todo")
+                .to_string();
+            let detail = step
+                .get("detail")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|detail| !detail.is_empty())
+                .map(str::to_string);
+            Some(KernelPlanStepView {
+                id,
+                title,
+                status,
+                detail,
+            })
+        })
+        .collect::<Vec<_>>();
+    Some(KernelPlanView {
+        goal: plan
+            .plan_json
+            .get("goal")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|goal| !goal.is_empty())
+            .map(str::to_string),
+        revision: i64::try_from(plan.revision).unwrap_or(i64::MAX),
+        steps,
+        markdown,
+    })
+}
+
+fn reduced_turn_status_token(status: ReducedTurnStatus) -> &'static str {
+    match status {
+        ReducedTurnStatus::Empty => "idle",
+        ReducedTurnStatus::Running => "running",
+        ReducedTurnStatus::WaitingUser => "waiting_user",
+        ReducedTurnStatus::WaitingApproval => "waiting_approval",
+        ReducedTurnStatus::Completed => "completed",
+        ReducedTurnStatus::Failed => "failed",
+        ReducedTurnStatus::Cancelled => "cancelled",
+    }
+}
+
+fn effect_class_token(effect_class: &EffectClass) -> &'static str {
+    match effect_class {
+        EffectClass::Read => "read",
+        EffectClass::FilesystemWrite => "filesystem_write",
+        EffectClass::ArtifactCreation => "artifact_creation",
+        EffectClass::ExternalWrite => "external_write",
+        EffectClass::RequestAuthorization => "request_authorization",
+    }
 }
 
 pub struct TaskStore {
@@ -3829,6 +3907,214 @@ impl TaskStore {
     /// `runtime_plans` owns the canonical checklist when the latest turn emitted plan activity;
     /// marker markdown remains only a legacy fallback for old rows. `activity_cap` bounds the
     /// payload by keeping the most recent steps.
+    pub fn project_kernel_thread(
+        &self,
+        thread_id: &str,
+        activity_cap: usize,
+    ) -> TaskRuntimeResult<KernelThreadProjection> {
+        let latest_turn: Option<(String, String, String, i64, Option<String>)> = self
+            .connection
+            .query_row(
+                "SELECT task_id, status, task_json, updated_at, blocked_reason FROM tasks WHERE thread_id = ?1 AND kind = 'chat_turn'
+                 ORDER BY created_at DESC LIMIT 1",
+                params![thread_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )
+            .optional()?;
+        let latest_turn_id = latest_turn.as_ref().map(|(id, _, _, _, _)| id.clone());
+        let latest_turn_record = latest_turn
+            .as_ref()
+            .and_then(|(_, _, task_json, _, _)| serde_json::from_str::<TaskRecord>(task_json).ok());
+        let latest_runtime_plan = match latest_turn_record.as_ref() {
+            Some(task) => load_runtime_plan_on(
+                &self.connection,
+                task.user_id.as_str(),
+                task.workspace_id.as_str(),
+                thread_id,
+            )?,
+            None => None,
+        };
+        let latest_turn_events = match latest_turn_id.as_deref() {
+            Some(turn_id) => self.read_turn_events(turn_id, 0)?,
+            None => Vec::new(),
+        };
+        let latest_uncertain_receipts = match latest_turn_record.as_ref() {
+            Some(task) => self
+                .list_effect_receipts_for_thread(
+                    thread_id,
+                    task.user_id.as_str(),
+                    task.workspace_id.as_str(),
+                )?
+                .into_iter()
+                .filter(|receipt| receipt.status == EffectReceiptStatus::Uncertain)
+                .collect::<Vec<_>>(),
+            None => Vec::new(),
+        };
+        let reducer_effects = latest_uncertain_receipts
+            .iter()
+            .map(|receipt| KernelEffectProjection {
+                effect_class: receipt.effect_class.clone(),
+                status: receipt.status,
+            })
+            .collect::<Vec<_>>();
+        let terminal_reason = match (latest_turn_id.as_deref(), latest_turn_record.as_ref()) {
+            (Some(turn_id), Some(task)) => self
+                .list_agent_runs_for_turn(
+                    turn_id,
+                    task.user_id.as_str(),
+                    task.workspace_id.as_str(),
+                )?
+                .into_iter()
+                .rev()
+                .find(|run| run.status != AgentRunStatus::Running)
+                .and_then(|run| run.terminal_reason),
+            _ => None,
+        };
+        let reduced = reduce_kernel_projection(KernelProjectionInput {
+            turn_events: &latest_turn_events,
+            runtime_plan: latest_runtime_plan.as_ref(),
+            uncertain_effects: &reducer_effects,
+            terminal_reason: terminal_reason.as_deref(),
+        });
+        let pending_approvals = match (latest_turn_id.as_deref(), latest_turn_record.as_ref()) {
+            (Some(turn_id), Some(task)) => {
+                let mut stmt = self.connection.prepare(
+                    "SELECT approval_json FROM task_approvals
+                     WHERE task_id = ?1 AND user_id = ?2 AND workspace_id = ?3 AND status = 'pending'
+                     ORDER BY created_at ASC, approval_id ASC",
+                )?;
+                let rows = stmt.query_map(
+                    params![turn_id, task.user_id.as_str(), task.workspace_id.as_str()],
+                    |row| row.get::<_, String>(0),
+                )?;
+                rows.map(|row| Ok(serde_json::from_str::<ApprovalRequest>(&row?)?))
+                    .collect::<TaskRuntimeResult<Vec<_>>>()?
+            }
+            _ => Vec::new(),
+        };
+        let mut activity_stmt = self.connection.prepare(
+            "SELECT te.payload_json, te.created_at
+             FROM turn_events te JOIN tasks t ON t.task_id = te.turn_id
+             WHERE t.thread_id = ?1 AND t.kind = 'chat_turn' AND te.kind = 'activity'
+             ORDER BY t.created_at ASC, te.seq ASC",
+        )?;
+        let activity_rows = activity_stmt.query_map(params![thread_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut activity = Vec::new();
+        for row in activity_rows {
+            let (payload_json, created_at) = row?;
+            let payload: Value = serde_json::from_str(&payload_json)?;
+            if let Some(text) = payload
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+            {
+                activity.push(KernelActivityRow {
+                    text: text.to_string(),
+                    created_at,
+                });
+            }
+        }
+        if activity_cap > 0 && activity.len() > activity_cap {
+            activity.drain(0..activity.len() - activity_cap);
+        }
+        let uncertain_effects = latest_uncertain_receipts
+            .iter()
+            .filter(|receipt| receipt.effect_class != EffectClass::Read)
+            .map(|receipt| KernelUncertainEffectView {
+                receipt_ref: receipt.receipt_ref.as_ref().to_string(),
+                execution_id: receipt.execution_id.clone(),
+                operation: receipt.operation.clone(),
+                effect_class: effect_class_token(&receipt.effect_class).to_string(),
+            })
+            .collect::<Vec<_>>();
+        let approvals = pending_approvals
+            .iter()
+            .map(|approval| {
+                Ok(KernelApprovalView {
+                    approval_id: approval.approval_id.clone(),
+                    task_id: approval.task_id.as_str().to_string(),
+                    action: approval.action.clone(),
+                    risk_level: approval.risk_level.clone(),
+                    data_boundary: approval.data_boundary.clone(),
+                    explanation: approval.explanation.clone(),
+                    status: enum_value(&approval.status)?,
+                })
+            })
+            .collect::<TaskRuntimeResult<Vec<_>>>()?;
+        let awaiting_user = reduced.requires_user_effect_resolution || !approvals.is_empty();
+        let active_turn_id = latest_turn.as_ref().and_then(|(turn_id, status, _, _, _)| {
+            if reduced.turn.is_terminal {
+                return None;
+            }
+            if !crate::turn_lifecycle::status_has_active_turn_projection(status.as_str()) {
+                return None;
+            }
+            Some(turn_id.clone())
+        });
+        let turn_status = reduced_turn_status_token(reduced.turn.status).to_string();
+        let composer_mode = if awaiting_user && active_turn_id.is_none() {
+            "approval_only"
+        } else if turn_status == "waiting_user" {
+            "reply_to_user_wait"
+        } else if active_turn_id.is_some() {
+            "steer_active_turn"
+        } else {
+            "new_turn"
+        }
+        .to_string();
+        let latest_updated_at = latest_turn
+            .as_ref()
+            .map(|(_, _, _, updated_at, _)| *updated_at)
+            .unwrap_or(0);
+        let plan = latest_runtime_plan
+            .as_ref()
+            .filter(|plan| plan.status == "open")
+            .and_then(kernel_plan_view);
+        let revision = plan
+            .as_ref()
+            .map(|plan| plan.revision)
+            .unwrap_or_default()
+            .max(reduced.turn.last_seq);
+        let can_stop = latest_turn.as_ref().is_some_and(|_| {
+            !reduced.turn.is_terminal
+                && matches!(
+                    composer_mode.as_str(),
+                    "steer_active_turn" | "reply_to_user_wait"
+                )
+        });
+        Ok(KernelThreadProjection {
+            thread_id: thread_id.to_string(),
+            revision,
+            turn: KernelTurnView {
+                active_turn_id,
+                status: turn_status,
+                last_event_seq: reduced.turn.last_seq,
+                terminal_reason: reduced.terminal_reason,
+                failure_text: reduced.turn.failure_text,
+                updated_at: latest_updated_at,
+            },
+            plan,
+            activity,
+            browser: KernelBrowserView {
+                state: "idle".to_string(),
+                ..KernelBrowserView::default()
+            },
+            capability_runtime: KernelCapabilityRuntimeView::default(),
+            attention: KernelAttentionView {
+                awaiting_user,
+                approvals,
+                uncertain_effects,
+            },
+            actions: KernelThreadActions {
+                can_stop,
+                composer_mode,
+            },
+        })
+    }
+
     pub fn project_thread_activity(
         &self,
         thread_id: &str,
@@ -7041,6 +7327,160 @@ mod chat_turn_query_tests {
             ),
             "read receipts are evidence, not user-resolution blockers"
         );
+    }
+
+    #[test]
+    fn kernel_thread_projection_owns_turn_plan_attention_and_actions() {
+        let s = store();
+        let mut task = make_chat_turn(
+            "turn_kernel_projection",
+            "threadKernelProjection",
+            TaskStatus::Running,
+        );
+        task.created_at = OffsetDateTime::from_unix_timestamp(100).unwrap();
+        s.insert_chat_turn(
+            &task,
+            "threadKernelProjection",
+            "req-kernel-projection",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.upsert_runtime_plan(
+            "u",
+            "w",
+            "threadKernelProjection",
+            0,
+            &json!({
+                "goal": "trova un treno",
+                "steps": [
+                    {"id": "s1", "title": "Cerca risultati", "status": "done", "detail": "ricerca completata"},
+                    {"id": "s2", "title": "Leggi risultati", "status": "doing", "detail": "in corso"}
+                ]
+            }),
+            "open",
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_kernel_projection",
+            TurnEventKind::StepAdvance,
+            json!({
+                "step_id": "s1",
+                "title": "Cerca risultati",
+                "from": "doing",
+                "to": "done",
+                "verified": true
+            }),
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_kernel_projection",
+            TurnEventKind::Done,
+            json!({"text": "risultati letti"}),
+        )
+        .unwrap();
+        s.create_agent_run(&NewAgentRun {
+            run_id: "run-kernel-projection".into(),
+            turn_id: "turn_kernel_projection".into(),
+            thread_id: "threadKernelProjection".into(),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            role: None,
+            model: Some("test-model".into()),
+            provider: Some("test-provider".into()),
+            prompt_fingerprint: None,
+        })
+        .unwrap();
+        s.finish_agent_run(
+            "run-kernel-projection",
+            AgentRunStatus::Completed,
+            Some("canonical_completed"),
+        )
+        .unwrap();
+
+        let read_ref = EffectReceiptRef::from_store_id("55555555555555555555555555555555").unwrap();
+        s.prepare_effect_receipt(&NewExecutionEffectReceipt {
+            receipt_ref: read_ref.clone(),
+            execution_id: "turn_kernel_projection".into(),
+            revision: 1,
+            run_id: Some("run-kernel-projection".into()),
+            thread_id: Some("threadKernelProjection".into()),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            effect_class: EffectClass::Read,
+            operation: "browser.extract".into(),
+            arguments_hash: "read-hash".into(),
+            idempotency_key: "read-idempotency-kernel".into(),
+            compensation: None,
+        })
+        .unwrap();
+        s.claim_effect_receipt(&read_ref).unwrap();
+        s.mark_effect_receipt_uncertain(&read_ref, &json!({"reason": "read interrupted"}))
+            .unwrap();
+
+        let write_ref =
+            EffectReceiptRef::from_store_id("66666666666666666666666666666666").unwrap();
+        s.prepare_effect_receipt(&NewExecutionEffectReceipt {
+            receipt_ref: write_ref.clone(),
+            execution_id: "turn_kernel_projection".into(),
+            revision: 1,
+            run_id: Some("run-kernel-projection".into()),
+            thread_id: Some("threadKernelProjection".into()),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            effect_class: EffectClass::ExternalWrite,
+            operation: "calendar.create_event".into(),
+            arguments_hash: "write-hash".into(),
+            idempotency_key: "write-idempotency-kernel".into(),
+            compensation: None,
+        })
+        .unwrap();
+        s.claim_effect_receipt(&write_ref).unwrap();
+        s.mark_effect_receipt_uncertain(&write_ref, &json!({"reason": "write interrupted"}))
+            .unwrap();
+
+        s.insert_approval(&ApprovalRequest::new(
+            "approval-kernel-projection",
+            TaskId::new("turn_kernel_projection"),
+            UserId::new("u"),
+            WorkspaceId::new("w"),
+            "calendar.create_event",
+            "high",
+            "external_calendar",
+            "Confirm whether the external write really completed.",
+        ))
+        .unwrap();
+
+        let projection = s
+            .project_kernel_thread("threadKernelProjection", 200)
+            .unwrap();
+
+        assert_eq!(projection.thread_id, "threadKernelProjection");
+        assert_eq!(projection.turn.status, "completed");
+        assert_eq!(projection.turn.active_turn_id, None);
+        assert_eq!(projection.turn.last_event_seq, 2);
+        assert_eq!(
+            projection.turn.terminal_reason.as_deref(),
+            Some("canonical_completed")
+        );
+        assert_eq!(projection.actions.can_stop, false);
+        assert_eq!(projection.actions.composer_mode, "approval_only");
+        assert_eq!(
+            projection.plan.as_ref().unwrap().goal.as_deref(),
+            Some("trova un treno")
+        );
+        assert_eq!(projection.plan.as_ref().unwrap().steps[0].status, "done");
+        assert_eq!(projection.plan.as_ref().unwrap().steps[1].status, "doing");
+        assert!(
+            projection.attention.awaiting_user,
+            "external-write uncertainty must require user attention"
+        );
+        assert_eq!(projection.attention.uncertain_effects.len(), 1);
+        assert_eq!(
+            projection.attention.uncertain_effects[0].effect_class, "external_write",
+            "read uncertainty must be filtered out of user-visible attention"
+        );
+        assert_eq!(projection.attention.approvals.len(), 1);
     }
 
     #[test]
