@@ -22,6 +22,38 @@ test("terminal projected turn at rest clears active work", () => {
   assert.equal(result.canStop, false);
 });
 
+test("legacy marker tail cannot keep liveness when projection is loaded", () => {
+  const result = deriveTurnLifecycle({
+    promptSubmitting: false,
+    streamingAssistantId: null,
+    projectedActiveTurn: null,
+    projectedTurnStatus: "completed",
+    projectionLoaded: true,
+    threadTailAwaitsHitl: true,
+  });
+
+  assert.equal(result.threadTailAwaitsHitl, false);
+  assert.equal(result.turnAwaitingUser, false);
+  assert.equal(result.hasActiveTurn, false);
+  assert.equal(result.workInProgress, false);
+});
+
+test("legacy marker tail remains fallback before projection loads", () => {
+  const result = deriveTurnLifecycle({
+    promptSubmitting: false,
+    streamingAssistantId: null,
+    projectedActiveTurn: null,
+    projectedTurnStatus: null,
+    projectionLoaded: false,
+    threadTailAwaitsHitl: true,
+  });
+
+  assert.equal(result.threadTailAwaitsHitl, true);
+  assert.equal(result.turnAwaitingUser, true);
+  assert.equal(result.hasActiveTurn, true);
+  assert.equal(result.workInProgress, false);
+});
+
 test("backend finalizing state is terminal at rest", () => {
   const result = deriveTurnLifecycle({
     promptSubmitting: false,

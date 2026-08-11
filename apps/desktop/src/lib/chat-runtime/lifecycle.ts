@@ -42,7 +42,7 @@ const NON_WORK_ACTIVE_STATUSES = new Set([
 
 export function deriveTurnLifecycle(input: TurnLifecycleInput): TurnLifecycleView {
   const isStreaming = Boolean(input.promptSubmitting || input.streamingAssistantId);
-  const threadTailAwaitsHitl = Boolean(input.threadTailAwaitsHitl);
+  const threadTailAwaitsHitl = !input.projectionLoaded && Boolean(input.threadTailAwaitsHitl);
   const activeStatus = input.projectedActiveTurn?.status ?? null;
   const turnAwaitingUser = activeStatus === "waiting_user_approval" || threadTailAwaitsHitl;
   const activeButNotModelWork = activeStatus !== null && NON_WORK_ACTIVE_STATUSES.has(activeStatus);

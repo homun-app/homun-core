@@ -5133,6 +5133,54 @@ fn canonical_stream_finalization_does_not_project_hitl_from_markers() {
 }
 
 #[test]
+fn transcript_parts_render_after_reload_without_marker_text() {
+    let state = super::AppState::for_tests();
+    let thread = state
+        .chat_store
+        .lock()
+        .unwrap()
+        .create_thread("transcript_parts_reload")
+        .expect("thread");
+    let assistant =
+        super::channel_chat_message_with_id("assistant", "", "transcript_parts_assistant");
+    state
+        .chat_store
+        .lock()
+        .unwrap()
+        .append_assistant_message(&thread.thread_id, &assistant)
+        .expect("assistant message");
+    let raw = r#"Pick one. ‹‹CHOICES››{"question":"Which?","options":["A","B"]}‹‹/CHOICES››"#;
+    let cards = super::actionable_cards_from_raw_text(raw);
+    let mut collector = super::StreamMemoryReuseCollector::default();
+    collector.observe_actionable_cards(&cards);
+
+    super::finalize_streamed_assistant_message(
+        &state,
+        &thread.thread_id,
+        &assistant.id,
+        "Pick one.",
+        &collector,
+        local_first_desktop_gateway::MessageDeliveryState::Delivered,
+    )
+    .expect("finalize typed transcript parts");
+
+    let saved = state
+        .chat_store
+        .lock()
+        .unwrap()
+        .message(&thread.thread_id, &assistant.id)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(saved.text, "Pick one.");
+    assert!(!saved.text.contains("CHOICES"));
+    assert_eq!(saved.event_parts.len(), 1);
+    assert_eq!(saved.event_parts[0]["type"], "actionable_card");
+    assert_eq!(saved.event_parts[0]["kind"], "CHOICES");
+    assert_eq!(saved.event_parts[0]["payload"]["question"], "Which?");
+}
+
+#[test]
 fn user_reply_resumes_the_suspended_chat_execution_in_place() {
     let _env = TestEnv::acquire();
     let state = super::AppState::for_tests();

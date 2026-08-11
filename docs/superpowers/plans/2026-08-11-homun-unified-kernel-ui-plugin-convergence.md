@@ -338,14 +338,14 @@ Temporary fallback retained: marker parsing in `chatEventParts.ts` for historica
 - Modify: `apps/desktop/src/lib/markers.ts`
 - Modify: `apps/desktop/src/components/ChatMessageParts.tsx` or current equivalent renderer owner.
 
-- [ ] Add typed transcript part DTOs for plan, activity, approval, connect suggestion, artifact, browser event, and plain answer.
-- [ ] Add tests:
+- [x] Add typed transcript part DTOs for plan, activity, approval, connect suggestion, artifact, browser event, and plain answer.
+- [x] Add tests:
   - `typed_parts_render_after_reload_without_marker_text`
   - `malformed_marker_fragments_cannot_affect_liveness`
   - `legacy_marker_messages_render_but_do_not_drive_current_turn`
-- [ ] Move marker parsing behind `legacyMarkerProjection`.
-- [ ] Remove marker/HITL fallback from general lifecycle code when durable projection exists.
-- [ ] Run:
+- [x] Move marker parsing behind `legacyMarkerProjection`.
+- [x] Remove marker/HITL fallback from general lifecycle code when durable projection exists.
+- [x] Run:
 
 ```bash
 npm --prefix apps/desktop test -- chatEventParts markers

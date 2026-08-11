@@ -63,6 +63,19 @@ test("open HITL wait at the chat tail forces a new turn even while streaming", (
   assert.equal(result.routesToSteering, false);
 });
 
+test("loaded projection quarantines legacy HITL marker routing", () => {
+  const result = routeComposerSubmission(
+    atRest({
+      projectionLoaded: true,
+      projectedTurnStatus: "completed",
+      threadTailAwaitsHitl: true,
+    }),
+  );
+  assert.equal(result.mode, "new_turn");
+  assert.equal(result.forceNewTurn, true);
+  assert.equal(result.routesToSteering, false);
+});
+
 test("explicit HITL Free resolution overrides the steering gate on active work", () => {
   const result = routeComposerSubmission(
     atRest({ streamingAssistantId: "assistant-1", explicitForceNewTurn: true }),

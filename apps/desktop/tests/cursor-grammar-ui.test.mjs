@@ -764,6 +764,13 @@ const chatEventParts = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatEventPartsImpl = await readFile(
+  new URL("../src/lib/chatEventParts.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatViewMessages = await readFile(
   new URL("../src/lib/chatViewMessages.ts", import.meta.url),
   "utf8",
@@ -2342,11 +2349,12 @@ test("ChatView delegates chat event projection helpers to chatEventParts", () =>
   assert.doesNotMatch(chatView, /function replayStatusFromProjection/);
   assert.doesNotMatch(chatView, /function threadTailAwaitsUser/);
   assert.doesNotMatch(chatView, /interface ActiveTurnProjection/);
-  assert.match(chatEventParts, /export function chatEventPartFromStream/);
-  assert.match(chatEventParts, /export function normalizeChatEventParts/);
-  assert.match(chatEventParts, /export function shouldDropStructuredMarkerDelta/);
-  assert.match(chatEventParts, /export function replayStatusFromProjection/);
-  assert.match(chatEventParts, /export function threadTailAwaitsUser/);
+  assert.match(chatEventParts, /from "\.\/chatEventParts\.mjs"/);
+  assert.match(chatEventPartsImpl, /export function chatEventPartFromStream/);
+  assert.match(chatEventPartsImpl, /export function normalizeChatEventParts/);
+  assert.match(chatEventPartsImpl, /export function shouldDropStructuredMarkerDelta/);
+  assert.match(chatEventPartsImpl, /export function replayStatusFromProjection/);
+  assert.match(chatEventPartsImpl, /export function threadTailAwaitsUser/);
   assert.match(chatEventParts, /export interface ActiveTurnProjection/);
 });
 
@@ -2972,8 +2980,8 @@ test("the step_advance wire payload is typed end to end", () => {
   assert.match(coreBridge, /\{ type: "step_advance"; request_id: string; payload: StepAdvancePayload; seq\?: number \}/);
   assert.match(appTypes, /\{ type: "step_advance"; payload: StepAdvancePayload \}/);
   assert.match(appTypes, /StepAdvancePayload,/);
-  assert.match(chatEventParts, /case "step_advance":/);
-  assert.match(chatEventParts, /isValidStepAdvancePayload/);
+  assert.match(chatEventPartsImpl, /case "step_advance":/);
+  assert.match(chatEventPartsImpl, /isValidStepAdvancePayload/);
   assert.match(appCoreMappers, /type === "step_advance"/);
 });
 
