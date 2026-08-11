@@ -172,6 +172,12 @@ impl ToolOutcomeHint {
 /// `request_confirm`→`*ctx.pending_confirm`, `request_compaction`→`*ctx.pending_compaction`,
 /// `reset_stall_guards`→ real-progress reset (`progress_anchor_round=round`, `repeat_count=0`,
 /// `last_round_sig.clear()`), which today fire together in the `update_plan`/`step_advance` arm.
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BlockedCapability {
+    pub key: String,
+    pub reason: String,
+}
+
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolEffects {
     /// A dispatched effect has an unknown remote result. The loop must suspend on this receipt
@@ -198,6 +204,11 @@ pub struct ToolEffects {
     /// loop dedups into `LoopState::active_sensitive`, arming the turn's force-confirm. `String`
     /// (not the gateway's `SensitiveCategory`) so the leaf engine stays gateway-type-free.
     pub arm_sensitive: Vec<String>,
+    /// Capability/plugin/MCP row that is waiting for a user connection or approval. Projection-only:
+    /// the turn liveness still comes from task status, approvals, receipts, and terminal events.
+    pub pending_capability: Option<String>,
+    /// Capability/plugin/MCP rows blocked by policy, approval, or missing connection. Projection-only.
+    pub blocked_capabilities: Vec<BlockedCapability>,
     /// Real progress happened → reset the stall guards (F1): anchor the round, zero the repeat
     /// counter, clear the last-round signature.
     pub reset_stall_guards: bool,

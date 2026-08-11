@@ -352,6 +352,12 @@ pub(crate) async fn emit_approval_card(
     effects.append_output.push(card.clone());
     let _ = emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card }).await;
     effects.request_confirm = true;
+    effects
+        .blocked_capabilities
+        .push(local_first_engine::BlockedCapability {
+            key: name.to_string(),
+            reason: "approval_required".to_string(),
+        });
     "AWAITING USER CONFIRMATION: the action was proposed via a \
 confirmation card in the interface. Do NOT say it was executed."
         .to_string()
@@ -4855,6 +4861,13 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
                 let _ =
                     emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card_text }).await;
                 effects.request_confirm = true;
+                effects.pending_capability = Some(need.clone());
+                effects
+                    .blocked_capabilities
+                    .push(local_first_engine::BlockedCapability {
+                        key: "suggest_capabilities".to_string(),
+                        reason: "connect_required".to_string(),
+                    });
                 "AWAITING: I showed the user clickable cards to \
 connect the suggested connectors (skill/MCP/Composio). Do NOT say you have already connected anything."
                     .to_string()
@@ -4945,6 +4958,12 @@ require your confirmation in the app. Propose it and stop."
         {
             let blocked = read_only_write_blocked_msg(&mcp_tool);
             emit_read_only_block_if_needed(ctx, &mut effects, &blocked).await;
+            effects
+                .blocked_capabilities
+                .push(local_first_engine::BlockedCapability {
+                    key: name.to_string(),
+                    reason: "read_only".to_string(),
+                });
             blocked
         } else {
             // ADR 0023: route the decision through the pure policy fn. The approval axis is

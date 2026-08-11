@@ -300,17 +300,17 @@ New owner: `KernelBrowserView`.
 - Modify: `apps/desktop/src/lib/chat-runtime/kernelProjectionPresenter.mjs`
 - Modify: `apps/desktop/src/components/MessageConnectSuggestCard.tsx` only if projection-driven connect actions require a prop change.
 
-- [ ] Add a reducer test named `capability_runtime_projection_does_not_own_liveness`.
-- [ ] Fixture: `use_skill` loads a tool, MCP read tool succeeds, MCP write tool is blocked by approval, and a plugin suggests a connector.
-- [ ] Assert:
+- [x] Add a reducer test named `capability_runtime_projection_does_not_own_liveness`.
+- [x] Fixture: `use_skill` loads a tool, MCP read tool succeeds, MCP write tool is blocked by approval, and a plugin suggests a connector.
+- [x] Assert:
   - loaded tools appear in `capability_runtime.loaded_tools`;
   - blocked connector/tool appears in `capability_runtime.blocked_capabilities`;
   - read tool result never sets `attention.awaiting_user`;
   - write tool approval appears through `attention.approvals`;
   - no capability field changes `turn.status` without a matching turn event or task status.
-- [ ] Normalize `ToolEffects.load_tools`, armed sensitive domains, MCP/Composio confirmation, and connect suggestions into typed projection rows.
-- [ ] UI connect/install cards render from typed projection or typed transcript parts; raw marker support remains legacy only.
-- [ ] Run:
+- [x] Normalize `ToolEffects.load_tools`, armed sensitive domains, MCP/Composio confirmation, and connect suggestions into typed projection rows.
+- [x] UI connect/install cards render from typed projection or typed transcript parts; raw marker support remains legacy only.
+- [x] Run:
 
 ```bash
 cargo test -p local-first-engine load_tools -- --nocapture

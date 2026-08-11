@@ -348,6 +348,33 @@ fn is_introspective_tool(name: &str) -> bool {
     )
 }
 
+fn capability_runtime_tool_result_payload(
+    name: &str,
+    effects: &crate::ToolEffects,
+) -> Option<serde_json::Value> {
+    if effects.load_tools.is_empty()
+        && effects.arm_sensitive.is_empty()
+        && effects.pending_capability.is_none()
+        && effects.blocked_capabilities.is_empty()
+    {
+        return None;
+    }
+    let loaded_tools = effects
+        .load_tools
+        .iter()
+        .map(|tool| tool.key.as_str())
+        .collect::<Vec<_>>();
+    Some(serde_json::json!({
+        "name": name,
+        "capability_runtime": {
+            "loaded_tools": loaded_tools,
+            "armed_sensitive_domains": effects.arm_sensitive,
+            "pending_capability": effects.pending_capability,
+            "blocked_capabilities": effects.blocked_capabilities,
+        }
+    }))
+}
+
 /// Rough count of imperative signals in a user message: exclamation marks plus distinct
 /// action-verb matches. Used by [`request_is_complex`] as a proxy for "2+ imperative sentences".
 /// Pure heuristic — never the sole gate (the length and multi-tool conditions also apply).
@@ -1294,9 +1321,16 @@ again to find the right control). Keep working on the task — do not stop and d
                     // browse call IS progress at the manager level → reset the stall clock.
                     let browser_activity_observed = tool_effects.browser_activity_observed;
                     let suspend_effect_receipt = tool_effects.suspend_effect_receipt.clone();
+                    let capability_runtime_event =
+                        capability_runtime_tool_result_payload(name, &tool_effects);
                     // ADR 0024 inc 5d.1b: apply the tool's loop-state effects immediately, before the
                     // loop reads any field they populate (plan, ls.accumulated, …) — net state as inline.
                     ls.apply_effects(&mut pending_confirm, round, tool_effects);
+                    if let Some(payload) = capability_runtime_event {
+                        let _ = event_sink
+                            .emit(GenerateStreamEvent::ToolResult { payload })
+                            .await;
+                    }
                     if browser_activity_observed {
                         last_browser_progress_at = Instant::now();
                         // Same reasoning as the granular-tool progress reset above, at the MANAGER
@@ -2309,6 +2343,45 @@ mod tests {
     use serde_json::{Value, json};
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    #[test]
+    fn load_tools_emits_capability_runtime_payload() {
+        let payload = capability_runtime_tool_result_payload(
+            "find_capability",
+            &ToolEffects {
+                load_tools: vec![crate::LoadedTool {
+                    key: "mcp__github__list_issues".to_string(),
+                    schema: Some(json!({"type": "function"})),
+                }],
+                arm_sensitive: vec!["financial".to_string()],
+                pending_capability: Some("github issue triage".to_string()),
+                blocked_capabilities: vec![crate::BlockedCapability {
+                    key: "mcp__github__create_issue".to_string(),
+                    reason: "approval_required".to_string(),
+                }],
+                ..ToolEffects::default()
+            },
+        )
+        .expect("capability effects emit metadata");
+
+        assert_eq!(payload["name"], "find_capability");
+        assert_eq!(
+            payload["capability_runtime"]["loaded_tools"],
+            json!(["mcp__github__list_issues"])
+        );
+        assert_eq!(
+            payload["capability_runtime"]["armed_sensitive_domains"],
+            json!(["financial"])
+        );
+        assert_eq!(
+            payload["capability_runtime"]["pending_capability"],
+            "github issue triage"
+        );
+        assert_eq!(
+            payload["capability_runtime"]["blocked_capabilities"][0],
+            json!({"key": "mcp__github__create_issue", "reason": "approval_required"})
+        );
+    }
 
     // Minimal seam mocks: the model answers immediately (no tool calls); everything else is a no-op.
     struct AnswerModel;

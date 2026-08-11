@@ -14447,6 +14447,34 @@ fn fanout_recall_preserves_the_payload_and_uses_recall_kind() {
 }
 
 #[test]
+fn capability_runtime_projection_turn_event_preserves_metadata() {
+    let raw = serde_json::json!({
+        "type": "tool_result",
+        "payload": {
+            "name": "find_capability",
+            "capability_runtime": {
+                "loaded_tools": ["mcp__github__list_issues"],
+                "blocked_capabilities": [
+                    {"key": "mcp__github__create_issue", "reason": "approval_required"}
+                ]
+            }
+        }
+    });
+
+    let (kind, payload) = super::turn_event_from_stream_value(&raw).expect("tool result maps");
+
+    assert_eq!(kind, local_first_task_runtime::TurnEventKind::Tool);
+    assert_eq!(
+        payload["payload"]["capability_runtime"]["loaded_tools"],
+        serde_json::json!(["mcp__github__list_issues"])
+    );
+    assert_eq!(
+        payload["payload"]["capability_runtime"]["blocked_capabilities"][0],
+        serde_json::json!({"key": "mcp__github__create_issue", "reason": "approval_required"})
+    );
+}
+
+#[test]
 fn fanout_stream_error_maps_to_turn_event_error() {
     let raw = serde_json::json!({
         "type": "error",

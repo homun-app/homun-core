@@ -6,17 +6,19 @@ use crate::{
     ActiveTurnProjection, AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus,
     ApprovalRequest, Automation, AutomationRun, BrowserCheckpointRecord, EffectReceiptClaim,
     ExecutionEffectReceipt, KernelActivityRow, KernelApprovalView, KernelAttentionView,
-    KernelBrowserView, KernelCapabilityRuntimeView, KernelPlanStepView, KernelPlanView,
-    KernelThreadActions, KernelThreadProjection, KernelTurnView, KernelUncertainEffectView,
-    NewAgentRun, NewBrowserCheckpoint, NewExecutionEffectReceipt, NewTurnSteering,
-    ObjectiveContractRecord, ObjectiveMode, ProjectionClaim, ResourceClass, RuntimePlanRecord,
-    SubagentInfo, TaskCheckpoint, TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError,
-    TaskRuntimeResult, TaskStatus, TerminalWrite, ThreadActivityProjection, ThreadAttention,
-    TurnEvent, TurnEventKind, TurnSteeringRecord, TurnSteeringStatus, UserId, WorkspaceId,
+    KernelBlockedCapabilityView, KernelBrowserView, KernelCapabilityRuntimeView,
+    KernelPlanStepView, KernelPlanView, KernelThreadActions, KernelThreadProjection,
+    KernelTurnView, KernelUncertainEffectView, NewAgentRun, NewBrowserCheckpoint,
+    NewExecutionEffectReceipt, NewTurnSteering, ObjectiveContractRecord, ObjectiveMode,
+    ProjectionClaim, ResourceClass, RuntimePlanRecord, SubagentInfo, TaskCheckpoint,
+    TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
+    TerminalWrite, ThreadActivityProjection, ThreadAttention, TurnEvent, TurnEventKind,
+    TurnSteeringRecord, TurnSteeringStatus, UserId, WorkspaceId,
 };
 use local_first_execution_protocol::{EffectClass, EffectReceiptRef, EffectReceiptStatus};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::path::Path;
 use time::OffsetDateTime;
 
@@ -195,6 +197,89 @@ fn event_text(event: &TurnEvent) -> Option<String> {
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .map(str::to_string)
+}
+
+fn capability_runtime_value(payload: &Value) -> Option<&Value> {
+    if let Some(runtime) = payload
+        .get("capability_runtime")
+        .filter(|value| value.is_object())
+    {
+        return Some(runtime);
+    }
+    payload.get("payload").and_then(capability_runtime_value)
+}
+
+fn string_array_field(value: &Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn project_kernel_capability_runtime(events: &[TurnEvent]) -> KernelCapabilityRuntimeView {
+    let mut loaded_tools = BTreeSet::new();
+    let mut armed_sensitive_domains = BTreeSet::new();
+    let mut blocked_seen = BTreeSet::new();
+    let mut blocked_capabilities = Vec::new();
+    let mut pending_capability = None;
+
+    for runtime in events
+        .iter()
+        .filter(|event| event.kind == TurnEventKind::Tool)
+        .filter_map(|event| capability_runtime_value(&event.payload))
+    {
+        loaded_tools.extend(string_array_field(runtime, "loaded_tools"));
+        armed_sensitive_domains.extend(string_array_field(runtime, "armed_sensitive_domains"));
+        if let Some(pending) = runtime
+            .get("pending_capability")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            pending_capability = Some(pending.to_string());
+        }
+        for blocked in runtime
+            .get("blocked_capabilities")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(key) = blocked
+                .get("key")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            let reason = blocked
+                .get("reason")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("blocked");
+            let dedupe_key = format!("{key}\u{1f}{reason}");
+            if blocked_seen.insert(dedupe_key) {
+                blocked_capabilities.push(KernelBlockedCapabilityView {
+                    key: key.to_string(),
+                    reason: reason.to_string(),
+                });
+            }
+        }
+    }
+
+    KernelCapabilityRuntimeView {
+        loaded_tools: loaded_tools.into_iter().collect(),
+        armed_sensitive_domains: armed_sensitive_domains.into_iter().collect(),
+        pending_capability,
+        blocked_capabilities,
+    }
 }
 
 fn latest_browser_progress(events: &[TurnEvent]) -> Option<String> {
@@ -4240,7 +4325,7 @@ impl TaskStore {
                 browser_checkpoint.as_ref(),
                 terminal_reason.as_deref(),
             ),
-            capability_runtime: KernelCapabilityRuntimeView::default(),
+            capability_runtime: project_kernel_capability_runtime(&latest_turn_events),
             attention: KernelAttentionView {
                 awaiting_user,
                 approvals,
@@ -7655,6 +7740,149 @@ mod chat_turn_query_tests {
             "read uncertainty must be filtered out of user-visible attention"
         );
         assert_eq!(projection.attention.approvals.len(), 1);
+    }
+
+    #[test]
+    fn capability_runtime_projection_does_not_own_liveness() {
+        let s = store();
+        let task = make_chat_turn(
+            "turn_capability_projection",
+            "threadCapabilityProjection",
+            TaskStatus::Running,
+        );
+        s.insert_chat_turn(
+            &task,
+            "threadCapabilityProjection",
+            "req-capability-projection",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_capability_projection",
+            TurnEventKind::Tool,
+            json!({
+                "type": "tool_result",
+                "payload": {
+                    "name": "use_skill",
+                    "capability_runtime": {
+                        "loaded_tools": ["mcp__github__list_issues"],
+                        "armed_sensitive_domains": ["financial"]
+                    }
+                }
+            }),
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_capability_projection",
+            TurnEventKind::Tool,
+            json!({
+                "type": "tool_result",
+                "payload": {
+                    "name": "mcp__github__list_issues",
+                    "output": [{"title": "read result"}]
+                }
+            }),
+        )
+        .unwrap();
+
+        let read_projection = s
+            .project_kernel_thread("threadCapabilityProjection", 200)
+            .unwrap();
+        assert_eq!(read_projection.turn.status, "running");
+        assert!(
+            !read_projection.attention.awaiting_user,
+            "successful read tool results must not request user attention"
+        );
+        assert_eq!(
+            read_projection.capability_runtime.loaded_tools,
+            vec!["mcp__github__list_issues".to_string()]
+        );
+        assert_eq!(
+            read_projection.capability_runtime.armed_sensitive_domains,
+            vec!["financial".to_string()]
+        );
+
+        s.insert_turn_event(
+            "turn_capability_projection",
+            TurnEventKind::Tool,
+            json!({
+                "type": "tool_result",
+                "payload": {
+                    "name": "mcp__github__create_issue",
+                    "capability_runtime": {
+                        "blocked_capabilities": [
+                            {"key": "mcp__github__create_issue", "reason": "approval_required"}
+                        ]
+                    }
+                }
+            }),
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_capability_projection",
+            TurnEventKind::Tool,
+            json!({
+                "type": "tool_result",
+                "payload": {
+                    "name": "suggest_capabilities",
+                    "capability_runtime": {
+                        "pending_capability": "train booking connector",
+                        "blocked_capabilities": [
+                            {"key": "suggest_capabilities", "reason": "connect_required"}
+                        ]
+                    }
+                }
+            }),
+        )
+        .unwrap();
+        s.insert_approval(&ApprovalRequest::new(
+            "approval-capability-projection",
+            TaskId::new("turn_capability_projection"),
+            UserId::new("u"),
+            WorkspaceId::new("w"),
+            "mcp__github__create_issue",
+            "medium",
+            "connected_service",
+            "Confirm the write before executing it.",
+        ))
+        .unwrap();
+
+        let projection = s
+            .project_kernel_thread("threadCapabilityProjection", 200)
+            .unwrap();
+
+        assert_eq!(
+            projection.turn.status, "running",
+            "capability metadata alone must not terminalize or block the turn"
+        );
+        assert_eq!(
+            projection.capability_runtime.pending_capability.as_deref(),
+            Some("train booking connector")
+        );
+        assert_eq!(projection.capability_runtime.blocked_capabilities.len(), 2);
+        assert!(
+            projection
+                .capability_runtime
+                .blocked_capabilities
+                .iter()
+                .any(|blocked| blocked.key == "mcp__github__create_issue"
+                    && blocked.reason == "approval_required")
+        );
+        assert!(
+            projection
+                .capability_runtime
+                .blocked_capabilities
+                .iter()
+                .any(|blocked| blocked.key == "suggest_capabilities"
+                    && blocked.reason == "connect_required")
+        );
+        assert!(projection.attention.awaiting_user);
+        assert_eq!(projection.attention.approvals.len(), 1);
+        assert_eq!(
+            projection.attention.approvals[0].action,
+            "mcp__github__create_issue"
+        );
     }
 
     #[test]
