@@ -1,0 +1,61 @@
+{
+  "case": "automation_background_waiting_approval",
+  "endpoint": "/api/chat/threads/thread-automation/kernel-projection",
+  "response": {
+    "thread_id": "thread-automation",
+    "revision": 5,
+    "turn": {
+      "active_turn_id": "turn-automation",
+      "status": "waiting_approval",
+      "last_event_seq": 0,
+      "terminal_reason": null,
+      "failure_text": null,
+      "updated_at": 1723360080
+    },
+    "plan": null,
+    "activity": [],
+    "subagents": [],
+    "browser": {
+      "state": "idle",
+      "target_id": null,
+      "latest_progress": null,
+      "failure_reason": null,
+      "snapshot_verified": false
+    },
+    "capability_runtime": {
+      "loaded_tools": [],
+      "armed_sensitive_domains": [],
+      "pending_capability": null,
+      "blocked_capabilities": []
+    },
+    "attention": {
+      "awaiting_user": true,
+      "approvals": [
+        {
+          "approval_id": "approval-automation",
+          "task_id": "turn-automation",
+          "action": "send_channel_message",
+          "risk_level": "medium",
+          "data_boundary": "external_write",
+          "explanation": "Automation wants to send an update",
+          "status": "pending"
+        }
+      ],
+      "uncertain_effects": []
+    },
+    "actions": {
+      "can_stop": true,
+      "composer_mode": "reply_to_user_wait"
+    }
+  },
+  "expect": {
+    "equals": {
+      "turn.status": "waiting_approval",
+      "attention.awaiting_user": true,
+      "actions.composer_mode": "reply_to_user_wait"
+    },
+    "lengths": {
+      "attention.approvals": 1
+    }
+  }
+}

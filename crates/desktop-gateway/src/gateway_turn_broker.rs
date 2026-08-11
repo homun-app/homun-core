@@ -1681,7 +1681,7 @@ mod kernel_projection_route_tests {
 
         assert_eq!(projection.turn.status, "completed");
         assert_eq!(projection.turn.active_turn_id, None);
-        assert_eq!(projection.actions.can_stop, false);
+        assert!(!projection.actions.can_stop);
         assert_eq!(projection.actions.composer_mode, "new_turn");
     }
 }

@@ -431,7 +431,7 @@ New owner: same kernel projection used by chat turns.
 - Modify: `scripts/pre_release_gate.py` only if the new gate command must be added to release validation.
 - Add: `scripts/smoke_kernel_projection.py`
 
-- [ ] Add gate rows for:
+- [x] Add gate rows for:
   - terminal turn clears UI liveness;
   - runtime plan survives stream gap and reload;
   - read uncertainty is not a user verification request;
@@ -441,9 +441,9 @@ New owner: same kernel projection used by chat turns.
   - plugin loaded tools do not change liveness;
   - MCP/plugin write approval appears through kernel attention;
   - legacy markers render but do not own current lifecycle.
-- [ ] Add a deterministic smoke script that starts from persisted fixtures and queries `/kernel-projection`.
-- [ ] Wire the smoke into `kernel_regression_gate.py`.
-- [ ] Run the full release-relevant gate:
+- [x] Add a deterministic smoke script that starts from persisted fixtures and queries `/kernel-projection`.
+- [x] Wire the smoke into `kernel_regression_gate.py`.
+- [x] Run the full release-relevant gate:
 
 ```bash
 python3 scripts/kernel_regression_gate.py

@@ -56,6 +56,7 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             "turn consistency audit unit tests",
             [PYTHON, "-m", "unittest", "scripts.test_audit_turn_consistency", "-v"],
         ),
+        Step("kernel projection smoke", [PYTHON, "scripts/smoke_kernel_projection.py"]),
         Step(
             "task runtime active chat turn",
             ["cargo", "test", "-p", "local-first-task-runtime", "active_chat_turn"],

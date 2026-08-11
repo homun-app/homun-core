@@ -1,0 +1,55 @@
+{
+  "case": "read_uncertain_effect_is_quiet",
+  "endpoint": "/api/chat/threads/thread-read-uncertain/kernel-projection",
+  "response": {
+    "thread_id": "thread-read-uncertain",
+    "revision": 3,
+    "turn": {
+      "active_turn_id": "turn-read",
+      "status": "running",
+      "last_event_seq": 4,
+      "terminal_reason": null,
+      "failure_text": null,
+      "updated_at": 1723359720
+    },
+    "plan": null,
+    "activity": [
+      {
+        "text": "Read outcome uncertain",
+        "created_at": 1723359720
+      }
+    ],
+    "subagents": [],
+    "browser": {
+      "state": "active",
+      "target_id": "browser-read",
+      "latest_progress": "Snapshot retry",
+      "failure_reason": null,
+      "snapshot_verified": false
+    },
+    "capability_runtime": {
+      "loaded_tools": [],
+      "armed_sensitive_domains": [],
+      "pending_capability": null,
+      "blocked_capabilities": []
+    },
+    "attention": {
+      "awaiting_user": false,
+      "approvals": [],
+      "uncertain_effects": []
+    },
+    "actions": {
+      "can_stop": true,
+      "composer_mode": "steer_active_turn"
+    }
+  },
+  "expect": {
+    "equals": {
+      "attention.awaiting_user": false,
+      "actions.composer_mode": "steer_active_turn"
+    },
+    "lengths": {
+      "attention.uncertain_effects": 0
+    }
+  }
+}

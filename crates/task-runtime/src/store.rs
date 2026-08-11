@@ -303,10 +303,10 @@ fn project_kernel_capability_runtime(events: &[TurnEvent]) -> KernelCapabilityRu
 fn latest_browser_progress(events: &[TurnEvent]) -> Option<String> {
     events
         .iter()
+        .rev()
         .filter(|event| event.kind == TurnEventKind::Activity)
         .filter_map(event_text)
-        .filter(|text| browser_budget_failure_reason(text).is_none())
-        .last()
+        .find(|text| browser_budget_failure_reason(text).is_none())
 }
 
 fn browser_done_observed(events: &[TurnEvent], terminal_reason: Option<&str>) -> bool {
@@ -325,10 +325,10 @@ fn project_kernel_browser_view(
     let latest_progress = latest_browser_progress(events);
     if let Some(reason) = events
         .iter()
+        .rev()
         .filter(|event| event.kind == TurnEventKind::Activity)
         .filter_map(event_text)
-        .filter_map(|text| browser_budget_failure_reason(&text).map(str::to_string))
-        .last()
+        .find_map(|text| browser_budget_failure_reason(&text).map(str::to_string))
     {
         return KernelBrowserView {
             state: "failed".to_string(),
@@ -7747,7 +7747,7 @@ mod chat_turn_query_tests {
             projection.turn.terminal_reason.as_deref(),
             Some("canonical_completed")
         );
-        assert_eq!(projection.actions.can_stop, false);
+        assert!(!projection.actions.can_stop);
         assert_eq!(projection.actions.composer_mode, "approval_only");
         assert_eq!(
             projection.plan.as_ref().unwrap().goal.as_deref(),

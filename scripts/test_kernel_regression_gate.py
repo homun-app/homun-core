@@ -13,6 +13,7 @@ class KernelRegressionGateTests(unittest.TestCase):
         self.assertIn("task runtime turn lifecycle", labels)
         self.assertIn("task runtime turn reducer", labels)
         self.assertIn("turn consistency audit unit tests", labels)
+        self.assertIn("kernel projection smoke", labels)
         self.assertIn("task runtime active chat turn", labels)
         self.assertIn("task runtime finalizing fence", labels)
         self.assertIn("task runtime enqueue", labels)
@@ -41,6 +42,11 @@ class KernelRegressionGateTests(unittest.TestCase):
             by_label["turn consistency audit unit tests"].command,
             [gate.PYTHON, "-m", "unittest", "scripts.test_audit_turn_consistency", "-v"],
         )
+        self.assertEqual(
+            by_label["kernel projection smoke"].command,
+            [gate.PYTHON, "scripts/smoke_kernel_projection.py"],
+        )
+        self.assertEqual(by_label["kernel projection smoke"].cwd, gate.ROOT)
         self.assertEqual(by_label["gateway steering cleanup"].cwd, gate.ROOT)
         self.assertEqual(by_label["desktop unit tests"].command, ["npm", "test"])
         self.assertEqual(by_label["desktop unit tests"].cwd, gate.DESKTOP)

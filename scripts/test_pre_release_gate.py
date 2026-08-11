@@ -14,6 +14,7 @@ class PreReleaseGateTests(unittest.TestCase):
         self.assertIn("desktop dependency audit", labels)
         self.assertIn("task runtime tests", labels)
         self.assertIn("turn consistency audit unit tests", labels)
+        self.assertIn("kernel projection smoke", labels)
         self.assertIn("engine tests", labels)
         self.assertIn("desktop unit tests", labels)
         self.assertIn("stability soak unit tests", labels)
@@ -68,12 +69,16 @@ class PreReleaseGateTests(unittest.TestCase):
         self.assertIn("orchestrator tests", labels)
         self.assertIn("gateway tests", labels)
         self.assertIn("memorybench provider", labels)
+        self.assertIn("kernel projection smoke", labels)
         self.assertIn("ui contract", labels)
         self.assertIn("desktop build", labels)
         self.assertIn("eval unit tests", labels)
         self.assertIn("eval syntax", labels)
         self.assertNotIn("model eval", labels)
         self.assertNotIn("gateway eval", labels)
+        by_label = {step.label: step for step in plan}
+        self.assertIn("scripts.test_kernel_regression_gate", by_label["eval unit tests"].command)
+        self.assertIn("scripts.test_smoke_kernel_projection", by_label["eval unit tests"].command)
 
     def test_env_enables_model_and_gateway_eval(self):
         env = {
@@ -125,6 +130,7 @@ class PreReleaseGateTests(unittest.TestCase):
                 "orchestrator tests",
                 "task runtime tests",
                 "turn consistency audit unit tests",
+                "kernel projection smoke",
                 "engine tests",
                 "gateway tests",
                 "memorybench provider",
