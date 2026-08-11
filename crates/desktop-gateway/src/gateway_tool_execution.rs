@@ -94,6 +94,36 @@ pub(crate) fn browser_effect_class(
         .then_some(local_first_execution_protocol::EffectClass::ExternalWrite)
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum BrowserEffectRisk {
+    Low,
+    High,
+}
+
+pub(crate) fn browser_action_effect_risk(
+    action: &serde_json::Value,
+    payment_floor_refs: &std::collections::HashSet<String>,
+    focus_payment_context: bool,
+) -> BrowserEffectRisk {
+    match browser_safety::effective_action_class(action, payment_floor_refs, focus_payment_context)
+    {
+        Ok(browser_safety::ActionClass::Ordinary) => BrowserEffectRisk::Low,
+        Ok(
+            browser_safety::ActionClass::Account
+            | browser_safety::ActionClass::Booking
+            | browser_safety::ActionClass::PaymentCommit,
+        )
+        | Err(_) => BrowserEffectRisk::High,
+    }
+}
+
+pub(crate) fn browser_act_uncertain_failure_requires_user_resolution(
+    risk: BrowserEffectRisk,
+    failure_kind: BrowserActFailureKind,
+) -> bool {
+    risk == BrowserEffectRisk::High && failure_kind == BrowserActFailureKind::UnknownRemoteOutcome
+}
+
 pub(crate) fn begin_browser_effect<'a>(
     ctx: &BrowserToolCtx<'a>,
     operation: &str,
@@ -1510,6 +1540,8 @@ navigate elsewhere to work around it.",
                                 ))
                             }
                         } else {
+                            let effect_risk =
+                                browser_action_effect_risk(&action, &current_floor_refs, focus_ctx);
                             let effect_lease = match begin_browser_effect(
                                 ctx,
                                 "browser_act",
@@ -1935,6 +1967,26 @@ chosen. Otherwise try a different element, scroll, or wait (kind=wait).]",
                                                 )),
                                                 Err(receipt_error) => Err(format!(
                                                     "Browser action was never dispatched, but its receipt could not be released: {receipt_error}. Transport error: {}",
+                                                    redact_sensitive_text(&error)
+                                                )),
+                                            }
+                                        } else if !browser_act_uncertain_failure_requires_user_resolution(
+                                            effect_risk,
+                                            failure_kind,
+                                        ) {
+                                            match release_browser_effect_not_applied(
+                                                ctx,
+                                                &effect_lease,
+                                                "low_risk_remote_outcome_unknown",
+                                                &redact_sensitive_text(&error),
+                                            ) {
+                                                Ok(receipt) => Err(format!(
+                                                    "BROWSER EFFECT LOW RISK UNKNOWN (receipt {}): the browser action was ordinary/search-flow interaction, so Homun will not ask the user to verify an external write outcome. Treat this as browser no-progress, inspect the current page, and continue or report partial results. Sidecar error: {}",
+                                                    receipt.receipt_ref.as_ref(),
+                                                    redact_sensitive_text(&error)
+                                                )),
+                                                Err(receipt_error) => Err(format!(
+                                                    "Low-risk browser action outcome was unknown and its receipt could not be released: {receipt_error}. Sidecar error: {}",
                                                     redact_sensitive_text(&error)
                                                 )),
                                             }

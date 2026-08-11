@@ -4480,6 +4480,55 @@ fn browser_act_transport_errors_are_classified_conservatively() {
     );
 }
 
+#[test]
+fn ordinary_browser_action_ambiguity_is_low_risk_no_user_resolution() {
+    let action = serde_json::json!({
+        "kind": "click",
+        "ref": "e184",
+        "action_class": "ordinary"
+    });
+    let floor_refs = std::collections::HashSet::new();
+
+    assert_eq!(
+        super::browser_action_effect_risk(&action, &floor_refs, false),
+        super::BrowserEffectRisk::Low
+    );
+    assert!(
+        !super::browser_act_uncertain_failure_requires_user_resolution(
+            super::BrowserEffectRisk::Low,
+            super::BrowserActFailureKind::UnknownRemoteOutcome,
+        ),
+        "a read/search ordinary click timeout must become browser no-progress, not an effect_resolution card"
+    );
+}
+
+#[test]
+fn booking_account_and_payment_browser_actions_remain_high_risk() {
+    let floor_refs = std::collections::HashSet::from(["pay-ref".to_string()]);
+    for action in [
+        serde_json::json!({"kind": "click", "ref": "e7", "action_class": "booking"}),
+        serde_json::json!({"kind": "click", "ref": "e8", "action_class": "account"}),
+        serde_json::json!({
+            "kind": "click",
+            "ref": "pay-ref",
+            "action_class": "payment_commit",
+            "payment_approval_id": "pay_1"
+        }),
+    ] {
+        assert_eq!(
+            super::browser_action_effect_risk(&action, &floor_refs, false),
+            super::BrowserEffectRisk::High
+        );
+        assert!(
+            super::browser_act_uncertain_failure_requires_user_resolution(
+                super::BrowserEffectRisk::High,
+                super::BrowserActFailureKind::UnknownRemoteOutcome,
+            ),
+            "high-risk browser ambiguity still needs human verification"
+        );
+    }
+}
+
 /// Builds the minimal browser tool context needed to settle an effect receipt:
 /// an active execution contract allowing `ExternalWrite` plus fabricated
 /// per-turn scratch state. Mirrors the effect_host `activate` helper.
