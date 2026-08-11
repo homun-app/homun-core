@@ -2254,7 +2254,7 @@ impl TaskStore {
                     result_json, effects_json, error_json, compensation_json,
                     prepared_at, started_at, resolved_at
              FROM execution_effect_receipts
-             WHERE user_id = ?1 AND status = 'uncertain'
+             WHERE user_id = ?1 AND status = 'uncertain' AND effect_class != 'read'
              ORDER BY prepared_at ASC, idempotency_key ASC",
         )?;
         let rows = stmt.query_map([user_id], map_effect_receipt_row)?;
