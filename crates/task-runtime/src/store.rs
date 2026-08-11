@@ -1,4 +1,7 @@
-use crate::turn_reducer::{REDUCED_TERMINAL_TURN_EVENT_KIND_SQL_LIST, turn_event_kind_is_terminal};
+use crate::turn_reducer::{
+    KernelEffectProjection, KernelProjectionInput, REDUCED_TERMINAL_TURN_EVENT_KIND_SQL_LIST,
+    ReducedTurnStatus, reduce_kernel_projection, turn_event_kind_is_terminal,
+};
 use crate::{
     ActiveTurnProjection, AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus,
     ApprovalRequest, Automation, AutomationRun, BrowserCheckpointRecord, EffectReceiptClaim,
@@ -3845,9 +3848,63 @@ impl TaskStore {
         let latest_turn_record = latest_turn
             .as_ref()
             .and_then(|(_, _, task_json, _, _)| serde_json::from_str::<TaskRecord>(task_json).ok());
-        let latest_turn_status = latest_turn
+        let stored_latest_turn_status = latest_turn
             .as_ref()
             .map(|(_, status, _, _, _)| status.clone());
+        let latest_kernel_projection =
+            match (latest_turn_id.as_deref(), latest_turn_record.as_ref()) {
+                (Some(turn_id), Some(task)) => {
+                    let turn_events = self.read_turn_events(turn_id, 0)?;
+                    let runtime_plan = load_runtime_plan_on(
+                        &self.connection,
+                        task.user_id.as_str(),
+                        task.workspace_id.as_str(),
+                        thread_id,
+                    )?;
+                    let uncertain_effects = self
+                        .list_effect_receipts_for_thread(
+                            thread_id,
+                            task.user_id.as_str(),
+                            task.workspace_id.as_str(),
+                        )?
+                        .into_iter()
+                        .filter(|receipt| receipt.status == EffectReceiptStatus::Uncertain)
+                        .map(|receipt| KernelEffectProjection {
+                            effect_class: receipt.effect_class,
+                            status: receipt.status,
+                        })
+                        .collect::<Vec<_>>();
+                    let terminal_reason = self
+                        .list_agent_runs_for_turn(
+                            turn_id,
+                            task.user_id.as_str(),
+                            task.workspace_id.as_str(),
+                        )?
+                        .into_iter()
+                        .rev()
+                        .find(|run| run.status != AgentRunStatus::Running)
+                        .and_then(|run| run.terminal_reason);
+                    Some(reduce_kernel_projection(KernelProjectionInput {
+                        turn_events: &turn_events,
+                        runtime_plan: runtime_plan.as_ref(),
+                        uncertain_effects: &uncertain_effects,
+                        terminal_reason: terminal_reason.as_deref(),
+                    }))
+                }
+                _ => None,
+            };
+        let latest_turn_status = latest_kernel_projection
+            .as_ref()
+            .and_then(|projection| match projection.turn.status {
+                ReducedTurnStatus::Completed => Some("completed".to_string()),
+                ReducedTurnStatus::Failed => Some("failed".to_string()),
+                ReducedTurnStatus::Cancelled => Some("cancelled".to_string()),
+                ReducedTurnStatus::Empty
+                | ReducedTurnStatus::Running
+                | ReducedTurnStatus::WaitingUser
+                | ReducedTurnStatus::WaitingApproval => None,
+            })
+            .or(stored_latest_turn_status);
         let latest_turn_last_seq = latest_turn_id
             .as_deref()
             .map(|turn_id| {
@@ -3859,8 +3916,14 @@ impl TaskStore {
             })
             .transpose()?
             .unwrap_or(0);
+        let latest_turn_is_canonically_terminal = latest_kernel_projection
+            .as_ref()
+            .is_some_and(|projection| projection.turn.is_terminal);
         let active_turn = latest_turn.as_ref().and_then(
             |(turn_id, status, task_json, updated_at, blocked_reason)| {
+                if latest_turn_is_canonically_terminal {
+                    return None;
+                }
                 if !crate::turn_lifecycle::status_has_active_turn_projection(status.as_str()) {
                     return None;
                 }
@@ -3925,14 +3988,9 @@ impl TaskStore {
             }
         }
         if latest_turn_has_plan_event
-            && let Some(task) = latest_turn_record.as_ref()
-            && let Some(runtime_plan) = load_runtime_plan_on(
-                &self.connection,
-                task.user_id.as_str(),
-                task.workspace_id.as_str(),
-                thread_id,
-            )?
-            && let Some(markdown) = runtime_plan_markdown(&runtime_plan.plan_json)
+            && let Some(kernel_projection) = latest_kernel_projection.as_ref()
+            && let Some(active_plan) = kernel_projection.active_plan.as_ref()
+            && let Some(markdown) = runtime_plan_markdown(&active_plan.plan_json)
         {
             plan_markdown = Some(markdown);
         }
@@ -6872,6 +6930,116 @@ mod chat_turn_query_tests {
                 "**Goal**: Consegnare una app stabile\n\n- [x] **Analizzare ownership** (`s1`): mappa completata\n- [-] **Consolidare PlanState** (`s2`): in corso"
             ),
             "thread activity must render the canonical runtime plan after step_advance"
+        );
+    }
+
+    #[test]
+    fn read_receipts_do_not_block_thread_activity_projection() {
+        let s = store();
+        let mut task = make_chat_turn(
+            "turn_read_receipt",
+            "threadReadReceipt",
+            TaskStatus::Running,
+        );
+        task.created_at = OffsetDateTime::from_unix_timestamp(100).unwrap();
+        s.insert_chat_turn(
+            &task,
+            "threadReadReceipt",
+            "req-read-receipt",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.upsert_runtime_plan(
+            "u",
+            "w",
+            "threadReadReceipt",
+            0,
+            &json!({
+                "goal": "trova un treno",
+                "steps": [
+                    {"id": "s1", "title": "Cerca risultati", "status": "done", "detail": "ricerca completata"},
+                    {"id": "s2", "title": "Leggi risultati", "status": "doing", "detail": "in corso"}
+                ]
+            }),
+            "open",
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_read_receipt",
+            TurnEventKind::StepAdvance,
+            json!({
+                "step_id": "s1",
+                "title": "Cerca risultati",
+                "from": "doing",
+                "to": "done",
+                "verified": true,
+                "note": null
+            }),
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_read_receipt",
+            TurnEventKind::Done,
+            json!({"text": "risultati letti"}),
+        )
+        .unwrap();
+        s.create_agent_run(&NewAgentRun {
+            run_id: "run-read-receipt".into(),
+            turn_id: "turn_read_receipt".into(),
+            thread_id: "threadReadReceipt".into(),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            role: None,
+            model: Some("test-model".into()),
+            provider: Some("test-provider".into()),
+            prompt_fingerprint: None,
+        })
+        .unwrap();
+        s.finish_agent_run(
+            "run-read-receipt",
+            AgentRunStatus::Completed,
+            Some("canonical_completed"),
+        )
+        .unwrap();
+        let receipt_ref =
+            EffectReceiptRef::from_store_id("44444444444444444444444444444444").unwrap();
+        s.prepare_effect_receipt(&NewExecutionEffectReceipt {
+            receipt_ref: receipt_ref.clone(),
+            execution_id: "turn_read_receipt".into(),
+            revision: 1,
+            run_id: Some("run-read-receipt".into()),
+            thread_id: Some("threadReadReceipt".into()),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            effect_class: EffectClass::Read,
+            operation: "browser.extract".into(),
+            arguments_hash: "read-hash".into(),
+            idempotency_key: "read-idempotency".into(),
+            compensation: None,
+        })
+        .unwrap();
+        s.claim_effect_receipt(&receipt_ref).unwrap();
+        s.mark_effect_receipt_uncertain(&receipt_ref, &json!({"reason": "read interrupted"}))
+            .unwrap();
+
+        let projection = s.project_thread_activity("threadReadReceipt", 200).unwrap();
+
+        assert_eq!(
+            projection.latest_turn_status.as_deref(),
+            Some("completed"),
+            "terminal turn_events must beat stale task liveness in thread activity"
+        );
+        assert!(
+            projection.active_turn.is_none(),
+            "a canonically terminal turn must not keep the UI in active thinking state"
+        );
+        assert_eq!(
+            projection.plan_markdown.as_deref(),
+            Some(
+                "**Goal**: trova un treno\n\n- [x] **Cerca risultati** (`s1`): ricerca completata\n- [-] **Leggi risultati** (`s2`): in corso"
+            ),
+            "read receipts are evidence, not user-resolution blockers"
         );
     }
 
