@@ -605,13 +605,16 @@ mod browser_rehydrate_contract_tests {
 
     #[test]
     fn only_mutating_browser_tools_require_effect_receipts() {
-        for name in ["browser_act", "browser_rehydrate"] {
-            assert_eq!(
-                browser_effect_class(name),
-                Some(local_first_execution_protocol::EffectClass::ExternalWrite),
-                "{name} must cross the effect host"
-            );
-        }
+        assert_eq!(
+            browser_effect_class("browser_rehydrate"),
+            Some(local_first_execution_protocol::EffectClass::ExternalWrite),
+            "browser_rehydrate must cross the effect host as an external write"
+        );
+        assert_eq!(
+            browser_effect_class("browser_act"),
+            None,
+            "browser_act effect class is action-dependent and owned by gateway_tool_execution"
+        );
         for name in [
             "browser_navigate",
             "browser_snapshot",

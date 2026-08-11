@@ -9,7 +9,18 @@ use super::*;
 
 #[test]
 fn tool_execution_owner_smoke() {
-    assert!(browser_effect_class("browser_act").is_some());
+    assert_eq!(
+        browser_action_effect_class(
+            &serde_json::json!({"kind": "click", "ref": "e1", "action_class": "ordinary"}),
+            &std::collections::HashSet::new(),
+            false,
+        ),
+        local_first_execution_protocol::EffectClass::Read,
+    );
+    assert_eq!(
+        browser_effect_class("browser_rehydrate"),
+        Some(local_first_execution_protocol::EffectClass::ExternalWrite)
+    );
 }
 
 #[test]
@@ -90,7 +101,7 @@ pub(crate) struct BrowserToolCtx<'a> {
 pub(crate) fn browser_effect_class(
     name: &str,
 ) -> Option<local_first_execution_protocol::EffectClass> {
-    matches!(name, "browser_act" | "browser_rehydrate")
+    matches!(name, "browser_rehydrate")
         .then_some(local_first_execution_protocol::EffectClass::ExternalWrite)
 }
 
@@ -117,11 +128,61 @@ pub(crate) fn browser_action_effect_risk(
     }
 }
 
+pub(crate) fn browser_action_effect_class(
+    action: &serde_json::Value,
+    payment_floor_refs: &std::collections::HashSet<String>,
+    focus_payment_context: bool,
+) -> local_first_execution_protocol::EffectClass {
+    match browser_action_effect_risk(action, payment_floor_refs, focus_payment_context) {
+        BrowserEffectRisk::Low => local_first_execution_protocol::EffectClass::Read,
+        BrowserEffectRisk::High => local_first_execution_protocol::EffectClass::ExternalWrite,
+    }
+}
+
 pub(crate) fn browser_act_uncertain_failure_requires_user_resolution(
     risk: BrowserEffectRisk,
     failure_kind: BrowserActFailureKind,
 ) -> bool {
     risk == BrowserEffectRisk::High && failure_kind == BrowserActFailureKind::UnknownRemoteOutcome
+}
+
+pub(crate) fn begin_browser_action_effect<'a>(
+    ctx: &BrowserToolCtx<'a>,
+    call_id: &str,
+    action: serde_json::Value,
+    payment_floor_refs: &std::collections::HashSet<String>,
+    focus_payment_context: bool,
+) -> Result<crate::effect_host::EffectDecision<'a>, String> {
+    let contract = ctx.execution_contract.ok_or_else(|| {
+        "Browser mutation blocked: no durable execution scope is available.".to_string()
+    })?;
+    let effect_class =
+        browser_action_effect_class(&action, payment_floor_refs, focus_payment_context);
+    crate::effect_host::EffectHost::new(ctx.state.task_store.as_ref(), contract, ctx.effect_run_id)
+        .begin(crate::effect_host::EffectRequest::capability(
+            "browser_act",
+            call_id,
+            effect_class,
+            action,
+        ))
+}
+
+pub(crate) fn authorize_browser_action_effect(
+    ctx: &BrowserToolCtx<'_>,
+    call_id: &str,
+    action: serde_json::Value,
+    payment_floor_refs: &std::collections::HashSet<String>,
+    focus_payment_context: bool,
+) -> Result<(), String> {
+    let contract = ctx.execution_contract.ok_or_else(|| {
+        "Browser mutation blocked: no durable execution scope is available.".to_string()
+    })?;
+    let effect_class =
+        browser_action_effect_class(&action, payment_floor_refs, focus_payment_context);
+    let request =
+        crate::effect_host::EffectRequest::capability("browser_act", call_id, effect_class, action);
+    crate::effect_host::EffectHost::new(ctx.state.task_store.as_ref(), contract, ctx.effect_run_id)
+        .authorize_request(&request)
 }
 
 pub(crate) fn begin_browser_effect<'a>(
@@ -142,23 +203,6 @@ pub(crate) fn begin_browser_effect<'a>(
             effect_class,
             arguments,
         ))
-}
-
-pub(crate) fn authorize_browser_effect(
-    ctx: &BrowserToolCtx<'_>,
-    operation: &str,
-    call_id: &str,
-    arguments: serde_json::Value,
-) -> Result<(), String> {
-    let contract = ctx.execution_contract.ok_or_else(|| {
-        "Browser mutation blocked: no durable execution scope is available.".to_string()
-    })?;
-    let effect_class = browser_effect_class(operation)
-        .ok_or_else(|| format!("browser operation {operation} is not effectful"))?;
-    let request =
-        crate::effect_host::EffectRequest::capability(operation, call_id, effect_class, arguments);
-    crate::effect_host::EffectHost::new(ctx.state.task_store.as_ref(), contract, ctx.effect_run_id)
-        .authorize_request(&request)
 }
 
 pub(crate) fn complete_browser_effect(
@@ -1434,8 +1478,14 @@ or tell the user to start the contained computer (Settings → Local computer)."
                         let mut preflight_error = if blocked_before_claim.is_some() {
                             None
                         } else {
-                            authorize_browser_effect(ctx, "browser_act", call_id, action.clone())
-                                .err()
+                            authorize_browser_action_effect(
+                                ctx,
+                                call_id,
+                                action.clone(),
+                                &current_floor_refs,
+                                focus_ctx,
+                            )
+                            .err()
                         };
                         // SAFETY GATE: arbitrary page script remains forbidden and
                         // the final action that transfers money requires a matching
@@ -1542,11 +1592,12 @@ navigate elsewhere to work around it.",
                         } else {
                             let effect_risk =
                                 browser_action_effect_risk(&action, &current_floor_refs, focus_ctx);
-                            let effect_lease = match begin_browser_effect(
+                            let effect_lease = match begin_browser_action_effect(
                                 ctx,
-                                "browser_act",
                                 call_id,
                                 action.clone(),
+                                &current_floor_refs,
+                                focus_ctx,
                             ) {
                                 Ok(crate::effect_host::EffectDecision::Execute(lease)) => lease,
                                 Ok(crate::effect_host::EffectDecision::Replay(receipt)) => {

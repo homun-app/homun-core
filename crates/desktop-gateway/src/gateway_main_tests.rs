@@ -4529,6 +4529,111 @@ fn booking_account_and_payment_browser_actions_remain_high_risk() {
     }
 }
 
+#[test]
+fn browser_act_receipt_effect_class_follows_action_risk() {
+    let _env = TestEnv::acquire();
+    let state = super::AppState::for_tests();
+    let (contract, sink) =
+        browser_settlement_ctx_parts(&state, "execution-browser-act-effect-class");
+    let journal = super::agent_journal::GatewayJournal::Disabled;
+    let mut browser_used = false;
+    let mut last_snapshot = String::new();
+    let mut floor_refs = std::collections::HashMap::new();
+    let mut payment_contexts = std::collections::HashMap::new();
+    let mut pending_image = None;
+    let mut tool_call_ids = std::collections::BTreeSet::new();
+    let mut current_target = "booking".to_string();
+    let mut opened_targets = Vec::new();
+    let mut nav_failures = std::collections::HashMap::new();
+    let mut suspend_receipt = None;
+    let mut outcome_hint = None;
+    let ctx = super::BrowserToolCtx {
+        browser_used: &mut browser_used,
+        last_snapshot: &mut last_snapshot,
+        payment_floor_refs: &mut floor_refs,
+        payment_context_by_target: &mut payment_contexts,
+        pending_browser_image: &mut pending_image,
+        browser_tool_call_ids: &mut tool_call_ids,
+        current_target: &mut current_target,
+        opened_targets: &mut opened_targets,
+        nav_failures: &mut nav_failures,
+        state: &state,
+        tx: &sink,
+        thread_id: Some("thread-browser-settle"),
+        prompt: "",
+        read_only: false,
+        channel_owner: false,
+        journal: &journal,
+        execution_contract: Some(&contract),
+        effect_run_id: Some("run-browser-settle"),
+        suspend_effect_receipt: &mut suspend_receipt,
+        outcome_hint: &mut outcome_hint,
+        model_supports_vision: true,
+    };
+
+    let ordinary_action = serde_json::json!({
+        "target_id": "booking",
+        "kind": "click",
+        "ref": "e184",
+        "action_class": "ordinary"
+    });
+    let super::effect_host::EffectDecision::Execute(ordinary) = super::begin_browser_action_effect(
+        &ctx,
+        "call-ordinary-read",
+        ordinary_action,
+        &std::collections::HashSet::new(),
+        false,
+    )
+    .expect("ordinary browser act claims") else {
+        panic!("ordinary browser act must execute first");
+    };
+    let ordinary_receipt_ref = ordinary.receipt_ref().clone();
+    let ordinary_receipt = state
+        .task_store
+        .lock()
+        .expect("task store")
+        .effect_receipt(&ordinary_receipt_ref)
+        .expect("load ordinary receipt")
+        .expect("ordinary receipt");
+    assert_eq!(
+        ordinary_receipt.effect_class,
+        local_first_execution_protocol::EffectClass::Read
+    );
+    super::release_browser_effect_not_applied(&ctx, &ordinary, "test_release", "test cleanup")
+        .expect("release ordinary receipt");
+
+    let booking_action = serde_json::json!({
+        "target_id": "booking",
+        "kind": "click",
+        "ref": "e7",
+        "action_class": "booking"
+    });
+    let super::effect_host::EffectDecision::Execute(booking) = super::begin_browser_action_effect(
+        &ctx,
+        "call-booking-write",
+        booking_action,
+        &std::collections::HashSet::new(),
+        false,
+    )
+    .expect("booking browser act claims") else {
+        panic!("booking browser act must execute first");
+    };
+    let booking_receipt_ref = booking.receipt_ref().clone();
+    let booking_receipt = state
+        .task_store
+        .lock()
+        .expect("task store")
+        .effect_receipt(&booking_receipt_ref)
+        .expect("load booking receipt")
+        .expect("booking receipt");
+    assert_eq!(
+        booking_receipt.effect_class,
+        local_first_execution_protocol::EffectClass::ExternalWrite
+    );
+    super::release_browser_effect_not_applied(&ctx, &booking, "test_release", "test cleanup")
+        .expect("release booking receipt");
+}
+
 /// Builds the minimal browser tool context needed to settle an effect receipt:
 /// an active execution contract allowing `ExternalWrite` plus fabricated
 /// per-turn scratch state. Mirrors the effect_host `activate` helper.
@@ -4606,11 +4711,17 @@ fn begin_browser_act_lease<'a>(
     ctx: &super::BrowserToolCtx<'a>,
     call_id: &str,
 ) -> super::effect_host::EffectLease<'a> {
-    let super::effect_host::EffectDecision::Execute(lease) = super::begin_browser_effect(
+    let super::effect_host::EffectDecision::Execute(lease) = super::begin_browser_action_effect(
         ctx,
-        "browser_act",
         call_id,
-        serde_json::json!({"target_id": "booking", "kind": "click", "ref": "e7"}),
+        serde_json::json!({
+            "target_id": "booking",
+            "kind": "click",
+            "ref": "e7",
+            "action_class": "booking"
+        }),
+        &std::collections::HashSet::new(),
+        false,
     )
     .expect("claim browser_act effect") else {
         panic!("first browser_act claim must execute");
@@ -4683,11 +4794,17 @@ fn browser_act_pre_dispatch_failure_releases_the_effect_without_suspension() {
     // The engine stays free to retry: the same logical call claims a fresh
     // execution instead of resolving as uncertain.
     assert!(matches!(
-        super::begin_browser_effect(
+        super::begin_browser_action_effect(
             &ctx,
-            "browser_act",
             "call-pre-dispatch",
-            serde_json::json!({"target_id": "booking", "kind": "click", "ref": "e7"}),
+            serde_json::json!({
+                "target_id": "booking",
+                "kind": "click",
+                "ref": "e7",
+                "action_class": "booking"
+            }),
+            &std::collections::HashSet::new(),
+            false,
         )
         .expect("retry claim"),
         super::effect_host::EffectDecision::Execute(_)
@@ -4753,11 +4870,17 @@ fn browser_act_ambiguous_failure_stays_uncertain_and_suspends() {
 
     // An uncertain receipt never executes again: retry resolves, never re-dispatches.
     assert!(matches!(
-        super::begin_browser_effect(
+        super::begin_browser_action_effect(
             &ctx,
-            "browser_act",
             "call-ambiguous",
-            serde_json::json!({"target_id": "booking", "kind": "click", "ref": "e7"}),
+            serde_json::json!({
+                "target_id": "booking",
+                "kind": "click",
+                "ref": "e7",
+                "action_class": "booking"
+            }),
+            &std::collections::HashSet::new(),
+            false,
         )
         .expect("resolve claim"),
         super::effect_host::EffectDecision::Resolve(_)
