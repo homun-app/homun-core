@@ -1072,6 +1072,83 @@ export interface ThreadActivityProjection {
   } | null;
 }
 
+export interface KernelThreadProjection {
+  thread_id: string;
+  revision: number;
+  turn: {
+    active_turn_id: string | null;
+    status: "idle" | "running" | "waiting_user" | "waiting_approval" | "completed" | "failed" | "cancelled";
+    last_event_seq: number;
+    terminal_reason: string | null;
+    failure_text: string | null;
+    updated_at: number;
+  };
+  plan: {
+    goal: string | null;
+    revision: number;
+    steps: Array<{
+      id: string;
+      title: string;
+      status: "todo" | "doing" | "done" | "blocked" | "failed" | string;
+      detail: string | null;
+    }>;
+    markdown: string;
+  } | null;
+  activity: Array<{
+    text: string;
+    created_at: number;
+  }>;
+  browser: {
+    state: "idle" | "active" | "waiting_user" | "done" | "failed" | "unknown" | string;
+    target_id: string | null;
+    latest_progress: string | null;
+    failure_reason: string | null;
+    snapshot_verified: boolean;
+  };
+  capability_runtime: {
+    loaded_tools: string[];
+    armed_sensitive_domains: string[];
+    pending_capability: string | null;
+    blocked_capabilities: Array<{
+      key: string;
+      reason: string;
+    }>;
+  };
+  attention: {
+    awaiting_user: boolean;
+    approvals: Array<{
+      approval_id: string;
+      task_id: string;
+      action: string;
+      risk_level: string;
+      data_boundary: string;
+      explanation: string;
+      status: string;
+    }>;
+    uncertain_effects: Array<{
+      receipt_ref: string;
+      execution_id: string;
+      operation: string;
+      effect_class: string;
+    }>;
+  };
+  actions: {
+    can_stop: boolean;
+    composer_mode: "new_turn" | "steer_active_turn" | "reply_to_user_wait" | "approval_only" | "disabled" | string;
+  };
+}
+
+export async function fetchKernelThreadProjection(
+  threadId: string,
+): Promise<KernelThreadProjection> {
+  return gatewayJson<KernelThreadProjection>(
+    `/api/chat/threads/${encodeURIComponent(threadId)}/kernel-projection`,
+  );
+}
+
+/** Legacy compatibility endpoint. New runtime/UI code should consume
+ *  `fetchKernelThreadProjection`; this remains until no renderer consumer uses
+ *  `ThreadActivityProjection` outside the legacy marker fallback. */
 export async function fetchThreadActivity(
   threadId: string,
 ): Promise<ThreadActivityProjection> {

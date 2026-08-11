@@ -57,6 +57,10 @@ pub(crate) fn build_gateway_router(state: AppState) -> Router {
         .route("/api/chat/threads/{thread_id}", delete(delete_chat_thread))
         .route("/api/chat/threads/{thread_id}/messages", get(chat_messages))
         .route(
+            "/api/chat/threads/{thread_id}/kernel-projection",
+            get(thread_kernel_projection),
+        )
+        .route(
             "/api/chat/threads/{thread_id}/activity",
             get(thread_activity_projection),
         )

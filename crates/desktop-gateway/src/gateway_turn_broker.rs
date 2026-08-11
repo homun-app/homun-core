@@ -1103,6 +1103,29 @@ pub(crate) async fn thread_activity_projection(
     Ok(Json(projection))
 }
 
+/// GET /api/chat/threads/{thread_id}/kernel-projection — canonical Runtime V2 thread
+/// projection. This is the backend-owned contract for turn status, plan, activity,
+/// attention, browser, capability runtime, and composer actions. `/activity` remains
+/// a compatibility adapter until the renderer is migrated.
+pub(crate) async fn thread_kernel_projection(
+    Path(thread_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<local_first_task_runtime::KernelThreadProjection>, GatewayError> {
+    let store = state.task_store.lock().map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "broker_store_lock",
+        message: format!("lock: {e}"),
+    })?;
+    let projection = store
+        .project_kernel_thread(&thread_id, 200)
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "thread_kernel_projection",
+            message: format!("{e}"),
+        })?;
+    Ok(Json(projection))
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct SteeringMutationRequest {
     expected_revision: u64,
@@ -1588,6 +1611,78 @@ mod broker_event_tests {
     #[test]
     fn heartbeat_interval_is_fifteen_seconds() {
         assert_eq!(HEARTBEAT_INTERVAL_SECS, 15);
+    }
+}
+
+#[cfg(test)]
+mod kernel_projection_route_tests {
+    use super::*;
+    use local_first_task_runtime::{
+        AgentRunStatus, NewAgentRun, TaskPriority, TaskRecord, TaskStatus, TurnEventKind,
+    };
+
+    #[tokio::test]
+    async fn kernel_projection_route_returns_terminal_actions() {
+        let state = AppState::for_tests();
+        {
+            let store = state.task_store.lock().unwrap();
+            let mut task = TaskRecord::new(
+                "turn-kernel-route",
+                gateway_user_id(),
+                gateway_workspace_id(),
+                "chat_turn",
+                "seed terminal projection",
+                serde_json::json!({}),
+            );
+            task.status = TaskStatus::Running;
+            task.priority = TaskPriority::High;
+            store
+                .insert_chat_turn(
+                    &task,
+                    "thread-kernel-route",
+                    "req-kernel-route",
+                    "interactive",
+                    "full",
+                )
+                .unwrap();
+            store
+                .insert_turn_event(
+                    "turn-kernel-route",
+                    TurnEventKind::Done,
+                    serde_json::json!({"text": "done"}),
+                )
+                .unwrap();
+            store
+                .create_agent_run(&NewAgentRun {
+                    run_id: "run-kernel-route".into(),
+                    turn_id: "turn-kernel-route".into(),
+                    thread_id: "thread-kernel-route".into(),
+                    user_id: gateway_user_id().as_str().to_string(),
+                    workspace_id: gateway_workspace_id().as_str().to_string(),
+                    role: None,
+                    model: Some("test-model".into()),
+                    provider: Some("test-provider".into()),
+                    prompt_fingerprint: None,
+                })
+                .unwrap();
+            store
+                .finish_agent_run(
+                    "run-kernel-route",
+                    AgentRunStatus::Completed,
+                    Some("canonical_completed"),
+                )
+                .unwrap();
+        }
+
+        let Json(projection) =
+            thread_kernel_projection(Path("thread-kernel-route".to_string()), State(state))
+                .await
+                .unwrap();
+
+        assert_eq!(projection.turn.status, "completed");
+        assert_eq!(projection.turn.active_turn_id, None);
+        assert_eq!(projection.actions.can_stop, false);
+        assert_eq!(projection.actions.composer_mode, "new_turn");
     }
 }
 
