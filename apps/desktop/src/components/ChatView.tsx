@@ -17,7 +17,6 @@ import {
   buildWorkbenchArtifacts,
 } from "./ChatWorkspaceProjections";
 import { projectWorkspaceSections } from "../lib/workspaceIslandSections";
-import { deriveTurnLifecycle } from "../lib/chat-runtime/lifecycle";
 import { deriveBrowserStatus } from "../lib/chat-runtime/browserActivityLifecycle";
 import {
   PANEL_VIEWS,
@@ -307,6 +306,7 @@ export function ChatView({
     projectedTurnStatus,
     projectionLoaded,
     resumeComputer,
+    runtimeViewModel,
     setActiveSurface,
     setComputerLiveStatus,
     takeoverComputer,
@@ -325,6 +325,7 @@ export function ChatView({
     activeTurnIdRef,
     streamOwnerTurnRef,
     turnReplayRef,
+    threadTailAwaitsHitl,
     translate: t,
   });
 
@@ -338,14 +339,7 @@ export function ChatView({
     hasActiveTurn,
     workInProgress,
     terminalTurnAtRest,
-  } = deriveTurnLifecycle({
-    promptSubmitting,
-    streamingAssistantId,
-    projectedActiveTurn,
-    projectedTurnStatus,
-    projectionLoaded,
-    threadTailAwaitsHitl,
-  });
+  } = runtimeViewModel.turnUiState;
 
   // ── Approval flow ──────────────────────────────────────────────────────
   const {
@@ -415,6 +409,7 @@ export function ChatView({
     threadMessages,
     replyContext,
     threadTailAwaitsHitl,
+    composerMode: runtimeViewModel.composerMode,
     setPromptSubmitting,
     setPromptError,
     setStreamingAssistantId,

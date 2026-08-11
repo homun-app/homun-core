@@ -1336,6 +1336,14 @@ assertContains("src/components/ChatView.tsx", "setOptimisticMessages", "chat str
 assertContains("src/components/ChatMessageContent.tsx", "<AssistantMessageBody", "streaming answers must render through the normal message body component");
 assertContains("src/components/useChatActivityProjection.ts", "projectedView.browserStatus.failureReason", "browser budget UI must use typed kernel failure reason");
 assertNotContains("src/components/useChatActivityProjection.ts", "browser_budget_exceeded", "browser budget marker text must not be parsed in the renderer");
+assertContains("src/components/ChatView.tsx", "runtimeViewModel", "ChatView must consume the kernel runtime view model");
+assertContains("src/components/ChatView.tsx", "runtimeViewModel.turnUiState", "ChatView lifecycle must come from the runtime view model");
+assertContains("src/components/useChatTurnSubmission.ts", "composerMode", "composer submission must receive kernel composer mode");
+assertContains("src/lib/chat-runtime/submissionRouting.mjs", "composerModeFromKernel", "submission routing must normalize kernel composer modes");
+assertNotContains("src/components/ChatView.tsx", "../lib/markers", "ChatView must not import marker parsing");
+assertNotContains("src/components/ChatView.tsx", "latestPlanMarkdown", "ChatView must not read plan marker text directly");
+assertNotContains("src/components/ChatView.tsx", "browser_budget_exceeded", "ChatView must not parse browser budget marker text");
+assertNotContains("src/components/useChatActivityProjection.ts", 'status === "doing" ? { ...step, status: "done"', "lifecycle code must not auto-complete doing plan steps");
 assertContains("src/i18n/locales/it.json", "Tempo massimo del browser raggiunto", "browser timeout is localized");
 assertMatches(
   "src/components/ChatMessageContent.tsx",

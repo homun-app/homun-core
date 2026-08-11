@@ -11,6 +11,7 @@ export interface UseChatBrowserActivityLifecycleParams {
   threadMessages: ChatMessage[];
   islandRefreshNonce?: number;
   activeStreamInProgress: boolean;
+  threadTailAwaitsHitl: boolean;
   liveActivitySteps: string[];
   livePlanMarkdown: string | null;
   activeTurnIdRef: { current: string | null };
@@ -38,6 +39,7 @@ export function useChatBrowserActivityLifecycle({
   threadMessages,
   islandRefreshNonce,
   activeStreamInProgress,
+  threadTailAwaitsHitl,
   liveActivitySteps,
   livePlanMarkdown,
   activeTurnIdRef,
@@ -83,6 +85,7 @@ export function useChatBrowserActivityLifecycle({
     projectedSubagents,
     projectedTurnStatus,
     projectionLoaded,
+    runtimeViewModel,
     workspacePlanGoal,
     workspacePlanSteps,
   } = useChatActivityProjection({
@@ -95,6 +98,7 @@ export function useChatBrowserActivityLifecycle({
     streamOwnerTurnRef,
     threadId,
     threadMessages,
+    threadTailAwaitsHitl,
     translate,
     turnReplayRef,
   });
@@ -128,6 +132,7 @@ export function useChatBrowserActivityLifecycle({
     projectedSubagents,
     projectedTurnStatus,
     projectionLoaded,
+    runtimeViewModel,
     workspacePlanGoal,
     workspacePlanSteps,
   };

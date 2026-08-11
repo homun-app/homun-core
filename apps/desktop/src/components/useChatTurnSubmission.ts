@@ -62,6 +62,7 @@ export interface UseChatTurnSubmissionParams {
   threadMessages: ChatMessage[];
   replyContext: ReplyContext | null;
   threadTailAwaitsHitl: boolean;
+  composerMode: string;
   setPromptSubmitting: Dispatch<SetStateAction<boolean>>;
   setPromptError: Dispatch<SetStateAction<string | null>>;
   setStreamingAssistantId: Dispatch<SetStateAction<string | null>>;
@@ -148,6 +149,7 @@ export function useChatTurnSubmission({
   bumpIslandRefreshNonce,
   seed, sessionId, translate: t,
   promptSubmitting, streamingAssistantId, threadMessages, replyContext, threadTailAwaitsHitl,
+  composerMode,
   setPromptSubmitting, setPromptError, setStreamingAssistantId, setStreamStatus,
   setLiveActivitySteps, setLivePlanMarkdown, setOptimisticMessages,
   setAutoContinueMessageId, setReplyContext,
@@ -530,7 +532,8 @@ export function useChatTurnSubmission({
     const model = options?.model;
     const submissionRoute = routeComposerSubmission({
       promptSubmitting, streamingAssistantId, projectedActiveTurn, projectedTurnStatus,
-      projectionLoaded, threadTailAwaitsHitl, explicitForceNewTurn: options?.forceNewTurn,
+      projectionLoaded, threadTailAwaitsHitl, composerMode,
+      explicitForceNewTurn: options?.forceNewTurn,
     });
     const forceNewTurn = submissionRoute.forceNewTurn;
     if (forceNewTurn) {

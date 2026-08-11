@@ -12,6 +12,7 @@ export interface KernelProjectionPresenterInput {
   persistedActivity: string[];
   persistedPlan: string | null;
   streamOwnerTurnId: string | null;
+  legacyThreadTailAwaitsHitl?: boolean;
 }
 
 export interface KernelProjectionPresenterView {
@@ -25,6 +26,7 @@ export interface KernelProjectionPresenterView {
   }>;
   workspacePlanGoal: string | null;
   turnUiState: {
+    isStreaming: boolean;
     hasActiveTurn: boolean;
     workInProgress: boolean;
     canStop: boolean;

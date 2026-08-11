@@ -122,13 +122,13 @@ KernelThreadActions {
 - Modify: `crates/task-runtime/src/store.rs`
 - Modify: `crates/task-runtime/src/lib.rs`
 
-- [ ] Add a failing reducer/store test named `kernel_thread_projection_owns_turn_plan_attention_and_actions`.
-- [ ] Build the fixture with one latest chat turn, a runtime plan with stable step ids, one read uncertain receipt, one external-write uncertain receipt, one waiting approval, and a terminal run.
-- [ ] Assert that read uncertainty does not set `attention.awaiting_user`, external-write uncertainty does, terminal run clears `active_turn_id`, and plan step statuses come from `runtime_plans`.
-- [ ] Add serializable DTOs in `types.rs`; keep field names snake_case to match current gateway JSON.
-- [ ] Add `TaskStore::project_kernel_thread(thread_id, activity_cap)` that calls the existing reducer and returns `KernelThreadProjection`.
-- [ ] Keep `project_thread_activity` as a compatibility adapter implemented from the new projection where possible.
-- [ ] Run:
+- [x] Add a failing reducer/store test named `kernel_thread_projection_owns_turn_plan_attention_and_actions`.
+- [x] Build the fixture with one latest chat turn, a runtime plan with stable step ids, one read uncertain receipt, one external-write uncertain receipt, one waiting approval, and a terminal run.
+- [x] Assert that read uncertainty does not set `attention.awaiting_user`, external-write uncertainty does, terminal run clears `active_turn_id`, and plan step statuses come from `runtime_plans`.
+- [x] Add serializable DTOs in `types.rs`; keep field names snake_case to match current gateway JSON.
+- [x] Add `TaskStore::project_kernel_thread(thread_id, activity_cap)` that calls the existing reducer and returns `KernelThreadProjection`.
+- [x] Keep `project_thread_activity` as a compatibility adapter implemented from the new projection where possible.
+- [x] Run:
 
 ```bash
 cargo test -p local-first-task-runtime kernel_thread_projection_owns_turn_plan_attention_and_actions -- --nocapture
@@ -153,13 +153,13 @@ Regression test: `kernel_thread_projection_owns_turn_plan_attention_and_actions`
 - Modify: `crates/desktop-gateway/src/gateway_routes.rs`
 - Modify: `apps/desktop/src/lib/chatApi.ts`
 
-- [ ] Add `GET /api/chat/threads/{thread_id}/kernel-projection`.
-- [ ] Return the exact `KernelThreadProjection` DTO from `TaskStore::project_kernel_thread`.
-- [ ] Add `KernelThreadProjection` TypeScript interfaces in `chatApi.ts`.
-- [ ] Add `fetchKernelThreadProjection(threadId)`.
-- [ ] Keep `fetchThreadActivity` temporarily, with a comment pointing to the removal condition: no renderer consumer outside the legacy adapter.
-- [ ] Add a gateway-level test or focused Rust route/unit test proving a terminal durable turn returns `turn.status="completed"`, `actions.can_stop=false`, and `actions.composer_mode="new_turn"`.
-- [ ] Run:
+- [x] Add `GET /api/chat/threads/{thread_id}/kernel-projection`.
+- [x] Return the exact `KernelThreadProjection` DTO from `TaskStore::project_kernel_thread`.
+- [x] Add `KernelThreadProjection` TypeScript interfaces in `chatApi.ts`.
+- [x] Add `fetchKernelThreadProjection(threadId)`.
+- [x] Keep `fetchThreadActivity` temporarily, with a comment pointing to the removal condition: no renderer consumer outside the legacy adapter.
+- [x] Add a gateway-level test or focused Rust route/unit test proving a terminal durable turn returns `turn.status="completed"`, `actions.can_stop=false`, and `actions.composer_mode="new_turn"`.
+- [x] Run:
 
 ```bash
 cargo test -p local-first-desktop-gateway kernel_projection -- --nocapture
@@ -184,14 +184,14 @@ Temporary fallback retained: `/activity`, until `useChatActivityProjection.ts` s
 - Add: `apps/desktop/src/lib/chat-runtime/kernelProjectionPresenter.ts`
 - Add: `apps/desktop/src/lib/chat-runtime/kernelProjectionPresenter.test.mjs`
 
-- [ ] Add RED tests before implementation:
+- [x] Add RED tests before implementation:
   - `terminal_projection_clears_active_thinking`
   - `durable_plan_projection_wins_over_marker_and_stream_gap`
   - `read_uncertain_effect_does_not_render_verification_attention`
   - `write_uncertain_effect_renders_attention`
   - `plugin_loaded_tools_do_not_change_liveness`
   - `browser_active_without_done_stays_active`
-- [ ] Implement a pure presenter returning:
+- [x] Implement a pure presenter returning:
   - `conversationPlan`
   - `conversationActivity`
   - `workspacePlanSteps`
@@ -201,9 +201,9 @@ Temporary fallback retained: `/activity`, until `useChatActivityProjection.ts` s
   - `attentionItems`
   - `browserStatus`
   - `capabilityRuntime`
-- [ ] The presenter may merge live current-turn stream rows only when `streamOwnerTurnId === projection.turn.active_turn_id`.
-- [ ] The presenter must ignore persisted marker plan/activity when `projectionLoaded === true`.
-- [ ] Run:
+- [x] The presenter may merge live current-turn stream rows only when `streamOwnerTurnId === projection.turn.active_turn_id`.
+- [x] The presenter must ignore persisted marker plan/activity when `projectionLoaded === true`.
+- [x] Run:
 
 ```bash
 npm --prefix apps/desktop test -- kernelProjectionPresenter
@@ -228,13 +228,13 @@ Temporary fallback retained: marker extraction only when `projectionLoaded === f
 - Modify: `apps/desktop/src/lib/chat-runtime/lifecycle.mjs`
 - Modify: `apps/desktop/src/lib/chat-runtime/lifecycle.test.mjs`
 
-- [ ] Replace `fetchThreadActivity` with `fetchKernelThreadProjection`.
-- [ ] Replace local state fragments (`projectedPlan`, `projectedActivity`, `projectedTurnStatus`, `projectedActiveTurn`) with one `kernelProjection` state value.
-- [ ] Use `kernelProjectionPresenter` for plan, activity, workspace steps, active-turn view, browser budget/failure state, and composer mode.
-- [ ] Delete the local `doing -> done` rewrite based on `projectedTurnStatus`; backend must return final step statuses.
-- [ ] Delete plan resurrection from `latestPlanMarkdown(messages)` when projection loaded.
-- [ ] Keep `latestPlanMarkdown` only inside a clearly named `legacyMarkerProjection` fallback path.
-- [ ] Run:
+- [x] Replace `fetchThreadActivity` with `fetchKernelThreadProjection`.
+- [x] Replace local state fragments (`projectedPlan`, `projectedActivity`, `projectedTurnStatus`, `projectedActiveTurn`) with one `kernelProjection` state value.
+- [x] Use `kernelProjectionPresenter` for plan, activity, workspace steps, active-turn view, browser budget/failure state, and composer mode.
+- [x] Delete the local `doing -> done` rewrite based on `projectedTurnStatus`; backend must return final step statuses.
+- [x] Delete plan resurrection from `latestPlanMarkdown(messages)` when projection loaded.
+- [x] Keep `latestPlanMarkdown` only inside a clearly named `legacyMarkerProjection` fallback path.
+- [x] Run:
 
 ```bash
 npm --prefix apps/desktop test -- useChatActivityProjection
@@ -262,15 +262,15 @@ Temporary fallback retained: `legacyMarkerProjection` for old persisted messages
 - Modify: `apps/desktop/src/lib/chat-runtime/kernelProjectionPresenter.mjs`
 - Modify: browser-related tests under `runtimes/browser_automation` only if the typed event contract requires it.
 
-- [ ] Add backend tests:
+- [x] Add backend tests:
   - `browser_done_closes_browser_state_even_with_read_uncertainty`
   - `browser_visible_snapshot_without_done_is_not_success`
   - `browser_no_progress_failure_is_bounded`
-- [ ] Project browser state only from durable browser events/checkpoints/effect receipts, not from UI snapshot visibility.
-- [ ] Emit typed failure reasons for `wall_clock`, `failed_navigations`, and `no_progress`.
-- [ ] Remove UI parsing of `browser_budget_exceeded:*` from generic activity rows once typed failure is present.
-- [ ] Ensure the browser prompt requesting train results can end in `browser.state="done"` plus terminal answer without an outcome-verification card for read-only uncertainty.
-- [ ] Run:
+- [x] Project browser state only from durable browser events/checkpoints/effect receipts, not from UI snapshot visibility.
+- [x] Emit typed failure reasons for `wall_clock`, `failed_navigations`, and `no_progress`.
+- [x] Remove UI parsing of `browser_budget_exceeded:*` from generic activity rows once typed failure is present.
+- [x] Ensure the browser prompt requesting train results can end in `browser.state="done"` plus terminal answer without an outcome-verification card for read-only uncertainty.
+- [x] Run:
 
 ```bash
 cargo test -p local-first-task-runtime browser_done_closes_browser_state_even_with_read_uncertainty -- --nocapture
@@ -372,15 +372,15 @@ Temporary fallback retained: import/render compatibility for older marker-only m
 - Modify: `apps/desktop/src/lib/chat-runtime/submissionRouting.test.mjs`
 - Modify: `apps/desktop/scripts/check-ui-contract.mjs`
 
-- [ ] Introduce a single `runtimeViewModel` object passed into `ChatView` sections.
-- [ ] Replace `threadTailAwaitsHitl` decision points with `projection.attention.awaiting_user` when projection loaded.
-- [ ] Submission routing must use `actions.composer_mode`.
-- [ ] Add structural UI contract checks:
+- [x] Introduce a single `runtimeViewModel` object passed into `ChatView` sections.
+- [x] Replace `threadTailAwaitsHitl` decision points with `projection.attention.awaiting_user` when projection loaded.
+- [x] Submission routing must use `actions.composer_mode`.
+- [x] Add structural UI contract checks:
   - `ChatView.tsx` must not import `markers.ts`;
   - `ChatView.tsx` must not call `latestPlanMarkdown`;
   - `ChatView.tsx` must not parse browser budget marker text;
   - lifecycle code must not map `doing -> done`.
-- [ ] Run:
+- [x] Run:
 
 ```bash
 npm --prefix apps/desktop test -- submissionRouting

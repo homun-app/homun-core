@@ -70,8 +70,54 @@ test("terminal_projection_clears_active_thinking", () => {
   assert.equal(view.turnUiState.hasActiveTurn, false);
   assert.equal(view.turnUiState.workInProgress, false);
   assert.equal(view.turnUiState.canStop, false);
+  assert.equal(view.turnUiState.isStreaming, false);
   assert.equal(view.turnUiState.terminalTurnAtRest, true);
   assert.equal(view.composerMode, "new_turn");
+});
+
+test("runtime_view_model_quarantines_legacy_hitl_tail_after_projection_load", () => {
+  const view = projectKernelThreadView({
+    projectionLoaded: true,
+    projection: projection({
+      turn: {
+        active_turn_id: null,
+        status: "completed",
+        last_event_seq: 2,
+        terminal_reason: "canonical_completed",
+        failure_text: null,
+        updated_at: 100,
+      },
+    }),
+    isStreaming: false,
+    liveActivitySteps: [],
+    livePlanMarkdown: null,
+    persistedActivity: [],
+    persistedPlan: null,
+    streamOwnerTurnId: null,
+    legacyThreadTailAwaitsHitl: true,
+  });
+
+  assert.equal(view.turnUiState.turnAwaitingUser, false);
+  assert.equal(view.turnUiState.hasActiveTurn, false);
+  assert.equal(view.turnUiState.workInProgress, false);
+});
+
+test("runtime_view_model_keeps_legacy_hitl_tail_before_projection_load", () => {
+  const view = projectKernelThreadView({
+    projectionLoaded: false,
+    projection: null,
+    isStreaming: false,
+    liveActivitySteps: [],
+    livePlanMarkdown: null,
+    persistedActivity: [],
+    persistedPlan: null,
+    streamOwnerTurnId: null,
+    legacyThreadTailAwaitsHitl: true,
+  });
+
+  assert.equal(view.turnUiState.turnAwaitingUser, true);
+  assert.equal(view.turnUiState.hasActiveTurn, true);
+  assert.equal(view.turnUiState.workInProgress, false);
 });
 
 test("durable_plan_projection_wins_over_marker_and_stream_gap", () => {

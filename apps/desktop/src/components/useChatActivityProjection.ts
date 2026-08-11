@@ -12,7 +12,10 @@ import {
   replayStatusFromProjection,
   type ActiveTurnProjection,
 } from "../lib/chatEventParts";
-import { projectKernelThreadView } from "../lib/chat-runtime/kernelProjectionPresenter";
+import {
+  projectKernelThreadView,
+  type KernelProjectionPresenterView,
+} from "../lib/chat-runtime/kernelProjectionPresenter";
 import type { ChatMessage } from "../types";
 import {
   latestActivitySteps,
@@ -32,6 +35,7 @@ interface UseChatActivityProjectionOptions {
   streamOwnerTurnRef: { current: string | null };
   threadId: string;
   threadMessages: ChatMessage[];
+  threadTailAwaitsHitl: boolean;
   translate: (key: string) => string;
   turnReplayRef: { current: TurnReplayState | null };
 }
@@ -138,6 +142,7 @@ export function useChatActivityProjection({
   streamOwnerTurnRef,
   threadId,
   threadMessages,
+  threadTailAwaitsHitl,
   translate,
   turnReplayRef,
 }: UseChatActivityProjectionOptions) {
@@ -161,7 +166,9 @@ export function useChatActivityProjection({
     persistedPlan: legacyProjection.plan,
     persistedActivity: legacyProjection.activity,
     streamOwnerTurnId: streamOwnerTurnRef.current,
+    legacyThreadTailAwaitsHitl: threadTailAwaitsHitl,
   });
+  const runtimeViewModel: KernelProjectionPresenterView = projectedView;
 
   const conversationPlan = projectedView.conversationPlan;
   const conversationActivity = projectedView.conversationActivity;
@@ -274,6 +281,7 @@ export function useChatActivityProjection({
     projectedSubagents,
     projectedTurnStatus,
     projectionLoaded,
+    runtimeViewModel,
     workspacePlanGoal,
     workspacePlanSteps,
   };
