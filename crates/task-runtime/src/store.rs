@@ -4073,6 +4073,38 @@ impl TaskStore {
             .as_ref()
             .filter(|plan| plan.status == "open")
             .and_then(kernel_plan_view);
+        let mut sub_stmt = self.connection.prepare(
+            "SELECT kind, status, task_json, blocked_reason, created_at, updated_at FROM tasks
+             WHERE thread_id = ?1 AND kind LIKE 'subagent.%'
+             ORDER BY created_at ASC",
+        )?;
+        let subagents = sub_stmt
+            .query_map(params![thread_id], |row| {
+                let kind: String = row.get(0)?;
+                let status: String = row.get(1)?;
+                let task_json: String = row.get(2)?;
+                let blocked_reason: Option<String> = row.get(3)?;
+                let created_at: i64 = row.get(4)?;
+                let updated_at: i64 = row.get(5)?;
+                let goal = serde_json::from_str::<Value>(&task_json)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .get("goal")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .map(str::to_string)
+                    })
+                    .filter(|value| !value.is_empty());
+                Ok(SubagentInfo {
+                    name: subagent_name_from_kind(&kind),
+                    status,
+                    summary: blocked_reason.or(goal),
+                    created_at,
+                    updated_at,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
         let revision = plan
             .as_ref()
             .map(|plan| plan.revision)
@@ -4098,6 +4130,7 @@ impl TaskStore {
             },
             plan,
             activity,
+            subagents,
             browser: KernelBrowserView {
                 state: "idle".to_string(),
                 ..KernelBrowserView::default()

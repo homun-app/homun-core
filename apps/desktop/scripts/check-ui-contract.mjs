@@ -1422,7 +1422,9 @@ assertNotContains("src/components/ChatView.tsx", "setActiveTurnElapsedSeconds", 
 assertContains("src/components/useChatStreamingNotifier.ts", "onStreamingChangeRef", "streaming parent notifications must have one focused owner");
 assertContains("src/components/ChatView.tsx", "useChatStreamingNotifier(onStreamingChange)", "ChatView must consume the focused streaming notifier owner");
 assertNotContains("src/components/ChatView.tsx", "onStreamingChangeRef", "ChatView must not own streaming notification refs");
-assertContains("src/components/useChatActivityProjection.ts", "fetchThreadActivity", "durable activity projection fetch must have one focused owner");
+assertContains("src/components/useChatActivityProjection.ts", "fetchKernelThreadProjection", "kernel activity projection fetch must have one focused owner");
+assertContains("src/components/useChatActivityProjection.ts", "projectKernelThreadView", "kernel activity projection presenter must have one focused owner");
+assertNotContains("src/components/useChatActivityProjection.ts", "fetchThreadActivity", "activity projection must not call the legacy activity endpoint");
 assertContains("src/components/useChatActivityProjection.ts", "latestPlanMarkdown", "activity projection marker fallback must have one focused owner");
 assertContains("src/components/useChatActivityProjection.ts", "latestActivitySteps", "activity projection marker fallback must have one focused owner");
 assertContains("src/components/useChatActivityProjection.ts", "parsePlanSteps", "workspace plan steps must have one focused owner");
@@ -1430,6 +1432,7 @@ assertContains("src/components/useChatActivityProjection.ts", "createTurnReplayS
 assertContains("src/components/useChatActivityProjection.ts", "replayStatusFromProjection", "activity projection replay status mapping must have one focused owner");
 assertContains("src/components/useChatBrowserActivityLifecycle.ts", "useChatActivityProjection({", "browser activity lifecycle must consume the focused durable activity projection owner");
 assertNotContains("src/components/ChatView.tsx", "fetchThreadActivity", "ChatView must not own durable activity projection fetch");
+assertNotContains("src/components/ChatView.tsx", "fetchKernelThreadProjection", "ChatView must not own kernel activity projection fetch");
 assertNotContains("src/components/ChatView.tsx", "latestPlanMarkdown", "ChatView must not own plan marker fallback parsing");
 assertNotContains("src/components/ChatView.tsx", "latestActivitySteps", "ChatView must not own activity marker fallback parsing");
 assertNotContains("src/components/ChatView.tsx", "parsePlanSteps", "ChatView must not own workspace plan parsing");

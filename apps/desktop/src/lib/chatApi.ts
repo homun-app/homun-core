@@ -1077,7 +1077,7 @@ export interface KernelThreadProjection {
   revision: number;
   turn: {
     active_turn_id: string | null;
-    status: "idle" | "running" | "waiting_user" | "waiting_approval" | "completed" | "failed" | "cancelled";
+    status: "idle" | "running" | "waiting_user" | "waiting_approval" | "completed" | "failed" | "cancelled" | string;
     last_event_seq: number;
     terminal_reason: string | null;
     failure_text: string | null;
@@ -1098,6 +1098,7 @@ export interface KernelThreadProjection {
     text: string;
     created_at: number;
   }>;
+  subagents: SubagentInfo[];
   browser: {
     state: "idle" | "active" | "waiting_user" | "done" | "failed" | "unknown" | string;
     target_id: string | null;

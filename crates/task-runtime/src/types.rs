@@ -618,6 +618,7 @@ pub struct KernelThreadProjection {
     pub turn: KernelTurnView,
     pub plan: Option<KernelPlanView>,
     pub activity: Vec<KernelActivityRow>,
+    pub subagents: Vec<SubagentInfo>,
     pub browser: KernelBrowserView,
     pub capability_runtime: KernelCapabilityRuntimeView,
     pub attention: KernelAttentionView,
@@ -735,7 +736,7 @@ pub struct ThreadAttention {
 }
 
 /// One spawned subagent, projected into the island's "Subagenti" section.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubagentInfo {
     pub name: String,
     pub status: String,

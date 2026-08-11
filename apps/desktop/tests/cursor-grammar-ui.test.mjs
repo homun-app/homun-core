@@ -1900,7 +1900,9 @@ test("ChatView delegates browser/activity lifecycle ownership to useChatBrowserA
   assert.match(chatBrowserActivityLifecycleHook, /export function useChatBrowserActivityLifecycle/);
   // The sub-hooks still own their internals
   assert.match(chatActivityProjectionHook, /export function useChatActivityProjection/);
-  assert.match(chatActivityProjectionHook, /fetchThreadActivity/);
+  assert.match(chatActivityProjectionHook, /fetchKernelThreadProjection/);
+  assert.match(chatActivityProjectionHook, /projectKernelThreadView/);
+  assert.doesNotMatch(chatActivityProjectionHook, /fetchThreadActivity/);
   assert.match(chatComputerSessionHook, /export function useChatComputerSession/);
   assert.match(chatComputerSessionHook, /createLoadingComputerSession/);
 });
