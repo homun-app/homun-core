@@ -45,6 +45,33 @@ impl Default for TurnStateSnapshot {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KernelEffectProjection {
+    pub effect_class: local_first_execution_protocol::EffectClass,
+    pub status: local_first_execution_protocol::EffectReceiptStatus,
+}
+
+pub struct KernelProjectionInput<'a> {
+    pub turn_events: &'a [TurnEvent],
+    pub runtime_plan: Option<&'a crate::RuntimePlanRecord>,
+    pub uncertain_effects: &'a [KernelEffectProjection],
+    pub terminal_reason: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KernelActivePlanProjection {
+    pub goal: Option<String>,
+    pub plan_json: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KernelTurnProjection {
+    pub turn: TurnStateSnapshot,
+    pub active_plan: Option<KernelActivePlanProjection>,
+    pub requires_user_effect_resolution: bool,
+    pub terminal_reason: Option<String>,
+}
+
 pub fn reduce_turn_events(events: &[TurnEvent]) -> TurnStateSnapshot {
     let mut snapshot = TurnStateSnapshot::default();
     let mut ordered = events.to_vec();
@@ -150,6 +177,36 @@ pub fn reduce_turn_events(events: &[TurnEvent]) -> TurnStateSnapshot {
     snapshot
 }
 
+pub fn reduce_kernel_projection(input: KernelProjectionInput<'_>) -> KernelTurnProjection {
+    let turn = reduce_turn_events(input.turn_events);
+    let active_plan = input.runtime_plan.and_then(|plan| {
+        if plan.status != "open" {
+            return None;
+        }
+        Some(KernelActivePlanProjection {
+            goal: plan
+                .plan_json
+                .get("goal")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|goal| !goal.is_empty())
+                .map(str::to_string),
+            plan_json: plan.plan_json.clone(),
+        })
+    });
+    let requires_user_effect_resolution = input.uncertain_effects.iter().any(|effect| {
+        effect.status == local_first_execution_protocol::EffectReceiptStatus::Uncertain
+            && effect.effect_class == local_first_execution_protocol::EffectClass::ExternalWrite
+    });
+
+    KernelTurnProjection {
+        turn,
+        active_plan,
+        requires_user_effect_resolution,
+        terminal_reason: input.terminal_reason.map(str::to_string),
+    }
+}
+
 pub fn turn_event_kind_is_terminal(kind: TurnEventKind) -> bool {
     matches!(
         kind,
@@ -167,4 +224,71 @@ pub fn reduced_terminal_status_matches_task_status(
             | (ReducedTurnStatus::Failed, TaskStatus::Failed)
             | (ReducedTurnStatus::Cancelled, TaskStatus::Cancelled)
     )
+}
+
+#[cfg(test)]
+mod kernel_projection_tests {
+    use super::*;
+    use crate::RuntimePlanRecord;
+    use local_first_execution_protocol::{EffectClass, EffectReceiptStatus};
+
+    #[test]
+    fn read_receipts_do_not_block_projected_plan_or_terminal_turn() {
+        let plan = RuntimePlanRecord {
+            user_id: "u1".into(),
+            workspace_id: "w1".into(),
+            thread_id: "thread-a".into(),
+            status: "open".into(),
+            plan_json: serde_json::json!({
+                "goal": "trova un treno",
+                "steps": [
+                    {"id": "s1", "title": "Cerca risultati", "status": "done"},
+                    {"id": "s2", "title": "Leggi risultati", "status": "doing"}
+                ]
+            }),
+            objective_revision: 0,
+            revision: 1,
+            stall_turns: 0,
+            last_resume_done: Some(1),
+            created_at: 1,
+            updated_at: 2,
+        };
+        let events = vec![
+            TurnEvent {
+                event_id: 1,
+                turn_id: "turn-a".into(),
+                seq: 1,
+                kind: TurnEventKind::PlanUpdate,
+                payload: plan.plan_json.clone(),
+                created_at: 1,
+            },
+            TurnEvent {
+                event_id: 2,
+                turn_id: "turn-a".into(),
+                seq: 2,
+                kind: TurnEventKind::Done,
+                payload: serde_json::json!({"text": "risultati letti"}),
+                created_at: 2,
+            },
+        ];
+        let effects = vec![KernelEffectProjection {
+            effect_class: EffectClass::Read,
+            status: EffectReceiptStatus::Uncertain,
+        }];
+
+        let projection = reduce_kernel_projection(KernelProjectionInput {
+            turn_events: &events,
+            runtime_plan: Some(&plan),
+            uncertain_effects: &effects,
+            terminal_reason: Some("canonical_completed"),
+        });
+
+        assert_eq!(projection.turn.status, ReducedTurnStatus::Completed);
+        assert_eq!(
+            projection.active_plan.as_ref().unwrap().goal.as_deref(),
+            Some("trova un treno")
+        );
+        assert!(!projection.requires_user_effect_resolution);
+        assert!(projection.turn.is_terminal);
+    }
 }

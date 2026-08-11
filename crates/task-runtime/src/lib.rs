@@ -45,9 +45,10 @@ pub use resources::{ResourceGovernor, ResourceLimits};
 pub use scheduler::TaskScheduler;
 pub use store::TaskStore;
 pub use turn_reducer::{
-    REDUCED_TERMINAL_TURN_EVENT_KIND_SQL_LIST, ReducedTurnStatus, TurnContradiction,
-    TurnStateSnapshot, reduce_turn_events, reduced_terminal_status_matches_task_status,
-    turn_event_kind_is_terminal,
+    KernelActivePlanProjection, KernelEffectProjection, KernelProjectionInput,
+    KernelTurnProjection, REDUCED_TERMINAL_TURN_EVENT_KIND_SQL_LIST, ReducedTurnStatus,
+    TurnContradiction, TurnStateSnapshot, reduce_kernel_projection, reduce_turn_events,
+    reduced_terminal_status_matches_task_status, turn_event_kind_is_terminal,
 };
 pub use types::{
     ActiveTurnProjection, AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus, ApprovalPolicy,
