@@ -451,6 +451,28 @@ fn request_is_complex(user_message: &str, calls: &[serde_json::Value]) -> bool {
     distinct_tools.len() >= 2
 }
 
+fn browser_exhausted_fallback_answer(loop_exit: Option<&str>, sources: &[String]) -> String {
+    let reason = match loop_exit {
+        Some("browser_budget_exceeded") => "il browser ha esaurito il budget di navigazione",
+        Some("structured_no_progress") => {
+            "il browser non ha fatto progressi utili dopo piu tentativi"
+        }
+        Some("round_ceiling_reached") => "il turno ha raggiunto il limite di passaggi disponibili",
+        _ => "la ricerca browser non ha prodotto risultati verificabili",
+    };
+    let mut answer = format!(
+        "Non sono riuscito a leggere risultati verificabili: {reason}. Non ho effettuato prenotazioni o acquisti."
+    );
+    if !sources.is_empty() {
+        answer.push_str("\n\nFonti tentate:");
+        for source in sources {
+            answer.push_str("\n- ");
+            answer.push_str(source);
+        }
+    }
+    answer
+}
+
 /// Run ONE agent turn: the bounded guarded ReAct loop + forced synthesis. GENERIC over the seams so
 /// the engine stays decoupled from the gateway's `AppState`/transport — the gateway builds the impls
 /// (constructed per turn) and injects them. Returns the [`crate::TurnOutcome`] the gateway's post-turn
@@ -1312,14 +1334,9 @@ again to find the right control). Keep working on the task — do not stop and d
                             source: name.to_string(),
                         });
                     }
-                    // A delegated `browse` call reports `browser_activity_observed` (it did real
-                    // browser work in its sub-turn). In the MANAGER turn no granular browser tool ever
-                    // runs, so the granular-branch progress reset below never fires here — without this,
-                    // the manager's stall clock would stay pinned at turn start and a healthy long
-                    // browse (up to its own 300s deadline) would trip the manager's stall window the
-                    // moment it returns, ending the turn before the model can use the result (C2). A
-                    // browse call IS progress at the manager level → reset the stall clock.
                     let browser_activity_observed = tool_effects.browser_activity_observed;
+                    let browser_activity_is_progress = browser_activity_observed
+                        && !matches!(outcome, "empty" | "error" | "blocked" | "no_progress");
                     let suspend_effect_receipt = tool_effects.suspend_effect_receipt.clone();
                     let capability_runtime_event =
                         capability_runtime_tool_result_payload(name, &tool_effects);
@@ -1331,12 +1348,12 @@ again to find the right control). Keep working on the task — do not stop and d
                             .emit(GenerateStreamEvent::ToolResult { payload })
                             .await;
                     }
-                    if browser_activity_observed {
+                    if browser_activity_is_progress {
                         last_browser_progress_at = Instant::now();
-                        // Same reasoning as the granular-tool progress reset above, at the MANAGER
-                        // level: a delegated `browse` that did real work IS progress, so it must also
-                        // reset the round anchor — otherwise a manager that keeps delegating healthy
-                        // browses would still hit the round cap on total delegations.
+                        // Manager-level counterpart of the granular-browser progress reset: only a
+                        // delegated browse whose structured outcome is success resets liveness. A
+                        // partial/timeout/unavailable browse still marks `browser_used` for projection
+                        // and final synthesis, but it must not let the manager wander forever.
                         ls.progress_anchor_round = round;
                     }
 
@@ -2205,6 +2222,11 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
                 })
             } else if visible_answer(&ls.accumulated).is_some() {
                 Some(ls.accumulated.clone())
+            } else if ls.browser_used {
+                Some(browser_exhausted_fallback_answer(
+                    loop_exit,
+                    &browse_sources,
+                ))
             } else {
                 None
             };
@@ -6150,9 +6172,72 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         }
     }
 
+    #[derive(Default)]
+    struct BrowserEmptyFinalModel {
+        calls: AtomicUsize,
+    }
+
+    impl ModelClient for BrowserEmptyFinalModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let message = if index == 0 {
+                json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "empty_browse",
+                        "type": "function",
+                        "function": { "name": "browse", "arguments": "{\"goal\":\"test\"}" }
+                    }]
+                })
+            } else {
+                assert!(call.is_final_round);
+                json!({"role": "assistant", "content": ""})
+            };
+            Ok(ModelRoundOutput {
+                message,
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some(if index == 0 { "tool_calls" } else { "stop" }.to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
     struct SlowDelegatedBrowse;
 
     impl CapabilityExecutor for SlowDelegatedBrowse {
+        async fn execute_tool(
+            &self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            _state: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+            Ok(ToolOutcome {
+                result: "found: true".to_string(),
+                effects: ToolEffects {
+                    browser_activity_observed: true,
+                    outcome_hint: Some(crate::ToolOutcomeHint::Success),
+                    ..ToolEffects::default()
+                },
+            })
+        }
+    }
+
+    struct SlowNoProgressDelegatedBrowse;
+
+    impl CapabilityExecutor for SlowNoProgressDelegatedBrowse {
         async fn execute_tool(
             &self,
             _name: &str,
@@ -6338,6 +6423,122 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             "the model must get its post-browse round to use the result"
         );
         assert_eq!(outcome.stop, crate::TurnStop::Completed);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn no_progress_delegated_browse_does_not_reset_the_manager_stall_window() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = BrowseThenAnswerModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.browser_budget.max_elapsed_ms = 300_000;
+        turn_cfg.browser_budget.max_stall_ms = 80;
+
+        let _ = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &SlowNoProgressDelegatedBrowse,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let stalls = journal
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|kind| kind.as_str() == "browser_budget_exceeded")
+            .count();
+        assert_eq!(
+            stalls, 1,
+            "a no-progress browse must not reset the manager stall window"
+        );
+        assert_eq!(
+            model.calls.load(Ordering::SeqCst),
+            2,
+            "the model may get one post-browse synthesis round, but the no-progress browse must still trip the stall guard"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn browser_exhaustion_with_empty_synthesis_delivers_fallback_answer() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = BrowserEmptyFinalModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.browser_budget.max_elapsed_ms = 300_000;
+        turn_cfg.browser_budget.max_stall_ms = 80;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &SlowNoProgressDelegatedBrowse,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
+        assert!(
+            outcome.memory_answer.contains("Non sono riuscito"),
+            "{}",
+            outcome.memory_answer
+        );
     }
 
     /// A manager-level delegated `browse` that SUCCEEDS every time, with a distinct goal per round

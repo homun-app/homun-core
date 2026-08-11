@@ -83,7 +83,7 @@ pub(crate) fn chat_browser_budget() -> local_first_engine::BrowserBudget {
 /// Absolute wall-clock backstop for ONE delegated `browse` sub-turn (see the sub-turn's `TurnConfig`).
 /// Named rather than inlined because the MANAGER budget below is DERIVED from it: the two are one
 /// invariant, not two independent numbers that can drift apart.
-pub(crate) const BROWSE_SUBTURN_MAX_ELAPSED_MS: u64 = 300_000;
+pub(crate) const BROWSE_SUBTURN_MAX_ELAPSED_MS: u64 = 120_000;
 
 /// The MANAGER turn's absolute wall-clock backstop, derived from one browse sub-turn's own cap.
 ///

@@ -5891,6 +5891,80 @@ Do not repeat it again; choose a different ref/action strategy or call browser_d
     (Some(nudge), hard_capped)
 }
 
+fn browser_failed_action_family(args_raw: &str) -> String {
+    let value: serde_json::Value =
+        serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(actions) = value.get("actions").and_then(|actions| actions.as_array()) {
+        let families = actions
+            .iter()
+            .filter_map(|action| action.get("kind").and_then(|kind| kind.as_str()))
+            .map(str::trim)
+            .filter(|kind| !kind.is_empty())
+            .collect::<Vec<_>>();
+        if !families.is_empty() {
+            return families.join("+");
+        }
+    }
+    value
+        .get("kind")
+        .and_then(|kind| kind.as_str())
+        .map(str::trim)
+        .filter(|kind| !kind.is_empty())
+        .unwrap_or("browser_act")
+        .to_string()
+}
+
+pub(crate) fn repeated_browser_failed_action_nudge(
+    recent_failed_action_families: &mut std::collections::VecDeque<String>,
+    tool_name: &str,
+    args_raw: &str,
+    failed: bool,
+    threshold: usize,
+) -> (Option<String>, bool) {
+    if tool_name != "browser_act" || !failed || threshold == 0 {
+        return (None, false);
+    }
+
+    let family = browser_failed_action_family(args_raw);
+    if recent_failed_action_families
+        .back()
+        .is_some_and(|last| last != &family)
+    {
+        recent_failed_action_families.clear();
+    }
+    recent_failed_action_families.push_back(family.clone());
+    while recent_failed_action_families.len() > threshold.max(1) {
+        recent_failed_action_families.pop_front();
+    }
+
+    let repeated = recent_failed_action_families
+        .iter()
+        .rev()
+        .take_while(|item| {
+            recent_failed_action_families
+                .back()
+                .is_some_and(|last| *item == last)
+        })
+        .count();
+    if repeated < 2 {
+        return (None, false);
+    }
+
+    let hard_capped = repeated >= threshold;
+    let nudge = if hard_capped {
+        format!(
+            "⚠️ ANTI-LOOP: browser action family `{family}` failed {repeated} times in this sub-turn. \
+The browser sub-turn has been TERMINATED due to repeated failed actions. Call browser_done with current findings or change site/source."
+        )
+    } else {
+        format!(
+            "⚠️ ANTI-LOOP: browser action family `{family}` has already failed {repeated} times. \
+Do not repeat it; change strategy, change source, or call browser_done with current findings."
+        )
+    };
+    (Some(nudge), hard_capped)
+}
+
 /// The gateway's `BrowserExecutor` (ADR 0024 inc 5, 5.D1b slice 5b; ADR 0025 seam). OWNS the browser
 /// subsystem's turn state — the live sidecar `browser_session` (a gateway type that can't live in the
 /// engine-safe `LoopState`) plus the browser-private bookkeeping (last snapshot, current tab / opened
@@ -5950,6 +6024,7 @@ pub(crate) struct GatewayBrowserExecutor<'a> {
     // do NOT count — only the model's own `browser_snapshot` tool calls.
     pub(crate) consecutive_snapshot_count: u32,
     pub(crate) recent_action_signatures: std::collections::VecDeque<String>,
+    pub(crate) recent_failed_action_families: std::collections::VecDeque<String>,
 }
 
 impl Drop for GatewayBrowserExecutor<'_> {
@@ -6160,6 +6235,36 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
             };
         }
         if let Some(nudge) = repeat_nudge {
+            text.push_str("\n\n");
+            text.push_str(&nudge);
+            outcome_hint = Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
+        }
+        let failed_action_threshold = std::env::var("HOMUN_BROWSER_FAILED_ACTION_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(3);
+        let (failed_action_nudge, failed_action_hard_capped) = repeated_browser_failed_action_nudge(
+            &mut self.recent_failed_action_families,
+            name,
+            args_raw,
+            matches!(
+                outcome_hint,
+                Some(local_first_engine::contract::ToolOutcomeHint::NoProgress)
+            ),
+            failed_action_threshold,
+        );
+        if failed_action_hard_capped {
+            return local_first_engine::ToolOutcome {
+                result: failed_action_nudge
+                    .map(|nudge| format!("{text}\n\n{nudge}"))
+                    .unwrap_or(text),
+                effects: local_first_engine::ToolEffects {
+                    outcome_hint: Some(local_first_engine::contract::ToolOutcomeHint::NoProgress),
+                    ..Default::default()
+                },
+            };
+        }
+        if let Some(nudge) = failed_action_nudge {
             text.push_str("\n\n");
             text.push_str(&nudge);
             outcome_hint = Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
@@ -6501,7 +6606,7 @@ pub(crate) fn earlier_browse_call_in_current_round(
     false
 }
 
-pub(crate) const MAX_DISTINCT_BROWSE_CALLS_PER_TURN: usize = 4;
+pub(crate) const MAX_DISTINCT_BROWSE_CALLS_PER_TURN: usize = 2;
 
 pub(crate) fn normalized_browse_goal(goal: &str) -> String {
     goal.split_whitespace()
@@ -6594,11 +6699,15 @@ pub(crate) fn delegated_browse_tool_outcome(
         result: local_first_engine::browse::browse_result_for_manager(result),
         effects: local_first_engine::ToolEffects {
             browser_activity_observed: true,
-            outcome_hint: Some(if result.found {
-                local_first_engine::ToolOutcomeHint::Success
-            } else {
-                local_first_engine::ToolOutcomeHint::NoProgress
-            }),
+            outcome_hint: Some(
+                if result.found
+                    && result.status == local_first_engine::browse::BrowserDoneStatus::Completed
+                {
+                    local_first_engine::ToolOutcomeHint::Success
+                } else {
+                    local_first_engine::ToolOutcomeHint::NoProgress
+                },
+            ),
             suspend_effect_receipt,
             ..Default::default()
         },
@@ -6619,7 +6728,33 @@ pub(crate) struct GatewayBrowseOutcome {
 /// This bound only exists so a pathological loop cannot spin forever — the stall window (90s without
 /// progress) and the absolute wall clock (300s) are what normally stop a stuck browse.
 pub(crate) fn browse_hard_round_ceiling(rounds: usize) -> usize {
-    rounds.saturating_mul(3).max(24)
+    rounds.saturating_add(8).max(24)
+}
+
+pub(crate) async fn await_browse_subturn_with_timeout<F>(
+    future: F,
+    timeout_ms: u64,
+) -> Result<F::Output, tokio::time::error::Elapsed>
+where
+    F: std::future::Future,
+{
+    tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), future).await
+}
+
+pub(crate) fn browse_subturn_timeout_result(
+    last_snapshot: &str,
+    sources: Vec<String>,
+    contract: Option<&local_first_engine::browse::BrowseResultContract>,
+) -> local_first_engine::BrowseResult {
+    let fallback_payload = local_first_engine::browse::BrowserDonePayload {
+        status: local_first_engine::browse::BrowserDoneStatus::Timeout,
+        answer: last_snapshot.chars().take(2000).collect(),
+        items: vec![],
+        fields_missing: vec!["browser_done".into()],
+        sources,
+        evidence: vec!["Browser sub-turn exceeded its wall-clock budget.".into()],
+    };
+    local_first_engine::browse::validate_browser_done_payload(fallback_payload, contract)
 }
 
 pub(crate) fn browse_round_budget(
@@ -6704,6 +6839,7 @@ impl GatewayBrowseExecutor<'_> {
             screenshot_on_stall,
             consecutive_snapshot_count: 0,
             recent_action_signatures: std::collections::VecDeque::new(),
+            recent_failed_action_families: std::collections::VecDeque::new(),
         }
     }
 
@@ -6911,38 +7047,73 @@ impl GatewayBrowseExecutor<'_> {
             resolved_hitl: None,
         };
 
-        let outcome = local_first_engine::agent_loop::run_turn(
-            ls,
-            cfg,
-            &usage_context,
-            &model_client,
-            &capability_executor,
-            &mut browser_executor,
-            &plan_progress,
-            &completion_judge,
-            &compactor,
-            &turn_policy,
-            // C2: a real journal handle (not a fabricated id) so engine-emitted events for this
-            // sub-turn — including `BrowserBudgetExceeded` — persist alongside the protocol metrics
-            // recorded above/below, when the enclosing run has one registered.
-            &journal,
-            &drain,
-            0.2, // low temperature: deterministic extraction, not creative writing
-            self.thread_id,
-            &std::collections::BTreeSet::new(),
-            &[],
-            user_goal.clone(),
-            String::new(),
-            None,
-            false,
-            0,
-            false,
-            Vec::new(),
-            None, // no trace-dump inside the sub-turn
-            // Sub-turns don't spam the readable per-turn trace (ADR 0025): the manager's turn owns it.
-            &local_first_engine::turn_trace::TurnTrace::disabled(),
+        let outcome = await_browse_subturn_with_timeout(
+            local_first_engine::agent_loop::run_turn(
+                ls,
+                cfg,
+                &usage_context,
+                &model_client,
+                &capability_executor,
+                &mut browser_executor,
+                &plan_progress,
+                &completion_judge,
+                &compactor,
+                &turn_policy,
+                // C2: a real journal handle (not a fabricated id) so engine-emitted events for this
+                // sub-turn — including `BrowserBudgetExceeded` — persist alongside the protocol metrics
+                // recorded above/below, when the enclosing run has one registered.
+                &journal,
+                &drain,
+                0.2, // low temperature: deterministic extraction, not creative writing
+                self.thread_id,
+                &std::collections::BTreeSet::new(),
+                &[],
+                user_goal.clone(),
+                String::new(),
+                None,
+                false,
+                0,
+                false,
+                Vec::new(),
+                None, // no trace-dump inside the sub-turn
+                // Sub-turns don't spam the readable per-turn trace (ADR 0025): the manager's turn owns it.
+                &local_first_engine::turn_trace::TurnTrace::disabled(),
+            ),
+            BROWSE_SUBTURN_MAX_ELAPSED_MS,
         )
         .await;
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(_elapsed) => {
+                let timeout_metrics = serde_json::json!({
+                    "observation_chars": browser_executor.last_snapshot.chars().count() as u64,
+                    "stop_reason": "timeout",
+                    "action_kinds": ["browser_done"],
+                    "timeout_ms": BROWSE_SUBTURN_MAX_ELAPSED_MS,
+                });
+                journal.record(browser_protocol_journal_event(
+                    usage_context.call_id.as_str(),
+                    "hard_timeout",
+                    &timeout_metrics,
+                ));
+                push_browser_step(
+                    browser_protocol_event_summary(
+                        usage_context.call_id.as_str(),
+                        "hard_timeout",
+                        timeout_metrics,
+                    ),
+                    "error",
+                );
+                return GatewayBrowseOutcome {
+                    result: browse_subturn_timeout_result(
+                        &browser_executor.last_snapshot,
+                        Vec::new(),
+                        request.contract.as_ref(),
+                    ),
+                    suspend_effect_receipt: None,
+                };
+            }
+        };
 
         let suspend_effect_receipt = match &outcome.stop {
             local_first_engine::TurnStop::SuspendedEffect { receipt_ref } => {

@@ -28,11 +28,12 @@ use super::{
     plan_stall_exhausted, plan_step_status, proactive_answer_memory_request,
     proactive_memory_request_for_suggestion_action, project_filesystem_mcp_instruction,
     prune_browser_history, redact_sensitive_text, repeated_browser_action_nudge,
-    requeue_waiting_resource_tasks, resolve_active_model, resolve_contained_computer_cdp,
-    resolve_contained_computer_novnc, response_language_instruction, rewrite_confirm_to_done,
-    run_bash_unsandboxed_result, sanitize_dedup_key, scheduled_thread_sender_for_task_id,
-    scheduled_thread_title, search_composio_catalog, should_try_tool_compatibility_fallback,
-    skill_id_from_command, strip_json_fences, suggestion_choices_json, task_effective_goal,
+    repeated_browser_failed_action_nudge, requeue_waiting_resource_tasks, resolve_active_model,
+    resolve_contained_computer_cdp, resolve_contained_computer_novnc,
+    response_language_instruction, rewrite_confirm_to_done, run_bash_unsandboxed_result,
+    sanitize_dedup_key, scheduled_thread_sender_for_task_id, scheduled_thread_title,
+    search_composio_catalog, should_try_tool_compatibility_fallback, skill_id_from_command,
+    strip_json_fences, suggestion_choices_json, task_effective_goal,
     task_execution_outcome_from_executor_result, task_goal_summary, task_queue_response,
     tool_touches_calendar, tool_touches_contacts, valid_catalog_owner,
     validate_memory_source_input, validate_memory_source_overrides,
@@ -3610,8 +3611,7 @@ fn browse_goal_dedup_is_scoped_to_the_normalized_goal() {
 fn browse_turn_cap_allows_multiple_distinct_sources_but_stays_bounded() {
     assert!(super::browse_call_within_turn_cap(0));
     assert!(super::browse_call_within_turn_cap(1));
-    assert!(super::browse_call_within_turn_cap(3));
-    assert!(!super::browse_call_within_turn_cap(4));
+    assert!(!super::browse_call_within_turn_cap(2));
 }
 
 #[test]
@@ -3711,6 +3711,68 @@ fn browse_hard_ceiling_stays_above_the_progress_relative_round_budget() {
             "the backstop must stay generous, got {ceiling}"
         );
     }
+}
+
+#[test]
+fn browse_hard_ceiling_does_not_triple_rich_browser_contracts() {
+    for rounds in [16usize, 24] {
+        let ceiling = super::browse_hard_round_ceiling(rounds);
+        assert!(
+            ceiling <= rounds + 8,
+            "hard ceiling ({ceiling}) must be a tight backstop above the progress-relative budget ({rounds}), not a second long-running budget"
+        );
+    }
+}
+
+#[test]
+fn browse_subturn_wall_clock_backstop_stays_bounded_for_interactive_reads() {
+    const {
+        assert!(
+            super::BROWSE_SUBTURN_MAX_ELAPSED_MS <= 120_000,
+            "one delegated browse must return control to the manager within an interactive window"
+        );
+    }
+}
+
+#[tokio::test]
+async fn delegated_browse_subturn_timeout_returns_control_to_manager() {
+    let started = std::time::Instant::now();
+    let outcome = super::await_browse_subturn_with_timeout(
+        async {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            "late"
+        },
+        10,
+    )
+    .await;
+
+    assert!(outcome.is_err());
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(1),
+        "timeout wrapper must bound a non-cooperative browse future"
+    );
+}
+
+#[test]
+fn delegated_browse_subturn_timeout_is_manager_no_progress() {
+    let result = super::browse_subturn_timeout_result(
+        "results page snapshot",
+        vec!["https://example.test/search".to_string()],
+        None,
+    );
+    assert_eq!(
+        result.status,
+        local_first_engine::browse::BrowserDoneStatus::Timeout
+    );
+    assert!(!result.found);
+
+    let outcome = delegated_browse_tool_outcome(&result, None);
+
+    assert!(outcome.effects.browser_activity_observed);
+    assert_eq!(
+        outcome.effects.outcome_hint,
+        Some(local_first_engine::ToolOutcomeHint::NoProgress)
+    );
 }
 
 #[test]
@@ -3960,6 +4022,30 @@ fn delegated_browse_outcome_marks_browser_activity_and_structured_progress() {
     assert_eq!(
         missing_outcome.effects.outcome_hint,
         Some(local_first_engine::ToolOutcomeHint::NoProgress)
+    );
+}
+
+#[test]
+fn delegated_browse_outcome_treats_partial_contract_result_as_no_progress() {
+    let partial = local_first_engine::BrowseResult {
+        found: true,
+        answer: "solo dati incompleti".to_string(),
+        sources: vec!["https://example.test/source".to_string()],
+        confidence: local_first_engine::browse::Confidence::Low,
+        note: Some("minimum_items missing".to_string()),
+        status: local_first_engine::browse::BrowserDoneStatus::Partial,
+        items: Vec::new(),
+        fields_missing: vec!["minimum_items".to_string()],
+        evidence: Vec::new(),
+    };
+
+    let outcome = delegated_browse_tool_outcome(&partial, None);
+
+    assert!(outcome.effects.browser_activity_observed);
+    assert_eq!(
+        outcome.effects.outcome_hint,
+        Some(local_first_engine::ToolOutcomeHint::NoProgress),
+        "partial browser_done did not satisfy the manager's browse contract"
     );
 }
 
@@ -9020,6 +9106,54 @@ fn reconcile_final_plan_marker_does_not_close_open_step_from_answer_length() {
 
     assert!(updated.contains("- [-] **Deliver result** (`s2`)"));
     assert!(!updated.contains("- [x] **Deliver result**"));
+}
+
+#[test]
+fn reconcile_final_plan_marker_closes_last_reporting_step_with_delivered_evidence() {
+    let plan = super::runtime_execution_plan(&[
+        serde_json::json!({"id":"s1","title":"Preparare la ricerca","status":"done","detail":"ok"}),
+        serde_json::json!({"id":"s2","title":"Cercare treni Milano Roma","status":"done","detail":"risultati letti"}),
+        serde_json::json!({"id":"s3","title":"Estrarre e riportare 3-5 opzioni con fonte","status":"doing","detail":"in corso"}),
+    ]);
+    let answer_body = format!(
+        "| Ora | Treno | Fonte |\n\
+| --- | --- | --- |\n\
+| 08:00 | Frecciarossa 9503 | https://www.trenitalia.com |\n\
+| 08:10 | Italo 9951 | https://www.italotreno.it |\n\n\
+Fonti: https://www.trenitalia.com e https://www.italotreno.it\n\n{}",
+        "Ho letto i risultati e riporto opzioni utilizzabili con fonte. ".repeat(12)
+    );
+    let answer = format!(
+        "‹‹PLAN››{}‹‹/PLAN››\n{}",
+        super::build_plan_markdown(None, &super::execution_plan_steps(&plan)),
+        answer_body
+    );
+
+    let updated = super::reconcile_final_plan_marker_on_delivery(&plan, &answer);
+
+    assert!(updated.contains("- [x] **Estrarre e riportare 3-5 opzioni con fonte** (`s3`)"));
+    assert!(!updated.contains("- [-] **Estrarre e riportare 3-5 opzioni con fonte**"));
+}
+
+#[test]
+fn reconcile_final_plan_marker_does_not_launder_blocked_steps() {
+    let plan = super::runtime_execution_plan(&[
+        serde_json::json!({"id":"s1","title":"Preparare la ricerca","status":"done","detail":"ok"}),
+        serde_json::json!({"id":"s2","title":"Cercare treni Milano Roma","status":"blocked","detail":"paused by the harness: no progress"}),
+        serde_json::json!({"id":"s3","title":"Estrarre e riportare 3-5 opzioni con fonte","status":"doing","detail":"in corso"}),
+    ]);
+    let answer = format!(
+        "‹‹PLAN››{}‹‹/PLAN››\n| Ora | Fonte |\n| --- | --- |\n| 08:00 | https://www.trenitalia.com |\n\n{}",
+        super::build_plan_markdown(None, &super::execution_plan_steps(&plan)),
+        "Risposta sostanziale con tabella e fonti. ".repeat(20)
+    );
+
+    let updated = super::reconcile_final_plan_marker_on_delivery(&plan, &answer);
+
+    assert!(updated.contains("- [!] **Cercare treni Milano Roma** (`s2`)"));
+    assert!(updated.contains("- [-] **Estrarre e riportare 3-5 opzioni con fonte** (`s3`)"));
+    assert!(!updated.contains("- [x] **Cercare treni Milano Roma**"));
+    assert!(!updated.contains("- [x] **Estrarre e riportare 3-5 opzioni con fonte**"));
 }
 
 #[test]
@@ -15698,6 +15832,17 @@ fn step_advance_requires_a_target_and_normalizes_common_adapter_aliases() {
     .unwrap();
     assert_eq!(goal.as_deref(), Some("Prenotare il treno"));
     assert_eq!(sent.len(), 1);
+
+    let (goal, sent) = super::plan_tool_sent(
+        "update_plan",
+        r#"{"goal":"null","steps":[{"id":"s1","title":"Cerca","status":"doing","detail":""}]}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        goal, None,
+        "string 'null' is a weak-model placeholder, not a replacement goal"
+    );
+    assert_eq!(sent.len(), 1);
 }
 
 #[test]
@@ -15808,6 +15953,32 @@ fn merge_plan_keeps_blocked_steps_sticky() {
         "blocked",
         "blocked stays blocked"
     );
+}
+
+#[test]
+fn merge_plan_allows_model_blocked_step_to_be_claimed_done_after_new_evidence() {
+    let mut plan = vec![serde_json::json!({
+        "id":"s1",
+        "title":"Search source",
+        "status":"blocked",
+        "detail":"Site did not return results yet"
+    })];
+    let claims = merge_plan(
+        &mut plan,
+        &[serde_json::json!({
+            "id":"s1",
+            "title":"Search source",
+            "status":"done",
+            "detail":"Results read from the source"
+        })],
+    );
+    assert_eq!(
+        claims,
+        vec![0],
+        "done claim must go through F2 verification"
+    );
+    assert_eq!(plan_step_status(&plan[0]), "doing");
+    assert_eq!(plan[0]["detail"], "Results read from the source");
 }
 
 #[test]
@@ -25159,6 +25330,40 @@ fn repeated_browser_action_nudge_resets_on_different_action_signature() {
             .0
             .is_none()
     );
+}
+
+#[test]
+fn repeated_browser_failed_action_nudge_survives_interleaved_actions() {
+    let mut recent = std::collections::VecDeque::new();
+    let set_date = r#"{"kind":"set_date","date":"2026-08-25","action_class":"ordinary"}"#;
+    let click = r#"{"kind":"click","ref":"e41","action_class":"ordinary"}"#;
+
+    let (nudge, hard_capped) =
+        repeated_browser_failed_action_nudge(&mut recent, "browser_act", set_date, true, 3);
+    assert!(nudge.is_none());
+    assert!(!hard_capped);
+
+    let (nudge, hard_capped) =
+        repeated_browser_failed_action_nudge(&mut recent, "browser_act", click, false, 3);
+    assert!(nudge.is_none());
+    assert!(!hard_capped);
+
+    let (nudge, hard_capped) =
+        repeated_browser_failed_action_nudge(&mut recent, "browser_navigate", "{}", false, 3);
+    assert!(nudge.is_none());
+    assert!(!hard_capped);
+
+    let (nudge, hard_capped) =
+        repeated_browser_failed_action_nudge(&mut recent, "browser_act", set_date, true, 3);
+    let msg = nudge.expect("second failed set_date should nudge even after other actions");
+    assert!(msg.contains("set_date"));
+    assert!(!hard_capped);
+
+    let (nudge, hard_capped) =
+        repeated_browser_failed_action_nudge(&mut recent, "browser_act", set_date, true, 3);
+    let msg = nudge.expect("third failed set_date should hard-cap the sub-turn");
+    assert!(msg.contains("TERMINATED"));
+    assert!(hard_capped);
 }
 
 #[test]

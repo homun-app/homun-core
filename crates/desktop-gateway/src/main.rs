@@ -391,9 +391,10 @@ pub(crate) use model_registry::{
 // plan helpers moved into the engine with `run_turn` (5.D2).
 use local_first_engine::markers::{VAULT_REVEAL_CLOSE, VAULT_REVEAL_OPEN};
 use local_first_engine::plan::{
-    build_plan_markdown, enforce_monotonic_plan_progress, parse_plan_marker, plan_done_count,
-    plan_incomplete_reason, plan_is_complete, plan_is_settled, plan_next_open, plan_step_id,
-    plan_step_status, plan_step_title, plan_value_goal, plan_value_steps,
+    MIN_DELIVERED_CHARS_TO_CONCLUDE, build_plan_markdown, enforce_monotonic_plan_progress,
+    parse_plan_marker, plan_done_count, plan_incomplete_reason, plan_is_complete, plan_is_settled,
+    plan_next_open, plan_step_id, plan_step_status, plan_step_title, plan_value_goal,
+    plan_value_steps,
 };
 // Engine helpers exercised ONLY by this crate's tests (their non-test callers moved into
 // `engine::run_turn` at 5.D2). `#[cfg(test)]`-gated so they're in scope for `super::…` in `mod tests`
@@ -2256,13 +2257,84 @@ fn tombstone_automation_memory_records(
 /// does NOT reuse `answer_concludes_plan` — that predicate must stay conservative for the
 /// *nudge* decision (25001), where many open steps means "keep pushing", the opposite intent.
 fn plan_steps_reconciled_on_delivery(
-    _plan: &ExecutionPlan,
-    _text: &str,
+    plan: &ExecutionPlan,
+    text: &str,
 ) -> Option<Vec<serde_json::Value>> {
-    // Completion is evidence-driven (`step_advance` + done criteria). Delivery
-    // length is never proof that open work happened: the old sweep converted
-    // every open step to done after a long answer and laundered partial runs.
-    None
+    let delivered_chars = text.trim().chars().count();
+    if delivered_chars < MIN_DELIVERED_CHARS_TO_CONCLUDE {
+        return None;
+    }
+    let mut steps = execution_plan_steps(plan);
+    if steps.is_empty() || steps.iter().any(|step| plan_step_status(step) == "blocked") {
+        return None;
+    }
+    let open_steps = steps
+        .iter()
+        .enumerate()
+        .filter(|(_, step)| matches!(plan_step_status(step), "todo" | "doing"))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let [open_index] = open_steps.as_slice() else {
+        return None;
+    };
+    if *open_index + 1 != steps.len() {
+        return None;
+    }
+    if !plan_step_is_delivery_report(&steps[*open_index]) {
+        return None;
+    }
+    if !delivered_answer_has_result_evidence(text) {
+        return None;
+    }
+    steps[*open_index]["status"] = serde_json::json!("done");
+    steps[*open_index]["detail"] = serde_json::json!("delivered in final answer");
+    Some(steps)
+}
+
+fn plan_step_is_delivery_report(step: &serde_json::Value) -> bool {
+    let text = format!(
+        "{} {}",
+        plan_step_title(step),
+        step.get("detail")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+    )
+    .to_ascii_lowercase();
+    [
+        "deliver",
+        "answer",
+        "report",
+        "result",
+        "source",
+        "extract",
+        "riport",
+        "rispond",
+        "fonte",
+        "fonti",
+        "opzion",
+        "estrar",
+        "sintetizz",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle))
+}
+
+fn delivered_answer_has_result_evidence(text: &str) -> bool {
+    delivered_answer_has_markdown_table(text)
+        && (text.matches("http://").count() + text.matches("https://").count()) > 0
+}
+
+fn delivered_answer_has_markdown_table(text: &str) -> bool {
+    let mut previous_row = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        let is_row = trimmed.starts_with('|') && trimmed.matches('|').count() >= 2;
+        if is_row && previous_row {
+            return true;
+        }
+        previous_row = is_row;
+    }
+    false
 }
 
 /// Thin text-only wrapper over `plan_steps_reconciled_on_delivery` — the delivery call sites
@@ -4296,10 +4368,19 @@ fn merge_plan(plan: &mut Vec<serde_json::Value>, sent: &[serde_json::Value]) -> 
             });
         match pos {
             Some(i) => {
-                if matches!(plan_step_status(&plan[i]), "done" | "blocked") {
-                    // sticky: a `done` step never re-opens (stops the regenerate loop), and a
-                    // `blocked` step stays blocked — the harness blocks a stalled step (F4) and
-                    // the model must not re-open it, which would re-arm the cross-turn loop.
+                let current_status = plan_step_status(&plan[i]);
+                let harness_blocked = plan[i]
+                    .get("detail")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .is_some_and(|detail| detail.starts_with("paused by the harness:"));
+                if current_status == "done" {
+                    // Sticky: a `done` step never re-opens, which stops regenerate loops.
+                } else if current_status == "blocked" {
+                    if new_status == "done" && !harness_blocked {
+                        plan[i]["status"] = serde_json::json!("doing");
+                        claims.push(i);
+                    }
                 } else if new_status == "done" {
                     plan[i]["status"] = serde_json::json!("doing");
                     claims.push(i);
@@ -4381,7 +4462,10 @@ fn plan_tool_sent(
         .get("goal")
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
-        .filter(|goal| !goal.is_empty())
+        .filter(|goal| {
+            let normalized = goal.to_ascii_lowercase();
+            !goal.is_empty() && !matches!(normalized.as_str(), "null" | "none" | "n/a")
+        })
         .map(str::to_string);
     Ok((
         goal,
@@ -8936,6 +9020,7 @@ async fn run_agent_rounds(
         screenshot_on_stall: false,
         consecutive_snapshot_count: 0,
         recent_action_signatures: std::collections::VecDeque::new(),
+        recent_failed_action_families: std::collections::VecDeque::new(),
     };
     let plan_progress = GatewayPlanProgress {
         state: state_owned.clone(),
