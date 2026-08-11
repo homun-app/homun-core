@@ -238,3 +238,29 @@ test("browser_active_without_done_stays_active", () => {
     latestProgress: "Loaded search results",
   });
 });
+
+test("browser_failure_reason_is_typed_state_not_activity_text", () => {
+  const view = projectKernelThreadView({
+    projectionLoaded: true,
+    projection: projection({
+      activity: [],
+      browser: {
+        state: "failed",
+        target_id: "browser-1",
+        latest_progress: null,
+        failure_reason: "no_progress",
+        snapshot_verified: false,
+      },
+    }),
+    isStreaming: false,
+    liveActivitySteps: [],
+    livePlanMarkdown: null,
+    persistedActivity: ["browser_budget_exceeded:no_progress"],
+    persistedPlan: null,
+    streamOwnerTurnId: null,
+  });
+
+  assert.equal(view.browserStatus.failed, true);
+  assert.equal(view.browserStatus.failureReason, "no_progress");
+  assert.deepEqual(view.conversationActivity, []);
+});

@@ -116,6 +116,18 @@ function kernelPlanStepsToUiSteps(projection: KernelThreadProjection | null): Pl
   }));
 }
 
+function browserFailureMessage(failureReason: string | null, translate: (key: string) => string) {
+  return failureReason === "wall_clock"
+    ? translate("chat.browserBudget.wallClock")
+    : failureReason === "failed_navigations"
+      ? translate("chat.browserBudget.failedNavigations")
+      : failureReason === "no_progress"
+        ? translate("chat.browserBudget.noProgress")
+        : failureReason
+          ? translate("chat.browserBudget.default")
+          : null;
+}
+
 export function useChatActivityProjection({
   activeTurnIdRef,
   islandRefreshNonce,
@@ -152,33 +164,12 @@ export function useChatActivityProjection({
   });
 
   const conversationPlan = projectedView.conversationPlan;
-  const rawConversationActivity = projectedView.conversationActivity;
-
-  const rawLatestActivity = rawConversationActivity[rawConversationActivity.length - 1] ?? "";
-  const browserBudgetReason = rawLatestActivity.startsWith("browser_budget_exceeded:")
-    ? rawLatestActivity.slice("browser_budget_exceeded:".length)
-    : null;
-  const browserBudgetMessage = browserBudgetReason === "wall_clock"
-    ? translate("chat.browserBudget.wallClock")
-    : browserBudgetReason === "failed_navigations"
-      ? translate("chat.browserBudget.failedNavigations")
-      : browserBudgetReason === "no_progress"
-        ? translate("chat.browserBudget.noProgress")
-        : browserBudgetReason
-          ? translate("chat.browserBudget.default")
-          : null;
-  const conversationActivity = rawConversationActivity.map((step) =>
-    step.startsWith("browser_budget_exceeded:")
-      ? step.endsWith(":wall_clock")
-        ? translate("chat.browserBudget.wallClock")
-        : step.endsWith(":failed_navigations")
-          ? translate("chat.browserBudget.failedNavigations")
-          : step.endsWith(":no_progress")
-            ? translate("chat.browserBudget.noProgress")
-            : translate("chat.browserBudget.default")
-      : step,
+  const conversationActivity = projectedView.conversationActivity;
+  const browserBudgetMessage = browserFailureMessage(
+    projectedView.browserStatus.failureReason,
+    translate,
   );
-  const browserBudgetAssistantId = browserBudgetReason
+  const browserBudgetAssistantId = projectedView.browserStatus.failureReason
     ? [...threadMessages].reverse().find((message) => message.role === "assistant")?.id ?? null
     : null;
 

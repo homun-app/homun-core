@@ -1334,7 +1334,8 @@ assertNotContains("src/styles.css", ".virtual-message-row", "chat transcript mus
 assertContains("src/components/useChatConversationScroll.ts", "streamingFrameRef", "chat streaming must throttle visible updates in Electron");
 assertContains("src/components/ChatView.tsx", "setOptimisticMessages", "chat streaming must keep visible text in the React message state");
 assertContains("src/components/ChatMessageContent.tsx", "<AssistantMessageBody", "streaming answers must render through the normal message body component");
-assertContains("src/components/useChatActivityProjection.ts", "browser_budget_exceeded", "browser budget has an actionable Activity state");
+assertContains("src/components/useChatActivityProjection.ts", "projectedView.browserStatus.failureReason", "browser budget UI must use typed kernel failure reason");
+assertNotContains("src/components/useChatActivityProjection.ts", "browser_budget_exceeded", "browser budget marker text must not be parsed in the renderer");
 assertContains("src/i18n/locales/it.json", "Tempo massimo del browser raggiunto", "browser timeout is localized");
 assertMatches(
   "src/components/ChatMessageContent.tsx",

@@ -165,6 +165,101 @@ fn effect_class_token(effect_class: &EffectClass) -> &'static str {
     }
 }
 
+fn browser_budget_failure_reason(text: &str) -> Option<&str> {
+    let reason = text.trim().strip_prefix("browser_budget_exceeded:")?;
+    match reason {
+        "wall_clock" | "failed_navigations" | "no_progress" => Some(reason),
+        _ => Some("unknown"),
+    }
+}
+
+fn browser_tool_name(payload: &Value) -> Option<&str> {
+    for key in ["name", "tool_name"] {
+        if let Some(name) = payload.get(key).and_then(Value::as_str) {
+            return Some(name);
+        }
+    }
+    for key in ["payload", "call", "tool"] {
+        if let Some(name) = payload.get(key).and_then(browser_tool_name) {
+            return Some(name);
+        }
+    }
+    None
+}
+
+fn event_text(event: &TurnEvent) -> Option<String> {
+    event
+        .payload
+        .get("text")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
+}
+
+fn latest_browser_progress(events: &[TurnEvent]) -> Option<String> {
+    events
+        .iter()
+        .filter(|event| event.kind == TurnEventKind::Activity)
+        .filter_map(event_text)
+        .filter(|text| browser_budget_failure_reason(text).is_none())
+        .last()
+}
+
+fn browser_done_observed(events: &[TurnEvent], terminal_reason: Option<&str>) -> bool {
+    terminal_reason == Some("browser_done_terminal")
+        || events.iter().any(|event| {
+            event.kind == TurnEventKind::Tool
+                && browser_tool_name(&event.payload) == Some("browser_done")
+        })
+}
+
+fn project_kernel_browser_view(
+    events: &[TurnEvent],
+    checkpoint: Option<&BrowserCheckpointRecord>,
+    terminal_reason: Option<&str>,
+) -> KernelBrowserView {
+    let latest_progress = latest_browser_progress(events);
+    if let Some(reason) = events
+        .iter()
+        .filter(|event| event.kind == TurnEventKind::Activity)
+        .filter_map(event_text)
+        .filter_map(|text| browser_budget_failure_reason(&text).map(str::to_string))
+        .last()
+    {
+        return KernelBrowserView {
+            state: "failed".to_string(),
+            target_id: checkpoint.map(|checkpoint| checkpoint.target_id.clone()),
+            latest_progress,
+            failure_reason: Some(reason),
+            snapshot_verified: checkpoint.is_some(),
+        };
+    }
+    if browser_done_observed(events, terminal_reason) {
+        return KernelBrowserView {
+            state: "done".to_string(),
+            target_id: checkpoint.map(|checkpoint| checkpoint.target_id.clone()),
+            latest_progress,
+            failure_reason: None,
+            snapshot_verified: checkpoint.is_some(),
+        };
+    }
+    if let Some(checkpoint) = checkpoint {
+        return KernelBrowserView {
+            state: "active".to_string(),
+            target_id: Some(checkpoint.target_id.clone()),
+            latest_progress,
+            failure_reason: None,
+            snapshot_verified: true,
+        };
+    }
+    KernelBrowserView {
+        state: "idle".to_string(),
+        latest_progress,
+        ..KernelBrowserView::default()
+    }
+}
+
 pub struct TaskStore {
     pub(crate) connection: Connection,
 }
@@ -3970,6 +4065,14 @@ impl TaskStore {
                 .and_then(|run| run.terminal_reason),
             _ => None,
         };
+        let browser_checkpoint = match latest_turn_record.as_ref() {
+            Some(task) => self.load_active_browser_checkpoint_for_thread(
+                task.user_id.as_str(),
+                task.workspace_id.as_str(),
+                thread_id,
+            )?,
+            None => None,
+        };
         let reduced = reduce_kernel_projection(KernelProjectionInput {
             turn_events: &latest_turn_events,
             runtime_plan: latest_runtime_plan.as_ref(),
@@ -4010,6 +4113,7 @@ impl TaskStore {
                 .and_then(Value::as_str)
                 .map(str::trim)
                 .filter(|text| !text.is_empty())
+                .filter(|text| browser_budget_failure_reason(text).is_none())
             {
                 activity.push(KernelActivityRow {
                     text: text.to_string(),
@@ -4131,10 +4235,11 @@ impl TaskStore {
             plan,
             activity,
             subagents,
-            browser: KernelBrowserView {
-                state: "idle".to_string(),
-                ..KernelBrowserView::default()
-            },
+            browser: project_kernel_browser_view(
+                &latest_turn_events,
+                browser_checkpoint.as_ref(),
+                terminal_reason.as_deref(),
+            ),
             capability_runtime: KernelCapabilityRuntimeView::default(),
             attention: KernelAttentionView {
                 awaiting_user,
@@ -6938,6 +7043,42 @@ mod chat_turn_query_tests {
         t
     }
 
+    fn insert_browser_turn(store: &TaskStore, turn_id: &str, thread_id: &str, status: TaskStatus) {
+        let mut task = make_chat_turn(turn_id, thread_id, status);
+        task.created_at = OffsetDateTime::from_unix_timestamp(100).unwrap();
+        store
+            .insert_chat_turn(
+                &task,
+                thread_id,
+                &format!("req-{turn_id}"),
+                "interactive",
+                "full",
+            )
+            .unwrap();
+    }
+
+    fn browser_checkpoint(thread_id: &str, target_id: &str) -> NewBrowserCheckpoint {
+        NewBrowserCheckpoint {
+            checkpoint_id: format!("checkpoint-{thread_id}-{target_id}"),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            thread_id: thread_id.into(),
+            target_id: target_id.into(),
+            objective_revision: 1,
+            schema_version: 1,
+            url: "https://rail.example/search".into(),
+            origin: "https://rail.example".into(),
+            browser_epoch: "browser-epoch-1".into(),
+            cdp_target_id: Some("cdp-target-1".into()),
+            generation: 1,
+            draft_secret_ref: None,
+            draft_control_count: 0,
+            omitted_sensitive_count: 0,
+            omitted_bounded_count: 0,
+            expires_at: 2_000_000_000,
+        }
+    }
+
     #[test]
     fn active_chat_turn_returns_none_when_empty() {
         let s = store();
@@ -7514,6 +7655,159 @@ mod chat_turn_query_tests {
             "read uncertainty must be filtered out of user-visible attention"
         );
         assert_eq!(projection.attention.approvals.len(), 1);
+    }
+
+    #[test]
+    fn browser_done_closes_browser_state_even_with_read_uncertainty() {
+        let s = store();
+        insert_browser_turn(
+            &s,
+            "turn_browser_done",
+            "threadBrowserDone",
+            TaskStatus::Running,
+        );
+        s.insert_turn_event(
+            "turn_browser_done",
+            TurnEventKind::Tool,
+            json!({
+                "type": "tool_result",
+                "name": "browser_done",
+                "payload": {"status": "completed"}
+            }),
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_browser_done",
+            TurnEventKind::Done,
+            json!({"text": "browser results delivered"}),
+        )
+        .unwrap();
+        s.create_agent_run(&NewAgentRun {
+            run_id: "run-browser-done".into(),
+            turn_id: "turn_browser_done".into(),
+            thread_id: "threadBrowserDone".into(),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            role: None,
+            model: Some("test-model".into()),
+            provider: Some("test-provider".into()),
+            prompt_fingerprint: None,
+        })
+        .unwrap();
+        s.finish_agent_run(
+            "run-browser-done",
+            AgentRunStatus::Completed,
+            Some("browser_done_terminal"),
+        )
+        .unwrap();
+        let receipt_ref =
+            EffectReceiptRef::from_store_id("77777777777777777777777777777777").unwrap();
+        s.prepare_effect_receipt(&NewExecutionEffectReceipt {
+            receipt_ref: receipt_ref.clone(),
+            execution_id: "turn_browser_done".into(),
+            revision: 1,
+            run_id: Some("run-browser-done".into()),
+            thread_id: Some("threadBrowserDone".into()),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            effect_class: EffectClass::Read,
+            operation: "browser.extract".into(),
+            arguments_hash: "read-hash-browser-done".into(),
+            idempotency_key: "read-idempotency-browser-done".into(),
+            compensation: None,
+        })
+        .unwrap();
+        s.claim_effect_receipt(&receipt_ref).unwrap();
+        s.mark_effect_receipt_uncertain(&receipt_ref, &json!({"reason": "read interrupted"}))
+            .unwrap();
+
+        let projection = s.project_kernel_thread("threadBrowserDone", 200).unwrap();
+
+        assert_eq!(projection.turn.status, "completed");
+        assert_eq!(projection.browser.state, "done");
+        assert_eq!(projection.browser.failure_reason, None);
+        assert!(
+            !projection.attention.awaiting_user,
+            "read-only browser uncertainty must not require outcome verification"
+        );
+        assert!(projection.attention.uncertain_effects.is_empty());
+    }
+
+    #[test]
+    fn browser_visible_snapshot_without_done_is_not_success() {
+        let s = store();
+        insert_browser_turn(
+            &s,
+            "turn_browser_active",
+            "threadBrowserActive",
+            TaskStatus::Running,
+        );
+        s.upsert_objective_contract(
+            "u",
+            "w",
+            "threadBrowserActive",
+            "message-browser-active",
+            "Find train results",
+            ObjectiveMode::Mixed,
+            &json!({}),
+            &json!(["browser"]),
+            &json!({"kind": "browser_done"}),
+            "active",
+        )
+        .unwrap();
+        s.upsert_browser_checkpoint(&browser_checkpoint("threadBrowserActive", "train-search"))
+            .unwrap();
+        s.insert_turn_event(
+            "turn_browser_active",
+            TurnEventKind::Activity,
+            json!({"text": "snapshot"}),
+        )
+        .unwrap();
+
+        let projection = s.project_kernel_thread("threadBrowserActive", 200).unwrap();
+
+        assert_eq!(projection.browser.state, "active");
+        assert_eq!(
+            projection.browser.target_id.as_deref(),
+            Some("train-search")
+        );
+        assert_eq!(
+            projection.browser.latest_progress.as_deref(),
+            Some("snapshot")
+        );
+        assert!(projection.browser.snapshot_verified);
+        assert_ne!(projection.browser.state, "done");
+    }
+
+    #[test]
+    fn browser_no_progress_failure_is_bounded() {
+        let s = store();
+        insert_browser_turn(
+            &s,
+            "turn_browser_no_progress",
+            "threadBrowserNoProgress",
+            TaskStatus::Running,
+        );
+        s.insert_turn_event(
+            "turn_browser_no_progress",
+            TurnEventKind::Activity,
+            json!({"text": "browser_budget_exceeded:no_progress"}),
+        )
+        .unwrap();
+
+        let projection = s
+            .project_kernel_thread("threadBrowserNoProgress", 200)
+            .unwrap();
+
+        assert_eq!(projection.browser.state, "failed");
+        assert_eq!(
+            projection.browser.failure_reason.as_deref(),
+            Some("no_progress")
+        );
+        assert!(
+            projection.activity.is_empty(),
+            "typed browser budget failures must not leak as generic activity rows"
+        );
     }
 
     #[test]

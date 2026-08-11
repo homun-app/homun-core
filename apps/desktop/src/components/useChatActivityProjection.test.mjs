@@ -20,3 +20,8 @@ test("useChatActivityProjection keeps marker parsing behind legacyMarkerProjecti
   assert.match(source, /legacyMarkerProjection/);
   assert.doesNotMatch(source, /status === "doing" \? \{ \.\.\.step, status: "done"/);
 });
+
+test("useChatActivityProjection reads browser failure from typed kernel projection", () => {
+  assert.match(source, /projectedView\.browserStatus\.failureReason/);
+  assert.doesNotMatch(source, /browser_budget_exceeded/);
+});
