@@ -343,7 +343,6 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn execution_thread_workspace(": "turn broker workspace resolution must stay in gateway_turn_broker",
         "fn set_chat_turn_message_delivery_state(": "turn broker delivery projection must stay in gateway_turn_broker",
         "async fn get_turn_events(": "turn broker event route must stay in gateway_turn_broker",
-        "async fn thread_activity_projection(": "turn broker activity route must stay in gateway_turn_broker",
         "struct SteeringMutationRequest ": "turn broker steering request DTO must stay in gateway_turn_broker",
         "struct SteeringRevisionRequest ": "turn broker steering revision DTO must stay in gateway_turn_broker",
         "fn publish_steering_changed(": "turn broker steering broadcast must stay in gateway_turn_broker",

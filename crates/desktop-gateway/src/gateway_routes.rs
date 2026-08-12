@@ -61,10 +61,6 @@ pub(crate) fn build_gateway_router(state: AppState) -> Router {
             get(thread_kernel_projection),
         )
         .route(
-            "/api/chat/threads/{thread_id}/activity",
-            get(thread_activity_projection),
-        )
-        .route(
             "/api/chat/threads/{thread_id}/steering",
             get(list_thread_steering),
         )

@@ -73,8 +73,9 @@ projection, then derive visual rows. The row builder can add `Thinking` or
 Code observations on `fabio/runtime-v2-first-slice`:
 
 - `crates/task-runtime/src/turn_reducer.rs` now exposes `reduce_kernel_projection`.
-- `crates/task-runtime/src/store.rs::project_thread_activity` now routes latest
-  turn activity through that reducer.
+- `crates/task-runtime/src/store.rs::project_kernel_thread` routes latest turn
+  state, plan, activity, browser, attention, capability runtime, and actions
+  through the kernel reducer/projection contract.
 - `apps/desktop/src/components/useChatActivityProjection.ts` still chooses among
   durable projection, live stream plan, persisted marker plan, local active turn
   refs, and replay state.
@@ -206,7 +207,7 @@ it, and it must be isolated behind a named legacy adapter.
 Owner: `crates/task-runtime` plus `crates/desktop-gateway`.
 
 Add or extend a single endpoint that returns the kernel projection for one
-thread. It may wrap the existing `/activity` route initially, but the DTO should
+thread. The retired `/activity` route must not be reintroduced; the DTO should
 be explicit about turn, plan, activity, browser, and actions.
 
 Remove or quarantine:

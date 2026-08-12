@@ -182,7 +182,7 @@ Assert that the projected thread activity keeps the active plan but does not pro
 - [ ] **Step 2: Run failing test**
 
 ```bash
-cargo test -p local-first-task-runtime read_receipts_do_not_block_thread_activity_projection -- --nocapture
+cargo test -p local-first-task-runtime kernel_thread_projection -- --nocapture
 ```
 
 Expected: FAIL before `store.rs` delegates projection to the reducer.
@@ -196,7 +196,7 @@ In the store method that derives latest thread activity from `runtime_plans` and
 ```bash
 cargo test -p local-first-task-runtime runtime_plans -- --nocapture
 cargo test -p local-first-task-runtime step_advance -- --nocapture
-cargo test -p local-first-task-runtime read_receipts_do_not_block_thread_activity_projection -- --nocapture
+cargo test -p local-first-task-runtime kernel_thread_projection -- --nocapture
 ```
 
 Expected: PASS.

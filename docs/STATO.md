@@ -100,9 +100,9 @@ Merge state GitHub: `CLEAN`.
 - Smoke Electron reale su build/dev pulita: chat, plan progress, browser read
   research, Activity/browser island, composer mode.
 - Aggiornare eventuali note release/RC dopo merge della PR.
-- Il client desktop non consuma piu' `ThreadActivityProjection`; resta da
-  chiudere, in una slice separata, la route backend compat
-  `GET /api/chat/threads/{thread_id}/activity` e i test/task-runtime collegati.
+- `ThreadActivityProjection` e la route backend compat
+  `GET /api/chat/threads/{thread_id}/activity` sono stati rimossi nella cleanup
+  backend 2026-08-12; il read model canonico e' `KernelThreadProjection`.
 - Continuare la rimozione dei fallback `legacy*` solo con fixture owner-level e
   gate kernel verde.
 - `main.rs` e `ChatView.tsx` restano grandi, ma non vanno tagliati senza owner
@@ -113,8 +113,8 @@ Merge state GitHub: `CLEAN`.
 1. Merge/review della PR #108 quando il draft viene promosso.
 2. Smoke Electron su checkout pulito della PR: riprodurre i due bug iniziali
    (goal/plan/progress e browser treni Milano-Roma read-only).
-3. Prossima slice delete-first: chiudere il compat endpoint backend `/activity`
-   oppure rimuovere un fallback `legacy*` ancora tracciato, con fixture owner.
+3. Prossima slice delete-first: rimuovere un fallback `legacy*` ancora tracciato,
+   con fixture owner.
 
 ## Prompt di ripartenza
 

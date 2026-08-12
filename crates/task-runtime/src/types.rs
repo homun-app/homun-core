@@ -96,7 +96,7 @@ pub enum TaskStatus {
     /// the scheduler's `Queued|Pending` dispatch (unlike `Queued`, which would busy-run
     /// it). Only the coordinator's resume trigger (probe confirms model availability)
     /// flips this back to `Queued` via `unpark_chat_turn_to_queued`. Existing terminal
-    /// checks (`active_chat_turn_on`, `project_thread_activity`) already treat anything
+    /// checks (`active_chat_turn_on`, `project_kernel_thread`) already treat anything
     /// outside `completed/failed/cancelled/expired/finalizing` as active, so a new user
     /// message on this thread becomes steering, not a second turn.
     Parked,
@@ -590,25 +590,6 @@ pub struct AgentRunEvent {
     pub kind: String,
     pub payload: Value,
     pub created_at: i64,
-}
-
-/// Thread-level cockpit projection over the durable per-turn log (`turn_events`) for the
-/// working island. Plans supersede (latest `plan_update` wins); activity accumulates across
-/// ALL turns of the thread in chronological order (capped to bound the payload). This is the
-/// single durable source the island reads at rest — the message-text `‹‹ACT/PLAN››` markers
-/// are a lossy mirror (absent for workflow deliverables, plan emitted at most once) we no
-/// longer depend on. `latest_turn_status` distinguishes a live turn from a concluded one.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ThreadActivityProjection {
-    pub plan_markdown: Option<String>,
-    pub activity: Vec<String>,
-    pub latest_turn_status: Option<String>,
-    pub turn_count: usize,
-    /// Subagents spawned on this thread (name + status). Empty until `spawn_subagent`
-    /// actually fires — today weak local managers route decomposition to the PLAN, so this
-    /// is forward-looking plumbing: the section renders as soon as a subagent task appears.
-    pub subagents: Vec<SubagentInfo>,
-    pub active_turn: Option<ActiveTurnProjection>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

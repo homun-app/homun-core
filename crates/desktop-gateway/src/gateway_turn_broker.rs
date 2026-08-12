@@ -1080,33 +1080,9 @@ pub(crate) async fn get_turn_events(
     Ok(Json(out))
 }
 
-/// GET /api/chat/threads/{thread_id}/activity — durable cockpit projection for the working
-/// island: the latest plan across the thread + activity accumulated cross-turn + the latest
-/// turn's status. Reads the canonical turn_events log (via the indexed tasks(thread_id) join),
-/// NOT the lossy message-text markers — so the island survives turn-end/reload/thread-switch.
-pub(crate) async fn thread_activity_projection(
-    Path(thread_id): Path<String>,
-    State(state): State<AppState>,
-) -> Result<Json<local_first_task_runtime::ThreadActivityProjection>, GatewayError> {
-    let store = state.task_store.lock().map_err(|e| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "broker_store_lock",
-        message: format!("lock: {e}"),
-    })?;
-    let projection = store
-        .project_thread_activity(&thread_id, 200)
-        .map_err(|e| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "thread_activity",
-            message: format!("{e}"),
-        })?;
-    Ok(Json(projection))
-}
-
 /// GET /api/chat/threads/{thread_id}/kernel-projection — canonical Runtime V2 thread
 /// projection. This is the backend-owned contract for turn status, plan, activity,
-/// attention, browser, capability runtime, and composer actions. `/activity` remains
-/// a compatibility adapter until the renderer is migrated.
+/// attention, browser, capability runtime, and composer actions.
 pub(crate) async fn thread_kernel_projection(
     Path(thread_id): Path<String>,
     State(state): State<AppState>,

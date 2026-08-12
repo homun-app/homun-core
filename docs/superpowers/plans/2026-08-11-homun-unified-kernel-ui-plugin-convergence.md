@@ -110,9 +110,9 @@ KernelThreadActions {
 }
 ```
 
-`ThreadActivityProjection` remains only as a backend compatibility endpoint until
-external/non-desktop consumers are audited. The desktop client no longer exports
-`fetchThreadActivity` after the 2026-08-12 UI cleanup.
+`ThreadActivityProjection` and `GET /api/chat/threads/{thread_id}/activity` were
+retired in the 2026-08-12 backend cleanup. Runtime/UI code must consume
+`KernelThreadProjection`.
 
 ---
 
@@ -129,12 +129,13 @@ external/non-desktop consumers are audited. The desktop client no longer exports
 - [x] Assert that read uncertainty does not set `attention.awaiting_user`, external-write uncertainty does, terminal run clears `active_turn_id`, and plan step statuses come from `runtime_plans`.
 - [x] Add serializable DTOs in `types.rs`; keep field names snake_case to match current gateway JSON.
 - [x] Add `TaskStore::project_kernel_thread(thread_id, activity_cap)` that calls the existing reducer and returns `KernelThreadProjection`.
-- [x] Keep `project_thread_activity` as a compatibility adapter implemented from the new projection where possible.
+- [x] Retire `project_thread_activity` once `project_kernel_thread` owns the full
+  Runtime V2 projection.
 - [x] Run:
 
 ```bash
 cargo test -p local-first-task-runtime kernel_thread_projection_owns_turn_plan_attention_and_actions -- --nocapture
-cargo test -p local-first-task-runtime project_thread_activity -- --nocapture
+cargo test -p local-first-task-runtime kernel_thread_projection -- --nocapture
 cargo fmt --all --check
 ```
 
@@ -176,8 +177,7 @@ Removed owner: gateway route callers no longer infer stop/composer behavior from
 
 New owner: `TaskStore::project_kernel_thread`.
 
-Temporary fallback retained: backend `/activity` route only; the desktop client
-no longer exports `fetchThreadActivity`.
+Temporary fallback retained: none for the backend `/activity` read model.
 
 ---
 

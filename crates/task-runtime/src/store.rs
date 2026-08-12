@@ -3,16 +3,15 @@ use crate::turn_reducer::{
     ReducedTurnStatus, reduce_kernel_projection, turn_event_kind_is_terminal,
 };
 use crate::{
-    ActiveTurnProjection, AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus,
-    ApprovalRequest, Automation, AutomationRun, BrowserCheckpointRecord, EffectReceiptClaim,
-    ExecutionEffectReceipt, KernelActivityRow, KernelApprovalView, KernelAttentionView,
-    KernelBlockedCapabilityView, KernelBrowserView, KernelCapabilityRuntimeView,
-    KernelPlanStepView, KernelPlanView, KernelThreadActions, KernelThreadProjection,
-    KernelTurnView, KernelUncertainEffectView, NewAgentRun, NewBrowserCheckpoint,
-    NewExecutionEffectReceipt, NewTurnSteering, ObjectiveContractRecord, ObjectiveMode,
-    ProjectionClaim, ResourceClass, RuntimePlanRecord, SubagentInfo, TaskCheckpoint,
-    TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
-    TerminalWrite, ThreadActivityProjection, ThreadAttention, TurnEvent, TurnEventKind,
+    AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus, ApprovalRequest, Automation,
+    AutomationRun, BrowserCheckpointRecord, EffectReceiptClaim, ExecutionEffectReceipt,
+    KernelActivityRow, KernelApprovalView, KernelAttentionView, KernelBlockedCapabilityView,
+    KernelBrowserView, KernelCapabilityRuntimeView, KernelPlanStepView, KernelPlanView,
+    KernelThreadActions, KernelThreadProjection, KernelTurnView, KernelUncertainEffectView,
+    NewAgentRun, NewBrowserCheckpoint, NewExecutionEffectReceipt, NewTurnSteering,
+    ObjectiveContractRecord, ObjectiveMode, ProjectionClaim, ResourceClass, RuntimePlanRecord,
+    SubagentInfo, TaskCheckpoint, TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError,
+    TaskRuntimeResult, TaskStatus, TerminalWrite, ThreadAttention, TurnEvent, TurnEventKind,
     TurnSteeringRecord, TurnSteeringStatus, UserId, WorkspaceId,
 };
 use local_first_execution_protocol::{EffectClass, EffectReceiptRef, EffectReceiptStatus};
@@ -170,7 +169,7 @@ fn task_status_kernel_turn_token(status: &str) -> Option<&'static str> {
         "completed" => Some("completed"),
         "failed" => Some("failed"),
         "cancelled" | "expired" => Some("cancelled"),
-        "finalizing" => Some("running"),
+        "finalizing" => Some("finalizing"),
         _ => None,
     }
 }
@@ -980,7 +979,7 @@ impl TaskStore {
             [],
         )?;
 
-        // tasks by (thread_id, kind, created_at): project_thread_activity and
+        // tasks by (thread_id, kind, created_at): project_kernel_thread and
         // thread_attention select the latest chat_turn or subagent rows for a thread
         // ordered by created_at DESC. idx_tasks_chat_turn_thread(thread_id, status,
         // kind) has status between thread_id and kind and lacks created_at, so it
@@ -4096,15 +4095,10 @@ impl TaskStore {
         )?)
     }
 
-    /// Projects the durable per-turn log into a thread-level cockpit view for the working
-    /// island (see `ThreadActivityProjection`). ONE JOIN turn_events⋈tasks(thread_id) — both
-    /// tables live in the same sqlite — yields every activity+plan signal across the thread's
-    /// turns in chronological order. Activity ACCUMULATES across the thread; the PLAN is scoped
-    /// to the LATEST turn only (a new task that emits no plan must not leave the previous task's
-    /// plan on screen — the island has to reflect the current request, not the first one).
-    /// `runtime_plans` owns the canonical checklist when the latest turn emitted plan activity;
-    /// marker markdown remains only a legacy fallback for old rows. `activity_cap` bounds the
-    /// payload by keeping the most recent steps.
+    /// Projects the durable per-turn log into the canonical Runtime V2 thread view.
+    /// Activity accumulates across chat turns, while liveness, plan, browser,
+    /// attention, capability runtime, and composer actions are owned by this one
+    /// kernel projection.
     pub fn project_kernel_thread(
         &self,
         thread_id: &str,
@@ -4261,12 +4255,18 @@ impl TaskStore {
             }
             Some(turn_id.clone())
         });
-        let turn_status = match reduced.turn.status {
-            ReducedTurnStatus::Empty => latest_turn
-                .as_ref()
-                .and_then(|(_, status, _, _, _)| task_status_kernel_turn_token(status))
-                .unwrap_or("idle"),
-            status => reduced_turn_status_token(status),
+        let stored_turn_status = latest_turn
+            .as_ref()
+            .map(|(_, status, _, _, _)| status.as_str());
+        let turn_status = if stored_turn_status == Some("finalizing") {
+            "finalizing"
+        } else {
+            match reduced.turn.status {
+                ReducedTurnStatus::Empty => stored_turn_status
+                    .and_then(task_status_kernel_turn_token)
+                    .unwrap_or("idle"),
+                status => reduced_turn_status_token(status),
+            }
         }
         .to_string();
         let composer_mode = if awaiting_user && active_turn_id.is_none() {
@@ -4360,226 +4360,6 @@ impl TaskStore {
                 can_stop,
                 composer_mode,
             },
-        })
-    }
-
-    pub fn project_thread_activity(
-        &self,
-        thread_id: &str,
-        activity_cap: usize,
-    ) -> TaskRuntimeResult<ThreadActivityProjection> {
-        // Latest turn (id + status) first: the plan is scoped to it.
-        let latest_turn: Option<(String, String, String, i64, Option<String>)> = self
-            .connection
-            .query_row(
-                "SELECT task_id, status, task_json, updated_at, blocked_reason FROM tasks WHERE thread_id = ?1 AND kind = 'chat_turn'
-                 ORDER BY created_at DESC LIMIT 1",
-                params![thread_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
-            )
-            .optional()?;
-        let latest_turn_id = latest_turn.as_ref().map(|(id, _, _, _, _)| id.clone());
-        let latest_turn_record = latest_turn
-            .as_ref()
-            .and_then(|(_, _, task_json, _, _)| serde_json::from_str::<TaskRecord>(task_json).ok());
-        let stored_latest_turn_status = latest_turn
-            .as_ref()
-            .map(|(_, status, _, _, _)| status.clone());
-        let latest_kernel_projection =
-            match (latest_turn_id.as_deref(), latest_turn_record.as_ref()) {
-                (Some(turn_id), Some(task)) => {
-                    let turn_events = self.read_turn_events(turn_id, 0)?;
-                    let runtime_plan = load_runtime_plan_on(
-                        &self.connection,
-                        task.user_id.as_str(),
-                        task.workspace_id.as_str(),
-                        thread_id,
-                    )?;
-                    let uncertain_effects = self
-                        .list_effect_receipts_for_thread(
-                            thread_id,
-                            task.user_id.as_str(),
-                            task.workspace_id.as_str(),
-                        )?
-                        .into_iter()
-                        .filter(|receipt| receipt.status == EffectReceiptStatus::Uncertain)
-                        .map(|receipt| KernelEffectProjection {
-                            effect_class: receipt.effect_class,
-                            status: receipt.status,
-                        })
-                        .collect::<Vec<_>>();
-                    let terminal_reason = self
-                        .list_agent_runs_for_turn(
-                            turn_id,
-                            task.user_id.as_str(),
-                            task.workspace_id.as_str(),
-                        )?
-                        .into_iter()
-                        .rev()
-                        .find(|run| run.status != AgentRunStatus::Running)
-                        .and_then(|run| run.terminal_reason);
-                    Some(reduce_kernel_projection(KernelProjectionInput {
-                        turn_events: &turn_events,
-                        runtime_plan: runtime_plan.as_ref(),
-                        uncertain_effects: &uncertain_effects,
-                        terminal_reason: terminal_reason.as_deref(),
-                    }))
-                }
-                _ => None,
-            };
-        let latest_turn_status = latest_kernel_projection
-            .as_ref()
-            .and_then(|projection| match projection.turn.status {
-                ReducedTurnStatus::Completed => Some("completed".to_string()),
-                ReducedTurnStatus::Failed => Some("failed".to_string()),
-                ReducedTurnStatus::Cancelled => Some("cancelled".to_string()),
-                ReducedTurnStatus::Empty
-                | ReducedTurnStatus::Running
-                | ReducedTurnStatus::WaitingUser
-                | ReducedTurnStatus::WaitingApproval => None,
-            })
-            .or(stored_latest_turn_status);
-        let latest_turn_last_seq = latest_turn_id
-            .as_deref()
-            .map(|turn_id| {
-                self.connection.query_row(
-                    "SELECT COALESCE(MAX(seq), 0) FROM turn_events WHERE turn_id = ?1",
-                    params![turn_id],
-                    |row| row.get::<_, i64>(0),
-                )
-            })
-            .transpose()?
-            .unwrap_or(0);
-        let latest_turn_is_canonically_terminal = latest_kernel_projection
-            .as_ref()
-            .is_some_and(|projection| projection.turn.is_terminal);
-        let active_turn = latest_turn.as_ref().and_then(
-            |(turn_id, status, task_json, updated_at, blocked_reason)| {
-                if latest_turn_is_canonically_terminal {
-                    return None;
-                }
-                if !crate::turn_lifecycle::status_has_active_turn_projection(status.as_str()) {
-                    return None;
-                }
-                let task = latest_turn_record
-                    .as_ref()
-                    .cloned()
-                    .or_else(|| serde_json::from_str::<TaskRecord>(task_json).ok())?;
-                Some(ActiveTurnProjection {
-                    turn_id: turn_id.clone(),
-                    last_event_seq: latest_turn_last_seq,
-                    status: status.clone(),
-                    attempt: task.attempt_count,
-                    max_attempts: task.retry_policy.max_attempts,
-                    not_before: task.not_before.map(|value| value.unix_timestamp()),
-                    blocked_reason: blocked_reason.clone(),
-                    updated_at: *updated_at,
-                })
-            },
-        );
-
-        let mut stmt = self.connection.prepare(
-            "SELECT te.turn_id, te.kind, te.payload_json
-             FROM turn_events te JOIN tasks t ON t.task_id = te.turn_id
-             WHERE t.thread_id = ?1 AND t.kind = 'chat_turn'
-               AND te.kind IN ('activity', 'plan_update', 'step_advance')
-             ORDER BY t.created_at ASC, te.seq ASC",
-        )?;
-        let rows = stmt.query_map(params![thread_id], |row| {
-            let turn_id: String = row.get(0)?;
-            let kind: String = row.get(1)?;
-            let payload: String = row.get(2)?;
-            Ok((turn_id, kind, payload))
-        })?;
-        let mut activity: Vec<String> = Vec::new();
-        let mut plan_markdown: Option<String> = None;
-        let mut latest_turn_has_plan_event = false;
-        for row in rows {
-            let (turn_id, kind, payload_json) = row?;
-            let payload: Value = serde_json::from_str(&payload_json)?;
-            match kind.as_str() {
-                "activity" => {
-                    if let Some(text) = payload.get("text").and_then(|v| v.as_str()) {
-                        let text = text.trim();
-                        if !text.is_empty() {
-                            activity.push(text.to_string());
-                        }
-                    }
-                }
-                // Plan is scoped to the LATEST turn: a newer, plan-less task clears the old plan.
-                "plan_update" if Some(&turn_id) == latest_turn_id.as_ref() => {
-                    latest_turn_has_plan_event = true;
-                    if let Some(md) = payload.get("markdown").and_then(|v| v.as_str())
-                        && !md.trim().is_empty()
-                    {
-                        plan_markdown = Some(md.to_string());
-                    }
-                }
-                "step_advance" if Some(&turn_id) == latest_turn_id.as_ref() => {
-                    latest_turn_has_plan_event = true;
-                }
-                _ => {}
-            }
-        }
-        if latest_turn_has_plan_event
-            && let Some(kernel_projection) = latest_kernel_projection.as_ref()
-            && let Some(active_plan) = kernel_projection.active_plan.as_ref()
-            && let Some(markdown) = runtime_plan_markdown(&active_plan.plan_json)
-        {
-            plan_markdown = Some(markdown);
-        }
-        // Bound the payload: keep the most recent `activity_cap` steps (the tail is what the
-        // cockpit shows). A cap of 0 would be nonsensical here, so treat it as "no cap".
-        if activity_cap > 0 && activity.len() > activity_cap {
-            activity.drain(0..activity.len() - activity_cap);
-        }
-        // Turn count — served by idx_tasks_chat_turn_thread.
-        let turn_count: i64 = self.connection.query_row(
-            "SELECT COUNT(*) FROM tasks WHERE thread_id = ?1 AND kind = 'chat_turn'",
-            params![thread_id],
-            |row| row.get(0),
-        )?;
-        // Subagents spawned on this thread (kind `subagent.<role>`). Forward-looking: empty
-        // until spawn_subagent actually fires. `subagent.review` → "Review".
-        let mut sub_stmt = self.connection.prepare(
-            "SELECT kind, status, task_json, blocked_reason, created_at, updated_at FROM tasks
-             WHERE thread_id = ?1 AND kind LIKE 'subagent.%'
-             ORDER BY created_at ASC",
-        )?;
-        let subagents = sub_stmt
-            .query_map(params![thread_id], |row| {
-                let kind: String = row.get(0)?;
-                let status: String = row.get(1)?;
-                let task_json: String = row.get(2)?;
-                let blocked_reason: Option<String> = row.get(3)?;
-                let created_at: i64 = row.get(4)?;
-                let updated_at: i64 = row.get(5)?;
-                let goal = serde_json::from_str::<Value>(&task_json)
-                    .ok()
-                    .and_then(|value| {
-                        value
-                            .get("goal")
-                            .and_then(Value::as_str)
-                            .map(str::trim)
-                            .map(str::to_string)
-                    })
-                    .filter(|value| !value.is_empty());
-                Ok(SubagentInfo {
-                    name: subagent_name_from_kind(&kind),
-                    status,
-                    summary: blocked_reason.or(goal),
-                    created_at,
-                    updated_at,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(ThreadActivityProjection {
-            plan_markdown,
-            activity,
-            latest_turn_status,
-            turn_count: turn_count as usize,
-            subagents,
-            active_turn,
         })
     }
 
@@ -7318,17 +7098,16 @@ mod chat_turn_query_tests {
             .insert_turn_event("turn_cursor", TurnEventKind::Activity, json!({"text": "B"}))
             .unwrap();
 
-        let active = s
-            .project_thread_activity("thread_cursor", 200)
-            .unwrap()
-            .active_turn
-            .expect("active turn projection");
-        assert_eq!(active.turn_id, "turn_cursor");
-        assert_eq!(active.last_event_seq, last.seq);
+        let projection = s.project_kernel_thread("thread_cursor", 200).unwrap();
+        assert_eq!(
+            projection.turn.active_turn_id.as_deref(),
+            Some("turn_cursor")
+        );
+        assert_eq!(projection.turn.last_event_seq, last.seq);
     }
 
     #[test]
-    fn finalizing_turn_is_latest_but_not_active_in_thread_activity() {
+    fn finalizing_turn_is_latest_but_not_active_in_kernel_projection() {
         let s = store();
         let task = make_chat_turn("turn_finalizing", "thread_finalizing", TaskStatus::Running);
         s.insert_chat_turn(
@@ -7350,266 +7129,12 @@ mod chat_turn_query_tests {
                 .unwrap()
         );
 
-        let projection = s.project_thread_activity("thread_finalizing", 200).unwrap();
-        assert_eq!(projection.latest_turn_status.as_deref(), Some("finalizing"));
-        assert_eq!(projection.turn_count, 1);
-        assert!(
-            projection.active_turn.is_none(),
-            "finalizing must free active-turn projection while preserving latest status"
-        );
-        assert_eq!(projection.activity, vec!["Almost done".to_string()]);
-    }
-
-    #[test]
-    fn project_thread_activity_accumulates_cross_turn_and_takes_latest_plan() {
-        let s = store();
-        // Turn 1 (older): one activity + one plan. created_at set explicitly so the JOIN's
-        // `t.created_at ASC` ordering is deterministic across turns.
-        let mut t1 = make_chat_turn("turn_a", "threadX", TaskStatus::Completed);
-        t1.created_at = OffsetDateTime::from_unix_timestamp(100).unwrap();
-        s.insert_chat_turn(&t1, "threadX", "reqa", "interactive", "full")
-            .unwrap();
-        s.insert_turn_event("turn_a", TurnEventKind::Activity, json!({"text": "A1"}))
-            .unwrap();
-        s.insert_turn_event(
-            "turn_a",
-            TurnEventKind::PlanUpdate,
-            json!({"markdown": "- [ ] uno"}),
-        )
-        .unwrap();
-        // Turn 2 (newer, still running): one activity + a superseding plan.
-        let mut t2 = make_chat_turn("turn_b", "threadX", TaskStatus::Running);
-        t2.created_at = OffsetDateTime::from_unix_timestamp(200).unwrap();
-        s.insert_chat_turn(&t2, "threadX", "reqb", "interactive", "full")
-            .unwrap();
-        s.insert_turn_event("turn_b", TurnEventKind::Activity, json!({"text": "B1"}))
-            .unwrap();
-        s.insert_turn_event(
-            "turn_b",
-            TurnEventKind::PlanUpdate,
-            json!({"markdown": "- [x] due"}),
-        )
-        .unwrap();
-
-        let p = s.project_thread_activity("threadX", 200).unwrap();
+        let projection = s.project_kernel_thread("thread_finalizing", 200).unwrap();
+        assert_eq!(projection.turn.status, "finalizing");
+        assert_eq!(projection.turn.active_turn_id, None);
         assert_eq!(
-            p.activity,
-            vec!["A1".to_string(), "B1".to_string()],
-            "activity accumulates across turns in order"
-        );
-        assert_eq!(
-            p.plan_markdown.as_deref(),
-            Some("- [x] due"),
-            "latest plan wins"
-        );
-        assert_eq!(p.turn_count, 2);
-        assert_eq!(
-            p.latest_turn_status.as_deref(),
-            Some("running"),
-            "status of the most recent turn"
-        );
-    }
-
-    #[test]
-    fn project_thread_activity_plan_is_scoped_to_latest_turn() {
-        let s = store();
-        // Turn 1 (older): a planned task that completes with a plan.
-        let mut t1 = make_chat_turn("turn_a", "threadZ", TaskStatus::Completed);
-        t1.created_at = OffsetDateTime::from_unix_timestamp(100).unwrap();
-        s.insert_chat_turn(&t1, "threadZ", "reqa", "interactive", "full")
-            .unwrap();
-        s.insert_turn_event("turn_a", TurnEventKind::Activity, json!({"text": "A1"}))
-            .unwrap();
-        s.insert_turn_event(
-            "turn_a",
-            TurnEventKind::PlanUpdate,
-            json!({"markdown": "- [x] mini-ricerca"}),
-        )
-        .unwrap();
-        // Turn 2 (newer): a DIFFERENT task with no plan (e.g. a one-shot web search).
-        let mut t2 = make_chat_turn("turn_b", "threadZ", TaskStatus::Completed);
-        t2.created_at = OffsetDateTime::from_unix_timestamp(200).unwrap();
-        s.insert_chat_turn(&t2, "threadZ", "reqb", "interactive", "full")
-            .unwrap();
-        s.insert_turn_event(
-            "turn_b",
-            TurnEventKind::Activity,
-            json!({"text": "B1 search"}),
-        )
-        .unwrap();
-
-        let p = s.project_thread_activity("threadZ", 200).unwrap();
-        assert_eq!(
-            p.plan_markdown, None,
-            "the plan-less latest turn must clear the previous task's plan"
-        );
-        assert_eq!(
-            p.activity,
-            vec!["A1".to_string(), "B1 search".to_string()],
-            "activity still accumulates"
-        );
-    }
-
-    #[test]
-    fn project_thread_activity_uses_runtime_plan_when_latest_turn_advanced_step() {
-        let s = store();
-        let mut task = make_chat_turn("turn_plan_state", "threadPlanState", TaskStatus::Running);
-        task.created_at = OffsetDateTime::from_unix_timestamp(100).unwrap();
-        s.insert_chat_turn(
-            &task,
-            "threadPlanState",
-            "req-plan-state",
-            "interactive",
-            "full",
-        )
-        .unwrap();
-        s.upsert_runtime_plan(
-            "u",
-            "w",
-            "threadPlanState",
-            0,
-            &json!({
-                "goal": "Consegnare una app stabile",
-                "steps": [
-                    {"id": "s1", "title": "Analizzare ownership", "status": "done", "detail": "mappa completata"},
-                    {"id": "s2", "title": "Consolidare PlanState", "status": "doing", "detail": "in corso"}
-                ]
-            }),
-            "open",
-        )
-        .unwrap();
-        s.insert_turn_event(
-            "turn_plan_state",
-            TurnEventKind::StepAdvance,
-            json!({
-                "step_id": "s1",
-                "title": "Analizzare ownership",
-                "from": "doing",
-                "to": "done",
-                "verified": true,
-                "note": null
-            }),
-        )
-        .unwrap();
-
-        let projection = s.project_thread_activity("threadPlanState", 200).unwrap();
-
-        assert_eq!(
-            projection.plan_markdown.as_deref(),
-            Some(
-                "**Goal**: Consegnare una app stabile\n\n- [x] **Analizzare ownership** (`s1`): mappa completata\n- [-] **Consolidare PlanState** (`s2`): in corso"
-            ),
-            "thread activity must render the canonical runtime plan after step_advance"
-        );
-    }
-
-    #[test]
-    fn read_receipts_do_not_block_thread_activity_projection() {
-        let s = store();
-        let mut task = make_chat_turn(
-            "turn_read_receipt",
-            "threadReadReceipt",
-            TaskStatus::Running,
-        );
-        task.created_at = OffsetDateTime::from_unix_timestamp(100).unwrap();
-        s.insert_chat_turn(
-            &task,
-            "threadReadReceipt",
-            "req-read-receipt",
-            "interactive",
-            "full",
-        )
-        .unwrap();
-        s.upsert_runtime_plan(
-            "u",
-            "w",
-            "threadReadReceipt",
-            0,
-            &json!({
-                "goal": "trova un treno",
-                "steps": [
-                    {"id": "s1", "title": "Cerca risultati", "status": "done", "detail": "ricerca completata"},
-                    {"id": "s2", "title": "Leggi risultati", "status": "doing", "detail": "in corso"}
-                ]
-            }),
-            "open",
-        )
-        .unwrap();
-        s.insert_turn_event(
-            "turn_read_receipt",
-            TurnEventKind::StepAdvance,
-            json!({
-                "step_id": "s1",
-                "title": "Cerca risultati",
-                "from": "doing",
-                "to": "done",
-                "verified": true,
-                "note": null
-            }),
-        )
-        .unwrap();
-        s.insert_turn_event(
-            "turn_read_receipt",
-            TurnEventKind::Done,
-            json!({"text": "risultati letti"}),
-        )
-        .unwrap();
-        s.create_agent_run(&NewAgentRun {
-            run_id: "run-read-receipt".into(),
-            turn_id: "turn_read_receipt".into(),
-            thread_id: "threadReadReceipt".into(),
-            user_id: "u".into(),
-            workspace_id: "w".into(),
-            role: None,
-            model: Some("test-model".into()),
-            provider: Some("test-provider".into()),
-            prompt_fingerprint: None,
-        })
-        .unwrap();
-        s.finish_agent_run(
-            "run-read-receipt",
-            AgentRunStatus::Completed,
-            Some("canonical_completed"),
-        )
-        .unwrap();
-        let receipt_ref =
-            EffectReceiptRef::from_store_id("44444444444444444444444444444444").unwrap();
-        s.prepare_effect_receipt(&NewExecutionEffectReceipt {
-            receipt_ref: receipt_ref.clone(),
-            execution_id: "turn_read_receipt".into(),
-            revision: 1,
-            run_id: Some("run-read-receipt".into()),
-            thread_id: Some("threadReadReceipt".into()),
-            user_id: "u".into(),
-            workspace_id: "w".into(),
-            effect_class: EffectClass::Read,
-            operation: "browser.extract".into(),
-            arguments_hash: "read-hash".into(),
-            idempotency_key: "read-idempotency".into(),
-            compensation: None,
-        })
-        .unwrap();
-        s.claim_effect_receipt(&receipt_ref).unwrap();
-        s.mark_effect_receipt_uncertain(&receipt_ref, &json!({"reason": "read interrupted"}))
-            .unwrap();
-
-        let projection = s.project_thread_activity("threadReadReceipt", 200).unwrap();
-
-        assert_eq!(
-            projection.latest_turn_status.as_deref(),
-            Some("completed"),
-            "terminal turn_events must beat stale task liveness in thread activity"
-        );
-        assert!(
-            projection.active_turn.is_none(),
-            "a canonically terminal turn must not keep the UI in active thinking state"
-        );
-        assert_eq!(
-            projection.plan_markdown.as_deref(),
-            Some(
-                "**Goal**: trova un treno\n\n- [x] **Cerca risultati** (`s1`): ricerca completata\n- [-] **Leggi risultati** (`s2`): in corso"
-            ),
-            "read receipts are evidence, not user-resolution blockers"
+            projection.activity[0].text, "Almost done",
+            "finalizing preserves durable activity rows"
         );
     }
 
@@ -8064,7 +7589,7 @@ mod chat_turn_query_tests {
     }
 
     #[test]
-    fn project_thread_activity_caps_to_most_recent() {
+    fn kernel_thread_projection_caps_activity_to_most_recent() {
         let s = store();
         let t = make_chat_turn("turn_c", "threadY", TaskStatus::Completed);
         s.insert_chat_turn(&t, "threadY", "reqc", "interactive", "full")
@@ -8077,26 +7602,29 @@ mod chat_turn_query_tests {
             )
             .unwrap();
         }
-        let p = s.project_thread_activity("threadY", 2).unwrap();
+        let p = s.project_kernel_thread("threadY", 2).unwrap();
         assert_eq!(
-            p.activity,
-            vec!["step3".to_string(), "step4".to_string()],
+            p.activity
+                .iter()
+                .map(|row| row.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["step3", "step4"],
             "cap keeps the most recent tail"
         );
     }
 
     #[test]
-    fn project_thread_activity_empty_thread_is_default() {
+    fn kernel_thread_projection_empty_thread_is_default() {
         let s = store();
-        let p = s.project_thread_activity("nope", 200).unwrap();
+        let p = s.project_kernel_thread("nope", 200).unwrap();
         assert!(p.activity.is_empty());
-        assert_eq!(p.plan_markdown, None);
-        assert_eq!(p.latest_turn_status, None);
-        assert_eq!(p.turn_count, 0);
+        assert_eq!(p.plan, None);
+        assert_eq!(p.turn.status, "idle");
+        assert_eq!(p.turn.active_turn_id, None);
     }
 
     #[test]
-    fn project_thread_activity_includes_subagent_summary_and_timestamps() {
+    fn kernel_thread_projection_includes_subagent_summary_and_timestamps() {
         let s = store();
         let mut subagent = TaskRecord::new(
             "subagent-1",
@@ -8120,7 +7648,7 @@ mod chat_turn_query_tests {
             .unwrap()
         );
 
-        let projection = s.project_thread_activity("thread-subagents", 200).unwrap();
+        let projection = s.project_kernel_thread("thread-subagents", 200).unwrap();
         assert_eq!(projection.subagents.len(), 1);
         assert_eq!(projection.subagents[0].name, "Review");
         assert_eq!(
@@ -8512,7 +8040,7 @@ mod query_plan_tests {
     // ── tasks ──────────────────────────────────────────────────────────────────
 
     #[test]
-    fn project_thread_activity_latest_turn_uses_index() {
+    fn project_kernel_thread_latest_turn_uses_index() {
         let store = TaskStore::open_in_memory().unwrap();
         seed_hot_path_data(&store);
 
@@ -8525,7 +8053,7 @@ mod query_plan_tests {
         assert_uses_index(
             &plan,
             Some("idx_tasks_thread_kind_created"),
-            "project_thread_activity latest turn",
+            "project_kernel_thread latest turn",
         );
     }
 
@@ -8564,7 +8092,7 @@ mod query_plan_tests {
              WHERE thread_id = 'thread-1' AND kind LIKE 'subagent.%'
              ORDER BY created_at ASC",
         );
-        assert_uses_index(&plan, None, "project_thread_activity subagents");
+        assert_uses_index(&plan, None, "project_kernel_thread subagents");
     }
 
     // ── turn_steering ───────────────────────────────────────────────────────────
@@ -8685,7 +8213,7 @@ mod query_plan_tests {
     }
 
     #[test]
-    fn project_thread_activity_join_uses_index() {
+    fn project_kernel_thread_activity_join_uses_index() {
         let store = TaskStore::open_in_memory().unwrap();
         seed_hot_path_data(&store);
 
@@ -8694,10 +8222,10 @@ mod query_plan_tests {
             "SELECT te.turn_id, te.kind, te.payload_json
              FROM turn_events te JOIN tasks t ON t.task_id = te.turn_id
              WHERE t.thread_id = 'thread-1' AND t.kind = 'chat_turn'
-               AND te.kind IN ('activity', 'plan_update')
+               AND te.kind = 'activity'
              ORDER BY t.created_at ASC, te.seq ASC",
         );
-        assert_uses_index(&plan, None, "project_thread_activity JOIN");
+        assert_uses_index(&plan, None, "project_kernel_thread activity JOIN");
     }
 
     #[test]
