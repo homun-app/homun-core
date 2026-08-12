@@ -34,8 +34,7 @@ fn subagent_name_from_kind(kind: &str) -> String {
     }
 }
 
-fn runtime_plan_markdown(plan: &Value) -> Option<String> {
-    let steps = runtime_plan_steps(plan);
+fn runtime_plan_markdown(plan: &Value, steps: &[KernelPlanStepView]) -> Option<String> {
     if steps.is_empty() {
         return None;
     }
@@ -50,31 +49,25 @@ fn runtime_plan_markdown(plan: &Value) -> Option<String> {
         lines.push(String::new());
     }
     for (index, step) in steps.iter().enumerate() {
-        let Some(title) = step
-            .get("title")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|title| !title.is_empty())
-        else {
+        let title = step.title.trim();
+        if title.is_empty() {
             continue;
-        };
-        let status = step.get("status").and_then(Value::as_str).unwrap_or("todo");
+        }
+        let status = step.status.trim();
         let marker = match status {
             "done" => "x",
             "doing" | "in_progress" | "in-progress" => "-",
             "blocked" => "!",
             _ => " ",
         };
-        let id = step
-            .get("id")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("s{}", index + 1));
+        let id = if step.id.trim().is_empty() {
+            format!("s{}", index + 1)
+        } else {
+            step.id.trim().to_string()
+        };
         let detail = step
-            .get("detail")
-            .and_then(Value::as_str)
+            .detail
+            .as_deref()
             .map(str::trim)
             .filter(|detail| !detail.is_empty())
             .unwrap_or("—");
@@ -90,8 +83,19 @@ fn runtime_plan_steps(plan: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-fn kernel_plan_view(plan: &RuntimePlanRecord) -> Option<KernelPlanView> {
-    let markdown = runtime_plan_markdown(&plan.plan_json)?;
+fn kernel_plan_step_status(raw_status: Option<&str>, turn_is_terminal: bool) -> String {
+    let status = raw_status
+        .map(str::trim)
+        .filter(|status| !status.is_empty())
+        .unwrap_or("todo");
+    if turn_is_terminal && matches!(status, "doing" | "in_progress" | "in-progress") {
+        "blocked".to_string()
+    } else {
+        status.to_string()
+    }
+}
+
+fn kernel_plan_view(plan: &RuntimePlanRecord, turn_is_terminal: bool) -> Option<KernelPlanView> {
     let steps = runtime_plan_steps(&plan.plan_json)
         .into_iter()
         .enumerate()
@@ -109,13 +113,10 @@ fn kernel_plan_view(plan: &RuntimePlanRecord) -> Option<KernelPlanView> {
                 .filter(|id| !id.is_empty())
                 .map(str::to_string)
                 .unwrap_or_else(|| format!("s{}", index + 1));
-            let status = step
-                .get("status")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|status| !status.is_empty())
-                .unwrap_or("todo")
-                .to_string();
+            let status = kernel_plan_step_status(
+                step.get("status").and_then(Value::as_str),
+                turn_is_terminal,
+            );
             let detail = step
                 .get("detail")
                 .and_then(Value::as_str)
@@ -130,6 +131,7 @@ fn kernel_plan_view(plan: &RuntimePlanRecord) -> Option<KernelPlanView> {
             })
         })
         .collect::<Vec<_>>();
+    let markdown = runtime_plan_markdown(&plan.plan_json, &steps)?;
     Some(KernelPlanView {
         goal: plan
             .plan_json
@@ -4286,7 +4288,7 @@ impl TaskStore {
         let plan = latest_runtime_plan
             .as_ref()
             .filter(|plan| plan.status == "open")
-            .and_then(kernel_plan_view);
+            .and_then(|plan| kernel_plan_view(plan, reduced.turn.is_terminal));
         let mut sub_stmt = self.connection.prepare(
             "SELECT kind, status, task_json, blocked_reason, created_at, updated_at FROM tasks
              WHERE thread_id = ?1 AND kind LIKE 'subagent.%'
@@ -7278,8 +7280,16 @@ mod chat_turn_query_tests {
             projection.plan.as_ref().unwrap().goal.as_deref(),
             Some("trova un treno")
         );
-        assert_eq!(projection.plan.as_ref().unwrap().steps[0].status, "done");
-        assert_eq!(projection.plan.as_ref().unwrap().steps[1].status, "doing");
+        let plan = projection.plan.as_ref().unwrap();
+        assert_eq!(plan.steps[0].status, "done");
+        assert_eq!(
+            plan.steps[1].status, "blocked",
+            "terminal turns must not expose an active plan step to the UI"
+        );
+        assert!(
+            plan.markdown.contains("- [!] **Leggi risultati** (`s2`)"),
+            "terminal plan markdown must match the projected blocked step"
+        );
         assert!(
             projection.attention.awaiting_user,
             "external-write uncertainty must require user attention"

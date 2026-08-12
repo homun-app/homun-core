@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-12 (Runtime V2 UI delete-first cleanup).**
+> **Ultimo aggiornamento: 2026-08-12 (Runtime V2 terminal plan projection).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -58,10 +58,14 @@ Slice chiuse sul branch:
 - smoke deterministico `/kernel-projection` dentro kernel/pre-release gate.
 - `browserActivityLifecycle` non possiede piu' la scelta del piano:
   `deriveConversationPlan` e' stato rimosso, il piano passa dal presenter kernel.
+- `TaskStore::project_kernel_thread` non esporta step `doing`/`in_progress`
+  quando il turno e' terminale: la projection UI mostra lo step corrente come
+  `blocked` e rigenera il markdown dallo stesso stato proiettato.
 
 ## Invarianti ora protetti
 
 - Un turno terminale non lascia liveness UI attiva.
+- Un turno terminale non lascia step di piano attivi nella projection UI.
 - Piano e progresso vengono da `runtime_plans`/`turn_events`, non da marker.
 - `browser_done` chiude il lavoro browser; snapshot visibile senza done resta
   `active`/`unknown`.
