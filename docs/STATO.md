@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-11 (Runtime V2 kernel projection convergence).**
+> **Ultimo aggiornamento: 2026-08-12 (Runtime V2 UI delete-first cleanup).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -14,7 +14,7 @@
 | Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/runtime-v2-first-slice` |
 | Branch | `fabio/runtime-v2-first-slice` |
 | PR | `https://github.com/homun-app/homun-core/pull/108` |
-| HEAD codice verificato | `01b2ecf7` |
+| HEAD codice verificato | `68002f4d` + cleanup UI in questa slice |
 
 ## Dove siamo
 
@@ -46,12 +46,16 @@ Slice chiuse sul branch:
 - endpoint gateway `GET /api/chat/threads/{thread_id}/kernel-projection`;
 - presenter desktop puro `kernelProjectionPresenter`;
 - `useChatActivityProjection` migrato alla proiezione kernel;
+- client desktop migrato via `fetchKernelThreadProjection` senza export
+  `fetchThreadActivity`;
 - stato browser tipizzato in `KernelBrowserView`;
 - stato plugin/skill/MCP/connector in `KernelCapabilityRuntimeView`;
 - marker transcript quarantinati dietro legacy adapter;
 - `ChatView` ridotto a presenter shell via `runtimeViewModel`;
 - automazioni/background run allineati alla stessa proiezione;
 - smoke deterministico `/kernel-projection` dentro kernel/pre-release gate.
+- `browserActivityLifecycle` non possiede piu' la scelta del piano:
+  `deriveConversationPlan` e' stato rimosso, il piano passa dal presenter kernel.
 
 ## Invarianti ora protetti
 
@@ -67,7 +71,7 @@ Slice chiuse sul branch:
 
 ## Gate verificati localmente
 
-Su `01b2ecf7`:
+Su `68002f4d`:
 
 ```bash
 python3 scripts/kernel_regression_gate.py
@@ -96,8 +100,9 @@ Merge state GitHub: `CLEAN`.
 - Smoke Electron reale su build/dev pulita: chat, plan progress, browser read
   research, Activity/browser island, composer mode.
 - Aggiornare eventuali note release/RC dopo merge della PR.
-- Tenere `ThreadActivityProjection` solo come compat endpoint finche' non resta
-  nessun consumer non legacy.
+- Il client desktop non consuma piu' `ThreadActivityProjection`; resta da
+  chiudere, in una slice separata, la route backend compat
+  `GET /api/chat/threads/{thread_id}/activity` e i test/task-runtime collegati.
 - Continuare la rimozione dei fallback `legacy*` solo con fixture owner-level e
   gate kernel verde.
 - `main.rs` e `ChatView.tsx` restano grandi, ma non vanno tagliati senza owner
@@ -108,8 +113,8 @@ Merge state GitHub: `CLEAN`.
 1. Merge/review della PR #108 quando il draft viene promosso.
 2. Smoke Electron su checkout pulito della PR: riprodurre i due bug iniziali
    (goal/plan/progress e browser treni Milano-Roma read-only).
-3. Solo dopo smoke reale, aprire la prossima slice: rimuovere un fallback
-   `legacy*` ancora tracciato oppure chiudere il compat endpoint `/activity`.
+3. Prossima slice delete-first: chiudere il compat endpoint backend `/activity`
+   oppure rimuovere un fallback `legacy*` ancora tracciato, con fixture owner.
 
 ## Prompt di ripartenza
 

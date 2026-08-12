@@ -110,7 +110,9 @@ KernelThreadActions {
 }
 ```
 
-`ThreadActivityProjection` remains only as a compatibility endpoint until the desktop is migrated.
+`ThreadActivityProjection` remains only as a backend compatibility endpoint until
+external/non-desktop consumers are audited. The desktop client no longer exports
+`fetchThreadActivity` after the 2026-08-12 UI cleanup.
 
 ---
 
@@ -158,6 +160,7 @@ Regression test: `kernel_thread_projection_owns_turn_plan_attention_and_actions`
 - [x] Add `KernelThreadProjection` TypeScript interfaces in `chatApi.ts`.
 - [x] Add `fetchKernelThreadProjection(threadId)`.
 - [x] Keep `fetchThreadActivity` temporarily, with a comment pointing to the removal condition: no renderer consumer outside the legacy adapter.
+- [x] Remove desktop `fetchThreadActivity` once the renderer consumes only `fetchKernelThreadProjection`.
 - [x] Add a gateway-level test or focused Rust route/unit test proving a terminal durable turn returns `turn.status="completed"`, `actions.can_stop=false`, and `actions.composer_mode="new_turn"`.
 - [x] Run:
 
@@ -173,7 +176,8 @@ Removed owner: gateway route callers no longer infer stop/composer behavior from
 
 New owner: `TaskStore::project_kernel_thread`.
 
-Temporary fallback retained: `/activity`, until `useChatActivityProjection.ts` stops consuming it.
+Temporary fallback retained: backend `/activity` route only; the desktop client
+no longer exports `fetchThreadActivity`.
 
 ---
 
@@ -214,6 +218,11 @@ npm --prefix apps/desktop test -- kernelProjectionPresenter
 Removed owner: `browserActivityLifecycle.mjs::deriveConversationPlan` no longer chooses canonical plan when kernel projection is loaded.
 
 New owner: `kernelProjectionPresenter.mjs`.
+
+Removed owner: desktop `chatApi.ts::fetchThreadActivity` no longer exposes the
+legacy activity read model to renderer code.
+
+New owner: `chatApi.ts::fetchKernelThreadProjection`.
 
 Temporary fallback retained: marker extraction only when `projectionLoaded === false`.
 

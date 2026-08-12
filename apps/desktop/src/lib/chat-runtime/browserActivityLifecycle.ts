@@ -13,16 +13,6 @@ export interface BrowserStatus {
   failed: boolean;
 }
 
-export interface ConversationPlanInput {
-  isStreaming: boolean;
-  livePlanMarkdown: string | null;
-  projectionLoaded: boolean;
-  projectedPlan: string | null;
-  persistedPlan: string | null;
-  projectedActiveTurnId: string | null;
-  streamOwnerTurnId: string | null;
-}
-
 /**
  * Derive the browser status object for workspace sections from the live
  * computer session state. Pure function — no React, no side-effects.
@@ -40,9 +30,3 @@ export const deriveBrowserStatus: (
   previewDataUrl: string | null,
   computerControlError: string | null,
 ) => BrowserStatus;
-
-export const deriveConversationPlan: (
-  input: ConversationPlanInput,
-) => string | null = implementation.deriveConversationPlan as (
-  input: ConversationPlanInput,
-) => string | null;

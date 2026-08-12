@@ -1,5 +1,10 @@
 # Kernel V2 Stability Implementation Plan
 
+> Superseded for current execution by
+> [`2026-08-11-homun-unified-kernel-ui-plugin-convergence.md`](2026-08-11-homun-unified-kernel-ui-plugin-convergence.md).
+> Keep this file as historical context only; do not reintroduce removed desktop
+> owners such as `deriveConversationPlan`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make Homun's turn, plan, browser, effect-receipt, and UI-liveness state converge through one canonical reducer contract before the first release.
@@ -211,32 +216,10 @@ git commit -m "fix(runtime): project thread activity through kernel reducer"
 
 - [ ] **Step 1: Add/keep a failing frontend fixture**
 
-Add a test named `durable_kernel_projection_wins_over_stream_gap`. Fixture:
-
-```js
-const result = deriveConversationPlan({
-  activeTurnId: "turn-a",
-  streamOwnerTurnId: "turn-a",
-  projectedPlan: {
-    goal: "trova un treno",
-    steps: [{ id: "s2", title: "Leggi risultati", status: "doing" }],
-  },
-  streamPlan: null,
-});
-assert.equal(result?.goal, "trova un treno");
-```
-
-Add the stale-turn companion assertion:
-
-```js
-const stale = deriveConversationPlan({
-  activeTurnId: "turn-b",
-  streamOwnerTurnId: "turn-a",
-  projectedPlan: { goal: "old", steps: [{ id: "s1", title: "Old", status: "doing" }] },
-  streamPlan: null,
-});
-assert.equal(stale, null);
-```
+This task was replaced by `kernelProjectionPresenter` owner fixtures in the
+unified Runtime V2 plan. Do not add a new `deriveConversationPlan` helper in
+`browserActivityLifecycle`; plan selection now belongs to the kernel projection
+presenter.
 
 - [ ] **Step 2: Run the paired Node test**
 

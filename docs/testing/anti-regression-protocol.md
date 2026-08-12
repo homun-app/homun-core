@@ -74,7 +74,7 @@ npm run build
 | Prompt utente inviato con bubble frame | `cursor-grammar-ui.test.mjs` |
 | Editor messaggio troppo piccolo | `cursor-grammar-ui.test.mjs` |
 | Browser/activity overlay sovrapposti | `adaptive-workspace-island-ui.test.mjs` |
-| Goal/piano non visibili dopo reload | `scripts/smoke_kernel_projection.py`, `turn_reducer_contract`, `deriveConversationPlan` |
+| Goal/piano non visibili dopo reload | `scripts/smoke_kernel_projection.py`, `turn_reducer_contract`, `kernelProjectionPresenter.test.mjs` |
 | Progress del piano non avanza | `runtime_plans` + `step_advance` owner tests, `scripts/smoke_kernel_projection.py` |
 | Browser bloccato senza `browser_done` | `browser_done_closes_browser_state_even_with_read_uncertainty`, `scripts/smoke_kernel_projection.py` |
 | Verifica richiesta per read incerta | `scripts/smoke_kernel_projection.py`, `kernelProjectionPresenter.test.mjs` |

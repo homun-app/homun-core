@@ -17,30 +17,3 @@ export function deriveBrowserStatus(
     failed: computerControlError !== null,
   };
 }
-
-export function deriveConversationPlan({
-  isStreaming,
-  livePlanMarkdown,
-  projectionLoaded,
-  projectedPlan,
-  persistedPlan,
-  projectedActiveTurnId,
-  streamOwnerTurnId,
-}) {
-  if (!isStreaming) {
-    return projectionLoaded ? projectedPlan : persistedPlan;
-  }
-  if (livePlanMarkdown) {
-    return livePlanMarkdown;
-  }
-  if (
-    projectionLoaded
-    && projectedPlan
-    && projectedActiveTurnId
-    && streamOwnerTurnId
-    && projectedActiveTurnId === streamOwnerTurnId
-  ) {
-    return projectedPlan;
-  }
-  return null;
-}

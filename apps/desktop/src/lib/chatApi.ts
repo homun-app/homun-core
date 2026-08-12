@@ -1042,34 +1042,12 @@ export async function fetchTurnStatus(turnId: string): Promise<TurnStatusRespons
   );
 }
 
-/** Durable cockpit projection for the working island (mirrors the Rust
- *  `ThreadActivityProjection`): the latest plan across the thread, activity
- *  accumulated cross-turn, and the latest turn's status. Read at rest so the
- *  island survives turn-end/reload/thread-switch instead of parsing lossy
- *  message-text markers. */
 export interface SubagentInfo {
   name: string;
   status: string;
   summary?: string;
   created_at?: number;
   updated_at?: number;
-}
-export interface ThreadActivityProjection {
-  plan_markdown: string | null;
-  activity: string[];
-  latest_turn_status: string | null;
-  turn_count: number;
-  subagents: SubagentInfo[];
-  active_turn?: {
-    turn_id: string;
-    last_event_seq: number;
-    status: string;
-    attempt: number;
-    max_attempts: number;
-    not_before: number | null;
-    blocked_reason: string | null;
-    updated_at: number;
-  } | null;
 }
 
 export interface KernelThreadProjection {
@@ -1144,17 +1122,6 @@ export async function fetchKernelThreadProjection(
 ): Promise<KernelThreadProjection> {
   return gatewayJson<KernelThreadProjection>(
     `/api/chat/threads/${encodeURIComponent(threadId)}/kernel-projection`,
-  );
-}
-
-/** Legacy compatibility endpoint. New runtime/UI code should consume
- *  `fetchKernelThreadProjection`; this remains until no renderer consumer uses
- *  `ThreadActivityProjection` outside the legacy marker fallback. */
-export async function fetchThreadActivity(
-  threadId: string,
-): Promise<ThreadActivityProjection> {
-  return gatewayJson<ThreadActivityProjection>(
-    `/api/chat/threads/${encodeURIComponent(threadId)}/activity`,
   );
 }
 

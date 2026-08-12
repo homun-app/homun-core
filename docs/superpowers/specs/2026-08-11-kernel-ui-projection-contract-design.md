@@ -236,8 +236,9 @@ Create a pure presenter adapter that maps `KernelThreadProjection` to:
 
 Remove or quarantine:
 
-- `deriveConversationPlan` fallback from persisted marker plan when projection is
-  loaded;
+- legacy local plan fallback from persisted marker plan when projection is
+  loaded. The desktop `deriveConversationPlan` owner was removed in the
+  2026-08-12 UI cleanup;
 - local `doing -> done` rewrite based on `projectedTurnStatus`;
 - duplicated HITL-tail lifecycle decisions when backend `attention.awaiting_user`
   is present.
@@ -328,4 +329,3 @@ It should start with a RED contract around the current backend projection shape:
 3. Delete one obsolete fallback from `useChatActivityProjection.ts` or
    `browserActivityLifecycle.mjs`.
 4. Run focused tests plus `python3 scripts/kernel_regression_gate.py`.
-
