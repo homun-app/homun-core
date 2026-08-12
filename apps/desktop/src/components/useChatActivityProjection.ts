@@ -18,8 +18,6 @@ import {
 } from "../lib/chat-runtime/kernelProjectionPresenter";
 import type { ChatMessage } from "../types";
 import {
-  latestActivitySteps,
-  latestPlanMarkdown,
   parsePlanGoal,
   parsePlanSteps,
   type PlanStep,
@@ -31,7 +29,6 @@ interface UseChatActivityProjectionOptions {
   isStreaming: boolean;
   liveActivitySteps: string[];
   livePlanMarkdown: string | null;
-  messages: ChatMessage[];
   streamOwnerTurnRef: { current: string | null };
   threadId: string;
   threadMessages: ChatMessage[];
@@ -41,13 +38,6 @@ interface UseChatActivityProjectionOptions {
 }
 
 const TERMINAL_KERNEL_STATUSES = new Set(["completed", "failed", "cancelled", "finalizing"]);
-
-function legacyMarkerProjection(messages: ChatMessage[]) {
-  return {
-    plan: latestPlanMarkdown(messages),
-    activity: latestActivitySteps(messages),
-  };
-}
 
 function emptyKernelProjection(threadId: string): KernelThreadProjection {
   return {
@@ -138,7 +128,6 @@ export function useChatActivityProjection({
   isStreaming,
   liveActivitySteps,
   livePlanMarkdown,
-  messages,
   streamOwnerTurnRef,
   threadId,
   threadMessages,
@@ -149,7 +138,6 @@ export function useChatActivityProjection({
   const [kernelProjection, setKernelProjection] = useState<KernelThreadProjection | null>(null);
   const [projectionLoaded, setProjectionLoaded] = useState(false);
 
-  const legacyProjection = useMemo(() => legacyMarkerProjection(messages), [messages]);
   const projectedActiveTurn = useMemo(
     () => activeTurnFromKernelProjection(kernelProjection),
     [kernelProjection],
@@ -163,8 +151,6 @@ export function useChatActivityProjection({
     livePlanMarkdown,
     projectionLoaded,
     liveActivitySteps,
-    persistedPlan: legacyProjection.plan,
-    persistedActivity: legacyProjection.activity,
     streamOwnerTurnId: streamOwnerTurnRef.current,
     legacyThreadTailAwaitsHitl: threadTailAwaitsHitl,
   });
@@ -263,7 +249,7 @@ export function useChatActivityProjection({
         setProjectionLoaded(true);
       })
       .catch(() => {
-        /* kernel projection unavailable -> legacyMarkerProjection covers old persisted messages */
+        /* kernel projection unavailable: keep runtime island empty instead of inferring from markers */
       });
     return () => {
       cancelled = true;

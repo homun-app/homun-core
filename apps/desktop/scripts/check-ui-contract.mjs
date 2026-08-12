@@ -1434,8 +1434,8 @@ assertNotContains("src/components/ChatView.tsx", "onStreamingChangeRef", "ChatVi
 assertContains("src/components/useChatActivityProjection.ts", "fetchKernelThreadProjection", "kernel activity projection fetch must have one focused owner");
 assertContains("src/components/useChatActivityProjection.ts", "projectKernelThreadView", "kernel activity projection presenter must have one focused owner");
 assertNotContains("src/components/useChatActivityProjection.ts", "fetchThreadActivity", "activity projection must not call the legacy activity endpoint");
-assertContains("src/components/useChatActivityProjection.ts", "latestPlanMarkdown", "activity projection marker fallback must have one focused owner");
-assertContains("src/components/useChatActivityProjection.ts", "latestActivitySteps", "activity projection marker fallback must have one focused owner");
+assertNotContains("src/components/useChatActivityProjection.ts", "latestPlanMarkdown", "activity projection must not reconstruct plan state from markers");
+assertNotContains("src/components/useChatActivityProjection.ts", "latestActivitySteps", "activity projection must not reconstruct activity state from markers");
 assertContains("src/components/useChatActivityProjection.ts", "parsePlanSteps", "workspace plan steps must have one focused owner");
 assertContains("src/components/useChatActivityProjection.ts", "createTurnReplayState", "activity projection replay seeding must have one focused owner");
 assertContains("src/components/useChatActivityProjection.ts", "replayStatusFromProjection", "activity projection replay status mapping must have one focused owner");

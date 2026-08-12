@@ -206,7 +206,8 @@ Temporary fallback retained: none for the backend `/activity` read model.
   - `browserStatus`
   - `capabilityRuntime`
 - [x] The presenter may merge live current-turn stream rows only when `streamOwnerTurnId === projection.turn.active_turn_id`.
-- [x] The presenter must ignore persisted marker plan/activity when `projectionLoaded === true`.
+- [x] The presenter must ignore persisted marker plan/activity even when kernel
+  projection is not loaded; live stream rows are the only pre-projection input.
 - [x] Run:
 
 ```bash
@@ -224,7 +225,7 @@ legacy activity read model to renderer code.
 
 New owner: `chatApi.ts::fetchKernelThreadProjection`.
 
-Temporary fallback retained: marker extraction only when `projectionLoaded === false`.
+Temporary fallback retained: none for presenter plan/activity.
 
 ---
 
@@ -242,7 +243,9 @@ Temporary fallback retained: marker extraction only when `projectionLoaded === f
 - [x] Use `kernelProjectionPresenter` for plan, activity, workspace steps, active-turn view, browser budget/failure state, and composer mode.
 - [x] Delete the local `doing -> done` rewrite based on `projectedTurnStatus`; backend must return final step statuses.
 - [x] Delete plan resurrection from `latestPlanMarkdown(messages)` when projection loaded.
-- [x] Keep `latestPlanMarkdown` only inside a clearly named `legacyMarkerProjection` fallback path.
+- [x] Remove `latestPlanMarkdown`/`latestActivitySteps` from
+  `useChatActivityProjection`; marker parsing may render transcript history but
+  must not project the runtime island.
 - [x] Run:
 
 ```bash
@@ -257,7 +260,9 @@ Removed owner: `useChatActivityProjection.ts` no longer owns plan completion, st
 
 New owner: backend `KernelThreadProjection` plus pure presenter.
 
-Temporary fallback retained: `legacyMarkerProjection` for old persisted messages and projection fetch failures only.
+Temporary fallback retained: none for `useChatActivityProjection` plan/activity.
+Projection fetch failures keep the runtime island empty instead of inferring
+state from markers.
 
 ---
 
@@ -352,7 +357,8 @@ Temporary fallback retained: marker parsing in `chatEventParts.ts` for historica
   - `typed_parts_render_after_reload_without_marker_text`
   - `malformed_marker_fragments_cannot_affect_liveness`
   - `legacy_marker_messages_render_but_do_not_drive_current_turn`
-- [x] Move marker parsing behind `legacyMarkerProjection`.
+- [x] Keep marker parsing only in transcript compatibility helpers; the runtime
+  island no longer has a `legacyMarkerProjection` path.
 - [x] Remove marker/HITL fallback from general lifecycle code when durable projection exists.
 - [x] Run:
 

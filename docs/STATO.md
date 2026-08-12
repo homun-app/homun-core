@@ -14,7 +14,7 @@
 | Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/runtime-v2-first-slice` |
 | Branch | `fabio/runtime-v2-first-slice` |
 | PR | `https://github.com/homun-app/homun-core/pull/108` |
-| HEAD codice verificato | `68002f4d` + cleanup UI in questa slice |
+| HEAD codice verificato | `adaad77a` + cleanup marker plan/activity in questa slice |
 
 ## Dove siamo
 
@@ -51,6 +51,8 @@ Slice chiuse sul branch:
 - stato browser tipizzato in `KernelBrowserView`;
 - stato plugin/skill/MCP/connector in `KernelCapabilityRuntimeView`;
 - marker transcript quarantinati dietro legacy adapter;
+- marker transcript non proiettano piu' plan/activity nell'isola runtime; lo
+  storico resta compatibile solo nel rendering transcript;
 - `ChatView` ridotto a presenter shell via `runtimeViewModel`;
 - automazioni/background run allineati alla stessa proiezione;
 - smoke deterministico `/kernel-projection` dentro kernel/pre-release gate.
@@ -67,11 +69,12 @@ Slice chiuse sul branch:
 - Receipt `ExternalWrite` incerta genera attention item.
 - Tool/plugin/MCP caricati non cambiano liveness.
 - Automazioni e proactive run usano lo stesso vocabolario del kernel.
-- Marker legacy possono renderizzare storico, ma non riaprire lifecycle corrente.
+- Marker legacy possono renderizzare storico, ma non riaprire lifecycle corrente
+  e non alimentano piu' plan/activity dell'isola.
 
 ## Gate verificati localmente
 
-Su `68002f4d`:
+Su `adaad77a` piu' cleanup marker plan/activity in questa slice:
 
 ```bash
 python3 scripts/kernel_regression_gate.py
@@ -85,15 +88,11 @@ Esito: verde.
 
 PR draft: `https://github.com/homun-app/homun-core/pull/108`.
 
-Check GitHub verdi:
+Verificare lo stato remoto corrente con:
 
-- Backend (build + gateway tests)
-- Frontend (typecheck + build)
-- Landlock fence validation (ubuntu-24.04)
-- Release readiness
-- Build installers: Linux, macOS, Windows
-
-Merge state GitHub: `CLEAN`.
+```bash
+gh pr checks 108
+```
 
 ## Debito residuo
 
@@ -103,6 +102,9 @@ Merge state GitHub: `CLEAN`.
 - `ThreadActivityProjection` e la route backend compat
   `GET /api/chat/threads/{thread_id}/activity` sono stati rimossi nella cleanup
   backend 2026-08-12; il read model canonico e' `KernelThreadProjection`.
+- `legacyMarkerProjection` e' stato rimosso da `useChatActivityProjection`; in
+  assenza di `KernelThreadProjection` l'isola runtime resta vuota invece di
+  ricostruire plan/activity dai marker.
 - Continuare la rimozione dei fallback `legacy*` solo con fixture owner-level e
   gate kernel verde.
 - `main.rs` e `ChatView.tsx` restano grandi, ma non vanno tagliati senza owner

@@ -62,8 +62,6 @@ test("terminal_projection_clears_active_thinking", () => {
     isStreaming: false,
     liveActivitySteps: [],
     livePlanMarkdown: null,
-    persistedActivity: ["old activity"],
-    persistedPlan: "- [-] old marker plan",
     streamOwnerTurnId: null,
   });
 
@@ -91,8 +89,6 @@ test("runtime_view_model_quarantines_legacy_hitl_tail_after_projection_load", ()
     isStreaming: false,
     liveActivitySteps: [],
     livePlanMarkdown: null,
-    persistedActivity: [],
-    persistedPlan: null,
     streamOwnerTurnId: null,
     legacyThreadTailAwaitsHitl: true,
   });
@@ -109,8 +105,6 @@ test("runtime_view_model_keeps_legacy_hitl_tail_before_projection_load", () => {
     isStreaming: false,
     liveActivitySteps: [],
     livePlanMarkdown: null,
-    persistedActivity: [],
-    persistedPlan: null,
     streamOwnerTurnId: null,
     legacyThreadTailAwaitsHitl: true,
   });
@@ -118,6 +112,21 @@ test("runtime_view_model_keeps_legacy_hitl_tail_before_projection_load", () => {
   assert.equal(view.turnUiState.turnAwaitingUser, true);
   assert.equal(view.turnUiState.hasActiveTurn, true);
   assert.equal(view.turnUiState.workInProgress, false);
+});
+
+test("missing_kernel_projection_does_not_fallback_to_marker_plan_or_activity", () => {
+  const view = projectKernelThreadView({
+    projectionLoaded: false,
+    projection: null,
+    isStreaming: false,
+    liveActivitySteps: [],
+    livePlanMarkdown: null,
+    streamOwnerTurnId: null,
+    legacyThreadTailAwaitsHitl: false,
+  });
+
+  assert.equal(view.conversationPlan, null);
+  assert.deepEqual(view.conversationActivity, []);
 });
 
 test("durable_plan_projection_wins_over_marker_and_stream_gap", () => {
@@ -149,8 +158,6 @@ test("durable_plan_projection_wins_over_marker_and_stream_gap", () => {
     isStreaming: true,
     liveActivitySteps: [],
     livePlanMarkdown: null,
-    persistedActivity: [],
-    persistedPlan: "- [x] stale marker plan",
     streamOwnerTurnId: "turn-1",
   });
 
@@ -185,8 +192,6 @@ test("read_uncertain_effect_does_not_render_verification_attention", () => {
     isStreaming: false,
     liveActivitySteps: [],
     livePlanMarkdown: null,
-    persistedActivity: [],
-    persistedPlan: null,
     streamOwnerTurnId: null,
   });
 
@@ -214,8 +219,6 @@ test("write_uncertain_effect_renders_attention", () => {
     isStreaming: false,
     liveActivitySteps: [],
     livePlanMarkdown: null,
-    persistedActivity: [],
-    persistedPlan: null,
     streamOwnerTurnId: null,
   });
 
@@ -244,8 +247,6 @@ test("plugin_loaded_tools_do_not_change_liveness", () => {
     isStreaming: false,
     liveActivitySteps: [],
     livePlanMarkdown: null,
-    persistedActivity: [],
-    persistedPlan: null,
     streamOwnerTurnId: null,
   });
 
@@ -269,8 +270,6 @@ test("browser_active_without_done_stays_active", () => {
     isStreaming: false,
     liveActivitySteps: [],
     livePlanMarkdown: null,
-    persistedActivity: [],
-    persistedPlan: null,
     streamOwnerTurnId: null,
   });
 
@@ -301,8 +300,6 @@ test("browser_failure_reason_is_typed_state_not_activity_text", () => {
     isStreaming: false,
     liveActivitySteps: [],
     livePlanMarkdown: null,
-    persistedActivity: ["browser_budget_exceeded:no_progress"],
-    persistedPlan: null,
     streamOwnerTurnId: null,
   });
 

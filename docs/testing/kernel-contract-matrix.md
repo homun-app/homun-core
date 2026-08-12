@@ -34,7 +34,7 @@ risposte di `GET /api/chat/threads/{thread_id}/kernel-projection`.
 | Tool/plugin caricati non cambiano liveness | `gateway_tool_execution.rs`, `store.rs` | `capability_runtime.loaded_tools[]` senza cambio `turn.status` | plugin/capability runtime panel | `python3 scripts/smoke_kernel_projection.py`; `npm test -- kernelProjectionPresenter` |
 | Approvazione MCP/plugin write passa da kernel attention | `ApprovalGate`, `effect_host.rs`, `store.rs` | `attention.approvals[]`, `turn.status = waiting_approval` | approval UI from `runtimeViewModel.turnUiState` | `python3 scripts/smoke_kernel_projection.py`; `cargo test -p local-first-desktop-gateway automation_projection -- --nocapture` |
 | Automazioni/background usano lo stesso vocabolario | `gateway_automation_routes.rs`, `execute_proactive_prompt_task`, `TaskUiReadModel` | task `thread_id` -> `/kernel-projection` | `AutomationsView` via `projectAutomationRunState` | `python3 scripts/smoke_kernel_projection.py`; `npm test -- automationRunProjection` |
-| Marker legacy non possiedono il lifecycle corrente | `gateway_chat_markers.rs`, `kernelProjectionPresenter` | marker persistiti solo come fallback pre-proiezione | `legacyMarkerProjection` quarantinato | `python3 scripts/smoke_kernel_projection.py`; `npm test -- kernelProjectionPresenter useChatActivityProjection` |
+| Marker legacy non possiedono il lifecycle corrente | `gateway_chat_markers.rs`, `kernelProjectionPresenter` | marker persistiti solo per compat transcript, mai come plan/activity dell'isola | `chatEventParts` quarantinato | `python3 scripts/smoke_kernel_projection.py`; `npm test -- kernelProjectionPresenter useChatActivityProjection` |
 
 ## Contratti
 

@@ -14,10 +14,10 @@ test("useChatActivityProjection consumes kernel projection instead of legacy act
   assert.doesNotMatch(source, /deriveConversationPlan/);
 });
 
-test("useChatActivityProjection keeps marker parsing behind legacyMarkerProjection", () => {
-  const latestPlanUses = [...source.matchAll(/latestPlanMarkdown\(/g)].length;
-  assert.equal(latestPlanUses, 1);
-  assert.match(source, /legacyMarkerProjection/);
+test("useChatActivityProjection does not project plan or activity from legacy markers", () => {
+  assert.doesNotMatch(source, /latestPlanMarkdown\(/);
+  assert.doesNotMatch(source, /latestActivitySteps\(/);
+  assert.doesNotMatch(source, /legacyMarkerProjection/);
   assert.doesNotMatch(source, /status === "doing" \? \{ \.\.\.step, status: "done"/);
 });
 

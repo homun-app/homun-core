@@ -316,7 +316,6 @@ export function ChatView({
   } = useChatBrowserActivityLifecycle({
     computerSessionId,
     threadId: thread.threadId,
-    messages,
     threadMessages,
     islandRefreshNonce,
     activeStreamInProgress,

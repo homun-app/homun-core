@@ -7,7 +7,6 @@ import type { ChatMessage } from "../types";
 export interface UseChatBrowserActivityLifecycleParams {
   computerSessionId: string;
   threadId: string;
-  messages: ChatMessage[];
   threadMessages: ChatMessage[];
   islandRefreshNonce?: number;
   activeStreamInProgress: boolean;
@@ -23,7 +22,7 @@ export interface UseChatBrowserActivityLifecycleParams {
 /**
  * Owns the browser / computer session state and the activity projection
  * pipeline. Combines `useChatComputerSession` (live browser surface, preview,
- * control actions) with `useChatActivityProjection` (persisted + live activity
+ * control actions) with `useChatActivityProjection` (kernel + live activity
  * steps, plan, subagents) and the `activityNonce` used to auto-open the
  * activity island.
  *
@@ -35,7 +34,6 @@ export interface UseChatBrowserActivityLifecycleParams {
 export function useChatBrowserActivityLifecycle({
   computerSessionId,
   threadId,
-  messages,
   threadMessages,
   islandRefreshNonce,
   activeStreamInProgress,
@@ -94,7 +92,6 @@ export function useChatBrowserActivityLifecycle({
     isStreaming: activeStreamInProgress,
     liveActivitySteps,
     livePlanMarkdown,
-    messages,
     streamOwnerTurnRef,
     threadId,
     threadMessages,

@@ -11,13 +11,13 @@ function projectionPlan(input, projection, streamMatchesProjection) {
     }
     return null;
   }
-  return input.persistedPlan ?? null;
+  return null;
 }
 
 function projectionActivity(input, projection, streamMatchesProjection) {
   const durableActivity = projection
     ? (projection.activity ?? []).map((row) => row.text).filter(Boolean)
-    : input.persistedActivity ?? [];
+    : [];
   if (input.isStreaming && (!projection || streamMatchesProjection)) {
     return [...durableActivity, ...(input.liveActivitySteps ?? [])];
   }

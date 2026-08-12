@@ -9,8 +9,6 @@ export interface KernelProjectionPresenterInput {
   isStreaming: boolean;
   liveActivitySteps: string[];
   livePlanMarkdown: string | null;
-  persistedActivity: string[];
-  persistedPlan: string | null;
   streamOwnerTurnId: string | null;
   legacyThreadTailAwaitsHitl?: boolean;
 }
