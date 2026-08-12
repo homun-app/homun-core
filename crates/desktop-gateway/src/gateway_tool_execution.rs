@@ -40,6 +40,52 @@ fn browse_subagent_prompt_documents_autocomplete_semantic_default() {
     );
 }
 
+#[test]
+fn browse_timeout_preserves_grounded_snapshot_as_partial_result() {
+    let snapshot = format!(
+        "{}\n{}",
+        "Trenitalia risultati Milano Centrale Roma Termini".repeat(12),
+        "FR 9512 09:05 12:10 prezzo EUR 49.90".repeat(12)
+    );
+
+    let result = browse_subturn_timeout_result(
+        &snapshot,
+        vec!["https://www.trenitalia.com/".to_string()],
+        None,
+    );
+
+    assert!(result.found, "snapshot evidence should survive: {result:?}");
+    assert_eq!(
+        result.status,
+        local_first_engine::browse::BrowserDoneStatus::Partial
+    );
+    assert!(result.answer.contains("FR 9512"), "got: {}", result.answer);
+    assert_eq!(result.sources, vec!["https://www.trenitalia.com/"]);
+}
+
+#[test]
+fn browser_navigate_result_records_visited_source_for_timeout_fallback() {
+    let mut sources = Vec::new();
+
+    record_browser_navigate_source(
+        &mut sources,
+        "Page opened (https://www.trenitalia.com/search). Snapshot:\nRisultati Milano Roma",
+    );
+
+    assert_eq!(sources, vec!["https://www.trenitalia.com/search"]);
+}
+
+pub(crate) fn record_browser_navigate_source(sources: &mut Vec<String>, result: &str) {
+    if let Some(url) = local_first_engine::text::extract_source_urls(result)
+        .into_iter()
+        .next()
+        && !local_first_engine::text::is_low_value_source_url(&url)
+        && !sources.contains(&url)
+    {
+        sources.push(url);
+    }
+}
+
 /// The browser branch's tool context (ADR 0026 / inc 5, 5.D1b slice 3). SPLIT out of `ChatToolCtx`
 /// because `execute_browser_tool` and `execute_chat_tool` have DISJOINT read-sets: the browser
 /// tool reads the browser cluster + provider + a few read-only fields, and nothing execute_chat_tool
@@ -5977,6 +6023,7 @@ Do not repeat it; change strategy, change source, or call browser_done with curr
 pub(crate) struct GatewayBrowserExecutor<'a> {
     pub(crate) browser_session: Option<BrowserAutomationClient<BrowserSidecarSession>>,
     pub(crate) last_snapshot: String,
+    pub(crate) browse_sources: Vec<String>,
     // Machine-derived payment floor refs for the last observation (act/navigate/
     // snapshot), keyed by `target_id` (Build1 Fix 3). Was a single global
     // `HashSet` — but interleaving two tabs without re-observing the acted-on one
@@ -6141,6 +6188,9 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
             )
             .await
         };
+        if name == "browser_navigate" {
+            record_browser_navigate_source(&mut self.browse_sources, &text);
+        }
         // Phase 3.2: record this tool's outcome in the step memory ring buffer.
         if let Some(step_mem) = self.step_memory.as_mut() {
             let status = match outcome_hint {
@@ -6746,13 +6796,40 @@ pub(crate) fn browse_subturn_timeout_result(
     sources: Vec<String>,
     contract: Option<&local_first_engine::browse::BrowseResultContract>,
 ) -> local_first_engine::BrowseResult {
+    browse_subturn_incomplete_result(
+        last_snapshot,
+        sources,
+        contract,
+        "Browser sub-turn exceeded its wall-clock budget.",
+    )
+}
+
+pub(crate) fn browse_subturn_incomplete_result(
+    last_snapshot: &str,
+    sources: Vec<String>,
+    contract: Option<&local_first_engine::browse::BrowseResultContract>,
+    evidence: &str,
+) -> local_first_engine::BrowseResult {
+    let snapshot = last_snapshot.trim();
+    let grounded_snapshot = !sources.is_empty() && snapshot.chars().count() >= 200;
     let fallback_payload = local_first_engine::browse::BrowserDonePayload {
-        status: local_first_engine::browse::BrowserDoneStatus::Timeout,
-        answer: last_snapshot.chars().take(2000).collect(),
+        status: if grounded_snapshot {
+            local_first_engine::browse::BrowserDoneStatus::Partial
+        } else {
+            local_first_engine::browse::BrowserDoneStatus::Timeout
+        },
+        answer: if grounded_snapshot {
+            format!(
+                "The browser reached a grounded page but the browsing sub-agent did not finish its summary. Verify and extract the requested facts from this last page snapshot:\n{}",
+                snapshot.chars().take(8_000).collect::<String>()
+            )
+        } else {
+            snapshot.chars().take(2000).collect()
+        },
         items: vec![],
         fields_missing: vec!["browser_done".into()],
         sources,
-        evidence: vec!["Browser sub-turn exceeded its wall-clock budget.".into()],
+        evidence: vec![evidence.to_string()],
     };
     local_first_engine::browse::validate_browser_done_payload(fallback_payload, contract)
 }
@@ -6815,6 +6892,7 @@ impl GatewayBrowseExecutor<'_> {
         GatewayBrowserExecutor {
             browser_session: None,
             last_snapshot: String::new(),
+            browse_sources: Vec::new(),
             last_payment_floor_refs: std::collections::HashMap::new(),
             payment_context_by_target: std::collections::HashMap::new(),
             result_contract,
@@ -7107,7 +7185,7 @@ impl GatewayBrowseExecutor<'_> {
                 return GatewayBrowseOutcome {
                     result: browse_subturn_timeout_result(
                         &browser_executor.last_snapshot,
-                        Vec::new(),
+                        browser_executor.browse_sources.clone(),
                         request.contract.as_ref(),
                     ),
                     suspend_effect_receipt: None,
@@ -7151,14 +7229,6 @@ impl GatewayBrowseExecutor<'_> {
                 suspend_effect_receipt,
             };
         }
-        let fallback_payload = local_first_engine::browse::BrowserDonePayload {
-            status: local_first_engine::browse::BrowserDoneStatus::Timeout,
-            answer: browser_executor.last_snapshot.chars().take(2000).collect(),
-            items: vec![],
-            fields_missing: vec!["browser_done".into()],
-            sources: outcome.browse_sources.clone(),
-            evidence: vec!["Browser sub-turn ended before browser_done.".into()],
-        };
         let timeout_metrics = serde_json::json!({
             "observation_chars": browser_executor.last_snapshot.chars().count() as u64,
             "stop_reason": "timeout",
@@ -7177,10 +7247,19 @@ impl GatewayBrowseExecutor<'_> {
             ),
             "error",
         );
+        let mut sources = outcome.browse_sources.clone();
+        for source in &browser_executor.browse_sources {
+            if !sources.contains(source) {
+                sources.push(source.clone());
+            }
+        }
+
         GatewayBrowseOutcome {
-            result: local_first_engine::browse::validate_browser_done_payload(
-                fallback_payload,
+            result: browse_subturn_incomplete_result(
+                &browser_executor.last_snapshot,
+                sources,
                 request.contract.as_ref(),
+                "Browser sub-turn ended before browser_done.",
             ),
             suspend_effect_receipt,
         }

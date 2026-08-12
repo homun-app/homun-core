@@ -8996,6 +8996,7 @@ async fn run_agent_rounds(
     let mut browser_executor = GatewayBrowserExecutor {
         browser_session: None,
         last_snapshot: String::new(),
+        browse_sources: Vec::new(),
         last_payment_floor_refs: std::collections::HashMap::new(),
         payment_context_by_target: std::collections::HashMap::new(),
         result_contract: None,
