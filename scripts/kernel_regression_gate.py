@@ -58,6 +58,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
         ),
         Step("kernel projection smoke", [PYTHON, "scripts/smoke_kernel_projection.py"]),
         Step(
+            "engine browser grounded fallback",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-engine",
+                "browser_exhaustion_with_grounded_partial_result_delivers_that_evidence",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "task runtime active chat turn",
             ["cargo", "test", "-p", "local-first-task-runtime", "active_chat_turn"],
         ),

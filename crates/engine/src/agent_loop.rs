@@ -451,7 +451,11 @@ fn request_is_complex(user_message: &str, calls: &[serde_json::Value]) -> bool {
     distinct_tools.len() >= 2
 }
 
-fn browser_exhausted_fallback_answer(loop_exit: Option<&str>, sources: &[String]) -> String {
+fn browser_exhausted_fallback_answer(
+    loop_exit: Option<&str>,
+    grounded_browse: Option<&crate::BrowseResult>,
+    sources: &[String],
+) -> String {
     let reason = match loop_exit {
         Some("browser_budget_exceeded") => "il browser ha esaurito il budget di navigazione",
         Some("structured_no_progress") => {
@@ -460,6 +464,44 @@ fn browser_exhausted_fallback_answer(loop_exit: Option<&str>, sources: &[String]
         Some("round_ceiling_reached") => "il turno ha raggiunto il limite di passaggi disponibili",
         _ => "la ricerca browser non ha prodotto risultati verificabili",
     };
+    if let Some(result) = grounded_browse
+        && result.found
+    {
+        let mut answer = format!(
+            "La ricerca browser ha raccolto risultati parziali, ma la sintesi finale non e stata completata perche {reason}. Non ho effettuato prenotazioni o acquisti."
+        );
+        if !result.answer.trim().is_empty() {
+            answer.push_str("\n\nRisultati osservati:\n");
+            answer.push_str(result.answer.trim());
+        } else if !result.items.is_empty() {
+            answer.push_str("\n\nRisultati osservati:\n");
+            answer.push_str(
+                &serde_json::to_string_pretty(&result.items)
+                    .unwrap_or_else(|_| format!("{:?}", result.items)),
+            );
+        }
+        if !result.fields_missing.is_empty() {
+            answer.push_str("\n\nCampi ancora mancanti:");
+            for field in &result.fields_missing {
+                answer.push_str("\n- ");
+                answer.push_str(field);
+            }
+        }
+        let mut all_sources = sources.to_vec();
+        for source in &result.sources {
+            if !all_sources.contains(source) {
+                all_sources.push(source.clone());
+            }
+        }
+        if !all_sources.is_empty() {
+            answer.push_str("\n\nFonti:");
+            for source in all_sources {
+                answer.push_str("\n- ");
+                answer.push_str(&source);
+            }
+        }
+        return answer;
+    }
     let mut answer = format!(
         "Non sono riuscito a leggere risultati verificabili: {reason}. Non ho effettuato prenotazioni o acquisti."
     );
@@ -528,6 +570,7 @@ where
     let mut choices_card_nudges: u32 = 0;
     let mut clarify_card_nudges: u32 = 0;
     let mut resolved_hitl_nudges: u32 = 0;
+    let mut grounded_browse_result: Option<crate::BrowseResult> = None;
     // Plan-before-act gate: fires at most once per turn. When the model tries to execute a
     // "work" tool before creating a plan (and the request is complex), the gate blocks the
     // call, injects a "plan first" directive, and lets the loop re-ask the model. Once fired
@@ -1372,6 +1415,27 @@ again to find the right control). Keep working on the task — do not stop and d
                             && !browse_sources.contains(&url)
                         {
                             browse_sources.push(url);
+                        }
+                    }
+                    if name == "browse"
+                        && let Some(browse_result) =
+                            crate::browse::browse_result_from_manager_text(&result)
+                    {
+                        for source in &browse_result.sources {
+                            if !is_low_value_source_url(source) && !browse_sources.contains(source)
+                            {
+                                browse_sources.push(source.clone());
+                            }
+                        }
+                        let grounded = !browse_result.sources.is_empty()
+                            || !browse_result.items.is_empty()
+                            || !browse_result.evidence.is_empty();
+                        if browse_result.found
+                            && grounded
+                            && (!browse_result.answer.trim().is_empty()
+                                || !browse_result.items.is_empty())
+                        {
+                            grounded_browse_result = Some(browse_result);
                         }
                     }
                     if name == "recall_memory" {
@@ -2225,6 +2289,7 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
             } else if ls.browser_used {
                 Some(browser_exhausted_fallback_answer(
                     loop_exit,
+                    grounded_browse_result.as_ref(),
                     &browse_sources,
                 ))
             } else {
@@ -6257,6 +6322,44 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         }
     }
 
+    struct GroundedPartialDelegatedBrowse;
+
+    impl CapabilityExecutor for GroundedPartialDelegatedBrowse {
+        async fn execute_tool(
+            &self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            _state: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+            let result = crate::BrowseResult {
+                found: true,
+                answer: "FR 9512 Milano Centrale -> Roma Termini 09:05 12:10 EUR 49.90\nItalo 9920 Milano Centrale -> Roma Termini 09:40 12:55 EUR 52.90".to_string(),
+                sources: vec!["https://www.trenitalia.com/search".to_string()],
+                confidence: crate::browse::Confidence::Low,
+                note: None,
+                status: crate::browse::BrowserDoneStatus::Partial,
+                items: vec![json!({
+                    "train": "FR 9512",
+                    "departure": "09:05",
+                    "arrival": "12:10",
+                    "price": "EUR 49.90"
+                })],
+                fields_missing: vec!["browser_done".to_string()],
+                evidence: vec!["grounded result snapshot captured before timeout".to_string()],
+            };
+            Ok(ToolOutcome {
+                result: crate::browse::browse_result_for_manager(&result),
+                effects: ToolEffects {
+                    browser_activity_observed: true,
+                    outcome_hint: Some(crate::ToolOutcomeHint::NoProgress),
+                    ..ToolEffects::default()
+                },
+            })
+        }
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn delegated_browse_is_interrupted_at_the_turns_remaining_browser_deadline() {
         let mut ls = LoopState::new();
@@ -6536,6 +6639,71 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         assert_eq!(outcome.stop, crate::TurnStop::Completed);
         assert!(
             outcome.memory_answer.contains("Non sono riuscito"),
+            "{}",
+            outcome.memory_answer
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn browser_exhaustion_with_grounded_partial_result_delivers_that_evidence() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "trova un treno Milano Roma" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = BrowserEmptyFinalModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.browser_budget.max_elapsed_ms = 300_000;
+        turn_cfg.browser_budget.max_stall_ms = 80;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &GroundedPartialDelegatedBrowse,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "trova un treno Milano Roma".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
+        assert!(
+            outcome.memory_answer.contains("FR 9512"),
+            "{}",
+            outcome.memory_answer
+        );
+        assert!(
+            outcome
+                .memory_answer
+                .contains("https://www.trenitalia.com/search"),
+            "{}",
+            outcome.memory_answer
+        );
+        assert!(
+            !outcome.memory_answer.contains("Non sono riuscito"),
             "{}",
             outcome.memory_answer
         );
