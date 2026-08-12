@@ -121,6 +121,11 @@ pub struct LoopState {
     pub browser_no_progress: u32,
     /// Delegated `browse` calls that completed in this manager turn.
     pub browse_calls_completed: usize,
+    /// Consecutive step failures across ALL tool families this turn (Task #9).
+    /// Incremented on tool error/blocked/no_progress outcomes; reset when a plan
+    /// step completes (frontier advances) or the model calls update_plan/step_advance.
+    /// When > 2, triggers a forced replan directive (Task #8/#9).
+    pub consecutive_step_failures: u32,
 }
 
 impl LoopState {
@@ -208,6 +213,7 @@ impl LoopState {
             self.last_round_sig.clear();
             self.no_progress_count = 0;
             self.last_no_progress_family.clear();
+            self.consecutive_step_failures = 0; // Task #9: plan progress resets failure streak.
         }
     }
 }
@@ -252,6 +258,7 @@ mod tests {
         assert!(ls.browser_tool_call_ids.is_empty());
         assert_eq!(ls.browser_failed_navigations, 0);
         assert_eq!(ls.browser_no_progress, 0);
+        assert_eq!(ls.consecutive_step_failures, 0);
     }
 
     #[test]
@@ -279,6 +286,25 @@ mod tests {
         );
 
         assert!(ls.browser_used);
+    }
+
+    #[test]
+    fn consecutive_step_failures_resets_on_stall_guard_reset() {
+        let mut ls = LoopState::new();
+        ls.consecutive_step_failures = 5;
+        let mut pending_confirm = false;
+        ls.apply_effects(
+            &mut pending_confirm,
+            3,
+            ToolEffects {
+                reset_stall_guards: true,
+                ..ToolEffects::default()
+            },
+        );
+        assert_eq!(
+            ls.consecutive_step_failures, 0,
+            "stall guard reset must clear the consecutive failure counter"
+        );
     }
 
     #[test]

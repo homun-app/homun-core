@@ -8,6 +8,7 @@ import { MessageArtifacts, type ParsedArtifact } from "./MessageArtifacts";
 import { ChoicesCard } from "./MessageChoiceCard";
 import { PlanProposeCard } from "./MessagePlanProposeCard";
 import { DiffCard } from "./MessageDiffCard";
+import { StepAdvanceNote } from "./MessageStepAdvance";
 import { GoalProposeCard } from "./MessageGoalProposeCard";
 import { VaultRevealCard } from "./MessageVaultRevealCard";
 import { SandboxReadOnlyCard } from "./MessageSandboxReadOnlyCard";
@@ -147,6 +148,14 @@ export const AssistantMessageBody = memo(
           ?.filter((p): p is Extract<ChatEventPart, { type: "diff" }> => p.type === "diff")
           .map((part, index) => (
             <DiffCard key={`diff-${index}`} payload={part.payload} />
+          ))}
+        {eventParts
+          ?.filter(
+            (p): p is Extract<ChatEventPart, { type: "step_advance" }> =>
+              p.type === "step_advance",
+          )
+          .map((part, index) => (
+            <StepAdvanceNote key={`step-advance-${index}`} payload={part.payload} />
           ))}
       </>
     );

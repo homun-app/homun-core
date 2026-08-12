@@ -57,16 +57,25 @@ pub(crate) fn plan_autoadvance_from_evidence_enabled() -> bool {
 }
 
 /// ADR 0022 - Tappa 1: route brief/recall/learn through `MemoryRecallService`.
-/// Default OFF for conservative parity; flip ON to validate encapsulation.
+/// Default ON — the service-object path is the validated encapsulation.
+/// `HOMUN_MEMORY_SERVICE=0`/`off`/`false` falls back to inline orchestration as
+/// a diagnostic opt-out (same discipline as `HOMUN_PLAN_RECONCILE`).
+pub(crate) fn memory_service_flag(value: Option<&str>) -> bool {
+    !matches!(
+        value.map(str::trim).filter(|value| !value.is_empty()),
+        Some(value) if value == "0"
+            || value.eq_ignore_ascii_case("off")
+            || value.eq_ignore_ascii_case("false")
+    )
+}
+
 pub(crate) fn memory_service_enabled() -> bool {
-    std::env::var("HOMUN_MEMORY_SERVICE")
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("on"))
-        .unwrap_or(false)
+    memory_service_flag(std::env::var("HOMUN_MEMORY_SERVICE").ok().as_deref())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::plan_reconcile_on_delivery_flag;
+    use super::{memory_service_flag, plan_reconcile_on_delivery_flag};
 
     #[test]
     fn gateway_runtime_flags_plan_reconcile_defaults_on_with_explicit_opt_out() {
@@ -78,5 +87,35 @@ mod tests {
         assert!(!plan_reconcile_on_delivery_flag(Some("0")));
         assert!(!plan_reconcile_on_delivery_flag(Some("off")));
         assert!(!plan_reconcile_on_delivery_flag(Some(" OFF ")));
+    }
+
+    #[test]
+    fn gateway_runtime_flags_memory_service_defaults_on_with_explicit_opt_out() {
+        // ADR 0022: the service-object path is now the default; the inline path
+        // is a diagnostic opt-out via HOMUN_MEMORY_SERVICE=0/off/false.
+        assert!(memory_service_flag(None), "unset env var defaults ON");
+        assert!(memory_service_flag(Some("1")));
+        assert!(memory_service_flag(Some("on")));
+        assert!(memory_service_flag(Some("true")));
+        assert!(memory_service_flag(Some("yes")));
+        assert!(memory_service_flag(Some("")), "empty string defaults ON");
+        assert!(memory_service_flag(Some("  ")), "whitespace defaults ON");
+        assert!(!memory_service_flag(Some("0")), "0 disables");
+        assert!(!memory_service_flag(Some("off")), "off disables");
+        assert!(!memory_service_flag(Some("false")), "false disables");
+        assert!(
+            !memory_service_flag(Some("OFF")),
+            "OFF disables (case-insensitive)"
+        );
+        assert!(
+            !memory_service_flag(Some("False")),
+            "False disables (case-insensitive)"
+        );
+        assert!(
+            !memory_service_flag(Some("FALSE")),
+            "FALSE disables (case-insensitive)"
+        );
+        assert!(!memory_service_flag(Some(" 0 ")), "trimmed 0 disables");
+        assert!(!memory_service_flag(Some(" off ")), "trimmed off disables");
     }
 }

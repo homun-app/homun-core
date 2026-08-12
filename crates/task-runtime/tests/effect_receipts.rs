@@ -328,6 +328,50 @@ fn uncertain_receipt_persists_redacted_dispatch_evidence() {
 }
 
 #[test]
+fn user_facing_uncertain_effects_exclude_read_receipts() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let mut read_receipt = new_receipt();
+    read_receipt.receipt_ref =
+        EffectReceiptRef::from_store_id("22222222222222222222222222222222").unwrap();
+    read_receipt.effect_class = EffectClass::Read;
+    read_receipt.operation = "browser_act".into();
+    read_receipt.idempotency_key = "browser_act:read".into();
+    let mut external_receipt = new_receipt();
+    external_receipt.receipt_ref =
+        EffectReceiptRef::from_store_id("33333333333333333333333333333333").unwrap();
+    external_receipt.idempotency_key = "connector.send:external".into();
+
+    for receipt in [&read_receipt, &external_receipt] {
+        let prepared = store.prepare_effect_receipt(receipt).unwrap();
+        assert!(matches!(
+            store.claim_effect_receipt(&prepared.receipt_ref).unwrap(),
+            EffectReceiptClaim::Execute(_)
+        ));
+        store
+            .mark_effect_receipt_uncertain(
+                &prepared.receipt_ref,
+                &json!({"outcome": "unknown_after_dispatch"}),
+            )
+            .unwrap();
+    }
+
+    assert_eq!(
+        store
+            .effect_receipt(&read_receipt.receipt_ref)
+            .unwrap()
+            .unwrap()
+            .status,
+        EffectReceiptStatus::Uncertain,
+        "read receipts remain durable for engine replay/resolve"
+    );
+    let user_visible = store.uncertain_effect_receipts_for_user("user-1").unwrap();
+
+    assert_eq!(user_visible.len(), 1);
+    assert_eq!(user_visible[0].receipt_ref, external_receipt.receipt_ref);
+    assert_eq!(user_visible[0].effect_class, EffectClass::ExternalWrite);
+}
+
+#[test]
 fn an_orphaned_uncertain_receipt_can_be_resolved_without_recreating_its_execution() {
     let store = TaskStore::open_in_memory().unwrap();
     let prepared = store.prepare_effect_receipt(&new_receipt()).unwrap();

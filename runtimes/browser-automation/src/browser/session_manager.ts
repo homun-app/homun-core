@@ -98,6 +98,9 @@ type PageState = {
   // delta->delta sequences, collapsing delta mode into a full-page dump.
   lastFullSnapshot?: string;
   lastSnapshotFingerprint?: string;
+  // Fase 2.2: ref IDs from the previous observation so new refs can be
+  // marked with a `*` suffix in the next snapshot display text.
+  previousRefs?: Set<string>;
   consoleMessages: ConsoleEntry[];
   pendingDialog?: Dialog;
   dialogWaiters: Array<(dialog: Dialog) => void>;
@@ -314,10 +317,13 @@ export class BrowserSessionManager {
       ...params,
       previousSnapshot: state.lastFullSnapshot,
       generation: state.generation,
+      previousRefs: state.previousRefs,
     });
     state.refs = snapshot.refLocators;
     state.lastFullSnapshot = snapshot.rawSnapshot;
     state.lastSnapshotFingerprint = snapshot.fingerprint;
+    // Track current ref IDs for new-ref marking on the next observation.
+    state.previousRefs = new Set(snapshot.refs.map((r) => r.ref));
     this.rememberTarget(params.targetId, state, state.label);
     return {
       targetId: snapshot.targetId,
@@ -589,19 +595,19 @@ export class BrowserSessionManager {
     }
     await waitForPageToSettle(state.page, action);
     state.generation += 1;
+    const postActObservationMode = postActObservationModeForAction(action);
     const snapshot = await createSnapshot(state.page, action.targetId, {
-      // The observation returned AFTER an action must stay CONTENT-preserving at full size: the model
-      // reads results straight from it (e.g. the cards that appear after a search submit), so shrinking
-      // it here truncates the very data the task needs. Per-step latency is instead reduced by cutting
-      // the NUMBER of steps (one-bundle form fills) and by reading structured results from the network
-      // (browser.read_network), not by starving this observation.
+      observationMode: postActObservationMode,
       ...(action as Record<string, unknown>),
       previousSnapshot: state.lastFullSnapshot,
       generation: state.generation,
+      previousRefs: state.previousRefs,
     } as BrowserSnapshotOptions);
     state.refs = snapshot.refLocators;
     state.lastFullSnapshot = snapshot.rawSnapshot;
     state.lastSnapshotFingerprint = snapshot.fingerprint;
+    // Track current ref IDs for new-ref marking on the next observation.
+    state.previousRefs = new Set(snapshot.refs.map((r) => r.ref));
     this.rememberTarget(action.targetId, state, state.label);
     return {
       ...result,
@@ -1104,6 +1110,15 @@ function snapshotDelayForAction(action: BrowserActRequest): number {
     return 600;
   }
   return 250;
+}
+
+function postActObservationModeForAction(action: BrowserActRequest): "interact" | "extract" {
+  // The action result is an observation contract, not only a ref-refresh contract.
+  // Returning interact-only snapshots hid non-clickable outcomes that the action
+  // had just caused or proven visible: search results after wait(text), aria-live
+  // status text after click/fill, and hover tooltips. Callers that want the small
+  // acting view already pass observationMode=interact/delta explicitly.
+  return "extract";
 }
 
 async function waitForPageToSettle(page: Page, action: BrowserActRequest): Promise<void> {

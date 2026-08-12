@@ -1203,7 +1203,10 @@ small {
   --detail-panel-w: min(520px, calc(100% - 48px));
   --island-gap: clamp(16px, 3vw, 44px);
   --workspace-island-panel-width: 340px;
-  --workspace-island-rail-reserve: 48px;
+  --workspace-island-rail-reserve: 32px;
+  /* Extra breathing room between the composer and the open island panel so the
+     composer's right edge never kisses the panel border. */
+  --workspace-island-clearance: 12px;
   --workspace-current-reserve: var(--workspace-island-rail-reserve);
   height: 100%;
   min-height: 0;
@@ -1219,7 +1222,8 @@ small {
 }
 .active-task-layout[data-workspace-island-open="true"] {
   --workspace-current-reserve: calc(
-    var(--workspace-island-panel-width) + var(--workspace-island-rail-reserve)
+    var(--workspace-island-panel-width) + var(--workspace-island-rail-reserve) +
+      var(--workspace-island-clearance)
   );
 }
 

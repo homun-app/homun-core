@@ -1,6 +1,6 @@
 # Kernel Contract Matrix
 
-Verificato 2026-08-03 sul branch `fabio/chat-lifecycle-consolidation`.
+Verificato 2026-08-11 sul branch `fabio/runtime-v2-first-slice`.
 
 Questa matrix e' il punto di ingresso per consolidare il kernel senza nuove
 feature. Prima di dichiarare chiusa una regressione in questo perimetro:
@@ -15,6 +15,27 @@ reasoning visibile dopo streaming:
 ```bash
 HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 ```
+
+## Runtime V2 Projection Gates
+
+Queste righe sono il contratto unico per i bug recenti su goal, piano,
+progresso, browser, capability/plugin, automazioni e UI liveness. Le fixture
+persistite vivono in `scripts/fixtures/kernel_projection/` e rappresentano
+risposte di `GET /api/chat/threads/{thread_id}/kernel-projection`.
+
+| Contratto | Owner canonico | Persistenza/API | UI owner | Gate |
+| --- | --- | --- | --- | --- |
+| Turno terminale dopo reload non mantiene liveness | `TaskStore::project_kernel_thread` | `/kernel-projection.turn.active_turn_id = null`, `turn.status = completed|failed|cancelled` | `kernelProjectionPresenter`, `runtimeViewModel` | `python3 scripts/smoke_kernel_projection.py`; `npm test -- kernelProjectionPresenter` |
+| Piano su turno terminale non esporta step attivi | `TaskStore::project_kernel_thread` | `/kernel-projection.plan.steps[].status != doing|in_progress` quando `turn.status = completed|failed|cancelled` | `kernelProjectionPresenter`, Activity island | `cargo test -p local-first-task-runtime kernel_thread_projection_owns_turn_plan_attention_and_actions`; `python3 scripts/smoke_kernel_projection.py` |
+| Piano runtime sopravvive a stream gap/reload | `turn_reducer.rs`, `store.rs` | `runtime_plans`, `turn_events` `plan_update`/`step_advance` | `kernelProjectionPresenter` via `runtimeViewModel.plan` | `python3 scripts/smoke_kernel_projection.py`; `cargo test -p local-first-task-runtime --test turn_reducer_contract` |
+| Receipt `Read` incerta non chiede verifica utente | `effect_host.rs`, `execution_store.rs`, `store.rs` | `execution_effect_receipts.effect_class = read` | `kernelProjectionPresenter.attention` | `python3 scripts/smoke_kernel_projection.py`; `npm test -- kernelProjectionPresenter` |
+| Receipt `ExternalWrite` incerta chiede verifica utente | `effect_host.rs`, `execution_store.rs`, `store.rs` | `execution_effect_receipts.effect_class = external_write`, `attention.uncertain_effects[]` | attention cards from kernel projection | `python3 scripts/smoke_kernel_projection.py`; `cargo test -p local-first-task-runtime turn_reducer` |
+| `browser_done` chiude lo stato browser | `gateway_browser_tools.rs`, `gateway_tool_execution.rs`, `turn_reducer.rs` | `browser.state = done`, terminal reason `browser_done_terminal` | browser/activity presenter | `python3 scripts/smoke_kernel_projection.py`; `cargo test -p local-first-task-runtime browser_done_closes_browser_state_even_with_read_uncertainty` |
+| Browser visibile senza `browser_done` resta active/unknown | `gateway_browser_runtime.rs`, `store.rs` | browser sidecar/checkpoint + no `BrowserDone` terminal | Activity/browser island | `python3 scripts/smoke_kernel_projection.py`; `npm test -- kernelProjectionPresenter` |
+| Tool/plugin caricati non cambiano liveness | `gateway_tool_execution.rs`, `store.rs` | `capability_runtime.loaded_tools[]` senza cambio `turn.status` | plugin/capability runtime panel | `python3 scripts/smoke_kernel_projection.py`; `npm test -- kernelProjectionPresenter` |
+| Approvazione MCP/plugin write passa da kernel attention | `ApprovalGate`, `effect_host.rs`, `store.rs` | `attention.approvals[]`, `turn.status = waiting_approval` | approval UI from `runtimeViewModel.turnUiState` | `python3 scripts/smoke_kernel_projection.py`; `cargo test -p local-first-desktop-gateway automation_projection -- --nocapture` |
+| Automazioni/background usano lo stesso vocabolario | `gateway_automation_routes.rs`, `execute_proactive_prompt_task`, `TaskUiReadModel` | task `thread_id` -> `/kernel-projection` | `AutomationsView` via `projectAutomationRunState` | `python3 scripts/smoke_kernel_projection.py`; `npm test -- automationRunProjection` |
+| Marker legacy non possiedono il lifecycle corrente | `gateway_chat_markers.rs`, `kernelProjectionPresenter` | marker persistiti solo per compat transcript, mai come plan/activity dell'isola | `chatEventParts` quarantinato | `python3 scripts/smoke_kernel_projection.py`; `npm test -- kernelProjectionPresenter useChatActivityProjection` |
 
 ## Contratti
 
@@ -95,7 +116,11 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | Gateway CORS | `crates/desktop-gateway/src/gateway_cors.rs` | `Origin`, `Access-Control-*`, `x-effective-model` | desktop renderer fetch | `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_cors`; `cd apps/desktop && npm run test:ui-contract` |
 | Gateway health | `crates/desktop-gateway/src/gateway_health.rs` | `/api/health`, recovered store list, projection worker health | Electron watchdog / startup liveness | `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_health`; `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway health_stays_live_while_a_store_lock_is_held`; `cd apps/desktop && npm run test:ui-contract` |
 
-## Smoke Live
+## Smoke Deterministici E Live
+
+`scripts/smoke_kernel_projection.py` legge fixture persistite di
+`/kernel-projection` e verifica i contratti Runtime V2 senza avviare gateway,
+modello o browser. E' parte del gate kernel e del pre-release gate.
 
 `scripts/kernel_live_smoke.py` crea un thread fresco, invia un prompt che forza
 il browser su `https://www.selenium.dev`, aspetta il run terminale e verifica che

@@ -22,6 +22,38 @@ test("terminal projected turn at rest clears active work", () => {
   assert.equal(result.canStop, false);
 });
 
+test("legacy marker tail cannot keep liveness when projection is loaded", () => {
+  const result = deriveTurnLifecycle({
+    promptSubmitting: false,
+    streamingAssistantId: null,
+    projectedActiveTurn: null,
+    projectedTurnStatus: "completed",
+    projectionLoaded: true,
+    threadTailAwaitsHitl: true,
+  });
+
+  assert.equal(result.threadTailAwaitsHitl, false);
+  assert.equal(result.turnAwaitingUser, false);
+  assert.equal(result.hasActiveTurn, false);
+  assert.equal(result.workInProgress, false);
+});
+
+test("legacy marker tail remains fallback before projection loads", () => {
+  const result = deriveTurnLifecycle({
+    promptSubmitting: false,
+    streamingAssistantId: null,
+    projectedActiveTurn: null,
+    projectedTurnStatus: null,
+    projectionLoaded: false,
+    threadTailAwaitsHitl: true,
+  });
+
+  assert.equal(result.threadTailAwaitsHitl, true);
+  assert.equal(result.turnAwaitingUser, true);
+  assert.equal(result.hasActiveTurn, true);
+  assert.equal(result.workInProgress, false);
+});
+
 test("backend finalizing state is terminal at rest", () => {
   const result = deriveTurnLifecycle({
     promptSubmitting: false,
@@ -61,6 +93,31 @@ test("waiting user is active but not model work", () => {
   assert.equal(result.workInProgress, false);
   assert.equal(result.turnAwaitingUser, true);
   assert.equal(result.canStop, false);
+});
+
+test("parked turn is active but not model work", () => {
+  const result = deriveTurnLifecycle({
+    promptSubmitting: false,
+    streamingAssistantId: null,
+    projectedActiveTurn: {
+      turn_id: "turn_parked",
+      status: "parked",
+      updated_at: 10,
+      attempt: 1,
+      max_attempts: 1,
+      last_event_seq: 4,
+      not_before: null,
+      blocked_reason: "parked_waiting_for_model",
+    },
+    projectedTurnStatus: "parked",
+    projectionLoaded: true,
+    threadTailAwaitsHitl: false,
+  });
+
+  assert.equal(result.hasActiveTurn, true);
+  assert.equal(result.workInProgress, false);
+  assert.equal(result.turnAwaitingUser, false);
+  assert.equal(result.canStop, true);
 });
 
 test("streaming local state is work even before projection arrives", () => {

@@ -11,11 +11,14 @@ class KernelRegressionGateTests(unittest.TestCase):
 
         self.assertEqual(plan[0].command, ["cargo", "fmt", "--check"])
         self.assertIn("task runtime turn lifecycle", labels)
+        self.assertIn("task runtime turn reducer", labels)
+        self.assertIn("turn consistency audit unit tests", labels)
+        self.assertIn("kernel projection smoke", labels)
         self.assertIn("task runtime active chat turn", labels)
         self.assertIn("task runtime finalizing fence", labels)
         self.assertIn("task runtime enqueue", labels)
         self.assertIn("gateway steering cleanup", labels)
-        self.assertIn("desktop cursor grammar", labels)
+        self.assertIn("desktop unit tests", labels)
         self.assertIn("desktop ui contract", labels)
         self.assertIn("desktop build", labels)
         self.assertNotIn("live gateway browser smoke", labels)
@@ -24,8 +27,29 @@ class KernelRegressionGateTests(unittest.TestCase):
         by_label = {step.label: step for step in gate.build_plan({})}
 
         self.assertEqual(by_label["task runtime turn lifecycle"].cwd, gate.ROOT)
+        self.assertEqual(
+            by_label["task runtime turn reducer"].command,
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-task-runtime",
+                "--test",
+                "turn_reducer_contract",
+            ],
+        )
+        self.assertEqual(
+            by_label["turn consistency audit unit tests"].command,
+            [gate.PYTHON, "-m", "unittest", "scripts.test_audit_turn_consistency", "-v"],
+        )
+        self.assertEqual(
+            by_label["kernel projection smoke"].command,
+            [gate.PYTHON, "scripts/smoke_kernel_projection.py"],
+        )
+        self.assertEqual(by_label["kernel projection smoke"].cwd, gate.ROOT)
         self.assertEqual(by_label["gateway steering cleanup"].cwd, gate.ROOT)
-        self.assertEqual(by_label["desktop cursor grammar"].cwd, gate.DESKTOP)
+        self.assertEqual(by_label["desktop unit tests"].command, ["npm", "test"])
+        self.assertEqual(by_label["desktop unit tests"].cwd, gate.DESKTOP)
         self.assertEqual(by_label["desktop ui contract"].cwd, gate.DESKTOP)
         self.assertEqual(by_label["desktop build"].cwd, gate.DESKTOP)
 
@@ -68,7 +92,7 @@ class KernelRegressionGateTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(calls, labels[: stop_index + 1])
         self.assertIn("gateway main ownership contract", calls)
-        self.assertNotIn("desktop cursor grammar", calls)
+        self.assertNotIn("desktop unit tests", calls)
         self.assertNotIn("desktop build", calls)
 
 

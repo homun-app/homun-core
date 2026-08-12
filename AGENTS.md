@@ -53,8 +53,12 @@ same-named `.ts` wrapper imports it and adds the types — see
 
 - edit the `.mjs` implementation (never duplicate logic into the `.ts` wrapper);
 - run the paired test with `node --test <file>.test.mjs` from `apps/desktop/`;
-- new test files must be reachable from the desktop test route, not only
-  enumerated in gate scripts.
+- the umbrella desktop route is `npm test` (discovery script
+  `apps/desktop/scripts/run-unit-tests.mjs`): it discovers every `*.test.mjs`
+  under `src`, `tests`, `electron`, and `scripts` by convention, so new test
+  files join it without editing any enumerated list. The release and kernel
+  gates consume this same route — never re-add per-file `node --test`
+  inventories to the gate scripts.
 
 ## Repo layout
 

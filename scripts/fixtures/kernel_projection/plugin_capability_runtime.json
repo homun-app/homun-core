@@ -1,0 +1,66 @@
+{
+  "case": "plugin_capability_runtime",
+  "endpoint": "/api/chat/threads/thread-plugin/kernel-projection",
+  "response": {
+    "thread_id": "thread-plugin",
+    "revision": 6,
+    "turn": {
+      "active_turn_id": "turn-plugin",
+      "status": "running",
+      "last_event_seq": 5,
+      "terminal_reason": null,
+      "failure_text": null,
+      "updated_at": 1723360020
+    },
+    "plan": null,
+    "activity": [
+      {
+        "text": "Loaded MCP tools",
+        "created_at": 1723360020
+      }
+    ],
+    "subagents": [],
+    "browser": {
+      "state": "idle",
+      "target_id": null,
+      "latest_progress": null,
+      "failure_reason": null,
+      "snapshot_verified": false
+    },
+    "capability_runtime": {
+      "loaded_tools": [
+        "mcp.search",
+        "mcp.read"
+      ],
+      "armed_sensitive_domains": [
+        "filesystem.write"
+      ],
+      "pending_capability": "plugin:mcp",
+      "blocked_capabilities": [
+        {
+          "key": "network.write",
+          "reason": "approval_required"
+        }
+      ]
+    },
+    "attention": {
+      "awaiting_user": false,
+      "approvals": [],
+      "uncertain_effects": []
+    },
+    "actions": {
+      "can_stop": true,
+      "composer_mode": "steer_active_turn"
+    }
+  },
+  "expect": {
+    "equals": {
+      "capability_runtime.pending_capability": "plugin:mcp",
+      "actions.composer_mode": "steer_active_turn"
+    },
+    "lengths": {
+      "capability_runtime.loaded_tools": 2,
+      "capability_runtime.blocked_capabilities": 1
+    }
+  }
+}

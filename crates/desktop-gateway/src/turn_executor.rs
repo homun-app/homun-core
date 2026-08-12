@@ -549,6 +549,26 @@ pub fn emit_turn_event(
     } else {
         store.insert_turn_event(turn_id, kind, payload.clone())?
     };
+    broadcast_turn_event(state, turn_id, &event);
+    Ok(())
+}
+
+/// Live fan-out of an ALREADY-PERSISTED turn event (no write). Publishes on the
+/// same two live sinks `emit_turn_event` uses:
+/// 1. The per-turn broadcast channel (legacy NDJSON `/api/chat/turns/{id}/events`
+///    stream — transitional, kept until the unified WS is the only client).
+/// 2. The unified `WsRegistry` (fan-out to all connected WS clients).
+///
+/// The cancel path (`gateway_turn_broker::cancel_chat_turn_and_finalize_bubble`)
+/// persists the canonical `cancelled` terminal event through the broker BEFORE the
+/// executor can emit it, so the executor's later `emit_turn_event(Cancelled)` is
+/// silenced by the terminal-once guard — this helper is what gives that persisting
+/// writer the live fan-out, keeping the "persisting writer broadcasts" contract.
+pub fn broadcast_turn_event(
+    state: &crate::AppState,
+    turn_id: &str,
+    event: &local_first_task_runtime::TurnEvent,
+) {
     // Best-effort live broadcast on the per-turn channel (NDJSON stream — transitional).
     // No receivers is fine (broadcast::send errors are benign).
     if let Ok(map) = turn_broadcast_registry().lock()
@@ -557,7 +577,7 @@ pub fn emit_turn_event(
         let _ = broadcast.tx.send(TurnEvent {
             seq: event.seq,
             kind: event.kind.as_str().to_string(),
-            payload: payload.clone(),
+            payload: event.payload.clone(),
         });
     }
     // Publish on the unified WS (fan-out to all connected clients).
@@ -568,7 +588,6 @@ pub fn emit_turn_event(
         event.kind.as_str(),
         event.payload.clone(),
     );
-    Ok(())
 }
 
 /// Gateway's CancelNotify impl: signals the executor's cancel Notify for a turn.

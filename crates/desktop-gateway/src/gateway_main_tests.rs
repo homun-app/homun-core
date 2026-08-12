@@ -7,31 +7,33 @@ use super::{
     MemoryDataSensitivity, MemorySourceOverrideInput, MemorySourceUpsertRequest,
     ValidatedMemorySourceInput, WorkspaceRecord, WorkspacesFile, active_llm_concurrency,
     adapt_skill_body, aggregate_session_state_from_counts, authorize_managed_capability_tool,
-    block_stalled_step, brain_budgets_for_context_window, browser_capability_action_refusal,
-    browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
-    browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_browse_goal,
-    build_memory_source_grant, build_plan_markdown, capability_call_completed_outcome,
-    classify_connector_error, clawhub_origin, collect_member_counts, command_output_with_timeout,
-    composio_tool_is_read, connector_error_hint, default_browser_headless_value,
-    delegated_browse_tool_outcome, delete_workspace, earlier_browse_call_in_current_round,
-    enforce_monotonic_plan_progress, extract_source_urls, fonti_section, format_memory_block,
-    gateway_memory_user_id, humanize_task_kind, hybrid_memory_score, inbound_action,
-    is_auto_confirmable, is_internal_task_kind, is_low_value_source_url, is_semantic_duplicate,
-    jail_in_root, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
-    mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days,
-    memory_bench_ingest, memory_bench_search, memory_bench_status, memory_facade,
-    memory_source_candidates_from_records, memory_source_facade_error, memory_source_grant_views,
-    memory_sources_flag, memorybench_workspace_id, merge_plan, next_plan_stall,
-    next_ready_task_across_workspaces, normalize_for_dedup, parse_plan_marker,
-    parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
-    plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
-    proactive_answer_memory_request, proactive_memory_request_for_suggestion_action,
-    project_filesystem_mcp_instruction, prune_browser_history, redact_sensitive_text,
-    requeue_waiting_resource_tasks, resolve_active_model, resolve_contained_computer_cdp,
-    resolve_contained_computer_novnc, response_language_instruction, rewrite_confirm_to_done,
-    run_bash_unsandboxed_result, sanitize_dedup_key, scheduled_thread_sender_for_task_id,
-    scheduled_thread_title, search_composio_catalog, should_try_tool_compatibility_fallback,
-    skill_id_from_command, strip_json_fences, suggestion_choices_json, task_effective_goal,
+    block_stalled_step, brain_budgets_for_context_window, browser_anti_loop_nudge,
+    browser_capability_action_refusal, browser_error_indicates_dead_sidecar,
+    browser_method_for_capability_tool, browser_snapshot_text, browser_targets_for_goal,
+    browser_url_for_goal, build_browse_goal, build_memory_source_grant, build_plan_markdown,
+    capability_call_completed_outcome, classify_connector_error, clawhub_origin,
+    collect_member_counts, command_output_with_timeout, composio_tool_is_read,
+    connector_error_hint, default_browser_headless_value, delegated_browse_tool_outcome,
+    delete_workspace, earlier_browse_call_in_current_round, enforce_monotonic_plan_progress,
+    extract_source_urls, fonti_section, format_memory_block, gateway_memory_user_id,
+    humanize_task_kind, hybrid_memory_score, inbound_action, is_auto_confirmable,
+    is_internal_task_kind, is_low_value_source_url, is_semantic_duplicate, jail_in_root,
+    llm_concurrency_view, mcp_error_hint, mcp_provider_slug, mcp_stdio_config_from_metadata,
+    mcp_stdio_config_to_metadata, memory_age_days, memory_bench_ingest, memory_bench_search,
+    memory_bench_status, memory_facade, memory_source_candidates_from_records,
+    memory_source_facade_error, memory_source_grant_views, memory_sources_flag,
+    memorybench_workspace_id, merge_plan, next_plan_stall, next_ready_task_across_workspaces,
+    normalize_for_dedup, parse_plan_marker, parse_review_suggestion, plan_done_count,
+    plan_incomplete_reason, plan_is_complete, plan_is_settled, plan_next_open,
+    plan_stall_exhausted, plan_step_status, proactive_answer_memory_request,
+    proactive_memory_request_for_suggestion_action, project_filesystem_mcp_instruction,
+    prune_browser_history, redact_sensitive_text, repeated_browser_action_nudge,
+    repeated_browser_failed_action_nudge, requeue_waiting_resource_tasks, resolve_active_model,
+    resolve_contained_computer_cdp, resolve_contained_computer_novnc,
+    response_language_instruction, rewrite_confirm_to_done, run_bash_unsandboxed_result,
+    sanitize_dedup_key, scheduled_thread_sender_for_task_id, scheduled_thread_title,
+    search_composio_catalog, should_try_tool_compatibility_fallback, skill_id_from_command,
+    strip_json_fences, suggestion_choices_json, task_effective_goal,
     task_execution_outcome_from_executor_result, task_goal_summary, task_queue_response,
     tool_touches_calendar, tool_touches_contacts, valid_catalog_owner,
     validate_memory_source_input, validate_memory_source_overrides,
@@ -3609,8 +3611,7 @@ fn browse_goal_dedup_is_scoped_to_the_normalized_goal() {
 fn browse_turn_cap_allows_multiple_distinct_sources_but_stays_bounded() {
     assert!(super::browse_call_within_turn_cap(0));
     assert!(super::browse_call_within_turn_cap(1));
-    assert!(super::browse_call_within_turn_cap(3));
-    assert!(!super::browse_call_within_turn_cap(4));
+    assert!(!super::browse_call_within_turn_cap(2));
 }
 
 #[test]
@@ -3622,7 +3623,7 @@ fn browse_round_budget_scales_with_contract_shape() {
         fields: vec![],
         boundary: None,
     };
-    assert_eq!(super::browse_round_budget(&simple), 5);
+    assert_eq!(super::browse_round_budget(&simple), 12);
 
     let list = BrowseResultContract {
         kind: BrowseResultKind::List,
@@ -3647,8 +3648,8 @@ fn browse_round_budget_scales_with_contract_shape() {
         ],
         boundary: None,
     };
-    // BASE 5 + ceil(3 required / 2)=2 + (minimum_items>3 ? 1 : 0)=1 = 8
-    assert_eq!(super::browse_round_budget(&list), 8);
+    // BASE 12 + ceil(3 required / 2)=2 + (minimum_items>3 ? 1 : 0)=1 = 15
+    assert_eq!(super::browse_round_budget(&list), 15);
 }
 
 #[test]
@@ -3713,6 +3714,68 @@ fn browse_hard_ceiling_stays_above_the_progress_relative_round_budget() {
 }
 
 #[test]
+fn browse_hard_ceiling_does_not_triple_rich_browser_contracts() {
+    for rounds in [16usize, 24] {
+        let ceiling = super::browse_hard_round_ceiling(rounds);
+        assert!(
+            ceiling <= rounds + 8,
+            "hard ceiling ({ceiling}) must be a tight backstop above the progress-relative budget ({rounds}), not a second long-running budget"
+        );
+    }
+}
+
+#[test]
+fn browse_subturn_wall_clock_backstop_stays_bounded_for_interactive_reads() {
+    const {
+        assert!(
+            super::BROWSE_SUBTURN_MAX_ELAPSED_MS <= 120_000,
+            "one delegated browse must return control to the manager within an interactive window"
+        );
+    }
+}
+
+#[tokio::test]
+async fn delegated_browse_subturn_timeout_returns_control_to_manager() {
+    let started = std::time::Instant::now();
+    let outcome = super::await_browse_subturn_with_timeout(
+        async {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            "late"
+        },
+        10,
+    )
+    .await;
+
+    assert!(outcome.is_err());
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(1),
+        "timeout wrapper must bound a non-cooperative browse future"
+    );
+}
+
+#[test]
+fn delegated_browse_subturn_timeout_is_manager_no_progress() {
+    let result = super::browse_subturn_timeout_result(
+        "results page snapshot",
+        vec!["https://example.test/search".to_string()],
+        None,
+    );
+    assert_eq!(
+        result.status,
+        local_first_engine::browse::BrowserDoneStatus::Timeout
+    );
+    assert!(!result.found);
+
+    let outcome = delegated_browse_tool_outcome(&result, None);
+
+    assert!(outcome.effects.browser_activity_observed);
+    assert_eq!(
+        outcome.effects.outcome_hint,
+        Some(local_first_engine::ToolOutcomeHint::NoProgress)
+    );
+}
+
+#[test]
 fn manager_wall_clock_stays_above_the_browse_subturn_it_delegates() {
     // Same shape of regression as `browse_hard_ceiling_...` above, one level up and on the
     // wall-clock axis: the manager turn and the `browse` sub-turn it delegates were BOTH capped
@@ -3761,7 +3824,7 @@ fn browse_round_budget_never_exceeds_cap() {
             .collect(),
         boundary: None,
     };
-    assert_eq!(super::browse_round_budget(&huge), 10);
+    assert_eq!(super::browse_round_budget(&huge), 19);
 }
 
 #[test]
@@ -3963,6 +4026,30 @@ fn delegated_browse_outcome_marks_browser_activity_and_structured_progress() {
 }
 
 #[test]
+fn delegated_browse_outcome_treats_partial_contract_result_as_no_progress() {
+    let partial = local_first_engine::BrowseResult {
+        found: true,
+        answer: "solo dati incompleti".to_string(),
+        sources: vec!["https://example.test/source".to_string()],
+        confidence: local_first_engine::browse::Confidence::Low,
+        note: Some("minimum_items missing".to_string()),
+        status: local_first_engine::browse::BrowserDoneStatus::Partial,
+        items: Vec::new(),
+        fields_missing: vec!["minimum_items".to_string()],
+        evidence: Vec::new(),
+    };
+
+    let outcome = delegated_browse_tool_outcome(&partial, None);
+
+    assert!(outcome.effects.browser_activity_observed);
+    assert_eq!(
+        outcome.effects.outcome_hint,
+        Some(local_first_engine::ToolOutcomeHint::NoProgress),
+        "partial browser_done did not satisfy the manager's browse contract"
+    );
+}
+
+#[test]
 fn delegated_browse_outcome_preserves_effect_suspension() {
     let receipt_ref = local_first_execution_protocol::EffectReceiptRef::from_store_id(
         "99999999999999999999999999999999",
@@ -3979,6 +4066,94 @@ fn delegated_browse_outcome_preserves_effect_suspension() {
 fn browse_subagent_uses_a_tighter_navigation_cap_per_single_goal() {
     assert_eq!(super::bounded_browse_subagent_nav_cap(20), 8);
     assert_eq!(super::bounded_browse_subagent_nav_cap(5), 5);
+}
+
+/// Activity relay for the browse sub-turn (regression: island Activity panel stayed empty during
+/// browsing). The sub browser executor must narrate ACT events on the REAL enclosing turn sink,
+/// while the sub-turn's model output stays on the drain (ADR 0025 encapsulation).
+#[tokio::test(flavor = "current_thread")]
+async fn browse_subturn_relays_activity_to_the_turn_sink_and_keeps_model_output_drained() {
+    let _env = TestEnv::acquire();
+    let state = super::AppState::for_tests();
+    let (mpsc_tx, mut mpsc_rx) = tokio::sync::mpsc::channel(16);
+    let (broadcast_tx, _btx) = tokio::sync::broadcast::channel(16);
+    let sink = super::StreamSink {
+        mpsc: mpsc_tx,
+        entry: std::sync::Arc::new(super::StreamEntry {
+            lines: std::sync::Mutex::new(Vec::new()),
+            tx: broadcast_tx,
+            finished: std::sync::atomic::AtomicBool::new(false),
+            last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
+            thread_id: None,
+            assistant_message_id: std::sync::Mutex::new(None),
+            outcome: std::sync::Mutex::new(None),
+            outcome_ready: tokio::sync::Notify::new(),
+        }),
+    };
+    let browse = super::GatewayBrowseExecutor {
+        state: &state,
+        http: &state.http,
+        tx: &sink,
+        thread_id: None,
+        prompt: "activity relay regression test",
+        read_only: true,
+        channel_owner: false,
+        agent_run_id: None,
+        execution_contract: None,
+    };
+    // The sub browser executor's narration port is the REAL turn sink (not the drain).
+    let sub = browse.sub_browser_executor(
+        super::agent_journal::GatewayJournal::Disabled,
+        None,
+        None,
+        false,
+        true,
+    );
+    assert!(std::ptr::eq(sub.tx, &sink));
+
+    // An ACT narration delta crossing that port reaches the turn sink as an Activity event...
+    super::emit_stream_event(
+        sub.tx,
+        super::GenerateStreamEvent::Delta {
+            text: "‹‹ACT››🌐 Opening https://example.com‹‹/ACT››".to_string(),
+        },
+    )
+    .await
+    .expect("ACT narration reaches the turn sink");
+    let lines = sink.entry.lines.lock().expect("sink lines").clone();
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("\"type\":\"activity\"")
+                && line.contains("Opening https://example.com")),
+        "expected an Activity event on the turn sink, got: {lines:?}"
+    );
+    // ...and the narration never closes the manager stream with a terminal event.
+    assert!(!super::stream_entry_has_terminal_event(&sink.entry));
+    // The live response tees the event too.
+    let live = mpsc_rx
+        .try_recv()
+        .expect("live response receives the activity event");
+    assert!(
+        String::from_utf8_lossy(&live.expect("live event bytes")).contains("\"type\":\"activity\"")
+    );
+
+    // Model output stays encapsulated: a sub-turn delta emitted on a drain sink never reaches
+    // the turn sink.
+    let drain = super::drain_stream_sink();
+    super::emit_stream_event(
+        &drain,
+        super::GenerateStreamEvent::Delta {
+            text: "sub-agent model tokens must stay encapsulated".to_string(),
+        },
+    )
+    .await
+    .expect("drain swallows sub-turn model output");
+    let lines_after = sink.entry.lines.lock().expect("sink lines").clone();
+    assert_eq!(
+        lines_after, lines,
+        "drained sub-turn model output must not reach the turn sink"
+    );
 }
 
 #[test]
@@ -4349,6 +4524,456 @@ fn sidecar_http_status_preserves_remote_outcome_uncertainty() {
 }
 
 #[test]
+fn browser_act_transport_errors_are_classified_conservatively() {
+    use super::BrowserActFailureKind::*;
+    // PRE-dispatch: the Act request never reached the sidecar read loop.
+    assert_eq!(
+        super::browser_act_failure_kind("sidecar:sidecar stdin closed"),
+        ConnectFailedBeforeDispatch
+    );
+    assert_eq!(
+        super::browser_act_failure_kind("sidecar:Broken pipe (os error 32)"),
+        ConnectFailedBeforeDispatch
+    );
+    // PRE-dispatch: sidecar verified it never touched the page.
+    assert_eq!(
+        super::browser_act_failure_kind(
+            "sidecar:BROWSER_NOT_STARTED:browser session is not started"
+        ),
+        ConnectFailedBeforeDispatch
+    );
+    assert_eq!(
+        super::browser_act_failure_kind("sidecar:BROWSER_TAB_NOT_FOUND:tab not found: booking"),
+        ConnectFailedBeforeDispatch
+    );
+    // AMBIGUOUS: anything after the sidecar could have accepted the Act request
+    // stays uncertain (double-execution guard).
+    assert_eq!(
+        super::browser_act_failure_kind(super::BROWSER_SIDECAR_TIMEOUT_ERROR),
+        UnknownRemoteOutcome
+    );
+    assert_eq!(
+        super::browser_act_failure_kind("sidecar:sidecar closed unexpectedly"),
+        UnknownRemoteOutcome
+    );
+    assert_eq!(
+        super::browser_act_failure_kind("sidecar:sidecar unresponsive: no reply within 15s"),
+        UnknownRemoteOutcome
+    );
+    assert_eq!(
+        super::browser_act_failure_kind("sidecar:BROWSER_INTERNAL_ERROR:Target closed"),
+        UnknownRemoteOutcome
+    );
+}
+
+#[test]
+fn ordinary_browser_action_ambiguity_is_low_risk_no_user_resolution() {
+    let action = serde_json::json!({
+        "kind": "click",
+        "ref": "e184",
+        "action_class": "ordinary"
+    });
+    let floor_refs = std::collections::HashSet::new();
+
+    assert_eq!(
+        super::browser_action_effect_risk(&action, &floor_refs, false),
+        super::BrowserEffectRisk::Low
+    );
+    assert!(
+        !super::browser_act_uncertain_failure_requires_user_resolution(
+            super::BrowserEffectRisk::Low,
+            super::BrowserActFailureKind::UnknownRemoteOutcome,
+        ),
+        "a read/search ordinary click timeout must become browser no-progress, not an effect_resolution card"
+    );
+}
+
+#[test]
+fn booking_account_and_payment_browser_actions_remain_high_risk() {
+    let floor_refs = std::collections::HashSet::from(["pay-ref".to_string()]);
+    for action in [
+        serde_json::json!({"kind": "click", "ref": "e7", "action_class": "booking"}),
+        serde_json::json!({"kind": "click", "ref": "e8", "action_class": "account"}),
+        serde_json::json!({
+            "kind": "click",
+            "ref": "pay-ref",
+            "action_class": "payment_commit",
+            "payment_approval_id": "pay_1"
+        }),
+    ] {
+        assert_eq!(
+            super::browser_action_effect_risk(&action, &floor_refs, false),
+            super::BrowserEffectRisk::High
+        );
+        assert!(
+            super::browser_act_uncertain_failure_requires_user_resolution(
+                super::BrowserEffectRisk::High,
+                super::BrowserActFailureKind::UnknownRemoteOutcome,
+            ),
+            "high-risk browser ambiguity still needs human verification"
+        );
+    }
+}
+
+#[test]
+fn browser_act_receipt_effect_class_follows_action_risk() {
+    let _env = TestEnv::acquire();
+    let state = super::AppState::for_tests();
+    let (contract, sink) =
+        browser_settlement_ctx_parts(&state, "execution-browser-act-effect-class");
+    let journal = super::agent_journal::GatewayJournal::Disabled;
+    let mut browser_used = false;
+    let mut last_snapshot = String::new();
+    let mut floor_refs = std::collections::HashMap::new();
+    let mut payment_contexts = std::collections::HashMap::new();
+    let mut pending_image = None;
+    let mut tool_call_ids = std::collections::BTreeSet::new();
+    let mut current_target = "booking".to_string();
+    let mut opened_targets = Vec::new();
+    let mut nav_failures = std::collections::HashMap::new();
+    let mut suspend_receipt = None;
+    let mut outcome_hint = None;
+    let ctx = super::BrowserToolCtx {
+        browser_used: &mut browser_used,
+        last_snapshot: &mut last_snapshot,
+        payment_floor_refs: &mut floor_refs,
+        payment_context_by_target: &mut payment_contexts,
+        pending_browser_image: &mut pending_image,
+        browser_tool_call_ids: &mut tool_call_ids,
+        current_target: &mut current_target,
+        opened_targets: &mut opened_targets,
+        nav_failures: &mut nav_failures,
+        state: &state,
+        tx: &sink,
+        thread_id: Some("thread-browser-settle"),
+        prompt: "",
+        read_only: false,
+        channel_owner: false,
+        journal: &journal,
+        execution_contract: Some(&contract),
+        effect_run_id: Some("run-browser-settle"),
+        suspend_effect_receipt: &mut suspend_receipt,
+        outcome_hint: &mut outcome_hint,
+        model_supports_vision: true,
+    };
+
+    let ordinary_action = serde_json::json!({
+        "target_id": "booking",
+        "kind": "click",
+        "ref": "e184",
+        "action_class": "ordinary"
+    });
+    let super::effect_host::EffectDecision::Execute(ordinary) = super::begin_browser_action_effect(
+        &ctx,
+        "call-ordinary-read",
+        ordinary_action,
+        &std::collections::HashSet::new(),
+        false,
+    )
+    .expect("ordinary browser act claims") else {
+        panic!("ordinary browser act must execute first");
+    };
+    let ordinary_receipt_ref = ordinary.receipt_ref().clone();
+    let ordinary_receipt = state
+        .task_store
+        .lock()
+        .expect("task store")
+        .effect_receipt(&ordinary_receipt_ref)
+        .expect("load ordinary receipt")
+        .expect("ordinary receipt");
+    assert_eq!(
+        ordinary_receipt.effect_class,
+        local_first_execution_protocol::EffectClass::Read
+    );
+    super::release_browser_effect_not_applied(&ctx, &ordinary, "test_release", "test cleanup")
+        .expect("release ordinary receipt");
+
+    let booking_action = serde_json::json!({
+        "target_id": "booking",
+        "kind": "click",
+        "ref": "e7",
+        "action_class": "booking"
+    });
+    let super::effect_host::EffectDecision::Execute(booking) = super::begin_browser_action_effect(
+        &ctx,
+        "call-booking-write",
+        booking_action,
+        &std::collections::HashSet::new(),
+        false,
+    )
+    .expect("booking browser act claims") else {
+        panic!("booking browser act must execute first");
+    };
+    let booking_receipt_ref = booking.receipt_ref().clone();
+    let booking_receipt = state
+        .task_store
+        .lock()
+        .expect("task store")
+        .effect_receipt(&booking_receipt_ref)
+        .expect("load booking receipt")
+        .expect("booking receipt");
+    assert_eq!(
+        booking_receipt.effect_class,
+        local_first_execution_protocol::EffectClass::ExternalWrite
+    );
+    super::release_browser_effect_not_applied(&ctx, &booking, "test_release", "test cleanup")
+        .expect("release booking receipt");
+}
+
+/// Builds the minimal browser tool context needed to settle an effect receipt:
+/// an active execution contract allowing `ExternalWrite` plus fabricated
+/// per-turn scratch state. Mirrors the effect_host `activate` helper.
+fn browser_settlement_ctx_parts(
+    state: &super::AppState,
+    execution_id: &str,
+) -> (
+    local_first_execution_protocol::ValidatedExecutionContract,
+    super::StreamSink,
+) {
+    let user = super::gateway_user_id();
+    let workspace = local_first_task_runtime::WorkspaceId::new("workspace-browser-settle");
+    let now = time::OffsetDateTime::now_utc();
+    let mut task = local_first_task_runtime::TaskRecord::new(
+        execution_id,
+        user.clone(),
+        workspace.clone(),
+        "chat_turn",
+        "settle browser effect",
+        serde_json::json!({"thread_id": "thread-browser-settle"}),
+    );
+    task.status = local_first_task_runtime::TaskStatus::Running;
+    task.lease_owner = Some("worker-1".into());
+    task.last_heartbeat_at = Some(now);
+    task.lease_expires_at = Some(now + time::Duration::minutes(5));
+    let mut raw = local_first_execution_protocol::ExecutionContract::new(
+        execution_id,
+        "chat_turn",
+        local_first_execution_protocol::ExecutionScope {
+            user_id: user.as_str().into(),
+            workspace_id: workspace.as_str().into(),
+            thread_id: Some("thread-browser-settle".into()),
+        },
+        serde_json::to_value(&task).expect("task"),
+    );
+    raw.fencing_token = u64::try_from(now.unix_timestamp_nanos()).expect("fence");
+    raw.policy.allowed_effects = vec![
+        local_first_execution_protocol::EffectClass::Read,
+        local_first_execution_protocol::EffectClass::ExternalWrite,
+    ];
+    let contract: local_first_execution_protocol::ValidatedExecutionContract =
+        raw.try_into().expect("contract");
+    {
+        let store = state.task_store.lock().expect("task store");
+        store.insert_task(&task).expect("insert task");
+        store.create_execution(&contract).expect("create execution");
+        store
+            .start_execution_attempt(
+                &contract.as_ref().execution_id,
+                contract.as_ref().revision,
+                contract.as_ref().fencing_token,
+                "worker-1",
+            )
+            .expect("start attempt");
+    }
+    let (mpsc, _rx) = tokio::sync::mpsc::channel(4);
+    let (tx, _btx) = tokio::sync::broadcast::channel(4);
+    let sink = super::StreamSink {
+        mpsc,
+        entry: std::sync::Arc::new(super::StreamEntry {
+            lines: std::sync::Mutex::new(Vec::new()),
+            tx,
+            finished: std::sync::atomic::AtomicBool::new(false),
+            last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
+            thread_id: None,
+            assistant_message_id: std::sync::Mutex::new(None),
+            outcome: std::sync::Mutex::new(None),
+            outcome_ready: tokio::sync::Notify::new(),
+        }),
+    };
+    (contract, sink)
+}
+
+fn begin_browser_act_lease<'a>(
+    ctx: &super::BrowserToolCtx<'a>,
+    call_id: &str,
+) -> super::effect_host::EffectLease<'a> {
+    let super::effect_host::EffectDecision::Execute(lease) = super::begin_browser_action_effect(
+        ctx,
+        call_id,
+        serde_json::json!({
+            "target_id": "booking",
+            "kind": "click",
+            "ref": "e7",
+            "action_class": "booking"
+        }),
+        &std::collections::HashSet::new(),
+        false,
+    )
+    .expect("claim browser_act effect") else {
+        panic!("first browser_act claim must execute");
+    };
+    lease
+}
+
+#[test]
+fn browser_act_pre_dispatch_failure_releases_the_effect_without_suspension() {
+    let _env = TestEnv::acquire();
+    let state = super::AppState::for_tests();
+    let (contract, sink) =
+        browser_settlement_ctx_parts(&state, "execution-browser-act-pre-dispatch");
+    let journal = super::agent_journal::GatewayJournal::Disabled;
+    let mut browser_used = false;
+    let mut last_snapshot = String::new();
+    let mut floor_refs = std::collections::HashMap::new();
+    let mut payment_contexts = std::collections::HashMap::new();
+    let mut pending_image = None;
+    let mut tool_call_ids = std::collections::BTreeSet::new();
+    let mut current_target = "booking".to_string();
+    let mut opened_targets = Vec::new();
+    let mut nav_failures = std::collections::HashMap::new();
+    let mut suspend_receipt = None;
+    let mut outcome_hint = None;
+    let ctx = super::BrowserToolCtx {
+        browser_used: &mut browser_used,
+        last_snapshot: &mut last_snapshot,
+        payment_floor_refs: &mut floor_refs,
+        payment_context_by_target: &mut payment_contexts,
+        pending_browser_image: &mut pending_image,
+        browser_tool_call_ids: &mut tool_call_ids,
+        current_target: &mut current_target,
+        opened_targets: &mut opened_targets,
+        nav_failures: &mut nav_failures,
+        state: &state,
+        tx: &sink,
+        thread_id: Some("thread-browser-settle"),
+        prompt: "",
+        read_only: false,
+        channel_owner: false,
+        journal: &journal,
+        execution_contract: Some(&contract),
+        effect_run_id: Some("run-browser-settle"),
+        suspend_effect_receipt: &mut suspend_receipt,
+        outcome_hint: &mut outcome_hint,
+        model_supports_vision: true,
+    };
+    let lease = begin_browser_act_lease(&ctx, "call-pre-dispatch");
+
+    // Transport died before dispatch: receipt is released, NOT marked uncertain,
+    // and the turn is NOT suspended (no verification card).
+    let receipt = super::release_browser_effect_not_applied(
+        &ctx,
+        &lease,
+        super::BrowserActFailureKind::ConnectFailedBeforeDispatch.as_str(),
+        "sidecar stdin closed",
+    )
+    .expect("release receipt");
+    assert_eq!(
+        receipt.status,
+        local_first_execution_protocol::EffectReceiptStatus::Prepared
+    );
+    assert!(
+        ctx.suspend_effect_receipt.is_none(),
+        "pre-dispatch failure must not suspend the turn"
+    );
+    drop(lease);
+
+    // The engine stays free to retry: the same logical call claims a fresh
+    // execution instead of resolving as uncertain.
+    assert!(matches!(
+        super::begin_browser_action_effect(
+            &ctx,
+            "call-pre-dispatch",
+            serde_json::json!({
+                "target_id": "booking",
+                "kind": "click",
+                "ref": "e7",
+                "action_class": "booking"
+            }),
+            &std::collections::HashSet::new(),
+            false,
+        )
+        .expect("retry claim"),
+        super::effect_host::EffectDecision::Execute(_)
+    ));
+}
+
+#[test]
+fn browser_act_ambiguous_failure_stays_uncertain_and_suspends() {
+    let _env = TestEnv::acquire();
+    let state = super::AppState::for_tests();
+    let (contract, sink) = browser_settlement_ctx_parts(&state, "execution-browser-act-ambiguous");
+    let journal = super::agent_journal::GatewayJournal::Disabled;
+    let mut browser_used = false;
+    let mut last_snapshot = String::new();
+    let mut floor_refs = std::collections::HashMap::new();
+    let mut payment_contexts = std::collections::HashMap::new();
+    let mut pending_image = None;
+    let mut tool_call_ids = std::collections::BTreeSet::new();
+    let mut current_target = "booking".to_string();
+    let mut opened_targets = Vec::new();
+    let mut nav_failures = std::collections::HashMap::new();
+    let mut suspend_receipt = None;
+    let mut outcome_hint = None;
+    let mut ctx = super::BrowserToolCtx {
+        browser_used: &mut browser_used,
+        last_snapshot: &mut last_snapshot,
+        payment_floor_refs: &mut floor_refs,
+        payment_context_by_target: &mut payment_contexts,
+        pending_browser_image: &mut pending_image,
+        browser_tool_call_ids: &mut tool_call_ids,
+        current_target: &mut current_target,
+        opened_targets: &mut opened_targets,
+        nav_failures: &mut nav_failures,
+        state: &state,
+        tx: &sink,
+        thread_id: Some("thread-browser-settle"),
+        prompt: "",
+        read_only: false,
+        channel_owner: false,
+        journal: &journal,
+        execution_contract: Some(&contract),
+        effect_run_id: Some("run-browser-settle"),
+        suspend_effect_receipt: &mut suspend_receipt,
+        outcome_hint: &mut outcome_hint,
+        model_supports_vision: true,
+    };
+    let lease = begin_browser_act_lease(&ctx, "call-ambiguous");
+
+    // Post-ack ambiguity keeps the existing behavior: receipt uncertain + turn
+    // suspended so the user verifies the outcome (double-execution guard).
+    let receipt = super::mark_browser_effect_uncertain(&mut ctx, &lease).expect("uncertain");
+    assert_eq!(
+        receipt.status,
+        local_first_execution_protocol::EffectReceiptStatus::Uncertain
+    );
+    let lease_receipt_ref = lease.receipt_ref().clone();
+    assert_eq!(
+        ctx.suspend_effect_receipt.as_ref(),
+        Some(&lease_receipt_ref),
+        "ambiguous failure must suspend the turn on the uncertain receipt"
+    );
+    drop(lease);
+
+    // An uncertain receipt never executes again: retry resolves, never re-dispatches.
+    assert!(matches!(
+        super::begin_browser_action_effect(
+            &ctx,
+            "call-ambiguous",
+            serde_json::json!({
+                "target_id": "booking",
+                "kind": "click",
+                "ref": "e7",
+                "action_class": "booking"
+            }),
+            &std::collections::HashSet::new(),
+            false,
+        )
+        .expect("resolve claim"),
+        super::effect_host::EffectDecision::Resolve(_)
+    ));
+}
+
+#[test]
 fn recipient_fingerprint_is_stable_and_does_not_expose_the_recipient() {
     let first = super::recipient_fingerprint(" chat-id-123 ");
     let second = super::recipient_fingerprint("chat-id-123");
@@ -4594,6 +5219,54 @@ fn canonical_stream_finalization_does_not_project_hitl_from_markers() {
 }
 
 #[test]
+fn transcript_parts_render_after_reload_without_marker_text() {
+    let state = super::AppState::for_tests();
+    let thread = state
+        .chat_store
+        .lock()
+        .unwrap()
+        .create_thread("transcript_parts_reload")
+        .expect("thread");
+    let assistant =
+        super::channel_chat_message_with_id("assistant", "", "transcript_parts_assistant");
+    state
+        .chat_store
+        .lock()
+        .unwrap()
+        .append_assistant_message(&thread.thread_id, &assistant)
+        .expect("assistant message");
+    let raw = r#"Pick one. ‹‹CHOICES››{"question":"Which?","options":["A","B"]}‹‹/CHOICES››"#;
+    let cards = super::actionable_cards_from_raw_text(raw);
+    let mut collector = super::StreamMemoryReuseCollector::default();
+    collector.observe_actionable_cards(&cards);
+
+    super::finalize_streamed_assistant_message(
+        &state,
+        &thread.thread_id,
+        &assistant.id,
+        "Pick one.",
+        &collector,
+        local_first_desktop_gateway::MessageDeliveryState::Delivered,
+    )
+    .expect("finalize typed transcript parts");
+
+    let saved = state
+        .chat_store
+        .lock()
+        .unwrap()
+        .message(&thread.thread_id, &assistant.id)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(saved.text, "Pick one.");
+    assert!(!saved.text.contains("CHOICES"));
+    assert_eq!(saved.event_parts.len(), 1);
+    assert_eq!(saved.event_parts[0]["type"], "actionable_card");
+    assert_eq!(saved.event_parts[0]["kind"], "CHOICES");
+    assert_eq!(saved.event_parts[0]["payload"]["question"], "Which?");
+}
+
+#[test]
 fn user_reply_resumes_the_suspended_chat_execution_in_place() {
     let _env = TestEnv::acquire();
     let state = super::AppState::for_tests();
@@ -4730,6 +5403,295 @@ fn user_reply_resumes_the_suspended_chat_execution_in_place() {
             .message(&thread.thread_id, "local_user_resume-request")
             .unwrap()
             .is_some()
+    );
+}
+
+#[test]
+fn cancelled_suspended_turn_does_not_resurrect_on_next_user_message() {
+    // Stop-flow regression: a turn cancelled while suspended used to keep its
+    // pending wake, and the next user message delivered that wake, flipping the
+    // Cancelled task back to queued and resurrecting the SAME execution.
+    let _env = TestEnv::acquire();
+    let state = super::AppState::for_tests();
+    let thread = state
+        .chat_store
+        .lock()
+        .unwrap()
+        .create_thread("workspace-cancelled-resume")
+        .unwrap();
+    let user = super::gateway_user_id();
+    let workspace = local_first_task_runtime::WorkspaceId::new("workspace-cancelled-resume");
+    let task = local_first_task_runtime::TaskRecord::new(
+        "turn-cancelled-resume",
+        user.clone(),
+        workspace.clone(),
+        "chat_turn",
+        "choose",
+        serde_json::json!({
+            "thread_id": thread.thread_id,
+            "prompt": "Choose A or B",
+            "request_id": "initial-request",
+            "assistant_message_id": "assistant-cancelled-resume",
+            "workspace_id": workspace.as_str(),
+        }),
+    );
+    let contract = local_first_execution_protocol::ValidatedExecutionContract::try_from(
+        local_first_execution_protocol::ExecutionContract::new(
+            task.task_id.as_str(),
+            "chat_turn",
+            local_first_execution_protocol::ExecutionScope {
+                user_id: user.as_str().into(),
+                workspace_id: workspace.as_str().into(),
+                thread_id: Some(thread.thread_id.clone()),
+            },
+            serde_json::to_value(&task).unwrap(),
+        ),
+    )
+    .unwrap();
+    let wake = local_first_execution_protocol::WakeCondition::User {
+        wait_ref: "turn-cancelled-resume:1:user".into(),
+    };
+    let outcome = local_first_execution_protocol::ValidatedExecutionOutcome::new(
+        local_first_execution_protocol::ExecutionOutcome::Suspended {
+            wake: wake.clone(),
+            checkpoint: local_first_execution_protocol::CheckpointEnvelope::new(
+                task.task_id.as_str(),
+                1,
+                "chat_turn",
+                1,
+                local_first_execution_protocol::CheckpointDataRef::Public {
+                    record_ref: local_first_execution_protocol::DurableDataRef::from_store_id(
+                        "0123456789abcdef0123456789abcdef",
+                    )
+                    .unwrap(),
+                },
+            ),
+        },
+        &contract,
+    )
+    .unwrap();
+    {
+        let store = state.task_store.lock().unwrap();
+        store.insert_task(&task).unwrap();
+        store.create_execution(&contract).unwrap();
+        store.commit_execution_outcome(&outcome).unwrap();
+        // Reproduce the PRE-FIX inconsistent state: the task was marked
+        // Cancelled but the pending wake survived (old cancel path).
+        store
+            .update_task_status(
+                &task.task_id,
+                &user,
+                &workspace,
+                local_first_task_runtime::TaskStatus::Cancelled,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .pending_execution_wakes(user.as_str(), workspace.as_str(), Some(&thread.thread_id))
+                .unwrap()
+                .len(),
+            1,
+            "precondition: the stale pending wake survived the legacy cancel"
+        );
+    }
+
+    let input = local_first_task_runtime::broker::ChatTurnInput {
+        thread_id: thread.thread_id.clone(),
+        request_id: "after-cancel-request".into(),
+        assistant_message_id: "unused-new-assistant".into(),
+        prompt: "A".into(),
+        visible_prompt: None,
+        images: Vec::new(),
+        attachments: None,
+        mode: None,
+        model: None,
+        source: local_first_task_runtime::broker::ChatTurnSource::Interactive,
+        approval: local_first_task_runtime::broker::TurnApproval::Full,
+    };
+    let resumed = super::resume_suspended_user_turn_core(&state, &input).unwrap();
+    assert!(
+        resumed.is_none(),
+        "a terminal (cancelled) turn must never be resumed in place"
+    );
+    {
+        let store = state.task_store.lock().unwrap();
+        assert!(
+            store
+                .pending_execution_wakes(user.as_str(), workspace.as_str(), Some(&thread.thread_id))
+                .unwrap()
+                .is_empty(),
+            "the stale wake is discarded so no later message resurrects the turn"
+        );
+        let cancelled = store
+            .get_task(&task.task_id, &user, &workspace)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            cancelled.status,
+            local_first_task_runtime::TaskStatus::Cancelled,
+            "the old turn stays cancelled"
+        );
+        // The same message now enqueues a brand-new turn instead of reviving
+        // the cancelled one.
+        let enqueued =
+            local_first_task_runtime::broker::enqueue_chat_turn(&store, &user, &workspace, &input)
+                .unwrap();
+        assert_ne!(
+            enqueued.task_id.as_str(),
+            task.task_id.as_str(),
+            "the new turn is a fresh task, not the cancelled execution"
+        );
+        let fresh = store
+            .get_task(&enqueued.task_id, &user, &workspace)
+            .unwrap()
+            .unwrap();
+        assert_eq!(fresh.status, local_first_task_runtime::TaskStatus::Queued);
+    }
+}
+
+#[test]
+fn cancel_after_resume_targets_the_server_turn_id_not_the_request_derived_one() {
+    // After a resume, POST /turns answers with the EXISTING execution id while
+    // the client holds a fresh requestId: a DELETE on `turn_{requestId}` hits
+    // nothing (404), only the server-returned turn id cancels the turn.
+    let _env = TestEnv::acquire();
+    let state = super::AppState::for_tests();
+    let thread = state
+        .chat_store
+        .lock()
+        .unwrap()
+        .create_thread("workspace-cancel-after-resume")
+        .unwrap();
+    let user = super::gateway_user_id();
+    let workspace = local_first_task_runtime::WorkspaceId::new("workspace-cancel-after-resume");
+    let task = local_first_task_runtime::TaskRecord::new(
+        "turn-cancel-after-resume",
+        user.clone(),
+        workspace.clone(),
+        "chat_turn",
+        "choose",
+        serde_json::json!({
+            "thread_id": thread.thread_id,
+            "prompt": "Choose A or B",
+            "request_id": "initial-request",
+            "assistant_message_id": "assistant-cancel-after-resume",
+            "workspace_id": workspace.as_str(),
+        }),
+    );
+    let contract = local_first_execution_protocol::ValidatedExecutionContract::try_from(
+        local_first_execution_protocol::ExecutionContract::new(
+            task.task_id.as_str(),
+            "chat_turn",
+            local_first_execution_protocol::ExecutionScope {
+                user_id: user.as_str().into(),
+                workspace_id: workspace.as_str().into(),
+                thread_id: Some(thread.thread_id.clone()),
+            },
+            serde_json::to_value(&task).unwrap(),
+        ),
+    )
+    .unwrap();
+    let wake = local_first_execution_protocol::WakeCondition::User {
+        wait_ref: "turn-cancel-after-resume:1:user".into(),
+    };
+    let outcome = local_first_execution_protocol::ValidatedExecutionOutcome::new(
+        local_first_execution_protocol::ExecutionOutcome::Suspended {
+            wake: wake.clone(),
+            checkpoint: local_first_execution_protocol::CheckpointEnvelope::new(
+                task.task_id.as_str(),
+                1,
+                "chat_turn",
+                1,
+                local_first_execution_protocol::CheckpointDataRef::Public {
+                    record_ref: local_first_execution_protocol::DurableDataRef::from_store_id(
+                        "fedcba9876543210fedcba9876543210",
+                    )
+                    .unwrap(),
+                },
+            ),
+        },
+        &contract,
+    )
+    .unwrap();
+    {
+        let store = state.task_store.lock().unwrap();
+        store.insert_task(&task).unwrap();
+        store.create_execution(&contract).unwrap();
+        store.commit_execution_outcome(&outcome).unwrap();
+    }
+    let mut assistant = super::channel_chat_message_with_id(
+        "assistant",
+        "Choose A or B",
+        "assistant-cancel-after-resume",
+    );
+    assistant.linked_task_id = Some(task.task_id.as_str().into());
+    assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::WaitingUser;
+    state
+        .chat_store
+        .lock()
+        .unwrap()
+        .append_assistant_message(&thread.thread_id, &assistant)
+        .unwrap();
+
+    let input = local_first_task_runtime::broker::ChatTurnInput {
+        thread_id: thread.thread_id.clone(),
+        request_id: "resume-request".into(),
+        assistant_message_id: "unused-new-assistant".into(),
+        prompt: "A".into(),
+        visible_prompt: None,
+        images: Vec::new(),
+        attachments: None,
+        mode: None,
+        model: None,
+        source: local_first_task_runtime::broker::ChatTurnSource::Interactive,
+        approval: local_first_task_runtime::broker::TurnApproval::Full,
+    };
+    let resumed = super::resume_suspended_user_turn_core(&state, &input)
+        .unwrap()
+        .expect("suspended turn resumed");
+    assert_eq!(resumed.execution_id, task.task_id.as_str());
+
+    let store = state.task_store.lock().unwrap();
+    // The id the frontend used to derive (`turn_{requestId}`) matches no turn:
+    // the cancel is a no-op (server-side it was a 404).
+    let ghost = local_first_task_runtime::broker::cancel_chat_turn(
+        &store,
+        &user,
+        &workspace,
+        &local_first_task_runtime::TaskId::new("turn_resume-request"),
+        &local_first_task_runtime::broker::NoopCancelNotify,
+    )
+    .unwrap();
+    assert!(
+        !ghost.cancelled,
+        "the request-derived id must not cancel anything"
+    );
+    // The server-returned turn_id (the existing execution id) cancels the
+    // resumed turn for real.
+    let cancelled_outcome = local_first_task_runtime::broker::cancel_chat_turn(
+        &store,
+        &user,
+        &workspace,
+        &local_first_task_runtime::TaskId::new(&resumed.execution_id),
+        &local_first_task_runtime::broker::NoopCancelNotify,
+    )
+    .unwrap();
+    assert!(cancelled_outcome.cancelled);
+    let cancelled = store
+        .get_task(&task.task_id, &user, &workspace)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        cancelled.status,
+        local_first_task_runtime::TaskStatus::Cancelled
+    );
+    assert!(
+        store
+            .pending_execution_wakes(user.as_str(), workspace.as_str(), Some(&thread.thread_id))
+            .unwrap()
+            .is_empty(),
+        "cancel after resume also clears any pending wake"
     );
 }
 
@@ -8122,7 +9084,7 @@ fn replace_latest_plan_marker_updates_delivered_plan_status() {
     ];
     let answer = "‹‹PLAN››- [x] **Open page** (`s1`): ok\n\
 - [ ] **Deliver answer** (`s2`): pending‹‹/PLAN››\nDone.";
-    let updated = super::replace_latest_plan_marker(answer, &steps);
+    let updated = super::replace_latest_plan_marker(answer, None, &steps);
     assert!(updated.contains("- [x] **Deliver answer** (`s2`): sent"));
     assert!(!updated.contains("- [ ] **Deliver answer**"));
     assert!(updated.ends_with("\nDone."));
@@ -8136,7 +9098,7 @@ fn reconcile_final_plan_marker_does_not_close_open_step_from_answer_length() {
     ]);
     let answer = format!(
         "‹‹PLAN››{}‹‹/PLAN››\n{}",
-        super::build_plan_markdown(&super::execution_plan_steps(&plan)),
+        super::build_plan_markdown(None, &super::execution_plan_steps(&plan)),
         "Risultato finale: completato. ".repeat(40)
     );
 
@@ -8144,6 +9106,54 @@ fn reconcile_final_plan_marker_does_not_close_open_step_from_answer_length() {
 
     assert!(updated.contains("- [-] **Deliver result** (`s2`)"));
     assert!(!updated.contains("- [x] **Deliver result**"));
+}
+
+#[test]
+fn reconcile_final_plan_marker_closes_last_reporting_step_with_delivered_evidence() {
+    let plan = super::runtime_execution_plan(&[
+        serde_json::json!({"id":"s1","title":"Preparare la ricerca","status":"done","detail":"ok"}),
+        serde_json::json!({"id":"s2","title":"Cercare treni Milano Roma","status":"done","detail":"risultati letti"}),
+        serde_json::json!({"id":"s3","title":"Estrarre e riportare 3-5 opzioni con fonte","status":"doing","detail":"in corso"}),
+    ]);
+    let answer_body = format!(
+        "| Ora | Treno | Fonte |\n\
+| --- | --- | --- |\n\
+| 08:00 | Frecciarossa 9503 | https://www.trenitalia.com |\n\
+| 08:10 | Italo 9951 | https://www.italotreno.it |\n\n\
+Fonti: https://www.trenitalia.com e https://www.italotreno.it\n\n{}",
+        "Ho letto i risultati e riporto opzioni utilizzabili con fonte. ".repeat(12)
+    );
+    let answer = format!(
+        "‹‹PLAN››{}‹‹/PLAN››\n{}",
+        super::build_plan_markdown(None, &super::execution_plan_steps(&plan)),
+        answer_body
+    );
+
+    let updated = super::reconcile_final_plan_marker_on_delivery(&plan, &answer);
+
+    assert!(updated.contains("- [x] **Estrarre e riportare 3-5 opzioni con fonte** (`s3`)"));
+    assert!(!updated.contains("- [-] **Estrarre e riportare 3-5 opzioni con fonte**"));
+}
+
+#[test]
+fn reconcile_final_plan_marker_does_not_launder_blocked_steps() {
+    let plan = super::runtime_execution_plan(&[
+        serde_json::json!({"id":"s1","title":"Preparare la ricerca","status":"done","detail":"ok"}),
+        serde_json::json!({"id":"s2","title":"Cercare treni Milano Roma","status":"blocked","detail":"paused by the harness: no progress"}),
+        serde_json::json!({"id":"s3","title":"Estrarre e riportare 3-5 opzioni con fonte","status":"doing","detail":"in corso"}),
+    ]);
+    let answer = format!(
+        "‹‹PLAN››{}‹‹/PLAN››\n| Ora | Fonte |\n| --- | --- |\n| 08:00 | https://www.trenitalia.com |\n\n{}",
+        super::build_plan_markdown(None, &super::execution_plan_steps(&plan)),
+        "Risposta sostanziale con tabella e fonti. ".repeat(20)
+    );
+
+    let updated = super::reconcile_final_plan_marker_on_delivery(&plan, &answer);
+
+    assert!(updated.contains("- [!] **Cercare treni Milano Roma** (`s2`)"));
+    assert!(updated.contains("- [-] **Estrarre e riportare 3-5 opzioni con fonte** (`s3`)"));
+    assert!(!updated.contains("- [x] **Cercare treni Milano Roma**"));
+    assert!(!updated.contains("- [x] **Estrarre e riportare 3-5 opzioni con fonte**"));
 }
 
 #[test]
@@ -8156,7 +9166,7 @@ fn reconcile_final_plan_preserves_all_evidence_free_open_steps() {
     ]);
     let answer = format!(
         "‹‹PLAN››{}‹‹/PLAN››\n{}",
-        super::build_plan_markdown(&super::execution_plan_steps(&plan)),
+        super::build_plan_markdown(None, &super::execution_plan_steps(&plan)),
         "Risposta completa con tutti i mercati coperti. ".repeat(30)
     );
 
@@ -8179,7 +9189,7 @@ fn reconcile_final_plan_noop_on_short_answer() {
     ]);
     let answer = format!(
         "‹‹PLAN››{}‹‹/PLAN››\nDone.",
-        super::build_plan_markdown(&super::execution_plan_steps(&plan)),
+        super::build_plan_markdown(None, &super::execution_plan_steps(&plan)),
     );
 
     let updated = super::reconcile_final_plan_marker_on_delivery(&plan, &answer);
@@ -8694,13 +9704,27 @@ fn the_plan_value_handed_to_the_engine_preserves_status_and_title() {
         serde_json::json!({ "id": "s1", "title": "Cerca il treno", "status": "done", "detail": "" }),
         serde_json::json!({ "id": "s2", "title": "Apri la prenotazione", "status": "doing", "detail": "" }),
     ];
-    use local_first_engine::plan::{plan_step_status, plan_step_title, plan_value_steps};
+    use local_first_engine::plan::{
+        plan_step_status, plan_step_title, plan_value_goal, plan_value_steps,
+    };
     // Exactly what the update_plan arm / the resume / the frontier advance assign to `ls.plan`.
-    let as_engine_sees_it = super::canonical_plan_value(&canonical);
+    let as_engine_sees_it = super::canonical_plan_value(None, &canonical);
     let steps = plan_value_steps(&as_engine_sees_it);
     assert_eq!(steps.len(), 2, "the engine sees both steps");
     assert_eq!(plan_step_title(&steps[0]), "Cerca il treno");
     assert_eq!(plan_step_status(&steps[0]), "done");
+    assert_eq!(
+        plan_value_goal(&as_engine_sees_it),
+        None,
+        "no goal in → no goal out"
+    );
+    let with_goal = super::canonical_plan_value(Some("Prenotare il treno"), &canonical);
+    assert_eq!(
+        plan_value_goal(&with_goal),
+        Some("Prenotare il treno".to_string()),
+        "the goal rides the canonical plan Value, steps untouched"
+    );
+    assert_eq!(plan_value_steps(&with_goal).len(), 2);
     assert_eq!(
         plan_step_status(&steps[1]),
         "doing",
@@ -8732,7 +9756,7 @@ fn the_raw_execution_plan_serialization_hides_status_from_the_engine() {
         "the raw shape buries status in `arguments` — this is the trap, keep it documented"
     );
     assert_eq!(
-        plan_step_status(&plan_value_steps(&super::canonical_plan_value(&canonical))[0]),
+        plan_step_status(&plan_value_steps(&super::canonical_plan_value(None, &canonical))[0]),
         "done"
     );
 }
@@ -9035,6 +10059,16 @@ fn orchestration_plan_tools_expose_strict_schemas() {
         update_plan.pointer("/function/parameters/properties/steps/items/properties/id/type"),
         Some(&serde_json::json!(["string", "null"]))
     );
+    // The plan's `goal` is OPTIONAL at the schema level (required stays `["steps"]`)
+    // but admitted as a top-level property alongside the strict no-extra-fields rule.
+    assert_eq!(
+        update_plan.pointer("/function/parameters/properties/goal/type"),
+        Some(&serde_json::json!(["string", "null"]))
+    );
+    assert_eq!(
+        update_plan.pointer("/function/parameters/required"),
+        Some(&serde_json::json!(["steps"]))
+    );
 
     let step_advance = super::step_advance_tool_schema();
     assert_eq!(
@@ -9072,6 +10106,113 @@ fn orchestration_completion_judge_uses_strict_schema() {
         response_format.pointer("/json_schema/schema/additionalProperties"),
         Some(&serde_json::Value::Bool(false))
     );
+}
+
+#[test]
+fn external_failure_backstop_rejects_failed_external_actions_on_action_criteria() {
+    // The live anomaly: 9+ failed browse attempts, no train result, and the model
+    // claimed done with an analytical summary. Action criterion + only failed
+    // external markers → deterministic rejection (judge not even consulted).
+    let evidence = [
+        "browse(treni Roma Milano) → found: false",
+        "[external_action_failed] operation=browse",
+        "browser_act → Action failed: element not found",
+        "[external_action_failed] operation=browser_act",
+        "assistant_candidate → 9+ browse attempts failed, no train result obtained",
+    ]
+    .join("\n");
+    let reason =
+        super::external_failure_backstop("ottenere i treni Roma-Milano di domani", &evidence)
+            .expect("action criterion with only failed external actions must be rejected");
+    assert!(reason.contains("deterministic backstop"));
+    assert!(reason.to_lowercase().contains("repl"));
+
+    // A single failure marker is enough to trip the backstop.
+    let evidence = "[external_action_failed] operation=send_message";
+    assert!(super::external_failure_backstop("inviare il messaggio al canale", evidence).is_some());
+}
+
+#[test]
+fn external_failure_backstop_defers_analytical_criteria_to_the_judge() {
+    let evidence = [
+        "browse(orari) → found: false",
+        "[external_action_failed] operation=browse",
+    ]
+    .join("\n");
+    // Analytical criteria (case-insensitive keywords): describing the failures IS
+    // the deliverable, so the deterministic backstop must stand down and let the
+    // LLM judge decide.
+    for criterion in [
+        "Riepiloga cosa è successo",
+        "summarize the failed attempts",
+        "analizza i motivi dello stallo",
+        "produce a short report of the attempts",
+        "spiega perché la ricerca non funziona",
+        "explain what blocked the search",
+        "indagare il motivo del blocco",
+        "capire why la pagina non carica",
+    ] {
+        assert!(
+            super::external_failure_backstop(criterion, &evidence).is_none(),
+            "analytical criterion «{criterion}» must reach the judge"
+        );
+        assert!(
+            super::criterion_is_analytical(criterion),
+            "«{criterion}» must classify as analytical"
+        );
+    }
+}
+
+#[test]
+fn external_failure_backstop_stands_down_after_a_successful_external_action() {
+    // Failed attempts followed by a SUCCESSFUL external result: the judge decides
+    // (the success may or may not match the criterion/target — not a hard reject).
+    let evidence = [
+        "[external_action_failed] operation=browse",
+        "[external_action_failed] operation=browser_act",
+        "browser_act → Action performed.",
+        "[external_action_ok] operation=browser_act",
+    ]
+    .join("\n");
+    assert!(super::external_failure_backstop("ottenere i treni Roma-Milano", &evidence).is_none());
+}
+
+#[test]
+fn external_failure_backstop_is_a_noop_without_failure_markers() {
+    // No external failures → behavior unchanged for every criterion shape.
+    let evidence = "browser_navigate → Page opened. Snapshot: …\n[external_action_ok] operation=browser_navigate";
+    assert!(super::external_failure_backstop("aprire la pagina degli orari", evidence).is_none());
+    assert!(super::external_failure_backstop("aprire la pagina degli orari", "").is_none());
+    assert!(super::external_failure_backstop("", "plain prose evidence").is_none());
+}
+
+#[test]
+fn action_words_do_not_classify_as_analytical_criteria() {
+    // "elenca"/"risultati"/"tabella"/"treni" are ACTION criteria: they require an
+    // external result to exist, so they must NOT disarm the backstop.
+    for criterion in [
+        "elenca le opzioni di viaggio",
+        "mostra i risultati della ricerca",
+        "tabella dei treni disponibili",
+        "trovare i treni per domani",
+    ] {
+        assert!(
+            !super::criterion_is_analytical(criterion),
+            "«{criterion}» is an action criterion, not analytical"
+        );
+        let evidence = "[external_action_failed] operation=browse";
+        assert!(
+            super::external_failure_backstop(criterion, evidence).is_some(),
+            "«{criterion}» must trip the backstop on failed-only evidence"
+        );
+    }
+}
+
+#[test]
+fn step_completion_judge_prompt_pins_the_failed_external_action_rule() {
+    let prompt = super::step_completion_judge_system_prompt();
+    assert!(prompt.contains("failed external actions (browser/channel)"));
+    assert!(prompt.contains("a textual summary describing failures is not evidence of completion"));
 }
 
 #[test]
@@ -13488,17 +14629,51 @@ fn fanout_recall_preserves_the_payload_and_uses_recall_kind() {
 }
 
 #[test]
-fn fanout_stream_error_is_an_observation_not_a_logical_terminal() {
+fn capability_runtime_projection_turn_event_preserves_metadata() {
+    let raw = serde_json::json!({
+        "type": "tool_result",
+        "payload": {
+            "name": "find_capability",
+            "capability_runtime": {
+                "loaded_tools": ["mcp__github__list_issues"],
+                "blocked_capabilities": [
+                    {"key": "mcp__github__create_issue", "reason": "approval_required"}
+                ]
+            }
+        }
+    });
+
+    let (kind, payload) = super::turn_event_from_stream_value(&raw).expect("tool result maps");
+
+    assert_eq!(kind, local_first_task_runtime::TurnEventKind::Tool);
+    assert_eq!(
+        payload["payload"]["capability_runtime"]["loaded_tools"],
+        serde_json::json!(["mcp__github__list_issues"])
+    );
+    assert_eq!(
+        payload["payload"]["capability_runtime"]["blocked_capabilities"][0],
+        serde_json::json!({"key": "mcp__github__create_issue", "reason": "approval_required"})
+    );
+}
+
+#[test]
+fn fanout_stream_error_maps_to_turn_event_error() {
     let raw = serde_json::json!({
         "type": "error",
-        "message": "provider stream disconnected"
+        "code": "model_timeout",
+        "message": "The model took too long to respond. Please try again.",
+        "retryable": false
     });
 
     let (kind, payload) = super::turn_event_from_stream_value(&raw).expect("stream error maps");
 
-    assert_eq!(kind, local_first_task_runtime::TurnEventKind::Activity);
-    assert_eq!(payload["phase"], "stream_error");
-    assert_eq!(payload["message"], "provider stream disconnected");
+    assert_eq!(kind, local_first_task_runtime::TurnEventKind::Error);
+    assert_eq!(payload["code"], "model_timeout");
+    assert_eq!(
+        payload["message"],
+        "The model took too long to respond. Please try again."
+    );
+    assert_eq!(payload["retryable"], false);
 }
 
 #[test]
@@ -14608,7 +15783,7 @@ fn plan_marker_round_trips() {
         serde_json::json!({"id":"s1","title":"Alpha","status":"done","detail":"d1"}),
         serde_json::json!({"id":"s2","title":"Beta","status":"doing","detail":""}),
     ];
-    let marker = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan));
+    let marker = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(None, &plan));
     let parsed = parse_plan_marker(&format!("prose {marker} more"));
     assert_eq!(parsed.len(), 2);
     assert_eq!(parsed[0]["id"], "s1");
@@ -14640,14 +15815,34 @@ fn plan_completion_requires_every_step_done() {
 #[test]
 fn step_advance_requires_a_target_and_normalizes_common_adapter_aliases() {
     assert!(super::plan_tool_sent("step_advance", "{}").is_err());
-    let sent = super::plan_tool_sent(
+    let (goal, sent) = super::plan_tool_sent(
         "step_advance",
         r#"{"step_id":"s2","status":"completed","detail":"tests pass"}"#,
     )
     .unwrap();
+    assert_eq!(goal, None, "step_advance never carries a goal");
     assert_eq!(sent[0]["id"], "s2");
     assert_eq!(sent[0]["status"], "done");
     assert_eq!(sent[0]["detail"], "tests pass");
+    // update_plan accepts the optional goal alongside the steps.
+    let (goal, sent) = super::plan_tool_sent(
+        "update_plan",
+        r#"{"goal":"Prenotare il treno","steps":[{"id":"s1","title":"Cerca","status":"doing","detail":""}]}"#,
+    )
+    .unwrap();
+    assert_eq!(goal.as_deref(), Some("Prenotare il treno"));
+    assert_eq!(sent.len(), 1);
+
+    let (goal, sent) = super::plan_tool_sent(
+        "update_plan",
+        r#"{"goal":"null","steps":[{"id":"s1","title":"Cerca","status":"doing","detail":""}]}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        goal, None,
+        "string 'null' is a weak-model placeholder, not a replacement goal"
+    );
+    assert_eq!(sent.len(), 1);
 }
 
 #[test]
@@ -14758,6 +15953,32 @@ fn merge_plan_keeps_blocked_steps_sticky() {
         "blocked",
         "blocked stays blocked"
     );
+}
+
+#[test]
+fn merge_plan_allows_model_blocked_step_to_be_claimed_done_after_new_evidence() {
+    let mut plan = vec![serde_json::json!({
+        "id":"s1",
+        "title":"Search source",
+        "status":"blocked",
+        "detail":"Site did not return results yet"
+    })];
+    let claims = merge_plan(
+        &mut plan,
+        &[serde_json::json!({
+            "id":"s1",
+            "title":"Search source",
+            "status":"done",
+            "detail":"Results read from the source"
+        })],
+    );
+    assert_eq!(
+        claims,
+        vec![0],
+        "done claim must go through F2 verification"
+    );
+    assert_eq!(plan_step_status(&plan[0]), "doing");
+    assert_eq!(plan[0]["detail"], "Results read from the source");
 }
 
 #[test]
@@ -19603,6 +20824,7 @@ fn task_queue_response_serializes_ui_read_model_for_renderer() {
                 task_id: TaskId::new("task-1"),
                 kind: "browser_automation".to_string(),
                 goal: "Find train options".to_string(),
+                thread_id: Some("thread-automation".to_string()),
                 status: TaskStatus::Queued,
                 priority: TaskPriority::High,
                 blocked_reason: None,
@@ -19628,6 +20850,10 @@ fn task_queue_response_serializes_ui_read_model_for_renderer() {
     .unwrap();
 
     assert_eq!(response.queued[0].task_id, "task-1");
+    assert_eq!(
+        response.queued[0].thread_id.as_deref(),
+        Some("thread-automation")
+    );
     assert_eq!(response.queued[0].status, "queued");
     assert_eq!(response.queued[0].priority, "high");
     assert_eq!(response.waiting_approvals[0].status, "pending");
@@ -20930,8 +22156,131 @@ fn scheduled_automation_materializes_visible_proactive_task() {
         contract.as_ref().scope.thread_id.as_deref(),
         Some(thread_id)
     );
+    let queue = local_first_task_runtime::TaskUiReadModel::new(&store)
+        .queue_snapshot(
+            &UserId::new("user_auto"),
+            &WorkspaceId::new("workspace_auto"),
+        )
+        .unwrap();
+    assert_eq!(queue.queued.len(), 1);
+    assert_eq!(queue.queued[0].thread_id.as_deref(), Some(thread_id));
+    let queue_item = super::task_item_response(queue.queued[0].clone()).unwrap();
+    assert_eq!(queue_item.thread_id.as_deref(), Some(thread_id));
+
+    let mut visible_turn = TaskRecord::new(
+        "turn_auto_sched",
+        UserId::new("user_auto"),
+        WorkspaceId::new("workspace_auto"),
+        "chat_turn",
+        "Visible automation turn",
+        serde_json::json!({ "thread_id": thread_id }),
+    );
+    visible_turn.status = TaskStatus::WaitingUserApproval;
+    store
+        .insert_chat_turn(
+            &visible_turn,
+            thread_id,
+            "req-auto-sched",
+            "automation",
+            "confirm",
+        )
+        .unwrap();
+    let projection = store.project_kernel_thread(thread_id, 200).unwrap();
+    assert_eq!(projection.thread_id, thread_id);
+    assert_eq!(
+        projection.turn.status, "waiting_approval",
+        "automation-started visible turns must use the same kernel status vocabulary as chat turns"
+    );
     assert_eq!(task.retry_policy.max_attempts, 3);
     assert_eq!(task.retry_policy.backoff_seconds, 120);
+}
+
+#[test]
+fn automation_projection_uses_kernel_contract_for_waiting_and_completed_turns() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let user = UserId::new("user_auto");
+    let workspace = WorkspaceId::new("workspace_auto");
+    let thread_id = "channel_scheduled_autorun_projection";
+    let automation_task = TaskRecord::new(
+        "autorun_projection",
+        user.clone(),
+        workspace.clone(),
+        "proactive_prompt",
+        "Run projected automation",
+        serde_json::json!({
+            "automation_id": "auto_projection",
+            "thread_id": thread_id,
+            "approval": "confirm",
+        }),
+    );
+    store.insert_task(&automation_task).unwrap();
+
+    let visible_turn = TaskRecord::new(
+        "turn_auto_projection",
+        user.clone(),
+        workspace.clone(),
+        "chat_turn",
+        "Visible projected automation turn",
+        serde_json::json!({ "thread_id": thread_id }),
+    );
+    store
+        .insert_chat_turn(
+            &visible_turn,
+            thread_id,
+            "req-auto-projection",
+            "automation",
+            "confirm",
+        )
+        .unwrap();
+    let approval = local_first_task_runtime::ApprovalGate::new()
+        .request_approval(
+            &store,
+            &visible_turn.task_id,
+            &user,
+            &workspace,
+            "connector.write",
+            "high",
+            "connector",
+            "Automation write requires confirmation",
+        )
+        .unwrap();
+
+    let queue = local_first_task_runtime::TaskUiReadModel::new(&store)
+        .queue_snapshot(&user, &workspace)
+        .unwrap();
+    assert_eq!(queue.queued[0].thread_id.as_deref(), Some(thread_id));
+    let waiting_projection = store.project_kernel_thread(thread_id, 200).unwrap();
+    assert_eq!(waiting_projection.turn.status, "waiting_approval");
+    assert_eq!(
+        waiting_projection.actions.composer_mode,
+        "reply_to_user_wait"
+    );
+    assert!(waiting_projection.attention.awaiting_user);
+
+    local_first_task_runtime::ApprovalGate::new()
+        .approve(&store, &approval.approval_id, "tester")
+        .unwrap();
+    store
+        .insert_turn_event(
+            visible_turn.task_id.as_str(),
+            local_first_task_runtime::TurnEventKind::Done,
+            serde_json::json!({ "text": "Automation completed." }),
+        )
+        .unwrap();
+    store
+        .update_task_status(
+            &visible_turn.task_id,
+            &user,
+            &workspace,
+            TaskStatus::Completed,
+            None,
+        )
+        .unwrap();
+
+    let completed_projection = store.project_kernel_thread(thread_id, 200).unwrap();
+    assert_eq!(completed_projection.turn.status, "completed");
+    assert_eq!(completed_projection.turn.active_turn_id, None);
+    assert_eq!(completed_projection.actions.composer_mode, "new_turn");
 }
 
 #[test]
@@ -23866,4 +25215,201 @@ async fn integrity_repair_apply_creates_private_backup_without_exposing_paths() 
 
     drop(_data_dir);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn browser_anti_loop_nudge_injects_after_threshold_consecutive_snapshots() {
+    let threshold = 3;
+    // First snapshot: count goes to 1, no nudge.
+    let (count, nudge, hard_capped) = browser_anti_loop_nudge(0, "browser_snapshot", threshold);
+    assert_eq!(count, 1);
+    assert!(nudge.is_none());
+    assert!(!hard_capped);
+    // Second snapshot: count goes to 2, no nudge.
+    let (count, nudge, hard_capped) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+    assert_eq!(count, 2);
+    assert!(nudge.is_none());
+    assert!(!hard_capped);
+    // Third snapshot: count reaches threshold, soft nudge injected, counter NOT reset.
+    let (count, nudge, hard_capped) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+    assert_eq!(count, 3);
+    let msg = nudge.expect("soft nudge should be injected at threshold");
+    assert!(msg.contains("ANTI-LOOP"));
+    assert!(msg.contains("3 consecutive"));
+    assert!(msg.contains("Do NOT call browser_snapshot again"));
+    assert!(!hard_capped);
+    // Fourth snapshot: counter stays above threshold, soft nudge repeats, NOT reset.
+    let (count, nudge, hard_capped) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+    assert_eq!(count, 4);
+    assert!(nudge.is_some());
+    assert!(!hard_capped);
+    // Fifth snapshot: hard cap fires (threshold + 2 = 5), counter NOT reset, hard_capped.
+    let (count, nudge, hard_capped) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+    assert_eq!(count, 5);
+    let msg = nudge.expect("hard cap nudge should be injected at threshold + 2");
+    assert!(msg.contains("ANTI-LOOP"));
+    assert!(msg.contains("5 consecutive"));
+    assert!(msg.contains("TERMINATED"));
+    assert!(hard_capped);
+}
+
+#[test]
+fn browser_anti_loop_nudge_resets_on_meaningful_action() {
+    let threshold = 3;
+    // Accumulate two consecutive snapshots.
+    let (count, _, _) = browser_anti_loop_nudge(0, "browser_snapshot", threshold);
+    let (count, _, _) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+    assert_eq!(count, 2);
+    // A browser_act (e.g. click) resets the counter to 0 — no nudge.
+    let (count, nudge, hard_capped) = browser_anti_loop_nudge(count, "browser_act", threshold);
+    assert_eq!(count, 0);
+    assert!(nudge.is_none());
+    assert!(!hard_capped);
+    // Even right after reset, a single snapshot does not trigger.
+    let (count, nudge, _) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+    assert_eq!(count, 1);
+    assert!(nudge.is_none());
+    // Other meaningful actions also reset.
+    let (count, nudge, _) = browser_anti_loop_nudge(2, "browser_navigate", threshold);
+    assert_eq!(count, 0);
+    assert!(nudge.is_none());
+    let (count, nudge, _) = browser_anti_loop_nudge(2, "browser_done", threshold);
+    assert_eq!(count, 0);
+    assert!(nudge.is_none());
+    let (count, nudge, _) = browser_anti_loop_nudge(2, "browser_screenshot", threshold);
+    assert_eq!(count, 0);
+    assert!(nudge.is_none());
+}
+
+#[test]
+fn repeated_browser_action_nudge_survives_interleaved_snapshots() {
+    let mut recent = std::collections::VecDeque::new();
+    let same_type = r#"{"kind":"type","ref":"e65","text":"Milano","action_class":"ordinary"}"#;
+
+    let (nudge, hard_capped) =
+        repeated_browser_action_nudge(&mut recent, "browser_act", same_type, 3);
+    assert!(nudge.is_none());
+    assert!(!hard_capped);
+
+    let (nudge, hard_capped) =
+        repeated_browser_action_nudge(&mut recent, "browser_snapshot", "{}", 3);
+    assert!(nudge.is_none());
+    assert!(!hard_capped);
+
+    let (nudge, hard_capped) =
+        repeated_browser_action_nudge(&mut recent, "browser_act", same_type, 3);
+    let msg = nudge.expect("second identical browser action should nudge even after snapshot");
+    assert!(msg.contains("same browser action"));
+    assert!(!hard_capped);
+
+    let (nudge, hard_capped) =
+        repeated_browser_action_nudge(&mut recent, "browser_act", same_type, 3);
+    let msg = nudge.expect("third identical browser action should hard-cap");
+    assert!(msg.contains("TERMINATED"));
+    assert!(hard_capped);
+}
+
+#[test]
+fn repeated_browser_action_nudge_resets_on_different_action_signature() {
+    let mut recent = std::collections::VecDeque::new();
+    let milano = r#"{"kind":"type","ref":"e65","text":"Milano"}"#;
+    let roma = r#"{"kind":"type","ref":"e65","text":"Roma"}"#;
+
+    assert!(
+        repeated_browser_action_nudge(&mut recent, "browser_act", milano, 3)
+            .0
+            .is_none()
+    );
+    assert!(
+        repeated_browser_action_nudge(&mut recent, "browser_act", roma, 3)
+            .0
+            .is_none()
+    );
+    assert!(
+        repeated_browser_action_nudge(&mut recent, "browser_act", milano, 3)
+            .0
+            .is_none()
+    );
+}
+
+#[test]
+fn repeated_browser_failed_action_nudge_survives_interleaved_actions() {
+    let mut recent = std::collections::VecDeque::new();
+    let set_date = r#"{"kind":"set_date","date":"2026-08-25","action_class":"ordinary"}"#;
+    let click = r#"{"kind":"click","ref":"e41","action_class":"ordinary"}"#;
+
+    let (nudge, hard_capped) =
+        repeated_browser_failed_action_nudge(&mut recent, "browser_act", set_date, true, 3);
+    assert!(nudge.is_none());
+    assert!(!hard_capped);
+
+    let (nudge, hard_capped) =
+        repeated_browser_failed_action_nudge(&mut recent, "browser_act", click, false, 3);
+    assert!(nudge.is_none());
+    assert!(!hard_capped);
+
+    let (nudge, hard_capped) =
+        repeated_browser_failed_action_nudge(&mut recent, "browser_navigate", "{}", false, 3);
+    assert!(nudge.is_none());
+    assert!(!hard_capped);
+
+    let (nudge, hard_capped) =
+        repeated_browser_failed_action_nudge(&mut recent, "browser_act", set_date, true, 3);
+    let msg = nudge.expect("second failed set_date should nudge even after other actions");
+    assert!(msg.contains("set_date"));
+    assert!(!hard_capped);
+
+    let (nudge, hard_capped) =
+        repeated_browser_failed_action_nudge(&mut recent, "browser_act", set_date, true, 3);
+    let msg = nudge.expect("third failed set_date should hard-cap the sub-turn");
+    assert!(msg.contains("TERMINATED"));
+    assert!(hard_capped);
+}
+
+#[test]
+fn browser_anti_loop_nudge_threshold_zero_disables_nudge() {
+    // A threshold of 0 disables both nudge and hard cap entirely.
+    let (count, nudge, hard_capped) = browser_anti_loop_nudge(0, "browser_snapshot", 0);
+    assert_eq!(count, 1);
+    assert!(nudge.is_none());
+    assert!(!hard_capped);
+    let (count, nudge, hard_capped) = browser_anti_loop_nudge(99, "browser_snapshot", 0);
+    assert_eq!(count, 100);
+    assert!(nudge.is_none());
+    assert!(!hard_capped);
+}
+
+#[test]
+fn browser_anti_loop_nudge_respects_custom_threshold() {
+    // A custom threshold of 5 fires a soft nudge on the 5th consecutive snapshot,
+    // and the hard cap fires at threshold + 2 = 7.
+    let threshold = 5;
+    let mut count = 0u32;
+    for i in 1..threshold {
+        let (c, nudge, _) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+        count = c;
+        assert_eq!(count, i);
+        assert!(nudge.is_none(), "no nudge expected at count {}", i);
+    }
+    // Snapshot 5: soft nudge fires, counter NOT reset.
+    let (c, nudge, hard_capped) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+    count = c;
+    assert_eq!(count, threshold);
+    assert!(!hard_capped);
+    let msg = nudge.expect("soft nudge at threshold");
+    assert!(msg.contains("5 consecutive"));
+    // Snapshot 6: soft nudge repeats, counter NOT reset.
+    let (c, nudge, hard_capped) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+    count = c;
+    assert_eq!(count, threshold + 1);
+    assert!(nudge.is_some());
+    assert!(!hard_capped);
+    // Snapshot 7: hard cap fires (threshold + 2 = 7).
+    let (c, nudge, hard_capped) = browser_anti_loop_nudge(count, "browser_snapshot", threshold);
+    count = c;
+    assert_eq!(count, threshold + 2);
+    assert!(hard_capped);
+    let msg = nudge.expect("hard cap nudge at threshold + 2");
+    assert!(msg.contains("7 consecutive"));
+    assert!(msg.contains("TERMINATED"));
 }

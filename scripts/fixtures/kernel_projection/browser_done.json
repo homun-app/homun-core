@@ -1,0 +1,54 @@
+{
+  "case": "browser_done",
+  "endpoint": "/api/chat/threads/thread-browser-done/kernel-projection",
+  "response": {
+    "thread_id": "thread-browser-done",
+    "revision": 7,
+    "turn": {
+      "active_turn_id": null,
+      "status": "completed",
+      "last_event_seq": 11,
+      "terminal_reason": "browser_done_terminal",
+      "failure_text": null,
+      "updated_at": 1723359900
+    },
+    "plan": null,
+    "activity": [
+      {
+        "text": "browser_done returned results",
+        "created_at": 1723359900
+      }
+    ],
+    "subagents": [],
+    "browser": {
+      "state": "done",
+      "target_id": null,
+      "latest_progress": "Found 5 options",
+      "failure_reason": null,
+      "snapshot_verified": true
+    },
+    "capability_runtime": {
+      "loaded_tools": [],
+      "armed_sensitive_domains": [],
+      "pending_capability": null,
+      "blocked_capabilities": []
+    },
+    "attention": {
+      "awaiting_user": false,
+      "approvals": [],
+      "uncertain_effects": []
+    },
+    "actions": {
+      "can_stop": false,
+      "composer_mode": "new_turn"
+    }
+  },
+  "expect": {
+    "equals": {
+      "turn.status": "completed",
+      "turn.active_turn_id": null,
+      "browser.state": "done",
+      "actions.composer_mode": "new_turn"
+    }
+  }
+}

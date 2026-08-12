@@ -16,6 +16,7 @@ pub mod resources;
 pub mod scheduler;
 pub mod store;
 pub mod turn_lifecycle;
+pub mod turn_reducer;
 pub mod types;
 pub mod ui;
 
@@ -43,13 +44,22 @@ pub use recurrence::next_occurrence;
 pub use resources::{ResourceGovernor, ResourceLimits};
 pub use scheduler::TaskScheduler;
 pub use store::TaskStore;
+pub use turn_reducer::{
+    KernelActivePlanProjection, KernelEffectProjection, KernelProjectionInput,
+    KernelTurnProjection, REDUCED_TERMINAL_TURN_EVENT_KIND_SQL_LIST, ReducedTurnStatus,
+    TurnContradiction, TurnStateSnapshot, reduce_kernel_projection, reduce_turn_events,
+    reduced_terminal_status_matches_task_status, turn_event_kind_is_terminal,
+};
 pub use types::{
     ActiveTurnProjection, AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus, ApprovalPolicy,
     Automation, AutomationRun, AutomationSource, AutomationTrigger, BrowserCheckpointRecord,
-    EffectReceiptClaim, EventTrigger, ExecutionEffectReceipt, NewAgentRun, NewBrowserCheckpoint,
-    NewExecutionEffectReceipt, NewTurnSteering, ObjectiveContractRecord, ObjectiveMode,
-    ResourceClass, ResourceRequirement, RetryPolicy, RuntimePlanRecord, SubagentInfo, TaskId,
-    TaskPriority, TaskRecord, TaskStatus, TerminalWrite, ThreadActivityProjection, ThreadAttention,
+    EffectReceiptClaim, EventTrigger, ExecutionEffectReceipt, KernelActivityRow,
+    KernelApprovalView, KernelAttentionView, KernelBlockedCapabilityView, KernelBrowserView,
+    KernelCapabilityRuntimeView, KernelPlanStepView, KernelPlanView, KernelThreadActions,
+    KernelThreadProjection, KernelTurnView, KernelUncertainEffectView, NewAgentRun,
+    NewBrowserCheckpoint, NewExecutionEffectReceipt, NewTurnSteering, ObjectiveContractRecord,
+    ObjectiveMode, ResourceClass, ResourceRequirement, RetryPolicy, RuntimePlanRecord,
+    SubagentInfo, TaskId, TaskPriority, TaskRecord, TaskStatus, TerminalWrite, ThreadAttention,
     TurnEvent, TurnEventKind, TurnSteeringRecord, TurnSteeringStatus, UserId, WorkflowId,
     WorkspaceId,
 };

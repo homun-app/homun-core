@@ -30,11 +30,11 @@ test("desktop runtime passes the staged PDFium path to the gateway", async () =>
 });
 
 test("PDF preview never falls back to an unauthorizable blob iframe", async () => {
-  const chat = await readFile(path.join(appRoot, "src", "components", "ChatView.tsx"), "utf8");
+  const messageArtifacts = await readFile(path.join(appRoot, "src", "components", "MessageArtifacts.tsx"), "utf8");
 
-  assert.doesNotMatch(chat, /kind:\s*"pdf"/);
-  assert.doesNotMatch(chat, /title="Preview PDF"/);
-  assert.match(chat, /artifactPdfPages/);
+  assert.doesNotMatch(messageArtifacts, /kind:\s*"pdf"/);
+  assert.doesNotMatch(messageArtifacts, /title="Preview PDF"/);
+  assert.match(messageArtifacts, /artifactPdfPages/);
 });
 
 test("development does not reload when package resources are staged", async () => {

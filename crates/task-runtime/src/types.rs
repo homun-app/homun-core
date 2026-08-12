@@ -96,7 +96,7 @@ pub enum TaskStatus {
     /// the scheduler's `Queued|Pending` dispatch (unlike `Queued`, which would busy-run
     /// it). Only the coordinator's resume trigger (probe confirms model availability)
     /// flips this back to `Queued` via `unpark_chat_turn_to_queued`. Existing terminal
-    /// checks (`active_chat_turn_on`, `project_thread_activity`) already treat anything
+    /// checks (`active_chat_turn_on`, `project_kernel_thread`) already treat anything
     /// outside `completed/failed/cancelled/expired/finalizing` as active, so a new user
     /// message on this thread becomes steering, not a second turn.
     Parked,
@@ -592,23 +592,105 @@ pub struct AgentRunEvent {
     pub created_at: i64,
 }
 
-/// Thread-level cockpit projection over the durable per-turn log (`turn_events`) for the
-/// working island. Plans supersede (latest `plan_update` wins); activity accumulates across
-/// ALL turns of the thread in chronological order (capped to bound the payload). This is the
-/// single durable source the island reads at rest — the message-text `‹‹ACT/PLAN››` markers
-/// are a lossy mirror (absent for workflow deliverables, plan emitted at most once) we no
-/// longer depend on. `latest_turn_status` distinguishes a live turn from a concluded one.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ThreadActivityProjection {
-    pub plan_markdown: Option<String>,
-    pub activity: Vec<String>,
-    pub latest_turn_status: Option<String>,
-    pub turn_count: usize,
-    /// Subagents spawned on this thread (name + status). Empty until `spawn_subagent`
-    /// actually fires — today weak local managers route decomposition to the PLAN, so this
-    /// is forward-looking plumbing: the section renders as soon as a subagent task appears.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelThreadProjection {
+    pub thread_id: String,
+    pub revision: i64,
+    pub turn: KernelTurnView,
+    pub plan: Option<KernelPlanView>,
+    pub activity: Vec<KernelActivityRow>,
     pub subagents: Vec<SubagentInfo>,
-    pub active_turn: Option<ActiveTurnProjection>,
+    pub browser: KernelBrowserView,
+    pub capability_runtime: KernelCapabilityRuntimeView,
+    pub attention: KernelAttentionView,
+    pub actions: KernelThreadActions,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelTurnView {
+    pub active_turn_id: Option<String>,
+    pub status: String,
+    pub last_event_seq: i64,
+    pub terminal_reason: Option<String>,
+    pub failure_text: Option<String>,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelPlanView {
+    pub goal: Option<String>,
+    pub revision: i64,
+    pub steps: Vec<KernelPlanStepView>,
+    pub markdown: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelPlanStepView {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelActivityRow {
+    pub text: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelBrowserView {
+    pub state: String,
+    pub target_id: Option<String>,
+    pub latest_progress: Option<String>,
+    pub failure_reason: Option<String>,
+    pub snapshot_verified: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelCapabilityRuntimeView {
+    pub loaded_tools: Vec<String>,
+    pub armed_sensitive_domains: Vec<String>,
+    pub pending_capability: Option<String>,
+    pub blocked_capabilities: Vec<KernelBlockedCapabilityView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelBlockedCapabilityView {
+    pub key: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelAttentionView {
+    pub awaiting_user: bool,
+    pub approvals: Vec<KernelApprovalView>,
+    pub uncertain_effects: Vec<KernelUncertainEffectView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelApprovalView {
+    pub approval_id: String,
+    pub task_id: String,
+    pub action: String,
+    pub risk_level: String,
+    pub data_boundary: String,
+    pub explanation: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelUncertainEffectView {
+    pub receipt_ref: String,
+    pub execution_id: String,
+    pub operation: String,
+    pub effect_class: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelThreadActions {
+    pub can_stop: bool,
+    pub composer_mode: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -635,7 +717,7 @@ pub struct ThreadAttention {
 }
 
 /// One spawned subagent, projected into the island's "Subagenti" section.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubagentInfo {
     pub name: String,
     pub status: String,
@@ -667,6 +749,18 @@ pub enum TurnEventKind {
     /// surface "in attesa del browser…". Emitted when the governor puts the task in
     /// WaitingResource. The turn auto-resumes (back to Queued) once the resource frees.
     Queued,
+    /// A single plan step changed status. Payload (frontend contract, exact):
+    /// `{"step_id": string, "title": string, "from": string|null, "to": string,
+    /// "verified": bool|null, "note": string|null}`. Emitted whenever a step's
+    /// canonical status changes (model step_advance/update_plan after F2, or the
+    /// harness evidence-verified frontier advance) so the frontend can render it
+    /// inline in the chat stream (distinct from the full PlanUpdate card).
+    StepAdvance,
+    /// Periodic keep-alive while the model is processing. Payload carries
+    /// elapsed_seconds (since last event) and round. Emitted every ~15s of
+    /// inactivity (no streaming tokens) so the UI can show "still thinking…"
+    /// instead of an indefinite spinner.
+    Heartbeat,
 }
 
 impl TurnEventKind {
@@ -685,6 +779,8 @@ impl TurnEventKind {
             TurnEventKind::Aborted => "aborted",
             TurnEventKind::Retry => "retry",
             TurnEventKind::Queued => "queued",
+            TurnEventKind::StepAdvance => "step_advance",
+            TurnEventKind::Heartbeat => "heartbeat",
         }
     }
 
@@ -703,6 +799,8 @@ impl TurnEventKind {
             "aborted" => Self::Aborted,
             "retry" => Self::Retry,
             "queued" => Self::Queued,
+            "step_advance" => Self::StepAdvance,
+            "heartbeat" => Self::Heartbeat,
             _ => return None,
         })
     }

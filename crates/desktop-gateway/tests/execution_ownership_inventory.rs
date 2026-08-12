@@ -155,6 +155,7 @@ fn turn_broker_surface_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
     let broker = production_source(&root.join("src/gateway_turn_broker.rs"));
+    let routes = production_source(&root.join("src/gateway_routes.rs"));
     let streams = production_source(&root.join("src/gateway_chat_streams.rs"));
 
     let owned = [
@@ -162,7 +163,6 @@ fn turn_broker_surface_has_one_gateway_owner() {
         "async fn enqueue_turn(",
         "async fn cancel_turn(",
         "async fn get_turn_events(",
-        "async fn thread_activity_projection(",
         "async fn subscribe_turn_stream(",
         "async fn list_thread_steering(",
         "async fn update_steering(",
@@ -179,6 +179,14 @@ fn turn_broker_surface_has_one_gateway_owner() {
             "main.rs must not retain turn broker surface {pattern}"
         );
     }
+    assert!(
+        !broker.contains("async fn thread_activity_projection("),
+        "legacy /activity handler was retired; use thread_kernel_projection"
+    );
+    assert!(
+        !routes.contains("\"/api/chat/threads/{thread_id}/activity\""),
+        "legacy /activity route was retired; use /kernel-projection"
+    );
 
     let forbidden_in_broker = [
         "async fn run_agent_rounds(",

@@ -374,4 +374,29 @@ mod tests {
             other => panic!("project workspace must map to MemoryScope::Project, got {other:?}"),
         }
     }
+
+    /// ADR 0022 — the service-object path (`MemoryRecallService`) is now the
+    /// default. `HOMUN_MEMORY_SERVICE` unset or any value other than `0`/`off`/
+    /// `false` enables it; only those explicit opt-outs fall back to inline
+    /// orchestration. This keeps `install_memory_service_if_enabled` wiring a
+    /// `Some(service)` on a clean boot.
+    #[test]
+    fn gateway_memory_recall_service_flag_defaults_on() {
+        assert!(
+            crate::memory_service_flag(None),
+            "unset HOMUN_MEMORY_SERVICE must default ON"
+        );
+        assert!(crate::memory_service_flag(Some("1")));
+        assert!(crate::memory_service_flag(Some("on")));
+        assert!(
+            crate::memory_service_flag(Some("")),
+            "empty value defaults ON"
+        );
+        // Explicit opt-outs — backward compatible.
+        assert!(!crate::memory_service_flag(Some("0")));
+        assert!(!crate::memory_service_flag(Some("off")));
+        assert!(!crate::memory_service_flag(Some("false")));
+        assert!(!crate::memory_service_flag(Some("OFF")));
+        assert!(!crate::memory_service_flag(Some("FALSE")));
+    }
 }

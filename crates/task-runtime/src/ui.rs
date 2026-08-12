@@ -14,6 +14,7 @@ pub struct TaskUiItem {
     pub task_id: TaskId,
     pub kind: String,
     pub goal: String,
+    pub thread_id: Option<String>,
     pub status: TaskStatus,
     pub priority: TaskPriority,
     pub blocked_reason: Option<String>,
@@ -34,6 +35,7 @@ pub struct TaskUiDetail {
     pub task_id: TaskId,
     pub kind: String,
     pub goal: String,
+    pub thread_id: Option<String>,
     pub status: TaskStatus,
     pub priority: TaskPriority,
     pub blocked_reason: Option<String>,
@@ -112,10 +114,12 @@ impl<'a> TaskUiReadModel<'a> {
             .latest_checkpoint(task_id, user_id, workspace_id)?
             .map(|checkpoint| checkpoint.redacted_payload);
         let runtime_metadata = runtime_metadata_for_task(&task, latest_checkpoint.as_ref());
+        let thread_id = task_thread_id(&task);
         Ok(Some(TaskUiDetail {
             task_id: task.task_id,
             kind: task.kind,
             goal: task.goal,
+            thread_id,
             status: task.status,
             priority: task.priority,
             blocked_reason: task.blocked_reason,
@@ -178,11 +182,21 @@ impl TaskUiItem {
             task_id: task.task_id.clone(),
             kind: task.kind.clone(),
             goal: task.goal.clone(),
+            thread_id: task_thread_id(task),
             status: task.status,
             priority: task.priority,
             blocked_reason: task.blocked_reason.clone(),
         }
     }
+}
+
+fn task_thread_id(task: &crate::TaskRecord) -> Option<String> {
+    task.input_json
+        .get("thread_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|thread_id| !thread_id.is_empty())
+        .map(str::to_string)
 }
 
 fn all_resource_classes() -> [ResourceClass; 11] {

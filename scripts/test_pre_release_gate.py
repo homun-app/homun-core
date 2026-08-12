@@ -13,13 +13,18 @@ class PreReleaseGateTests(unittest.TestCase):
         self.assertIn("desktop dependency install", labels)
         self.assertIn("desktop dependency audit", labels)
         self.assertIn("task runtime tests", labels)
+        self.assertIn("turn consistency audit unit tests", labels)
+        self.assertIn("kernel projection smoke", labels)
         self.assertIn("engine tests", labels)
-        self.assertIn("desktop attention tests", labels)
-        self.assertIn("desktop replay tests", labels)
-        self.assertIn("desktop visible content tests", labels)
-        self.assertIn("desktop electron tests", labels)
-        self.assertIn("contained computer package tests", labels)
+        self.assertIn("desktop unit tests", labels)
         self.assertIn("stability soak unit tests", labels)
+
+    def test_desktop_unit_tests_use_the_umbrella_route(self):
+        by_label = {step.label: step for step in gate.build_plan({})}
+
+        step = by_label["desktop unit tests"]
+        self.assertEqual(step.command, ["npm", "test"])
+        self.assertEqual(step.cwd, gate.DESKTOP)
 
     def test_live_stability_soak_is_last_when_enabled(self):
         plan = gate.build_plan({"HOMUN_RUN_STABILITY_SOAK": "1"})
@@ -64,12 +69,16 @@ class PreReleaseGateTests(unittest.TestCase):
         self.assertIn("orchestrator tests", labels)
         self.assertIn("gateway tests", labels)
         self.assertIn("memorybench provider", labels)
+        self.assertIn("kernel projection smoke", labels)
         self.assertIn("ui contract", labels)
         self.assertIn("desktop build", labels)
         self.assertIn("eval unit tests", labels)
         self.assertIn("eval syntax", labels)
         self.assertNotIn("model eval", labels)
         self.assertNotIn("gateway eval", labels)
+        by_label = {step.label: step for step in plan}
+        self.assertIn("scripts.test_kernel_regression_gate", by_label["eval unit tests"].command)
+        self.assertIn("scripts.test_smoke_kernel_projection", by_label["eval unit tests"].command)
 
     def test_env_enables_model_and_gateway_eval(self):
         env = {
@@ -120,15 +129,12 @@ class PreReleaseGateTests(unittest.TestCase):
                 "capability tests",
                 "orchestrator tests",
                 "task runtime tests",
+                "turn consistency audit unit tests",
+                "kernel projection smoke",
                 "engine tests",
                 "gateway tests",
                 "memorybench provider",
-                "desktop attention tests",
-                "desktop replay tests",
-                "desktop visible content tests",
-                "desktop electron tests",
-                "contained computer package tests",
-                "host computer package tests",
+                "desktop unit tests",
                 "ui contract",
             ],
         )

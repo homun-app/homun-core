@@ -172,6 +172,12 @@ impl ToolOutcomeHint {
 /// `request_confirm`→`*ctx.pending_confirm`, `request_compaction`→`*ctx.pending_compaction`,
 /// `reset_stall_guards`→ real-progress reset (`progress_anchor_round=round`, `repeat_count=0`,
 /// `last_round_sig.clear()`), which today fire together in the `update_plan`/`step_advance` arm.
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BlockedCapability {
+    pub key: String,
+    pub reason: String,
+}
+
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolEffects {
     /// A dispatched effect has an unknown remote result. The loop must suspend on this receipt
@@ -198,6 +204,11 @@ pub struct ToolEffects {
     /// loop dedups into `LoopState::active_sensitive`, arming the turn's force-confirm. `String`
     /// (not the gateway's `SensitiveCategory`) so the leaf engine stays gateway-type-free.
     pub arm_sensitive: Vec<String>,
+    /// Capability/plugin/MCP row that is waiting for a user connection or approval. Projection-only:
+    /// the turn liveness still comes from task status, approvals, receipts, and terminal events.
+    pub pending_capability: Option<String>,
+    /// Capability/plugin/MCP rows blocked by policy, approval, or missing connection. Projection-only.
+    pub blocked_capabilities: Vec<BlockedCapability>,
     /// Real progress happened → reset the stall guards (F1): anchor the round, zero the repeat
     /// counter, clear the last-round signature.
     pub reset_stall_guards: bool,
@@ -313,9 +324,11 @@ pub trait ExecutionJournal: Send + Sync {
 pub trait PlanProgress {
     /// Persist the thread's runtime plan durably (cross-turn continuity). The delivery reconcile and
     /// each mid-turn frontier advance call this; `None` thread = no persistence scope (a no-op impl).
+    /// `goal` is the plan's optional one-sentence objective (persisted as `{goal, steps}`).
     fn persist_plan(
         &self,
         thread: Option<&str>,
+        goal: Option<&str>,
         steps: &[Value],
     ) -> impl Future<Output = ()> + Send;
 
@@ -348,9 +361,10 @@ pub trait PlanProgress {
     /// Rebuild the plan `Value` from a fresh step list (ADR 0024 inc 5, 5.D1c.5): the other half of the
     /// Value↔ExecutionPlan bridge. When the mid-turn frontier advance produces new steps, the loop
     /// stores the canonical serialized plan via this method (gateway: `to_value(runtime_execution_plan
-    /// (steps))`). SYNC + pure, on this seam for the same reason as `reconcile_on_delivery` — the leaf
-    /// engine can't build the typed `ExecutionPlan`.
-    fn plan_value_from_steps(&self, steps: &[Value]) -> Value;
+    /// (steps))`). `goal` is carried forward so a step-only rebuild never drops it. SYNC + pure, on
+    /// this seam for the same reason as `reconcile_on_delivery` — the leaf engine can't build the
+    /// typed `ExecutionPlan`.
+    fn plan_value_from_steps(&self, goal: Option<&str>, steps: &[Value]) -> Value;
 }
 
 /// The loop's F3 context-compaction port (ADR 0024 inc 5, 5.D1c.6). When a plan step completes, the
@@ -692,7 +706,7 @@ mod tests {
         judge: bool,                             // scripted verify verdict
     }
     impl PlanProgress for RecordingPlan {
-        async fn persist_plan(&self, _thread: Option<&str>, steps: &[Value]) {
+        async fn persist_plan(&self, _thread: Option<&str>, _goal: Option<&str>, steps: &[Value]) {
             self.persisted.lock().unwrap().push(steps.len());
         }
         async fn record_step_outcome(
@@ -715,9 +729,9 @@ mod tests {
             // Scripted: report one reconciled step so the seam's sync bridge is exercised.
             Some(vec![Value::Null])
         }
-        fn plan_value_from_steps(&self, steps: &[Value]) -> Value {
+        fn plan_value_from_steps(&self, goal: Option<&str>, steps: &[Value]) -> Value {
             // Scripted: echo the steps under a `steps` key (a stand-in for the ExecutionPlan value).
-            serde_json::json!({ "steps": steps })
+            serde_json::json!({ "goal": goal, "steps": steps })
         }
     }
 
@@ -727,7 +741,7 @@ mod tests {
             judge: true,
             ..Default::default()
         };
-        plan.persist_plan(Some("t1"), &[Value::Null, Value::Null])
+        plan.persist_plan(Some("t1"), None, &[Value::Null, Value::Null])
             .await;
         let (done, _why) = plan
             .verify_step_complete("step", "crit", "did the thing")

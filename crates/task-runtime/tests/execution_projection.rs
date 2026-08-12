@@ -3,7 +3,8 @@ use local_first_execution_protocol::{
     ExecutionFailure, ExecutionOutcome, WakeCondition,
 };
 use local_first_task_runtime::{
-    AgentRunStatus, ExecutionProjection, ExecutionPublicEventKind, TaskStatus,
+    AgentRunStatus, ExecutionProjection, ExecutionPublicEventKind, ReducedTurnStatus, TaskStatus,
+    reduced_terminal_status_matches_task_status,
 };
 use serde_json::json;
 
@@ -143,5 +144,18 @@ fn every_canonical_outcome_has_one_projection() {
         assert_eq!(projection.run_status, run_status);
         assert_eq!(projection.terminal, terminal);
         assert_eq!(projection.event_kind, event_kind);
+
+        if projection.terminal {
+            let reduced = match projection.event_kind {
+                ExecutionPublicEventKind::Completed => ReducedTurnStatus::Completed,
+                ExecutionPublicEventKind::Cancelled => ReducedTurnStatus::Cancelled,
+                ExecutionPublicEventKind::Failed => ReducedTurnStatus::Failed,
+                ExecutionPublicEventKind::Suspended => unreachable!("suspended is not terminal"),
+            };
+            assert!(reduced_terminal_status_matches_task_status(
+                reduced,
+                projection.task_status,
+            ));
+        }
     }
 }

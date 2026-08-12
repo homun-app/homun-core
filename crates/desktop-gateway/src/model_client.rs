@@ -14,7 +14,8 @@ use local_first_subagents::GenerateStreamEvent;
 
 use crate::{
     StreamSink, auth_fallback_config, build_chat_payload, collect_ollama_native_stream,
-    collect_openai_stream, emit_stream_event, is_ollama_base, model_first_token_timeout_secs,
+    collect_openai_stream, emit_stream_event, is_ollama_base,
+    model_error_mapping::TransportErrorKind, model_first_token_timeout_secs,
     model_headers_timeout_secs, model_idle_timeout_secs, model_request_timeout_secs,
     should_try_tool_compatibility_fallback, tool_compatibility_fallback_config,
 };
@@ -570,6 +571,9 @@ impl<'a> AttemptLifecycle<'a> {
             CostProvenance::Unavailable
         };
         self.recorder.record(completed);
+        // Update the process-wide health cache so the lock-free `/api/health`
+        // handler can report the last successful inference timestamp.
+        crate::gateway_health::record_successful_inference();
     }
 
     fn failed(
@@ -618,6 +622,25 @@ pub(crate) async fn send_with_headers_timeout(
         Ok(Ok(response)) => SendOutcome::Ready(response),
         Ok(Err(error)) => SendOutcome::Transport(error),
         Err(_elapsed) => SendOutcome::HeadersTimeout,
+    }
+}
+
+/// Classify a [`SendOutcome`] failure into a [`TransportErrorKind`] for user-facing
+/// messaging. Tries to distinguish "network unreachable" from "connection refused"
+/// by walking the reqwest error's source chain.
+fn classify_send_outcome(failure: &SendOutcome) -> TransportErrorKind {
+    match failure {
+        SendOutcome::HeadersTimeout => TransportErrorKind::from_transport(false, false, true),
+        SendOutcome::Transport(error) => {
+            if error.is_timeout() {
+                TransportErrorKind::Timeout
+            } else if error.is_connect() {
+                TransportErrorKind::refine_connect_error(error)
+            } else {
+                TransportErrorKind::ConnectionRefused
+            }
+        }
+        SendOutcome::Ready(_) => unreachable!(),
     }
 }
 
@@ -890,6 +913,16 @@ retrying through «{fb_model}»…‹‹/ACT››"
                                     text: format!("‹‹ACT››⏳ The model isn't responding ({code}), retrying ({attempt}/2)…‹‹/ACT››"),
                                 })
                                 .await;
+                            let kind = TransportErrorKind::from_http_status(code.as_u16());
+                            let _ = emit_stream_event(
+                                self.tx,
+                                GenerateStreamEvent::Error {
+                                    code: kind.error_code().to_string(),
+                                    message: kind.user_message().to_string(),
+                                    retryable: true,
+                                },
+                            )
+                            .await;
                             tokio::time::sleep(std::time::Duration::from_millis(
                                 800 * u64::from(attempt),
                             ))
@@ -1005,6 +1038,16 @@ check/update the key in Settings → Model & Runtime."
                             },
                         )
                         .await;
+                        let kind = TransportErrorKind::from_http_status(code.as_u16());
+                        let _ = emit_stream_event(
+                            self.tx,
+                            GenerateStreamEvent::Error {
+                                code: kind.error_code().to_string(),
+                                message: kind.user_message().to_string(),
+                                retryable: false,
+                            },
+                        )
+                        .await;
                         return Err(ModelCallError::Upstream(message));
                     }
                     // A transport error and a pre-stream headers-timeout are both
@@ -1042,6 +1085,16 @@ check/update the key in Settings → Model & Runtime."
                                     text: format!("‹‹ACT››⏳ Network to the model unstable, retrying ({attempt}/2)…‹‹/ACT››"),
                                 })
                                 .await;
+                            let kind = classify_send_outcome(&failure);
+                            let _ = emit_stream_event(
+                                self.tx,
+                                GenerateStreamEvent::Error {
+                                    code: kind.error_code().to_string(),
+                                    message: kind.user_message().to_string(),
+                                    retryable: true,
+                                },
+                            )
+                            .await;
                             tokio::time::sleep(std::time::Duration::from_millis(
                                 800 * u64::from(attempt),
                             ))
@@ -1078,12 +1131,22 @@ check/update the key in Settings → Model & Runtime."
                             attempt = 0;
                             continue;
                         }
+                        let kind = classify_send_outcome(&failure);
                         let _ = emit_stream_event(
                             self.tx,
                             GenerateStreamEvent::Delta {
                                 text:
                                     "The model didn't respond (timeout/network). Try again shortly."
                                         .to_string(),
+                            },
+                        )
+                        .await;
+                        let _ = emit_stream_event(
+                            self.tx,
+                            GenerateStreamEvent::Error {
+                                code: kind.error_code().to_string(),
+                                message: kind.user_message().to_string(),
+                                retryable: false,
                             },
                         )
                         .await;
@@ -1135,6 +1198,16 @@ check/update the key in Settings → Model & Runtime."
                         text: format!(
                             "The model interrupted the response ({error}). Try again shortly."
                         ),
+                    },
+                )
+                .await;
+                let kind = TransportErrorKind::from_stream_error(&error);
+                let _ = emit_stream_event(
+                    self.tx,
+                    GenerateStreamEvent::Error {
+                        code: kind.error_code().to_string(),
+                        message: kind.user_message().to_string(),
+                        retryable: false,
                     },
                 )
                 .await;

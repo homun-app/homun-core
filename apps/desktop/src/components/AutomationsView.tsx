@@ -15,6 +15,8 @@ import {
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { fetchKernelThreadProjection, type KernelThreadProjection } from "../lib/chatApi";
+import { projectAutomationRunState } from "../lib/automationRunProjection";
 import { coreBridge } from "../lib/coreBridge";
 import type {
   AutomationCreateteInput,
@@ -92,6 +94,9 @@ export function AutomationsView({
   // reminders ("ricordami…") that have no Automazione rule behind them and would
   // otherwise be invisible/undeletable. Listed here so there's one place to cancel any.
   const [scheduled, setScheduled] = useState<CoreTaskItem[]>([]);
+  const [scheduledProjections, setScheduledProjections] = useState<
+    Record<string, KernelThreadProjection>
+  >({});
   const reloadScheduled = useCallback(() => {
     void coreBridge.taskQueue().then((q) => {
       setScheduled(
@@ -104,6 +109,36 @@ export function AutomationsView({
   useEffect(() => {
     reloadScheduled();
   }, [automations, reloadScheduled]);
+  useEffect(() => {
+    const threadIds = Array.from(
+      new Set(
+        scheduled
+          .map((task) => task.thread_id)
+          .filter((threadId): threadId is string => Boolean(threadId)),
+      ),
+    );
+    if (threadIds.length === 0) {
+      setScheduledProjections({});
+      return;
+    }
+    let cancelled = false;
+    void Promise.all(
+      threadIds.map(async (threadId) => {
+        try {
+          return [threadId, await fetchKernelThreadProjection(threadId)] as const;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((entries) => {
+      if (!cancelled) {
+        setScheduledProjections(Object.fromEntries(entries.filter((entry): entry is [string, KernelThreadProjection] => Boolean(entry))));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [scheduled]);
   const cancelScheduled = (taskId: string) => {
     void coreBridge.cancelTask(taskId).then(() => reloadScheduled());
   };
@@ -755,13 +790,18 @@ export function AutomationsView({
             {t("automations.scheduledTasks")} ({scheduled.length})
           </div>
           <p className="auto-empty" style={{ marginTop: 0 }}>{t("automations.scheduledHint")}</p>
-          {scheduled.map((task) => (
+          {scheduled.map((task) => {
+            const runState = projectAutomationRunState(
+              task,
+              task.thread_id ? scheduledProjections[task.thread_id] ?? null : null,
+            );
+            return (
             <article className="auto-card" key={task.task_id}>
               <div className="auto-card-main">
                 <div className="auto-card-head">
                   <span className="auto-trigger-chip">
                     <Clock3 size={13} aria-hidden />
-                    {task.status === "active" ? t("automations.inProgress") : t("automations.inQueue")}
+                    {t(runState.labelKey)}
                   </span>
                 </div>
                 <p className="auto-card-prompt">{task.goal}</p>
@@ -777,7 +817,8 @@ export function AutomationsView({
                 </button>
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>

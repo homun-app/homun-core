@@ -1054,7 +1054,7 @@ if matches!(
 Run:
 
 ```bash
-cargo test -p local-first-task-runtime project_thread_activity turn_lifecycle
+cargo test -p local-first-task-runtime kernel_thread_projection turn_lifecycle
 ```
 
 Expected: PASS.

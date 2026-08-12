@@ -12,7 +12,7 @@ fn browser_tools_owner_smoke() {
     assert_eq!(bounded_browse_subagent_nav_cap(20), 8);
 }
 
-pub(crate) const MAX_TOOL_ROUNDS_BROWSER: usize = 32;
+pub(crate) const MAX_TOOL_ROUNDS_BROWSER: usize = 64;
 
 /// Round budget once a browser tool has been used this turn (env-overridable).
 pub(crate) fn chat_browser_max_rounds() -> usize {
@@ -27,7 +27,7 @@ pub(crate) fn chat_browser_max_rounds() -> usize {
 /// browsing and synthesize from what we already gathered. The per-step round budget
 /// (F1) only resets on step COMPLETION, so a model that never closes a step (it keeps
 /// hopping across cookie-walled / JS-heavy live sources that fail to read — Mondiali:
-/// ~15 pages, 0/4 closed) burns the WHOLE 32-round budget wandering. Counting distinct
+/// ~15 pages, 0/4 closed) burns the WHOLE 64-round budget wandering. Counting distinct
 /// navigations per step (via `step_evidence`, cleared on step close) catches the
 /// distinct-URL wander the no-progress guard misses (it only catches IDENTICAL calls).
 /// Env-overridable: `HOMUN_CHAT_BROWSER_NAV_CAP`.
@@ -83,7 +83,7 @@ pub(crate) fn chat_browser_budget() -> local_first_engine::BrowserBudget {
 /// Absolute wall-clock backstop for ONE delegated `browse` sub-turn (see the sub-turn's `TurnConfig`).
 /// Named rather than inlined because the MANAGER budget below is DERIVED from it: the two are one
 /// invariant, not two independent numbers that can drift apart.
-pub(crate) const BROWSE_SUBTURN_MAX_ELAPSED_MS: u64 = 300_000;
+pub(crate) const BROWSE_SUBTURN_MAX_ELAPSED_MS: u64 = 120_000;
 
 /// The MANAGER turn's absolute wall-clock backstop, derived from one browse sub-turn's own cap.
 ///
@@ -555,13 +555,18 @@ pub(crate) fn browser_snapshot_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_snapshot",
-            "description": "Re-read the SNAPSHOT of the current page (accessible text + [ref=...] references). Call it to refresh your view of the page after it changed (e.g. after dynamic loading) or if you lost the page context. Read-only, doesn't modify anything.",
+            "description": "Re-read the SNAPSHOT of the current page (accessible text + [ref=...] references). Call it to refresh your view of the page after it changed (e.g. after dynamic loading) or if you lost the page context. Read-only, doesn't modify anything. Default mode is 'interact' (compact, ~9k chars, shows interactive elements and suggestions clearly). Use 'extract' only when you need full page content for data collection (returns ~40k chars).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "target": {
                         "type": "string",
                         "description": "id of the tab to operate on; default: the current tab."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["interact", "extract"],
+                        "description": "Observation mode. 'interact' (default): compact view with interactive elements and suggestions (~9k chars, best for navigation). 'extract': full content for data collection (~40k chars). Use 'interact' unless you need complete page text."
                     }
                 }
             }
@@ -628,6 +633,7 @@ pub(crate) fn browser_act_tool_schema() -> serde_json::Value {
                     "value": { "type": "string", "description": "Value to select (kind='select'/'select_option')." },
                     "values": { "type": "array", "items": { "type": "string" }, "description": "Multiple values for a multi-select." },
                     "submit": { "type": "boolean", "description": "If true, submit the form after writing (equivalent to pressing Enter)." },
+                    "auto_complete": { "type": "boolean", "description": "For kind='type': when false (the default), the autocomplete dropdown stays open after typing so you can inspect it and click the desired option yourself from the snapshot. Default false — the gateway forces this to false for all type actions. You MUST click the matching option from the snapshot; the system does NOT auto-select. Set true only if the autocomplete auto-select works correctly (rarely reliable)." },
                     "key": { "type": "string", "description": "Key to press for kind='press', e.g. 'Enter', 'ArrowDown'. For kind='press_key' put the key name in 'text' instead — press_key reads 'text', not 'key'." },
                     "durationMs": { "type": "number", "description": "How long to keep the pointer pressed for kind='hold' (ms). Default ~3000; raise if the challenge needs a longer hold." },
                     "generation": { "type": "integer", "description": "Observation generation used to choose refs." },
@@ -656,6 +662,7 @@ pub(crate) fn browser_act_tool_schema() -> serde_json::Value {
                                 "value": { "type": "string", "description": "Value to select (kind='select'/'select_option')." },
                                 "key": { "type": "string", "description": "Key to press for kind='press', e.g. 'Enter', 'ArrowDown'. For kind='press_key' put the key name in 'text' instead — press_key reads 'text', not 'key'." },
                                 "submit": { "type": "boolean", "description": "If true, submit the form after writing (equivalent to pressing Enter)." },
+                                "auto_complete": { "type": "boolean", "description": "For kind='type': when false (the default), the autocomplete dropdown stays open after typing. Default false — you MUST click the matching option from the snapshot yourself." },
                                 "action_class": {
                                     "type": "string",
                                     "enum": ["ordinary","account","booking","payment_commit"],

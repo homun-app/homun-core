@@ -1,0 +1,63 @@
+{
+  "case": "write_uncertain_effect_needs_attention",
+  "endpoint": "/api/chat/threads/thread-write-uncertain/kernel-projection",
+  "response": {
+    "thread_id": "thread-write-uncertain",
+    "revision": 5,
+    "turn": {
+      "active_turn_id": "turn-write",
+      "status": "waiting_user",
+      "last_event_seq": 7,
+      "terminal_reason": null,
+      "failure_text": null,
+      "updated_at": 1723359780
+    },
+    "plan": null,
+    "activity": [
+      {
+        "text": "External write outcome uncertain",
+        "created_at": 1723359780
+      }
+    ],
+    "subagents": [],
+    "browser": {
+      "state": "waiting_user",
+      "target_id": "browser-write",
+      "latest_progress": "Click outcome uncertain",
+      "failure_reason": null,
+      "snapshot_verified": false
+    },
+    "capability_runtime": {
+      "loaded_tools": [],
+      "armed_sensitive_domains": [],
+      "pending_capability": null,
+      "blocked_capabilities": []
+    },
+    "attention": {
+      "awaiting_user": true,
+      "approvals": [],
+      "uncertain_effects": [
+        {
+          "receipt_ref": "receipt-write",
+          "execution_id": "turn-write",
+          "operation": "browser_act",
+          "effect_class": "external_write"
+        }
+      ]
+    },
+    "actions": {
+      "can_stop": true,
+      "composer_mode": "reply_to_user_wait"
+    }
+  },
+  "expect": {
+    "equals": {
+      "turn.status": "waiting_user",
+      "attention.awaiting_user": true,
+      "actions.composer_mode": "reply_to_user_wait"
+    },
+    "lengths": {
+      "attention.uncertain_effects": 1
+    }
+  }
+}

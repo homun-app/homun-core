@@ -1042,11 +1042,6 @@ export async function fetchTurnStatus(turnId: string): Promise<TurnStatusRespons
   );
 }
 
-/** Durable cockpit projection for the working island (mirrors the Rust
- *  `ThreadActivityProjection`): the latest plan across the thread, activity
- *  accumulated cross-turn, and the latest turn's status. Read at rest so the
- *  island survives turn-end/reload/thread-switch instead of parsing lossy
- *  message-text markers. */
 export interface SubagentInfo {
   name: string;
   status: string;
@@ -1054,29 +1049,79 @@ export interface SubagentInfo {
   created_at?: number;
   updated_at?: number;
 }
-export interface ThreadActivityProjection {
-  plan_markdown: string | null;
-  activity: string[];
-  latest_turn_status: string | null;
-  turn_count: number;
-  subagents: SubagentInfo[];
-  active_turn?: {
-    turn_id: string;
+
+export interface KernelThreadProjection {
+  thread_id: string;
+  revision: number;
+  turn: {
+    active_turn_id: string | null;
+    status: "idle" | "running" | "waiting_user" | "waiting_approval" | "completed" | "failed" | "cancelled" | string;
     last_event_seq: number;
-    status: string;
-    attempt: number;
-    max_attempts: number;
-    not_before: number | null;
-    blocked_reason: string | null;
+    terminal_reason: string | null;
+    failure_text: string | null;
     updated_at: number;
+  };
+  plan: {
+    goal: string | null;
+    revision: number;
+    steps: Array<{
+      id: string;
+      title: string;
+      status: "todo" | "doing" | "done" | "blocked" | "failed" | string;
+      detail: string | null;
+    }>;
+    markdown: string;
   } | null;
+  activity: Array<{
+    text: string;
+    created_at: number;
+  }>;
+  subagents: SubagentInfo[];
+  browser: {
+    state: "idle" | "active" | "waiting_user" | "done" | "failed" | "unknown" | string;
+    target_id: string | null;
+    latest_progress: string | null;
+    failure_reason: string | null;
+    snapshot_verified: boolean;
+  };
+  capability_runtime: {
+    loaded_tools: string[];
+    armed_sensitive_domains: string[];
+    pending_capability: string | null;
+    blocked_capabilities: Array<{
+      key: string;
+      reason: string;
+    }>;
+  };
+  attention: {
+    awaiting_user: boolean;
+    approvals: Array<{
+      approval_id: string;
+      task_id: string;
+      action: string;
+      risk_level: string;
+      data_boundary: string;
+      explanation: string;
+      status: string;
+    }>;
+    uncertain_effects: Array<{
+      receipt_ref: string;
+      execution_id: string;
+      operation: string;
+      effect_class: string;
+    }>;
+  };
+  actions: {
+    can_stop: boolean;
+    composer_mode: "new_turn" | "steer_active_turn" | "reply_to_user_wait" | "approval_only" | "disabled" | string;
+  };
 }
 
-export async function fetchThreadActivity(
+export async function fetchKernelThreadProjection(
   threadId: string,
-): Promise<ThreadActivityProjection> {
-  return gatewayJson<ThreadActivityProjection>(
-    `/api/chat/threads/${encodeURIComponent(threadId)}/activity`,
+): Promise<KernelThreadProjection> {
+  return gatewayJson<KernelThreadProjection>(
+    `/api/chat/threads/${encodeURIComponent(threadId)}/kernel-projection`,
   );
 }
 
@@ -1084,10 +1129,21 @@ export async function fetchThreadActivity(
  * Cancel a running turn: DELETE /api/chat/turns/{id}. The broker marks the turn
  * cancelled and notifies the executor. 202 = accepted, 404 = no active turn
  * (already finished) — both are fine for a best-effort Stop, so we don't throw.
+ * Non-2xx responses are NOT swallowed silently: a 404 here historically meant the
+ * caller derived a wrong turn id (e.g. `turn_${requestId}` after a resume kept
+ * the existing execution id) and the server-side cancel never happened.
  */
 export async function cancelTurn(turnId: string): Promise<void> {
-  await fetch(`${DESKTOP_GATEWAY_URL}/api/chat/turns/${encodeURIComponent(turnId)}`, {
-    method: "DELETE",
-    headers: gatewayHeaders(),
-  });
+  const response = await fetch(
+    `${DESKTOP_GATEWAY_URL}/api/chat/turns/${encodeURIComponent(turnId)}`,
+    {
+      method: "DELETE",
+      headers: gatewayHeaders(),
+    },
+  );
+  if (!response.ok) {
+    console.warn(
+      `[chatApi] cancelTurn DELETE /api/chat/turns/${turnId} returned HTTP ${response.status}`,
+    );
+  }
 }

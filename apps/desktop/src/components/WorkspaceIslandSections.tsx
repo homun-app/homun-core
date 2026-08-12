@@ -9,10 +9,20 @@ import type { SubagentInfo } from "../lib/chatApi";
 import type { WorkspaceSectionId } from "../lib/workspaceIslandSections";
 import type { PlanStep } from "./ChatPayloadParsers";
 import type { IslandSource } from "./InspectorView";
+import {
+  derivePlanStepDisplay,
+  getDoneCriterionText,
+} from "../lib/chat-runtime/planStepDisplay";
+import { derivePlanningDisplayState } from "../lib/chat-runtime/planningState";
 
 interface WorkspaceIslandSectionsProps {
   section: WorkspaceSectionId;
   projectObjective: string | null;
+  /** Goal parsed from the plan markdown (`**Goal**: ...`), shown when no
+   *  project objective is set. */
+  planGoal: string | null;
+  /** Plan step id last touched by a `step_advance` event (brief pulse). */
+  planStepPulseId: string | null;
   planSteps: PlanStep[];
   subagents: SubagentInfo[];
   activity: string[];
@@ -31,6 +41,8 @@ interface WorkspaceIslandSectionsProps {
 export function WorkspaceIslandSections({
   section,
   projectObjective,
+  planGoal,
+  planStepPulseId,
   planSteps,
   subagents,
   activity,
@@ -47,13 +59,36 @@ export function WorkspaceIslandSections({
 }: WorkspaceIslandSectionsProps) {
   const { t } = useTranslation();
 
+  const { showPlanningIndicator, showBrowsingIndicator } = derivePlanningDisplayState({
+    workInProgress,
+    planStepCount: planSteps.length,
+    activityStepCount: activity.length,
+  });
+
   if (section === "activity") {
+    // The project objective wins; the plan goal fills the same slot otherwise.
+    const objectiveText = projectObjective ?? planGoal;
+    const objectiveLabel = projectObjective
+      ? t("projectContext.objective")
+      : t("chat.planGoal");
     return (
       <div className="workspace-island-activity">
-        {projectObjective ? (
+        {objectiveText ? (
           <div className="workspace-island-objective">
-            <span>{t("projectContext.objective")}</span>
-            <p>{projectObjective}</p>
+            <span>{objectiveLabel}</span>
+            <p>{objectiveText}</p>
+          </div>
+        ) : null}
+        {showPlanningIndicator ? (
+          <div className="workspace-island-planning" role="status">
+            <span className="workspace-island-planning-dot" aria-hidden="true" />
+            <span>{t("chat.planningIndicator")}</span>
+          </div>
+        ) : null}
+        {showBrowsingIndicator ? (
+          <div className="workspace-island-planning" role="status">
+            <span className="workspace-island-planning-dot" aria-hidden="true" />
+            <span>{t("chat.browsingIndicator")}</span>
           </div>
         ) : null}
         {planSteps.length > 0 ? (
@@ -65,12 +100,36 @@ export function WorkspaceIslandSections({
               </em>
             </div>
             <ol className="workspace-island-list">
-              {planSteps.map((step, index) => (
-                <li key={`${index}-${step.title}`} className={`status-${step.status}`}>
-                  <span className="workspace-island-state" aria-hidden="true" />
-                  <span>{step.title}</span>
-                </li>
-              ))}
+              {planSteps.map((step, index) => {
+                const display = derivePlanStepDisplay(step);
+                const criterion =
+                  display.showDoneCriterion && getDoneCriterionText(step);
+                const pulsing = Boolean(step.id) && step.id === planStepPulseId;
+                return (
+                  <li
+                    key={`${index}-${step.title}`}
+                    className={`plan-step ${display.itemClassName}${pulsing ? " plan-step-pulse" : ""}`}
+                  >
+                    <span
+                      className="workspace-island-state"
+                      role="img"
+                      aria-label={display.iconLabel}
+                    >
+                      {display.icon ? (
+                        <span className="plan-step-icon" aria-hidden="true">
+                          {display.icon}
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="plan-step-content">
+                      <span className={display.titleClassName}>{step.title}</span>
+                      {criterion ? (
+                        <span className="plan-step-criterion">{criterion}</span>
+                      ) : null}
+                    </span>
+                  </li>
+                );
+              })}
             </ol>
           </div>
         ) : null}

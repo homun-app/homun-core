@@ -1,0 +1,83 @@
+{
+  "case": "runtime_plan_after_reload",
+  "endpoint": "/api/chat/threads/thread-plan/kernel-projection",
+  "response": {
+    "thread_id": "thread-plan",
+    "revision": 9,
+    "turn": {
+      "active_turn_id": "turn-plan",
+      "status": "running",
+      "last_event_seq": 12,
+      "terminal_reason": null,
+      "failure_text": null,
+      "updated_at": 1723359660
+    },
+    "plan": {
+      "goal": "Preparare risultati treno",
+      "revision": 2,
+      "steps": [
+        {
+          "id": "s1",
+          "title": "Apri ricerca",
+          "status": "done",
+          "detail": null
+        },
+        {
+          "id": "s2",
+          "title": "Leggi risultati",
+          "status": "doing",
+          "detail": "Pagina risultati caricata"
+        },
+        {
+          "id": "s3",
+          "title": "Rispondi",
+          "status": "todo",
+          "detail": null
+        }
+      ],
+      "markdown": "- [x] Apri ricerca\n- [ ] Leggi risultati\n- [ ] Rispondi"
+    },
+    "activity": [
+      {
+        "text": "Browser results visible",
+        "created_at": 1723359660
+      }
+    ],
+    "subagents": [],
+    "browser": {
+      "state": "active",
+      "target_id": "browser-turn-plan",
+      "latest_progress": "Results page loaded",
+      "failure_reason": null,
+      "snapshot_verified": true
+    },
+    "capability_runtime": {
+      "loaded_tools": [],
+      "armed_sensitive_domains": [],
+      "pending_capability": null,
+      "blocked_capabilities": []
+    },
+    "attention": {
+      "awaiting_user": false,
+      "approvals": [],
+      "uncertain_effects": []
+    },
+    "actions": {
+      "can_stop": true,
+      "composer_mode": "steer_active_turn"
+    }
+  },
+  "expect": {
+    "equals": {
+      "turn.active_turn_id": "turn-plan",
+      "turn.status": "running",
+      "actions.can_stop": true,
+      "actions.composer_mode": "steer_active_turn"
+    },
+    "plan_steps": {
+      "s1": "done",
+      "s2": "doing",
+      "s3": "todo"
+    }
+  }
+}

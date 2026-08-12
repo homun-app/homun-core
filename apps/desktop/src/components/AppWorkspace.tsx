@@ -68,6 +68,7 @@ export interface AppWorkspaceProps {
   effectResolutionBusyId: string | null;
   effectResolutionError: string | null;
   islandRefreshNonce: number;
+  bumpIslandRefreshNonce: () => void;
   runtimeContextRevision: number;
   incomingBackgroundTurn: {
     turnId: string;
@@ -124,6 +125,7 @@ export function AppWorkspace({
   effectResolutionBusyId,
   effectResolutionError,
   islandRefreshNonce,
+  bumpIslandRefreshNonce,
   runtimeContextRevision,
   incomingBackgroundTurn,
   autoSubmit,
@@ -175,6 +177,7 @@ export function AppWorkspace({
             thread={activeThread}
             onMessagesChange={onMessagesChange}
             islandRefreshNonce={islandRefreshNonce}
+            bumpIslandRefreshNonce={bumpIslandRefreshNonce}
             runtimeContextRevision={runtimeContextRevision}
             incomingBackgroundTurn={incomingBackgroundTurn}
             autoSubmit={autoSubmit}

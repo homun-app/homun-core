@@ -1,0 +1,10 @@
+{
+  "comment": "Known-good response body for POST /api/chat/turns (HTTP 201). Mirrors the Rust enqueue_turn handler (gateway_turn_broker.rs): the broker returns turn_id/thread_id/request_id/status='queued'/position_in_queue. Matches TS interface QueuedTurnResponse (chatApi.ts). All fields are snake_case via serde default (no rename_all on this inline json!).",
+  "payload": {
+    "turn_id": "turn_1719900000_a1b2c3d4",
+    "thread_id": "thread_active_prompt",
+    "request_id": "req_1719900000",
+    "status": "queued",
+    "position_in_queue": 0
+  }
+}

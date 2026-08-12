@@ -1,0 +1,53 @@
+{
+  "case": "browser_active",
+  "endpoint": "/api/chat/threads/thread-browser-active/kernel-projection",
+  "response": {
+    "thread_id": "thread-browser-active",
+    "revision": 2,
+    "turn": {
+      "active_turn_id": "turn-browser-active",
+      "status": "running",
+      "last_event_seq": 6,
+      "terminal_reason": null,
+      "failure_text": null,
+      "updated_at": 1723359840
+    },
+    "plan": null,
+    "activity": [
+      {
+        "text": "Browser navigating",
+        "created_at": 1723359840
+      }
+    ],
+    "subagents": [],
+    "browser": {
+      "state": "active",
+      "target_id": "browser-active",
+      "latest_progress": "Navigating to source",
+      "failure_reason": null,
+      "snapshot_verified": true
+    },
+    "capability_runtime": {
+      "loaded_tools": [],
+      "armed_sensitive_domains": [],
+      "pending_capability": null,
+      "blocked_capabilities": []
+    },
+    "attention": {
+      "awaiting_user": false,
+      "approvals": [],
+      "uncertain_effects": []
+    },
+    "actions": {
+      "can_stop": true,
+      "composer_mode": "steer_active_turn"
+    }
+  },
+  "expect": {
+    "equals": {
+      "browser.state": "active",
+      "browser.snapshot_verified": true,
+      "actions.can_stop": true
+    }
+  }
+}

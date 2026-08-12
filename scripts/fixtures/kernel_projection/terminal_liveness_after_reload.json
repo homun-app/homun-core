@@ -1,0 +1,50 @@
+{
+  "case": "terminal_liveness_after_reload",
+  "endpoint": "/api/chat/threads/thread-terminal/kernel-projection",
+  "response": {
+    "thread_id": "thread-terminal",
+    "revision": 4,
+    "turn": {
+      "active_turn_id": null,
+      "status": "completed",
+      "last_event_seq": 8,
+      "terminal_reason": "done",
+      "failure_text": null,
+      "updated_at": 1723359600
+    },
+    "plan": null,
+    "activity": [],
+    "subagents": [],
+    "browser": {
+      "state": "idle",
+      "target_id": null,
+      "latest_progress": null,
+      "failure_reason": null,
+      "snapshot_verified": false
+    },
+    "capability_runtime": {
+      "loaded_tools": [],
+      "armed_sensitive_domains": [],
+      "pending_capability": null,
+      "blocked_capabilities": []
+    },
+    "attention": {
+      "awaiting_user": false,
+      "approvals": [],
+      "uncertain_effects": []
+    },
+    "actions": {
+      "can_stop": false,
+      "composer_mode": "new_turn"
+    }
+  },
+  "expect": {
+    "equals": {
+      "turn.active_turn_id": null,
+      "turn.status": "completed",
+      "actions.can_stop": false,
+      "actions.composer_mode": "new_turn",
+      "attention.awaiting_user": false
+    }
+  }
+}

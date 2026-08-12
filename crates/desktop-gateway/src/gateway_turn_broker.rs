@@ -142,6 +142,22 @@ pub(crate) fn resume_suspended_user_turn_core(
             ),
         ));
     }
+    // Never resurrect a turn that already reached a terminal state (e.g. it was
+    // cancelled while suspended): discard the stale wake and return `None` so
+    // the caller enqueues a brand-new turn for this message instead.
+    let wake_task_is_terminal = store
+        .get_task(
+            &local_first_task_runtime::TaskId::new(&wake.execution_id),
+            &user_id,
+            &workspace_id,
+        )?
+        .is_some_and(|task| {
+            local_first_task_runtime::turn_lifecycle::task_status_is_terminal(task.status)
+        });
+    if wake_task_is_terminal {
+        store.discard_pending_execution_wakes(&wake.execution_id)?;
+        return Ok(None);
+    }
     let stream_from_seq = store
         .read_turn_events(&wake.execution_id, 0)?
         .last()
@@ -589,6 +605,12 @@ pub(crate) async fn get_turn(
 /// (`cancel_turn`, `cancel_task`) routes through this now (converge, don't
 /// duplicate) so bubble treatment cannot silently diverge between them again.
 ///
+/// When the cancel inserted the canonical `cancelled` terminal event, this helper
+/// ALSO broadcasts it live (per-turn NDJSON channel + unified WS) — the executor's
+/// later `emit_turn_event(Cancelled)` is silenced by the terminal-once guard
+/// because this path persisted the event first, so without this broadcast the UI
+/// would never see the terminal state.
+///
 /// For a `Running` turn the execution runtime commits `Cancelled(User)` after
 /// its cancel race unwinds and the canonical projector repeats the same message
 /// state idempotently.
@@ -610,21 +632,31 @@ pub(crate) fn cancel_chat_turn_and_finalize_bubble(
     task_id: &TaskId,
     task_before_cancel: Option<&TaskRecord>,
 ) -> local_first_task_runtime::TaskRuntimeResult<bool> {
-    let ok = local_first_task_runtime::broker::cancel_chat_turn(
+    let outcome = local_first_task_runtime::broker::cancel_chat_turn(
         store,
         user_id,
         workspace_id,
         task_id,
         &crate::turn_executor::GatewayCancelNotify,
     )?;
-    if ok && let Some(task) = task_before_cancel {
-        set_chat_turn_message_delivery_state(
-            state,
-            task,
-            local_first_desktop_gateway::MessageDeliveryState::Cancelled,
-        );
+    if outcome.cancelled {
+        // This call inserted the canonical `cancelled` terminal event, so it owns
+        // the live fan-out (same envelope/shape as `emit_turn_event`): the executor
+        // racing to emit `Cancelled` afterwards hits `TerminalWrite::Existing` and
+        // stays silent. `None` means a racing writer already persisted the terminal
+        // event and broadcast it — do not double-broadcast.
+        if let Some(event) = outcome.terminal_event.as_ref() {
+            crate::turn_executor::broadcast_turn_event(state, task_id.as_str(), event);
+        }
+        if let Some(task) = task_before_cancel {
+            set_chat_turn_message_delivery_state(
+                state,
+                task,
+                local_first_desktop_gateway::MessageDeliveryState::Cancelled,
+            );
+        }
     }
-    Ok(ok)
+    Ok(outcome.cancelled)
 }
 
 /// DELETE /api/chat/turns/{turn_id} — cancel a turn (idempotent). 202 if cancelled,
@@ -1048,24 +1080,23 @@ pub(crate) async fn get_turn_events(
     Ok(Json(out))
 }
 
-/// GET /api/chat/threads/{thread_id}/activity — durable cockpit projection for the working
-/// island: the latest plan across the thread + activity accumulated cross-turn + the latest
-/// turn's status. Reads the canonical turn_events log (via the indexed tasks(thread_id) join),
-/// NOT the lossy message-text markers — so the island survives turn-end/reload/thread-switch.
-pub(crate) async fn thread_activity_projection(
+/// GET /api/chat/threads/{thread_id}/kernel-projection — canonical Runtime V2 thread
+/// projection. This is the backend-owned contract for turn status, plan, activity,
+/// attention, browser, capability runtime, and composer actions.
+pub(crate) async fn thread_kernel_projection(
     Path(thread_id): Path<String>,
     State(state): State<AppState>,
-) -> Result<Json<local_first_task_runtime::ThreadActivityProjection>, GatewayError> {
+) -> Result<Json<local_first_task_runtime::KernelThreadProjection>, GatewayError> {
     let store = state.task_store.lock().map_err(|e| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "broker_store_lock",
         message: format!("lock: {e}"),
     })?;
     let projection = store
-        .project_thread_activity(&thread_id, 200)
+        .project_kernel_thread(&thread_id, 200)
         .map_err(|e| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "thread_activity",
+            code: "thread_kernel_projection",
             message: format!("{e}"),
         })?;
     Ok(Json(projection))
@@ -1376,4 +1407,455 @@ pub(crate) async fn subscribe_turn_stream(
         .header("cache-control", "no-cache")
         .body(body)
         .expect("valid streaming response"))
+}
+
+// ── Step-advance visible event emission ─────────────────────────────────────
+//
+// When a plan step's canonical status changes (the `update_plan`/`step_advance` arm
+// after F2, or the engine's evidence-verified frontier advance), emit a
+// `GenerateStreamEvent::StepAdvance` so the frontend can render it inline in the chat
+// stream — distinct from the full ‹‹PLAN›› card. It rides the SAME stream channel as
+// every other turn event (the drain maps it via `turn_event_from_stream_value` to the
+// durable `step_advance` TurnEventKind: store + live broadcast + unified WS).
+
+/// Build a human-readable message for a step advance event (default `note` when the
+/// caller doesn't carry a more specific one).
+pub(crate) fn step_advance_message(step_id: &str, step_title: &str, status: &str) -> String {
+    let status_label = match status {
+        "done" => "completed",
+        "doing" => "in progress",
+        "blocked" => "blocked",
+        "todo" => "pending",
+        other => other,
+    };
+    if step_title.is_empty() {
+        format!("Step {step_id}: {status_label}")
+    } else {
+        format!("Step {step_id} {status_label}: {step_title}")
+    }
+}
+
+/// Emit a visible `StepAdvance` turn event for a single plan step status change.
+/// PAYLOAD CONTRACT with the frontend (do NOT deviate):
+/// `{"step_id": string, "title": string, "from": string|null, "to": string,
+/// "verified": bool|null, "note": string|null}` — `from` is null for a brand-new step,
+/// `verified` is the F2 verdict (null for plain status moves), `note` carries the
+/// rejection reason on a failed F2 claim. Emitted on the turn's stream sink so it
+/// fans out through the exact same path as every other turn event (durable store +
+/// live broadcast + unified WS) with the turn's own id.
+pub(crate) async fn emit_step_advance_event(
+    tx: &StreamSink,
+    step_id: &str,
+    step_title: &str,
+    from: Option<&str>,
+    to: &str,
+    verified: Option<bool>,
+    note: Option<&str>,
+) {
+    let note = note
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| step_advance_message(step_id, step_title, to));
+    let _ = emit_stream_event(
+        tx,
+        GenerateStreamEvent::StepAdvance {
+            step_id: step_id.to_string(),
+            title: step_title.to_string(),
+            from: from.map(str::to_string),
+            to: to.to_string(),
+            verified,
+            note: Some(note),
+        },
+    )
+    .await;
+}
+
+// ── Heartbeat during model wait ─────────────────────────────────────────────
+//
+// When the model is processing for a long time (>15s with no streaming tokens),
+// emit periodic `Heartbeat` events so the frontend can show "still thinking…"
+// instead of an indefinite spinner. The heartbeat is cancelled when tokens
+// resume or the turn ends.
+
+/// Interval between heartbeat events during model wait.
+// Plan deliverable: wired once the turn loop spawns model-wait heartbeats.
+#[allow(dead_code)]
+const HEARTBEAT_INTERVAL_SECS: u64 = 15;
+
+/// Spawn a background task that emits `Heartbeat` turn events every
+/// [`HEARTBEAT_INTERVAL_SECS`] seconds. Returns a [`tokio::task::JoinHandle`]
+/// the caller MUST abort when the model starts responding or the turn ends.
+///
+/// The heartbeat carries `elapsed_seconds` (since the heartbeat started) and
+/// `round` (the current agent round, if known) so the UI can surface progress
+/// without blocking on the model.
+// Plan deliverable: wired once the turn loop spawns model-wait heartbeats.
+#[allow(dead_code)]
+pub(crate) fn spawn_model_wait_heartbeat(
+    state: AppState,
+    turn_id: String,
+    round: Option<u32>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval =
+            tokio::time::interval(tokio::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
+        // The first tick fires immediately; skip it.
+        interval.tick().await;
+        let start = std::time::Instant::now();
+        loop {
+            interval.tick().await;
+            let elapsed = start.elapsed().as_secs();
+            let payload = serde_json::json!({
+                "elapsed_seconds": elapsed,
+                "round": round,
+            });
+            if let Ok(store) = state.task_store.lock() {
+                if crate::turn_executor::emit_turn_event(
+                    &state,
+                    &store,
+                    &turn_id,
+                    local_first_task_runtime::TurnEventKind::Heartbeat,
+                    payload,
+                )
+                .is_err()
+                {
+                    // Store gone (turn ended) — stop quietly.
+                    return;
+                }
+            } else {
+                return;
+            }
+        }
+    })
+}
+
+#[cfg(test)]
+mod broker_event_tests {
+    use super::*;
+
+    #[test]
+    fn step_advance_message_done_includes_title_and_status() {
+        let msg = step_advance_message("s2", "Implement data models", "done");
+        assert_eq!(msg, "Step s2 completed: Implement data models");
+    }
+
+    #[test]
+    fn step_advance_message_doing_in_progress() {
+        let msg = step_advance_message("s1", "Set up project", "doing");
+        assert_eq!(msg, "Step s1 in progress: Set up project");
+    }
+
+    #[test]
+    fn step_advance_message_blocked() {
+        let msg = step_advance_message("s3", "Deploy", "blocked");
+        assert_eq!(msg, "Step s3 blocked: Deploy");
+    }
+
+    #[test]
+    fn step_advance_message_empty_title_falls_back_to_id() {
+        let msg = step_advance_message("s5", "", "done");
+        assert_eq!(msg, "Step s5: completed");
+    }
+
+    #[test]
+    fn step_advance_message_unknown_status_passthrough() {
+        let msg = step_advance_message("s1", "Test", "custom");
+        assert_eq!(msg, "Step s1 custom: Test");
+    }
+
+    #[test]
+    fn step_advance_turn_event_kind_round_trips() {
+        let kind = local_first_task_runtime::TurnEventKind::StepAdvance;
+        assert_eq!(kind.as_str(), "step_advance");
+        assert_eq!(
+            local_first_task_runtime::TurnEventKind::parse("step_advance"),
+            Some(kind)
+        );
+    }
+
+    #[test]
+    fn heartbeat_turn_event_kind_round_trips() {
+        let kind = local_first_task_runtime::TurnEventKind::Heartbeat;
+        assert_eq!(kind.as_str(), "heartbeat");
+        assert_eq!(
+            local_first_task_runtime::TurnEventKind::parse("heartbeat"),
+            Some(kind)
+        );
+    }
+
+    #[test]
+    fn heartbeat_interval_is_fifteen_seconds() {
+        assert_eq!(HEARTBEAT_INTERVAL_SECS, 15);
+    }
+}
+
+#[cfg(test)]
+mod kernel_projection_route_tests {
+    use super::*;
+    use local_first_task_runtime::{
+        AgentRunStatus, NewAgentRun, TaskPriority, TaskRecord, TaskStatus, TurnEventKind,
+    };
+
+    #[tokio::test]
+    async fn kernel_projection_route_returns_terminal_actions() {
+        let state = AppState::for_tests();
+        {
+            let store = state.task_store.lock().unwrap();
+            let mut task = TaskRecord::new(
+                "turn-kernel-route",
+                gateway_user_id(),
+                gateway_workspace_id(),
+                "chat_turn",
+                "seed terminal projection",
+                serde_json::json!({}),
+            );
+            task.status = TaskStatus::Running;
+            task.priority = TaskPriority::High;
+            store
+                .insert_chat_turn(
+                    &task,
+                    "thread-kernel-route",
+                    "req-kernel-route",
+                    "interactive",
+                    "full",
+                )
+                .unwrap();
+            store
+                .insert_turn_event(
+                    "turn-kernel-route",
+                    TurnEventKind::Done,
+                    serde_json::json!({"text": "done"}),
+                )
+                .unwrap();
+            store
+                .create_agent_run(&NewAgentRun {
+                    run_id: "run-kernel-route".into(),
+                    turn_id: "turn-kernel-route".into(),
+                    thread_id: "thread-kernel-route".into(),
+                    user_id: gateway_user_id().as_str().to_string(),
+                    workspace_id: gateway_workspace_id().as_str().to_string(),
+                    role: None,
+                    model: Some("test-model".into()),
+                    provider: Some("test-provider".into()),
+                    prompt_fingerprint: None,
+                })
+                .unwrap();
+            store
+                .finish_agent_run(
+                    "run-kernel-route",
+                    AgentRunStatus::Completed,
+                    Some("canonical_completed"),
+                )
+                .unwrap();
+        }
+
+        let Json(projection) =
+            thread_kernel_projection(Path("thread-kernel-route".to_string()), State(state))
+                .await
+                .unwrap();
+
+        assert_eq!(projection.turn.status, "completed");
+        assert_eq!(projection.turn.active_turn_id, None);
+        assert!(!projection.actions.can_stop);
+        assert_eq!(projection.actions.composer_mode, "new_turn");
+    }
+}
+
+#[cfg(test)]
+mod cancel_broadcast_tests {
+    use super::*;
+    use local_first_task_runtime::{TaskId, TaskRecord, TaskStatus};
+
+    /// Seeds a Running chat_turn task under `turn_id` (no live executor — the
+    /// broadcast-side half of the cancel path is what these tests exercise).
+    fn seed_running_turn(state: &AppState, turn_id: &str, thread_id: &str) {
+        let store = state.task_store.lock().unwrap();
+        let mut task = TaskRecord::new(
+            turn_id,
+            gateway_user_id(),
+            gateway_workspace_id(),
+            "chat_turn",
+            "seed goal",
+            serde_json::json!({ "thread_id": thread_id }),
+        );
+        task.status = TaskStatus::Running;
+        store
+            .insert_chat_turn(&task, thread_id, "req-1", "interactive", "full")
+            .unwrap();
+    }
+
+    /// Regression: the broker persists the `cancelled` terminal event BEFORE the
+    /// executor can emit it, so the executor's emit is silenced by the
+    /// terminal-once guard — the cancel path itself must broadcast the event on
+    /// BOTH live sinks (per-turn NDJSON channel and unified WS), else the UI
+    /// never sees the terminal state.
+    #[test]
+    fn cancel_broadcasts_the_cancelled_terminal_event_on_per_turn_and_ws() {
+        let state = AppState::for_tests();
+        let turn_id = "turn-cancel-broadcast";
+        seed_running_turn(&state, turn_id, "thread-cancel-broadcast");
+
+        let broadcast = crate::turn_executor::register_turn(turn_id);
+        let mut ndjson_rx = broadcast.tx.subscribe();
+        let (_ws_session, mut ws_rx) = state.ws_registry.register();
+
+        let user_id = gateway_user_id();
+        let workspace_id = gateway_workspace_id();
+        let task_id = TaskId::new(turn_id);
+        let ok = {
+            let store = state.task_store.lock().unwrap();
+            cancel_chat_turn_and_finalize_bubble(
+                &state,
+                &store,
+                &user_id,
+                &workspace_id,
+                &task_id,
+                None,
+            )
+            .unwrap()
+        };
+        assert!(ok);
+
+        // Per-turn NDJSON broadcast channel.
+        let received = ndjson_rx
+            .try_recv()
+            .expect("cancelled on the NDJSON channel");
+        assert_eq!(received.kind, "cancelled");
+        assert_eq!(
+            received.payload.get("reason").and_then(Value::as_str),
+            Some("user_cancel")
+        );
+
+        // Unified WS (same envelope shape as `emit_turn_event`).
+        match ws_rx.try_recv().expect("cancelled on the unified WS") {
+            crate::ws_gateway::ServerMessage::TurnEvent {
+                turn_id: got_turn_id,
+                seq,
+                kind,
+                payload,
+                ..
+            } => {
+                assert_eq!(got_turn_id, turn_id);
+                assert_eq!(kind, "cancelled");
+                assert_eq!(seq, received.seq, "both sinks carry the persisted event");
+                assert_eq!(
+                    payload.get("reason").and_then(Value::as_str),
+                    Some("user_cancel")
+                );
+            }
+            other => panic!("expected turn.event on the WS, got {other:?}"),
+        }
+
+        // Terminal-once guard intact: the executor's late `Cancelled` emit finds
+        // the already-persisted terminal event and broadcasts NOTHING new.
+        {
+            let store = state.task_store.lock().unwrap();
+            crate::turn_executor::emit_turn_event(
+                &state,
+                &store,
+                turn_id,
+                local_first_task_runtime::TurnEventKind::Cancelled,
+                serde_json::json!({ "reason": "late_executor_cancel" }),
+            )
+            .unwrap();
+        }
+        assert!(
+            ndjson_rx.try_recv().is_err(),
+            "the executor's suppressed emit must not reach the NDJSON channel"
+        );
+        assert!(
+            ws_rx.try_recv().is_err(),
+            "the executor's suppressed emit must not reach the WS"
+        );
+
+        crate::turn_executor::unregister_turn(turn_id);
+    }
+
+    /// A turn without a live per-turn broadcast entry (parked/unregistered) still
+    /// publishes its `cancelled` terminal event on the unified WS.
+    #[test]
+    fn cancel_of_an_unregistered_turn_still_publishes_on_ws() {
+        let state = AppState::for_tests();
+        let turn_id = "turn-cancel-no-broadcast-entry";
+        seed_running_turn(&state, turn_id, "thread-cancel-no-entry");
+
+        let (_ws_session, mut ws_rx) = state.ws_registry.register();
+
+        let ok = {
+            let store = state.task_store.lock().unwrap();
+            cancel_chat_turn_and_finalize_bubble(
+                &state,
+                &store,
+                &gateway_user_id(),
+                &gateway_workspace_id(),
+                &TaskId::new(turn_id),
+                None,
+            )
+            .unwrap()
+        };
+        assert!(ok);
+
+        match ws_rx.try_recv().expect("cancelled on the unified WS") {
+            crate::ws_gateway::ServerMessage::TurnEvent {
+                turn_id: got_turn_id,
+                kind,
+                ..
+            } => {
+                assert_eq!(got_turn_id, turn_id);
+                assert_eq!(kind, "cancelled");
+            }
+            other => panic!("expected turn.event on the WS, got {other:?}"),
+        }
+    }
+
+    /// A second cancel is idempotent: no new terminal event, no new broadcast.
+    #[test]
+    fn second_cancel_is_idempotent_and_broadcasts_nothing() {
+        let state = AppState::for_tests();
+        let turn_id = "turn-cancel-idempotent";
+        seed_running_turn(&state, turn_id, "thread-cancel-idempotent");
+
+        let broadcast = crate::turn_executor::register_turn(turn_id);
+        let mut ndjson_rx = broadcast.tx.subscribe();
+        let (_ws_session, mut ws_rx) = state.ws_registry.register();
+
+        let user_id = gateway_user_id();
+        let workspace_id = gateway_workspace_id();
+        let task_id = TaskId::new(turn_id);
+        let store = state.task_store.lock().unwrap();
+        assert!(
+            cancel_chat_turn_and_finalize_bubble(
+                &state,
+                &store,
+                &user_id,
+                &workspace_id,
+                &task_id,
+                None,
+            )
+            .unwrap()
+        );
+        assert!(ndjson_rx.try_recv().is_ok(), "first cancel broadcasts");
+        assert!(ws_rx.try_recv().is_ok());
+
+        assert!(
+            !cancel_chat_turn_and_finalize_bubble(
+                &state,
+                &store,
+                &user_id,
+                &workspace_id,
+                &task_id,
+                None,
+            )
+            .unwrap()
+        );
+        assert!(
+            ndjson_rx.try_recv().is_err(),
+            "a no-op cancel must not broadcast"
+        );
+        assert!(ws_rx.try_recv().is_err());
+        drop(store);
+
+        crate::turn_executor::unregister_turn(turn_id);
+    }
 }

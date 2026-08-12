@@ -640,6 +640,8 @@
     "effectVerificationAria": "Ausstehende Ergebnisprüfungen",
     "needsVerification": "Prüfung erforderlich",
     "effectVerificationPrompt": "Homun kann nicht bestätigen, ob diese externe Aktion abgeschlossen wurde. Prüfen Sie das Ergebnis und geben Sie an, was passiert ist.",
+    "effectVerificationPromptBrowser": "Eine Browser-Aktion wurde unterbrochen und Homun konnte ihr Ergebnis auf der Seite nicht verifizieren. Dies ist keine Berechtigungsanfrage: Prüfen Sie die Seite und geben Sie an, ob die Aktion tatsächlich stattgefunden hat.",
+    "effectVerificationTitleBrowser": "Ergebnis der Browser-Aktion prüfen",
     "effectResolutionError": "Die Prüfung konnte nicht gespeichert werden. Versuchen Sie es erneut.",
     "uncertainSince": "Ergebnis unsicher seit {{time}}",
     "verifiedNotApplied": "Nicht ausgeführt",
@@ -677,6 +679,15 @@
     "markNotHelpful": "Antwort als nicht hilfreich markieren",
     "messageMetrics": "Leistungsmetriken der Nachricht",
     "activityProgress": "Aktivitätsfortschritt",
+    "planningIndicator": "Planung…",
+    "browsingIndicator": "Navigation…",
+    "planGoal": "Ziel",
+    "stepAdvance": {
+      "verified": "✓ Schritt verifiziert: {{title}}",
+      "unverified": "✗ Schritt nicht verifiziert: {{title}} — {{note}}",
+      "unverifiedNoNote": "✗ Schritt nicht verifiziert: {{title}}",
+      "transition": "→ Schritt {{title}}: {{from}} → {{to}}"
+    },
     "resizePanel": "Panelgröße ändern",
     "closePanel": "Panel schließen",
     "inspector": {

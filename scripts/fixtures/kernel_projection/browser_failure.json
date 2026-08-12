@@ -1,0 +1,54 @@
+{
+  "case": "browser_failure",
+  "endpoint": "/api/chat/threads/thread-browser-failure/kernel-projection",
+  "response": {
+    "thread_id": "thread-browser-failure",
+    "revision": 8,
+    "turn": {
+      "active_turn_id": null,
+      "status": "failed",
+      "last_event_seq": 10,
+      "terminal_reason": "browser_failed",
+      "failure_text": "Browser sidecar timed out",
+      "updated_at": 1723359960
+    },
+    "plan": null,
+    "activity": [
+      {
+        "text": "Browser sidecar timed out",
+        "created_at": 1723359960
+      }
+    ],
+    "subagents": [],
+    "browser": {
+      "state": "failed",
+      "target_id": null,
+      "latest_progress": null,
+      "failure_reason": "Browser sidecar timed out",
+      "snapshot_verified": false
+    },
+    "capability_runtime": {
+      "loaded_tools": [],
+      "armed_sensitive_domains": [],
+      "pending_capability": null,
+      "blocked_capabilities": []
+    },
+    "attention": {
+      "awaiting_user": false,
+      "approvals": [],
+      "uncertain_effects": []
+    },
+    "actions": {
+      "can_stop": false,
+      "composer_mode": "new_turn"
+    }
+  },
+  "expect": {
+    "equals": {
+      "turn.status": "failed",
+      "browser.state": "failed",
+      "browser.failure_reason": "Browser sidecar timed out",
+      "actions.can_stop": false
+    }
+  }
+}

@@ -117,7 +117,8 @@ function mapCoreChatEventParts(parts: unknown[] | null | undefined): ChatEventPa
       type === "payment_approval" ||
       type === "tool_result" ||
       type === "recall" ||
-      type === "diff"
+      type === "diff" ||
+      type === "step_advance"
     ) {
       // Persisted events are validated by downstream structured payload parsers.
       mapped.push({ type, payload: record.payload } as ChatEventPart);

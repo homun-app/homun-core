@@ -9,7 +9,35 @@ use super::*;
 
 #[test]
 fn tool_execution_owner_smoke() {
-    assert!(browser_effect_class("browser_act").is_some());
+    assert_eq!(
+        browser_action_effect_class(
+            &serde_json::json!({"kind": "click", "ref": "e1", "action_class": "ordinary"}),
+            &std::collections::HashSet::new(),
+            false,
+        ),
+        local_first_execution_protocol::EffectClass::Read,
+    );
+    assert_eq!(
+        browser_effect_class("browser_rehydrate"),
+        Some(local_first_execution_protocol::EffectClass::ExternalWrite)
+    );
+}
+
+#[test]
+fn browse_subagent_prompt_documents_autocomplete_semantic_default() {
+    let prompt = browse_subagent_system_prompt(true);
+    assert!(
+        prompt.contains("auto_complete is"),
+        "prompt must explain auto_complete behavior"
+    );
+    assert!(
+        prompt.contains("uses DOM semantics"),
+        "prompt must say autocomplete follows DOM semantics"
+    );
+    assert!(
+        !prompt.contains("forced to false"),
+        "prompt must not force a gateway policy over the sidecar"
+    );
 }
 
 /// The browser branch's tool context (ADR 0026 / inc 5, 5.D1b slice 3). SPLIT out of `ChatToolCtx`
@@ -64,13 +92,97 @@ pub(crate) struct BrowserToolCtx<'a> {
     // tools (snapshot/tabs/dialog/screenshot) → the caller defaults them to `Success`. Never
     // derived from the result prose — that is exactly the misclassification this replaces.
     pub(crate) outcome_hint: &'a mut Option<local_first_engine::contract::ToolOutcomeHint>,
+    // Whether the current model supports vision/image input. Used to decide whether to inject
+    // screenshot images into the conversation (P0 fix for non-vision models like minimax-m2.7,
+    // deepseek-v4-pro that fail with "this model does not support image input").
+    pub(crate) model_supports_vision: bool,
 }
 
 pub(crate) fn browser_effect_class(
     name: &str,
 ) -> Option<local_first_execution_protocol::EffectClass> {
-    matches!(name, "browser_act" | "browser_rehydrate")
+    matches!(name, "browser_rehydrate")
         .then_some(local_first_execution_protocol::EffectClass::ExternalWrite)
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum BrowserEffectRisk {
+    Low,
+    High,
+}
+
+pub(crate) fn browser_action_effect_risk(
+    action: &serde_json::Value,
+    payment_floor_refs: &std::collections::HashSet<String>,
+    focus_payment_context: bool,
+) -> BrowserEffectRisk {
+    match browser_safety::effective_action_class(action, payment_floor_refs, focus_payment_context)
+    {
+        Ok(browser_safety::ActionClass::Ordinary) => BrowserEffectRisk::Low,
+        Ok(
+            browser_safety::ActionClass::Account
+            | browser_safety::ActionClass::Booking
+            | browser_safety::ActionClass::PaymentCommit,
+        )
+        | Err(_) => BrowserEffectRisk::High,
+    }
+}
+
+pub(crate) fn browser_action_effect_class(
+    action: &serde_json::Value,
+    payment_floor_refs: &std::collections::HashSet<String>,
+    focus_payment_context: bool,
+) -> local_first_execution_protocol::EffectClass {
+    match browser_action_effect_risk(action, payment_floor_refs, focus_payment_context) {
+        BrowserEffectRisk::Low => local_first_execution_protocol::EffectClass::Read,
+        BrowserEffectRisk::High => local_first_execution_protocol::EffectClass::ExternalWrite,
+    }
+}
+
+pub(crate) fn browser_act_uncertain_failure_requires_user_resolution(
+    risk: BrowserEffectRisk,
+    failure_kind: BrowserActFailureKind,
+) -> bool {
+    risk == BrowserEffectRisk::High && failure_kind == BrowserActFailureKind::UnknownRemoteOutcome
+}
+
+pub(crate) fn begin_browser_action_effect<'a>(
+    ctx: &BrowserToolCtx<'a>,
+    call_id: &str,
+    action: serde_json::Value,
+    payment_floor_refs: &std::collections::HashSet<String>,
+    focus_payment_context: bool,
+) -> Result<crate::effect_host::EffectDecision<'a>, String> {
+    let contract = ctx.execution_contract.ok_or_else(|| {
+        "Browser mutation blocked: no durable execution scope is available.".to_string()
+    })?;
+    let effect_class =
+        browser_action_effect_class(&action, payment_floor_refs, focus_payment_context);
+    crate::effect_host::EffectHost::new(ctx.state.task_store.as_ref(), contract, ctx.effect_run_id)
+        .begin(crate::effect_host::EffectRequest::capability(
+            "browser_act",
+            call_id,
+            effect_class,
+            action,
+        ))
+}
+
+pub(crate) fn authorize_browser_action_effect(
+    ctx: &BrowserToolCtx<'_>,
+    call_id: &str,
+    action: serde_json::Value,
+    payment_floor_refs: &std::collections::HashSet<String>,
+    focus_payment_context: bool,
+) -> Result<(), String> {
+    let contract = ctx.execution_contract.ok_or_else(|| {
+        "Browser mutation blocked: no durable execution scope is available.".to_string()
+    })?;
+    let effect_class =
+        browser_action_effect_class(&action, payment_floor_refs, focus_payment_context);
+    let request =
+        crate::effect_host::EffectRequest::capability("browser_act", call_id, effect_class, action);
+    crate::effect_host::EffectHost::new(ctx.state.task_store.as_ref(), contract, ctx.effect_run_id)
+        .authorize_request(&request)
 }
 
 pub(crate) fn begin_browser_effect<'a>(
@@ -91,23 +203,6 @@ pub(crate) fn begin_browser_effect<'a>(
             effect_class,
             arguments,
         ))
-}
-
-pub(crate) fn authorize_browser_effect(
-    ctx: &BrowserToolCtx<'_>,
-    operation: &str,
-    call_id: &str,
-    arguments: serde_json::Value,
-) -> Result<(), String> {
-    let contract = ctx.execution_contract.ok_or_else(|| {
-        "Browser mutation blocked: no durable execution scope is available.".to_string()
-    })?;
-    let effect_class = browser_effect_class(operation)
-        .ok_or_else(|| format!("browser operation {operation} is not effectful"))?;
-    let request =
-        crate::effect_host::EffectRequest::capability(operation, call_id, effect_class, arguments);
-    crate::effect_host::EffectHost::new(ctx.state.task_store.as_ref(), contract, ctx.effect_run_id)
-        .authorize_request(&request)
 }
 
 pub(crate) fn complete_browser_effect(
@@ -144,6 +239,25 @@ pub(crate) fn mark_browser_effect_uncertain(
     *ctx.suspend_effect_receipt = Some(lease.receipt_ref().clone());
     crate::effect_host::EffectHost::new(ctx.state.task_store.as_ref(), contract, ctx.effect_run_id)
         .mark_uncertain(lease)
+}
+
+/// Verified not-applied settlement for a browser effect whose dispatch failed at
+/// the transport level BEFORE the sidecar accepted the Act request (mirrors the
+/// channel's `ConnectFailedBeforeDispatch → release_not_applied` pattern). The
+/// receipt returns to `prepared` and `suspend_effect_receipt` is deliberately NOT
+/// set: nothing ran on the page, there is no double-execution risk, so no user
+/// verification card is shown and the engine stays free to retry the action.
+pub(crate) fn release_browser_effect_not_applied(
+    ctx: &BrowserToolCtx<'_>,
+    lease: &crate::effect_host::EffectLease<'_>,
+    code: &str,
+    detail: &str,
+) -> Result<local_first_task_runtime::ExecutionEffectReceipt, String> {
+    let contract = ctx
+        .execution_contract
+        .ok_or_else(|| "browser effect contract disappeared".to_string())?;
+    crate::effect_host::EffectHost::new(ctx.state.task_store.as_ref(), contract, ctx.effect_run_id)
+        .release_not_applied(lease, code, detail)
 }
 
 pub(crate) fn replayed_browser_effect_text(
@@ -238,6 +352,12 @@ pub(crate) async fn emit_approval_card(
     effects.append_output.push(card.clone());
     let _ = emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card }).await;
     effects.request_confirm = true;
+    effects
+        .blocked_capabilities
+        .push(local_first_engine::BlockedCapability {
+            key: name.to_string(),
+            reason: "approval_required".to_string(),
+        });
     "AWAITING USER CONFIRMATION: the action was proposed via a \
 confirmation card in the interface. Do NOT say it was executed."
         .to_string()
@@ -958,6 +1078,19 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     {
                         *ctx.current_target = t.to_string();
                     }
+                    // P1 fix: default to 'interact' mode (9k chars) instead of 'extract' (40k chars).
+                    // The sub-agent typically needs to see interactive elements (buttons, suggestions)
+                    // to click, not the full page content. Extract mode can still be requested
+                    // explicitly for data collection.
+                    let mode = args
+                        .get("mode")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("interact");
+                    let snapshot_params = if mode == "extract" {
+                        browser_chat_snapshot_params(ctx.current_target.as_str())
+                    } else {
+                        browser_chat_act_snapshot_params(ctx.current_target.as_str())
+                    };
                     let _ = emit_stream_event(
                         ctx.tx,
                         GenerateStreamEvent::Delta {
@@ -972,7 +1105,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                         ctx.current_target.as_str(),
                         client,
                         BrowserMethod::Snapshot,
-                        browser_chat_snapshot_params(ctx.current_target.as_str()),
+                        snapshot_params,
                         BrowserCheckpointTelemetry {
                             journal: ctx.journal,
                             call_id,
@@ -1351,8 +1484,14 @@ or tell the user to start the contained computer (Settings → Local computer)."
                         let mut preflight_error = if blocked_before_claim.is_some() {
                             None
                         } else {
-                            authorize_browser_effect(ctx, "browser_act", call_id, action.clone())
-                                .err()
+                            authorize_browser_action_effect(
+                                ctx,
+                                call_id,
+                                action.clone(),
+                                &current_floor_refs,
+                                focus_ctx,
+                            )
+                            .err()
                         };
                         // SAFETY GATE: arbitrary page script remains forbidden and
                         // the final action that transfers money requires a matching
@@ -1457,11 +1596,14 @@ navigate elsewhere to work around it.",
                                 ))
                             }
                         } else {
-                            let effect_lease = match begin_browser_effect(
+                            let effect_risk =
+                                browser_action_effect_risk(&action, &current_floor_refs, focus_ctx);
+                            let effect_lease = match begin_browser_action_effect(
                                 ctx,
-                                "browser_act",
                                 call_id,
                                 action.clone(),
+                                &current_floor_refs,
+                                focus_ctx,
                             ) {
                                 Ok(crate::effect_host::EffectDecision::Execute(lease)) => lease,
                                 Ok(crate::effect_host::EffectDecision::Replay(receipt)) => {
@@ -1630,12 +1772,40 @@ chosen. Otherwise try a different element, scroll, or wait (kind=wait).]",
                                         );
                                     }
                                     if let Some(committed) = value.get("committedOption") {
+                                        // P1 fix: make committed selection message more explicit
                                         out.push_str(&format!(
-                                            "\n[automatic selection: {committed}]"
+                                            "\n[AUTOCOMPLETE SELECTION COMMITTED: {committed} — field is filled, proceed to next field or action]"
                                         ));
                                     }
                                     if let Some(sugg) = value.get("suggestions") {
-                                        out.push_str(&format!("\n[suggestions: {sugg}]"));
+                                        // P1 fix: make suggestion message more explicit and directive.
+                                        // The snapshot above (in interact mode) shows clickable option elements
+                                        // with their refs (e.g. [ref=e123] option "Rome Termini"). List the
+                                        // visible suggestion texts so the model can match them to refs in the snapshot.
+                                        let suggestions_hint = sugg
+                                            .as_array()
+                                            .map(|items| {
+                                                let texts: Vec<&str> = items
+                                                    .iter()
+                                                    .filter_map(|item| {
+                                                        // Suggestions are text strings from the sidecar
+                                                        item.as_str()
+                                                    })
+                                                    .take(5) // Limit to first 5 suggestions
+                                                    .collect();
+                                                if texts.is_empty() {
+                                                    String::new()
+                                                } else {
+                                                    format!(
+                                                        " Visible suggestions: {}",
+                                                        texts.join(", ")
+                                                    )
+                                                }
+                                            })
+                                            .unwrap_or_default();
+                                        out.push_str(&format!(
+                                            "\n[AUTOCOMPLETE SUGGESTIONS VISIBLE — click one NOW using browser_act kind=click with the ref of a matching option element in the snapshot above.{suggestions_hint} Example: {{\"kind\":\"click\",\"ref\":\"e123\",\"action_class\":\"ordinary\"}}]"
+                                        ));
                                     }
                                     // Guardrail (advisory, Layer C.3): if the model just
                                     // typed/filled a date that is in the PAST, nudge it to
@@ -1830,18 +2000,67 @@ chosen. Otherwise try a different element, scroll, or wait (kind=wait).]",
                                             recovery
                                         }
                                     } else {
-                                        let receipt =
-                                            mark_browser_effect_uncertain(ctx, &effect_lease);
-                                        match receipt {
-                                            Ok(receipt) => Err(format!(
-                                                "{} Sidecar error: {}",
-                                                uncertain_browser_effect_text(&receipt),
-                                                redact_sensitive_text(&error)
-                                            )),
-                                            Err(receipt_error) => Err(format!(
-                                                "Browser action outcome is unknown and its receipt could not be marked uncertain: {receipt_error}. Do not repeat it. Sidecar error: {}",
-                                                redact_sensitive_text(&error)
-                                            )),
+                                        let failure_kind = browser_act_failure_kind(&error);
+                                        if failure_kind
+                                            == BrowserActFailureKind::ConnectFailedBeforeDispatch
+                                        {
+                                            // Transport failed BEFORE the sidecar accepted the Act
+                                            // request: the action never ran, there is no
+                                            // double-execution risk, so release the receipt back to
+                                            // `prepared` (no verification card, retry stays legal)
+                                            // exactly like the channel ConnectFailedBeforeDispatch
+                                            // path instead of suspending the turn on a useless
+                                            // outcome verification.
+                                            match release_browser_effect_not_applied(
+                                                ctx,
+                                                &effect_lease,
+                                                failure_kind.as_str(),
+                                                &redact_sensitive_text(&error),
+                                            ) {
+                                                Ok(receipt) => Err(format!(
+                                                    "BROWSER EFFECT NOT APPLIED (receipt {}): the browser transport failed before the action was dispatched, so nothing was executed on the page. It is safe to retry the action once the browser session is back. Transport error: {}",
+                                                    receipt.receipt_ref.as_ref(),
+                                                    redact_sensitive_text(&error)
+                                                )),
+                                                Err(receipt_error) => Err(format!(
+                                                    "Browser action was never dispatched, but its receipt could not be released: {receipt_error}. Transport error: {}",
+                                                    redact_sensitive_text(&error)
+                                                )),
+                                            }
+                                        } else if !browser_act_uncertain_failure_requires_user_resolution(
+                                            effect_risk,
+                                            failure_kind,
+                                        ) {
+                                            match release_browser_effect_not_applied(
+                                                ctx,
+                                                &effect_lease,
+                                                "low_risk_remote_outcome_unknown",
+                                                &redact_sensitive_text(&error),
+                                            ) {
+                                                Ok(receipt) => Err(format!(
+                                                    "BROWSER EFFECT LOW RISK UNKNOWN (receipt {}): the browser action was ordinary/search-flow interaction, so Homun will not ask the user to verify an external write outcome. Treat this as browser no-progress, inspect the current page, and continue or report partial results. Sidecar error: {}",
+                                                    receipt.receipt_ref.as_ref(),
+                                                    redact_sensitive_text(&error)
+                                                )),
+                                                Err(receipt_error) => Err(format!(
+                                                    "Low-risk browser action outcome was unknown and its receipt could not be released: {receipt_error}. Sidecar error: {}",
+                                                    redact_sensitive_text(&error)
+                                                )),
+                                            }
+                                        } else {
+                                            let receipt =
+                                                mark_browser_effect_uncertain(ctx, &effect_lease);
+                                            match receipt {
+                                                Ok(receipt) => Err(format!(
+                                                    "{} Sidecar error: {}",
+                                                    uncertain_browser_effect_text(&receipt),
+                                                    redact_sensitive_text(&error)
+                                                )),
+                                                Err(receipt_error) => Err(format!(
+                                                    "Browser action outcome is unknown and its receipt could not be marked uncertain: {receipt_error}. Do not repeat it. Sidecar error: {}",
+                                                    redact_sensitive_text(&error)
+                                                )),
+                                            }
                                         }
                                     }
                                 }
@@ -1922,35 +2141,48 @@ chosen. Otherwise try a different element, scroll, or wait (kind=wait).]",
                                     text
                                 })
                                 .unwrap_or_default();
-                            // Read + base64 the PNG. Skip the image (text
-                            // note only) if missing or too large (~1.5MB
-                            // encoded ≈ 1.1MB raw).
-                            match std::fs::read(&path) {
-                                Ok(bytes) if bytes.len() <= 1_100_000 => {
-                                    let encoded =
-                                        base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                    let dataurl = format!("data:image/png;base64,{encoded}");
-                                    *ctx.pending_browser_image = Some(dataurl);
-                                    push_browser_step("screenshot".to_string(), "done");
-                                    Ok(format!(
-                                        "Screenshot captured (see the image attached \
+                            // P0 fix: skip image injection for non-vision models (minimax-m2.7,
+                            // deepseek-v4-pro, etc.) that would fail with "this model does not
+                            // support image input" on subsequent API calls. Return a text-only
+                            // message directing the model to use browser_snapshot instead.
+                            if !ctx.model_supports_vision {
+                                push_browser_step("screenshot".to_string(), "done");
+                                Ok(format!(
+                                    "Screenshot captured and stored for reference. The screenshot \
+is not shown inline because this model does not support image input. Use browser_snapshot to read \
+the page content.{legend}"
+                                ))
+                            } else {
+                                // Read + base64 the PNG. Skip the image (text
+                                // note only) if missing or too large (~1.5MB
+                                // encoded ≈ 1.1MB raw).
+                                match std::fs::read(&path) {
+                                    Ok(bytes) if bytes.len() <= 1_100_000 => {
+                                        let encoded = base64::engine::general_purpose::STANDARD
+                                            .encode(&bytes);
+                                        let dataurl = format!("data:image/png;base64,{encoded}");
+                                        *ctx.pending_browser_image = Some(dataurl);
+                                        push_browser_step("screenshot".to_string(), "done");
+                                        Ok(format!(
+                                            "Screenshot captured (see the image attached \
 below).{legend}"
-                                    ))
-                                }
-                                Ok(bytes) => {
-                                    push_browser_step("screenshot".to_string(), "done");
-                                    Ok(format!(
-                                        "Screenshot captured but too large for \
+                                        ))
+                                    }
+                                    Ok(bytes) => {
+                                        push_browser_step("screenshot".to_string(), "done");
+                                        Ok(format!(
+                                            "Screenshot captured but too large for \
 the preview ({} bytes). Proceed with the text snapshot.",
-                                        bytes.len()
-                                    ))
-                                }
-                                Err(error) => {
-                                    push_browser_step("screenshot".to_string(), "error");
-                                    Ok(format!(
-                                        "Screenshot not readable from disk: {error}. \
+                                            bytes.len()
+                                        ))
+                                    }
+                                    Err(error) => {
+                                        push_browser_step("screenshot".to_string(), "error");
+                                        Ok(format!(
+                                            "Screenshot not readable from disk: {error}. \
 Use the text snapshot."
-                                    ))
+                                        ))
+                                    }
                                 }
                             }
                         }
@@ -3820,7 +4052,7 @@ an uncertain date.",
         // `step_advance` reports progress on a SINGLE step by id (no need to
         // re-send the whole plan → weak-model-proof, no ballooning). It maps to
         // a one-element `sent` and rides the exact same merge + F2-verify path.
-        let sent = match plan_tool_sent(name, args_raw) {
+        let (sent_goal, sent) = match plan_tool_sent(name, args_raw) {
             Ok(sent) => sent,
             Err(result) => {
                 return GatewayToolDispatch {
@@ -3830,10 +4062,26 @@ an uncertain date.",
                 };
             }
         };
+        // The plan's `goal` rides the canonical plan Value: a sent goal (plan creation)
+        // wins, else preserve whatever goal the canonical plan already carries.
+        let plan_goal: Option<String> = sent_goal.or_else(|| plan_value_goal(ctx.plan));
         // 5d.1b: work on a LOCAL copy of the plan (merge mutates in place, and the arm rereads it
         // below); the final plan is returned as an effect (`effects.plan`) and applied after the call.
         // P5: `ctx.plan` is now the opaque `Value`; convert to the typed plan the merge needs.
         let mut current_plan = plan_value_from(ctx.plan);
+        // Status snapshot BEFORE the merge/F2 pass: diffed against the final canonical
+        // statuses to emit one `step_advance` stream event per changed step.
+        let pre_statuses: Vec<(String, String)> = execution_plan_steps(&current_plan)
+            .iter()
+            .map(|s| {
+                (
+                    plan_step_id(s)
+                        .map(str::to_string)
+                        .unwrap_or_else(|| plan_step_title(s).to_string()),
+                    plan_step_status(s).to_string(),
+                )
+            })
+            .collect();
         // MERGE the model's steps into the CANONICAL plan (never replace);
         // returns the canonical indices newly claimed done (held `doing`
         // until F2 verifies). See `merge_plan` for the anti-reset rule.
@@ -3873,7 +4121,11 @@ an uncertain date.",
             // steps the model actually finished stuck at "doing" (the real reason
             // "progress never advances" even on a strong model). And with NO evidence to
             // verify against, don't hold a step hostage: trust the claim (there is nothing
-            // to check). This evidence-based rule is uniform for every model.
+            // to check). This evidence-based rule is uniform for every model. NOTE: a
+            // recorded external-action failure (`[external_action_failed]` marker from the
+            // loop) IS evidence, so a claim shadowed by failed external actions never
+            // reaches this blind-trust path — it hits the deterministic backstop + judge
+            // inside `verify_step_complete` instead.
             let batch_evidence = ctx.step_evidence.join("\n");
             let has_evidence = !batch_evidence.is_empty();
             let mut any_verified = false;
@@ -3946,13 +4198,65 @@ an uncertain date.",
             // truth (verified state), not the model's raw claim. This is what
             // the UI shows and what the next turn resumes from.
             plan_steps = execution_plan_steps(&current_plan);
+            // step_advance stream events: diff canonical statuses before/after the merge + F2.
+            // A status change to `done` here passed F2 (verified=true); a rejected claim keeps
+            // its status but still surfaces as doing→doing with verified=false + reason.
+            for step in &plan_steps {
+                let step_id = plan_step_id(step)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| plan_step_title(step).to_string());
+                let after = plan_step_status(step).to_string();
+                let before = pre_statuses
+                    .iter()
+                    .find(|(id, _)| *id == step_id)
+                    .map(|(_, status)| status.clone());
+                if before.as_deref() == Some(after.as_str()) {
+                    continue;
+                }
+                emit_step_advance_event(
+                    ctx.tx,
+                    &step_id,
+                    plan_step_title(step),
+                    before.as_deref(),
+                    &after,
+                    if after == "done" { Some(true) } else { None },
+                    None,
+                )
+                .await;
+            }
+            if let Some(reason) = rejection.as_deref()
+                && let Some(step) = sent.first()
+            {
+                // Rejected claim: status stays `doing` — the event carries the rejection.
+                let step_id = plan_step_id(step)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| plan_step_title(step).to_string());
+                emit_step_advance_event(
+                    ctx.tx,
+                    &step_id,
+                    plan_step_title(step),
+                    Some("doing"),
+                    "doing",
+                    Some(false),
+                    Some(reason),
+                )
+                .await;
+            }
             // The whole merged/verified plan is the effect the caller applies to `ctx.plan` — in the
             // CANONICAL shape, so the loop's own plan-driven controls can read the frontier back.
-            effects.plan = Some(canonical_plan_value(&plan_steps));
-            let plan_mark = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
+            effects.plan = Some(canonical_plan_value(plan_goal.as_deref(), &plan_steps));
+            let plan_mark = format!(
+                "‹‹PLAN››{}‹‹/PLAN››",
+                build_plan_markdown(plan_goal.as_deref(), &plan_steps)
+            );
             effects.append_output.push(plan_mark.clone());
             let _ = emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: plan_mark }).await;
-            upsert_runtime_plan_memory_from_state(ctx.state, ctx.thread_id, &plan_steps);
+            upsert_runtime_plan_memory_from_state(
+                ctx.state,
+                ctx.thread_id,
+                plan_goal.as_deref(),
+                &plan_steps,
+            );
             // Turn trace: record the plan op with the model's SENT step statuses vs the CANONICAL
             // (merged/verified) ones — observability only, never influences the merge.
             ctx.turn_trace
@@ -4557,6 +4861,13 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
                 let _ =
                     emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card_text }).await;
                 effects.request_confirm = true;
+                effects.pending_capability = Some(need.clone());
+                effects
+                    .blocked_capabilities
+                    .push(local_first_engine::BlockedCapability {
+                        key: "suggest_capabilities".to_string(),
+                        reason: "connect_required".to_string(),
+                    });
                 "AWAITING: I showed the user clickable cards to \
 connect the suggested connectors (skill/MCP/Composio). Do NOT say you have already connected anything."
                     .to_string()
@@ -4647,6 +4958,12 @@ require your confirmation in the app. Propose it and stop."
         {
             let blocked = read_only_write_blocked_msg(&mcp_tool);
             emit_read_only_block_if_needed(ctx, &mut effects, &blocked).await;
+            effects
+                .blocked_capabilities
+                .push(local_first_engine::BlockedCapability {
+                    key: name.to_string(),
+                    reason: "read_only".to_string(),
+                });
             blocked
         } else {
             // ADR 0023: route the decision through the pure policy fn. The approval axis is
@@ -5289,6 +5606,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             let browse_executor = GatewayBrowseExecutor {
                 state: self.state,
                 http: &self.state.http,
+                tx: self.tx,
                 thread_id: self.thread_id,
                 prompt: self.prompt,
                 read_only: self.read_only
@@ -5428,6 +5746,225 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
     }
 }
 
+/// Anti-loop nudge logic for browser sub-turns (task 69). Exposed as a free function so unit tests can
+/// exercise the counter/injection without a full `GatewayBrowserExecutor` + live browser session.
+///
+/// Returns `(updated_count, Option<nudge_text>, hard_capped)`. When `tool_name` is
+/// `browser_snapshot` the counter increments; for ANY other tool (click/fill/type/navigate/
+/// browser_done/browser_screenshot …) it resets to 0.
+///
+/// The nudge is **appended to the tool result text** (not injected as a separate system message) so
+/// it arrives in the correct chat-API position — sandwiching a system message between `tool_call`
+/// and `tool_response` violates the contract and the model never sees it.
+///
+/// When the incremented count reaches `threshold` a **soft nudge** is returned. The counter is NOT
+/// reset so the nudge repeats on every subsequent snapshot, giving the model a clear escalating
+/// signal. After `threshold + 2` consecutive snapshots the **hard cap** fires: a terminating
+/// nudge is returned with `hard_capped = true` so the caller can force a `NoProgress` outcome to
+/// terminate the browse sub-turn. The counter still does NOT reset on the hard cap — subsequent
+/// snapshots hit the hard cap immediately, rapidly incrementing `browser_no_progress` until the
+/// budget trips. A `threshold` of 0 disables both nudge and hard cap entirely.
+pub(crate) fn browser_anti_loop_nudge(
+    consecutive_snapshot_count: u32,
+    tool_name: &str,
+    threshold: u32,
+) -> (u32, Option<String>, bool) {
+    let new_count = if tool_name == "browser_snapshot" {
+        consecutive_snapshot_count.saturating_add(1)
+    } else {
+        0
+    };
+    let hard_cap = threshold.saturating_add(2);
+    if threshold > 0 && new_count >= hard_cap {
+        let nudge = format!(
+            "⚠️ ANTI-LOOP: You have taken {} consecutive snapshot/observation actions without performing any meaningful interaction. \
+The browser sub-turn has been TERMINATED due to a snapshot loop — no further snapshots will be processed. \
+You MUST stop calling browser_snapshot and either perform a concrete action (browser_act, browser_navigate) or call browser_done with your findings.",
+            new_count,
+        );
+        (new_count, Some(nudge), true)
+    } else if threshold > 0 && new_count >= threshold {
+        let nudge = format!(
+            "⚠️ ANTI-LOOP: You have taken {} consecutive snapshot/observation actions without performing any meaningful interaction. \
+You MUST now perform ONE of these actions: browser_act, browser_navigate, or browser_done with your findings. \
+Do NOT call browser_snapshot again. Choose a concrete action now.",
+            new_count,
+        );
+        (new_count, Some(nudge), false)
+    } else {
+        (new_count, None, false)
+    }
+}
+
+fn browser_action_repeat_signature(args_raw: &str) -> String {
+    fn field_signature(value: &serde_json::Value) -> String {
+        const KEYS: &[&str] = &[
+            "kind",
+            "ref",
+            "target",
+            "target_id",
+            "selector",
+            "text",
+            "value",
+            "key",
+        ];
+        KEYS.iter()
+            .filter_map(|key| {
+                let raw = value.get(*key)?;
+                let normalized = raw
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| raw.to_string());
+                Some(format!("{key}={normalized}"))
+            })
+            .collect::<Vec<_>>()
+            .join(";")
+    }
+
+    let value: serde_json::Value =
+        serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({ "raw": args_raw }));
+    if let Some(actions) = value.get("actions").and_then(|actions| actions.as_array()) {
+        let action_sigs = actions
+            .iter()
+            .map(field_signature)
+            .collect::<Vec<_>>()
+            .join("|");
+        if !action_sigs.is_empty() {
+            return action_sigs;
+        }
+    }
+    let signature = field_signature(&value);
+    if signature.is_empty() {
+        args_raw.split_whitespace().collect::<Vec<_>>().join(" ")
+    } else {
+        signature
+    }
+}
+
+pub(crate) fn repeated_browser_action_nudge(
+    recent_action_signatures: &mut std::collections::VecDeque<String>,
+    tool_name: &str,
+    args_raw: &str,
+    threshold: usize,
+) -> (Option<String>, bool) {
+    if tool_name != "browser_act" {
+        return (None, false);
+    }
+
+    let signature = browser_action_repeat_signature(args_raw);
+    if recent_action_signatures
+        .back()
+        .is_some_and(|last| last != &signature)
+    {
+        recent_action_signatures.clear();
+    }
+    recent_action_signatures.push_back(signature);
+    while recent_action_signatures.len() > threshold.max(1) {
+        recent_action_signatures.pop_front();
+    }
+
+    let repeated = recent_action_signatures
+        .iter()
+        .rev()
+        .take_while(|sig| {
+            recent_action_signatures
+                .back()
+                .is_some_and(|last| *sig == last)
+        })
+        .count();
+    if threshold == 0 || repeated < 2 {
+        return (None, false);
+    }
+
+    let hard_capped = repeated >= threshold;
+    let nudge = if hard_capped {
+        format!(
+            "⚠️ ANTI-LOOP: The same browser action has been repeated {repeated} times without a different action strategy. \
+The browser sub-turn has been TERMINATED due to a repeated action loop. Call browser_done with current findings or change site/source."
+        )
+    } else {
+        format!(
+            "⚠️ ANTI-LOOP: The same browser action has been repeated {repeated} times. \
+Do not repeat it again; choose a different ref/action strategy or call browser_done with current findings."
+        )
+    };
+    (Some(nudge), hard_capped)
+}
+
+fn browser_failed_action_family(args_raw: &str) -> String {
+    let value: serde_json::Value =
+        serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(actions) = value.get("actions").and_then(|actions| actions.as_array()) {
+        let families = actions
+            .iter()
+            .filter_map(|action| action.get("kind").and_then(|kind| kind.as_str()))
+            .map(str::trim)
+            .filter(|kind| !kind.is_empty())
+            .collect::<Vec<_>>();
+        if !families.is_empty() {
+            return families.join("+");
+        }
+    }
+    value
+        .get("kind")
+        .and_then(|kind| kind.as_str())
+        .map(str::trim)
+        .filter(|kind| !kind.is_empty())
+        .unwrap_or("browser_act")
+        .to_string()
+}
+
+pub(crate) fn repeated_browser_failed_action_nudge(
+    recent_failed_action_families: &mut std::collections::VecDeque<String>,
+    tool_name: &str,
+    args_raw: &str,
+    failed: bool,
+    threshold: usize,
+) -> (Option<String>, bool) {
+    if tool_name != "browser_act" || !failed || threshold == 0 {
+        return (None, false);
+    }
+
+    let family = browser_failed_action_family(args_raw);
+    if recent_failed_action_families
+        .back()
+        .is_some_and(|last| last != &family)
+    {
+        recent_failed_action_families.clear();
+    }
+    recent_failed_action_families.push_back(family.clone());
+    while recent_failed_action_families.len() > threshold.max(1) {
+        recent_failed_action_families.pop_front();
+    }
+
+    let repeated = recent_failed_action_families
+        .iter()
+        .rev()
+        .take_while(|item| {
+            recent_failed_action_families
+                .back()
+                .is_some_and(|last| *item == last)
+        })
+        .count();
+    if repeated < 2 {
+        return (None, false);
+    }
+
+    let hard_capped = repeated >= threshold;
+    let nudge = if hard_capped {
+        format!(
+            "⚠️ ANTI-LOOP: browser action family `{family}` failed {repeated} times in this sub-turn. \
+The browser sub-turn has been TERMINATED due to repeated failed actions. Call browser_done with current findings or change site/source."
+        )
+    } else {
+        format!(
+            "⚠️ ANTI-LOOP: browser action family `{family}` has already failed {repeated} times. \
+Do not repeat it; change strategy, change source, or call browser_done with current findings."
+        )
+    };
+    (Some(nudge), hard_capped)
+}
+
 /// The gateway's `BrowserExecutor` (ADR 0024 inc 5, 5.D1b slice 5b; ADR 0025 seam). OWNS the browser
 /// subsystem's turn state — the live sidecar `browser_session` (a gateway type that can't live in the
 /// engine-safe `LoopState`) plus the browser-private bookkeeping (last snapshot, current tab / opened
@@ -5475,6 +6012,19 @@ pub(crate) struct GatewayBrowserExecutor<'a> {
         Option<local_first_execution_protocol::ValidatedExecutionContract>,
     pub(crate) effect_run_id: Option<String>,
     pub(crate) turn_id: Option<String>,
+    // Phase 3.2: step memory ring buffer (max 5 entries of [tool_name, first_ref, ok_or_error]).
+    // `None` when `HOMUN_BROWSER_STEP_MEMORY` is not enabled.
+    pub(crate) step_memory: Option<std::collections::VecDeque<[String; 3]>>,
+    // Phase 4.1: auto-screenshot after every successful browser_navigate / browser_act.
+    pub(crate) auto_screenshot: bool,
+    // Phase 4.2: capture a screenshot when browser_no_progress reaches 2.
+    pub(crate) screenshot_on_stall: bool,
+    // Anti-loop (task 69): consecutive explicit `browser_snapshot` calls without a
+    // meaningful interaction. Auto-observations after browser_act/browser_navigate
+    // do NOT count — only the model's own `browser_snapshot` tool calls.
+    pub(crate) consecutive_snapshot_count: u32,
+    pub(crate) recent_action_signatures: std::collections::VecDeque<String>,
+    pub(crate) recent_failed_action_families: std::collections::VecDeque<String>,
 }
 
 impl Drop for GatewayBrowserExecutor<'_> {
@@ -5550,9 +6100,15 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
         // `&mut self`, loop-visible browser fields + provider from `&mut ls`. `browser_session` is
         // threaded separately (its Cell/RefCell would make the ctx non-`Sync`). ADR 0025 folds this
         // whole ctx into a recursive `browse(goal)` and the seam goes away.
+        //
         let mut outcome_hint: Option<local_first_engine::contract::ToolOutcomeHint> = None;
         let mut suspend_effect_receipt = None;
-        let text = {
+        // Compute vision support through the single catalog gate used by the
+        // browse sub-loop policy. Browser screenshots are automatic diagnostics,
+        // so unknown vision support must fail closed here too.
+        let model_supports_vision =
+            model_supports_vision(&ls.provider.base_url, &ls.provider.model);
+        let mut text = {
             let mut bctx = BrowserToolCtx {
                 browser_used: &mut ls.browser_used,
                 last_snapshot: &mut self.last_snapshot,
@@ -5574,6 +6130,7 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
                 effect_run_id: self.effect_run_id.as_deref(),
                 suspend_effect_receipt: &mut suspend_effect_receipt,
                 outcome_hint: &mut outcome_hint,
+                model_supports_vision,
             };
             execute_browser_tool(
                 &mut bctx,
@@ -5584,6 +6141,181 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
             )
             .await
         };
+        // Phase 3.2: record this tool's outcome in the step memory ring buffer.
+        if let Some(step_mem) = self.step_memory.as_mut() {
+            let status = match outcome_hint {
+                Some(local_first_engine::contract::ToolOutcomeHint::NoProgress) => "nop",
+                _ => "ok",
+            };
+            let first_ref = serde_json::from_str::<serde_json::Value>(args_raw)
+                .ok()
+                .and_then(|v| {
+                    v.get("ref")
+                        .and_then(|r| r.as_str())
+                        .map(str::to_string)
+                        .or_else(|| {
+                            v.get("actions")
+                                .and_then(|a| a.as_array())
+                                .and_then(|arr| arr.first())
+                                .and_then(|first| first.get("ref"))
+                                .and_then(|r| r.as_str())
+                                .map(str::to_string)
+                        })
+                })
+                .unwrap_or_default();
+            let short_ref: String = first_ref.chars().take(30).collect();
+            if step_mem.len() >= 5 {
+                step_mem.pop_front();
+            }
+            step_mem.push_back([name.to_string(), short_ref, status.to_string()]);
+        }
+        // Anti-loop nudge (task 69): count consecutive explicit `browser_snapshot` calls.
+        // Only the model's own snapshot tool calls increment — auto-observations returned
+        // after browser_act/browser_navigate are separate tool results, not `browser_snapshot`
+        // actions, so they don't count. The nudge is appended to the tool RESULT text (not
+        // injected as a separate system message) so it arrives in the correct chat-API
+        // position — sandwiching a system message between tool_call and tool_response
+        // violates the contract and the model never sees it. After `threshold + 2`
+        // consecutive snapshots the hard cap fires: the tool result becomes a failure
+        // message and the outcome is marked `NoProgress` so the agent loop terminates the
+        // browse sub-turn.
+        let anti_loop_threshold = std::env::var("HOMUN_BROWSER_ANTI_LOOP_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(3);
+        let (new_snapshot_count, anti_loop_nudge, hard_capped) =
+            browser_anti_loop_nudge(self.consecutive_snapshot_count, name, anti_loop_threshold);
+        self.consecutive_snapshot_count = new_snapshot_count;
+        if hard_capped {
+            tracing::warn!(
+                target: "browser_anti_loop",
+                threshold = anti_loop_threshold,
+                "anti-loop HARD CAP: {} consecutive snapshots — terminating browse sub-turn",
+                anti_loop_threshold.saturating_add(2),
+            );
+            return local_first_engine::ToolOutcome {
+                result: anti_loop_nudge.unwrap_or_else(|| {
+                    "Browser sub-turn terminated due to a snapshot loop.".to_string()
+                }),
+                effects: local_first_engine::ToolEffects {
+                    outcome_hint: Some(local_first_engine::contract::ToolOutcomeHint::NoProgress),
+                    ..Default::default()
+                },
+            };
+        }
+        if let Some(nudge) = anti_loop_nudge {
+            tracing::info!(
+                target: "browser_anti_loop",
+                threshold = anti_loop_threshold,
+                "anti-loop nudge appended to tool result: {} consecutive snapshots without action",
+                new_snapshot_count,
+            );
+            text.push_str("\n\n");
+            text.push_str(&nudge);
+        }
+        let repeated_action_threshold = std::env::var("HOMUN_BROWSER_REPEATED_ACTION_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(3);
+        let (repeat_nudge, repeat_hard_capped) = repeated_browser_action_nudge(
+            &mut self.recent_action_signatures,
+            name,
+            args_raw,
+            repeated_action_threshold,
+        );
+        if repeat_hard_capped {
+            return local_first_engine::ToolOutcome {
+                result: repeat_nudge
+                    .map(|nudge| format!("{text}\n\n{nudge}"))
+                    .unwrap_or(text),
+                effects: local_first_engine::ToolEffects {
+                    outcome_hint: Some(local_first_engine::contract::ToolOutcomeHint::NoProgress),
+                    ..Default::default()
+                },
+            };
+        }
+        if let Some(nudge) = repeat_nudge {
+            text.push_str("\n\n");
+            text.push_str(&nudge);
+            outcome_hint = Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
+        }
+        let failed_action_threshold = std::env::var("HOMUN_BROWSER_FAILED_ACTION_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(3);
+        let (failed_action_nudge, failed_action_hard_capped) = repeated_browser_failed_action_nudge(
+            &mut self.recent_failed_action_families,
+            name,
+            args_raw,
+            matches!(
+                outcome_hint,
+                Some(local_first_engine::contract::ToolOutcomeHint::NoProgress)
+            ),
+            failed_action_threshold,
+        );
+        if failed_action_hard_capped {
+            return local_first_engine::ToolOutcome {
+                result: failed_action_nudge
+                    .map(|nudge| format!("{text}\n\n{nudge}"))
+                    .unwrap_or(text),
+                effects: local_first_engine::ToolEffects {
+                    outcome_hint: Some(local_first_engine::contract::ToolOutcomeHint::NoProgress),
+                    ..Default::default()
+                },
+            };
+        }
+        if let Some(nudge) = failed_action_nudge {
+            text.push_str("\n\n");
+            text.push_str(&nudge);
+            outcome_hint = Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
+        }
+        // Phase 4.1: auto-screenshot after successful navigate/act.
+        // Phase 4.2: screenshot on stall when browser_no_progress >= 2.
+        let wants_auto_screenshot = self.auto_screenshot
+            && matches!(name, "browser_navigate" | "browser_act")
+            && !matches!(
+                outcome_hint,
+                Some(local_first_engine::contract::ToolOutcomeHint::NoProgress)
+            );
+        let wants_stall_screenshot = self.screenshot_on_stall && ls.browser_no_progress >= 2;
+        if (wants_auto_screenshot || wants_stall_screenshot) && ls.pending_browser_image.is_none() {
+            let mut ss_hint: Option<local_first_engine::contract::ToolOutcomeHint> = None;
+            let mut ss_receipt = None;
+            let mut bctx = BrowserToolCtx {
+                browser_used: &mut ls.browser_used,
+                last_snapshot: &mut self.last_snapshot,
+                payment_floor_refs: &mut self.last_payment_floor_refs,
+                payment_context_by_target: &mut self.payment_context_by_target,
+                pending_browser_image: &mut ls.pending_browser_image,
+                browser_tool_call_ids: &mut ls.browser_tool_call_ids,
+                current_target: &mut self.current_target,
+                opened_targets: &mut self.opened_targets,
+                nav_failures: &mut self.nav_failures,
+                state: self.state,
+                tx: self.tx,
+                thread_id: self.thread_id,
+                prompt: self.prompt,
+                read_only: self.read_only,
+                channel_owner: self.channel_owner,
+                journal: &self.journal,
+                execution_contract: self.execution_contract.as_ref(),
+                effect_run_id: self.effect_run_id.as_deref(),
+                suspend_effect_receipt: &mut ss_receipt,
+                outcome_hint: &mut ss_hint,
+                model_supports_vision,
+            };
+            let _ = execute_browser_tool(
+                &mut bctx,
+                &mut self.browser_session,
+                "browser_screenshot",
+                "{}",
+                "auto_ss",
+            )
+            .await;
+            if ls.browser_no_progress >= 2 {
+                ls.browser_no_progress = 0;
+            }
+        }
         local_first_engine::ToolOutcome {
             result: text,
             effects: local_first_engine::ToolEffects {
@@ -5672,11 +6404,13 @@ visibly cannot do the task at all (no relevant form/results after you actually r
 2. FILLING A SEARCH/BOOKING FORM — one field at a time, and for each station/city/airport field you MUST \
 select its suggestion before moving on:\n\
    a) kind='type' the name into the field (e.g. \"Napoli\").\n\
-   b) A suggestions dropdown appears in the NEXT snapshot as new option/list items under the field. \
-CLICK the matching suggestion — do NOT press Enter, and do NOT type the next field yet. If you type the \
-next field before selecting the suggestion, the first field CLEARS and you'll be stuck re-typing it (this \
-is the #1 cause of a search form that never completes). If no suggestion list appears after one step, then \
-you may press Enter.\n\
+   b) After kind='type', inspect the returned observation. auto_complete is optional and by default \
+uses DOM semantics: ARIA comboboxes may be committed by the browser sidecar, while plain/non-ARIA \
+fields keep visible suggestions for you to inspect. If the action says AUTOCOMPLETE SELECTION \
+COMMITTED, move to the next field. If suggestion option/list items are visible, CLICK the matching \
+suggestion immediately from this observation. Do NOT type the next field until the current station \
+is committed; otherwise the first field may clear and you'll be stuck re-typing it. If no suggestion \
+list appears after one step, then you may press Enter.\n\
    IMPORTANT — every click (and every Enter/submit) MUST carry action_class, or it is REJECTED and nothing \
 happens: use action_class=\"ordinary\" for normal interaction like picking a suggestion, opening a menu or \
 pressing a search button; \"account\" for logging in; \"booking\" for reserving/selecting a seat or fare. \
@@ -5692,6 +6426,11 @@ one by one. Resolve a relative/partial date against today's date shown above (e.
 2026-08-18). When every field is set, click the search button. Do NOT bundle a station 'type' together \
 with other actions — after typing a station you must stop and select its suggestion first. (You MAY bundle \
 independent, non-autocomplete actions, e.g. set_date + set_time, in one browser_act `actions` array.)\n\
+After every kind='type' into an autocomplete field, read the post-action snapshot and the action notes. If \n\
+the field was auto-committed, continue. If a dropdown remains open, find the matching option element \n\
+(role=option or similar) and click it. Example: {{\"kind\":\"click\",\"ref\":\"e123\",\"action_class\":\"ordinary\"}}.\n\
+Use auto_complete=false only when you explicitly need to force manual dropdown inspection; use \n\
+auto_complete=true only for a known-safe non-ARIA typeahead you want the sidecar to commit.\n\
 2b. SELECTING A RESULT / CONTINUING A BOOKING — result pages (trains, flights, hotels) often expose BOTH \
 a visible solution CARD and duplicate screen-reader buttons beside it (e.g. \"Vedi i dettagli…\", \
 \"Torna alla pagina precedente\"). Prefer the control that CONTAINS the concrete option you want \
@@ -5867,7 +6606,7 @@ pub(crate) fn earlier_browse_call_in_current_round(
     false
 }
 
-pub(crate) const MAX_DISTINCT_BROWSE_CALLS_PER_TURN: usize = 4;
+pub(crate) const MAX_DISTINCT_BROWSE_CALLS_PER_TURN: usize = 2;
 
 pub(crate) fn normalized_browse_goal(goal: &str) -> String {
     goal.split_whitespace()
@@ -5960,11 +6699,15 @@ pub(crate) fn delegated_browse_tool_outcome(
         result: local_first_engine::browse::browse_result_for_manager(result),
         effects: local_first_engine::ToolEffects {
             browser_activity_observed: true,
-            outcome_hint: Some(if result.found {
-                local_first_engine::ToolOutcomeHint::Success
-            } else {
-                local_first_engine::ToolOutcomeHint::NoProgress
-            }),
+            outcome_hint: Some(
+                if result.found
+                    && result.status == local_first_engine::browse::BrowserDoneStatus::Completed
+                {
+                    local_first_engine::ToolOutcomeHint::Success
+                } else {
+                    local_first_engine::ToolOutcomeHint::NoProgress
+                },
+            ),
             suspend_effect_receipt,
             ..Default::default()
         },
@@ -5985,14 +6728,40 @@ pub(crate) struct GatewayBrowseOutcome {
 /// This bound only exists so a pathological loop cannot spin forever — the stall window (90s without
 /// progress) and the absolute wall clock (300s) are what normally stop a stuck browse.
 pub(crate) fn browse_hard_round_ceiling(rounds: usize) -> usize {
-    rounds.saturating_mul(4).max(24)
+    rounds.saturating_add(8).max(24)
+}
+
+pub(crate) async fn await_browse_subturn_with_timeout<F>(
+    future: F,
+    timeout_ms: u64,
+) -> Result<F::Output, tokio::time::error::Elapsed>
+where
+    F: std::future::Future,
+{
+    tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), future).await
+}
+
+pub(crate) fn browse_subturn_timeout_result(
+    last_snapshot: &str,
+    sources: Vec<String>,
+    contract: Option<&local_first_engine::browse::BrowseResultContract>,
+) -> local_first_engine::BrowseResult {
+    let fallback_payload = local_first_engine::browse::BrowserDonePayload {
+        status: local_first_engine::browse::BrowserDoneStatus::Timeout,
+        answer: last_snapshot.chars().take(2000).collect(),
+        items: vec![],
+        fields_missing: vec!["browser_done".into()],
+        sources,
+        evidence: vec!["Browser sub-turn exceeded its wall-clock budget.".into()],
+    };
+    local_first_engine::browse::validate_browser_done_payload(fallback_payload, contract)
 }
 
 pub(crate) fn browse_round_budget(
     contract: &local_first_engine::browse::BrowseResultContract,
 ) -> usize {
-    const BASE: usize = 5;
-    const CAP: usize = 10;
+    const BASE: usize = 12;
+    const CAP: usize = 24;
     let required = contract.fields.iter().filter(|f| f.required).count();
     let items_bonus = if contract.minimum_items.unwrap_or(0) > 3 {
         1
@@ -6009,6 +6778,11 @@ pub(crate) fn browse_round_budget(
 pub(crate) struct GatewayBrowseExecutor<'a> {
     pub(crate) state: &'a AppState,
     pub(crate) http: &'a reqwest::Client,
+    // Activity relay (ADR 0025 encapsulation exception): the REAL sink of the enclosing manager
+    // turn. The sub-turn's model tokens and engine events stay on the drain, but browser-action
+    // ACT narration ("🌐 Opening…", "👁️ Re-reading…", "📸 Capturing…") must reach the island
+    // Activity panel, so the sub browser executor is wired to this sink (see `sub_browser_executor`).
+    pub(crate) tx: &'a StreamSink,
     pub(crate) thread_id: Option<&'a str>,
     pub(crate) prompt: &'a str,
     pub(crate) read_only: bool,
@@ -6023,6 +6797,52 @@ pub(crate) struct GatewayBrowseExecutor<'a> {
 }
 
 impl GatewayBrowseExecutor<'_> {
+    /// Build the browser-only sub-executor for one browse sub-turn. Its narration port (`tx`) is
+    /// wired to the REAL enclosing turn sink (`self.tx`) so browser-action ACT events reach the
+    /// island Activity panel; everything else the sub-turn produces (model tokens via the sub
+    /// `GatewayModelClient`, engine plan/terminal events via `run_turn`'s sink) stays on the
+    /// caller's drain (ADR 0025 encapsulation). The browser branch of `execute_browser_tool`
+    /// emits ONLY `‹‹ACT››` narration deltas on `ctx.tx` — no terminal/delta of the sub-turn's
+    /// model output ever crosses this port.
+    pub(crate) fn sub_browser_executor(
+        &self,
+        journal: agent_journal::GatewayJournal,
+        result_contract: Option<local_first_engine::browse::BrowseResultContract>,
+        step_memory: Option<std::collections::VecDeque<[String; 3]>>,
+        auto_screenshot: bool,
+        screenshot_on_stall: bool,
+    ) -> GatewayBrowserExecutor<'_> {
+        GatewayBrowserExecutor {
+            browser_session: None,
+            last_snapshot: String::new(),
+            last_payment_floor_refs: std::collections::HashMap::new(),
+            payment_context_by_target: std::collections::HashMap::new(),
+            result_contract,
+            current_target: "chat_0".to_string(),
+            opened_targets: Vec::new(),
+            nav_failures: std::collections::HashMap::new(),
+            state: self.state,
+            tx: self.tx,
+            thread_id: self.thread_id,
+            prompt: self.prompt,
+            read_only: self.read_only,
+            channel_owner: self.channel_owner,
+            journal,
+            execution_contract: self.execution_contract.clone(),
+            effect_run_id: self.agent_run_id.clone(),
+            turn_id: self
+                .execution_contract
+                .as_ref()
+                .map(|contract| contract.as_ref().execution_id.clone()),
+            step_memory,
+            auto_screenshot,
+            screenshot_on_stall,
+            consecutive_snapshot_count: 0,
+            recent_action_signatures: std::collections::VecDeque::new(),
+            recent_failed_action_families: std::collections::VecDeque::new(),
+        }
+    }
+
     /// Run one browser sub-turn for `goal` and return its `BrowseResult`. The recursion (this calls
     /// `run_turn`, which dispatches browser tools back through the sub `GatewayBrowserExecutor`) stays
     /// finite: the sub CapabilityExecutor type has no `browse`, so there is no self-recursive tool.
@@ -6056,8 +6876,11 @@ impl GatewayBrowseExecutor<'_> {
             api_key,
         };
 
-        // The sub-agent's stream is fully encapsulated (see drain_stream_sink) — model tokens and events
-        // are swallowed; only the returned BrowseResult surfaces (the manager narrates to the user).
+        // The sub-agent's stream is encapsulated (see drain_stream_sink): the sub model client and
+        // `run_turn`'s engine sink stay on the drain, so model tokens and plan/terminal events never
+        // leak into the manager turn (ADR 0025). The ONLY crossing is the browser executor's ACT
+        // narration port, wired to the REAL turn sink (`self.tx`) so the island Activity panel sees
+        // browser actions while the browse runs.
         let drain = drain_stream_sink();
         let model_client = crate::model_client::GatewayModelClient {
             http: self.http,
@@ -6100,29 +6923,34 @@ impl GatewayBrowseExecutor<'_> {
         // The tool chokepoint is browser-only: offered browser tools route through the fresh browser
         // executor below; any non-browser call is refused (defense — none are offered in tool_schemas).
         let capability_executor = BrowseOnlyCapabilityExecutor;
-        let mut browser_executor = GatewayBrowserExecutor {
-            browser_session: None,
-            last_snapshot: String::new(),
-            last_payment_floor_refs: std::collections::HashMap::new(),
-            payment_context_by_target: std::collections::HashMap::new(),
-            result_contract: request.contract.clone(),
-            current_target: "chat_0".to_string(),
-            opened_targets: Vec::new(),
-            nav_failures: std::collections::HashMap::new(),
-            state: self.state,
-            tx: &drain,
-            thread_id: self.thread_id,
-            prompt: self.prompt,
-            read_only: self.read_only,
-            channel_owner: self.channel_owner,
-            journal: journal.clone(),
-            execution_contract: self.execution_contract.clone(),
-            effect_run_id: self.agent_run_id.clone(),
-            turn_id: self
-                .execution_contract
-                .as_ref()
-                .map(|contract| contract.as_ref().execution_id.clone()),
+        // ACT narration exits the encapsulation here (`self.tx` = the real turn sink); everything
+        // else the sub-turn emits stays on `drain` (see `sub_browser_executor`).
+        // Phase 3.2: step memory ring buffer, enabled by HOMUN_BROWSER_STEP_MEMORY.
+        let step_memory = match std::env::var("HOMUN_BROWSER_STEP_MEMORY").ok().as_deref() {
+            Some("true" | "1") => Some(std::collections::VecDeque::with_capacity(5)),
+            _ => None,
         };
+        // Phase 4.1: auto-screenshot after navigate/act, enabled by HOMUN_BROWSER_AUTO_SCREENSHOT.
+        let auto_screenshot = matches!(
+            std::env::var("HOMUN_BROWSER_AUTO_SCREENSHOT")
+                .ok()
+                .as_deref(),
+            Some("true" | "1")
+        );
+        // Phase 4.2: screenshot on stall (default ON), disabled by HOMUN_BROWSER_SCREENSHOT_ON_STALL=false/0.
+        let screenshot_on_stall = !matches!(
+            std::env::var("HOMUN_BROWSER_SCREENSHOT_ON_STALL")
+                .ok()
+                .as_deref(),
+            Some("false" | "0")
+        );
+        let mut browser_executor = self.sub_browser_executor(
+            journal.clone(),
+            request.contract.clone(),
+            step_memory,
+            auto_screenshot,
+            screenshot_on_stall,
+        );
         if let Some(hint_url) = request.hint_url.as_deref() {
             let nav_args = serde_json::json!({
                 "url": hint_url,
@@ -6177,7 +7005,7 @@ impl GatewayBrowseExecutor<'_> {
             .contract
             .as_ref()
             .map(browse_round_budget)
-            .unwrap_or(5);
+            .unwrap_or(12);
         let cfg = local_first_engine::TurnConfig {
             // NOT `rounds`: the soft budget below is progress-relative (it resets on every successful
             // browser action), but `hard_round_ceiling` is the raw `for round in 0..N` bound, so
@@ -6219,38 +7047,73 @@ impl GatewayBrowseExecutor<'_> {
             resolved_hitl: None,
         };
 
-        let outcome = local_first_engine::agent_loop::run_turn(
-            ls,
-            cfg,
-            &usage_context,
-            &model_client,
-            &capability_executor,
-            &mut browser_executor,
-            &plan_progress,
-            &completion_judge,
-            &compactor,
-            &turn_policy,
-            // C2: a real journal handle (not a fabricated id) so engine-emitted events for this
-            // sub-turn — including `BrowserBudgetExceeded` — persist alongside the protocol metrics
-            // recorded above/below, when the enclosing run has one registered.
-            &journal,
-            &drain,
-            0.2, // low temperature: deterministic extraction, not creative writing
-            self.thread_id,
-            &std::collections::BTreeSet::new(),
-            &[],
-            user_goal.clone(),
-            String::new(),
-            None,
-            false,
-            0,
-            false,
-            Vec::new(),
-            None, // no trace-dump inside the sub-turn
-            // Sub-turns don't spam the readable per-turn trace (ADR 0025): the manager's turn owns it.
-            &local_first_engine::turn_trace::TurnTrace::disabled(),
+        let outcome = await_browse_subturn_with_timeout(
+            local_first_engine::agent_loop::run_turn(
+                ls,
+                cfg,
+                &usage_context,
+                &model_client,
+                &capability_executor,
+                &mut browser_executor,
+                &plan_progress,
+                &completion_judge,
+                &compactor,
+                &turn_policy,
+                // C2: a real journal handle (not a fabricated id) so engine-emitted events for this
+                // sub-turn — including `BrowserBudgetExceeded` — persist alongside the protocol metrics
+                // recorded above/below, when the enclosing run has one registered.
+                &journal,
+                &drain,
+                0.2, // low temperature: deterministic extraction, not creative writing
+                self.thread_id,
+                &std::collections::BTreeSet::new(),
+                &[],
+                user_goal.clone(),
+                String::new(),
+                None,
+                false,
+                0,
+                false,
+                Vec::new(),
+                None, // no trace-dump inside the sub-turn
+                // Sub-turns don't spam the readable per-turn trace (ADR 0025): the manager's turn owns it.
+                &local_first_engine::turn_trace::TurnTrace::disabled(),
+            ),
+            BROWSE_SUBTURN_MAX_ELAPSED_MS,
         )
         .await;
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(_elapsed) => {
+                let timeout_metrics = serde_json::json!({
+                    "observation_chars": browser_executor.last_snapshot.chars().count() as u64,
+                    "stop_reason": "timeout",
+                    "action_kinds": ["browser_done"],
+                    "timeout_ms": BROWSE_SUBTURN_MAX_ELAPSED_MS,
+                });
+                journal.record(browser_protocol_journal_event(
+                    usage_context.call_id.as_str(),
+                    "hard_timeout",
+                    &timeout_metrics,
+                ));
+                push_browser_step(
+                    browser_protocol_event_summary(
+                        usage_context.call_id.as_str(),
+                        "hard_timeout",
+                        timeout_metrics,
+                    ),
+                    "error",
+                );
+                return GatewayBrowseOutcome {
+                    result: browse_subturn_timeout_result(
+                        &browser_executor.last_snapshot,
+                        Vec::new(),
+                        request.contract.as_ref(),
+                    ),
+                    suspend_effect_receipt: None,
+                };
+            }
+        };
 
         let suspend_effect_receipt = match &outcome.stop {
             local_first_engine::TurnStop::SuspendedEffect { receipt_ref } => {
@@ -6512,7 +7375,13 @@ browser_dialog), then write the final answer."
 pub(crate) struct NoPlanProgress;
 
 impl local_first_engine::PlanProgress for NoPlanProgress {
-    async fn persist_plan(&self, _thread: Option<&str>, _steps: &[serde_json::Value]) {}
+    async fn persist_plan(
+        &self,
+        _thread: Option<&str>,
+        _goal: Option<&str>,
+        _steps: &[serde_json::Value],
+    ) {
+    }
     async fn record_step_outcome(
         &self,
         _thread: Option<&str>,
@@ -6535,7 +7404,11 @@ impl local_first_engine::PlanProgress for NoPlanProgress {
     ) -> Option<Vec<serde_json::Value>> {
         None
     }
-    fn plan_value_from_steps(&self, _steps: &[serde_json::Value]) -> serde_json::Value {
+    fn plan_value_from_steps(
+        &self,
+        _goal: Option<&str>,
+        _steps: &[serde_json::Value],
+    ) -> serde_json::Value {
         serde_json::Value::Null
     }
 }
@@ -6551,16 +7424,16 @@ impl local_first_engine::ContextCompactor for NoContextCompactor {
 }
 
 /// Open `TurnPolicy` for the browse sub-turn (ADR 0025): nothing is route-blocked (the manager already
-/// applied the turn's route to the `browse` call itself), and vision defaults on so a browser screenshot
-/// can be injected for a vision-capable browser model.
+/// applied the turn's route to the `browse` call itself), and vision is resolved through the provider
+/// catalog so a screenshot is injected only when the browser model can actually see it.
 pub(crate) struct OpenTurnPolicy;
 
 impl local_first_engine::TurnPolicy for OpenTurnPolicy {
     fn route_blocked(&self, _tool: &str) -> Option<String> {
         None
     }
-    fn supports_vision(&self, _base_url: &str, _model: &str) -> bool {
-        true
+    fn supports_vision(&self, base_url: &str, model: &str) -> bool {
+        model_supports_vision(base_url, model)
     }
 }
 

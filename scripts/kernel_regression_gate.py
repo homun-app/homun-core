@@ -42,6 +42,22 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ["cargo", "test", "-p", "local-first-task-runtime", "turn_lifecycle"],
         ),
         Step(
+            "task runtime turn reducer",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-task-runtime",
+                "--test",
+                "turn_reducer_contract",
+            ],
+        ),
+        Step(
+            "turn consistency audit unit tests",
+            [PYTHON, "-m", "unittest", "scripts.test_audit_turn_consistency", "-v"],
+        ),
+        Step("kernel projection smoke", [PYTHON, "scripts/smoke_kernel_projection.py"]),
+        Step(
             "task runtime active chat turn",
             ["cargo", "test", "-p", "local-first-task-runtime", "active_chat_turn"],
         ),
@@ -653,7 +669,98 @@ def build_plan(env: dict[str, str]) -> list[Step]:
                 "steering",
             ],
         ),
-        Step("desktop cursor grammar", ["npm", "run", "test:cursor-grammar"], cwd=DESKTOP),
+        Step(
+            "gateway turn broker heartbeat",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "gateway_turn_broker",
+            ],
+        ),
+        Step(
+            "model error mapping",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "model_error_mapping",
+            ],
+        ),
+        Step(
+            "extended health endpoint",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "gateway_health",
+            ],
+        ),
+        Step(
+            "engine plan-before-act gate",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-engine",
+                "plan_gate",
+            ],
+        ),
+        Step(
+            "engine replan nudge on stall",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-engine",
+                "replan_nudge",
+            ],
+        ),
+        Step(
+            "engine forced replan on consecutive failures",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-engine",
+                "forced_replan",
+            ],
+        ),
+        Step(
+            "process manager restart policy",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-process-manager",
+                "restart_policy",
+            ],
+        ),
+        Step("desktop unit tests", ["npm", "test"], cwd=DESKTOP),
+        Step(
+            "API contract validation",
+            ["node", "--test", "tests/api-contract.test.mjs"],
+            cwd=DESKTOP,
+        ),
+        Step(
+            "planning state derivation",
+            ["node", "--test", "src/lib/chat-runtime/planningState.test.mjs"],
+            cwd=DESKTOP,
+        ),
+        Step(
+            "plan step display derivation",
+            ["node", "--test", "src/lib/chat-runtime/planStepDisplay.test.mjs"],
+            cwd=DESKTOP,
+        ),
         Step("desktop ui contract", ["npm", "run", "test:ui-contract"], cwd=DESKTOP),
         Step("desktop build", ["npm", "run", "build"], cwd=DESKTOP),
     ]

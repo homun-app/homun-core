@@ -17,7 +17,7 @@ monolite — solo quelli con semantica booleana/path chiara. Per il resto: `rg H
 
 | Flag | Default |
 | --- | --- |
-| `HOMUN_MEMORY_SERVICE` | **OFF** |
+| `HOMUN_MEMORY_SERVICE` | **ON** (`0`/`off`/`false` opt-out) |
 | `HOMUN_MEMORY_POOL` | **ON** |
 | `HOMUN_MEMORY_POOL_READERS` | `3` |
 | `HOMUN_TASK_EXECUTOR_WORKER` | **ON** |

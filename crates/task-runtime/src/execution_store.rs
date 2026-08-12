@@ -985,6 +985,24 @@ impl TaskStore {
         Ok(scoped)
     }
 
+    /// Discards every pending wake receipt owned by one execution and returns
+    /// how many were removed.
+    ///
+    /// Cancelled-while-suspended turns rely on this: a leftover pending wake
+    /// would let the next matching delivery flip the cancelled task back to
+    /// `queued` (see `project_legacy_task_ready_on`) and resurrect the same
+    /// execution. Delivered wakes are journal evidence and are never touched.
+    pub fn discard_pending_execution_wakes(&self, execution_id: &str) -> TaskRuntimeResult<usize> {
+        let execution_id = validated_text(execution_id, "wake discard execution id")?;
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let discarded = tx.execute(
+            "DELETE FROM execution_wakes WHERE execution_id = ?1 AND status = 'pending'",
+            params![execution_id],
+        )?;
+        tx.commit()?;
+        Ok(discarded)
+    }
+
     /// Resolves an uncertain effect and delivers its matching wake atomically.
     pub fn resolve_effect_receipt(
         &self,

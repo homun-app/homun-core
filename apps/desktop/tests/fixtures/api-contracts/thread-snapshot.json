@@ -1,0 +1,36 @@
+{
+  "comment": "Known-good response body for GET /api/chat/threads. Mirrors the Rust ChatThreadSnapshot (lib.rs) returned by chat_threads (gateway_chat_threads.rs). ChatThread fields are snake_case via serde default. Matches TS interface CoreChatThreadSnapshot (coreBridge.ts). workspace_id/source/channel_recipient are #[serde(default)] Option => may be absent on legacy rows; present here.",
+  "payload": {
+    "active_thread_id": "thread_active_prompt",
+    "threads": [
+      {
+        "thread_id": "thread_active_prompt",
+        "workspace_id": "ws_personal",
+        "title": "Build a landing page",
+        "subtitle": "Local model",
+        "status": "active",
+        "pinned": false,
+        "computer_session_id": "computer_active_prompt",
+        "task_id": "task_prompt_session",
+        "updated_at": "1719900000",
+        "message_count": 4,
+        "source": null,
+        "channel_recipient": null
+      },
+      {
+        "thread_id": "thread_whatsapp_inbound_001",
+        "workspace_id": "ws_personal",
+        "title": "Anna — WhatsApp",
+        "subtitle": "Channel",
+        "status": "active",
+        "pinned": true,
+        "computer_session_id": "computer_whatsapp_001",
+        "task_id": "task_whatsapp_001",
+        "updated_at": "1719890000",
+        "message_count": 2,
+        "source": "whatsapp",
+        "channel_recipient": "+15551234567"
+      }
+    ]
+  }
+}

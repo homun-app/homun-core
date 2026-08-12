@@ -1,0 +1,15 @@
+{
+  "comment": "Known-good shape for a kernel plan step-advance notification, delivered as a CoreChatStreamEvent of type 'step_advance' over the turn NDJSON stream / WS. Mirrors TS StepAdvancePayload (coreBridge.ts). from/verified/note are nullable (serde Option -> null); step_id/title/to are always present.",
+  "payload": {
+    "type": "step_advance",
+    "request_id": "req_1719900000",
+    "payload": {
+      "step_id": "step_02",
+      "title": "Fetch the quarterly report",
+      "from": "doing",
+      "to": "done",
+      "verified": true,
+      "note": null
+    }
+  }
+}

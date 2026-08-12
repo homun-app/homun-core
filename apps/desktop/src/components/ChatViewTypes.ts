@@ -46,6 +46,10 @@ export interface ChatViewProps {
   onThreadChanged: () => void | Promise<void>;
   onStreamingChange?: (busy: boolean) => void;
   islandRefreshNonce?: number;
+  // Bumps the island projection refresh nonce (owned by App). Used by the
+  // streaming cancel closures to re-fetch the activity projection after the
+  // cancel DELETE settles. Unlike the activity nonce, it never opens the island.
+  bumpIslandRefreshNonce?: () => void;
   runtimeContextRevision: number;
   incomingBackgroundTurn?: {
     turnId: string;

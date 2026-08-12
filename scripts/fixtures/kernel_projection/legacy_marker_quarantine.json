@@ -1,0 +1,57 @@
+{
+  "case": "legacy_marker_quarantine",
+  "endpoint": "/api/chat/threads/thread-legacy-marker/kernel-projection",
+  "legacy_inputs": {
+    "tail_contains_actionable_marker": true,
+    "tail_marker": "HITL_REQUIRED"
+  },
+  "response": {
+    "thread_id": "thread-legacy-marker",
+    "revision": 10,
+    "turn": {
+      "active_turn_id": null,
+      "status": "completed",
+      "last_event_seq": 9,
+      "terminal_reason": "done",
+      "failure_text": null,
+      "updated_at": 1723360140
+    },
+    "plan": null,
+    "activity": [],
+    "subagents": [],
+    "browser": {
+      "state": "idle",
+      "target_id": null,
+      "latest_progress": null,
+      "failure_reason": null,
+      "snapshot_verified": false
+    },
+    "capability_runtime": {
+      "loaded_tools": [],
+      "armed_sensitive_domains": [],
+      "pending_capability": null,
+      "blocked_capabilities": []
+    },
+    "attention": {
+      "awaiting_user": false,
+      "approvals": [],
+      "uncertain_effects": []
+    },
+    "actions": {
+      "can_stop": false,
+      "composer_mode": "new_turn"
+    }
+  },
+  "expect": {
+    "equals": {
+      "turn.active_turn_id": null,
+      "turn.status": "completed",
+      "attention.awaiting_user": false,
+      "actions.composer_mode": "new_turn"
+    },
+    "lengths": {
+      "attention.approvals": 0,
+      "attention.uncertain_effects": 0
+    }
+  }
+}

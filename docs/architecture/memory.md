@@ -16,9 +16,9 @@ Verificato 2026-07-31 contro `crates/memory` e gateway.
 | --- | --- | --- |
 | `HOMUN_MEMORY_POOL` | **ON** | Pool di connessioni SQLite; `=off`/`0` → `Single` + Mutex |
 | `HOMUN_MEMORY_POOL_READERS` | `3` | Reader nel pool |
-| `HOMUN_MEMORY_SERVICE` | **OFF** | Se `on`/`1`, gateway usa `MemoryRecallService` (`brief`/`recall`/`learn`); altrimenti orchestrazione inline storica |
+| `HOMUN_MEMORY_SERVICE` | **ON** | Se `0`/`off`/`false`, il gateway ricade sull'orchestrazione inline storica; altrimenti (default) usa `MemoryRecallService` (`brief`/`recall`/`learn`) |
 
-Residuo ADR 0022: il **service object** non è ancora il path default. Il pool sì.
+ADR 0022: il **service object** è ora il path default (parity verificata). Il pool resta ON.
 
 ## Moduli rilevanti
 

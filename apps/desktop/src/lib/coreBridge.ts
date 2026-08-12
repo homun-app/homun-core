@@ -321,7 +321,9 @@ export interface CoreChatMessagesSnapshot {
 export interface CoreTaskItem {
   task_id: string;
   kind: string;
+  label: string;
   goal: string;
+  thread_id: string | null;
   status: string;
   priority: string;
   blocked_reason: string | null;
@@ -642,11 +644,23 @@ export interface RecallEventPayload {
   status?: "ready" | "empty" | "degraded" | "unavailable" | "denied";
 }
 
+/** Wire contract for `step_advance` stream/WS events emitted by the kernel:
+ *  a plan step moved status, optionally carrying the verification outcome. */
+export interface StepAdvancePayload {
+  step_id: string;
+  title: string;
+  from: string | null;
+  to: string;
+  verified: boolean | null;
+  note: string | null;
+}
+
 export type CoreChatStreamEvent =
   | CoreChatStreamDelta
   | { type: "reasoning"; request_id: string; text: string; seq?: number }
   | { type: "activity"; request_id: string; text: string; seq?: number }
   | { type: "plan_update"; request_id: string; markdown: string; seq?: number }
+  | { type: "step_advance"; request_id: string; payload: StepAdvancePayload; seq?: number }
   | { type: "choice_prompt"; request_id: string; payload: ChoicePromptPayload }
   | { type: "vault_propose"; request_id: string; payload: VaultProposePayload }
   | { type: "vault_reveal"; request_id: string; payload: VaultRevealPayload }
@@ -3929,11 +3943,20 @@ export const coreBridge = {
     electronRunNextTask(),
 };
 
+// The broker's turn_id normally matches the client requestId (`turn_{requestId}`),
+// but a RESUMED turn keeps the existing execution id: POST /turns answers
+// status "resumed" with the old turn_id while the client holds a fresh
+// requestId. Cancel closures only know the requestId, so remember the
+// server-assigned turn id here and let Stop hit the real turn instead of a
+// 404 ghost (which used to silently skip the server-side cancel).
+const serverTurnIdByRequestId = new Map<string, string>();
+
 async function cancelChatPromptStream(requestId: string) {
-  // Cancel the running turn on the broker (DELETE /turns/{id}). The turn_id is
-  // derived from the requestId the same way the enqueue does (`turn_{requestId}`),
-  // so Stop actually aborts the turn server-side instead of being a no-op.
-  await cancelTurn(`turn_${requestId}`);
+  // Cancel the running turn on the broker (DELETE /turns/{id}). Prefer the
+  // server-assigned turn id registered on enqueue/resume; fall back to the
+  // derived `turn_${requestId}` only when the server id is unknown.
+  const turnId = serverTurnIdByRequestId.get(requestId) ?? `turn_${requestId}`;
+  await cancelTurn(turnId);
 }
 
 function electronCoreStatus(): CoreBridgeStatus {
@@ -4782,6 +4805,10 @@ async function submitBrokerRuntimeChatPromptStream(
     throw new SteeringQueuedDuringSubmissionError();
   }
   const turnId = enqueued.turn_id;
+  // Remember the server turn id for this requestId: on a "resumed" enqueue it
+  // is the EXISTING execution id (not `turn_${requestId}`), and Stop must
+  // DELETE that id or the cancel 404s.
+  serverTurnIdByRequestId.set(requestId, turnId);
   const promptBuildSeconds = roundedSeconds(
     (performance.now() - promptBuildStartedAt) / 1000,
   );
@@ -4804,6 +4831,7 @@ async function submitBrokerRuntimeChatPromptStream(
     });
   } finally {
     keepDesktopAwake(false);
+    serverTurnIdByRequestId.delete(requestId);
   }
   if (replay.state.status !== "completed") {
     throw new Error(replay.errorMessage ?? "Turn did not complete.");
@@ -5046,12 +5074,19 @@ async function resumeBrowserRuntimeChatPromptStream(
 ): Promise<CorePromptSubmissionResult> {
   const startedAt = performance.now();
   const turnId = `turn_${requestId}`;
-  const replay = await replayBrokerTurnStream(turnId, requestId);
-  if (replay.state.status !== "completed") {
-    throw new Error(replay.errorMessage ?? "Turn did not complete.");
+  serverTurnIdByRequestId.set(requestId, turnId);
+  let text: string;
+  let redactedUserText: string | undefined;
+  try {
+    const replay = await replayBrokerTurnStream(turnId, requestId);
+    if (replay.state.status !== "completed") {
+      throw new Error(replay.errorMessage ?? "Turn did not complete.");
+    }
+    text = replay.state.text;
+    redactedUserText = replay.redactedUserText;
+  } finally {
+    serverTurnIdByRequestId.delete(requestId);
   }
-  const text = replay.state.text;
-  const redactedUserText = replay.redactedUserText;
   void threadId;
   const timestamp = currentTimestampSeconds();
   const totalElapsedSeconds = roundedSeconds((performance.now() - startedAt) / 1000);

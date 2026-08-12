@@ -19,7 +19,9 @@ The outcome is a smaller set of explicit contracts, code owners, and anti-regres
 
 These are code observations, not documentation assumptions.
 
-- `crates/task-runtime/src/store.rs::project_thread_activity` projects a thread-level activity view from durable `turn_events` and `tasks`. It returns `latest_turn_status` and an optional `active_turn`.
+- Superseded by Runtime V2: `crates/task-runtime/src/store.rs::project_kernel_thread`
+  projects thread liveness, plan, activity, browser, attention, capability
+  runtime, and actions from durable kernel state.
 - `crates/task-runtime/src/types.rs::TaskStatus` defines the durable task status vocabulary, including active states such as `running`, `waiting_user_approval`, `parked`, and terminal states such as `completed`, `failed`, `cancelled`, and `expired`.
 - `crates/task-runtime/src/store.rs::fence_chat_turn_finalization` uses `turn_steering` rows in `pending`, `claimed`, or `interpreted` to decide whether a running turn may enter the SQL-only `finalizing` state.
 - `crates/desktop-gateway/src/turn_executor.rs::emit_turn_event` writes each turn event to durable storage and broadcasts it live.
