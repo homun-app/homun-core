@@ -1,0 +1,92 @@
+{
+  "case": "browser_grounded_partial_terminal",
+  "endpoint": "/api/chat/threads/thread-browser-grounded-partial/kernel-projection",
+  "response": {
+    "thread_id": "thread-browser-grounded-partial",
+    "revision": 12,
+    "turn": {
+      "active_turn_id": null,
+      "status": "completed",
+      "last_event_seq": 16,
+      "terminal_reason": "canonical_completed",
+      "failure_text": null,
+      "updated_at": 1723360020
+    },
+    "plan": {
+      "goal": "Trovare opzioni treno Milano-Roma",
+      "revision": 4,
+      "steps": [
+        {
+          "id": "s1",
+          "title": "Apri ricerca treni",
+          "status": "done",
+          "detail": "Risultati caricati"
+        },
+        {
+          "id": "s2",
+          "title": "Leggi risultati",
+          "status": "done",
+          "detail": "Opzioni osservate nella pagina risultati"
+        },
+        {
+          "id": "s3",
+          "title": "Rispondi con fonti",
+          "status": "done",
+          "detail": "Risposta completata da risultati parziali grounded"
+        }
+      ],
+      "markdown": "- [x] Apri ricerca treni\n- [x] Leggi risultati\n- [x] Rispondi con fonti"
+    },
+    "activity": [
+      {
+        "text": "Browser results observed with grounded partial fallback",
+        "created_at": 1723360020
+      }
+    ],
+    "subagents": [],
+    "browser": {
+      "state": "done",
+      "target_id": null,
+      "latest_progress": "Found 3 train options and source URLs",
+      "failure_reason": null,
+      "snapshot_verified": true
+    },
+    "capability_runtime": {
+      "loaded_tools": [],
+      "armed_sensitive_domains": [],
+      "pending_capability": null,
+      "blocked_capabilities": []
+    },
+    "attention": {
+      "awaiting_user": false,
+      "approvals": [],
+      "uncertain_effects": []
+    },
+    "actions": {
+      "can_stop": false,
+      "composer_mode": "new_turn"
+    }
+  },
+  "expect": {
+    "equals": {
+      "turn.status": "completed",
+      "turn.active_turn_id": null,
+      "turn.terminal_reason": "canonical_completed",
+      "plan.goal": "Trovare opzioni treno Milano-Roma",
+      "browser.state": "done",
+      "browser.snapshot_verified": true,
+      "attention.awaiting_user": false,
+      "actions.can_stop": false,
+      "actions.composer_mode": "new_turn"
+    },
+    "lengths": {
+      "attention.approvals": 0,
+      "attention.uncertain_effects": 0
+    },
+    "plan_steps": {
+      "s1": "done",
+      "s2": "done",
+      "s3": "done"
+    }
+  }
+}
