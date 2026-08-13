@@ -32,7 +32,6 @@ interface UseChatActivityProjectionOptions {
   streamOwnerTurnRef: { current: string | null };
   threadId: string;
   threadMessages: ChatMessage[];
-  threadTailAwaitsHitl: boolean;
   translate: (key: string) => string;
   turnReplayRef: { current: TurnReplayState | null };
 }
@@ -131,7 +130,6 @@ export function useChatActivityProjection({
   streamOwnerTurnRef,
   threadId,
   threadMessages,
-  threadTailAwaitsHitl,
   translate,
   turnReplayRef,
 }: UseChatActivityProjectionOptions) {
@@ -152,7 +150,6 @@ export function useChatActivityProjection({
     projectionLoaded,
     liveActivitySteps,
     streamOwnerTurnId: streamOwnerTurnRef.current,
-    legacyThreadTailAwaitsHitl: threadTailAwaitsHitl,
   });
   const runtimeViewModel: KernelProjectionPresenterView = projectedView;
 

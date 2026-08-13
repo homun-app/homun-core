@@ -24,7 +24,6 @@ export function routeComposerSubmission(input) {
     projectedActiveTurn: input.projectedActiveTurn ?? null,
     projectedTurnStatus: input.projectedTurnStatus ?? null,
     projectionLoaded: Boolean(input.projectionLoaded),
-    threadTailAwaitsHitl: Boolean(input.threadTailAwaitsHitl),
   });
   const kernelComposer = input.projectionLoaded
     ? composerModeFromKernel(input.composerMode)

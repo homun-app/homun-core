@@ -52,10 +52,6 @@ function attentionItems(projection) {
   return [...approvals, ...uncertainEffects];
 }
 
-function legacyTurnAwaitingUser(input) {
-  return !input.projectionLoaded && Boolean(input.legacyThreadTailAwaitsHitl);
-}
-
 function browserStatus(projection) {
   const browser = projection?.browser ?? {};
   const state = browser.state ?? "idle";
@@ -91,7 +87,7 @@ export function projectKernelThreadView(input) {
   );
   const items = attentionItems(projection);
   const turnStatus = projection?.turn?.status ?? "idle";
-  const turnAwaitingUser = turnStatus === "waiting_user" || items.length > 0 || legacyTurnAwaitingUser(input);
+  const turnAwaitingUser = turnStatus === "waiting_user" || items.length > 0;
   const terminalTurnAtRest = Boolean(
     projection
       && !input.isStreaming

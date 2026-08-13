@@ -112,7 +112,6 @@ export function ChatView({
     externalRef,
     threadMessages,
     activeStreamInProgress,
-    threadTailAwaitsHitl,
     refreshAfterChatSubmit,
   } = useChatTurnStateMachine({
     thread,
@@ -324,7 +323,6 @@ export function ChatView({
     activeTurnIdRef,
     streamOwnerTurnRef,
     turnReplayRef,
-    threadTailAwaitsHitl,
     translate: t,
   });
 
@@ -407,7 +405,6 @@ export function ChatView({
     streamingAssistantId,
     threadMessages,
     replyContext,
-    threadTailAwaitsHitl,
     composerMode: runtimeViewModel.composerMode,
     setPromptSubmitting,
     setPromptError,

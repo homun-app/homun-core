@@ -2354,7 +2354,7 @@ test("ChatView delegates chat event projection helpers to chatEventParts", () =>
   assert.match(chatEventPartsImpl, /export function normalizeChatEventParts/);
   assert.match(chatEventPartsImpl, /export function shouldDropStructuredMarkerDelta/);
   assert.match(chatEventPartsImpl, /export function replayStatusFromProjection/);
-  assert.match(chatEventPartsImpl, /export function threadTailAwaitsUser/);
+  assert.doesNotMatch(chatEventPartsImpl, /export function threadTailAwaitsUser/);
   assert.match(chatEventParts, /export interface ActiveTurnProjection/);
 });
 

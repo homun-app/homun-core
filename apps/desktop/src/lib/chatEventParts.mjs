@@ -2,7 +2,6 @@ import { isValidStepAdvancePayload } from "./chat-runtime/stepAdvanceDisplay.mjs
 
 const STRUCTURED_MARKER_DELTA_RE =
   /^‹‹(?:ACT|REASONING|PLAN|CHOICES|CLARIFY|AWAIT_USER|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL)››[\s\S]*?‹‹\/(?:ACT|REASONING|PLAN|CHOICES|CLARIFY|AWAIT_USER|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL)››$/;
-const LEGACY_HITL_MARKER_RE = /‹‹(?:CHOICES|CLARIFY|AWAIT_USER)››[\s\S]*?‹‹\/(?:CHOICES|CLARIFY|AWAIT_USER)››/;
 
 function parseChoicePromptPayload(payload) {
   if (!payload || typeof payload !== "object") return null;
@@ -98,31 +97,4 @@ export function replayStatusFromProjection(status) {
   if (status === "cancelled") return "cancelled";
   if (["retrying", "retry_waiting"].includes(status)) return "retrying";
   return "running";
-}
-
-/** Legacy marker fallback only; kernel projection owns current-turn liveness once loaded. */
-export function threadTailAwaitsUser(messages) {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message.role === "user") return false;
-    if (message.role !== "assistant") continue;
-    if (LEGACY_HITL_MARKER_RE.test(message.text)) {
-      return true;
-    }
-    const rawParts = message.eventParts;
-    if (
-      rawParts?.some((part) => {
-        if (part.type !== "actionable_card") return false;
-        if (part.kind === "CHOICES" || part.kind === "CLARIFY") return true;
-        if (part.kind !== "AWAIT_USER") return false;
-        const payload = part.payload;
-        return payload?.kind === "choice" || payload?.kind === "clarify";
-      })
-    ) {
-      return true;
-    }
-    const parts = normalizeChatEventParts(rawParts);
-    return parts.some((part) => part.type === "choice_prompt");
-  }
-  return false;
 }

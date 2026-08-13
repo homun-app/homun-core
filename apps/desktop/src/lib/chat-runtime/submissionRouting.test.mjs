@@ -9,7 +9,6 @@ function atRest(overrides = {}) {
     projectedActiveTurn: null,
     projectedTurnStatus: null,
     projectionLoaded: false,
-    threadTailAwaitsHitl: false,
     ...overrides,
   };
 }
@@ -80,11 +79,9 @@ test("kernel composer_mode routes user waits as new-turn replies", () => {
   assert.equal(result.routesToSteering, false);
 });
 
-test("open HITL wait at the chat tail forces a new turn even while streaming", () => {
-  const result = routeComposerSubmission(
-    atRest({ streamingAssistantId: "assistant-1", threadTailAwaitsHitl: true }),
-  );
-  assert.equal(result.mode, "waiting_user_reply");
+test("open HITL wait marker at the chat tail is display-only for submission routing", () => {
+  const result = routeComposerSubmission(atRest());
+  assert.equal(result.mode, "new_turn");
   assert.equal(result.forceNewTurn, true);
   assert.equal(result.routesToSteering, false);
 });
@@ -94,7 +91,6 @@ test("loaded projection quarantines legacy HITL marker routing", () => {
     atRest({
       projectionLoaded: true,
       projectedTurnStatus: "completed",
-      threadTailAwaitsHitl: true,
     }),
   );
   assert.equal(result.mode, "new_turn");

@@ -61,7 +61,6 @@ export interface UseChatTurnSubmissionParams {
   streamingAssistantId: string | null;
   threadMessages: ChatMessage[];
   replyContext: ReplyContext | null;
-  threadTailAwaitsHitl: boolean;
   composerMode: string;
   setPromptSubmitting: Dispatch<SetStateAction<boolean>>;
   setPromptError: Dispatch<SetStateAction<string | null>>;
@@ -148,7 +147,7 @@ export function useChatTurnSubmission({
   thread, messages, onMessagesChange, computerSessionId, onThreadChanged,
   bumpIslandRefreshNonce,
   seed, sessionId, translate: t,
-  promptSubmitting, streamingAssistantId, threadMessages, replyContext, threadTailAwaitsHitl,
+  promptSubmitting, streamingAssistantId, threadMessages, replyContext,
   composerMode,
   setPromptSubmitting, setPromptError, setStreamingAssistantId, setStreamStatus,
   setLiveActivitySteps, setLivePlanMarkdown, setOptimisticMessages,
@@ -532,7 +531,7 @@ export function useChatTurnSubmission({
     const model = options?.model;
     const submissionRoute = routeComposerSubmission({
       promptSubmitting, streamingAssistantId, projectedActiveTurn, projectedTurnStatus,
-      projectionLoaded, threadTailAwaitsHitl, composerMode,
+      projectionLoaded, composerMode,
       explicitForceNewTurn: options?.forceNewTurn,
     });
     const forceNewTurn = submissionRoute.forceNewTurn;

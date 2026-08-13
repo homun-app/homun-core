@@ -11,7 +11,6 @@ export interface SubmissionRoutingInput {
   projectedActiveTurn: ActiveTurnProjectionLike | null;
   projectedTurnStatus: string | null;
   projectionLoaded: boolean;
-  threadTailAwaitsHitl: boolean;
   composerMode?: string | null;
   /** HITL Free resolutions (Choice/Clarify) must never become mid-turn steering. */
   explicitForceNewTurn?: boolean;

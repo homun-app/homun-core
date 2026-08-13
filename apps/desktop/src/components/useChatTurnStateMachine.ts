@@ -10,7 +10,6 @@ import {
   readResumeMarker,
   type ResumeMarker,
 } from "../lib/chatResumeMarkers";
-import { threadTailAwaitsUser } from "../lib/chatEventParts";
 import {
   clearStreamStatusForRequest,
   isTerminalWsTurnStatus,
@@ -137,11 +136,6 @@ export function useChatTurnStateMachine({
   }, [optimisticMessages, messages]);
 
   const activeStreamInProgress = Boolean(promptSubmitting || streamingAssistantId);
-
-  const threadTailAwaitsHitl = useMemo(
-    () => threadTailAwaitsUser(threadMessages),
-    [threadMessages],
-  );
 
   // ── Simple callbacks ──────────────────────────────────────────────
   async function refreshAfterChatSubmit() {
@@ -281,7 +275,6 @@ export function useChatTurnStateMachine({
     // Derived values
     threadMessages,
     activeStreamInProgress,
-    threadTailAwaitsHitl,
     // Callbacks
     refreshAfterChatSubmit,
   };

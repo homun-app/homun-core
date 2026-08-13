@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-13 (post Runtime V2 browser/projection contracts).**
+> **Ultimo aggiornamento: 2026-08-13 (Runtime V2 legacy HITL fallback removal).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108, #109, #110, #111 mergeate in `main` |
-| HEAD codice verificato | `41777852` (`Merge pull request #111 from homun-app/fabio/browser-projection-contract`) |
+| PR | #108, #109, #110, #111, #112 mergeate in `main` |
+| HEAD codice verificato | `3eb69e2b` (`Merge pull request #112 from homun-app/fabio/update-runtime-v2-status`) |
 
 ## Dove siamo
 
@@ -40,7 +40,7 @@ protocollo anti-regressione vive in
 Piano completato:
 [`superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md`](superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md).
 
-Slice chiuse e mergeate:
+Slice Runtime V2 recenti:
 
 - `TaskStore::project_kernel_thread` e DTO `KernelThreadProjection`;
 - endpoint gateway `GET /api/chat/threads/{thread_id}/kernel-projection`;
@@ -70,6 +70,9 @@ Slice chiuse e mergeate:
 - PR #111 `Pin browser projection fallback contract`: fixture
   `browser_grounded_partial_terminal` protegge il caso terminale browser
   grounded/fallback lato projection UI.
+- Rimozione fallback legacy HITL: rimosso il fallback `threadTailAwaits*`
+  che faceva derivare lifecycle/composer mode dai marker HITL del transcript
+  prima del load della projection.
 
 ## Invarianti ora protetti
 
@@ -87,8 +90,8 @@ Slice chiuse e mergeate:
 - Receipt `ExternalWrite` incerta genera attention item.
 - Tool/plugin/MCP caricati non cambiano liveness.
 - Automazioni e proactive run usano lo stesso vocabolario del kernel.
-- Marker legacy possono renderizzare storico, ma non riaprire lifecycle corrente
-  e non alimentano piu' plan/activity dell'isola.
+- Marker legacy possono renderizzare storico, ma non riaprire lifecycle corrente,
+  non forzano composer mode e non alimentano piu' plan/activity dell'isola.
 
 ## Gate verificati
 
@@ -110,6 +113,9 @@ Slice browser/projection successive:
 - PR #111 mergeata il 2026-08-13, merge commit `41777852`; gate locale
   `python3 scripts/kernel_regression_gate.py` verde e CI verde su Backend,
   Frontend, Landlock, Release readiness, build Linux/macOS/Windows.
+- PR #112 mergeata il 2026-08-13, merge commit `3eb69e2b`; gate locale
+  `python3 scripts/kernel_regression_gate.py` verde e CI verde su Backend,
+  Frontend, Landlock, Release readiness, build Linux/macOS/Windows.
 
 ## PR / CI
 
@@ -123,6 +129,8 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/110`.
 - #111 `Pin browser projection fallback contract`:
   `https://github.com/homun-app/homun-core/pull/111`.
+- #112 `Update Runtime V2 status after browser projection contracts`:
+  `https://github.com/homun-app/homun-core/pull/112`.
 
 ## Debito residuo
 
@@ -136,6 +144,9 @@ PR mergeate:
 - `legacyMarkerProjection` e' stato rimosso da `useChatActivityProjection`; in
   assenza di `KernelThreadProjection` l'isola runtime resta vuota invece di
   ricostruire plan/activity dai marker.
+- `threadTailAwaits*` e' stato rimosso da lifecycle/composer routing; i marker
+  HITL del transcript restano display-only e non possono piu' creare liveness o
+  modalita' reply prima del load della projection.
 - Continuare la rimozione dei fallback `legacy*` solo con fixture owner-level e
   gate kernel verde.
 - `main.rs` e `ChatView.tsx` restano grandi, ma non vanno tagliati senza owner
@@ -143,11 +154,11 @@ PR mergeate:
 
 ## Prossimo lavoro
 
-1. Prossima slice delete-first: rimuovere un fallback `legacy*` ancora tracciato,
-   con owner canonico, fixture RED e gate kernel verde.
-2. Smoke Electron su checkout pulito di `main`: riprodurre i due bug iniziali
+1. Smoke Electron su checkout pulito di `main`: riprodurre i due bug iniziali
    (goal/plan/progress e browser treni Milano-Roma read-only), verificando
    risposta finale visibile e stato UI coerente.
+2. Prossima slice delete-first: rimuovere un altro fallback `legacy*` solo se
+   ancora tracciato da codice vivo, con owner canonico, fixture RED e gate.
 3. Roadmap rilascio: aggiornare stato RC solo dopo smoke reale, non solo dopo
    fixture deterministiche.
 
@@ -155,7 +166,7 @@ PR mergeate:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch main, HEAD atteso 41777852 o successivo.
+branch main, HEAD atteso 3eb69e2b o successivo.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
