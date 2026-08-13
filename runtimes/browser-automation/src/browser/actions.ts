@@ -1337,9 +1337,40 @@ async function driveTimePicker(
     const diff = Math.abs(Number(mm[1]) * 60 + Number(mm[2]) - targetMinutes);
     if (!best || diff < best.diff) best = { loc: el, diff, label };
   }
-  if (!best) return { ok: false, error: "no time options appeared in the opened time picker" };
+  if (!best) {
+    const direct = await setDirectTimeValue(control, target);
+    if (direct.ok) return direct;
+    return {
+      ok: false,
+      error: direct.error ? `no time options appeared; ${direct.error}` : "no time options appeared in the opened time picker",
+    };
+  }
   await best.loc.click({ timeout });
   return { ok: true, committed: best.label };
+}
+
+async function setDirectTimeValue(
+  control: Locator,
+  hhmm: string,
+): Promise<{ ok: boolean; committed?: string; error?: string }> {
+  return control
+    .evaluate((element, value) => {
+      const candidate =
+        element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+          ? element
+          : element.querySelector("input, textarea");
+      if (!(candidate instanceof HTMLInputElement || candidate instanceof HTMLTextAreaElement)) {
+        return { ok: false, error: "time control is not an editable input" };
+      }
+      candidate.focus();
+      candidate.value = value;
+      candidate.dispatchEvent(new Event("input", { bubbles: true }));
+      candidate.dispatchEvent(new Event("change", { bubbles: true }));
+      candidate.blur();
+      const committed = candidate.value || candidate.textContent || "";
+      return { ok: committed.trim() === value, committed };
+    }, hhmm)
+    .catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }));
 }
 
 function requireRefOrSelector(

@@ -14,6 +14,7 @@ class KernelRegressionGateTests(unittest.TestCase):
         self.assertIn("task runtime turn reducer", labels)
         self.assertIn("turn consistency audit unit tests", labels)
         self.assertIn("kernel projection smoke", labels)
+        self.assertIn("browser diagnostic contract", labels)
         self.assertIn("engine browser grounded fallback", labels)
         self.assertIn("task runtime active chat turn", labels)
         self.assertIn("task runtime finalizing fence", labels)
@@ -48,6 +49,11 @@ class KernelRegressionGateTests(unittest.TestCase):
             [gate.PYTHON, "scripts/smoke_kernel_projection.py"],
         )
         self.assertEqual(by_label["kernel projection smoke"].cwd, gate.ROOT)
+        self.assertEqual(
+            by_label["browser diagnostic contract"].command,
+            [gate.PYTHON, "-m", "unittest", "scripts.test_e2e_browser_diagnostic", "-v"],
+        )
+        self.assertEqual(by_label["browser diagnostic contract"].cwd, gate.ROOT)
         self.assertEqual(
             by_label["engine browser grounded fallback"].command,
             [

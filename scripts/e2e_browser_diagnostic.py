@@ -8,6 +8,8 @@ Usage:
     python3 scripts/e2e_browser_diagnostic.py [--thread-id ID] [--prompt "text"] [--timeout 480]
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import sqlite3
@@ -37,11 +39,11 @@ def load_token() -> str:
         sys.exit(2)
     return TOKEN_FILE.read_text().strip()
 
-TOKEN = load_token()
-HEADERS = {
-    "Authorization": f"Bearer {TOKEN}",
-    "Content-Type": "application/json",
-}
+def request_headers(has_body: bool) -> dict[str, str]:
+    headers = {"Authorization": f"Bearer {load_token()}"}
+    if has_body:
+        headers["Content-Type"] = "application/json"
+    return headers
 
 
 class Phase:
@@ -56,10 +58,8 @@ class Phase:
 def http(method: str, path: str, body: dict | None = None, timeout: int = 10):
     """Fire an HTTP request; return (status, parsed_json_or_None)."""
     url = GATEWAY + path
-    data = json.dumps(body).encode() if body else None
-    hdrs = dict(HEADERS)
-    if body is None:
-        hdrs.pop("Content-Type", None)
+    data = json.dumps(body).encode() if body is not None else None
+    hdrs = request_headers(body is not None)
     req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
     try:
         resp = urllib.request.urlopen(req, timeout=timeout)
@@ -148,6 +148,68 @@ def get_turn_status(turn_id: str) -> str:
     return ""
 
 
+def get_kernel_projection(thread_id: str) -> dict | None:
+    """Fetch the kernel-owned UI projection for final browser/plan state."""
+    status, body = http("GET", f"/api/chat/threads/{thread_id}/kernel-projection")
+    if status == 200 and isinstance(body, dict):
+        return body
+    return None
+
+
+def get_assistant_texts(thread_id: str) -> list[str]:
+    """Return newest assistant messages, preferring the DB for finished turns."""
+    msgs = db_query(
+        "SELECT text FROM chat_messages WHERE thread_id=? AND role='assistant' ORDER BY timestamp DESC LIMIT 5",
+        (thread_id,),
+    )
+    if msgs:
+        return [str(row.get("text") or "") for row in msgs]
+
+    st, body = http("GET", f"/api/chat/threads/{thread_id}/messages")
+    if st != 200 or not body:
+        return []
+    items = body if isinstance(body, list) else body.get("messages", body.get("items", []))
+    assistants = [m for m in items if isinstance(m, dict) and m.get("role") == "assistant"]
+    return [
+        str(message.get("text", message.get("content", "")) or "")
+        for message in reversed(assistants[-5:])
+    ]
+
+
+def projection_failure_sample(projection: dict | None) -> str | None:
+    if not isinstance(projection, dict):
+        return None
+
+    browser = projection.get("browser")
+    if isinstance(browser, dict) and browser.get("state") == "failed":
+        reason = browser.get("failure_reason") or "unknown"
+        return f"browser failed: {reason}"
+
+    plan = projection.get("plan")
+    steps = plan.get("steps") if isinstance(plan, dict) else None
+    if isinstance(steps, list):
+        blocked = [
+            step
+            for step in steps
+            if isinstance(step, dict) and step.get("status") == "blocked"
+        ]
+        if blocked:
+            title = blocked[0].get("title") or blocked[0].get("id") or "step"
+            return f"plan blocked: {title}"
+
+    return None
+
+
+def evaluate_final_result(assistant_texts: list[str], projection: dict | None) -> tuple[bool, str]:
+    projection_failure = projection_failure_sample(projection)
+    if projection_failure:
+        return False, projection_failure
+    if not assistant_texts:
+        return False, "no assistant messages"
+    txt = assistant_texts[0]
+    return True, f"msgs={len(assistant_texts)}, len={len(txt)}, preview={txt[:60]}"
+
+
 def evaluate_phases(events: list[dict], turn_id: str, thread_id: str) -> dict:
     """Evaluate phases 4-8 from collected events. Return dict of phase_name -> (passed, sample)."""
     results = {}
@@ -216,27 +278,12 @@ def evaluate_phases(events: list[dict], turn_id: str, thread_id: str) -> dict:
     else:
         results["Sub-turn browse"] = (False, "no agent_runs/executions")
 
-    # Phase 8: Final result (assistant messages)
-    msgs = db_query(
-        "SELECT text FROM chat_messages WHERE thread_id=? AND role='assistant' ORDER BY timestamp DESC LIMIT 5",
-        (thread_id,),
+    # Phase 8: Final result. A visible assistant message is not enough: the
+    # kernel projection must not report a failed browser or blocked plan.
+    results["Final result"] = evaluate_final_result(
+        get_assistant_texts(thread_id),
+        get_kernel_projection(thread_id),
     )
-    if msgs:
-        txt = msgs[0].get("text", "")
-        results["Final result"] = (True, f"msgs={len(msgs)}, len={len(txt)}, preview={txt[:60]}")
-    else:
-        # API fallback
-        st, body = http("GET", f"/api/chat/threads/{thread_id}/messages")
-        if st == 200 and body:
-            items = body if isinstance(body, list) else body.get("messages", body.get("items", []))
-            assistants = [m for m in items if m.get("role") == "assistant"]
-            if assistants:
-                txt = assistants[-1].get("text", assistants[-1].get("content", ""))
-                results["Final result"] = (True, f"msgs={len(assistants)}, len={len(txt)}")
-            else:
-                results["Final result"] = (False, "no assistant messages")
-        else:
-            results["Final result"] = (False, "no assistant messages")
 
     return results
 
