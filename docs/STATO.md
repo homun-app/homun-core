@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108, #109, #110, #111, #112 mergeate in `main` |
-| HEAD codice verificato | `3eb69e2b` (`Merge pull request #112 from homun-app/fabio/update-runtime-v2-status`) |
+| PR | #108, #109, #110, #111, #112, #113 mergeate in `main` |
+| HEAD codice verificato | `74735bb6` (`Merge pull request #113 from homun-app/fabio/remove-legacy-runtime-fallback`) |
 
 ## Dove siamo
 
@@ -116,6 +116,9 @@ Slice browser/projection successive:
 - PR #112 mergeata il 2026-08-13, merge commit `3eb69e2b`; gate locale
   `python3 scripts/kernel_regression_gate.py` verde e CI verde su Backend,
   Frontend, Landlock, Release readiness, build Linux/macOS/Windows.
+- PR #113 mergeata il 2026-08-13, merge commit `74735bb6`; gate locale
+  `python3 scripts/kernel_regression_gate.py` verde e CI verde su Backend,
+  Frontend, Landlock, Release readiness, build Linux/macOS/Windows.
 
 ## PR / CI
 
@@ -131,6 +134,8 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/111`.
 - #112 `Update Runtime V2 status after browser projection contracts`:
   `https://github.com/homun-app/homun-core/pull/112`.
+- #113 `Remove legacy HITL liveness fallback`:
+  `https://github.com/homun-app/homun-core/pull/113`.
 
 ## Debito residuo
 
@@ -166,7 +171,7 @@ PR mergeate:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch main, HEAD atteso 3eb69e2b o successivo.
+branch main, HEAD atteso 74735bb6 o successivo.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
