@@ -10,7 +10,6 @@ export interface KernelProjectionPresenterInput {
   liveActivitySteps: string[];
   livePlanMarkdown: string | null;
   streamOwnerTurnId: string | null;
-  legacyThreadTailAwaitsHitl?: boolean;
 }
 
 export interface KernelProjectionPresenterView {

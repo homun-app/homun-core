@@ -1,6 +1,6 @@
 import type { CoreChatStreamEvent } from "./coreBridge";
 import type { TurnReplayStatus } from "./turnReplayState";
-import type { ChatEventPart, ChatMessage } from "../types";
+import type { ChatEventPart } from "../types";
 
 // Node contract tests and the renderer share this dependency-free implementation.
 // @ts-expect-error JavaScript sibling intentionally has no declaration file.
@@ -34,8 +34,3 @@ export interface ActiveTurnProjection {
 export const replayStatusFromProjection = implementation.replayStatusFromProjection as (
   status: string,
 ) => TurnReplayStatus;
-
-/** Legacy marker fallback only; kernel projection owns current-turn liveness once loaded. */
-export const threadTailAwaitsUser = implementation.threadTailAwaitsUser as (
-  messages: ChatMessage[],
-) => boolean;

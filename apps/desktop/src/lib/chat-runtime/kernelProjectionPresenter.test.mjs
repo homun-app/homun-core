@@ -73,7 +73,7 @@ test("terminal_projection_clears_active_thinking", () => {
   assert.equal(view.composerMode, "new_turn");
 });
 
-test("runtime_view_model_quarantines_legacy_hitl_tail_after_projection_load", () => {
+test("runtime_view_model_uses_projection_not_marker_tail_after_projection_load", () => {
   const view = projectKernelThreadView({
     projectionLoaded: true,
     projection: projection({
@@ -90,7 +90,6 @@ test("runtime_view_model_quarantines_legacy_hitl_tail_after_projection_load", ()
     liveActivitySteps: [],
     livePlanMarkdown: null,
     streamOwnerTurnId: null,
-    legacyThreadTailAwaitsHitl: true,
   });
 
   assert.equal(view.turnUiState.turnAwaitingUser, false);
@@ -98,7 +97,7 @@ test("runtime_view_model_quarantines_legacy_hitl_tail_after_projection_load", ()
   assert.equal(view.turnUiState.workInProgress, false);
 });
 
-test("runtime_view_model_keeps_legacy_hitl_tail_before_projection_load", () => {
+test("runtime_view_model_keeps_marker_tail_display_only_before_projection_load", () => {
   const view = projectKernelThreadView({
     projectionLoaded: false,
     projection: null,
@@ -106,11 +105,10 @@ test("runtime_view_model_keeps_legacy_hitl_tail_before_projection_load", () => {
     liveActivitySteps: [],
     livePlanMarkdown: null,
     streamOwnerTurnId: null,
-    legacyThreadTailAwaitsHitl: true,
   });
 
-  assert.equal(view.turnUiState.turnAwaitingUser, true);
-  assert.equal(view.turnUiState.hasActiveTurn, true);
+  assert.equal(view.turnUiState.turnAwaitingUser, false);
+  assert.equal(view.turnUiState.hasActiveTurn, false);
   assert.equal(view.turnUiState.workInProgress, false);
 });
 
@@ -122,7 +120,6 @@ test("missing_kernel_projection_does_not_fallback_to_marker_plan_or_activity", (
     liveActivitySteps: [],
     livePlanMarkdown: null,
     streamOwnerTurnId: null,
-    legacyThreadTailAwaitsHitl: false,
   });
 
   assert.equal(view.conversationPlan, null);
@@ -351,7 +348,6 @@ test("grounded_browser_partial_terminal_keeps_plan_visible_without_attention", (
     liveActivitySteps: [],
     livePlanMarkdown: null,
     streamOwnerTurnId: null,
-    legacyThreadTailAwaitsHitl: true,
   });
 
   assert.equal(view.conversationPlan, "- [x] Apri ricerca treni\n- [x] Leggi risultati\n- [x] Rispondi con fonti");

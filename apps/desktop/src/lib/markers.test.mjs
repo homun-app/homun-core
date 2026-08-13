@@ -16,8 +16,9 @@ test("markers remain compatibility regexes, not lifecycle owners", () => {
   assert.doesNotMatch(lifecycleSource, /CHOICES|CLARIFY|AWAIT_USER/);
 });
 
-test("chatEventParts owns only the legacy HITL marker fallback", () => {
-  assert.match(chatEventPartsSource, /LEGACY_HITL_MARKER_RE/);
-  assert.match(chatEventPartsSource, /kernel projection owns current-turn liveness/);
+test("chatEventParts does not own HITL liveness fallbacks", () => {
+  assert.doesNotMatch(chatEventPartsSource, /LEGACY_HITL_MARKER_RE/);
+  assert.doesNotMatch(chatEventPartsSource, /threadTailAwaitsUser/);
+  assert.doesNotMatch(chatEventPartsSource, /current-turn liveness/);
   assert.equal(chatEventPartsSource.includes('from "./markers'), false);
 });

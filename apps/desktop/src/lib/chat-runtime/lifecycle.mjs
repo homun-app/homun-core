@@ -12,9 +12,8 @@ const NON_WORK_ACTIVE_STATUSES = new Set([
 
 export function deriveTurnLifecycle(input) {
   const isStreaming = Boolean(input.promptSubmitting || input.streamingAssistantId);
-  const threadTailAwaitsHitl = !input.projectionLoaded && Boolean(input.threadTailAwaitsHitl);
   const activeStatus = input.projectedActiveTurn?.status ?? null;
-  const turnAwaitingUser = activeStatus === "waiting_user_approval" || threadTailAwaitsHitl;
+  const turnAwaitingUser = activeStatus === "waiting_user_approval";
   const activeButNotModelWork = activeStatus !== null && NON_WORK_ACTIVE_STATUSES.has(activeStatus);
   const terminalTurnAtRest = Boolean(
     input.projectionLoaded
@@ -22,7 +21,7 @@ export function deriveTurnLifecycle(input) {
       && input.projectedTurnStatus !== null
       && TERMINAL_TURN_STATUSES.has(input.projectedTurnStatus),
   );
-  const hasActiveTurn = Boolean(isStreaming || input.projectedActiveTurn || threadTailAwaitsHitl);
+  const hasActiveTurn = Boolean(isStreaming || input.projectedActiveTurn);
   const workInProgress = Boolean(
     isStreaming
       || (input.projectedActiveTurn && !turnAwaitingUser && !activeButNotModelWork),
@@ -31,7 +30,6 @@ export function deriveTurnLifecycle(input) {
 
   return {
     isStreaming,
-    threadTailAwaitsHitl,
     turnAwaitingUser,
     terminalTurnAtRest,
     hasActiveTurn,
