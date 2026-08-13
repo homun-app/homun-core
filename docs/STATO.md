@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-12 (Runtime V2 terminal plan projection).**
+> **Ultimo aggiornamento: 2026-08-13 (post Runtime V2 browser/projection contracts).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/runtime-v2-first-slice` |
-| Branch | `fabio/runtime-v2-first-slice` |
-| PR | `https://github.com/homun-app/homun-core/pull/108` |
-| HEAD codice verificato | `adaad77a` + cleanup marker plan/activity in questa slice |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app` |
+| Branch | `main` |
+| PR | #108, #109, #110, #111 mergeate in `main` |
+| HEAD codice verificato | `41777852` (`Merge pull request #111 from homun-app/fabio/browser-projection-contract`) |
 
 ## Dove siamo
 
@@ -35,12 +35,12 @@ matrice owner/gate vive in
 protocollo anti-regressione vive in
 [`testing/anti-regression-protocol.md`](testing/anti-regression-protocol.md).
 
-## Runtime V2 - chiuso in questa slice
+## Runtime V2 - chiuso su main
 
 Piano completato:
 [`superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md`](superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md).
 
-Slice chiuse sul branch:
+Slice chiuse e mergeate:
 
 - `TaskStore::project_kernel_thread` e DTO `KernelThreadProjection`;
 - endpoint gateway `GET /api/chat/threads/{thread_id}/kernel-projection`;
@@ -61,6 +61,15 @@ Slice chiuse sul branch:
 - `TaskStore::project_kernel_thread` non esporta step `doing`/`in_progress`
   quando il turno e' terminale: la projection UI mostra lo step corrente come
   `blocked` e rigenera il markdown dallo stesso stato proiettato.
+- PR #109 `Preserve grounded browser timeout results`: il browser read-only che
+  arriva a risultati osservati prima del timeout non viene degradato a fallback
+  generico.
+- PR #110 `Preserve grounded browser fallback evidence`: la risposta finale
+  conserva evidenza, fonti e stato grounded quando il browser ha visto risultati
+  utili ma non chiude semanticamente tutto il task.
+- PR #111 `Pin browser projection fallback contract`: fixture
+  `browser_grounded_partial_terminal` protegge il caso terminale browser
+  grounded/fallback lato projection UI.
 
 ## Invarianti ora protetti
 
@@ -69,6 +78,11 @@ Slice chiuse sul branch:
 - Piano e progresso vengono da `runtime_plans`/`turn_events`, non da marker.
 - `browser_done` chiude il lavoro browser; snapshot visibile senza done resta
   `active`/`unknown`.
+- Browser grounded partial terminale resta leggibile: risposta finale e fonti
+  osservate sopravvivono al fallback invece di mostrare solo una risposta
+  generica o vuota.
+- La fixture `browser_grounded_partial_terminal` mantiene goal/piano visibili,
+  browser `done`, nessun attention item e nessuna liveness attiva.
 - Receipt `Read` incerta non genera card di verifica utente.
 - Receipt `ExternalWrite` incerta genera attention item.
 - Tool/plugin/MCP caricati non cambiano liveness.
@@ -76,9 +90,9 @@ Slice chiuse sul branch:
 - Marker legacy possono renderizzare storico, ma non riaprire lifecycle corrente
   e non alimentano piu' plan/activity dell'isola.
 
-## Gate verificati localmente
+## Gate verificati
 
-Su `adaad77a` piu' cleanup marker plan/activity in questa slice:
+Baseline Runtime V2 su PR #108:
 
 ```bash
 python3 scripts/kernel_regression_gate.py
@@ -86,23 +100,36 @@ python3 scripts/pre_release_gate.py
 make test
 ```
 
-Esito: verde.
+Esito: verde prima del merge.
+
+Slice browser/projection successive:
+
+- PR #109 mergeata il 2026-08-12, merge commit `5b5f27f0`.
+- PR #110 mergeata il 2026-08-12, merge commit `8be33808`; gate locale
+  `python3 scripts/kernel_regression_gate.py` verde.
+- PR #111 mergeata il 2026-08-13, merge commit `41777852`; gate locale
+  `python3 scripts/kernel_regression_gate.py` verde e CI verde su Backend,
+  Frontend, Landlock, Release readiness, build Linux/macOS/Windows.
 
 ## PR / CI
 
-PR draft: `https://github.com/homun-app/homun-core/pull/108`.
+PR mergeate:
 
-Verificare lo stato remoto corrente con:
-
-```bash
-gh pr checks 108
-```
+- #108 `Settle terminal plan projection states`:
+  `https://github.com/homun-app/homun-core/pull/108`.
+- #109 `Preserve grounded browser timeout results`:
+  `https://github.com/homun-app/homun-core/pull/109`.
+- #110 `Preserve grounded browser fallback evidence`:
+  `https://github.com/homun-app/homun-core/pull/110`.
+- #111 `Pin browser projection fallback contract`:
+  `https://github.com/homun-app/homun-core/pull/111`.
 
 ## Debito residuo
 
-- Smoke Electron reale su build/dev pulita: chat, plan progress, browser read
-  research, Activity/browser island, composer mode.
-- Aggiornare eventuali note release/RC dopo merge della PR.
+- Smoke Electron reale su `main` pulito: chat, plan progress, browser read
+  research, Activity/browser island, composer mode, nessuna card di verifica per
+  azioni browser read-only.
+- Aggiornare eventuali note release/RC dopo smoke visuale reale.
 - `ThreadActivityProjection` e la route backend compat
   `GET /api/chat/threads/{thread_id}/activity` sono stati rimossi nella cleanup
   backend 2026-08-12; il read model canonico e' `KernelThreadProjection`.
@@ -116,17 +143,19 @@ gh pr checks 108
 
 ## Prossimo lavoro
 
-1. Merge/review della PR #108 quando il draft viene promosso.
-2. Smoke Electron su checkout pulito della PR: riprodurre i due bug iniziali
-   (goal/plan/progress e browser treni Milano-Roma read-only).
-3. Prossima slice delete-first: rimuovere un fallback `legacy*` ancora tracciato,
-   con fixture owner.
+1. Prossima slice delete-first: rimuovere un fallback `legacy*` ancora tracciato,
+   con owner canonico, fixture RED e gate kernel verde.
+2. Smoke Electron su checkout pulito di `main`: riprodurre i due bug iniziali
+   (goal/plan/progress e browser treni Milano-Roma read-only), verificando
+   risposta finale visibile e stato UI coerente.
+3. Roadmap rilascio: aggiornare stato RC solo dopo smoke reale, non solo dopo
+   fixture deterministiche.
 
 ## Prompt di ripartenza
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/runtime-v2-first-slice, PR #108.
+branch main, HEAD atteso 41777852 o successivo.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
