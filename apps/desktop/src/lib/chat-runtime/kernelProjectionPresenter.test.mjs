@@ -307,3 +307,64 @@ test("browser_failure_reason_is_typed_state_not_activity_text", () => {
   assert.equal(view.browserStatus.failureReason, "no_progress");
   assert.deepEqual(view.conversationActivity, []);
 });
+
+test("grounded_browser_partial_terminal_keeps_plan_visible_without_attention", () => {
+  const view = projectKernelThreadView({
+    projectionLoaded: true,
+    projection: projection({
+      turn: {
+        active_turn_id: null,
+        status: "completed",
+        last_event_seq: 16,
+        terminal_reason: "canonical_completed",
+        failure_text: null,
+        updated_at: 1723360020,
+      },
+      plan: {
+        goal: "Trovare opzioni treno Milano-Roma",
+        revision: 4,
+        markdown: "- [x] Apri ricerca treni\n- [x] Leggi risultati\n- [x] Rispondi con fonti",
+        steps: [
+          { id: "s1", title: "Apri ricerca treni", status: "done", detail: "Risultati caricati" },
+          { id: "s2", title: "Leggi risultati", status: "done", detail: "Opzioni osservate" },
+          { id: "s3", title: "Rispondi con fonti", status: "done", detail: "Risposta completata" },
+        ],
+      },
+      browser: {
+        state: "done",
+        target_id: null,
+        latest_progress: "Found 3 train options and source URLs",
+        failure_reason: null,
+        snapshot_verified: true,
+      },
+      attention: {
+        awaiting_user: false,
+        approvals: [],
+        uncertain_effects: [],
+      },
+      actions: {
+        can_stop: false,
+        composer_mode: "new_turn",
+      },
+    }),
+    isStreaming: false,
+    liveActivitySteps: [],
+    livePlanMarkdown: null,
+    streamOwnerTurnId: null,
+    legacyThreadTailAwaitsHitl: true,
+  });
+
+  assert.equal(view.conversationPlan, "- [x] Apri ricerca treni\n- [x] Leggi risultati\n- [x] Rispondi con fonti");
+  assert.equal(view.workspacePlanGoal, "Trovare opzioni treno Milano-Roma");
+  assert.deepEqual(
+    view.workspacePlanSteps.map((step) => [step.id, step.status]),
+    [["s1", "done"], ["s2", "done"], ["s3", "done"]],
+  );
+  assert.deepEqual(view.attentionItems, []);
+  assert.equal(view.turnUiState.hasActiveTurn, false);
+  assert.equal(view.turnUiState.workInProgress, false);
+  assert.equal(view.turnUiState.terminalTurnAtRest, true);
+  assert.equal(view.browserStatus.done, true);
+  assert.equal(view.browserStatus.active, false);
+  assert.equal(view.composerMode, "new_turn");
+});

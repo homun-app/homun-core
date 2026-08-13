@@ -27,6 +27,7 @@ REQUIRED_CASES = {
     "write_uncertain_effect_needs_attention",
     "browser_active",
     "browser_done",
+    "browser_grounded_partial_terminal",
     "browser_failure",
     "plugin_capability_runtime",
     "automation_background_waiting_approval",
