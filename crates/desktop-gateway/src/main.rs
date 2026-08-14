@@ -239,13 +239,15 @@ pub(crate) use gateway_browser_tools::{
     manager_browser_max_elapsed_ms,
 };
 pub(crate) use gateway_capability_registry::{
-    CapabilityEntry, CapabilitySource, auto_retrieve_composio, bm25_rank, cap_tokenize,
-    capability_discovery_trace_line, capability_entry_from_tool_schema, capability_source_label,
-    find_capability_tool_schema, mcp_capability_entries, search_connector_capability_entries,
-    suggest_capabilities_tool_schema,
+    CapabilityCorpusMaterializationInput, CapabilityEntry, CapabilitySource,
+    auto_retrieve_composio, bm25_rank, cap_tokenize, capability_discovery_trace_line,
+    capability_source_label, find_capability_tool_schema, materialize_capability_corpus,
+    search_connector_capability_entries, suggest_capabilities_tool_schema,
 };
 #[cfg(test)]
-pub(crate) use gateway_capability_registry::{connector_capability_entry, search_composio_catalog};
+pub(crate) use gateway_capability_registry::{
+    connector_capability_entry, mcp_capability_entries, search_composio_catalog,
+};
 pub(crate) use gateway_channels::*;
 use gateway_chat_markers::strip_chat_markers;
 use gateway_datetime_tools::resolve_datetime_tool_schema;
@@ -7556,53 +7558,14 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     }
     prune_tools_for_objective_policy(&mut base_tools, &objective_effect_policy, &composio_writes);
     prune_tools_for_route(&mut base_tools, &workflow_route, &workflow_deny_tools);
-    // Unified capability corpus for `find_capability`: deferred native tools + installed
-    // skills + connected connector tools, all in one BM25-searchable list. One discovery
-    // path instead of three (find_capability subsumes find_connected_tools).
-    let mut capability_corpus: Vec<CapabilityEntry> = Vec::new();
-    for schema in deferred_tools {
-        let Some(entry) = capability_entry_from_tool_schema(schema, CapabilitySource::NativeTool)
-        else {
-            continue;
-        };
-        if native_workflow_by_tool_name(&entry.key).is_none() {
-            capability_corpus.push(entry);
-        }
-    }
-    if !read_only && objective_effect_policy.allows_mutation() {
-        capability_corpus.extend(native_workflow_capability_entries().into_iter().filter(
-            |entry| !objective_blocks_tool(&objective_effect_policy, &entry.key, &composio_writes),
-        ));
-        capability_corpus.extend(
-            native_atomic_capability_entries()
-                .into_iter()
-                .filter(|entry| {
-                    !objective_blocks_tool(&objective_effect_policy, &entry.key, &composio_writes)
-                }),
-        );
-        capability_corpus.extend(template_catalog_capability_entries().into_iter().filter(
-            |entry| !objective_blocks_tool(&objective_effect_policy, &entry.key, &composio_writes),
-        ));
-    }
-    capability_corpus.extend(
-        mcp_capability_entries(&mcp_catalog.schemas)
-            .into_iter()
-            .filter(|entry| {
-                !objective_blocks_tool(&objective_effect_policy, &entry.key, &composio_writes)
-            }),
-    );
-    if has_skills {
-        for (id, sname, sdesc) in &enabled_skills {
-            capability_corpus.push(CapabilityEntry {
-                key: id.clone(),
-                desc: sdesc.chars().take(140).collect(),
-                text: format!("{id} {sname} {sdesc}"),
-                schema: None,
-                is_skill: true,
-                source: CapabilitySource::Skill,
-            });
-        }
-    }
+    let capability_corpus = materialize_capability_corpus(CapabilityCorpusMaterializationInput {
+        deferred_tools,
+        read_only,
+        objective_effect_policy: &objective_effect_policy,
+        composio_writes: &composio_writes,
+        mcp_schemas: &mcp_catalog.schemas,
+        enabled_skills: &enabled_skills,
+    });
     // Connectors are NOT flattened into the BM25 corpus: they're searched via the
     // toolkit-aware `search_composio_catalog` inside find_capability (returns a service's
     // full CRUD set together, so the model picks the right verb). The hits are still

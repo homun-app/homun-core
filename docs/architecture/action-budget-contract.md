@@ -1,6 +1,6 @@
 # Action Budget Contract
 
-Verificato 2026-08-14 sul branch `fabio/capability-registry-contracts`.
+Verificato 2026-08-14 sul branch `fabio/capability-materialization-contracts`.
 
 Questo documento separa i budget di azione dal bug browser corrente. Il browser
 avra' una sessione dedicata; il contratto generale dell'app deve invece restare
@@ -27,7 +27,7 @@ UI mostra lo stato prodotto.
 | Progresso dentro uno step | `LoopState.progress_anchor_round` e `ToolEffects.reset_stall_guards` | `PlanStepAdvanced`, `runtime_plans` | renderizza step proiettati |
 | Stall cross-turn del piano | `crates/desktop-gateway/src/gateway_plan_stall.rs` | `runtime_plans.stall_turns`, `last_resume_done` | non calcola il budget |
 | Budget/live-set tool normali | `crates/desktop-gateway/src/gateway_tool_budget.rs` | `TurnConfig.max_rounds`, `TurnConfig.hard_round_ceiling`, live/deferred split | non decide quali tool sono disponibili |
-| Registry capability/plugin/tool | `crates/desktop-gateway/src/gateway_capability_registry.rs` | `CapabilityEntry`, `CapabilitySource`, BM25 corpus, MCP/connector projection, `find_capability`/`suggest_capabilities` schemas | mostra solo `KernelCapabilityRuntimeView`, non decide discovery o live-set |
+| Registry capability/plugin/tool | `crates/desktop-gateway/src/gateway_capability_registry.rs` | `CapabilityEntry`, `CapabilitySource`, BM25 corpus, materializzazione per-turno del corpus, MCP/connector projection, `find_capability`/`suggest_capabilities` schemas | mostra solo `KernelCapabilityRuntimeView`, non decide discovery o live-set |
 | Risorse concorrenti | `crates/task-runtime/src/resources.rs::ResourceGovernor` | `TaskStatus::WaitingResource` | mostra coda/waiting dal read model |
 | Contesto/token | `agent_loop.rs` + `ContextCompactor`, catalog model context window | compaction event + messages compattati | puo' mostrare usage, non decidere stop |
 | Tool/plugin/action timeout | tool runtime specifici + gateway policy | `ToolOutcome`, receipt/eventi | mostra call/result/approval |
