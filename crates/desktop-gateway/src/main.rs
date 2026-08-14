@@ -89,6 +89,7 @@ mod gateway_task_executor;
 mod gateway_task_executor_config;
 mod gateway_task_maintenance;
 mod gateway_template_catalog;
+mod gateway_tool_budget;
 mod gateway_tool_execution;
 mod gateway_turn_broker;
 mod gateway_turn_recovery;
@@ -345,6 +346,9 @@ pub(crate) use gateway_template_catalog::{
     import_pptx_template, imported_template_preview_ref, parse_file_template_catalog_entry,
     template_catalog, template_catalog_by_id, template_catalog_capability_entries,
     template_preview, template_source_attachment,
+};
+pub(crate) use gateway_tool_budget::{
+    chat_max_rounds, hard_round_ceiling, tool_stays_live_this_turn,
 };
 pub(crate) use gateway_tool_execution::*;
 pub(crate) use gateway_turn_broker::*;
@@ -6094,44 +6098,7 @@ async fn transcribe_audio(
     }))
 }
 
-/// Streams a chat completion from an OpenAI-compatible endpoint, translating its
-/// SSE deltas into the gateway's NDJSON `GenerateStreamEvent` format the UI
-/// already consumes, so every backend looks the same to the UI.
-/// Max model↔tool round-trips. The LAST round forbids tools (tool_choice:none) so
-/// the model always synthesizes a final answer from what it gathered. With 3:
-/// up to 2 tool calls (search + optional follow-up), then a forced answer.
-/// Soft round budget for a normal turn. NOT the primary control: the turn ends when
-/// the MODEL stops calling tools (natural termination) or the no-progress guard trips
-/// (it repeats the same calls). This is a generous backstop so a long agentic task
-/// (large refactor, multi-file scaffold) isn't truncated. Env: `HOMUN_CHAT_MAX_ROUNDS`.
-const MAX_TOOL_ROUNDS: usize = 40;
-
 // MAX_PLAN_NUDGES moved into `engine::agent_loop` (5.D2 — the loop that used it lives there now).
-
-/// Absolute hard ceiling on rounds in ONE turn — pure anti-runaway backstop. With the
-/// per-step budget (F1) doing the real bounding (reset on each completed plan step), this
-/// only has to sit "far above any real task": a long plan-driven turn (many slides, a deep
-/// web research) can legitimately need hundreds of rounds spread across its steps.
-/// Env-overridable: `HOMUN_CHAT_HARD_CEILING`.
-const HARD_ROUND_CEILING: usize = 600;
-
-/// Hard anti-runaway ceiling for one turn (env-overridable).
-fn hard_round_ceiling() -> usize {
-    env::var("HOMUN_CHAT_HARD_CEILING")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<usize>().ok())
-        .filter(|n| *n > 0)
-        .unwrap_or(HARD_ROUND_CEILING)
-}
-
-/// Soft round budget for a normal (non-browser) turn (env-overridable).
-fn chat_max_rounds() -> usize {
-    env::var("HOMUN_CHAT_MAX_ROUNDS")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<usize>().ok())
-        .filter(|n| *n > 0)
-        .unwrap_or(MAX_TOOL_ROUNDS)
-}
 // Round budget once a browser tool is in play. Driving a browser one micro-action
 // at a time (navigate -> snapshot -> act -> re-snapshot) needs many more
 // model/tool round-trips than a normal chat turn. Env-overridable via
@@ -6319,57 +6286,6 @@ fn run_in_sandbox_tool_schema() -> serde_json::Value {
 
 /// The discovery meta-tool: the model searches connected-service tools by intent
 /// instead of receiving all of them up front (progressive tool disclosure).
-/// Native tools that are ALWAYS loaded (the small core). Everything else is DEFERRED and
-/// discovered on demand via `find_capability` — the Tool Search pattern (Anthropic): keeping
-/// the upfront set small preserves selection accuracy + context as the tool count grows.
-/// Common across most turns: memory, dates, planning, skills, project code/files, discovery.
-const CORE_TOOL_NAMES: &[&str] = &[
-    "find_capability",
-    "use_computer",
-    "suggest_capabilities",
-    // GitHub search is common + the system prompt steers toward it over the browser, so it
-    // must be always-loaded (not behind find_capability) to actually be callable.
-    "github_search",
-    "recall_memory",
-    "resolve_datetime",
-    "use_skill",
-    "update_plan",
-    // Creating automations is a common, high-value action — keep it directly reachable
-    // (not behind find_capability) so "ricordami ogni…" / "quando mi scrive X…" land reliably.
-    "create_automation",
-    "update_automation",
-    "schedule_task",
-    // Sending a channel message is common + safety-gated (confirm card) — keep it core so
-    // "manda/girami su WhatsApp" works without a find_capability hop.
-    "send_message",
-    "query_code_graph",
-    "query_git_history",
-    "read_file",
-    "write_file",
-    "edit_file",
-    "apply_patch",
-    "list_files",
-    "run_in_project",
-];
-
-/// Which tools stay in the LIVE (non-deferred) set for THIS turn.
-///
-/// The fixed core, PLUS `browse` while the thread holds a live warm browser session or a durable
-/// active checkpoint. Root cause
-/// this closes: `browse` is not in `CORE_TOOL_NAMES`, so after a successful browse the follow-up
-/// turn ("book the first one") reached a manager that did not have `browse` in its tool set at all
-/// — while `run_in_project`/`read_file`/`write_file`/`apply_patch` always are — and it did the only
-/// thing it could see: Python/shell, a dead end that cannot carry the site's interactive session.
-/// The manager guidance is the textual half of the fix; this is the machine half.
-///
-/// `browse` stays OUT of `CORE_TOOL_NAMES` on purpose: making it always-live would spend the
-/// tokens on every turn of every thread, including the ones that never touched a browser. The
-/// signal is derived from state (`thread_has_browser_continuation`), never from the wording of
-/// the user's message.
-fn tool_stays_live_this_turn(name: &str, browser_continuation_available: bool) -> bool {
-    CORE_TOOL_NAMES.contains(&name) || (browser_continuation_available && name == "browse")
-}
-
 fn find_capability_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
