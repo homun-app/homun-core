@@ -410,6 +410,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway tool budget",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "gateway_tool_budget",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway chat markers",
             [
                 "cargo",

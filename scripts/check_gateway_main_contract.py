@@ -220,6 +220,12 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn plan_stall_exhausted(": "runtime plan stall budget must stay in gateway_plan_stall",
         "fn block_stalled_step(": "runtime plan stall budget must stay in gateway_plan_stall",
         "fn plan_stall_check_and_bump(": "runtime plan stall budget must stay in gateway_plan_stall",
+        "const MAX_TOOL_ROUNDS:": "runtime tool budget must stay in gateway_tool_budget",
+        "const HARD_ROUND_CEILING:": "runtime tool budget must stay in gateway_tool_budget",
+        "fn hard_round_ceiling(": "runtime tool budget must stay in gateway_tool_budget",
+        "fn chat_max_rounds(": "runtime tool budget must stay in gateway_tool_budget",
+        "const CORE_TOOL_NAMES:": "runtime tool live-set policy must stay in gateway_tool_budget",
+        "fn tool_stays_live_this_turn(": "runtime tool live-set policy must stay in gateway_tool_budget",
         "fn plan_reconcile_on_delivery_flag(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn plan_reconcile_on_delivery_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn turn_trace_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
@@ -546,6 +552,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_memory_tools;", "gateway root must declare memory tools owner")
     assert_contains(source, "mod gateway_plan_tools;", "gateway root must declare plan tools owner")
     assert_contains(source, "mod gateway_chat_markers;", "gateway root must declare chat marker owner")
+    assert_contains(source, "mod gateway_tool_budget;", "gateway root must declare tool budget owner")
     assert_contains(
         source,
         "mod gateway_project_search_tools;",

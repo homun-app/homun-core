@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-14 (action budget + plan/UI owner cleanup).**
+> **Ultimo aggiornamento: 2026-08-14 (tool budget owner extraction verified).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/app-action-budget-contracts` da `main` |
-| PR | #108-#116 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `a688c991` (`Merge pull request #116 from homun-app/fabio/browser-subturn-budget-main`) |
+| Branch | `fabio/plugin-tool-budget-contracts` da `main` |
+| PR | #108-#116 e #118 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `29435a4b` (`Merge pull request #118 from homun-app/fabio/app-action-budget-contracts`) |
 
 ## Dove siamo
 
@@ -81,6 +81,9 @@ Slice Runtime V2 recenti:
 - Estrazione `chat-runtime/planSteps`: parsing/normalizzazione dei passi UI
   passano da `kernelProjectionPresenter`; `useChatActivityProjection` non
   ricalcola piu' goal/progresso con un secondo owner locale.
+- Estrazione `gateway_tool_budget`: budget round normali e live-set
+  tool progressiva escono dal monolite `main.rs`; browser budget resta owner
+  separato in `gateway_browser_tools`.
 
 ## Invarianti ora protetti
 
@@ -130,8 +133,10 @@ Slice browser/projection successive:
 - PR #113 mergeata il 2026-08-13, merge commit `74735bb6`; gate locale
   `python3 scripts/kernel_regression_gate.py` verde e CI verde su Backend,
   Frontend, Landlock, Release readiness, build Linux/macOS/Windows.
-- PR #114, #115, #116 mergeate in `main`; `main` corrente osservato a
-  `a688c991`.
+- PR #114, #115, #116 mergeate in `main`; `main` osservato a `a688c991`.
+- PR #118 mergeata il 2026-08-14, merge commit `29435a4b`; CI verde su
+  Release readiness, Frontend, Backend, Landlock e build installer
+  Linux/macOS/Windows.
 - Slice `fabio/app-action-budget-contracts` verificata localmente con:
   `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
   `cargo test -p local-first-desktop-gateway plan_stall -- --nocapture`,
@@ -140,6 +145,11 @@ Slice browser/projection successive:
   `cd apps/desktop && npm test`, `cd apps/desktop && npm run test:ui-contract`,
   `cd apps/desktop && npm run build`, `python3 scripts/kernel_regression_gate.py`
   verde con voce `gateway plan stall`.
+- Slice `fabio/plugin-tool-budget-contracts` verificata localmente con:
+  `cargo fmt --check`, `python3 scripts/check_gateway_main_contract.py`,
+  `cargo test -p local-first-desktop-gateway gateway_tool_budget -- --nocapture`,
+  `git diff --check`, `python3 scripts/kernel_regression_gate.py` verde con
+  voce `gateway tool budget`.
 
 ## PR / CI
 
@@ -163,13 +173,13 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/115`.
 - #116 `Fix browser smoke completion contract`:
   `https://github.com/homun-app/homun-core/pull/116`.
+- #118 `Extract plan stall budget owner`:
+  `https://github.com/homun-app/homun-core/pull/118`.
 
 Branch corrente:
 
-- `fabio/app-action-budget-contracts`: estrae `gateway_plan_stall`, documenta
-  `architecture/action-budget-contract.md`, sposta il parsing/proiezione dei
-  passi UI in `chat-runtime/planSteps` + `kernelProjectionPresenter`;
-  PR #118 aperta draft: `https://github.com/homun-app/homun-core/pull/118`.
+- `fabio/plugin-tool-budget-contracts`: estrae `gateway_tool_budget` per
+  budget round normali e policy live/deferred dei tool; PR non ancora aperta.
 
 ## Debito residuo
 
@@ -193,19 +203,18 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Smoke Electron su checkout pulito di `main`: riprodurre i due bug iniziali
-   (goal/plan/progress e browser treni Milano-Roma read-only), verificando
-   risposta finale visibile e stato UI coerente.
-2. Prossima slice delete-first: rimuovere un altro fallback `legacy*` solo se
-   ancora tracciato da codice vivo, con owner canonico, fixture RED e gate.
-3. Roadmap rilascio: aggiornare stato RC solo dopo smoke reale, non solo dopo
-   fixture deterministiche.
+1. Chiudere la slice `gateway_tool_budget`: commit, PR e merge se CI verde.
+2. Prossima slice backend/kernel senza browser: capability/plugin registry e
+   timeout tool specifici, separando policy dichiarata dai plugin da budget
+   deciso dal runner.
+3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
+   goal/plan/progress e treni Milano-Roma read-only.
 
 ## Prompt di ripartenza
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch main, HEAD atteso 74735bb6 o successivo.
+branch main, HEAD atteso 29435a4b o successivo.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
