@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-14 (action confirmation owner extraction in progress).**
+> **Ultimo aggiornamento: 2026-08-14 (action confirmation owner merged).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/action-confirmation-contracts` da `main` |
-| PR | #108-#116, #118, #119, #120, #121, #122, #123 e #124 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `e9947b74` (`Merge pull request #124 from homun-app/fabio/post-pr123-status-cleanup`) |
+| Branch | `main` |
+| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124 e #125 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `4f792bfb` (`Merge pull request #125 from homun-app/fabio/action-confirmation-contracts`) |
 
 ## Dove siamo
 
@@ -95,7 +95,7 @@ Slice Runtime V2 recenti:
 - Estrazione `gateway_tool_timeouts`: la policy timeout MCP/plugin viene
   separata da `gateway_browser_tools`, cosi' browser, round budget e tool runtime
   non condividono owner impliciti.
-- Slice `gateway_action_confirmations` in corso: parsing marker conferma,
+- Estrazione `gateway_action_confirmations`: parsing marker conferma,
   exact-card provenance MCP e rewrite terminale MCP escono dal monolite
   `main.rs`, mentre endpoint e dispatch restano sugli owner esistenti.
 
@@ -169,6 +169,9 @@ Slice browser/projection successive:
 - PR #124 mergeata il 2026-08-14, merge commit `e9947b74`; CI verde su
   Release readiness, Frontend, Backend, Landlock e build installer
   Linux/macOS/Windows.
+- PR #125 mergeata il 2026-08-14, merge commit `4f792bfb`; CI verde su
+  Release readiness, Frontend, Backend, Landlock e build installer
+  Linux/macOS/Windows.
 - Slice `fabio/app-action-budget-contracts` verificata localmente con:
   `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
   `cargo test -p local-first-desktop-gateway plan_stall -- --nocapture`,
@@ -240,11 +243,14 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/123`.
 - #124 `Update status after tool timeout merge`:
   `https://github.com/homun-app/homun-core/pull/124`.
+- #125 `Extract action confirmation owner`:
+  `https://github.com/homun-app/homun-core/pull/125`.
 
 Branch corrente:
 
-- `fabio/action-confirmation-contracts`: estrae `gateway_action_confirmations`
-  per marker conferma/action approval e aggiunge guardrail nel kernel gate.
+- `main`: include `gateway_action_confirmations` per marker conferma/action
+  approval; il branch remoto `fabio/action-confirmation-contracts` e' stato
+  eliminato dal merge.
 
 ## Debito residuo
 
@@ -268,8 +274,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice `gateway_action_confirmations`: formatting, contract,
-   owner test, gate kernel completo, commit, PR e merge se CI verde.
+1. Prossima slice backend/kernel non-browser: scegliere il prossimo owner
+   piccolo ancora nel perimetro tool/MCP runtime, con contract RED e gate mirato.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -277,7 +283,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch main, HEAD atteso e9947b74 o successivo.
+branch main, HEAD atteso 4f792bfb o successivo.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
