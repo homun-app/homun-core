@@ -226,6 +226,16 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn chat_max_rounds(": "runtime tool budget must stay in gateway_tool_budget",
         "const CORE_TOOL_NAMES:": "runtime tool live-set policy must stay in gateway_tool_budget",
         "fn tool_stays_live_this_turn(": "runtime tool live-set policy must stay in gateway_tool_budget",
+        "fn find_capability_tool_schema(": "capability discovery schemas must stay in gateway_capability_registry",
+        "enum CapabilitySource ": "capability registry source typing must stay in gateway_capability_registry",
+        "struct CapabilityEntry ": "capability registry entries must stay in gateway_capability_registry",
+        "fn capability_entry_from_tool_schema(": "capability registry schema conversion must stay in gateway_capability_registry",
+        "fn mcp_capability_entries(": "capability registry MCP projection must stay in gateway_capability_registry",
+        "fn connector_capability_entry(": "capability registry connector projection must stay in gateway_capability_registry",
+        "fn bm25_rank(": "capability registry ranking must stay in gateway_capability_registry",
+        "fn search_connector_capability_entries(": "capability registry connector search must stay in gateway_capability_registry",
+        "fn capability_discovery_trace_line(": "capability registry tracing must stay in gateway_capability_registry",
+        "fn suggest_capabilities_tool_schema(": "capability suggestion schemas must stay in gateway_capability_registry",
         "fn plan_reconcile_on_delivery_flag(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn plan_reconcile_on_delivery_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn turn_trace_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
@@ -553,6 +563,11 @@ def main() -> int:
     assert_contains(source, "mod gateway_plan_tools;", "gateway root must declare plan tools owner")
     assert_contains(source, "mod gateway_chat_markers;", "gateway root must declare chat marker owner")
     assert_contains(source, "mod gateway_tool_budget;", "gateway root must declare tool budget owner")
+    assert_contains(
+        source,
+        "mod gateway_capability_registry;",
+        "gateway root must declare capability registry owner",
+    )
     assert_contains(
         source,
         "mod gateway_project_search_tools;",

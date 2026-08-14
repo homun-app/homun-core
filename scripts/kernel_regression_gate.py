@@ -422,6 +422,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway capability registry",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "gateway_capability_registry",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway chat markers",
             [
                 "cargo",
