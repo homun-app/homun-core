@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-14 (MCP chat tools owner verificato localmente).**
+> **Ultimo aggiornamento: 2026-08-14 (MCP chat tools owner merged).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/mcp-chat-tools-contracts` |
-| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125 e #126 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `8c4fadfd` (`Merge pull request #126 from homun-app/fabio/post-pr125-status-cleanup`) |
+| Branch | `main` |
+| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126 e #127 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `97040858` (`Merge pull request #127 from homun-app/fabio/mcp-chat-tools-contracts`) |
 
 ## Dove siamo
 
@@ -98,7 +98,7 @@ Slice Runtime V2 recenti:
 - Estrazione `gateway_action_confirmations`: parsing marker conferma,
   exact-card provenance MCP e rewrite terminale MCP escono dal monolite
   `main.rs`, mentre endpoint e dispatch restano sugli owner esistenti.
-- Estrazione `gateway_mcp_chat_tools` in corso: naming/parse e catalogo schema
+- Estrazione `gateway_mcp_chat_tools`: naming/parse e catalogo schema
   MCP cached escono dal monolite `main.rs`; l'esecuzione MCP resta separata per
   una slice successiva.
 
@@ -176,6 +176,9 @@ Slice browser/projection successive:
   Release readiness, Frontend, Backend, Landlock e build installer
   Linux/macOS/Windows.
 - PR #126 mergeata il 2026-08-14, merge commit `8c4fadfd`; CI verde su
+  Release readiness, Frontend, Backend, Landlock e build installer
+  Linux/macOS/Windows.
+- PR #127 mergeata il 2026-08-14, merge commit `97040858`; CI verde su
   Release readiness, Frontend, Backend, Landlock e build installer
   Linux/macOS/Windows.
 - Slice `fabio/app-action-budget-contracts` verificata localmente con:
@@ -262,11 +265,14 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/125`.
 - #126 `Update status after action confirmations merge`:
   `https://github.com/homun-app/homun-core/pull/126`.
+- #127 `Extract MCP chat tools owner`:
+  `https://github.com/homun-app/homun-core/pull/127`.
 
 Branch corrente:
 
-- `fabio/mcp-chat-tools-contracts`: estrae il catalogo MCP chat tools e aggiunge
-  guardrail/gate owner-level.
+- `main`: include `gateway_mcp_chat_tools` per naming/parse e catalogo schema
+  MCP cached; il branch remoto `fabio/mcp-chat-tools-contracts` e' stato
+  eliminato dal merge.
 
 ## Debito residuo
 
@@ -290,8 +296,9 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Prossima slice backend/kernel non-browser: scegliere il prossimo owner
-   piccolo ancora nel perimetro tool/MCP runtime, con contract RED e gate mirato.
+1. Prossima slice backend/kernel non-browser: isolare il prossimo owner MCP
+   runtime, probabilmente il path di esecuzione `run_mcp_chat_tool`/transport
+   se il taglio resta piccolo; altrimenti separare prima configurazione/metadata.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
