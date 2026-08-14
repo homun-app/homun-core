@@ -1,6 +1,6 @@
 # Kernel Contract Matrix
 
-Verificato 2026-08-14 sul branch `fabio/capability-materialization-contracts`.
+Verificato 2026-08-14 su `main` a `169d2fd0`.
 
 Questa matrix e' il punto di ingresso per consolidare il kernel senza nuove
 feature. Prima di dichiarare chiusa una regressione in questo perimetro:
