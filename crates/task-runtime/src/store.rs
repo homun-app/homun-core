@@ -318,12 +318,66 @@ fn browser_done_observed(events: &[TurnEvent], terminal_reason: Option<&str>) ->
         })
 }
 
+fn tool_result_text(payload: &Value) -> Option<&str> {
+    for key in ["result", "content", "text"] {
+        if let Some(text) = payload.get(key).and_then(Value::as_str) {
+            return Some(text);
+        }
+    }
+    for key in ["payload", "call", "tool"] {
+        if let Some(text) = payload.get(key).and_then(tool_result_text) {
+            return Some(text);
+        }
+    }
+    None
+}
+
+fn completed_delegated_browse_observed(events: &[TurnEvent]) -> bool {
+    events.iter().any(|event| {
+        if event.kind != TurnEventKind::Tool || browser_tool_name(&event.payload) != Some("browse")
+        {
+            return false;
+        }
+        let Some(result_text) = tool_result_text(&event.payload) else {
+            return false;
+        };
+        let Ok(result) = serde_json::from_str::<Value>(result_text.trim()) else {
+            return false;
+        };
+        let grounded = result
+            .get("sources")
+            .and_then(Value::as_array)
+            .is_some_and(|sources| !sources.is_empty())
+            || result
+                .get("items")
+                .and_then(Value::as_array)
+                .is_some_and(|items| !items.is_empty())
+            || result
+                .get("evidence")
+                .and_then(Value::as_array)
+                .is_some_and(|evidence| !evidence.is_empty());
+        result.get("found").and_then(Value::as_bool) == Some(true)
+            && result.get("status").and_then(Value::as_str) == Some("completed")
+            && grounded
+    })
+}
+
 fn project_kernel_browser_view(
     events: &[TurnEvent],
     checkpoint: Option<&BrowserCheckpointRecord>,
     terminal_reason: Option<&str>,
 ) -> KernelBrowserView {
     let latest_progress = latest_browser_progress(events);
+    if browser_done_observed(events, terminal_reason) || completed_delegated_browse_observed(events)
+    {
+        return KernelBrowserView {
+            state: "done".to_string(),
+            target_id: checkpoint.map(|checkpoint| checkpoint.target_id.clone()),
+            latest_progress,
+            failure_reason: None,
+            snapshot_verified: checkpoint.is_some(),
+        };
+    }
     if let Some(reason) = events
         .iter()
         .rev()
@@ -336,15 +390,6 @@ fn project_kernel_browser_view(
             target_id: checkpoint.map(|checkpoint| checkpoint.target_id.clone()),
             latest_progress,
             failure_reason: Some(reason),
-            snapshot_verified: checkpoint.is_some(),
-        };
-    }
-    if browser_done_observed(events, terminal_reason) {
-        return KernelBrowserView {
-            state: "done".to_string(),
-            target_id: checkpoint.map(|checkpoint| checkpoint.target_id.clone()),
-            latest_progress,
-            failure_reason: None,
             snapshot_verified: checkpoint.is_some(),
         };
     }
@@ -7595,6 +7640,65 @@ mod chat_turn_query_tests {
         assert!(
             projection.activity.is_empty(),
             "typed browser budget failures must not leak as generic activity rows"
+        );
+    }
+
+    #[test]
+    fn completed_delegated_browse_keeps_browser_done_after_secondary_no_progress() {
+        let s = store();
+        insert_browser_turn(
+            &s,
+            "turn_browser_mixed",
+            "threadBrowserMixed",
+            TaskStatus::Completed,
+        );
+        let browse_result = json!({
+            "found": true,
+            "answer": "Frecciarossa 9519 Milano Centrale 07:55 -> Roma Termini 12:10",
+            "sources": ["https://www.trenitalia.com/"],
+            "confidence": "high",
+            "status": "completed",
+            "items": [
+                {
+                    "departure": "07:55",
+                    "arrival": "12:10",
+                    "duration": "4h15"
+                }
+            ],
+            "fields_missing": [],
+            "evidence": ["Trenitalia result card"]
+        });
+        s.insert_turn_event(
+            "turn_browser_mixed",
+            TurnEventKind::Tool,
+            json!({
+                "type": "tool_result",
+                "name": "browse",
+                "result": browse_result.to_string()
+            }),
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_browser_mixed",
+            TurnEventKind::Activity,
+            json!({"text": "browser_budget_exceeded:no_progress"}),
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_browser_mixed",
+            TurnEventKind::Done,
+            json!({"text": "Ecco le opzioni trovate da Trenitalia."}),
+        )
+        .unwrap();
+
+        let projection = s.project_kernel_thread("threadBrowserMixed", 200).unwrap();
+
+        assert_eq!(projection.turn.status, "completed");
+        assert_eq!(projection.browser.state, "done");
+        assert_eq!(projection.browser.failure_reason, None);
+        assert!(
+            projection.activity.is_empty(),
+            "typed browser budget failures must not leak as generic activity rows even when browser is done"
         );
     }
 

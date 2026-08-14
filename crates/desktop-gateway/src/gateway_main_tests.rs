@@ -3725,11 +3725,15 @@ fn browse_hard_ceiling_does_not_triple_rich_browser_contracts() {
 }
 
 #[test]
-fn browse_subturn_wall_clock_backstop_stays_bounded_for_interactive_reads() {
+fn browse_subturn_wall_clock_backstop_allows_slow_grounded_results_but_stays_bounded() {
     const {
         assert!(
-            super::BROWSE_SUBTURN_MAX_ELAPSED_MS <= 120_000,
-            "one delegated browse must return control to the manager within an interactive window"
+            super::BROWSE_SUBTURN_MAX_ELAPSED_MS >= 240_000,
+            "one delegated browse must leave enough wall clock for slow grounded result pages"
+        );
+        assert!(
+            super::BROWSE_SUBTURN_MAX_ELAPSED_MS <= 300_000,
+            "one delegated browse must still have a bounded interactive backstop"
         );
     }
 }
