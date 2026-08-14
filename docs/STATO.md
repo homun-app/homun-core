@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-14 (capability registry owner extraction in progress).**
+> **Ultimo aggiornamento: 2026-08-14 (capability registry owner extraction verified locally).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -157,11 +157,16 @@ Slice browser/projection successive:
   `cargo test -p local-first-desktop-gateway gateway_tool_budget -- --nocapture`,
   `git diff --check`, `python3 scripts/kernel_regression_gate.py` verde con
   voce `gateway tool budget`.
-- Slice `fabio/capability-registry-contracts` in corso: RED del contract
+- Slice `fabio/capability-registry-contracts` verificata localmente: RED del contract
   `check_gateway_main_contract.py` osservato prima dell'estrazione; GREEN
   mirati con `python3 scripts/check_gateway_main_contract.py`,
   `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_capability_registry -- --nocapture`,
-  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway capability -- --nocapture`.
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway capability -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway gateway_capability_registry -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway gateway_tool_budget -- --nocapture`,
+  `cargo fmt --check`, `git diff --check` e
+  `python3 scripts/kernel_regression_gate.py` verde con voce
+  `gateway capability registry`.
 
 ## PR / CI
 
@@ -187,11 +192,14 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/116`.
 - #118 `Extract plan stall budget owner`:
   `https://github.com/homun-app/homun-core/pull/118`.
+- #119 `Extract gateway tool budget owner`:
+  `https://github.com/homun-app/homun-core/pull/119`.
 
 Branch corrente:
 
 - `fabio/capability-registry-contracts`: estrae `gateway_capability_registry`
-  per registry capability/plugin/MCP/connector; PR non ancora aperta.
+  per registry capability/plugin/MCP/connector; PR #120 aperta:
+  `https://github.com/homun-app/homun-core/pull/120`.
 
 ## Debito residuo
 
