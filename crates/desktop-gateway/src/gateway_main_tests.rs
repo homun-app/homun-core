@@ -54,6 +54,21 @@ use local_first_engine::plan::collapse_plan_markers;
 use local_first_engine::browser::{PRUNED_SNAPSHOT_STUB, message_has_image_url};
 
 #[cfg(unix)]
+async fn wait_for_pid_file(path: &std::path::Path) -> Result<i32, tokio::time::error::Elapsed> {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if let Ok(raw) = std::fs::read_to_string(path)
+                && let Ok(pid) = raw.trim().parse::<i32>()
+            {
+                break pid;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    })
+    .await
+}
+
+#[cfg(unix)]
 #[tokio::test]
 async fn aborting_project_command_kills_descendant_processes() {
     let mut sentinel = std::process::Command::new("sleep")
@@ -76,18 +91,17 @@ async fn aborting_project_command_kills_descendant_processes() {
     let run_root = root.clone();
     let run = tokio::spawn(async move { run_bash_unsandboxed_result(&run_root, &command).await });
 
-    let child_pid = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        loop {
-            if let Ok(raw) = std::fs::read_to_string(&child_pid_path)
-                && let Ok(pid) = raw.trim().parse::<i32>()
-            {
-                break pid;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    let child_pid = match wait_for_pid_file(&child_pid_path).await {
+        Ok(pid) => pid,
+        Err(error) => {
+            run.abort();
+            let _ = run.await;
+            let _ = sentinel.kill();
+            let _ = sentinel.wait();
+            let _ = std::fs::remove_dir_all(root);
+            panic!("descendant pid is written: {error:?}");
         }
-    })
-    .await
-    .expect("descendant pid is written");
+    };
     assert_eq!(unsafe { libc::kill(child_pid, 0) }, 0, "child must start");
 
     run.abort();

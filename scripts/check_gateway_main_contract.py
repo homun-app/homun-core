@@ -236,6 +236,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn search_connector_capability_entries(": "capability registry connector search must stay in gateway_capability_registry",
         "fn capability_discovery_trace_line(": "capability registry tracing must stay in gateway_capability_registry",
         "fn suggest_capabilities_tool_schema(": "capability suggestion schemas must stay in gateway_capability_registry",
+        "let mut capability_corpus: Vec<CapabilityEntry>": "capability corpus materialization must stay in gateway_capability_registry",
+        "for schema in deferred_tools {": "deferred tool corpus projection must stay in gateway_capability_registry",
         "fn plan_reconcile_on_delivery_flag(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn plan_reconcile_on_delivery_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn turn_trace_enabled(": "runtime environment flags must stay in gateway_runtime_flags",

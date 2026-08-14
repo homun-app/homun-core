@@ -132,6 +132,87 @@ pub(crate) fn connector_capability_entry(
     Some(entry)
 }
 
+pub(crate) struct CapabilityCorpusMaterializationInput<'a> {
+    pub(crate) deferred_tools: Vec<serde_json::Value>,
+    pub(crate) read_only: bool,
+    pub(crate) objective_effect_policy: &'a crate::semantic_decision::ObjectiveEffectPolicy,
+    pub(crate) composio_writes: &'a std::collections::BTreeSet<String>,
+    pub(crate) mcp_schemas: &'a [serde_json::Value],
+    pub(crate) enabled_skills: &'a [(String, String, String)],
+}
+
+pub(crate) fn materialize_capability_corpus(
+    input: CapabilityCorpusMaterializationInput<'_>,
+) -> Vec<CapabilityEntry> {
+    let mut corpus: Vec<CapabilityEntry> = Vec::new();
+    for schema in input.deferred_tools {
+        let Some(entry) = capability_entry_from_tool_schema(schema, CapabilitySource::NativeTool)
+        else {
+            continue;
+        };
+        if crate::native_workflow_by_tool_name(&entry.key).is_none() {
+            corpus.push(entry);
+        }
+    }
+    if !input.read_only && input.objective_effect_policy.allows_mutation() {
+        corpus.extend(
+            crate::native_workflow_capability_entries()
+                .into_iter()
+                .filter(|entry| {
+                    !crate::objective_blocks_tool(
+                        input.objective_effect_policy,
+                        &entry.key,
+                        input.composio_writes,
+                    )
+                }),
+        );
+        corpus.extend(
+            crate::native_atomic_capability_entries()
+                .into_iter()
+                .filter(|entry| {
+                    !crate::objective_blocks_tool(
+                        input.objective_effect_policy,
+                        &entry.key,
+                        input.composio_writes,
+                    )
+                }),
+        );
+        corpus.extend(
+            crate::template_catalog_capability_entries()
+                .into_iter()
+                .filter(|entry| {
+                    !crate::objective_blocks_tool(
+                        input.objective_effect_policy,
+                        &entry.key,
+                        input.composio_writes,
+                    )
+                }),
+        );
+    }
+    corpus.extend(
+        mcp_capability_entries(input.mcp_schemas)
+            .into_iter()
+            .filter(|entry| {
+                !crate::objective_blocks_tool(
+                    input.objective_effect_policy,
+                    &entry.key,
+                    input.composio_writes,
+                )
+            }),
+    );
+    for (id, sname, sdesc) in input.enabled_skills {
+        corpus.push(CapabilityEntry {
+            key: id.clone(),
+            desc: sdesc.chars().take(140).collect(),
+            text: format!("{id} {sname} {sdesc}"),
+            schema: None,
+            is_skill: true,
+            source: CapabilitySource::Skill,
+        });
+    }
+    corpus
+}
+
 /// Tokenizer for capability search and keyword-overlap prefilters. Delegates to the SHARED
 /// tokenizer (F1.a) so the chat loop and the orchestrator planner split text identically.
 pub(crate) fn cap_tokenize(s: &str) -> Vec<String> {
@@ -458,5 +539,84 @@ mod tests {
         assert!(keys.contains(&"GMAIL_FETCH_EMAILS"));
         assert!(keys.contains(&"GMAIL_SEND_EMAIL"));
         assert!(!keys.contains(&"GOOGLECALENDAR_EVENTS_LIST"));
+    }
+
+    #[test]
+    fn owner_materializes_deferred_mcp_and_skill_corpus() {
+        let policy = crate::semantic_decision::ObjectiveEffectPolicy::from_allowed_effects([
+            crate::semantic_decision::EffectClass::Read,
+        ]);
+        let composio_writes = std::collections::BTreeSet::new();
+        let enabled_skills = vec![(
+            "skill:pdf".to_string(),
+            "PDF".to_string(),
+            "Read and inspect PDF files.".to_string(),
+        )];
+        let corpus = materialize_capability_corpus(CapabilityCorpusMaterializationInput {
+            deferred_tools: vec![
+                schema("run_report", "Run a read-only report."),
+                schema("make_deck", "Create a deck."),
+            ],
+            read_only: true,
+            objective_effect_policy: &policy,
+            composio_writes: &composio_writes,
+            mcp_schemas: &[schema("mcp__filesystem__read_file", "Read a file.")],
+            enabled_skills: &enabled_skills,
+        });
+        let keys: Vec<&str> = corpus.iter().map(|entry| entry.key.as_str()).collect();
+
+        assert!(keys.contains(&"run_report"));
+        assert!(!keys.contains(&"make_deck"));
+        assert!(keys.contains(&"mcp__filesystem__read_file"));
+        assert!(keys.contains(&"skill:pdf"));
+    }
+
+    #[test]
+    fn owner_adds_mutating_native_capabilities_only_when_policy_allows() {
+        let read_policy = crate::semantic_decision::ObjectiveEffectPolicy::from_allowed_effects([
+            crate::semantic_decision::EffectClass::Read,
+        ]);
+        let write_policy = crate::semantic_decision::ObjectiveEffectPolicy::from_allowed_effects([
+            crate::semantic_decision::EffectClass::FilesystemWrite,
+            crate::semantic_decision::EffectClass::ArtifactCreation,
+        ]);
+        let composio_writes = std::collections::BTreeSet::new();
+
+        let read_only_corpus =
+            materialize_capability_corpus(CapabilityCorpusMaterializationInput {
+                deferred_tools: Vec::new(),
+                read_only: true,
+                objective_effect_policy: &write_policy,
+                composio_writes: &composio_writes,
+                mcp_schemas: &[],
+                enabled_skills: &[],
+            });
+        let read_policy_corpus =
+            materialize_capability_corpus(CapabilityCorpusMaterializationInput {
+                deferred_tools: Vec::new(),
+                read_only: false,
+                objective_effect_policy: &read_policy,
+                composio_writes: &composio_writes,
+                mcp_schemas: &[],
+                enabled_skills: &[],
+            });
+        let write_policy_corpus =
+            materialize_capability_corpus(CapabilityCorpusMaterializationInput {
+                deferred_tools: Vec::new(),
+                read_only: false,
+                objective_effect_policy: &write_policy,
+                composio_writes: &composio_writes,
+                mcp_schemas: &[],
+                enabled_skills: &[],
+            });
+        let write_keys: Vec<&str> = write_policy_corpus
+            .iter()
+            .map(|entry| entry.key.as_str())
+            .collect();
+
+        assert!(read_only_corpus.is_empty());
+        assert!(read_policy_corpus.is_empty());
+        assert!(write_keys.contains(&"make_deck"));
+        assert!(write_keys.contains(&"run_in_sandbox"));
     }
 }
