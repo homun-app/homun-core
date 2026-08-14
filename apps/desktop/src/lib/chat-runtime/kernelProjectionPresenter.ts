@@ -2,6 +2,7 @@
 // @ts-expect-error JavaScript sibling intentionally has no declaration file.
 import * as implementation from "./kernelProjectionPresenter.mjs";
 import type { KernelThreadProjection } from "../chatApi";
+import type { PlanStep } from "./planSteps";
 
 export interface KernelProjectionPresenterInput {
   projectionLoaded: boolean;
@@ -15,12 +16,7 @@ export interface KernelProjectionPresenterInput {
 export interface KernelProjectionPresenterView {
   conversationPlan: string | null;
   conversationActivity: string[];
-  workspacePlanSteps: Array<{
-    id: string;
-    title: string;
-    status: string;
-    detail: string | null;
-  }>;
+  workspacePlanSteps: PlanStep[];
   workspacePlanGoal: string | null;
   turnUiState: {
     isStreaming: boolean;

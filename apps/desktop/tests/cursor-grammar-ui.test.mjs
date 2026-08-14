@@ -785,6 +785,20 @@ const chatPayloadParsers = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const planStepsModule = await readFile(
+  new URL("../src/lib/chat-runtime/planSteps.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
+const kernelProjectionPresenterModule = await readFile(
+  new URL("../src/lib/chat-runtime/kernelProjectionPresenter.mjs", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatSteeringPrompt = await readFile(
   new URL("../src/lib/chatSteeringPrompt.mjs", import.meta.url),
   "utf8",
@@ -1860,7 +1874,8 @@ test("ChatView delegates message and formatting helpers to chatViewMessages", ()
 });
 
 test("ChatView delegates structured payload parsing to ChatPayloadParsers", () => {
-  assert.match(chatActivityProjectionHook, /from "\.\/ChatPayloadParsers";/);
+  assert.match(chatActivityProjectionHook, /from "\.\.\/lib\/chat-runtime\/kernelProjectionPresenter";/);
+  assert.doesNotMatch(chatActivityProjectionHook, /from "\.\/ChatPayloadParsers";/);
   assert.doesNotMatch(chatView, /from "\.\/ChatPayloadParsers";/);
   assert.doesNotMatch(chatView, /function eventPayload\(/);
   assert.doesNotMatch(chatView, /function parseVaultProposalPayload\(/);
@@ -2437,8 +2452,8 @@ test("ChatView does not retain the retired inline operational plan progress card
   assert.doesNotMatch(chatView, /function PlanProgressCard\(/);
   assert.doesNotMatch(chatView, /interface PlanStep/);
   assert.doesNotMatch(chatView, /function parsePlanSteps\(/);
-  assert.match(chatPayloadParsers, /export interface PlanStep/);
-  assert.match(chatPayloadParsers, /export function parsePlanSteps\(markdown: string\): PlanStep\[\]/);
+  assert.match(chatPayloadParsers, /export \{ parsePlanSteps, type PlanStep \} from "\.\.\/lib\/chat-runtime\/planSteps";/);
+  assert.match(planStepsModule, /export function parsePlanSteps\(markdown\)/);
 });
 
 test("ChatView delegates diff message rendering to MessageDiffCard", () => {
@@ -2955,14 +2970,17 @@ test("parsePlanGoal pins the **Goal**: line contract and stays robust without it
   assert.match(planGoalModule, /\^\\\*\\\*Goal\\\*\\\*:\\s\*\(\.\+\)\$\/m/);
   assert.match(planGoalModule, /export function parsePlanGoal\(markdown\)/);
   assert.match(chatPayloadParsers, /export \{ parsePlanGoal \} from "\.\.\/lib\/chat-runtime\/planGoal";/);
+  assert.match(kernelProjectionPresenterModule, /parsePlanGoal/);
   assert.match(chatActivityProjectionHook, /workspacePlanGoal/);
-  assert.match(chatActivityProjectionHook, /parsePlanGoal/);
+  assert.doesNotMatch(chatActivityProjectionHook, /parsePlanGoal/);
   assert.doesNotMatch(chatView, /parsePlanGoal/);
 });
 
 test("parsePlanSteps keeps the backticked step id for step_advance matching", () => {
-  assert.match(chatPayloadParsers, /\(\?:\\\(\`\(\[\^`\]\*\)\`\\\)\)\?/);
-  assert.match(chatPayloadParsers, /id\?: string;/);
+  assert.match(planStepsModule, /\(\?:\\\(\`\(\[\^`\]\*\)\`\\\)\)\?/);
+  assert.match(chatPayloadParsers, /type PlanStep/);
+  assert.match(kernelProjectionPresenterModule, /projectPlanSteps/);
+  assert.doesNotMatch(chatActivityProjectionHook, /parsePlanSteps/);
 });
 
 test("the plan goal renders above the step list via the objective pattern", () => {

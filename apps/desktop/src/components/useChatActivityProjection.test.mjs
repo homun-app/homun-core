@@ -18,6 +18,10 @@ test("useChatActivityProjection does not project plan or activity from legacy ma
   assert.doesNotMatch(source, /latestPlanMarkdown\(/);
   assert.doesNotMatch(source, /latestActivitySteps\(/);
   assert.doesNotMatch(source, /legacyMarkerProjection/);
+  assert.doesNotMatch(source, /parsePlanSteps/);
+  assert.doesNotMatch(source, /parsePlanGoal/);
+  assert.doesNotMatch(source, /normalizeKernelPlanStatus/);
+  assert.doesNotMatch(source, /kernelPlanStepsToUiSteps/);
   assert.doesNotMatch(source, /status === "doing" \? \{ \.\.\.step, status: "done"/);
 });
 

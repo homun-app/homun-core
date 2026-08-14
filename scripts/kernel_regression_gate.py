@@ -398,6 +398,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway plan stall",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "plan_stall",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway chat markers",
             [
                 "cargo",

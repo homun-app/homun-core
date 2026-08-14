@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-13 (Runtime V2 legacy HITL fallback removal).**
+> **Ultimo aggiornamento: 2026-08-14 (action budget + plan/UI owner cleanup).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
-| PR | #108, #109, #110, #111, #112, #113 mergeate in `main` |
-| HEAD codice verificato | `74735bb6` (`Merge pull request #113 from homun-app/fabio/remove-legacy-runtime-fallback`) |
+| Branch | `fabio/app-action-budget-contracts` da `main` |
+| PR | #108-#116 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `a688c991` (`Merge pull request #116 from homun-app/fabio/browser-subturn-budget-main`) |
 
 ## Dove siamo
 
@@ -29,7 +29,9 @@ turn_events + runtime_plans + execution_effect_receipts + agent_runs + HITL
 ```
 
 Il contratto as-built vive in
-[`architecture/kernel-v2-contract.md`](architecture/kernel-v2-contract.md). La
+[`architecture/kernel-v2-contract.md`](architecture/kernel-v2-contract.md). Il
+contratto budget/azioni vive in
+[`architecture/action-budget-contract.md`](architecture/action-budget-contract.md). La
 matrice owner/gate vive in
 [`testing/kernel-contract-matrix.md`](testing/kernel-contract-matrix.md). Il
 protocollo anti-regressione vive in
@@ -73,6 +75,12 @@ Slice Runtime V2 recenti:
 - Rimozione fallback legacy HITL: rimosso il fallback `threadTailAwaits*`
   che faceva derivare lifecycle/composer mode dai marker HITL del transcript
   prima del load della projection.
+- Estrazione `gateway_plan_stall`: il budget cross-turn del piano non vive piu'
+  nel monolite `main.rs`; `check_gateway_main_contract.py` ne impedisce il
+  rientro.
+- Estrazione `chat-runtime/planSteps`: parsing/normalizzazione dei passi UI
+  passano da `kernelProjectionPresenter`; `useChatActivityProjection` non
+  ricalcola piu' goal/progresso con un secondo owner locale.
 
 ## Invarianti ora protetti
 
@@ -90,6 +98,9 @@ Slice Runtime V2 recenti:
 - Receipt `ExternalWrite` incerta genera attention item.
 - Tool/plugin/MCP caricati non cambiano liveness.
 - Automazioni e proactive run usano lo stesso vocabolario del kernel.
+- Il workspace plan UI viene proiettato da `kernelProjectionPresenter` usando
+  `chat-runtime/planSteps`; l'hook activity fa fetch/replay e non possiede piu'
+  parsing o normalizzazione del piano.
 - Marker legacy possono renderizzare storico, ma non riaprire lifecycle corrente,
   non forzano composer mode e non alimentano piu' plan/activity dell'isola.
 
@@ -119,6 +130,16 @@ Slice browser/projection successive:
 - PR #113 mergeata il 2026-08-13, merge commit `74735bb6`; gate locale
   `python3 scripts/kernel_regression_gate.py` verde e CI verde su Backend,
   Frontend, Landlock, Release readiness, build Linux/macOS/Windows.
+- PR #114, #115, #116 mergeate in `main`; `main` corrente osservato a
+  `a688c991`.
+- Slice `fabio/app-action-budget-contracts` verificata localmente con:
+  `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
+  `cargo test -p local-first-desktop-gateway plan_stall -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway block_stalled_step -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway runtime_plan_control_store_owns_stall_bookkeeping -- --nocapture`,
+  `cd apps/desktop && npm test`, `cd apps/desktop && npm run test:ui-contract`,
+  `cd apps/desktop && npm run build`, `python3 scripts/kernel_regression_gate.py`
+  verde con voce `gateway plan stall`.
 
 ## PR / CI
 
@@ -136,6 +157,19 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/112`.
 - #113 `Remove legacy HITL liveness fallback`:
   `https://github.com/homun-app/homun-core/pull/113`.
+- #114 `Update status after Runtime V2 projection work`:
+  `https://github.com/homun-app/homun-core/pull/114`.
+- #115 `Fix browser timeout diagnostics and time input fallback`:
+  `https://github.com/homun-app/homun-core/pull/115`.
+- #116 `Fix browser smoke completion contract`:
+  `https://github.com/homun-app/homun-core/pull/116`.
+
+Branch corrente:
+
+- `fabio/app-action-budget-contracts`: estrae `gateway_plan_stall`, documenta
+  `architecture/action-budget-contract.md`, sposta il parsing/proiezione dei
+  passi UI in `chat-runtime/planSteps` + `kernelProjectionPresenter`;
+  PR #118 aperta draft: `https://github.com/homun-app/homun-core/pull/118`.
 
 ## Debito residuo
 

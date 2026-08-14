@@ -1,3 +1,6 @@
+import { parsePlanGoal } from "./planGoal.mjs";
+import { parsePlanSteps, projectPlanSteps } from "./planSteps.mjs";
+
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const BROWSER_ACTIVE_STATES = new Set(["active", "waiting_user", "unknown"]);
 
@@ -24,13 +27,13 @@ function projectionActivity(input, projection, streamMatchesProjection) {
   return durableActivity;
 }
 
-function projectionSteps(projection) {
-  return (projection?.plan?.steps ?? []).map((step) => ({
-    id: step.id,
-    title: step.title,
-    status: step.status,
-    detail: step.detail ?? null,
-  }));
+function workspacePlanSteps(projection, conversationPlan) {
+  if (projection) return projectPlanSteps(projection);
+  return parsePlanSteps(conversationPlan);
+}
+
+function workspacePlanGoal(projection, conversationPlan) {
+  return projection?.plan?.goal ?? parsePlanGoal(conversationPlan);
 }
 
 function attentionItems(projection) {
@@ -100,11 +103,13 @@ export function projectKernelThreadView(input) {
       || (activeTurnId && !turnAwaitingUser && !TERMINAL_STATUSES.has(turnStatus)),
   );
 
+  const conversationPlan = projectionPlan(input, projection, streamMatchesProjection);
+
   return {
-    conversationPlan: projectionPlan(input, projection, streamMatchesProjection),
+    conversationPlan,
     conversationActivity: projectionActivity(input, projection, streamMatchesProjection),
-    workspacePlanSteps: projectionSteps(projection),
-    workspacePlanGoal: projection?.plan?.goal ?? null,
+    workspacePlanSteps: workspacePlanSteps(projection, conversationPlan),
+    workspacePlanGoal: workspacePlanGoal(projection, conversationPlan),
     turnUiState: {
       isStreaming: Boolean(input.isStreaming),
       hasActiveTurn,
