@@ -31,6 +31,15 @@ UI mostra lo stato prodotto.
 | Tool/plugin/action timeout | tool runtime specifici + gateway policy | `ToolOutcome`, receipt/eventi | mostra call/result/approval |
 | Browser | `BrowserBudget` + browser sidecar result | `BrowserProgress`, `BrowserDone`, typed failure reason | sessione dedicata, non in questo slice |
 
+## Owner UI del piano
+
+La UI non possiede budget o avanzamento del piano. Il presenter
+`apps/desktop/src/lib/chat-runtime/kernelProjectionPresenter.mjs` e' l'owner
+del read model per goal e passi del workspace; la normalizzazione/parsing
+riutilizzabile vive in `apps/desktop/src/lib/chat-runtime/planSteps.mjs`.
+`useChatActivityProjection` fa fetch/replay della `KernelThreadProjection` e
+passa il risultato del presenter, senza ricostruire `PlanStep[]` o goal.
+
 ## Regole di refactor
 
 1. Ogni nuovo limite deve avere un solo owner Rust/TS nominato e testato.
@@ -48,9 +57,9 @@ UI mostra lo stato prodotto.
 
 1. Estrarre altri budget/proiezioni ancora dentro `main.rs` in owner piccoli,
    aggiungendo ogni volta una voce al gate `check_gateway_main_contract.py`.
-2. Portare la UI a leggere ogni stato di lavoro da un solo presenter
-   (`runtimeViewModel` / `kernelProjectionPresenter`) e rimuovere alias locali
-   che ricostruiscono "sta lavorando".
+2. Continuare a portare la UI a leggere ogni stato di lavoro da un solo
+   presenter (`runtimeViewModel` / `kernelProjectionPresenter`) e rimuovere
+   alias locali che ricostruiscono "sta lavorando".
 3. Allineare plugin/MCP/skill tool runtime: timeout e permessi sono tool policy,
    ma progresso, piano e terminalita' restano del kernel.
 4. Solo dopo, riaprire il browser: il suo budget dovra' essere una specializzazione

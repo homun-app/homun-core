@@ -1436,7 +1436,9 @@ assertContains("src/components/useChatActivityProjection.ts", "projectKernelThre
 assertNotContains("src/components/useChatActivityProjection.ts", "fetchThreadActivity", "activity projection must not call the legacy activity endpoint");
 assertNotContains("src/components/useChatActivityProjection.ts", "latestPlanMarkdown", "activity projection must not reconstruct plan state from markers");
 assertNotContains("src/components/useChatActivityProjection.ts", "latestActivitySteps", "activity projection must not reconstruct activity state from markers");
-assertContains("src/components/useChatActivityProjection.ts", "parsePlanSteps", "workspace plan steps must have one focused owner");
+assertContains("src/lib/chat-runtime/planSteps.mjs", "export function parsePlanSteps(markdown)", "workspace plan markdown parsing must have one focused owner");
+assertContains("src/lib/chat-runtime/kernelProjectionPresenter.mjs", "projectPlanSteps", "workspace plan projection must be owned by the kernel presenter");
+assertNotContains("src/components/useChatActivityProjection.ts", "parsePlanSteps", "activity projection hook must not own workspace plan parsing");
 assertContains("src/components/useChatActivityProjection.ts", "createTurnReplayState", "activity projection replay seeding must have one focused owner");
 assertContains("src/components/useChatActivityProjection.ts", "replayStatusFromProjection", "activity projection replay status mapping must have one focused owner");
 assertContains("src/components/useChatBrowserActivityLifecycle.ts", "useChatActivityProjection({", "browser activity lifecycle must consume the focused durable activity projection owner");

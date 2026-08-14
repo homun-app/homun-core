@@ -10,22 +10,7 @@ import type { VaultRevealProposal } from "./MessageVaultRevealCard";
 // Plan goal extraction lives in the shared pure module (Node-testable twin);
 // this file stays the single plan-parsing owner consumed by the UI.
 export { parsePlanGoal } from "../lib/chat-runtime/planGoal";
-
-export interface PlanStep {
-  status: "todo" | "doing" | "done" | "blocked";
-  title: string;
-  detail: string;
-  /** Step id carried by the checkbox line (``(`id`)``), when present. Used
-   *  to pulse the matching row when a `step_advance` event arrives. */
-  id?: string;
-  /**
-   * Concrete, checkable condition that proves the step is complete.
-   * Present in the runtime plan schema; surfaced in the workspace island
-   * as subtle sub-text under each step title. Optional because the plan
-   * markdown may not carry it separately (falls back to `detail`).
-   */
-  done_criterion?: string;
-}
+export { parsePlanSteps, type PlanStep } from "../lib/chat-runtime/planSteps";
 
 export function eventPayload(parts: ChatEventPart[] | undefined, type: ChatEventPart["type"]) {
   const part = parts?.find((item) => item.type === type);
@@ -107,19 +92,6 @@ export function parseChoicePromptPayload(payload: unknown): ChoicePrompt | null 
   };
 }
 
-export function parsePlanSteps(markdown: string): PlanStep[] {
-  const out: PlanStep[] = [];
-  for (const raw of markdown.split("\n")) {
-    const match = raw.match(/^\-\s*\[(.)\]\s*\*\*(.+?)\*\*\s*(?:\(`([^`]*)`\))?\s*:?\s*(.*)$/);
-    if (!match) continue;
-    const marker = match[1];
-    const status: PlanStep["status"] =
-      marker === "x" ? "done" : marker === "-" ? "doing" : marker === "!" ? "blocked" : "todo";
-    const id = match[3]?.trim();
-    out.push({ status, title: match[2].trim(), detail: match[4].trim(), ...(id ? { id } : {}) });
-  }
-  return out;
-}
 
 export function latestPlanMarkdown(
   messages: { text?: string; eventParts?: ChatEventPart[] }[],

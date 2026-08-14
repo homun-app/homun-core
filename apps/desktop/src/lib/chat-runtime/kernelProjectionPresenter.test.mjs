@@ -126,6 +126,53 @@ test("missing_kernel_projection_does_not_fallback_to_marker_plan_or_activity", (
   assert.deepEqual(view.conversationActivity, []);
 });
 
+test("live_stream_plan_is_projected_by_presenter_before_kernel_projection_loads", () => {
+  const view = projectKernelThreadView({
+    projectionLoaded: false,
+    projection: null,
+    isStreaming: true,
+    liveActivitySteps: ["Planning"],
+    livePlanMarkdown: "**Goal**: trovare un treno\n\n- [-] **Leggi risultati** (`s1`): in corso",
+    streamOwnerTurnId: "turn-local",
+  });
+
+  assert.equal(
+    view.conversationPlan,
+    "**Goal**: trovare un treno\n\n- [-] **Leggi risultati** (`s1`): in corso",
+  );
+  assert.equal(view.workspacePlanGoal, "trovare un treno");
+  assert.deepEqual(view.workspacePlanSteps, [
+    { status: "doing", title: "Leggi risultati", detail: "in corso", id: "s1" },
+  ]);
+  assert.deepEqual(view.conversationActivity, ["Planning"]);
+});
+
+test("workspace_plan_steps_are_normalized_inside_presenter", () => {
+  const view = projectKernelThreadView({
+    projectionLoaded: true,
+    projection: projection({
+      plan: {
+        goal: "goal",
+        revision: 1,
+        markdown: "- [ ] **Future**",
+        steps: [
+          { id: "s1", title: "Future status", status: "paused", detail: null },
+          { id: "s2", title: "Blocked", status: "blocked", detail: "needs input" },
+        ],
+      },
+    }),
+    isStreaming: false,
+    liveActivitySteps: [],
+    livePlanMarkdown: null,
+    streamOwnerTurnId: null,
+  });
+
+  assert.deepEqual(view.workspacePlanSteps, [
+    { id: "s1", title: "Future status", status: "todo", detail: "" },
+    { id: "s2", title: "Blocked", status: "blocked", detail: "needs input" },
+  ]);
+});
+
 test("durable_plan_projection_wins_over_marker_and_stream_gap", () => {
   const view = projectKernelThreadView({
     projectionLoaded: true,

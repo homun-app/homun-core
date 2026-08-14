@@ -17,11 +17,6 @@ import {
   type KernelProjectionPresenterView,
 } from "../lib/chat-runtime/kernelProjectionPresenter";
 import type { ChatMessage } from "../types";
-import {
-  parsePlanGoal,
-  parsePlanSteps,
-  type PlanStep,
-} from "./ChatPayloadParsers";
 
 interface UseChatActivityProjectionOptions {
   activeTurnIdRef: { current: string | null };
@@ -95,20 +90,6 @@ function activeTurnFromKernelProjection(
   };
 }
 
-function normalizeKernelPlanStatus(status: string): PlanStep["status"] {
-  if (status === "doing" || status === "done" || status === "blocked") return status;
-  return "todo";
-}
-
-function kernelPlanStepsToUiSteps(projection: KernelThreadProjection | null): PlanStep[] {
-  return (projection?.plan?.steps ?? []).map((step) => ({
-    id: step.id,
-    title: step.title,
-    status: normalizeKernelPlanStatus(step.status),
-    detail: step.detail ?? "",
-  }));
-}
-
 function browserFailureMessage(failureReason: string | null, translate: (key: string) => string) {
   return failureReason === "wall_clock"
     ? translate("chat.browserBudget.wallClock")
@@ -163,15 +144,8 @@ export function useChatActivityProjection({
     ? [...threadMessages].reverse().find((message) => message.role === "assistant")?.id ?? null
     : null;
 
-  const workspacePlanSteps = useMemo(() => {
-    if (projectionLoaded) return kernelPlanStepsToUiSteps(kernelProjection);
-    return conversationPlan ? parsePlanSteps(conversationPlan) : [];
-  }, [conversationPlan, kernelProjection, projectionLoaded]);
-
-  const workspacePlanGoal = useMemo(
-    () => projectedView.workspacePlanGoal ?? (conversationPlan ? parsePlanGoal(conversationPlan) : null),
-    [conversationPlan, projectedView.workspacePlanGoal],
-  );
+  const workspacePlanSteps = projectedView.workspacePlanSteps;
+  const workspacePlanGoal = projectedView.workspacePlanGoal;
 
   const clearProjectedActiveTurn = useCallback(() => {
     activeTurnIdRef.current = null;
