@@ -228,6 +228,12 @@ def forbidden_root_snippets() -> dict[str, str]:
         "const CORE_TOOL_NAMES:": "runtime tool live-set policy must stay in gateway_tool_budget",
         "fn tool_stays_live_this_turn(": "runtime tool live-set policy must stay in gateway_tool_budget",
         "fn mcp_call_timeout(": "tool timeout policy must stay in gateway_tool_timeouts",
+        "fn confirm_marker_value(": "action confirmation marker parsing must stay in gateway_action_confirmations",
+        "fn confirm_marker_matches_approval(": "action confirmation marker approval matching must stay in gateway_action_confirmations",
+        "const MCP_CONFIRM_OPEN:": "MCP confirmation marker constants must stay in gateway_action_confirmations",
+        "fn mcp_confirm_matches(": "MCP confirmation matching must stay in gateway_action_confirmations",
+        "fn mcp_confirm_matches_approval(": "MCP remote approval matching must stay in gateway_action_confirmations",
+        "fn rewrite_mcp_confirm_to_done(": "MCP confirmation rewrite must stay in gateway_action_confirmations",
         "fn find_capability_tool_schema(": "capability discovery schemas must stay in gateway_capability_registry",
         "enum CapabilitySource ": "capability registry source typing must stay in gateway_capability_registry",
         "struct CapabilityEntry ": "capability registry entries must stay in gateway_capability_registry",
@@ -514,6 +520,7 @@ def main() -> int:
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
+    assert_contains(source, "mod gateway_action_confirmations;", "gateway root must declare action confirmation owner")
     assert_contains(source, "mod gateway_task_maintenance;", "gateway root must declare task maintenance owner")
     assert_contains(source, "mod gateway_memory_background;", "gateway root must declare memory background owner")
     assert_contains(source, "mod gateway_remote_approval;", "gateway root must declare remote approval owner")

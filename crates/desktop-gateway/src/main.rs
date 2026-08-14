@@ -24,6 +24,7 @@ mod execution_control;
 mod execution_host;
 mod execution_projection;
 mod execution_runtime;
+mod gateway_action_confirmations;
 mod gateway_artifact_memory;
 mod gateway_artifacts;
 mod gateway_auth;
@@ -202,6 +203,10 @@ use axum::{
 use base64::Engine as _;
 use bytes::Bytes;
 use chat_store::{ChatStore, RemoteApprovalInput, RemoteApprovalRow, Tag, TagEntity};
+pub(crate) use gateway_action_confirmations::{
+    MCP_CONFIRM_CLOSE, MCP_CONFIRM_OPEN, confirm_marker_matches_approval, confirm_marker_value,
+    mcp_confirm_matches, mcp_confirm_matches_approval, rewrite_mcp_confirm_to_done,
+};
 use gateway_artifact_memory::{
     DECK_ARTIFACT_NAMES, artifact_provenance_labels, emit_rendered_deck_artifacts,
     register_artifact_memory, register_mcp_filesystem_artifact_memory,
@@ -15876,32 +15881,6 @@ fn vault_store_error(message: String) -> GatewayError {
     }
 }
 
-fn confirm_marker_value(text: &str, open_tag: &str, close_tag: &str) -> Option<serde_json::Value> {
-    let open = text.find(open_tag)?;
-    let start = open + open_tag.len();
-    let close_rel = text[start..].find(close_tag)?;
-    serde_json::from_str::<serde_json::Value>(&text[start..start + close_rel]).ok()
-}
-
-fn confirm_marker_matches_approval(
-    text: &str,
-    open_tag: &str,
-    close_tag: &str,
-    approval_id: &str,
-    tool: &str,
-    arguments: &serde_json::Value,
-) -> bool {
-    let Some(marker) = confirm_marker_value(text, open_tag, close_tag) else {
-        return false;
-    };
-    marker
-        .get("approval_id")
-        .and_then(serde_json::Value::as_str)
-        == Some(approval_id)
-        && marker.get("tool").and_then(serde_json::Value::as_str) == Some(tool)
-        && marker.get("arguments") == Some(arguments)
-}
-
 fn composio_confirm_matches(text: &str, tool: &str, arguments: &serde_json::Value) -> bool {
     let Some(marker) = confirm_marker_value(text, COMPOSIO_CONFIRM_OPEN, COMPOSIO_CONFIRM_CLOSE)
     else {
@@ -16640,65 +16619,6 @@ async fn connect_mark(
         }
     }
     Json(serde_json::json!({ "ok": true }))
-}
-
-const MCP_CONFIRM_OPEN: &str = "‹‹MCP_CONFIRM››";
-const MCP_CONFIRM_CLOSE: &str = "‹‹/MCP_CONFIRM››";
-
-fn mcp_confirm_matches(text: &str, tool: &str, arguments: &serde_json::Value) -> bool {
-    let Some(marker) = confirm_marker_value(text, MCP_CONFIRM_OPEN, MCP_CONFIRM_CLOSE) else {
-        return false;
-    };
-    marker.get("tool").and_then(serde_json::Value::as_str) == Some(tool)
-        && marker.get("arguments") == Some(arguments)
-}
-
-/// Remote approvals additionally carry a random, durable ID. Tool + arguments
-/// are not enough provenance: another equal-looking card (or an unpersisted
-/// streamed response) must never authorize this specific request.
-fn mcp_confirm_matches_approval(
-    text: &str,
-    approval_id: &str,
-    tool: &str,
-    arguments: &serde_json::Value,
-) -> bool {
-    confirm_marker_matches_approval(
-        text,
-        MCP_CONFIRM_OPEN,
-        MCP_CONFIRM_CLOSE,
-        approval_id,
-        tool,
-        arguments,
-    )
-}
-
-/// Like `rewrite_confirm_to_done` but for the MCP confirm marker. Replaces the
-/// pending-confirmation card with a plain "executed" note so reopening the chat
-/// can't re-trigger the action (and needs no extra frontend marker handling).
-fn rewrite_mcp_confirm_to_done(text: &str, tool: &str) -> String {
-    let Some(open) = text.find(MCP_CONFIRM_OPEN) else {
-        return text.to_string();
-    };
-    let Some(close_rel) = text[open..].find(MCP_CONFIRM_CLOSE) else {
-        return text.to_string();
-    };
-    let close = open + close_rel + MCP_CONFIRM_CLOSE.len();
-    let head_end = text[..open]
-        .rfind("I need your confirmation")
-        .unwrap_or(open);
-    let mut out = text[..head_end].trim_end().to_string();
-    let tail = text[close..].trim();
-    if !tail.is_empty() {
-        if !out.is_empty() {
-            out.push_str("\n\n");
-        }
-        out.push_str(tail);
-    }
-    if !out.is_empty() {
-        out.push_str("\n\n");
-    }
-    out.push_str(&format!("✓ MCP tool executed: {tool}"));
-    out
 }
 
 #[derive(Debug, Deserialize)]

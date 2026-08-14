@@ -31,6 +31,7 @@ UI mostra lo stato prodotto.
 | Risorse concorrenti | `crates/task-runtime/src/resources.rs::ResourceGovernor` | `TaskStatus::WaitingResource` | mostra coda/waiting dal read model |
 | Contesto/token | `agent_loop.rs` + `ContextCompactor`, catalog model context window | compaction event + messages compattati | puo' mostrare usage, non decidere stop |
 | Tool/plugin/action timeout | `crates/desktop-gateway/src/gateway_tool_timeouts.rs` + tool runtime specifici | `ToolOutcome`, receipt/eventi | mostra call/result/approval |
+| Action confirmations | `crates/desktop-gateway/src/gateway_action_confirmations.rs` | marker di conferma, exact-card provenance, rewrite terminale MCP | mostra card/action status; non decide autorizzazione |
 | Browser | `BrowserBudget` + browser sidecar result | `BrowserProgress`, `BrowserDone`, typed failure reason | sessione dedicata, non in questo slice |
 
 ## Owner UI del piano
@@ -60,7 +61,8 @@ passa il risultato del presenter, senza ricostruire `PlanStep[]` o goal.
 1. Estrarre altri budget/proiezioni ancora dentro `main.rs` in owner piccoli,
    aggiungendo ogni volta una voce al gate `check_gateway_main_contract.py`.
    Completato: `gateway_plan_stall`, `gateway_tool_budget`,
-   `gateway_capability_registry` e `gateway_tool_timeouts`.
+   `gateway_capability_registry` e `gateway_tool_timeouts`; in corso
+   `gateway_action_confirmations`.
 2. Continuare a portare la UI a leggere ogni stato di lavoro da un solo
    presenter (`runtimeViewModel` / `kernelProjectionPresenter`) e rimuovere
    alias locali che ricostruiscono "sta lavorando".

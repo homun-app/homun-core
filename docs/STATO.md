@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-14 (tool timeout owner merged).**
+> **Ultimo aggiornamento: 2026-08-14 (action confirmation owner extraction in progress).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
-| PR | #108-#116, #118, #119, #120, #121, #122 e #123 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `3401578b` (`Merge pull request #123 from homun-app/fabio/tool-timeout-contracts`) |
+| Branch | `fabio/action-confirmation-contracts` da `main` |
+| PR | #108-#116, #118, #119, #120, #121, #122, #123 e #124 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `e9947b74` (`Merge pull request #124 from homun-app/fabio/post-pr123-status-cleanup`) |
 
 ## Dove siamo
 
@@ -95,6 +95,9 @@ Slice Runtime V2 recenti:
 - Estrazione `gateway_tool_timeouts`: la policy timeout MCP/plugin viene
   separata da `gateway_browser_tools`, cosi' browser, round budget e tool runtime
   non condividono owner impliciti.
+- Slice `gateway_action_confirmations` in corso: parsing marker conferma,
+  exact-card provenance MCP e rewrite terminale MCP escono dal monolite
+  `main.rs`, mentre endpoint e dispatch restano sugli owner esistenti.
 
 ## Invarianti ora protetti
 
@@ -163,6 +166,9 @@ Slice browser/projection successive:
 - PR #123 mergeata il 2026-08-14, merge commit `3401578b`; CI verde su
   Release readiness, Frontend, Backend, Landlock e build installer
   Linux/macOS/Windows.
+- PR #124 mergeata il 2026-08-14, merge commit `e9947b74`; CI verde su
+  Release readiness, Frontend, Backend, Landlock e build installer
+  Linux/macOS/Windows.
 - Slice `fabio/app-action-budget-contracts` verificata localmente con:
   `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
   `cargo test -p local-first-desktop-gateway plan_stall -- --nocapture`,
@@ -182,6 +188,11 @@ Slice browser/projection successive:
   `cargo test -p local-first-desktop-gateway gateway_tool_timeouts -- --nocapture`
   e `python3 scripts/kernel_regression_gate.py` verde con voce
   `gateway tool timeouts`.
+- Slice `fabio/action-confirmation-contracts` in verifica locale: owner-level
+  `cargo test -p local-first-desktop-gateway gateway_action_confirmations -- --nocapture`
+  verde; contract `python3 scripts/check_gateway_main_contract.py` verde;
+  `python3 scripts/kernel_regression_gate.py` verde con voce
+  `gateway action confirmations`.
 - Slice `fabio/capability-registry-contracts` verificata localmente: RED del contract
   `check_gateway_main_contract.py` osservato prima dell'estrazione; GREEN
   mirati con `python3 scripts/check_gateway_main_contract.py`,
@@ -227,11 +238,13 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/122`.
 - #123 `Extract gateway tool timeout owner`:
   `https://github.com/homun-app/homun-core/pull/123`.
+- #124 `Update status after tool timeout merge`:
+  `https://github.com/homun-app/homun-core/pull/124`.
 
 Branch corrente:
 
-- `main`: include `gateway_tool_timeouts` per policy timeout MCP/plugin; il
-  branch remoto `fabio/tool-timeout-contracts` e' stato eliminato dal merge.
+- `fabio/action-confirmation-contracts`: estrae `gateway_action_confirmations`
+  per marker conferma/action approval e aggiunge guardrail nel kernel gate.
 
 ## Debito residuo
 
@@ -255,9 +268,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Prossima slice backend/kernel non-browser: proseguire la separazione dei
-   contratti tool runtime rimasti in `main.rs` partendo da owner piccolo,
-   contract RED e gate mirato.
+1. Chiudere la slice `gateway_action_confirmations`: formatting, contract,
+   owner test, gate kernel completo, commit, PR e merge se CI verde.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -265,7 +277,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch main, HEAD atteso 3401578b o successivo.
+branch main, HEAD atteso e9947b74 o successivo.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
