@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-14 (tool budget owner extraction verified).**
+> **Ultimo aggiornamento: 2026-08-14 (capability registry owner extraction in progress).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/plugin-tool-budget-contracts` da `main` |
-| PR | #108-#116 e #118 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `29435a4b` (`Merge pull request #118 from homun-app/fabio/app-action-budget-contracts`) |
+| Branch | `fabio/capability-registry-contracts` da `main` |
+| PR | #108-#116, #118 e #119 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `7aec200d` (`Merge pull request #119 from homun-app/fabio/plugin-tool-budget-contracts`) |
 
 ## Dove siamo
 
@@ -84,6 +84,10 @@ Slice Runtime V2 recenti:
 - Estrazione `gateway_tool_budget`: budget round normali e live-set
   tool progressiva escono dal monolite `main.rs`; browser budget resta owner
   separato in `gateway_browser_tools`.
+- Estrazione `gateway_capability_registry`: schema `find_capability` e
+  `suggest_capabilities`, corpus `CapabilityEntry`, source labels, BM25,
+  proiezione MCP/connector e search toolkit-aware Composio escono dal monolite
+  `main.rs`; il routing semantico workflow resta fuori da questa slice.
 
 ## Invarianti ora protetti
 
@@ -137,6 +141,9 @@ Slice browser/projection successive:
 - PR #118 mergeata il 2026-08-14, merge commit `29435a4b`; CI verde su
   Release readiness, Frontend, Backend, Landlock e build installer
   Linux/macOS/Windows.
+- PR #119 mergeata il 2026-08-14, merge commit `7aec200d`; CI verde su
+  Release readiness, Frontend, Backend, Landlock e build installer
+  Linux/macOS/Windows.
 - Slice `fabio/app-action-budget-contracts` verificata localmente con:
   `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
   `cargo test -p local-first-desktop-gateway plan_stall -- --nocapture`,
@@ -150,6 +157,11 @@ Slice browser/projection successive:
   `cargo test -p local-first-desktop-gateway gateway_tool_budget -- --nocapture`,
   `git diff --check`, `python3 scripts/kernel_regression_gate.py` verde con
   voce `gateway tool budget`.
+- Slice `fabio/capability-registry-contracts` in corso: RED del contract
+  `check_gateway_main_contract.py` osservato prima dell'estrazione; GREEN
+  mirati con `python3 scripts/check_gateway_main_contract.py`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_capability_registry -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway capability -- --nocapture`.
 
 ## PR / CI
 
@@ -178,8 +190,8 @@ PR mergeate:
 
 Branch corrente:
 
-- `fabio/plugin-tool-budget-contracts`: estrae `gateway_tool_budget` per
-  budget round normali e policy live/deferred dei tool; PR non ancora aperta.
+- `fabio/capability-registry-contracts`: estrae `gateway_capability_registry`
+  per registry capability/plugin/MCP/connector; PR non ancora aperta.
 
 ## Debito residuo
 
@@ -203,10 +215,11 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice `gateway_tool_budget`: commit, PR e merge se CI verde.
-2. Prossima slice backend/kernel senza browser: capability/plugin registry e
-   timeout tool specifici, separando policy dichiarata dai plugin da budget
-   deciso dal runner.
+1. Chiudere la slice `gateway_capability_registry`: gate completo, commit, PR e
+   merge se CI verde.
+2. Prossima slice backend/kernel senza browser: timeout tool specifici e
+   capability materialization snapshot, separando policy dichiarata dai plugin
+   da budget deciso dal runner.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -214,7 +227,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch main, HEAD atteso 29435a4b o successivo.
+branch main, HEAD atteso 7aec200d o successivo.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
