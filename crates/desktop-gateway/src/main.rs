@@ -54,6 +54,7 @@ mod gateway_health;
 mod gateway_http_client;
 mod gateway_identity;
 mod gateway_legacy_data;
+mod gateway_mcp_chat_tools;
 mod gateway_memory_background;
 mod gateway_memory_briefing;
 mod gateway_memory_clients;
@@ -264,6 +265,9 @@ pub(crate) use gateway_identity::{
     gateway_capability_user_id, gateway_capability_workspace_id, gateway_memory_user_id,
     gateway_memory_workspace_id, gateway_user_id, set_active_workspace, set_memory_workspace,
 };
+#[cfg(test)]
+pub(crate) use gateway_mcp_chat_tools::mcp_chat_tool_name;
+pub(crate) use gateway_mcp_chat_tools::{McpChatTools, mcp_chat_tools, parse_mcp_chat_name};
 use gateway_memory_clients::{gateway_embedding_client, gateway_llm_client};
 use gateway_memory_graph::{provenance_key_fragment, upsert_memory_relation};
 #[cfg(test)]
@@ -12409,99 +12413,6 @@ fn composio_chat_tools(state: &AppState, cap: usize) -> ComposioChatTools {
             out.schemas.push(serde_json::json!({
                 "type": "function",
                 "function": { "name": tool_slug, "description": description, "parameters": parameters },
-            }));
-        }
-    }
-    out
-}
-
-// ---- MCP tools in chat (mirrors the Composio chat-tools path) --------------
-
-/// OpenAI tool name for an MCP tool, namespaced by provider so multiple MCP
-/// servers — and the Composio slugs — never collide: `mcp__{slug}__{tool}`.
-fn mcp_chat_tool_name(provider_id: &CapabilityProviderId, tool: &str) -> String {
-    let id = provider_id.as_str();
-    let slug = id.strip_prefix("mcp:").unwrap_or(id);
-    format!("mcp__{slug}__{tool}")
-}
-
-/// Inverse of `mcp_chat_tool_name`: `mcp__{slug}__{tool}` → (provider_id, tool).
-/// Returns `None` for any non-MCP name, so the chat dispatch can use it to route.
-fn parse_mcp_chat_name(name: &str) -> Option<(CapabilityProviderId, String)> {
-    let rest = name.strip_prefix("mcp__")?;
-    let (slug, tool) = rest.split_once("__")?;
-    if slug.is_empty() || tool.is_empty() {
-        return None;
-    }
-    Some((
-        CapabilityProviderId::new(format!("mcp:{slug}")),
-        tool.to_string(),
-    ))
-}
-
-/// MCP function tools to expose to the chat model, plus the subset that are
-/// writes (need confirmation before running). Mirrors `ComposioChatTools`.
-#[derive(Debug, Default)]
-struct McpChatTools {
-    schemas: Vec<serde_json::Value>,
-    writes: std::collections::BTreeSet<String>,
-}
-
-/// Builds OpenAI function schemas for every cached tool of every connected MCP
-/// server. Read-only tools (per the cached `ActionClass`, derived from the MCP
-/// `readOnlyHint`) run directly; everything else is a write that needs
-/// confirmation. Reads from the local SQLite cache only (no network), but still
-/// best-effort: any error yields an empty set so chat keeps working.
-fn mcp_chat_tools(state: &AppState, cap: usize) -> McpChatTools {
-    let mut out = McpChatTools::default();
-    let user = gateway_capability_user_id();
-    let workspace = gateway_capability_workspace_id();
-    let Ok(registry) = lock_capability_registry(state) else {
-        return out;
-    };
-    let Ok(connections) = registry.connection_configs(&user, &workspace) else {
-        return out;
-    };
-    for conn in connections {
-        let is_mcp = registry
-            .provider_config(&conn.provider_id)
-            .ok()
-            .flatten()
-            .map(|config| config.provider_kind == CapabilityProviderKind::Mcp)
-            .unwrap_or(false);
-        if !is_mcp {
-            continue;
-        }
-        let Ok(tools) = registry.cached_tools(&conn.provider_id) else {
-            continue;
-        };
-        for cached in tools {
-            if out.schemas.len() >= cap {
-                return out;
-            }
-            let name = mcp_chat_tool_name(&conn.provider_id, &cached.tool.name);
-            // A read-looking name is never gated, even if the tool was cached under
-            // the old "absent readOnlyHint → write" default — so the read-no-confirm
-            // fix applies WITHOUT needing the server's tools re-fetched.
-            if cached.tool.action != ActionClass::Read
-                && !local_first_capabilities::name_is_read_only(&cached.tool.name)
-            {
-                out.writes.insert(name.clone());
-            }
-            let description = cached
-                .tool
-                .description
-                .chars()
-                .take(300)
-                .collect::<String>();
-            let parameters = if cached.tool.input_schema.is_null() {
-                serde_json::json!({ "type": "object", "properties": {} })
-            } else {
-                cached.tool.input_schema.clone()
-            };
-            out.schemas.push(serde_json::json!({
-                "type": "function",
-                "function": { "name": name, "description": description, "parameters": parameters },
             }));
         }
     }
@@ -27661,7 +27572,7 @@ fn lock_payment_approvals(
         })
 }
 
-fn lock_capability_registry(
+pub(crate) fn lock_capability_registry(
     state: &AppState,
 ) -> Result<MutexGuard<'_, CapabilityRegistryStore>, GatewayError> {
     state

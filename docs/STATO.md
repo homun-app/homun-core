@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-14 (action confirmation owner merged).**
+> **Ultimo aggiornamento: 2026-08-14 (MCP chat tools owner verificato localmente).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
-| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124 e #125 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `4f792bfb` (`Merge pull request #125 from homun-app/fabio/action-confirmation-contracts`) |
+| Branch | `fabio/mcp-chat-tools-contracts` |
+| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125 e #126 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `8c4fadfd` (`Merge pull request #126 from homun-app/fabio/post-pr125-status-cleanup`) |
 
 ## Dove siamo
 
@@ -98,6 +98,9 @@ Slice Runtime V2 recenti:
 - Estrazione `gateway_action_confirmations`: parsing marker conferma,
   exact-card provenance MCP e rewrite terminale MCP escono dal monolite
   `main.rs`, mentre endpoint e dispatch restano sugli owner esistenti.
+- Estrazione `gateway_mcp_chat_tools` in corso: naming/parse e catalogo schema
+  MCP cached escono dal monolite `main.rs`; l'esecuzione MCP resta separata per
+  una slice successiva.
 
 ## Invarianti ora protetti
 
@@ -172,6 +175,9 @@ Slice browser/projection successive:
 - PR #125 mergeata il 2026-08-14, merge commit `4f792bfb`; CI verde su
   Release readiness, Frontend, Backend, Landlock e build installer
   Linux/macOS/Windows.
+- PR #126 mergeata il 2026-08-14, merge commit `8c4fadfd`; CI verde su
+  Release readiness, Frontend, Backend, Landlock e build installer
+  Linux/macOS/Windows.
 - Slice `fabio/app-action-budget-contracts` verificata localmente con:
   `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
   `cargo test -p local-first-desktop-gateway plan_stall -- --nocapture`,
@@ -206,6 +212,15 @@ Slice browser/projection successive:
   `cargo fmt --check`, `git diff --check` e
   `python3 scripts/kernel_regression_gate.py` verde con voce
   `gateway capability registry`.
+- Slice `fabio/mcp-chat-tools-contracts` verificata localmente: owner-level
+  `cargo test -p local-first-desktop-gateway gateway_mcp_chat_tools -- --nocapture`
+  verde; test compat MCP
+  `cargo test -p local-first-desktop-gateway mcp_chat -- --nocapture` verde;
+  test corpus MCP
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway mcp_tool -- --nocapture`
+  verde; contract `python3 scripts/check_gateway_main_contract.py` verde;
+  `cargo fmt --check`, `git diff --check` e
+  `python3 scripts/kernel_regression_gate.py` verdi.
 
 ## PR / CI
 
@@ -245,12 +260,13 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/124`.
 - #125 `Extract action confirmation owner`:
   `https://github.com/homun-app/homun-core/pull/125`.
+- #126 `Update status after action confirmations merge`:
+  `https://github.com/homun-app/homun-core/pull/126`.
 
 Branch corrente:
 
-- `main`: include `gateway_action_confirmations` per marker conferma/action
-  approval; il branch remoto `fabio/action-confirmation-contracts` e' stato
-  eliminato dal merge.
+- `fabio/mcp-chat-tools-contracts`: estrae il catalogo MCP chat tools e aggiunge
+  guardrail/gate owner-level.
 
 ## Debito residuo
 

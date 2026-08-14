@@ -28,6 +28,7 @@ UI mostra lo stato prodotto.
 | Stall cross-turn del piano | `crates/desktop-gateway/src/gateway_plan_stall.rs` | `runtime_plans.stall_turns`, `last_resume_done` | non calcola il budget |
 | Budget/live-set tool normali | `crates/desktop-gateway/src/gateway_tool_budget.rs` | `TurnConfig.max_rounds`, `TurnConfig.hard_round_ceiling`, live/deferred split | non decide quali tool sono disponibili |
 | Registry capability/plugin/tool | `crates/desktop-gateway/src/gateway_capability_registry.rs` | `CapabilityEntry`, `CapabilitySource`, BM25 corpus, materializzazione per-turno del corpus, MCP/connector projection, `find_capability`/`suggest_capabilities` schemas | mostra solo `KernelCapabilityRuntimeView`, non decide discovery o live-set |
+| MCP chat tool catalogue | `crates/desktop-gateway/src/gateway_mcp_chat_tools.rs` | namespaced `mcp__{server}__{tool}` names, inverse parser, cached schema catalogue and write-set | consuma schema/write-set proiettati; non decide esecuzione o budget |
 | Risorse concorrenti | `crates/task-runtime/src/resources.rs::ResourceGovernor` | `TaskStatus::WaitingResource` | mostra coda/waiting dal read model |
 | Contesto/token | `agent_loop.rs` + `ContextCompactor`, catalog model context window | compaction event + messages compattati | puo' mostrare usage, non decidere stop |
 | Tool/plugin/action timeout | `crates/desktop-gateway/src/gateway_tool_timeouts.rs` + tool runtime specifici | `ToolOutcome`, receipt/eventi | mostra call/result/approval |
@@ -61,8 +62,8 @@ passa il risultato del presenter, senza ricostruire `PlanStep[]` o goal.
 1. Estrarre altri budget/proiezioni ancora dentro `main.rs` in owner piccoli,
    aggiungendo ogni volta una voce al gate `check_gateway_main_contract.py`.
    Completato: `gateway_plan_stall`, `gateway_tool_budget`,
-   `gateway_capability_registry`, `gateway_tool_timeouts` e
-   `gateway_action_confirmations`.
+   `gateway_capability_registry`, `gateway_tool_timeouts`,
+   `gateway_action_confirmations` e `gateway_mcp_chat_tools`.
 2. Continuare a portare la UI a leggere ogni stato di lavoro da un solo
    presenter (`runtimeViewModel` / `kernelProjectionPresenter`) e rimuovere
    alias locali che ricostruiscono "sta lavorando".
