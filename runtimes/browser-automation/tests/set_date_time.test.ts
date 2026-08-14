@@ -62,6 +62,18 @@ describe("set_date / set_time drivers", () => {
     expect(["08:00", "08:30"]).toContain(await timeText());
   });
 
+  it("set_time writes an editable time input when no option list appears", async () => {
+    const res = await manager.act({ targetId: "p", kind: "set_time", selector: "#directTimeControl", time: "08:00" } as any);
+    expect(res.ok).toBe(true);
+    expect(res.committedOption).toBe("08:00");
+    const value = (await manager.act({
+      targetId: "p",
+      kind: "evaluate",
+      fn: "() => document.querySelector('#directTimeControl').value",
+    } as any)).result as string;
+    expect(value).toBe("08:00");
+  });
+
   it("fills a whole form — text + date + time — in ONE bundle (kind='batch')", async () => {
     // The plan-once path (what the browse prompt now steers the model to emit): a single browser_act
     // bundle drives every field through its own driver — type for the text field, set_date/set_time for

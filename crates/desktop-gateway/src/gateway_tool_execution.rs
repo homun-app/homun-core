@@ -64,6 +64,52 @@ fn browse_timeout_preserves_grounded_snapshot_as_partial_result() {
 }
 
 #[test]
+fn browse_timeout_with_unsatisfied_contract_is_not_found() {
+    let snapshot = format!(
+        "{}\n{}",
+        "Trenitalia homepage Milano Roma search form ".repeat(16),
+        "Partenza Milano Centrale Arrivo Roma Termini Data 25/08/2026 Ora 08:00 ".repeat(16)
+    );
+    let contract = local_first_engine::browse::BrowseResultContract {
+        kind: local_first_engine::browse::BrowseResultKind::List,
+        minimum_items: Some(3),
+        fields: vec![
+            local_first_engine::browse::BrowseResultField {
+                name: "departure".into(),
+                required: true,
+            },
+            local_first_engine::browse::BrowseResultField {
+                name: "arrival".into(),
+                required: true,
+            },
+            local_first_engine::browse::BrowseResultField {
+                name: "duration".into(),
+                required: true,
+            },
+        ],
+        boundary: Some("read results only".into()),
+    };
+
+    let result = browse_subturn_timeout_result(
+        &snapshot,
+        vec!["https://www.trenitalia.com/".to_string()],
+        Some(&contract),
+    );
+
+    assert!(
+        !result.found,
+        "a long form/homepage snapshot without contract items must not become a found result: {result:?}"
+    );
+    assert_eq!(
+        result.status,
+        local_first_engine::browse::BrowserDoneStatus::Timeout
+    );
+    assert!(result.answer.contains("Milano Centrale"));
+    assert!(result.fields_missing.contains(&"minimum_items".to_string()));
+    assert!(result.fields_missing.contains(&"departure".to_string()));
+}
+
+#[test]
 fn browser_navigate_result_records_visited_source_for_timeout_fallback() {
     let mut sources = Vec::new();
 
@@ -6812,15 +6858,25 @@ pub(crate) fn browse_subturn_incomplete_result(
 ) -> local_first_engine::BrowseResult {
     let snapshot = last_snapshot.trim();
     let grounded_snapshot = !sources.is_empty() && snapshot.chars().count() >= 200;
+    let structured_contract_unsatisfied = contract.is_some_and(|contract| {
+        contract.minimum_items.unwrap_or(0) > 0
+            || contract.fields.iter().any(|field| field.required)
+    });
+    let usable_grounded_snapshot = grounded_snapshot && !structured_contract_unsatisfied;
     let fallback_payload = local_first_engine::browse::BrowserDonePayload {
-        status: if grounded_snapshot {
+        status: if usable_grounded_snapshot {
             local_first_engine::browse::BrowserDoneStatus::Partial
         } else {
             local_first_engine::browse::BrowserDoneStatus::Timeout
         },
-        answer: if grounded_snapshot {
+        answer: if usable_grounded_snapshot {
             format!(
                 "The browser reached a grounded page but the browsing sub-agent did not finish its summary. Verify and extract the requested facts from this last page snapshot:\n{}",
+                snapshot.chars().take(8_000).collect::<String>()
+            )
+        } else if grounded_snapshot {
+            format!(
+                "The browser timed out before satisfying the structured result contract. Last page snapshot for diagnostics only; do not treat it as completed results:\n{}",
                 snapshot.chars().take(8_000).collect::<String>()
             )
         } else {

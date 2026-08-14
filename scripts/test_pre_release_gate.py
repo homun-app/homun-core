@@ -6,7 +6,9 @@ import scripts.pre_release_gate as gate
 
 class PreReleaseGateTests(unittest.TestCase):
     def test_stability_steps_are_required(self):
-        labels = [step.label for step in gate.build_plan({})]
+        plan = gate.build_plan({})
+        labels = [step.label for step in plan]
+        by_label = {step.label: step for step in plan}
 
         self.assertIn("rust format", labels)
         self.assertIn("rust clippy", labels)
@@ -15,6 +17,7 @@ class PreReleaseGateTests(unittest.TestCase):
         self.assertIn("task runtime tests", labels)
         self.assertIn("turn consistency audit unit tests", labels)
         self.assertIn("kernel projection smoke", labels)
+        self.assertIn("scripts.test_e2e_browser_diagnostic", by_label["eval unit tests"].command)
         self.assertIn("engine tests", labels)
         self.assertIn("desktop unit tests", labels)
         self.assertIn("stability soak unit tests", labels)
@@ -79,6 +82,7 @@ class PreReleaseGateTests(unittest.TestCase):
         by_label = {step.label: step for step in plan}
         self.assertIn("scripts.test_kernel_regression_gate", by_label["eval unit tests"].command)
         self.assertIn("scripts.test_smoke_kernel_projection", by_label["eval unit tests"].command)
+        self.assertIn("scripts.test_e2e_browser_diagnostic", by_label["eval unit tests"].command)
 
     def test_env_enables_model_and_gateway_eval(self):
         env = {

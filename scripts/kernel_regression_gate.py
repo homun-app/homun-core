@@ -58,6 +58,10 @@ def build_plan(env: dict[str, str]) -> list[Step]:
         ),
         Step("kernel projection smoke", [PYTHON, "scripts/smoke_kernel_projection.py"]),
         Step(
+            "browser diagnostic contract",
+            [PYTHON, "-m", "unittest", "scripts.test_e2e_browser_diagnostic", "-v"],
+        ),
+        Step(
             "engine browser grounded fallback",
             [
                 "cargo",
