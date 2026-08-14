@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-14 (capability corpus materialization extraction in progress).**
+> **Ultimo aggiornamento: 2026-08-14 (capability corpus materialization merged).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/capability-materialization-contracts` da `main` |
-| PR | #108-#116, #118, #119 e #120 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `88ee847e` (`Merge pull request #120 from homun-app/fabio/capability-registry-contracts`) |
+| Branch | `main` |
+| PR | #108-#116, #118, #119, #120 e #121 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `169d2fd0` (`Merge pull request #121 from homun-app/fabio/capability-materialization-contracts`) |
 
 ## Dove siamo
 
@@ -151,6 +151,9 @@ Slice browser/projection successive:
 - PR #120 mergeata il 2026-08-14, merge commit `88ee847e`; CI verde su
   Release readiness, Frontend, Backend, Landlock e build installer
   Linux/macOS/Windows.
+- PR #121 mergeata il 2026-08-14, merge commit `169d2fd0`; CI verde su
+  Release readiness, Frontend, Backend, Landlock e build installer
+  Linux/macOS/Windows.
 - Slice `fabio/app-action-budget-contracts` verificata localmente con:
   `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
   `cargo test -p local-first-desktop-gateway plan_stall -- --nocapture`,
@@ -204,9 +207,8 @@ PR mergeate:
 
 Branch corrente:
 
-- `fabio/capability-materialization-contracts`: sposta nello stesso owner
-  `gateway_capability_registry` la materializzazione per-turno del corpus
-  capability/plugin/MCP; PR non ancora aperta.
+- `main`: include `gateway_capability_registry` per registry, search e
+  materializzazione per-turno del corpus capability/plugin/MCP.
 
 ## Debito residuo
 
@@ -230,18 +232,16 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice `gateway_capability_registry` materialization: gate
-   completo, commit, PR e merge se CI verde.
-2. Prossima slice backend/kernel senza browser: timeout tool specifici,
+1. Prossima slice backend/kernel senza browser: timeout tool specifici,
    separando policy dichiarata dai plugin da budget deciso dal runner.
-3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
+2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
 ## Prompt di ripartenza
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch main, HEAD atteso 88ee847e o successivo.
+branch main, HEAD atteso 169d2fd0 o successivo.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

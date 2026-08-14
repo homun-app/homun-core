@@ -1,6 +1,6 @@
 # Action Budget Contract
 
-Verificato 2026-08-14 sul branch `fabio/capability-materialization-contracts`.
+Verificato 2026-08-14 su `main` a `169d2fd0`.
 
 Questo documento separa i budget di azione dal bug browser corrente. Il browser
 avra' una sessione dedicata; il contratto generale dell'app deve invece restare
