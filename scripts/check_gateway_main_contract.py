@@ -14,6 +14,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAIN_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "main.rs")
+BROWSER_TOOLS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_browser_tools.rs")
 
 
 def extract_async_main_body(source: str) -> str:
@@ -226,6 +227,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn chat_max_rounds(": "runtime tool budget must stay in gateway_tool_budget",
         "const CORE_TOOL_NAMES:": "runtime tool live-set policy must stay in gateway_tool_budget",
         "fn tool_stays_live_this_turn(": "runtime tool live-set policy must stay in gateway_tool_budget",
+        "fn mcp_call_timeout(": "tool timeout policy must stay in gateway_tool_timeouts",
         "fn find_capability_tool_schema(": "capability discovery schemas must stay in gateway_capability_registry",
         "enum CapabilitySource ": "capability registry source typing must stay in gateway_capability_registry",
         "struct CapabilityEntry ": "capability registry entries must stay in gateway_capability_registry",
@@ -507,6 +509,8 @@ def assert_ordered(source: str, snippets: list[str], message: str) -> None:
 def main() -> int:
     with open(MAIN_RS, "r", encoding="utf-8") as handle:
         source = handle.read()
+    with open(BROWSER_TOOLS_RS, "r", encoding="utf-8") as handle:
+        browser_tools_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -565,6 +569,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_plan_tools;", "gateway root must declare plan tools owner")
     assert_contains(source, "mod gateway_chat_markers;", "gateway root must declare chat marker owner")
     assert_contains(source, "mod gateway_tool_budget;", "gateway root must declare tool budget owner")
+    assert_contains(source, "mod gateway_tool_timeouts;", "gateway root must declare tool timeout owner")
     assert_contains(
         source,
         "mod gateway_capability_registry;",
@@ -639,6 +644,11 @@ def main() -> int:
 
     for snippet, message in forbidden_root_snippets().items():
         assert_not_contains(source, snippet, message)
+    assert_not_contains(
+        browser_tools_source,
+        "fn mcp_call_timeout(",
+        "MCP timeout policy must not be owned by browser tools",
+    )
 
     assert_ordered(
         main_body,

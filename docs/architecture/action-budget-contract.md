@@ -30,7 +30,7 @@ UI mostra lo stato prodotto.
 | Registry capability/plugin/tool | `crates/desktop-gateway/src/gateway_capability_registry.rs` | `CapabilityEntry`, `CapabilitySource`, BM25 corpus, materializzazione per-turno del corpus, MCP/connector projection, `find_capability`/`suggest_capabilities` schemas | mostra solo `KernelCapabilityRuntimeView`, non decide discovery o live-set |
 | Risorse concorrenti | `crates/task-runtime/src/resources.rs::ResourceGovernor` | `TaskStatus::WaitingResource` | mostra coda/waiting dal read model |
 | Contesto/token | `agent_loop.rs` + `ContextCompactor`, catalog model context window | compaction event + messages compattati | puo' mostrare usage, non decidere stop |
-| Tool/plugin/action timeout | tool runtime specifici + gateway policy | `ToolOutcome`, receipt/eventi | mostra call/result/approval |
+| Tool/plugin/action timeout | `crates/desktop-gateway/src/gateway_tool_timeouts.rs` + tool runtime specifici | `ToolOutcome`, receipt/eventi | mostra call/result/approval |
 | Browser | `BrowserBudget` + browser sidecar result | `BrowserProgress`, `BrowserDone`, typed failure reason | sessione dedicata, non in questo slice |
 
 ## Owner UI del piano
@@ -60,7 +60,7 @@ passa il risultato del presenter, senza ricostruire `PlanStep[]` o goal.
 1. Estrarre altri budget/proiezioni ancora dentro `main.rs` in owner piccoli,
    aggiungendo ogni volta una voce al gate `check_gateway_main_contract.py`.
    Completato: `gateway_plan_stall`, `gateway_tool_budget` e
-   `gateway_capability_registry`.
+   `gateway_capability_registry`; in corso `gateway_tool_timeouts`.
 2. Continuare a portare la UI a leggere ogni stato di lavoro da un solo
    presenter (`runtimeViewModel` / `kernelProjectionPresenter`) e rimuovere
    alias locali che ricostruiscono "sta lavorando".

@@ -92,6 +92,7 @@ mod gateway_task_maintenance;
 mod gateway_template_catalog;
 mod gateway_tool_budget;
 mod gateway_tool_execution;
+mod gateway_tool_timeouts;
 mod gateway_turn_broker;
 mod gateway_turn_recovery;
 mod gateway_user_preferences;
@@ -230,8 +231,8 @@ pub(crate) use gateway_browser_tools::{
     chat_browser_max_rounds, chat_browser_nav_cap, chat_manager_browser_budget,
     computer_action_tool_schema, computer_get_state_tool_schema, computer_list_apps_tool_schema,
     initial_manager_tool_schemas_for_test, is_stale_ref_error, manager_browser_guidance,
-    mcp_call_timeout, normalize_browser_action_bundle, parse_browser_done_payload,
-    security_scan_block_reasons, stale_ref_recovery_message, use_computer_tool_schema,
+    normalize_browser_action_bundle, parse_browser_done_payload, security_scan_block_reasons,
+    stale_ref_recovery_message, use_computer_tool_schema,
 };
 #[cfg(test)]
 pub(crate) use gateway_browser_tools::{
@@ -362,6 +363,7 @@ pub(crate) use gateway_tool_budget::{
     chat_max_rounds, hard_round_ceiling, tool_stays_live_this_turn,
 };
 pub(crate) use gateway_tool_execution::*;
+pub(crate) use gateway_tool_timeouts::mcp_call_timeout;
 pub(crate) use gateway_turn_broker::*;
 use local_first_browser_automation::{
     BrowserAutomationClient, BrowserAutomationError, BrowserCheckpoint, BrowserMethod,
