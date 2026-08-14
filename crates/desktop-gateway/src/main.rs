@@ -68,6 +68,7 @@ mod gateway_memory_wiki;
 mod gateway_model_routing;
 mod gateway_model_timeouts;
 mod gateway_paths;
+mod gateway_plan_stall;
 mod gateway_plan_tools;
 mod gateway_plugin_packages;
 mod gateway_plugins;
@@ -284,6 +285,11 @@ use gateway_paths::{
     gateway_memory_database_path, gateway_memory_wiki_dir, gateway_project_access_path,
     gateway_task_database_path, gateway_vault_database_path, gateway_workspaces_path,
 };
+pub(crate) use gateway_plan_stall::{
+    MAX_PLAN_STALL_RESUMES, block_stalled_step, plan_stall_check_and_bump,
+};
+#[cfg(test)]
+pub(crate) use gateway_plan_stall::{next_plan_stall, plan_stall_exhausted};
 use gateway_plan_tools::{step_advance_tool_schema, update_plan_tool_schema};
 #[cfg(test)]
 use gateway_proactivity::parse_review_suggestion;
@@ -994,13 +1000,17 @@ mod agent_run_api_tests {
             .unwrap();
         let steps = steps.as_array().unwrap();
         assert!(!plan_stall_check_and_bump(
-            &state,
-            Some(&thread.thread_id),
+            state.task_store.as_ref(),
+            gateway_user_id().as_str(),
+            "workspace-a",
+            &thread.thread_id,
             steps
         ));
         assert!(!plan_stall_check_and_bump(
-            &state,
-            Some(&thread.thread_id),
+            state.task_store.as_ref(),
+            gateway_user_id().as_str(),
+            "workspace-a",
+            &thread.thread_id,
             steps
         ));
         let stored = state
@@ -2360,53 +2370,6 @@ fn plan_step_depends_on(step: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
-// --- F4: cross-turn plan-stall guard -------------------------------------------------
-//
-// The per-turn recovery counters (nav-fail `nav_failures`, round budget
-// `rounds_since_progress`) are reset every turn. A plan RESUMED across turns
-// (`load_runtime_plan_from_state`, channel/resume) therefore restarts its current step with
-// the counters at zero — so a step that fails deterministically (dead URL, unfillable form)
-// retries forever, once per resume. The fix is a CROSS-turn signal: count consecutive resumes
-// that close NO new step; after the cap the harness blocks the stuck step (caposaldo #2 — the
-// harness owns recovery, the model won't pivot on its own). The pure pieces live here, tested.
-
-/// Max consecutive resumes of a plan with no new completed step before the harness blocks the
-/// stuck step. Generous on purpose: a plan legitimately advancing even one step per turn never
-/// trips (any `done`-count increase resets the counter); only genuine no-progress loops do.
-const MAX_PLAN_STALL_RESUMES: u32 = 3;
-
-/// New stall count from the prior count and the done-counts at the previous vs the current
-/// resume. ANY progress (more done steps than last resume) resets to 0; otherwise +1. Pure.
-#[cfg(test)]
-fn next_plan_stall(prior_stall: u32, last_resume_done: usize, current_done: usize) -> u32 {
-    if current_done > last_resume_done {
-        0
-    } else {
-        prior_stall.saturating_add(1)
-    }
-}
-
-fn plan_stall_exhausted(stall: u32) -> bool {
-    stall >= MAX_PLAN_STALL_RESUMES
-}
-
-/// Block the first runnable (`todo`/`doing`) step — the F4 abort action once a plan has
-/// stalled across resumes. Records WHY in the step's `detail` (surfaced in the Plan panel).
-/// Returns the blocked step's title, or None if nothing was runnable. Pure (mutates `plan`).
-fn block_stalled_step(plan: &mut [serde_json::Value]) -> Option<String> {
-    for step in plan.iter_mut() {
-        if matches!(plan_step_status(step), "todo" | "doing") {
-            let title = plan_step_title(step).to_string();
-            step["status"] = serde_json::json!("blocked");
-            step["detail"] = serde_json::json!(format!(
-                "paused by the harness: no progress after {MAX_PLAN_STALL_RESUMES} resumed turns"
-            ));
-            return Some(title).filter(|t| !t.is_empty());
-        }
-    }
-    None
-}
-
 // `MIN_DELIVERED_CHARS_TO_CONCLUDE` + `answer_concludes_plan` moved to `engine::plan`
 // (ADR 0024 inc 5e.3); imported below.
 
@@ -3757,35 +3720,6 @@ fn runtime_plan_record_from_state(
     let goal = local_first_engine::plan::plan_value_goal(&plan.plan_json);
     let steps = local_first_engine::plan::plan_value_steps(&plan.plan_json);
     Some((goal, steps))
-}
-
-/// F4 turn-start: update the cross-turn stall bookkeeping on the RESUMED plan's memory and
-/// report whether it has stalled past the cap. Reads `{stall_turns, last_resume_done}` from
-/// the plan-memory metadata, recomputes them against the current done-count, writes them back
-/// (so a mid-turn plan upsert preserves them — `upsert_runtime_plan_memory` carries these
-/// fields forward), and returns true when the harness should block the stuck step. A no-op
-/// returning false on any store miss (fail-open: never wedge a turn over bookkeeping).
-fn plan_stall_check_and_bump(
-    state: &AppState,
-    thread_id: Option<&str>,
-    resume_plan: &[serde_json::Value],
-) -> bool {
-    let Some((user_id, workspace_id, thread_id)) = runtime_plan_control_scope(state, thread_id)
-    else {
-        return false;
-    };
-    let current_done = plan_done_count(resume_plan);
-    state
-        .task_store
-        .lock()
-        .ok()
-        .and_then(|store| {
-            store
-                .bump_runtime_plan_stall(&user_id, &workspace_id, &thread_id, current_done)
-                .ok()
-                .flatten()
-        })
-        .is_some_and(|plan| plan_stall_exhausted(plan.stall_turns))
 }
 
 fn runtime_plan_step_outcome_matches(
@@ -8427,7 +8361,17 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // `settled`, so `upsert_runtime_plan_memory` stops it auto-resuming. Gated until validated
     // live; the bookkeeping is a no-op when off.
     if applies_new_input && !resume_plan.is_empty() && plan_stall_abort_enabled() {
-        let stalled = plan_stall_check_and_bump(state, thread_id.as_deref(), &resume_plan);
+        let stalled = runtime_plan_control_scope(state, thread_id.as_deref()).is_some_and(
+            |(user_id, workspace_id, thread_id)| {
+                plan_stall_check_and_bump(
+                    state.task_store.as_ref(),
+                    &user_id,
+                    &workspace_id,
+                    &thread_id,
+                    &resume_plan,
+                )
+            },
+        );
         if stalled && let Some(title) = block_stalled_step(&mut resume_plan) {
             upsert_runtime_plan_memory_from_state(
                 state,

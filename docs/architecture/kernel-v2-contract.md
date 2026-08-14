@@ -7,6 +7,9 @@ su piano, progresso, browser e UI liveness. Non introduce un secondo motore: fis
 quali owner possono mutare lo stato canonico del turno e quali componenti possono
 solo proiettarlo.
 
+Il sotto-contratto su limiti, timeout, step budget, resource budget, plugin/tool
+policy e UI projection vive in [`action-budget-contract.md`](action-budget-contract.md).
+
 ## Baseline esterna letta nel codice
 
 Checkout locali sotto `/Users/fabio/Projects/Homun/agent-system-research`:
