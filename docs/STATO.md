@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-14 (capability corpus materialization merged).**
+> **Ultimo aggiornamento: 2026-08-14 (tool timeout owner extraction in progress).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
-| PR | #108-#116, #118, #119, #120 e #121 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `169d2fd0` (`Merge pull request #121 from homun-app/fabio/capability-materialization-contracts`) |
+| Branch | `fabio/tool-timeout-contracts` da `main` |
+| PR | #108-#116, #118, #119, #120, #121 e #122 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `e0c1d610` (`Merge pull request #122 from homun-app/fabio/post-pr121-status-cleanup`) |
 
 ## Dove siamo
 
@@ -92,6 +92,9 @@ Slice Runtime V2 recenti:
   del corpus capability (`deferred_tools`, MCP schemas, skill abilitate e policy
   obiettivo) viene spostata nello stesso owner, lasciando a `main.rs` solo lo
   snapshot degli input del turno.
+- Slice `gateway_tool_timeouts` in corso: la policy timeout MCP/plugin viene
+  separata da `gateway_browser_tools`, cosi' browser, round budget e tool runtime
+  non condividono owner impliciti.
 
 ## Invarianti ora protetti
 
@@ -154,6 +157,9 @@ Slice browser/projection successive:
 - PR #121 mergeata il 2026-08-14, merge commit `169d2fd0`; CI verde su
   Release readiness, Frontend, Backend, Landlock e build installer
   Linux/macOS/Windows.
+- PR #122 mergeata il 2026-08-14, merge commit `e0c1d610`; CI verde su
+  Release readiness, Frontend, Backend, Landlock e build installer
+  Linux/macOS/Windows.
 - Slice `fabio/app-action-budget-contracts` verificata localmente con:
   `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
   `cargo test -p local-first-desktop-gateway plan_stall -- --nocapture`,
@@ -207,8 +213,8 @@ PR mergeate:
 
 Branch corrente:
 
-- `main`: include `gateway_capability_registry` per registry, search e
-  materializzazione per-turno del corpus capability/plugin/MCP.
+- `fabio/tool-timeout-contracts`: estrae `gateway_tool_timeouts` per policy
+  timeout MCP/plugin e lascia a browser/tools solo l'esecuzione.
 
 ## Debito residuo
 
@@ -232,8 +238,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Prossima slice backend/kernel senza browser: timeout tool specifici,
-   separando policy dichiarata dai plugin da budget deciso dal runner.
+1. Chiudere la slice `gateway_tool_timeouts`: gate completo, commit, PR e merge
+   se CI verde.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -241,7 +247,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch main, HEAD atteso 169d2fd0 o successivo.
+branch main, HEAD atteso e0c1d610 o successivo.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

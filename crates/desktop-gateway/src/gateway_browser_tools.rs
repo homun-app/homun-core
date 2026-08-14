@@ -160,18 +160,6 @@ pub(crate) const COMPOSIO_RESULT_CHARS: usize = 6000;
 /// How many MCP tools (across all connected servers) to pull into the searchable
 /// catalog. MCP tools are read from the local SQLite cache, so this is cheap.
 pub(crate) const MCP_CATALOG_CAP: usize = 100;
-/// Timeout for a single MCP `tools/call` from chat. The stdio transport's
-/// `read_line` is blocking and uncapped, so without this a hung server would
-/// freeze the turn forever. Overridable via `HOMUN_MCP_CALL_TIMEOUT_SECS`.
-pub(crate) fn mcp_call_timeout() -> std::time::Duration {
-    let secs = std::env::var("HOMUN_MCP_CALL_TIMEOUT_SECS")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .filter(|&v| v > 0)
-        .unwrap_or(30);
-    std::time::Duration::from_secs(secs)
-}
-
 /// Granular browser tool: navigate to a URL (and auto-snapshot the result).
 /// ADR 0025 (browse-as-recursion): the SINGLE browser tool the manager sees when the sub-agent is on. The
 /// manager states an information GOAL (one need, usually one plan step); an isolated sub-agent drives the
