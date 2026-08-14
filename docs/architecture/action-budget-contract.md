@@ -59,8 +59,8 @@ passa il risultato del presenter, senza ricostruire `PlanStep[]` o goal.
 
 1. Estrarre altri budget/proiezioni ancora dentro `main.rs` in owner piccoli,
    aggiungendo ogni volta una voce al gate `check_gateway_main_contract.py`.
-   Completato: `gateway_plan_stall`, `gateway_tool_budget` e
-   `gateway_capability_registry`; in corso `gateway_tool_timeouts`.
+   Completato: `gateway_plan_stall`, `gateway_tool_budget`,
+   `gateway_capability_registry` e `gateway_tool_timeouts`.
 2. Continuare a portare la UI a leggere ogni stato di lavoro da un solo
    presenter (`runtimeViewModel` / `kernelProjectionPresenter`) e rimuovere
    alias locali che ricostruiscono "sta lavorando".
