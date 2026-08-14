@@ -238,6 +238,17 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn parse_mcp_chat_name(": "MCP chat tool parsing must stay in gateway_mcp_chat_tools",
         "struct McpChatTools": "MCP chat tool catalogue DTO must stay in gateway_mcp_chat_tools",
         "fn mcp_chat_tools(": "MCP chat tool catalogue must stay in gateway_mcp_chat_tools",
+        "fn mcp_stdio_config_from_metadata(": "MCP stdio metadata parsing must stay in gateway_mcp_runtime",
+        "fn mcp_stdio_config_to_metadata(": "MCP stdio metadata serialization must stay in gateway_mcp_runtime",
+        "fn mcp_http_config_to_metadata(": "MCP HTTP metadata serialization must stay in gateway_mcp_runtime",
+        "fn mcp_http_headers_to_secret(": "MCP HTTP header secret encoding must stay in gateway_mcp_runtime",
+        "fn mcp_http_headers_from_secret(": "MCP HTTP header secret decoding must stay in gateway_mcp_runtime",
+        "fn migrate_legacy_mcp_http_header_secrets(": "MCP legacy secret migration must stay in gateway_mcp_runtime",
+        "enum McpAnyTransport": "MCP transport adapter must stay in gateway_mcp_runtime",
+        "fn build_mcp_transport(": "MCP transport construction must stay in gateway_mcp_runtime",
+        "fn mcp_provider_slug(": "MCP provider id slugging must stay in gateway_mcp_runtime",
+        "fn mcp_discover_and_cache_tools(": "MCP discovery/cache runtime must stay in gateway_mcp_runtime",
+        "fn run_mcp_chat_tool(": "MCP chat execution runtime must stay in gateway_mcp_runtime",
         "fn find_capability_tool_schema(": "capability discovery schemas must stay in gateway_capability_registry",
         "enum CapabilitySource ": "capability registry source typing must stay in gateway_capability_registry",
         "struct CapabilityEntry ": "capability registry entries must stay in gateway_capability_registry",
@@ -526,6 +537,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
     assert_contains(source, "mod gateway_action_confirmations;", "gateway root must declare action confirmation owner")
     assert_contains(source, "mod gateway_mcp_chat_tools;", "gateway root must declare MCP chat tools owner")
+    assert_contains(source, "mod gateway_mcp_runtime;", "gateway root must declare MCP runtime owner")
     assert_contains(source, "mod gateway_task_maintenance;", "gateway root must declare task maintenance owner")
     assert_contains(source, "mod gateway_memory_background;", "gateway root must declare memory background owner")
     assert_contains(source, "mod gateway_remote_approval;", "gateway root must declare remote approval owner")

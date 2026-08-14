@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-14 (MCP chat tools owner merged).**
+> **Ultimo aggiornamento: 2026-08-14 (MCP runtime owner in estrazione).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
-| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126 e #127 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `97040858` (`Merge pull request #127 from homun-app/fabio/mcp-chat-tools-contracts`) |
+| Branch | `fabio/mcp-runtime-contracts` |
+| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127 e #128 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `33d6e7e4` (`Merge pull request #128 from homun-app/fabio/post-pr127-status-cleanup`) |
 
 ## Dove siamo
 
@@ -101,6 +101,10 @@ Slice Runtime V2 recenti:
 - Estrazione `gateway_mcp_chat_tools`: naming/parse e catalogo schema
   MCP cached escono dal monolite `main.rs`; l'esecuzione MCP resta separata per
   una slice successiva.
+- Estrazione `gateway_mcp_runtime`: transport stdio/http, metadata
+  connect<->execute, migrazione header secret, discovery/cache e
+  `run_mcp_chat_tool` escono dal monolite `main.rs`; route HTTP e DTO restano
+  composition/orchestration.
 
 ## Invarianti ora protetti
 
@@ -181,6 +185,9 @@ Slice browser/projection successive:
 - PR #127 mergeata il 2026-08-14, merge commit `97040858`; CI verde su
   Release readiness, Frontend, Backend, Landlock e build installer
   Linux/macOS/Windows.
+- PR #128 mergeata il 2026-08-14, merge commit `33d6e7e4`; CI verde su
+  Release readiness, Frontend, Backend, Landlock e build installer
+  Linux/macOS/Windows.
 - Slice `fabio/app-action-budget-contracts` verificata localmente con:
   `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
   `cargo test -p local-first-desktop-gateway plan_stall -- --nocapture`,
@@ -224,6 +231,13 @@ Slice browser/projection successive:
   verde; contract `python3 scripts/check_gateway_main_contract.py` verde;
   `cargo fmt --check`, `git diff --check` e
   `python3 scripts/kernel_regression_gate.py` verdi.
+- Slice `fabio/mcp-runtime-contracts` verificata localmente: nuovo owner
+  `gateway_mcp_runtime` con transport stdio/http, metadata, secret migration,
+  discovery/cache e `run_mcp_chat_tool`; owner-level
+  `cargo test -p local-first-desktop-gateway gateway_mcp_runtime -- --nocapture`
+  verde; compat MCP `mcp_chat`, `mcp_tool`, `mcp_http` verdi; contract
+  `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
+  `git diff --check` e `python3 scripts/kernel_regression_gate.py` verdi.
 
 ## PR / CI
 
