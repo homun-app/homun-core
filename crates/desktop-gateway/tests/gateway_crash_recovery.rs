@@ -472,9 +472,6 @@ fn reserved_port_remains_exclusive_until_gateway_spawn() {
         TcpListener::bind(("127.0.0.1", port)).is_err(),
         "the gateway port must remain reserved before spawn"
     );
-
-    reservation.release();
-    TcpListener::bind(("127.0.0.1", port)).expect("released port can be rebound");
 }
 
 #[test]

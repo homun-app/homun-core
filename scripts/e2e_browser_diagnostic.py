@@ -156,8 +156,46 @@ def get_kernel_projection(thread_id: str) -> dict | None:
     return None
 
 
-def get_assistant_texts(thread_id: str) -> list[str]:
-    """Return newest assistant messages, preferring the DB for finished turns."""
+def get_turn_assistant_message_id(turn_id: str) -> str | None:
+    """Return the preallocated assistant message id for a brokered turn."""
+    rows = db_query(
+        "SELECT task_json FROM tasks WHERE task_id=? AND kind='chat_turn' LIMIT 1",
+        (turn_id,),
+    )
+    for row in rows:
+        try:
+            task = json.loads(str(row.get("task_json") or "{}"))
+        except Exception:
+            continue
+        input_json = task.get("input_json")
+        if not isinstance(input_json, dict):
+            input_json = task.get("input")
+        if isinstance(input_json, dict):
+            assistant_id = input_json.get("assistant_message_id")
+            if isinstance(assistant_id, str) and assistant_id.strip():
+                return assistant_id.strip()
+    return None
+
+
+def get_assistant_texts(thread_id: str, turn_id: str | None = None) -> list[str]:
+    """Return assistant messages, scoped to the submitted turn when possible."""
+    if turn_id:
+        msgs = db_query(
+            "SELECT text FROM chat_messages WHERE thread_id=? AND role='assistant' AND linked_task_id=? ORDER BY timestamp DESC LIMIT 5",
+            (thread_id, turn_id),
+        )
+        if msgs:
+            return [str(row.get("text") or "") for row in msgs]
+
+        assistant_id = get_turn_assistant_message_id(turn_id)
+        if assistant_id:
+            msgs = db_query(
+                "SELECT text FROM chat_messages WHERE thread_id=? AND role='assistant' AND id=? LIMIT 1",
+                (thread_id, assistant_id),
+            )
+            if msgs:
+                return [str(row.get("text") or "") for row in msgs]
+
     msgs = db_query(
         "SELECT text FROM chat_messages WHERE thread_id=? AND role='assistant' ORDER BY timestamp DESC LIMIT 5",
         (thread_id,),
@@ -170,6 +208,12 @@ def get_assistant_texts(thread_id: str) -> list[str]:
         return []
     items = body if isinstance(body, list) else body.get("messages", body.get("items", []))
     assistants = [m for m in items if isinstance(m, dict) and m.get("role") == "assistant"]
+    if turn_id:
+        assistant_id = get_turn_assistant_message_id(turn_id)
+        assistants = [
+            m for m in assistants
+            if m.get("linked_task_id") == turn_id or (assistant_id and m.get("id") == assistant_id)
+        ]
     return [
         str(message.get("text", message.get("content", "")) or "")
         for message in reversed(assistants[-5:])
@@ -207,7 +251,22 @@ def evaluate_final_result(assistant_texts: list[str], projection: dict | None) -
     if not assistant_texts:
         return False, "no assistant messages"
     txt = assistant_texts[0]
+    if is_placeholder_assistant_text(txt):
+        return False, f"assistant placeholder only: {txt[:60]}"
     return True, f"msgs={len(assistant_texts)}, len={len(txt)}, preview={txt[:60]}"
+
+
+def is_placeholder_assistant_text(text: str) -> bool:
+    normalized = " ".join(text.strip().split()).lower()
+    if not normalized or normalized in {"...", "…"}:
+        return True
+    placeholder_prefixes = (
+        "i'm ready",
+        "i am ready",
+        "sono pronto",
+        "sono pronta",
+    )
+    return normalized.startswith(placeholder_prefixes)
 
 
 def evaluate_phases(events: list[dict], turn_id: str, thread_id: str) -> dict:
@@ -281,7 +340,7 @@ def evaluate_phases(events: list[dict], turn_id: str, thread_id: str) -> dict:
     # Phase 8: Final result. A visible assistant message is not enough: the
     # kernel projection must not report a failed browser or blocked plan.
     results["Final result"] = evaluate_final_result(
-        get_assistant_texts(thread_id),
+        get_assistant_texts(thread_id, turn_id),
         get_kernel_projection(thread_id),
     )
 
