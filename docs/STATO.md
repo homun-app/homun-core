@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-14 (MCP runtime owner in estrazione).**
+> **Ultimo aggiornamento: 2026-08-14 (MCP runtime owner merged).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/mcp-runtime-contracts` |
-| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127 e #128 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `33d6e7e4` (`Merge pull request #128 from homun-app/fabio/post-pr127-status-cleanup`) |
+| Branch | `main` |
+| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128 e #129 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `a554a1ef` (`Merge pull request #129 from homun-app/fabio/mcp-runtime-contracts`) |
 
 ## Dove siamo
 
@@ -188,6 +188,9 @@ Slice browser/projection successive:
 - PR #128 mergeata il 2026-08-14, merge commit `33d6e7e4`; CI verde su
   Release readiness, Frontend, Backend, Landlock e build installer
   Linux/macOS/Windows.
+- PR #129 mergeata il 2026-08-14, merge commit `a554a1ef`; CI verde su
+  Release readiness, Frontend, Backend, Landlock e build installer
+  Linux/macOS/Windows.
 - Slice `fabio/app-action-budget-contracts` verificata localmente con:
   `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
   `cargo test -p local-first-desktop-gateway plan_stall -- --nocapture`,
@@ -281,12 +284,18 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/126`.
 - #127 `Extract MCP chat tools owner`:
   `https://github.com/homun-app/homun-core/pull/127`.
+- #128 `Update status after MCP chat tools merge`:
+  `https://github.com/homun-app/homun-core/pull/128`.
+- #129 `Extract MCP runtime owner`:
+  `https://github.com/homun-app/homun-core/pull/129`.
 
 Branch corrente:
 
 - `main`: include `gateway_mcp_chat_tools` per naming/parse e catalogo schema
-  MCP cached; il branch remoto `fabio/mcp-chat-tools-contracts` e' stato
-  eliminato dal merge.
+  MCP cached e `gateway_mcp_runtime` per transport stdio/http, metadata,
+  secret migration, discovery/cache e `run_mcp_chat_tool`; i branch remoti
+  `fabio/mcp-chat-tools-contracts` e `fabio/mcp-runtime-contracts` sono stati
+  eliminati dai merge.
 
 ## Debito residuo
 
@@ -310,9 +319,10 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Prossima slice backend/kernel non-browser: isolare il prossimo owner MCP
-   runtime, probabilmente il path di esecuzione `run_mcp_chat_tool`/transport
-   se il taglio resta piccolo; altrimenti separare prima configurazione/metadata.
+1. Prossima slice backend/kernel non-browser: analizzare il prossimo confine
+   MCP/plugin rimasto in `main.rs` dopo runtime e chat tools, probabilmente
+   route/config registry MCP o endpoint di execute/connect, senza toccare il
+   browser.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -320,7 +330,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch main, HEAD atteso 4f792bfb o successivo.
+branch main, HEAD atteso a554a1ef o successivo.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
