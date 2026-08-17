@@ -1,4 +1,10 @@
-// Memory wiki projections and manual-edit registry for the hybrid memory view.
+// Memory wiki projections, routes, and manual-edit registry for the hybrid memory view.
+use axum::{
+    Json,
+    extract::{Query, State},
+};
+use serde::{Deserialize, Serialize};
+
 use crate::*;
 
 /// Wiki pages the user edited by hand (`workspace|path`) are not
@@ -178,6 +184,139 @@ pub(crate) fn rebuild_status_wiki(
     local_first_memory::rebuild_status_wiki(facade, user_id, workspace, &|ws, path| {
         wiki_is_edited(ws, path)
     });
+}
+
+#[derive(Serialize)]
+pub(crate) struct WikiPageView {
+    path: String,
+    title: String,
+    body: String,
+}
+
+/// The markdown face of the project's memory (wiki pages persisted in SQL): the
+/// readable, human-editable projection. Same scope resolution as the graph.
+pub(crate) async fn memory_wiki(
+    State(state): State<AppState>,
+    Query(query): Query<MemoryGraphQuery>,
+) -> Result<Json<Vec<WikiPageView>>, GatewayError> {
+    let facade = memory_facade(&state);
+    let user = gateway_memory_user_id();
+    let ws = resolve_memory_query_scope(&state, &query);
+    // Regenerate the "Decisioni" page from current decisions so existing projects show
+    // it without needing a fresh turn (idempotent).
+    rebuild_decisions_wiki(facade, &user, &ws);
+    rebuild_status_wiki(facade, &user, &ws);
+    let pages = facade
+        .list_wiki_pages_for_ui(&user, &ws)
+        .unwrap_or_default();
+    Ok(Json(
+        pages
+            .into_iter()
+            .map(|p| WikiPageView {
+                path: p.path,
+                title: p.title,
+                body: p.body,
+            })
+            .collect(),
+    ))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct WikiSaveRequest {
+    workspace: Option<String>,
+    thread: Option<String>,
+    path: String,
+    body: String,
+}
+
+impl WikiSaveRequest {
+    fn graph_query(&self) -> MemoryGraphQuery {
+        MemoryGraphQuery {
+            workspace: self.workspace.clone(),
+            thread: self.thread.clone(),
+        }
+    }
+}
+
+/// Save a hand-edited wiki page (the editable face of the hybrid model): persist the
+/// new markdown, mark the page as user-edited (so it isn't auto-regenerated), and
+/// RE-INGEST it — run the extractor on the edited text so the corrections flow back
+/// into the canonical structured memory.
+pub(crate) async fn memory_wiki_save(
+    State(state): State<AppState>,
+    Json(req): Json<WikiSaveRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let user = gateway_memory_user_id();
+    let ws = resolve_memory_query_scope(&state, &req.graph_query());
+    {
+        let facade = memory_facade(&state);
+        let existing = facade
+            .list_wiki_pages_for_ui(&user, &ws)
+            .ok()
+            .and_then(|pages| pages.into_iter().find(|p| p.path == req.path));
+        let reference = existing
+            .as_ref()
+            .map(|p| p.reference.clone())
+            .unwrap_or_else(|| MemoryRef::generated(MemoryRefKind::Wiki, user.clone(), ws.clone()));
+        let title = existing
+            .as_ref()
+            .map(|p| p.title.clone())
+            .unwrap_or_else(|| req.path.clone());
+        let linked_refs = existing.map(|p| p.linked_refs).unwrap_or_default();
+        let page = WikiPage {
+            reference,
+            user_id: user.clone(),
+            workspace_id: ws.clone(),
+            path: req.path.clone(),
+            title,
+            body: req.body.clone(),
+            linked_refs,
+            privacy_domain: PrivacyDomain::new("work"),
+            sensitivity: MemoryDataSensitivity::Internal,
+        };
+        facade
+            .record_wiki_page_for_ui(&page)
+            .map_err(|e| GatewayError::memory(e.to_string()))?;
+    }
+    reconcile_memory_scope(&state, &ws);
+    mark_wiki_edited(&ws, &req.path);
+    // Re-ingest: scope the MEMORY workspace to this page, then extract memories from
+    // the edited markdown into the structured store (non-empty `actions` bypasses the
+    // salience gate). Background — the save returns immediately. (Memory scope only —
+    // doesn't touch the global active workspace / Composio.)
+    set_memory_workspace(ws.as_str());
+    let st = state.clone();
+    let body = req.body.clone();
+    let reconcile_ws = ws.clone();
+    tokio::spawn(async move {
+        learn_via_service_or_inline(
+            &st,
+            &body,
+            "",
+            "The user manually corrected a project memory wiki page",
+            None,
+            None,
+            None,
+            None,
+            local_first_memory::MemoryReuseEnvelope::normal(),
+        )
+        .await;
+        reconcile_memory_scope(&st, &reconcile_ws);
+    });
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Consolidate a scope's memory: merge fragments + prune noise (user/agent triggered).
+pub(crate) async fn memory_consolidate(
+    State(state): State<AppState>,
+    Query(query): Query<MemoryGraphQuery>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let user = gateway_memory_user_id();
+    let ws = resolve_memory_query_scope(&state, &query);
+    let (merged, dropped) = consolidate_scope(&state, &user, &ws).await;
+    Ok(Json(
+        serde_json::json!({ "merged": merged, "dropped": dropped }),
+    ))
 }
 
 pub(crate) fn active_open_loop_record(memory: &MemoryRecord) -> bool {

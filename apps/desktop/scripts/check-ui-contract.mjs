@@ -457,8 +457,8 @@ assertRepoContains(
 );
 assertRepoContains(
   "crates/desktop-gateway/src/gateway_memory_wiki.rs",
-  "rebuild_status_wiki",
-  "Gateway memory wiki projections must have a dedicated owner",
+  "memory_wiki_save",
+  "Gateway memory wiki projections and routes must have a dedicated owner",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",
