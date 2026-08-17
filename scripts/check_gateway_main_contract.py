@@ -104,6 +104,23 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn spawn_memory_consolidation_tick(": "memory consolidation tick must stay in gateway_memory_background",
         "fn spawn_embedding_catchup(": "embedding catchup must stay in gateway_memory_background",
         "fn spawn_memory_hygiene_sweep(": "memory hygiene sweep must stay in gateway_memory_background",
+        "struct MemoryBenchMessage ": "MemoryBench DTOs must stay in gateway_memory_bench",
+        "struct MemoryBenchSession ": "MemoryBench DTOs must stay in gateway_memory_bench",
+        "struct MemoryBenchIngestRequest ": "MemoryBench DTOs must stay in gateway_memory_bench",
+        "struct MemoryBenchIngestResponse ": "MemoryBench DTOs must stay in gateway_memory_bench",
+        "struct MemoryBenchStatusRequest ": "MemoryBench DTOs must stay in gateway_memory_bench",
+        "struct MemoryBenchStatusResponse ": "MemoryBench DTOs must stay in gateway_memory_bench",
+        "struct MemoryBenchSearchRequest ": "MemoryBench DTOs must stay in gateway_memory_bench",
+        "struct MemoryBenchSearchResult ": "MemoryBench DTOs must stay in gateway_memory_bench",
+        "fn memorybench_default_limit(": "MemoryBench defaults must stay in gateway_memory_bench",
+        "fn memorybench_enabled(": "MemoryBench opt-in policy must stay in gateway_memory_bench",
+        "fn validate_memorybench_container_tag(": "MemoryBench validation must stay in gateway_memory_bench",
+        "fn memorybench_workspace_id(": "MemoryBench workspace identity must stay in gateway_memory_bench",
+        "fn ensure_memorybench_workspace(": "MemoryBench workspace materialization must stay in gateway_memory_bench",
+        "fn memorybench_session_text(": "MemoryBench session projection must stay in gateway_memory_bench",
+        "async fn memory_bench_ingest(": "MemoryBench routes must stay in gateway_memory_bench",
+        "async fn memory_bench_status(": "MemoryBench routes must stay in gateway_memory_bench",
+        "async fn memory_bench_search(": "MemoryBench routes must stay in gateway_memory_bench",
         "struct RemoteApprovalIntent ": "remote approval intent parsing must stay in gateway_remote_approval",
         "fn remote_approval_intent_from_marker(": "remote approval marker parsing must stay in gateway_remote_approval",
         "fn remote_approval_intent_from_raw_text(": "remote approval marker parsing must stay in gateway_remote_approval",
@@ -776,6 +793,7 @@ def main() -> int:
         "mod gateway_memory_sources;",
         "gateway root must declare memory source owner",
     )
+    assert_contains(source, "mod gateway_memory_bench;", "gateway root must declare MemoryBench owner")
     assert_contains(source, "mod gateway_project_access;", "gateway root must declare project access owner")
     assert_contains(source, "mod gateway_workspaces;", "gateway root must declare workspace registry owner")
     assert_contains(source, "mod gateway_write_tool_allowlist;", "gateway root must declare write-tool allow-list owner")
