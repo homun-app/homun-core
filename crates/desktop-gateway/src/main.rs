@@ -73,6 +73,7 @@ mod gateway_memory_recall_service;
 mod gateway_memory_sources;
 mod gateway_memory_tools;
 mod gateway_memory_turn_context;
+mod gateway_memory_ui_routes;
 mod gateway_memory_wiki;
 mod gateway_model_routing;
 mod gateway_model_timeouts;
@@ -163,6 +164,9 @@ use gateway_memory_query_embeddings::{
     memory_query_embedding_cache, memory_query_embedding_cache_key,
     memory_query_embedding_cache_max_entries, memory_query_embedding_cache_ttl,
     memory_query_embedding_timeout,
+};
+pub(crate) use gateway_memory_ui_routes::{
+    export_user_data, memory_dashboard, memory_export, memory_items,
 };
 pub(crate) use gateway_process_events::*;
 #[cfg(test)]
@@ -543,13 +547,13 @@ use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSe
 use local_first_memory::{
     BriefingPack, CachedBriefing, DataSensitivity as MemoryDataSensitivity, Exchange,
     ExtractedEntity, ExtractedMemory, ExtractedRelation, MemoryAccessRequest, MemoryCollectionKey,
-    MemoryCreateRequest, MemoryDashboard, MemoryEntity, MemoryError, MemoryExtraction,
-    MemoryFacade, MemoryIntegrityRepairRequest, MemoryLifecycleRequest, MemoryRecallService,
-    MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySearchRequest,
-    MemoryStatus, MemoryUiReadModel, MemoryUpdatePatch, MemoryWikiProjection, PERSONAL_WORKSPACE,
-    PrivacyDomain, ProjectGraphImportReport, RecallHit, RecallPack, SQLiteMemoryStore,
-    UserId as MemoryUserId, WikiFileStore, WikiPage, WorkspaceId as MemoryWorkspaceId,
-    briefing_cache, memory_record_revision, prompt_fingerprint,
+    MemoryCreateRequest, MemoryEntity, MemoryError, MemoryExtraction, MemoryFacade,
+    MemoryIntegrityRepairRequest, MemoryLifecycleRequest, MemoryRecallService, MemoryRecord,
+    MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySearchRequest, MemoryStatus,
+    MemoryUpdatePatch, MemoryWikiProjection, PERSONAL_WORKSPACE, PrivacyDomain,
+    ProjectGraphImportReport, RecallHit, RecallPack, SQLiteMemoryStore, UserId as MemoryUserId,
+    WikiFileStore, WikiPage, WorkspaceId as MemoryWorkspaceId, briefing_cache,
+    memory_record_revision, prompt_fingerprint,
 };
 use local_first_orchestrator::{
     ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
@@ -698,19 +702,17 @@ impl gateway_health::GatewayHealthState for AppState {
 
     /// Sidecar status: browser automation is "running" when a sidecar
     /// client has been spawned (the `browser_capability_client` is `Some`).
-    /// The contained computer is "running" when the setup coordinator
-    /// reports `Ready` (the container is verified healthy) OR the container
-    /// is live per Docker itself (e.g. started externally / by a later
-    /// bootstrap path the coordinator doesn't know about). PIDs are not
-    /// directly available from these in-memory holders.
+    /// The contained computer status comes from the setup coordinator cache:
+    /// the health handler must not shell out to Docker or block on external
+    /// probes, otherwise the Electron watchdog can lose its liveness signal
+    /// under load. PIDs are not directly available from these in-memory holders.
     fn sidecar_health(&self) -> gateway_health::SidecarHealth {
         let browser_running = self
             .browser_capability_client
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .is_some();
-        let contained_running =
-            self.setup_computer.status().ready || crate::sandbox::container_up();
+        let contained_running = self.setup_computer.status().ready;
         gateway_health::SidecarHealth {
             browser_automation: gateway_health::SidecarStatus {
                 running: browser_running,
@@ -18373,285 +18375,6 @@ async fn local_computer_artifact_preview(
         size_bytes: artifact.size_bytes,
         data_url: format!("data:{mime};base64,{encoded}"),
     })))
-}
-
-async fn memory_dashboard(
-    State(state): State<AppState>,
-) -> Result<Json<MemoryDashboard>, GatewayError> {
-    let request = gateway_memory_access_request();
-    let facade = memory_facade(&state);
-    let dashboard = MemoryUiReadModel::new(facade)
-        .dashboard(&request)
-        .map_err(GatewayError::memory)?;
-    Ok(Json(dashboard))
-}
-
-/// Exports local memory (personal scope) + dashboard counts as a JSON bundle the
-/// frontend downloads. Tasks live in the chat store and are out of scope for v1.
-async fn memory_export(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let facade = memory_facade(&state);
-    let request = gateway_memory_access_request();
-    let dashboard = MemoryUiReadModel::new(facade)
-        .dashboard(&request)
-        .map_err(GatewayError::memory)?;
-    let user = gateway_memory_user_id();
-    let personal = gateway_memory_workspace_id();
-    let memories = facade
-        .list_memories_for_ui(&user, &personal)
-        .unwrap_or_default();
-    let items: Vec<serde_json::Value> = memories
-        .into_iter()
-        .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
-        .map(|m| {
-            serde_json::json!({
-                "reference": m.reference.to_string(),
-                "memory_type": m.memory_type,
-                "text": m.text,
-                "status": format!("{:?}", m.status).to_lowercase(),
-                "sensitivity": format!("{:?}", m.sensitivity).to_lowercase(),
-                "confidence": m.confidence,
-                "created_at": m.created_at,
-            })
-        })
-        .collect();
-    Ok(Json(serde_json::json!({
-        "schema": "local-first-export/v1",
-        "dashboard": dashboard,
-        "memories": items,
-    })))
-}
-
-/// GET /api/export — full user data export (GDPR-style data portability).
-/// Serializes memories, chat threads + messages, contacts, and profiles into a
-/// single JSON document. Complements /api/memory/export (which is memory-only)
-/// and the workspace cascade-purge (which deletes).
-async fn export_user_data(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    // ── Memories (reuse the existing memory_export logic) ──
-    let memories = {
-        let facade = memory_facade(&state);
-        let user = gateway_memory_user_id();
-        let workspace = gateway_memory_workspace_id();
-        let items: Vec<serde_json::Value> = facade
-            .list_memories_for_ui(&user, &workspace)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
-            .map(|m| {
-                serde_json::json!({
-                    "reference": m.reference.to_string(),
-                    "memory_type": format!("{:?}", m.memory_type).to_lowercase(),
-                    "text": m.text,
-                    "status": format!("{:?}", m.status).to_lowercase(),
-                    "sensitivity": format!("{:?}", m.sensitivity).to_lowercase(),
-                    "confidence": m.confidence,
-                    "created_at": m.created_at,
-                })
-            })
-            .collect();
-        items
-    };
-
-    // ── Chat threads + messages ──
-    let (threads, messages) = {
-        let store = state.chat_store.lock().map_err(|e| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "store_lock",
-            message: e.to_string(),
-        })?;
-        let file = load_workspaces_file();
-        let mut all_threads = Vec::new();
-        let mut all_messages = Vec::new();
-        for ws in &file.workspaces {
-            let snapshot = store
-                .threads(&ws.id)
-                .unwrap_or_else(|_| ChatThreadSnapshot {
-                    active_thread_id: String::new(),
-                    threads: Vec::new(),
-                });
-            for thread in &snapshot.threads {
-                let msgs =
-                    store
-                        .messages(&thread.thread_id)
-                        .unwrap_or_else(|_| ChatMessagesSnapshot {
-                            thread_id: thread.thread_id.clone(),
-                            messages: Vec::new(),
-                        });
-                all_threads.push(serde_json::json!({
-                    "thread_id": thread.thread_id,
-                    "workspace_id": ws.id,
-                    "title": thread.title,
-                    "status": thread.status,
-                    "message_count": msgs.messages.len(),
-                }));
-                for msg in &msgs.messages {
-                    all_messages.push(serde_json::json!({
-                        "thread_id": thread.thread_id,
-                        "role": msg.role,
-                        "text": msg.text,
-                        "timestamp": msg.timestamp,
-                    }));
-                }
-            }
-        }
-        (all_threads, all_messages)
-    };
-
-    // ── Contacts + profiles ──
-    let (contacts, profiles) = {
-        let store = state.chat_store.lock().map_err(|e| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "store_lock",
-            message: e.to_string(),
-        })?;
-        let contacts_list = store.list_contacts().unwrap_or_default();
-        let profiles_list = store.list_profiles().unwrap_or_default();
-        let contacts_json: Vec<serde_json::Value> = contacts_list
-            .iter()
-            .map(|c| {
-                serde_json::json!({
-                    "id": c.id,
-                    "name": c.name,
-                    "contact_type": c.contact_type,
-                    "is_self": c.is_self,
-                })
-            })
-            .collect();
-        let profiles_json: Vec<serde_json::Value> = profiles_list
-            .iter()
-            .map(|p| {
-                serde_json::json!({
-                    "id": p.id,
-                    "name": p.name,
-                    "tone_of_voice": p.tone_of_voice,
-                })
-            })
-            .collect();
-        (contacts_json, profiles_json)
-    };
-
-    Ok(Json(serde_json::json!({
-        "schema": "local-first-export/v2",
-        "exported_at": OffsetDateTime::now_utc().to_string(),
-        "memories": memories,
-        "chat": {
-            "threads": threads,
-            "messages": messages,
-        },
-        "contacts": contacts,
-        "profiles": profiles,
-    })))
-}
-
-/// One memory in the management view (M5): UI-safe, with its scope and a string ref.
-#[derive(Debug, Serialize)]
-struct MemoryItemView {
-    reference: String,
-    scope: String,
-    workspace_id: String,
-    workspace_label: String,
-    memory_type: String,
-    status: String,
-    sensitivity: String,
-    confidence: f64,
-    text: String,
-    created_at: String,
-    certainty: String,
-}
-
-/// Lists individual memories from the PERSONAL + active PROJECT scopes so the user
-/// can see and manage what the assistant has learned (M5). Rejected/deleted are
-/// hidden; candidates are shown so they can be confirmed.
-async fn memory_items(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let facade = memory_facade(&state);
-    let user = gateway_memory_user_id();
-    let mut out: Vec<MemoryItemView> = Vec::new();
-    let mut push_scope = |workspace: &MemoryWorkspaceId, scope: &str, label: &str| {
-        if let Ok(memories) = facade.list_memories_for_ui(&user, workspace) {
-            for memory in memories {
-                if matches!(
-                    memory.status,
-                    MemoryStatus::Deleted | MemoryStatus::Rejected
-                ) {
-                    continue;
-                }
-                out.push(MemoryItemView {
-                    reference: memory.reference.to_string(),
-                    scope: scope.to_string(),
-                    workspace_id: workspace.as_str().to_string(),
-                    workspace_label: label.to_string(),
-                    memory_type: memory.memory_type,
-                    status: format!("{:?}", memory.status).to_lowercase(),
-                    sensitivity: format!("{:?}", memory.sensitivity).to_lowercase(),
-                    confidence: memory.confidence,
-                    certainty: memory
-                        .metadata
-                        .get("certainty")
-                        .and_then(|c| c.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    text: memory.text,
-                    created_at: memory.created_at,
-                });
-            }
-        }
-    };
-    // Whole memory across scopes, so the explorer can filter by project / build a timeline.
-    push_scope(
-        &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
-        "personal",
-        "Personal",
-    );
-    push_scope(
-        &MemoryWorkspaceId::new(THREADS_WORKSPACE),
-        "thread",
-        "Conversations",
-    );
-    for workspace in load_workspaces_file().workspaces {
-        if workspace.id == PERSONAL_WORKSPACE || workspace.id == THREADS_WORKSPACE {
-            continue;
-        }
-        push_scope(
-            &MemoryWorkspaceId::new(workspace.id.clone()),
-            "project",
-            &workspace.name,
-        );
-    }
-    // Selectable scopes for the graph view: the memory scopes above PLUS every
-    // folder-backed project even with zero memory — so a code project (e.g. "idra")
-    // is reachable and its code graph gets built on open. Without this it'd be
-    // invisible (the selector is derived only from items that have memory).
-    let mut scopes: Vec<serde_json::Value> = Vec::new();
-    let mut seen_ws: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut add_scope = |id: &str, label: &str, kind: &str, has_folder: bool| {
-        if seen_ws.insert(id.to_string()) {
-            scopes.push(serde_json::json!({
-                "workspace_id": id, "workspace_label": label, "scope": kind, "has_folder": has_folder
-            }));
-        }
-    };
-    add_scope(PERSONAL_WORKSPACE, "Personal", "personal", false);
-    add_scope(THREADS_WORKSPACE, "Conversations", "thread", false);
-    for it in &out {
-        add_scope(&it.workspace_id, &it.workspace_label, &it.scope, false);
-    }
-    for workspace in load_workspaces_file().workspaces {
-        if workspace.id == PERSONAL_WORKSPACE || workspace.id == THREADS_WORKSPACE {
-            continue;
-        }
-        let has_folder = workspace
-            .folder
-            .as_deref()
-            .map(|f| !f.trim().is_empty())
-            .unwrap_or(false);
-        add_scope(&workspace.id, &workspace.name, "project", has_folder);
-    }
-    Ok(Json(serde_json::json!({ "items": out, "scopes": scopes })))
 }
 
 // -------------------------------------------------------------- memory graph

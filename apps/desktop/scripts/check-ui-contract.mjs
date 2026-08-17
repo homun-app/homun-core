@@ -1656,7 +1656,7 @@ assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/memory/
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/capabilities/snapshot", "desktop gateway must expose capability registry snapshot endpoint");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "TaskUiReadModel", "desktop gateway must use the task runtime UI read model");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "LocalComputerReadModel", "desktop gateway must use the local computer UI read model");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "MemoryUiReadModel", "desktop gateway must use the memory UI read model");
+assertRepoContains("crates/desktop-gateway/src/gateway_memory_ui_routes.rs", "MemoryUiReadModel", "desktop gateway must use the memory UI read model");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "CapabilityRegistryStore", "desktop gateway must use the capability registry store");
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/chat/threads", "desktop gateway must expose persistent thread endpoints");
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/messages/{message_id}/create_task", "desktop gateway must create durable tasks from chat messages");

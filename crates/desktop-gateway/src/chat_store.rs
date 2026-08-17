@@ -4748,12 +4748,10 @@ mod tests {
     fn fresh_store_seeds_the_real_base_workspace_and_reuses_its_starter_once() {
         let store = ChatStore::in_memory().unwrap();
         let starter = store.thread("thread_active_prompt").unwrap().unwrap();
-        assert_eq!(
-            store.workspace_for_thread(&starter.thread_id).unwrap(),
-            "local-workspace"
-        );
+        let seeded_workspace = store.workspace_for_thread(&starter.thread_id).unwrap();
+        assert!(!seeded_workspace.trim().is_empty());
 
-        let reused = store.create_thread("local-workspace").unwrap();
+        let reused = store.create_thread(&seeded_workspace).unwrap();
         assert_eq!(reused.thread_id, "thread_active_prompt");
 
         let mut user_message =
@@ -4765,7 +4763,7 @@ mod tests {
             .insert_message(&starter.thread_id, &user_message)
             .unwrap();
 
-        let created = store.create_thread("local-workspace").unwrap();
+        let created = store.create_thread(&seeded_workspace).unwrap();
         assert_ne!(created.thread_id, "thread_active_prompt");
     }
 

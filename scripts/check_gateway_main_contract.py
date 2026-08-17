@@ -121,6 +121,11 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn memory_bench_ingest(": "MemoryBench routes must stay in gateway_memory_bench",
         "async fn memory_bench_status(": "MemoryBench routes must stay in gateway_memory_bench",
         "async fn memory_bench_search(": "MemoryBench routes must stay in gateway_memory_bench",
+        "async fn memory_dashboard(": "memory UI routes must stay in gateway_memory_ui_routes",
+        "async fn memory_export(": "memory export routes must stay in gateway_memory_ui_routes",
+        "async fn export_user_data(": "full user data export must stay in gateway_memory_ui_routes",
+        "struct MemoryItemView ": "memory explorer DTOs must stay in gateway_memory_ui_routes",
+        "async fn memory_items(": "memory explorer routes must stay in gateway_memory_ui_routes",
         "struct RemoteApprovalIntent ": "remote approval intent parsing must stay in gateway_remote_approval",
         "fn remote_approval_intent_from_marker(": "remote approval marker parsing must stay in gateway_remote_approval",
         "fn remote_approval_intent_from_raw_text(": "remote approval marker parsing must stay in gateway_remote_approval",
@@ -794,6 +799,11 @@ def main() -> int:
         "gateway root must declare memory source owner",
     )
     assert_contains(source, "mod gateway_memory_bench;", "gateway root must declare MemoryBench owner")
+    assert_contains(
+        source,
+        "mod gateway_memory_ui_routes;",
+        "gateway root must declare memory UI routes owner",
+    )
     assert_contains(source, "mod gateway_project_access;", "gateway root must declare project access owner")
     assert_contains(source, "mod gateway_workspaces;", "gateway root must declare workspace registry owner")
     assert_contains(source, "mod gateway_write_tool_allowlist;", "gateway root must declare write-tool allow-list owner")
