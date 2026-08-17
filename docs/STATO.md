@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (memory decide route owner verificato localmente).**
+> **Ultimo aggiornamento: 2026-08-18 (main pulito dopo PR #151).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/gateway-memory-decide-route-owner` |
-| PR | #108-#116, #118-#150 mergeate in `main`; #117 browser draft separata; slice memory decide in corso |
-| HEAD codice verificato | branch `fabio/gateway-memory-decide-route-owner` sopra `main` aggiornato a #150 |
+| Branch | `main` |
+| PR | #108-#116, #118-#151 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #151 |
 
 ## Dove siamo
 
