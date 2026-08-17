@@ -336,7 +336,9 @@ use gateway_memory_graph_routes::{MemoryGraphQuery, resolve_memory_query_scope};
 pub(crate) use gateway_memory_graph_routes::{
     memory_graph, memory_graph_merge, memory_graphify_import,
 };
-use gateway_memory_hygiene::{memory_hygiene_suggestions_for_scope, normalized_entity_name};
+#[cfg(test)]
+use gateway_memory_hygiene::memory_hygiene_suggestions_for_scope;
+use gateway_memory_hygiene::{memory_hygiene_suggestions, normalized_entity_name};
 #[cfg(test)]
 pub(crate) use gateway_memory_publications::{
     memory_publication_approve, memory_publication_create, memory_publication_edit,
@@ -19635,21 +19637,6 @@ language. Do not repeat already-defined objectives. Reply ONLY with JSON: \
     Ok(Json(
         serde_json::json!({ "objectives": objectives, "workspace": ws.as_str() }),
     ))
-}
-
-async fn memory_hygiene_suggestions(
-    State(state): State<AppState>,
-    Query(query): Query<MemoryGraphQuery>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let user = gateway_memory_user_id();
-    let ws = resolve_memory_query_scope(&state, &query);
-    let facade = memory_facade(&state);
-    let suggestions =
-        memory_hygiene_suggestions_for_scope(facade, &user, &ws).map_err(GatewayError::memory)?;
-    Ok(Json(serde_json::json!({
-        "workspace": ws.as_str(),
-        "suggestions": suggestions,
-    })))
 }
 
 // ------------------------------------------------------------------ contacts
