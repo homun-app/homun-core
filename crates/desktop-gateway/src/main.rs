@@ -56,6 +56,7 @@ mod gateway_identity;
 mod gateway_legacy_data;
 mod gateway_mcp_chat_tools;
 mod gateway_mcp_connections;
+mod gateway_mcp_execution;
 mod gateway_mcp_runtime;
 mod gateway_memory_background;
 mod gateway_memory_briefing;
@@ -277,6 +278,7 @@ pub(crate) use gateway_mcp_connections::{
 pub(crate) use gateway_mcp_connections::{
     connect_mcp, mcp_connected, mcp_disconnect, mcp_registry_search,
 };
+pub(crate) use gateway_mcp_execution::mcp_execute;
 pub(crate) use gateway_mcp_runtime::{
     build_mcp_transport, mcp_discover_and_cache_tools, mcp_http_config_to_metadata,
     mcp_http_headers_to_secret, mcp_provider_slug, mcp_stdio_config_to_metadata,
@@ -15744,149 +15746,6 @@ async fn connect_mark(
         }
     }
     Json(serde_json::json!({ "ok": true }))
-}
-
-#[derive(Debug, Deserialize)]
-struct McpExecuteRequest {
-    /// Namespaced tool name `mcp__{slug}__{tool}`.
-    tool: String,
-    #[serde(default)]
-    arguments: serde_json::Value,
-    #[serde(default)]
-    thread_id: Option<String>,
-    #[serde(default)]
-    message_id: Option<String>,
-    /// Policy B: "always allow this server" — record a server-level allow so this
-    /// server's writes stop asking for confirmation.
-    #[serde(default)]
-    allow_server: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct McpExecuteResponse {
-    ok: bool,
-    summary: String,
-}
-
-/// Executes an MCP tool on explicit user confirmation (the chat MCP confirm card
-/// calls this). Mirrors `composio_execute`: bounded by the same call timeout, and
-/// on success rewrites the originating message so the card can't reopen.
-async fn mcp_execute(
-    State(state): State<AppState>,
-    Json(request): Json<McpExecuteRequest>,
-) -> Result<Json<McpExecuteResponse>, GatewayError> {
-    let Some((provider_id, tool_name)) = parse_mcp_chat_name(&request.tool) else {
-        return Err(GatewayError {
-            status: StatusCode::BAD_REQUEST,
-            code: "mcp_bad_tool",
-            message: format!("Invalid MCP tool name: {}", request.tool),
-        });
-    };
-    let args = if request.arguments.is_null() {
-        serde_json::json!({})
-    } else {
-        request.arguments.clone()
-    };
-    let args_for_run = args.clone();
-    let args_for_resume = args.clone();
-    let (Some(thread_id), Some(message_id)) =
-        (request.thread_id.as_deref(), request.message_id.as_deref())
-    else {
-        return Err(actionable_claim_error(
-            "MCP execution requires an exact persisted source card",
-        ));
-    };
-    claim_actionable_source(&state, thread_id, message_id, |text| {
-        mcp_confirm_matches(text, &request.tool, &args)
-    })
-    .map_err(|_| GatewayError {
-        status: StatusCode::FORBIDDEN,
-        code: "mcp_confirmation_required",
-        message: "Execute MCP writes from their matching confirmation card.".to_string(),
-    })?;
-    if request.allow_server
-        && let Some((server, _)) = request
-            .tool
-            .strip_prefix("mcp__")
-            .and_then(|rest| rest.split_once("__"))
-    {
-        let _ = add_composio_tool_allow(&format!("mcp__{server}__*"));
-    }
-    let handle = tokio::task::spawn_blocking({
-        let state = state.clone();
-        move || run_mcp_chat_tool(&state, &provider_id, &tool_name, args_for_run)
-    });
-    let outcome = match tokio::time::timeout(mcp_call_timeout(), handle).await {
-        Ok(Ok(result)) => result,
-        Ok(Err(join)) => {
-            return Err(terminal_actionable_execution_error(
-                &state,
-                request.thread_id.as_deref(),
-                request.message_id.as_deref(),
-                "mcp_execute_join",
-                join.to_string(),
-                "Action failed.",
-            ));
-        }
-        Err(_elapsed) => {
-            let _ = terminal_actionable_execution_error(
-                &state,
-                request.thread_id.as_deref(),
-                request.message_id.as_deref(),
-                "mcp_execute_timeout",
-                "MCP tool timed out",
-                "Action timed out.",
-            );
-            return Ok(Json(McpExecuteResponse {
-                ok: false,
-                summary: format!(
-                    "Timeout: the MCP tool didn't respond within {}s.",
-                    mcp_call_timeout().as_secs()
-                ),
-            }));
-        }
-    };
-    match outcome {
-        Ok(output) => {
-            let summary = output.to_string().chars().take(2000).collect::<String>();
-            if let (Some(thread_id), Some(message_id)) =
-                (request.thread_id.as_deref(), request.message_id.as_deref())
-            {
-                resolve_actionable_source(
-                    &state,
-                    thread_id,
-                    message_id,
-                    |text| rewrite_mcp_confirm_to_done(text, &request.tool),
-                    ActionableSourceResolution::Succeeded,
-                )?;
-                // The source is terminal before this enqueue, so it cannot make
-                // the continuation fail with ThreadBusy.
-                resume_thread_after_approval(
-                    &state,
-                    request.thread_id.clone(),
-                    &request.tool,
-                    &summary,
-                    Some(args_for_resume),
-                    request.message_id.clone(),
-                );
-            }
-            Ok(Json(McpExecuteResponse { ok: true, summary }))
-        }
-        Err(error) => {
-            let _ = terminal_actionable_execution_error(
-                &state,
-                request.thread_id.as_deref(),
-                request.message_id.as_deref(),
-                "mcp_execute",
-                error.to_string(),
-                "Action failed.",
-            );
-            Ok(Json(McpExecuteResponse {
-                ok: false,
-                summary: format!("Action FAILED: {error}"),
-            }))
-        }
-    }
 }
 
 /// Parse one field-set (`auth_config_creation` or `connected_account_initiation`) of a

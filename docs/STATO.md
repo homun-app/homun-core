@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-17 (MCP connection routes owner merged).**
+> **Ultimo aggiornamento: 2026-08-17 (MCP execution route owner pronto per PR).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
-| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130 e #131 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `ba4dc0a8` (`Merge pull request #131 from homun-app/fabio/mcp-connection-routes-contracts`) |
+| Branch | `fabio/mcp-execution-route-contracts` |
+| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131 e #132 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | branch `fabio/mcp-execution-route-contracts` (`Extract MCP execution route owner`) |
 
 ## Dove siamo
 
@@ -107,8 +107,12 @@ Slice Runtime V2 recenti:
   composition/orchestration.
 - Estrazione `gateway_mcp_connections`: route/DTO HTTP MCP per
   `connect`, registry search, connected list e disconnect escono dal monolite
-  `main.rs`; `mcp_execute` resta fuori da questa slice perche' dipende da
-  conferme, timeout, allow-list e rewrite terminale.
+  `main.rs`; l'execute MCP e' stato tenuto in una slice separata perche'
+  dipende da conferme, timeout, allow-list e rewrite terminale.
+- Estrazione `gateway_mcp_execution`: route/DTO HTTP MCP per `execute` escono
+  dal monolite `main.rs`; il modulo orchestra confirmation-card claim, marker
+  allow-server e resume/rewrite terminale delegando runtime, timeout e parser
+  conferme agli owner gia' estratti.
 
 ## Invarianti ora protetti
 
@@ -254,6 +258,16 @@ Slice browser/projection successive:
   verde; contract `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
   `cargo clippy --workspace --all-targets --locked -- -D warnings`, `git diff --check`
   e `python3 scripts/kernel_regression_gate.py` verdi.
+- Slice `fabio/mcp-execution-route-contracts` verificata localmente: nuovo owner
+  `gateway_mcp_execution` per endpoint confirm-card MCP execute, marker
+  allow-server e orchestration terminale; owner-level
+  `cargo test -p local-first-desktop-gateway gateway_mcp_execution -- --nocapture`
+  verde; compat MCP confinanti `mcp_chat`, `gateway_mcp_runtime`,
+  `gateway_mcp_connections`, `gateway_action_confirmations`,
+  `gateway_tool_timeouts` e `mcp_http` verdi; contract
+  `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+  `git diff --check` e `python3 scripts/kernel_regression_gate.py` verdi.
 
 ## PR / CI
 
@@ -337,9 +351,9 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Prossima slice backend/kernel non-browser: valutare l'estrazione separata di
-   `mcp_execute` solo dopo aver isolato bene conferme, timeout, allow-list e
-   rewrite terminale.
+1. Prossima slice backend/kernel non-browser dopo MCP execution: valutare se
+   separare l'allow-list write-tool in un owner dedicato, per togliere anche
+   quella policy residua dal monolite senza cambiare semantica approvazioni.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
