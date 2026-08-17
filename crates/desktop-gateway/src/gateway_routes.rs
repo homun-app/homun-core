@@ -20,6 +20,10 @@ use crate::gateway_chat_threads::{
     delete_chat_thread, mark_chat_thread_seen, rename_chat_thread, reorder_chat_threads,
     select_chat_thread, set_chat_thread_pinned, unarchive_chat_thread,
 };
+use crate::gateway_memory_publications::{
+    memory_publication_approve, memory_publication_create, memory_publication_edit,
+    memory_publication_get, memory_publication_reject,
+};
 use crate::gateway_project_access::{
     project_access_list, project_access_remove, project_access_upsert,
 };

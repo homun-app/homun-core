@@ -54,6 +54,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_tags.rs` | Route tag cross-project per project/thread, DTO CRUD/assignment e parse `TagEntity`; non possiede registry workspace, thread lifecycle o store schema. |
 | `crates/desktop-gateway/src/gateway_update_routes.rs` | Route update/redeploy webhook e DTO di stato; non possiede startup, packaging o installer CI. |
 | `crates/desktop-gateway/src/gateway_skill_routes.rs` | Route skills locali, enable/disable, catalogo ClawHub, preview/install e registry GitHub; non possiede seed default a boot, execution sandbox o skill scanner/catalog/security engine. |
+| `crates/desktop-gateway/src/gateway_memory_publications.rs` | Route memory publication create/get/edit/approve/reject, DTO request, mapping errori facade e validazione scope owner; non possiede source grant management, semantica publication del `MemoryFacade` o registry workspace. |
 | `crates/desktop-gateway/src/gateway_project_access.rs` | Grant di accesso progetto, persistenza `project-access`, route access/upsert/remove e resolver policy consumato da channels/automazioni; non possiede registry workspace, contact store o lifecycle channel. |
 | `crates/desktop-gateway/src/gateway_model_routing.rs` | Risoluzione provider/modello, payload provider, compaction visibile al modello e policy reasoning. |
 | `crates/desktop-gateway/src/gateway_tool_execution.rs` | Dispatch tool chat/browser, effect receipts e confini capability/computer/browse. |

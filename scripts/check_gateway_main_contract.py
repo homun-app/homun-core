@@ -386,6 +386,21 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn skill_id_for(": "skill registry install id derivation must stay in gateway_skill_routes",
         "async fn registry_skills(": "skill registry routes must stay in gateway_skill_routes",
         "async fn install_registry_skill(": "skill registry routes must stay in gateway_skill_routes",
+        "const MEMORY_PUBLICATION_BODY_MAX:": "memory publication body limit must stay in gateway_memory_publications",
+        "struct MemoryPublicationCreateRequest": "memory publication DTOs must stay in gateway_memory_publications",
+        "struct MemoryPublicationApproveRequest": "memory publication DTOs must stay in gateway_memory_publications",
+        "struct MemoryPublicationEditRequest": "memory publication DTOs must stay in gateway_memory_publications",
+        "struct MemoryPublicationRejectRequest": "memory publication DTOs must stay in gateway_memory_publications",
+        "fn memory_publication_error(": "memory publication error mapping must stay in gateway_memory_publications",
+        "fn memory_publication_facade_error(": "memory publication facade error mapping must stay in gateway_memory_publications",
+        "fn publication_workspace_from_snapshot(": "memory publication workspace validation must stay in gateway_memory_publications",
+        "fn validate_publication_owner_scope(": "memory publication owner validation must stay in gateway_memory_publications",
+        "fn parse_publication_reference(": "memory publication reference validation must stay in gateway_memory_publications",
+        "async fn memory_publication_create(": "memory publication routes must stay in gateway_memory_publications",
+        "async fn memory_publication_get(": "memory publication routes must stay in gateway_memory_publications",
+        "async fn memory_publication_edit(": "memory publication routes must stay in gateway_memory_publications",
+        "async fn memory_publication_approve(": "memory publication routes must stay in gateway_memory_publications",
+        "async fn memory_publication_reject(": "memory publication routes must stay in gateway_memory_publications",
         "struct ProjectAccessGrant ": "project access DTOs must stay in gateway_project_access",
         "struct ProjectAccessFile ": "project access persistence DTOs must stay in gateway_project_access",
         "struct EffectiveProjectContactPolicy ": "project access policy DTOs must stay in gateway_project_access",
@@ -698,6 +713,11 @@ def main() -> int:
     assert_contains(source, "mod gateway_tags;", "gateway root must declare tag route owner")
     assert_contains(source, "mod gateway_update_routes;", "gateway root must declare update route owner")
     assert_contains(source, "mod gateway_skill_routes;", "gateway root must declare skill route owner")
+    assert_contains(
+        source,
+        "mod gateway_memory_publications;",
+        "gateway root must declare memory publication owner",
+    )
     assert_contains(source, "mod gateway_project_access;", "gateway root must declare project access owner")
     assert_contains(source, "mod gateway_write_tool_allowlist;", "gateway root must declare write-tool allow-list owner")
     assert_contains(source, "mod gateway_task_maintenance;", "gateway root must declare task maintenance owner")
