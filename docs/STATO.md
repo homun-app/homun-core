@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-17 (write-tool allow-list owner locale).**
+> **Ultimo aggiornamento: 2026-08-17 (write-tool allow-list owner pronto per PR).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/write-tool-allowlist-contracts` |
-| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131 e #132 mergeate in `main`; #133 aperta/draft su `fabio/mcp-execution-route-contracts`; #117 browser draft separata |
-| HEAD codice verificato | branch locale `fabio/write-tool-allowlist-contracts` dipendente da #133 |
+| Branch | `fabio/write-tool-allowlist-owner` |
+| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131, #132 e #133 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | branch `fabio/write-tool-allowlist-owner` sopra `main` aggiornato a #133 |
 
 ## Dove siamo
 
@@ -272,7 +272,7 @@ Slice browser/projection successive:
   `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
   `cargo clippy --workspace --all-targets --locked -- -D warnings`,
   `git diff --check` e `python3 scripts/kernel_regression_gate.py` verdi.
-- Slice locale `fabio/write-tool-allowlist-contracts` verificata localmente: nuovo owner
+- Slice `fabio/write-tool-allowlist-owner` verificata localmente: nuovo owner
   `gateway_write_tool_allowlist` per persistenza/list/revoke/matching
   always-allow write-tool Composio/MCP; owner-level
   `cargo test -p local-first-desktop-gateway gateway_write_tool_allowlist -- --nocapture`
@@ -336,19 +336,21 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/131`.
 - #132 `Update status after MCP connections merge`:
   `https://github.com/homun-app/homun-core/pull/132`.
+- #133 `Extract MCP execution route owner`:
+  `https://github.com/homun-app/homun-core/pull/133`.
 
 PR aperte:
 
-- #133 `Extract MCP execution route owner`:
-  `https://github.com/homun-app/homun-core/pull/133` (draft; CI parzialmente
-  osservata verde, release readiness ancora da verificare/mergeare quando torna
-  la connettivita' GitHub locale).
+- Nessuna PR aperta per la slice corrente; prossimo passo: aprire la PR
+  `fabio/write-tool-allowlist-owner`.
 
 Branch corrente:
 
-- `fabio/write-tool-allowlist-contracts`: branch locale sopra
-  `fabio/mcp-execution-route-contracts`; non pushare/aprire PR finche' #133 non
-  e' mergeata o rebased su `main`.
+- `fabio/write-tool-allowlist-owner`: branch PR sopra `main` aggiornato a #133;
+  contiene solo la slice `gateway_write_tool_allowlist`.
+- `fabio/write-tool-allowlist-contracts`: branch locale cumulativa rebased su
+  `main`, da usare solo come parcheggio per separare le prossime slice
+  `gateway_thread_files`, `gateway_transcription` e `gateway_usage_routes`.
 
 ## Debito residuo
 
@@ -372,9 +374,9 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Verificare/mergeare #133 appena GitHub torna raggiungibile, poi rebase della
-   slice locale `fabio/write-tool-allowlist-contracts` su `main`.
-2. Aprire PR separata per la slice allow-list dopo rebase su `main`.
+1. Aprire e verificare la PR separata per la slice allow-list.
+2. Dopo merge, aggiornare `main` e separare in PR piccole le slice
+   `gateway_thread_files`, `gateway_transcription` e `gateway_usage_routes`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -382,8 +384,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/write-tool-allowlist-contracts dipendente da #133, oppure main
-se #133 e la slice allow-list sono gia' state mergeate.
+branch fabio/write-tool-allowlist-owner se la PR allow-list e' ancora aperta,
+oppure main se la slice allow-list e' gia' stata mergeata.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
