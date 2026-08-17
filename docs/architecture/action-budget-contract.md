@@ -30,6 +30,7 @@ UI mostra lo stato prodotto.
 | Registry capability/plugin/tool | `crates/desktop-gateway/src/gateway_capability_registry.rs` | `CapabilityEntry`, `CapabilitySource`, BM25 corpus, materializzazione per-turno del corpus, MCP/connector projection, `find_capability`/`suggest_capabilities` schemas | mostra solo `KernelCapabilityRuntimeView`, non decide discovery o live-set |
 | MCP chat tool catalogue | `crates/desktop-gateway/src/gateway_mcp_chat_tools.rs` | namespaced `mcp__{server}__{tool}` names, inverse parser, cached schema catalogue and write-set | consuma schema/write-set proiettati; non decide esecuzione o budget |
 | MCP runtime execution | `crates/desktop-gateway/src/gateway_mcp_runtime.rs` | metadata stdio/http, secret header migration, transport build, discovery/cache, `run_mcp_chat_tool` | non possiede route HTTP, budget round o UI confirmation copy |
+| MCP connection routes | `crates/desktop-gateway/src/gateway_mcp_connections.rs` | connect/registry/connected/disconnect HTTP surface, provider registry lifecycle and HTTP secret cleanup | non possiede `mcp_execute`, timeout, round budget o confirmation rewrite |
 | Risorse concorrenti | `crates/task-runtime/src/resources.rs::ResourceGovernor` | `TaskStatus::WaitingResource` | mostra coda/waiting dal read model |
 | Contesto/token | `agent_loop.rs` + `ContextCompactor`, catalog model context window | compaction event + messages compattati | puo' mostrare usage, non decidere stop |
 | Tool/plugin/action timeout | `crates/desktop-gateway/src/gateway_tool_timeouts.rs` + tool runtime specifici | `ToolOutcome`, receipt/eventi | mostra call/result/approval |
@@ -64,8 +65,8 @@ passa il risultato del presenter, senza ricostruire `PlanStep[]` o goal.
    aggiungendo ogni volta una voce al gate `check_gateway_main_contract.py`.
    Completato: `gateway_plan_stall`, `gateway_tool_budget`,
    `gateway_capability_registry`, `gateway_tool_timeouts`,
-   `gateway_action_confirmations`, `gateway_mcp_chat_tools` e
-   `gateway_mcp_runtime`.
+   `gateway_action_confirmations`, `gateway_mcp_chat_tools`,
+   `gateway_mcp_runtime` e `gateway_mcp_connections`.
 2. Continuare a portare la UI a leggere ogni stato di lavoro da un solo
    presenter (`runtimeViewModel` / `kernelProjectionPresenter`) e rimuovere
    alias locali che ricostruiscono "sta lavorando".

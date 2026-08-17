@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-14 (MCP runtime owner merged).**
+> **Ultimo aggiornamento: 2026-08-17 (MCP connection routes owner in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -105,6 +105,10 @@ Slice Runtime V2 recenti:
   connect<->execute, migrazione header secret, discovery/cache e
   `run_mcp_chat_tool` escono dal monolite `main.rs`; route HTTP e DTO restano
   composition/orchestration.
+- Slice in corso `gateway_mcp_connections`: route/DTO HTTP MCP per
+  `connect`, registry search, connected list e disconnect escono dal monolite
+  `main.rs`; `mcp_execute` resta fuori da questa slice perche' dipende da
+  conferme, timeout, allow-list e rewrite terminale.
 
 ## Invarianti ora protetti
 
@@ -241,6 +245,10 @@ Slice browser/projection successive:
   verde; compat MCP `mcp_chat`, `mcp_tool`, `mcp_http` verdi; contract
   `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
   `git diff --check` e `python3 scripts/kernel_regression_gate.py` verdi.
+- Slice `fabio/mcp-connection-routes-contracts` in verifica locale: nuovo owner
+  `gateway_mcp_connections` per connect/registry/connected/disconnect MCP;
+  owner-level `cargo test -p local-first-desktop-gateway gateway_mcp_connections -- --nocapture`
+  verde; contract `python3 scripts/check_gateway_main_contract.py` verde.
 
 ## PR / CI
 
@@ -293,7 +301,9 @@ Branch corrente:
 
 - `main`: include `gateway_mcp_chat_tools` per naming/parse e catalogo schema
   MCP cached e `gateway_mcp_runtime` per transport stdio/http, metadata,
-  secret migration, discovery/cache e `run_mcp_chat_tool`; i branch remoti
+  secret migration, discovery/cache e `run_mcp_chat_tool`; branch di lavoro
+  corrente `fabio/mcp-connection-routes-contracts` estrae le route MCP di
+  connessione/catalogo/disconnessione. I branch remoti
   `fabio/mcp-chat-tools-contracts` e `fabio/mcp-runtime-contracts` sono stati
   eliminati dai merge.
 
@@ -319,10 +329,9 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Prossima slice backend/kernel non-browser: analizzare il prossimo confine
-   MCP/plugin rimasto in `main.rs` dopo runtime e chat tools, probabilmente
-   route/config registry MCP o endpoint di execute/connect, senza toccare il
-   browser.
+1. Chiudere la slice `gateway_mcp_connections` con gate kernel/PR/CI, poi
+   valutare l'estrazione separata di `mcp_execute` solo dopo aver isolato bene
+   conferme, timeout, allow-list e rewrite terminale.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -330,7 +339,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch main, HEAD atteso a554a1ef o successivo.
+branch main, HEAD atteso 7eefe415 o successivo.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
