@@ -33,6 +33,7 @@ UI mostra lo stato prodotto.
 | MCP connection routes | `crates/desktop-gateway/src/gateway_mcp_connections.rs` | connect/registry/connected/disconnect HTTP surface, provider registry lifecycle and HTTP secret cleanup | non possiede execute, timeout, round budget o confirmation rewrite |
 | MCP execution route | `crates/desktop-gateway/src/gateway_mcp_execution.rs` | confirm-card HTTP execution endpoint, exact persisted source claim, server-level allow marker derivation and terminal resume/rewrite orchestration | non possiede transport MCP, timeout policy, confirmation parser o UI copy |
 | Write-tool allow-list | `crates/desktop-gateway/src/gateway_write_tool_allowlist.rs` | persistenza delle scelte "always allow", matching esatto tool e marker MCP `mcp__server__*`, route list/revoke | non esegue tool, non decide approval routing e non possiede confirmation card |
+| Thread linked files | `crates/desktop-gateway/src/gateway_thread_files.rs` | cartella collegata per thread, precedenza workspace attivo, search/read `@ file`, anti path traversal e limiti lettura | non possiede workspace registry, project write tools o prompt assembly |
 | Risorse concorrenti | `crates/task-runtime/src/resources.rs::ResourceGovernor` | `TaskStatus::WaitingResource` | mostra coda/waiting dal read model |
 | Contesto/token | `agent_loop.rs` + `ContextCompactor`, catalog model context window | compaction event + messages compattati | puo' mostrare usage, non decidere stop |
 | Tool/plugin/action timeout | `crates/desktop-gateway/src/gateway_tool_timeouts.rs` + tool runtime specifici | `ToolOutcome`, receipt/eventi | mostra call/result/approval |
@@ -69,7 +70,8 @@ passa il risultato del presenter, senza ricostruire `PlanStep[]` o goal.
    `gateway_capability_registry`, `gateway_tool_timeouts`,
    `gateway_action_confirmations`, `gateway_mcp_chat_tools`,
    `gateway_mcp_runtime`, `gateway_mcp_connections`,
-   `gateway_mcp_execution` e `gateway_write_tool_allowlist`.
+   `gateway_mcp_execution`, `gateway_write_tool_allowlist` e
+   `gateway_thread_files`.
 2. Continuare a portare la UI a leggere ogni stato di lavoro da un solo
    presenter (`runtimeViewModel` / `kernelProjectionPresenter`) e rimuovere
    alias locali che ricostruiscono "sta lavorando".

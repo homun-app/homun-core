@@ -276,6 +276,24 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct AllowedToolsResponse": "write-tool allow-list route DTOs must stay in gateway_write_tool_allowlist",
         "async fn composio_allowed_tools(": "write-tool allow-list routes must stay in gateway_write_tool_allowlist",
         "async fn composio_revoke_allowed_tool(": "write-tool allow-list routes must stay in gateway_write_tool_allowlist",
+        "fn path_within(": "canonical path containment must stay in gateway_file_security",
+        "fn thread_folders_path(": "thread linked-folder paths must stay in gateway_thread_files",
+        "fn load_thread_folders(": "thread linked-folder persistence must stay in gateway_thread_files",
+        "fn write_thread_folders(": "thread linked-folder persistence must stay in gateway_thread_files",
+        "fn thread_folder(": "thread linked-folder resolution must stay in gateway_thread_files",
+        "fn effective_thread_folder(": "thread effective-folder resolution must stay in gateway_thread_files",
+        "fn search_folder_files(": "thread file search must stay in gateway_thread_files",
+        "struct ThreadFolderResponse": "thread folder route DTOs must stay in gateway_thread_files",
+        "struct SetThreadFolderRequest": "thread folder route DTOs must stay in gateway_thread_files",
+        "async fn get_thread_folder(": "thread folder routes must stay in gateway_thread_files",
+        "async fn set_thread_folder(": "thread folder routes must stay in gateway_thread_files",
+        "struct ThreadFilesQuery": "thread file route DTOs must stay in gateway_thread_files",
+        "struct ThreadFilesResponse": "thread file route DTOs must stay in gateway_thread_files",
+        "async fn search_thread_files(": "thread file routes must stay in gateway_thread_files",
+        "struct ThreadFileQuery": "thread file route DTOs must stay in gateway_thread_files",
+        "struct ThreadFileResponse": "thread file route DTOs must stay in gateway_thread_files",
+        "const MAX_CONTEXT_FILE_BYTES": "thread file read limits must stay in gateway_thread_files",
+        "async fn read_thread_file(": "thread file routes must stay in gateway_thread_files",
         "fn find_capability_tool_schema(": "capability discovery schemas must stay in gateway_capability_registry",
         "enum CapabilitySource ": "capability registry source typing must stay in gateway_capability_registry",
         "struct CapabilityEntry ": "capability registry entries must stay in gateway_capability_registry",
@@ -567,6 +585,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_mcp_connections;", "gateway root must declare MCP connection route owner")
     assert_contains(source, "mod gateway_mcp_execution;", "gateway root must declare MCP execution route owner")
     assert_contains(source, "mod gateway_mcp_runtime;", "gateway root must declare MCP runtime owner")
+    assert_contains(source, "mod gateway_thread_files;", "gateway root must declare thread file owner")
     assert_contains(source, "mod gateway_write_tool_allowlist;", "gateway root must declare write-tool allow-list owner")
     assert_contains(source, "mod gateway_task_maintenance;", "gateway root must declare task maintenance owner")
     assert_contains(source, "mod gateway_memory_background;", "gateway root must declare memory background owner")
