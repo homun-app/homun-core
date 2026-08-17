@@ -298,6 +298,32 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct TranscribeResponse": "chat transcription DTOs must stay in gateway_transcription",
         "fn decode_audio_bytes(": "chat transcription audio validation must stay in gateway_transcription",
         "async fn transcribe_audio(": "chat transcription route must stay in gateway_transcription",
+        "struct UsageWindowQuery": "usage route DTOs must stay in gateway_usage_routes",
+        "fn default_usage_window(": "usage route defaults must stay in gateway_usage_routes",
+        "fn parse_usage_window(": "usage route parsing must stay in gateway_usage_routes",
+        "fn usage_now_i64(": "usage route clock adapter must stay in gateway_usage_routes",
+        "async fn get_usage_summary(": "usage routes must stay in gateway_usage_routes",
+        "async fn get_usage_daily(": "usage routes must stay in gateway_usage_routes",
+        "async fn usage_breakdown(": "usage route helpers must stay in gateway_usage_routes",
+        "async fn get_usage_models(": "usage routes must stay in gateway_usage_routes",
+        "struct ProviderAccountingRow": "usage provider DTOs must stay in gateway_usage_routes",
+        "async fn get_usage_providers(": "usage routes must stay in gateway_usage_routes",
+        "async fn get_usage_processes(": "usage routes must stay in gateway_usage_routes",
+        "struct UsageSuggestionsQuery": "usage suggestion DTOs must stay in gateway_usage_routes",
+        "fn default_usage_suggestion_scope(": "usage suggestion defaults must stay in gateway_usage_routes",
+        "async fn get_usage_suggestions(": "usage suggestion routes must stay in gateway_usage_routes",
+        "fn build_usage_suggestions(": "usage suggestion assembly must stay in gateway_usage_routes",
+        "fn usage_suggestion_read_error(": "usage suggestion errors must stay in gateway_usage_routes",
+        "fn predicted_candidate_cost(": "usage suggestion cost prediction must stay in gateway_usage_routes",
+        "fn provider_headroom_percent(": "usage suggestion headroom calculation must stay in gateway_usage_routes",
+        "fn find_usage_suggestion(": "usage suggestion lookup must stay in gateway_usage_routes",
+        "async fn apply_usage_suggestion(": "usage suggestion routes must stay in gateway_usage_routes",
+        "async fn dismiss_usage_suggestion(": "usage suggestion routes must stay in gateway_usage_routes",
+        "struct SetProviderUsagePolicyRequest": "usage provider policy DTOs must stay in gateway_usage_routes",
+        "fn default_usage_currency(": "usage provider policy defaults must stay in gateway_usage_routes",
+        "async fn get_usage_provider_policy(": "usage provider policy routes must stay in gateway_usage_routes",
+        "async fn set_usage_provider_policy(": "usage provider policy routes must stay in gateway_usage_routes",
+        "async fn refresh_usage_provider(": "usage provider refresh routes must stay in gateway_usage_routes",
         "fn find_capability_tool_schema(": "capability discovery schemas must stay in gateway_capability_registry",
         "enum CapabilitySource ": "capability registry source typing must stay in gateway_capability_registry",
         "struct CapabilityEntry ": "capability registry entries must stay in gateway_capability_registry",
@@ -591,6 +617,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_mcp_runtime;", "gateway root must declare MCP runtime owner")
     assert_contains(source, "mod gateway_thread_files;", "gateway root must declare thread file owner")
     assert_contains(source, "mod gateway_transcription;", "gateway root must declare transcription owner")
+    assert_contains(source, "mod gateway_usage_routes;", "gateway root must declare usage route owner")
     assert_contains(source, "mod gateway_write_tool_allowlist;", "gateway root must declare write-tool allow-list owner")
     assert_contains(source, "mod gateway_task_maintenance;", "gateway root must declare task maintenance owner")
     assert_contains(source, "mod gateway_memory_background;", "gateway root must declare memory background owner")

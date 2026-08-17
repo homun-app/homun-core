@@ -50,6 +50,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_write_tool_allowlist.rs` | Persistenza e matching "always allow" per write-tool Composio/MCP, incluse route list/revoke; non possiede dispatch, approval routing o confirmation card. |
 | `crates/desktop-gateway/src/gateway_thread_files.rs` | Cartella collegata per thread e route `@ file` search/read, con precedenza workspace attivo e anti path traversal; non possiede registry workspace o tool project write. |
 | `crates/desktop-gateway/src/gateway_transcription.rs` | Route chat transcription, validazione audio base64 e bridge contained-computer Whisper; non possiede browser, composer UI o model routing. |
+| `crates/desktop-gateway/src/gateway_usage_routes.rs` | Route usage ledger, provider account snapshot, manual provider budget policy e model-usage suggestions; non possiede model registry, recorder o pricing store canonico. |
 | `crates/desktop-gateway/src/gateway_model_routing.rs` | Risoluzione provider/modello, payload provider, compaction visibile al modello e policy reasoning. |
 | `crates/desktop-gateway/src/gateway_tool_execution.rs` | Dispatch tool chat/browser, effect receipts e confini capability/computer/browse. |
 | `crates/desktop-gateway/src/gateway_runtime_settings.rs` | DTO e route settings runtime persistiti. |
