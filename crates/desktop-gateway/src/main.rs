@@ -99,6 +99,7 @@ mod gateway_thread_files;
 mod gateway_tool_budget;
 mod gateway_tool_execution;
 mod gateway_tool_timeouts;
+mod gateway_transcription;
 mod gateway_turn_broker;
 mod gateway_turn_recovery;
 mod gateway_user_preferences;
@@ -400,6 +401,7 @@ pub(crate) use gateway_tool_budget::{
 };
 pub(crate) use gateway_tool_execution::*;
 pub(crate) use gateway_tool_timeouts::mcp_call_timeout;
+pub(crate) use gateway_transcription::transcribe_audio;
 pub(crate) use gateway_turn_broker::*;
 pub(crate) use gateway_write_tool_allowlist::{
     add_composio_tool_allow, composio_allowed_tools, composio_revoke_allowed_tool,
@@ -6049,107 +6051,6 @@ fn capture_proactive_answer_memory(
     if let Ok(record) = facade.create_memory_candidate(request) {
         let _ = facade.confirm_memory(&lifecycle, &record.reference, "proactive answer capture");
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct TranscribeRequest {
-    /// Base64-encoded audio (any ffmpeg-decodable container, e.g. webm/opus).
-    audio_base64: String,
-    /// Optional language hint; omitted → Whisper auto-detects (multilingual).
-    #[serde(default)]
-    language: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct TranscribeResponse {
-    text: String,
-    language: Option<String>,
-}
-
-/// On-device speech-to-text (dictation 🎤). Decodes the audio and forwards it to
-/// the warm faster-whisper server inside the contained computer (CPU, private,
-/// multilingual). Brings the container up first if needed.
-async fn transcribe_audio(
-    State(state): State<AppState>,
-    Json(request): Json<TranscribeRequest>,
-) -> Result<Json<TranscribeResponse>, GatewayError> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(request.audio_base64.as_bytes())
-        .map_err(|e| GatewayError {
-            status: StatusCode::BAD_REQUEST,
-            code: "bad_audio",
-            message: format!("Invalid audio: {e}"),
-        })?;
-    if bytes.is_empty() {
-        return Err(GatewayError {
-            status: StatusCode::BAD_REQUEST,
-            code: "bad_audio",
-            message: "Empty audio.".to_string(),
-        });
-    }
-    // Ensure the contained computer (and its Whisper server) is running.
-    tokio::task::spawn_blocking(sandbox::ensure_contained_computer)
-        .await
-        .map_err(|e| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "sandbox",
-            message: e.to_string(),
-        })?
-        .map_err(|e| GatewayError {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            code: "sandbox",
-            message: e,
-        })?;
-    let url = format!("{}/transcribe", sandbox::whisper_base_url());
-    let mut builder = state
-        .http
-        .post(&url)
-        // Generous: the FIRST call downloads the model (~1.5GB) + loads it.
-        .timeout(std::time::Duration::from_secs(300))
-        .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
-        .body(bytes);
-    if let Some(lang) = request
-        .language
-        .as_ref()
-        .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
-    {
-        builder = builder.header("X-Language", lang);
-    }
-    let resp = builder.send().await.map_err(|e| GatewayError {
-        status: StatusCode::BAD_GATEWAY,
-        code: "transcribe_failed",
-        message: format!("STT server unreachable: {e}"),
-    })?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(GatewayError {
-            status: StatusCode::BAD_GATEWAY,
-            code: "transcribe_failed",
-            message: format!(
-                "STT responded {status}: {}",
-                body.chars().take(200).collect::<String>()
-            ),
-        });
-    }
-    let body: serde_json::Value = resp.json().await.map_err(|e| GatewayError {
-        status: StatusCode::BAD_GATEWAY,
-        code: "transcribe_failed",
-        message: format!("Invalid STT response: {e}"),
-    })?;
-    Ok(Json(TranscribeResponse {
-        text: body
-            .get("text")
-            .and_then(|t| t.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string(),
-        language: body
-            .get("language")
-            .and_then(|l| l.as_str())
-            .map(String::from),
-    }))
 }
 
 // MAX_PLAN_NUDGES moved into `engine::agent_loop` (5.D2 — the loop that used it lives there now).

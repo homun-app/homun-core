@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-17 (thread-files owner pronto per PR).**
+> **Ultimo aggiornamento: 2026-08-17 (chat-transcription owner pronto per PR).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/thread-linked-files-owner` |
-| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131, #132, #133 e #134 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | branch `fabio/thread-linked-files-owner` sopra `main` aggiornato a #134 |
+| Branch | `fabio/chat-transcription-owner` |
+| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131, #132, #133, #134 e #135 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | branch `fabio/chat-transcription-owner` sopra `main` aggiornato a #135 |
 
 ## Dove siamo
 
@@ -121,6 +121,9 @@ Slice Runtime V2 recenti:
   precedenza workspace attivo e route `@ file` search/read escono dal monolite
   `main.rs`; `path_within` viene portato nell'owner condiviso
   `gateway_file_security`, perche' e' usato anche da artifact e memoria.
+- Estrazione locale `gateway_transcription`: route dictation
+  `/api/chat/transcribe`, validazione audio base64 e bridge Whisper
+  contained-computer escono dal monolite `main.rs`.
 
 ## Invarianti ora protetti
 
@@ -297,6 +300,13 @@ Slice browser/projection successive:
   verdi; contract `python3 scripts/check_gateway_main_contract.py`,
   `cargo fmt --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
   `git diff --check` e `python3 scripts/kernel_regression_gate.py` verdi.
+- Slice locale `gateway_transcription` verificata sul branch
+  `fabio/write-tool-allowlist-contracts`: nuovo owner per route dictation,
+  validazione audio base64 e bridge Whisper contained-computer; owner-level
+  `cargo test -p local-first-desktop-gateway gateway_transcription -- --nocapture`
+  verde; contract `python3 scripts/check_gateway_main_contract.py`,
+  `cargo fmt --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+  `git diff --check` e `python3 scripts/kernel_regression_gate.py` verdi.
 
 ## PR / CI
 
@@ -354,18 +364,18 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/133`.
 - #134 `Extract write-tool allow-list owner`:
   `https://github.com/homun-app/homun-core/pull/134`.
+- #135 `Extract thread linked-file owner`:
+  `https://github.com/homun-app/homun-core/pull/135`.
 
 PR aperte:
 
 - Nessuna PR aperta per la slice corrente; prossimo passo: aprire
-  `fabio/thread-linked-files-owner`.
+  `fabio/chat-transcription-owner`.
 
 Branch corrente:
 
-- `fabio/thread-linked-files-owner`: branch PR sopra `main` aggiornato a #134;
-  contiene solo la slice `gateway_thread_files`.
-- `fabio/chat-transcription-owner`: branch locale da rebasare dopo merge
-  thread-files; contiene la slice `gateway_transcription`.
+- `fabio/chat-transcription-owner`: branch PR sopra `main` aggiornato a #135;
+  contiene solo la slice `gateway_transcription`.
 - `fabio/usage-routes-owner`: branch locale da rebasare dopo merge
   transcription; contiene la slice `gateway_usage_routes`.
 - `fabio/write-tool-allowlist-contracts`: branch locale cumulativa rebased su
@@ -394,19 +404,18 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Verificare e aprire la PR piccola per `gateway_thread_files`.
-2. Dopo merge, aggiornare `main`, rebasare `fabio/chat-transcription-owner` e
-   aprire PR piccola per `gateway_transcription`.
-3. Dopo merge transcription, rebasare `fabio/usage-routes-owner` e aprire PR
+1. Verificare e aprire la PR piccola per `gateway_transcription`.
+2. Dopo merge transcription, aggiornare `main`, rebasare
+   `fabio/usage-routes-owner` e aprire PR
    piccola per `gateway_usage_routes`.
-4. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
+3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
 ## Prompt di ripartenza
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/thread-linked-files-owner se la PR thread-files e' ancora da aprire
+branch fabio/chat-transcription-owner se la PR transcription e' ancora da aprire
 o e' aperta; altrimenti main aggiornato e prossima slice piccola disponibile.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
