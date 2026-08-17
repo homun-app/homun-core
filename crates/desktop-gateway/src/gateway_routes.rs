@@ -20,6 +20,9 @@ use crate::gateway_chat_threads::{
     delete_chat_thread, mark_chat_thread_seen, rename_chat_thread, reorder_chat_threads,
     select_chat_thread, set_chat_thread_pinned, unarchive_chat_thread,
 };
+use crate::gateway_project_access::{
+    project_access_list, project_access_remove, project_access_upsert,
+};
 use crate::gateway_tags::{
     tags_all_assignments, tags_assign, tags_create, tags_delete, tags_entities,
     tags_for_entity_handler, tags_list, tags_rename, tags_set_color, tags_unassign,

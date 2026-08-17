@@ -7,6 +7,8 @@
 
 use super::*;
 
+use crate::gateway_project_access::resolve_project_contact_policy;
+
 #[test]
 fn channels_owner_smoke() {
     assert_eq!(
