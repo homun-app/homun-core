@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-17 (MCP connection routes owner in corso).**
+> **Ultimo aggiornamento: 2026-08-17 (MCP connection routes owner merged).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128 e #129 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `a554a1ef` (`Merge pull request #129 from homun-app/fabio/mcp-runtime-contracts`) |
+| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130 e #131 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `ba4dc0a8` (`Merge pull request #131 from homun-app/fabio/mcp-connection-routes-contracts`) |
 
 ## Dove siamo
 
@@ -105,7 +105,7 @@ Slice Runtime V2 recenti:
   connect<->execute, migrazione header secret, discovery/cache e
   `run_mcp_chat_tool` escono dal monolite `main.rs`; route HTTP e DTO restano
   composition/orchestration.
-- Slice in corso `gateway_mcp_connections`: route/DTO HTTP MCP per
+- Estrazione `gateway_mcp_connections`: route/DTO HTTP MCP per
   `connect`, registry search, connected list e disconnect escono dal monolite
   `main.rs`; `mcp_execute` resta fuori da questa slice perche' dipende da
   conferme, timeout, allow-list e rewrite terminale.
@@ -195,6 +195,9 @@ Slice browser/projection successive:
 - PR #129 mergeata il 2026-08-14, merge commit `a554a1ef`; CI verde su
   Release readiness, Frontend, Backend, Landlock e build installer
   Linux/macOS/Windows.
+- PR #131 mergeata il 2026-08-17, merge commit `ba4dc0a8`; CI verde su
+  Release readiness, Frontend, Backend, Landlock e build installer
+  Linux/macOS/Windows.
 - Slice `fabio/app-action-budget-contracts` verificata localmente con:
   `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
   `cargo test -p local-first-desktop-gateway plan_stall -- --nocapture`,
@@ -245,10 +248,12 @@ Slice browser/projection successive:
   verde; compat MCP `mcp_chat`, `mcp_tool`, `mcp_http` verdi; contract
   `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
   `git diff --check` e `python3 scripts/kernel_regression_gate.py` verdi.
-- Slice `fabio/mcp-connection-routes-contracts` in verifica locale: nuovo owner
+- Slice `fabio/mcp-connection-routes-contracts` verificata localmente: nuovo owner
   `gateway_mcp_connections` per connect/registry/connected/disconnect MCP;
   owner-level `cargo test -p local-first-desktop-gateway gateway_mcp_connections -- --nocapture`
-  verde; contract `python3 scripts/check_gateway_main_contract.py` verde.
+  verde; contract `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`, `git diff --check`
+  e `python3 scripts/kernel_regression_gate.py` verdi.
 
 ## PR / CI
 
@@ -296,16 +301,19 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/128`.
 - #129 `Extract MCP runtime owner`:
   `https://github.com/homun-app/homun-core/pull/129`.
+- #130 `Update status after MCP runtime merge`:
+  `https://github.com/homun-app/homun-core/pull/130`.
+- #131 `Extract MCP connection route owner`:
+  `https://github.com/homun-app/homun-core/pull/131`.
 
 Branch corrente:
 
 - `main`: include `gateway_mcp_chat_tools` per naming/parse e catalogo schema
   MCP cached e `gateway_mcp_runtime` per transport stdio/http, metadata,
-  secret migration, discovery/cache e `run_mcp_chat_tool`; branch di lavoro
-  corrente `fabio/mcp-connection-routes-contracts` estrae le route MCP di
-  connessione/catalogo/disconnessione. I branch remoti
-  `fabio/mcp-chat-tools-contracts` e `fabio/mcp-runtime-contracts` sono stati
-  eliminati dai merge.
+  secret migration, discovery/cache e `run_mcp_chat_tool`; include anche
+  `gateway_mcp_connections` per route MCP di connect/registry/connected/disconnect.
+  I branch remoti `fabio/mcp-chat-tools-contracts`, `fabio/mcp-runtime-contracts`
+  e `fabio/mcp-connection-routes-contracts` sono stati eliminati dai merge.
 
 ## Debito residuo
 
@@ -329,9 +337,9 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice `gateway_mcp_connections` con gate kernel/PR/CI, poi
-   valutare l'estrazione separata di `mcp_execute` solo dopo aver isolato bene
-   conferme, timeout, allow-list e rewrite terminale.
+1. Prossima slice backend/kernel non-browser: valutare l'estrazione separata di
+   `mcp_execute` solo dopo aver isolato bene conferme, timeout, allow-list e
+   rewrite terminale.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -339,7 +347,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch main, HEAD atteso 7eefe415 o successivo.
+branch main, HEAD atteso ba4dc0a8 o successivo.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
