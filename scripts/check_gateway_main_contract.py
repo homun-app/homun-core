@@ -294,6 +294,10 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct ThreadFileResponse": "thread file route DTOs must stay in gateway_thread_files",
         "const MAX_CONTEXT_FILE_BYTES": "thread file read limits must stay in gateway_thread_files",
         "async fn read_thread_file(": "thread file routes must stay in gateway_thread_files",
+        "struct TranscribeRequest": "chat transcription DTOs must stay in gateway_transcription",
+        "struct TranscribeResponse": "chat transcription DTOs must stay in gateway_transcription",
+        "fn decode_audio_bytes(": "chat transcription audio validation must stay in gateway_transcription",
+        "async fn transcribe_audio(": "chat transcription route must stay in gateway_transcription",
         "fn find_capability_tool_schema(": "capability discovery schemas must stay in gateway_capability_registry",
         "enum CapabilitySource ": "capability registry source typing must stay in gateway_capability_registry",
         "struct CapabilityEntry ": "capability registry entries must stay in gateway_capability_registry",
@@ -586,6 +590,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_mcp_execution;", "gateway root must declare MCP execution route owner")
     assert_contains(source, "mod gateway_mcp_runtime;", "gateway root must declare MCP runtime owner")
     assert_contains(source, "mod gateway_thread_files;", "gateway root must declare thread file owner")
+    assert_contains(source, "mod gateway_transcription;", "gateway root must declare transcription owner")
     assert_contains(source, "mod gateway_write_tool_allowlist;", "gateway root must declare write-tool allow-list owner")
     assert_contains(source, "mod gateway_task_maintenance;", "gateway root must declare task maintenance owner")
     assert_contains(source, "mod gateway_memory_background;", "gateway root must declare memory background owner")
