@@ -614,6 +614,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway memory sources",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "memory_source",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway capability registry",
             [
                 "cargo",

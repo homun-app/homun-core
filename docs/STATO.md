@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-17 (memory publications owner verificata localmente).**
+> **Ultimo aggiornamento: 2026-08-17 (memory sources owner verificata localmente).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/gateway-memory-publications-owner` |
-| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131, #132, #133, #134, #135, #136, #137, #138, #139, #140 e #141 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | branch `fabio/gateway-memory-publications-owner` sopra `main` aggiornato a #141 |
+| Branch | `fabio/gateway-memory-sources-owner` |
+| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131, #132, #133, #134, #135, #136, #137, #138, #139, #140, #141 e #142 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | branch `fabio/gateway-memory-sources-owner` sopra `main` aggiornato a #142 |
 
 ## Dove siamo
 
@@ -141,6 +141,10 @@ Slice Runtime V2 recenti:
   create/get/edit/approve/reject, DTO request, mapping errori facade e
   validazione owned-scope escono dal monolite `main.rs`; source grant
   management, registry workspace e semantica `MemoryFacade` restano separati.
+- Estrazione locale `gateway_memory_sources`: route linked-memory source grant
+  list/upsert/revoke/candidates, DTO request/query, validazione policy e
+  proiezioni grant/candidate escono dal monolite `main.rs`; persistenza
+  workspace generale e storage semantics del `MemoryFacade` restano separati.
 
 ## Invarianti ora protetti
 
@@ -356,11 +360,19 @@ Slice browser/projection successive:
   verde; contract `python3 scripts/check_gateway_main_contract.py`,
   `cargo fmt --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
   `git diff --check` e `python3 scripts/kernel_regression_gate.py` verdi.
-- Slice locale `gateway_memory_publications` verificata localmente sul branch
+- Slice locale `gateway_memory_publications` verificata sul branch
   `fabio/gateway-memory-publications-owner`: nuovo owner per route
   publication create/get/edit/approve/reject, DTO request, mapping errori e
   validazione owned-scope; owner-level
   `cargo test -p local-first-desktop-gateway memory_publication -- --nocapture`
+  verde; contract `python3 scripts/check_gateway_main_contract.py`,
+  `cargo fmt --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+  `git diff --check` e `python3 scripts/kernel_regression_gate.py` verdi.
+- Slice locale `gateway_memory_sources` verificata localmente sul branch
+  `fabio/gateway-memory-sources-owner`: nuovo owner per route source grant
+  list/upsert/revoke/candidates, DTO request/query, validazione policy e
+  proiezioni grant/candidate; owner-level
+  `cargo test -p local-first-desktop-gateway memory_source -- --nocapture`
   verde; contract `python3 scripts/check_gateway_main_contract.py`,
   `cargo fmt --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
   `git diff --check` e `python3 scripts/kernel_regression_gate.py` verdi.
@@ -435,16 +447,18 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/140`.
 - #141 `Extract gateway skill routes owner`:
   `https://github.com/homun-app/homun-core/pull/141`.
+- #142 `Extract gateway memory publications owner`:
+  `https://github.com/homun-app/homun-core/pull/142`.
 
 PR aperte:
 
 - Nessuna PR aperta per la slice corrente; prossimo passo: aprire
-  `fabio/gateway-memory-publications-owner`.
+  `fabio/gateway-memory-sources-owner`.
 
 Branch corrente:
 
-- `fabio/gateway-memory-publications-owner`: branch sopra `main` aggiornato a
-  #141; contiene solo la slice `gateway_memory_publications`.
+- `fabio/gateway-memory-sources-owner`: branch sopra `main` aggiornato a #142;
+  contiene solo la slice `gateway_memory_sources`.
 - `fabio/write-tool-allowlist-contracts`: branch locale cumulativa rebased su
   `main`, da usare solo come parcheggio per separare le prossime slice
   successive.
@@ -471,8 +485,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Verificare e aprire PR piccola per `gateway_memory_publications`.
-2. Dopo merge memory publications, aggiornare `main` e riprendere la prossima slice non-browser
+1. Completare contract/gate e aprire PR piccola per `gateway_memory_sources`.
+2. Dopo merge memory sources, aggiornare `main` e riprendere la prossima slice non-browser
    solo dopo nuova lettura owner-level di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
@@ -481,7 +495,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/gateway-memory-publications-owner se la PR memory publications e' ancora da aprire o e' aperta;
+branch fabio/gateway-memory-sources-owner se la PR memory sources e' ancora da aprire o e' aperta;
 altrimenti main aggiornato e scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.

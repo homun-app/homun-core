@@ -24,6 +24,9 @@ use crate::gateway_memory_publications::{
     memory_publication_approve, memory_publication_create, memory_publication_edit,
     memory_publication_get, memory_publication_reject,
 };
+use crate::gateway_memory_sources::{
+    memory_source_candidates, memory_source_revoke, memory_source_upsert, memory_sources_list,
+};
 use crate::gateway_project_access::{
     project_access_list, project_access_remove, project_access_upsert,
 };
