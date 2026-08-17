@@ -166,6 +166,9 @@ Slice Runtime V2 recenti:
 - Estrazione locale `gateway_memory_hygiene`: route `/api/memory/hygiene/suggestions`
   esce dal monolite `main.rs` e resta accanto alla normalizzazione entity-name e
   al calcolo suggerimenti merge person.
+- Estrazione locale `gateway_memory_goals`: route `/api/memory/goals`,
+  `/api/memory/project-briefing` e mutazioni goals add/promote/suggest escono dal
+  monolite `main.rs`; wiki rebuild e turn-context restano negli owner dedicati.
 - `/api/health` non esegue piu' probe Docker nel percorso watchdog: lo stato
   contained-computer letto dall'health handler arriva dal coordinator in memoria,
   mentre le verifiche Docker restano negli owner setup/browser dedicati.

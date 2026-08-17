@@ -446,6 +446,11 @@ assertRepoContains(
   "Gateway root test module must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_goals.rs",
+  "memory_project_briefing",
+  "Gateway memory goals and project briefing routes must have a dedicated owner",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_memory_hygiene.rs",
   "memory_hygiene_suggestions",
   "Gateway memory hygiene route and suggestions must have a dedicated owner",
