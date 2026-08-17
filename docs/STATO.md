@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-17 (MCP execution route owner pronto per PR).**
+> **Ultimo aggiornamento: 2026-08-17 (write-tool allow-list owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/mcp-execution-route-contracts` |
-| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131 e #132 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | branch `fabio/mcp-execution-route-contracts` (`Extract MCP execution route owner`) |
+| Branch | `fabio/write-tool-allowlist-contracts` |
+| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131 e #132 mergeate in `main`; #133 aperta/draft su `fabio/mcp-execution-route-contracts`; #117 browser draft separata |
+| HEAD codice verificato | branch locale `fabio/write-tool-allowlist-contracts` dipendente da #133 |
 
 ## Dove siamo
 
@@ -113,6 +113,10 @@ Slice Runtime V2 recenti:
   dal monolite `main.rs`; il modulo orchestra confirmation-card claim, marker
   allow-server e resume/rewrite terminale delegando runtime, timeout e parser
   conferme agli owner gia' estratti.
+- Estrazione locale `gateway_write_tool_allowlist`: persistenza e matching
+  "always allow" per write-tool Composio/MCP escono dal monolite `main.rs`;
+  il file storico `composio-tool-allow.json` resta invariato per compatibilita',
+  mentre list/revoke e marker MCP server-level vivono nello stesso owner.
 
 ## Invarianti ora protetti
 
@@ -268,6 +272,17 @@ Slice browser/projection successive:
   `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
   `cargo clippy --workspace --all-targets --locked -- -D warnings`,
   `git diff --check` e `python3 scripts/kernel_regression_gate.py` verdi.
+- Slice locale `fabio/write-tool-allowlist-contracts` verificata localmente: nuovo owner
+  `gateway_write_tool_allowlist` per persistenza/list/revoke/matching
+  always-allow write-tool Composio/MCP; owner-level
+  `cargo test -p local-first-desktop-gateway gateway_write_tool_allowlist -- --nocapture`
+  verde; compat dispatcher
+  `cargo test -p local-first-desktop-gateway gateway_tool_execution -- --nocapture`
+  verde; compat confinanti `gateway_mcp_execution`, `mcp_chat`, `composio` e
+  `gateway_action_confirmations` verdi; contract
+  `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+  `git diff --check` e `python3 scripts/kernel_regression_gate.py` verdi.
 
 ## PR / CI
 
@@ -319,15 +334,21 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/130`.
 - #131 `Extract MCP connection route owner`:
   `https://github.com/homun-app/homun-core/pull/131`.
+- #132 `Update status after MCP connections merge`:
+  `https://github.com/homun-app/homun-core/pull/132`.
+
+PR aperte:
+
+- #133 `Extract MCP execution route owner`:
+  `https://github.com/homun-app/homun-core/pull/133` (draft; CI parzialmente
+  osservata verde, release readiness ancora da verificare/mergeare quando torna
+  la connettivita' GitHub locale).
 
 Branch corrente:
 
-- `main`: include `gateway_mcp_chat_tools` per naming/parse e catalogo schema
-  MCP cached e `gateway_mcp_runtime` per transport stdio/http, metadata,
-  secret migration, discovery/cache e `run_mcp_chat_tool`; include anche
-  `gateway_mcp_connections` per route MCP di connect/registry/connected/disconnect.
-  I branch remoti `fabio/mcp-chat-tools-contracts`, `fabio/mcp-runtime-contracts`
-  e `fabio/mcp-connection-routes-contracts` sono stati eliminati dai merge.
+- `fabio/write-tool-allowlist-contracts`: branch locale sopra
+  `fabio/mcp-execution-route-contracts`; non pushare/aprire PR finche' #133 non
+  e' mergeata o rebased su `main`.
 
 ## Debito residuo
 
@@ -351,17 +372,18 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Prossima slice backend/kernel non-browser dopo MCP execution: valutare se
-   separare l'allow-list write-tool in un owner dedicato, per togliere anche
-   quella policy residua dal monolite senza cambiare semantica approvazioni.
-2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
+1. Verificare/mergeare #133 appena GitHub torna raggiungibile, poi rebase della
+   slice locale `fabio/write-tool-allowlist-contracts` su `main`.
+2. Aprire PR separata per la slice allow-list dopo rebase su `main`.
+3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
 ## Prompt di ripartenza
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch main, HEAD atteso ba4dc0a8 o successivo.
+branch fabio/write-tool-allowlist-contracts dipendente da #133, oppure main
+se #133 e la slice allow-list sono gia' state mergeate.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
