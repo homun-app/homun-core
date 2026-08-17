@@ -376,6 +376,11 @@ assertRepoContains(
   "Gateway memory graph persistence must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_contact_profile.rs",
+  "contact_profile_refresh",
+  "Gateway contact profile routes must have a dedicated owner",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_memory_tools.rs",
   "record_decision",
   "Gateway memory tools must have a dedicated owner",
