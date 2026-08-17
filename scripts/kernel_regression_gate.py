@@ -566,6 +566,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway update routes",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "gateway_update_routes",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway capability registry",
             [
                 "cargo",

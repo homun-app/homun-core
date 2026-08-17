@@ -24,6 +24,7 @@ use crate::gateway_tags::{
     tags_all_assignments, tags_assign, tags_create, tags_delete, tags_entities,
     tags_for_entity_handler, tags_list, tags_rename, tags_set_color, tags_unassign,
 };
+use crate::gateway_update_routes::{update_info, update_trigger};
 use crate::*;
 
 pub(crate) fn build_gateway_router(state: AppState) -> Router {

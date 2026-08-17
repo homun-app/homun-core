@@ -384,16 +384,18 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/136`.
 - #137 `Extract usage route owner`:
   `https://github.com/homun-app/homun-core/pull/137`.
+- #138 `Extract gateway tags owner`:
+  `https://github.com/homun-app/homun-core/pull/138`.
 
 PR aperte:
 
 - Nessuna PR aperta per la slice corrente; prossimo passo: aprire
-  `fabio/gateway-tags-owner`.
+  `fabio/gateway-update-routes-owner`.
 
 Branch corrente:
 
-- `fabio/gateway-tags-owner`: branch sopra `main` aggiornato a #137;
-  contiene solo la slice `gateway_tags`.
+- `fabio/gateway-update-routes-owner`: branch sopra `main` aggiornato a #138;
+  contiene solo la slice `gateway_update_routes`.
 - `fabio/write-tool-allowlist-contracts`: branch locale cumulativa rebased su
   `main`, da usare solo come parcheggio per separare le prossime slice
   successive.
@@ -420,8 +422,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Verificare e aprire PR piccola per `gateway_tags`.
-2. Dopo merge tags, aggiornare `main` e riprendere la prossima slice non-browser
+1. Verificare e aprire PR piccola per `gateway_update_routes`.
+2. Dopo merge update routes, aggiornare `main` e riprendere la prossima slice non-browser
    solo dopo nuova lettura owner-level di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
@@ -430,7 +432,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/gateway-tags-owner se la PR tags e' ancora da aprire o e' aperta;
+branch fabio/gateway-update-routes-owner se la PR update routes e' ancora da aprire o e' aperta;
 altrimenti main aggiornato e scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
