@@ -102,6 +102,7 @@ mod gateway_turn_broker;
 mod gateway_turn_recovery;
 mod gateway_user_preferences;
 mod gateway_vault_key;
+mod gateway_write_tool_allowlist;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod inference_transport;
 mod model_client;
@@ -394,6 +395,10 @@ pub(crate) use gateway_tool_budget::{
 pub(crate) use gateway_tool_execution::*;
 pub(crate) use gateway_tool_timeouts::mcp_call_timeout;
 pub(crate) use gateway_turn_broker::*;
+pub(crate) use gateway_write_tool_allowlist::{
+    add_composio_tool_allow, composio_allowed_tools, composio_revoke_allowed_tool,
+    composio_tool_allowed,
+};
 use local_first_browser_automation::{
     BrowserAutomationClient, BrowserAutomationError, BrowserCheckpoint, BrowserMethod,
     BrowserResponse, BrowserSidecarSession, BrowserSidecarSpawnOptions, BrowserUrlApprovalGrant,
@@ -13415,70 +13420,6 @@ fn composio_execution_error(output: &serde_json::Value) -> Option<String> {
     None
 }
 
-// ---- write-tool approval allow-list ("conferma sempre per questo tool") -------
-
-fn composio_tool_allow_path() -> Option<PathBuf> {
-    gateway_data_dir()
-        .ok()
-        .map(|dir| dir.join("composio-tool-allow.json"))
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct ComposioToolAllow {
-    /// Tool slugs the user approved to run WITHOUT per-call confirmation.
-    #[serde(default)]
-    always: Vec<String>,
-}
-
-/// Tool slugs the user has chosen to always allow (skip the confirmation card).
-fn load_composio_tool_allow() -> std::collections::BTreeSet<String> {
-    let Some(path) = composio_tool_allow_path() else {
-        return std::collections::BTreeSet::new();
-    };
-    let Ok(raw) = fs::read_to_string(path) else {
-        return std::collections::BTreeSet::new();
-    };
-    serde_json::from_str::<ComposioToolAllow>(&raw)
-        .map(|a| a.always.into_iter().collect())
-        .unwrap_or_default()
-}
-
-fn composio_tool_allowed(slug: &str) -> bool {
-    let set = load_composio_tool_allow();
-    if set.contains(slug) {
-        return true;
-    }
-    // Server-level allow for MCP (policy B): the marker `mcp__<server>__*` waves
-    // through every tool of a server the user trusted "always" once.
-    if let Some(rest) = slug.strip_prefix("mcp__")
-        && let Some((server, _)) = rest.split_once("__")
-    {
-        return set.contains(&format!("mcp__{server}__*"));
-    }
-    false
-}
-
-fn write_composio_tool_allow(set: std::collections::BTreeSet<String>) -> Result<(), String> {
-    let path = composio_tool_allow_path().ok_or_else(|| "data dir unavailable".to_string())?;
-    let value = ComposioToolAllow {
-        always: set.into_iter().collect(),
-    };
-    let json = serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?;
-    fs::write(path, json).map_err(|e| e.to_string())
-}
-
-fn add_composio_tool_allow(slug: &str) -> Result<(), String> {
-    let mut set = load_composio_tool_allow();
-    set.insert(slug.to_string());
-    write_composio_tool_allow(set)
-}
-
-fn remove_composio_tool_allow(slug: &str) -> Result<(), String> {
-    let mut set = load_composio_tool_allow();
-    set.remove(slug);
-    write_composio_tool_allow(set)
-}
-
 // ---- per-conversation linked folder ("@ file" context) -----------------------
 
 fn thread_folders_path() -> Option<PathBuf> {
@@ -13727,46 +13668,6 @@ async fn read_thread_file(
         content,
         truncated,
     }))
-}
-
-#[derive(Debug, Serialize)]
-struct AllowedToolView {
-    slug: String,
-    /// Human-readable name (GMAIL_SEND_EMAIL → "Send email · Gmail").
-    name: String,
-}
-
-#[derive(Debug, Serialize)]
-struct AllowedToolsResponse {
-    tools: Vec<AllowedToolView>,
-}
-
-fn current_allowed_tools() -> AllowedToolsResponse {
-    let tools = load_composio_tool_allow()
-        .into_iter()
-        .map(|slug| AllowedToolView {
-            name: humanize_composio_tool(&slug),
-            slug,
-        })
-        .collect();
-    AllowedToolsResponse { tools }
-}
-
-/// Lists the write tools the user marked "always allow" (skip confirmation).
-async fn composio_allowed_tools() -> Json<AllowedToolsResponse> {
-    Json(current_allowed_tools())
-}
-
-/// Revokes a tool's always-allow rule → it will ask for confirmation again.
-async fn composio_revoke_allowed_tool(
-    Path(slug): Path<String>,
-) -> Result<Json<AllowedToolsResponse>, GatewayError> {
-    remove_composio_tool_allow(&slug).map_err(|message| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "composio_allow_write_failed",
-        message,
-    })?;
-    Ok(Json(current_allowed_tools()))
 }
 
 #[derive(Debug, Deserialize)]

@@ -494,6 +494,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway write-tool allowlist",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "gateway_write_tool_allowlist",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway capability registry",
             [
                 "cargo",

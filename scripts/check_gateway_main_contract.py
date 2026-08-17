@@ -264,6 +264,18 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct McpExecuteResponse": "MCP execution DTOs must stay in gateway_mcp_execution",
         "fn mcp_server_allow_marker(": "MCP server allow marker derivation must stay in gateway_mcp_execution",
         "async fn mcp_execute(": "MCP execution route must stay in gateway_mcp_execution",
+        "fn composio_tool_allow_path(": "write-tool allow-list paths must stay in gateway_write_tool_allowlist",
+        "struct ComposioToolAllow": "write-tool allow-list persistence DTO must stay in gateway_write_tool_allowlist",
+        "fn load_composio_tool_allow(": "write-tool allow-list loading must stay in gateway_write_tool_allowlist",
+        "fn tool_allowed_in_set(": "write-tool allow-list matching must stay in gateway_write_tool_allowlist",
+        "fn composio_tool_allowed(": "write-tool allow-list matching must stay in gateway_write_tool_allowlist",
+        "fn write_composio_tool_allow(": "write-tool allow-list persistence must stay in gateway_write_tool_allowlist",
+        "fn add_composio_tool_allow(": "write-tool allow-list persistence must stay in gateway_write_tool_allowlist",
+        "fn remove_composio_tool_allow(": "write-tool allow-list persistence must stay in gateway_write_tool_allowlist",
+        "struct AllowedToolView": "write-tool allow-list route DTOs must stay in gateway_write_tool_allowlist",
+        "struct AllowedToolsResponse": "write-tool allow-list route DTOs must stay in gateway_write_tool_allowlist",
+        "async fn composio_allowed_tools(": "write-tool allow-list routes must stay in gateway_write_tool_allowlist",
+        "async fn composio_revoke_allowed_tool(": "write-tool allow-list routes must stay in gateway_write_tool_allowlist",
         "fn find_capability_tool_schema(": "capability discovery schemas must stay in gateway_capability_registry",
         "enum CapabilitySource ": "capability registry source typing must stay in gateway_capability_registry",
         "struct CapabilityEntry ": "capability registry entries must stay in gateway_capability_registry",
@@ -555,6 +567,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_mcp_connections;", "gateway root must declare MCP connection route owner")
     assert_contains(source, "mod gateway_mcp_execution;", "gateway root must declare MCP execution route owner")
     assert_contains(source, "mod gateway_mcp_runtime;", "gateway root must declare MCP runtime owner")
+    assert_contains(source, "mod gateway_write_tool_allowlist;", "gateway root must declare write-tool allow-list owner")
     assert_contains(source, "mod gateway_task_maintenance;", "gateway root must declare task maintenance owner")
     assert_contains(source, "mod gateway_memory_background;", "gateway root must declare memory background owner")
     assert_contains(source, "mod gateway_remote_approval;", "gateway root must declare remote approval owner")
