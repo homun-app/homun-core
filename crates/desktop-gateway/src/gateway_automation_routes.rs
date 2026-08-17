@@ -5,6 +5,10 @@
 
 use super::*;
 
+use crate::gateway_project_access::{
+    EffectiveProjectContactPolicy, resolve_project_contact_policy,
+};
+
 #[test]
 fn automation_routes_owner_smoke() {
     assert_eq!(

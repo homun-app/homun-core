@@ -342,6 +342,21 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct UpdateTriggerResponse": "update route DTOs must stay in gateway_update_routes",
         "async fn update_info(": "update routes must stay in gateway_update_routes",
         "async fn update_trigger(": "update routes must stay in gateway_update_routes",
+        "struct ProjectAccessGrant ": "project access DTOs must stay in gateway_project_access",
+        "struct ProjectAccessFile ": "project access persistence DTOs must stay in gateway_project_access",
+        "struct EffectiveProjectContactPolicy ": "project access policy DTOs must stay in gateway_project_access",
+        "struct ProjectAccessUpsertRequest ": "project access route DTOs must stay in gateway_project_access",
+        "struct ProjectAccessRemoveRequest ": "project access route DTOs must stay in gateway_project_access",
+        "fn normalize_project_access_grant(": "project access normalization must stay in gateway_project_access",
+        "fn load_project_access_file(": "project access persistence must stay in gateway_project_access",
+        "fn save_project_access_file(": "project access persistence must stay in gateway_project_access",
+        "fn list_project_access(": "project access listing must stay in gateway_project_access",
+        "fn upsert_project_access(": "project access persistence must stay in gateway_project_access",
+        "fn remove_project_access(": "project access persistence must stay in gateway_project_access",
+        "fn resolve_project_contact_policy(": "project contact policy resolution must stay in gateway_project_access",
+        "async fn project_access_list(": "project access routes must stay in gateway_project_access",
+        "async fn project_access_upsert(": "project access routes must stay in gateway_project_access",
+        "async fn project_access_remove(": "project access routes must stay in gateway_project_access",
         "fn find_capability_tool_schema(": "capability discovery schemas must stay in gateway_capability_registry",
         "enum CapabilitySource ": "capability registry source typing must stay in gateway_capability_registry",
         "struct CapabilityEntry ": "capability registry entries must stay in gateway_capability_registry",
@@ -638,6 +653,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_usage_routes;", "gateway root must declare usage route owner")
     assert_contains(source, "mod gateway_tags;", "gateway root must declare tag route owner")
     assert_contains(source, "mod gateway_update_routes;", "gateway root must declare update route owner")
+    assert_contains(source, "mod gateway_project_access;", "gateway root must declare project access owner")
     assert_contains(source, "mod gateway_write_tool_allowlist;", "gateway root must declare write-tool allow-list owner")
     assert_contains(source, "mod gateway_task_maintenance;", "gateway root must declare task maintenance owner")
     assert_contains(source, "mod gateway_memory_background;", "gateway root must declare memory background owner")

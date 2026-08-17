@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-17 (usage routes owner pronto per PR).**
+> **Ultimo aggiornamento: 2026-08-17 (project access owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/usage-routes-owner` |
-| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131, #132, #133, #134, #135 e #136 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | branch `fabio/usage-routes-owner` sopra `main` aggiornato a #136 |
+| Branch | `fabio/gateway-project-access-owner` |
+| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131, #132, #133, #134, #135, #136, #137, #138 e #139 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | branch `fabio/gateway-project-access-owner` sopra `main` aggiornato a #139 |
 
 ## Dove siamo
 
@@ -128,6 +128,12 @@ Slice Runtime V2 recenti:
   account provider, policy budget manuale e model-usage suggestions escono dal
   monolite `main.rs`; `now_epoch_secs` resta nel root perche' condiviso da
   runtime, memory, browser e workspace.
+- Estrazione locale `gateway_update_routes`: route update/redeploy webhook e
+  DTO di stato escono dal monolite `main.rs`; startup, packaging e CI installer
+  restano fuori owner.
+- Estrazione locale `gateway_project_access`: grant accesso progetto,
+  persistenza `project-access`, route access/upsert/remove e resolver policy
+  condiviso da channels/automazioni escono dal monolite `main.rs`.
 
 ## Invarianti ora protetti
 
@@ -321,6 +327,17 @@ Slice browser/projection successive:
   contract `python3 scripts/check_gateway_main_contract.py`,
   `cargo fmt --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
   `git diff --check` e `python3 scripts/kernel_regression_gate.py` verdi.
+- Slice locale `gateway_update_routes` verificata sul branch
+  `fabio/gateway-update-routes-owner`: nuovo owner per update webhook,
+  `/api/update/info` e `/api/update/trigger`; owner-level
+  `cargo test -p local-first-desktop-gateway gateway_update_routes -- --nocapture`
+  verde; contract `python3 scripts/check_gateway_main_contract.py`,
+  `cargo fmt --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+  `git diff --check` e `python3 scripts/kernel_regression_gate.py` verdi.
+- Slice locale `gateway_project_access` in verifica sul branch
+  `fabio/gateway-project-access-owner`: nuovo owner per grant accesso progetto,
+  persistenza, route access/upsert/remove e resolver policy condiviso da
+  channels/automazioni.
 
 ## PR / CI
 
@@ -386,16 +403,18 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/137`.
 - #138 `Extract gateway tags owner`:
   `https://github.com/homun-app/homun-core/pull/138`.
+- #139 `Extract gateway update routes owner`:
+  `https://github.com/homun-app/homun-core/pull/139`.
 
 PR aperte:
 
 - Nessuna PR aperta per la slice corrente; prossimo passo: aprire
-  `fabio/gateway-update-routes-owner`.
+  `fabio/gateway-project-access-owner`.
 
 Branch corrente:
 
-- `fabio/gateway-update-routes-owner`: branch sopra `main` aggiornato a #138;
-  contiene solo la slice `gateway_update_routes`.
+- `fabio/gateway-project-access-owner`: branch sopra `main` aggiornato a #139;
+  contiene solo la slice `gateway_project_access`.
 - `fabio/write-tool-allowlist-contracts`: branch locale cumulativa rebased su
   `main`, da usare solo come parcheggio per separare le prossime slice
   successive.
@@ -422,8 +441,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Verificare e aprire PR piccola per `gateway_update_routes`.
-2. Dopo merge update routes, aggiornare `main` e riprendere la prossima slice non-browser
+1. Verificare e aprire PR piccola per `gateway_project_access`.
+2. Dopo merge project access, aggiornare `main` e riprendere la prossima slice non-browser
    solo dopo nuova lettura owner-level di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
