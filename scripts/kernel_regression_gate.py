@@ -590,6 +590,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway skill routes",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "gateway_skill_routes",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway capability registry",
             [
                 "cargo",
