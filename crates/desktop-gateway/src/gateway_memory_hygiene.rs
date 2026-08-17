@@ -1,4 +1,9 @@
-// Memory graph hygiene suggestions and shared entity-name normalization.
+// Memory graph hygiene suggestions, routes, and shared entity-name normalization.
+use axum::{
+    Json,
+    extract::{Query, State},
+};
+
 use crate::*;
 
 #[derive(Debug, Clone, Serialize)]
@@ -79,6 +84,21 @@ pub(crate) fn memory_hygiene_suggestions_for_scope(
         }
     }
     Ok(out)
+}
+
+pub(crate) async fn memory_hygiene_suggestions(
+    State(state): State<AppState>,
+    Query(query): Query<MemoryGraphQuery>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let user = gateway_memory_user_id();
+    let ws = resolve_memory_query_scope(&state, &query);
+    let facade = memory_facade(&state);
+    let suggestions =
+        memory_hygiene_suggestions_for_scope(facade, &user, &ws).map_err(GatewayError::memory)?;
+    Ok(Json(serde_json::json!({
+        "workspace": ws.as_str(),
+        "suggestions": suggestions,
+    })))
 }
 
 #[cfg(test)]

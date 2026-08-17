@@ -233,6 +233,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn normalized_entity_name(": "memory hygiene entity-name normalization must stay in gateway_memory_hygiene",
         "fn verified_identity_aliases(": "memory hygiene identity alias detection must stay in gateway_memory_hygiene",
         "fn memory_hygiene_suggestions_for_scope(": "memory hygiene suggestions must stay in gateway_memory_hygiene",
+        "async fn memory_hygiene_suggestions(": "memory hygiene route must stay in gateway_memory_hygiene",
         "fn persist_graph(": "memory graph persistence routing must stay in gateway_memory_graph_persistence",
         "fn persist_graph_scope(": "memory graph scope persistence must stay in gateway_memory_graph_persistence",
         "fn recall_memory_tool_schema(": "memory tool schemas must stay in gateway_memory_tools",

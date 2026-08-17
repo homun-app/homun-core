@@ -447,8 +447,8 @@ assertRepoContains(
 );
 assertRepoContains(
   "crates/desktop-gateway/src/gateway_memory_hygiene.rs",
-  "memory_hygiene_suggestions_for_scope",
-  "Gateway memory hygiene suggestions must have a dedicated owner",
+  "memory_hygiene_suggestions",
+  "Gateway memory hygiene route and suggestions must have a dedicated owner",
 );
 assertRepoContains(
   "crates/desktop-gateway/src/gateway_artifact_memory.rs",
