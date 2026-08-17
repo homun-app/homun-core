@@ -35,6 +35,7 @@ UI mostra lo stato prodotto.
 | Write-tool allow-list | `crates/desktop-gateway/src/gateway_write_tool_allowlist.rs` | persistenza delle scelte "always allow", matching esatto tool e marker MCP `mcp__server__*`, route list/revoke | non esegue tool, non decide approval routing e non possiede confirmation card |
 | Thread linked files | `crates/desktop-gateway/src/gateway_thread_files.rs` | cartella collegata per thread, precedenza workspace attivo, search/read `@ file`, anti path traversal e limiti lettura | non possiede workspace registry, project write tools o prompt assembly |
 | Chat transcription | `crates/desktop-gateway/src/gateway_transcription.rs` | route dictation, validazione audio base64 e bridge Whisper contained-computer | non possiede browser, UI composer o model routing |
+| Usage/budget routes | `crates/desktop-gateway/src/gateway_usage_routes.rs` | finestre usage, summary/daily/models/providers/processes, snapshot account provider, policy budget manuale e suggerimenti modello | non possiede recorder usage, model registry o pricing store |
 | Risorse concorrenti | `crates/task-runtime/src/resources.rs::ResourceGovernor` | `TaskStatus::WaitingResource` | mostra coda/waiting dal read model |
 | Contesto/token | `agent_loop.rs` + `ContextCompactor`, catalog model context window | compaction event + messages compattati | puo' mostrare usage, non decidere stop |
 | Tool/plugin/action timeout | `crates/desktop-gateway/src/gateway_tool_timeouts.rs` + tool runtime specifici | `ToolOutcome`, receipt/eventi | mostra call/result/approval |
@@ -72,7 +73,7 @@ passa il risultato del presenter, senza ricostruire `PlanStep[]` o goal.
    `gateway_action_confirmations`, `gateway_mcp_chat_tools`,
    `gateway_mcp_runtime`, `gateway_mcp_connections`,
    `gateway_mcp_execution`, `gateway_write_tool_allowlist`,
-   `gateway_thread_files` e `gateway_transcription`.
+   `gateway_thread_files`, `gateway_transcription` e `gateway_usage_routes`.
 2. Continuare a portare la UI a leggere ogni stato di lavoro da un solo
    presenter (`runtimeViewModel` / `kernelProjectionPresenter`) e rimuovere
    alias locali che ricostruiscono "sta lavorando".
