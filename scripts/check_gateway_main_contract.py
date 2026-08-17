@@ -324,6 +324,19 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn get_usage_provider_policy(": "usage provider policy routes must stay in gateway_usage_routes",
         "async fn set_usage_provider_policy(": "usage provider policy routes must stay in gateway_usage_routes",
         "async fn refresh_usage_provider(": "usage provider refresh routes must stay in gateway_usage_routes",
+        "struct CreateTagRequest ": "tag route DTOs must stay in gateway_tags",
+        "struct TagAssignRequest ": "tag route DTOs must stay in gateway_tags",
+        "fn parse_tag_entity(": "tag entity parsing must stay in gateway_tags",
+        "async fn tags_list(": "tag routes must stay in gateway_tags",
+        "async fn tags_create(": "tag routes must stay in gateway_tags",
+        "async fn tags_rename(": "tag routes must stay in gateway_tags",
+        "async fn tags_set_color(": "tag routes must stay in gateway_tags",
+        "async fn tags_delete(": "tag routes must stay in gateway_tags",
+        "async fn tags_assign(": "tag routes must stay in gateway_tags",
+        "async fn tags_unassign(": "tag routes must stay in gateway_tags",
+        "async fn tags_entities(": "tag routes must stay in gateway_tags",
+        "async fn tags_for_entity_handler(": "tag routes must stay in gateway_tags",
+        "async fn tags_all_assignments(": "tag routes must stay in gateway_tags",
         "fn find_capability_tool_schema(": "capability discovery schemas must stay in gateway_capability_registry",
         "enum CapabilitySource ": "capability registry source typing must stay in gateway_capability_registry",
         "struct CapabilityEntry ": "capability registry entries must stay in gateway_capability_registry",
@@ -618,6 +631,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_thread_files;", "gateway root must declare thread file owner")
     assert_contains(source, "mod gateway_transcription;", "gateway root must declare transcription owner")
     assert_contains(source, "mod gateway_usage_routes;", "gateway root must declare usage route owner")
+    assert_contains(source, "mod gateway_tags;", "gateway root must declare tag route owner")
     assert_contains(source, "mod gateway_write_tool_allowlist;", "gateway root must declare write-tool allow-list owner")
     assert_contains(source, "mod gateway_task_maintenance;", "gateway root must declare task maintenance owner")
     assert_contains(source, "mod gateway_memory_background;", "gateway root must declare memory background owner")

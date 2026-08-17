@@ -91,6 +91,7 @@ mod gateway_runtime_flags;
 mod gateway_runtime_settings;
 mod gateway_secrets;
 mod gateway_store_integrity;
+mod gateway_tags;
 mod gateway_task_executor;
 mod gateway_task_executor_config;
 mod gateway_task_maintenance;
@@ -210,7 +211,7 @@ use axum::{
 };
 use base64::Engine as _;
 use bytes::Bytes;
-use chat_store::{ChatStore, RemoteApprovalInput, RemoteApprovalRow, Tag, TagEntity};
+use chat_store::{ChatStore, RemoteApprovalInput, RemoteApprovalRow};
 pub(crate) use gateway_action_confirmations::{
     MCP_CONFIRM_CLOSE, MCP_CONFIRM_OPEN, confirm_marker_matches_approval, confirm_marker_value,
     mcp_confirm_matches, mcp_confirm_matches_approval, rewrite_mcp_confirm_to_done,
@@ -27428,166 +27429,6 @@ async fn reorder_workspaces(
         active_workspace_id: file.active.clone(),
         workspaces: file.workspaces,
     }))
-}
-
-// ── Tags API ────────────────────────────────────────────────────────────────────────────
-// Colored labels that cut across projects and conversations. The store is the single source
-// of truth (chat_store::{Tag, TagEntity}); these handlers are thin CRUD + assignment.
-
-#[derive(Deserialize)]
-struct CreateTagRequest {
-    name: String,
-    color: String,
-}
-
-#[derive(Deserialize)]
-struct RenameTagRequest {
-    name: String,
-}
-
-#[derive(Deserialize)]
-struct SetTagColorRequest {
-    color: String,
-}
-
-#[derive(Deserialize)]
-struct TagAssignRequest {
-    entity_type: String,
-    entity_id: String,
-}
-
-/// Map an `entity_type` string from the wire to the typed enum, 400 on anything else.
-fn parse_tag_entity(value: &str) -> Result<TagEntity, GatewayError> {
-    TagEntity::parse(value).ok_or_else(|| GatewayError {
-        status: StatusCode::BAD_REQUEST,
-        code: "tag_entity_invalid",
-        message: "entity_type must be 'project' or 'thread'".to_string(),
-    })
-}
-
-async fn tags_list(State(state): State<AppState>) -> Result<Json<Vec<Tag>>, GatewayError> {
-    let tags = lock_store(&state)?
-        .list_tags()
-        .map_err(GatewayError::store)?;
-    Ok(Json(tags))
-}
-
-async fn tags_create(
-    State(state): State<AppState>,
-    Json(request): Json<CreateTagRequest>,
-) -> Result<Json<Tag>, GatewayError> {
-    let name = request.name.trim();
-    if name.is_empty() {
-        return Err(GatewayError {
-            status: StatusCode::BAD_REQUEST,
-            code: "tag_name_required",
-            message: "tag name must not be empty".to_string(),
-        });
-    }
-    // Gateway mints the id so it stays predictable client-side.
-    let id = format!("tag_{}_{}", now_epoch_secs(), uuid::Uuid::new_v4().simple());
-    let tag = lock_store(&state)?
-        .create_tag(&id, name, request.color.trim())
-        .map_err(GatewayError::store)?;
-    Ok(Json(tag))
-}
-
-async fn tags_rename(
-    State(state): State<AppState>,
-    Path(tag_id): Path<String>,
-    Json(request): Json<RenameTagRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    lock_store(&state)?
-        .rename_tag(&tag_id, request.name.trim())
-        .map_err(GatewayError::store)?;
-    Ok(Json(serde_json::json!({ "ok": true })))
-}
-
-async fn tags_set_color(
-    State(state): State<AppState>,
-    Path(tag_id): Path<String>,
-    Json(request): Json<SetTagColorRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    lock_store(&state)?
-        .set_tag_color(&tag_id, request.color.trim())
-        .map_err(GatewayError::store)?;
-    Ok(Json(serde_json::json!({ "ok": true })))
-}
-
-async fn tags_delete(
-    State(state): State<AppState>,
-    Path(tag_id): Path<String>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    lock_store(&state)?
-        .delete_tag(&tag_id)
-        .map_err(GatewayError::store)?;
-    Ok(Json(serde_json::json!({ "ok": true })))
-}
-
-async fn tags_assign(
-    State(state): State<AppState>,
-    Path(tag_id): Path<String>,
-    Json(request): Json<TagAssignRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let entity = parse_tag_entity(&request.entity_type)?;
-    lock_store(&state)?
-        .assign_tag(&tag_id, entity, &request.entity_id)
-        .map_err(GatewayError::store)?;
-    Ok(Json(serde_json::json!({ "ok": true })))
-}
-
-async fn tags_unassign(
-    State(state): State<AppState>,
-    Path(tag_id): Path<String>,
-    Json(request): Json<TagAssignRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let entity = parse_tag_entity(&request.entity_type)?;
-    lock_store(&state)?
-        .unassign_tag(&tag_id, entity, &request.entity_id)
-        .map_err(GatewayError::store)?;
-    Ok(Json(serde_json::json!({ "ok": true })))
-}
-
-async fn tags_entities(
-    State(state): State<AppState>,
-    Path(tag_id): Path<String>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let entities = lock_store(&state)?
-        .entities_for_tag(&tag_id)
-        .map_err(GatewayError::store)?;
-    let list: Vec<serde_json::Value> = entities
-        .into_iter()
-        .map(|(entity_type, entity_id)| {
-            serde_json::json!({ "entity_type": entity_type, "entity_id": entity_id })
-        })
-        .collect();
-    Ok(Json(serde_json::json!({ "entities": list })))
-}
-
-async fn tags_for_entity_handler(
-    State(state): State<AppState>,
-    Path((entity_type, entity_id)): Path<(String, String)>,
-) -> Result<Json<Vec<Tag>>, GatewayError> {
-    let entity = parse_tag_entity(&entity_type)?;
-    let tags = lock_store(&state)?
-        .tags_for_entity(entity, &entity_id)
-        .map_err(GatewayError::store)?;
-    Ok(Json(tags))
-}
-
-async fn tags_all_assignments(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let rows = lock_store(&state)?
-        .all_tag_assignments()
-        .map_err(GatewayError::store)?;
-    let list: Vec<serde_json::Value> = rows
-        .into_iter()
-        .map(|(entity_type, entity_id, tag)| {
-            serde_json::json!({ "entity_type": entity_type, "entity_id": entity_id, "tag": tag })
-        })
-        .collect();
-    Ok(Json(serde_json::json!({ "assignments": list })))
 }
 
 /// Purges all workspace-owned data before removing the workspace registry entry.
