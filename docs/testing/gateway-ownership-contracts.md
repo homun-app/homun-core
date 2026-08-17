@@ -45,7 +45,8 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_browser_runtime.rs` | Sidecar browser, checkpoint save/restore, sessioni warm, reaper e activity runtime. |
 | `crates/desktop-gateway/src/gateway_mcp_chat_tools.rs` | Naming/parse tool MCP chat e catalogo schema cached. |
 | `crates/desktop-gateway/src/gateway_mcp_runtime.rs` | Transport MCP stdio/http, metadata connect/execution, secret header migration, discovery/cache e `run_mcp_chat_tool`. |
-| `crates/desktop-gateway/src/gateway_mcp_connections.rs` | DTO/route MCP per connect, registry search, connected list e disconnect; non possiede `mcp_execute`. |
+| `crates/desktop-gateway/src/gateway_mcp_connections.rs` | DTO/route MCP per connect, registry search, connected list e disconnect; non possiede execute. |
+| `crates/desktop-gateway/src/gateway_mcp_execution.rs` | DTO/route MCP per execute da confirmation card, claim della source card, marker allow-server e resume/rewrite terminale; non possiede transport, timeout o parser conferma. |
 | `crates/desktop-gateway/src/gateway_model_routing.rs` | Risoluzione provider/modello, payload provider, compaction visibile al modello e policy reasoning. |
 | `crates/desktop-gateway/src/gateway_tool_execution.rs` | Dispatch tool chat/browser, effect receipts e confini capability/computer/browse. |
 | `crates/desktop-gateway/src/gateway_runtime_settings.rs` | DTO e route settings runtime persistiti. |
