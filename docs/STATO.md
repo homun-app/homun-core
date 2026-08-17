@@ -160,6 +160,9 @@ Slice Runtime V2 recenti:
   merge entity graph e adapter import Graphify escono dal monolite `main.rs`;
   maintenance/reconcile, persistence graph e relation helper restano owner
   separati.
+- Estrazione locale `gateway_memory_wiki`: route `/api/memory/wiki` read/save e
+  `/api/memory/consolidate` escono dal monolite `main.rs`; lo stesso owner
+  mantiene registry edit manuali e rebuild delle pagine wiki derivate.
 - `/api/health` non esegue piu' probe Docker nel percorso watchdog: lo stato
   contained-computer letto dall'health handler arriva dal coordinator in memoria,
   mentre le verifiche Docker restano negli owner setup/browser dedicati.

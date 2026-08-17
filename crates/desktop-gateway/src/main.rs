@@ -366,13 +366,14 @@ use gateway_memory_turn_context::{
     project_objective_block, recent_work_block, scope_from_active_workspace,
 };
 use gateway_memory_wiki::{
-    active_open_loop_record, mark_wiki_edited, rebuild_decisions_wiki, rebuild_profile_wiki,
-    rebuild_project_brief, rebuild_status_wiki, wiki_is_edited,
+    active_open_loop_record, rebuild_decisions_wiki, rebuild_profile_wiki, rebuild_project_brief,
+    rebuild_status_wiki, wiki_is_edited,
 };
 #[cfg(test)]
 use gateway_memory_wiki::{
     close_matching_open_loops, deduplicate_open_loops, status_wiki_body_from_open_loops,
 };
+pub(crate) use gateway_memory_wiki::{memory_consolidate, memory_wiki, memory_wiki_save};
 pub(crate) use gateway_model_routing::*;
 pub(crate) use gateway_model_timeouts::{
     model_first_token_timeout_secs, model_headers_timeout_secs, model_idle_timeout_secs,
@@ -19649,163 +19650,6 @@ async fn memory_hygiene_suggestions(
         "workspace": ws.as_str(),
         "suggestions": suggestions,
     })))
-}
-
-#[derive(Serialize)]
-struct WikiPageView {
-    path: String,
-    title: String,
-    body: String,
-}
-
-/// The markdown face of the project's memory (wiki pages persisted in SQL): the
-/// readable, human-editable projection. Same scope resolution as the graph.
-async fn memory_wiki(
-    State(state): State<AppState>,
-    Query(query): Query<MemoryGraphQuery>,
-) -> Result<Json<Vec<WikiPageView>>, GatewayError> {
-    let facade = memory_facade(&state);
-    let user = gateway_memory_user_id();
-    let ws = if let Some(tid) = query.thread.as_deref().filter(|t| !t.trim().is_empty()) {
-        lock_store(&state)
-            .ok()
-            .and_then(|store| store.workspace_for_thread(tid).ok())
-            .filter(|w| !w.trim().is_empty())
-            .map(MemoryWorkspaceId::new)
-            .unwrap_or_else(gateway_memory_workspace_id)
-    } else if let Some(workspace) = query.workspace.filter(|w| !w.trim().is_empty()) {
-        MemoryWorkspaceId::new(workspace)
-    } else {
-        gateway_memory_workspace_id()
-    };
-    // Regenerate the "Decisioni" page from current decisions so existing projects show
-    // it without needing a fresh turn (idempotent).
-    rebuild_decisions_wiki(facade, &user, &ws);
-    rebuild_status_wiki(facade, &user, &ws);
-    let pages = facade
-        .list_wiki_pages_for_ui(&user, &ws)
-        .unwrap_or_default();
-    Ok(Json(
-        pages
-            .into_iter()
-            .map(|p| WikiPageView {
-                path: p.path,
-                title: p.title,
-                body: p.body,
-            })
-            .collect(),
-    ))
-}
-
-#[derive(Deserialize)]
-struct WikiSaveRequest {
-    workspace: Option<String>,
-    thread: Option<String>,
-    path: String,
-    body: String,
-}
-
-/// Save a hand-edited wiki page (the editable face of the hybrid model): persist the
-/// new markdown, mark the page as user-edited (so it isn't auto-regenerated), and
-/// RE-INGEST it — run the extractor on the edited text so the corrections flow back
-/// into the canonical structured memory.
-async fn memory_wiki_save(
-    State(state): State<AppState>,
-    Json(req): Json<WikiSaveRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let user = gateway_memory_user_id();
-    let ws = if let Some(tid) = req.thread.as_deref().filter(|t| !t.trim().is_empty()) {
-        lock_store(&state)
-            .ok()
-            .and_then(|store| store.workspace_for_thread(tid).ok())
-            .filter(|w| !w.trim().is_empty())
-            .map(MemoryWorkspaceId::new)
-            .unwrap_or_else(gateway_memory_workspace_id)
-    } else if let Some(workspace) = req.workspace.clone().filter(|w| !w.trim().is_empty()) {
-        MemoryWorkspaceId::new(workspace)
-    } else {
-        gateway_memory_workspace_id()
-    };
-    {
-        let facade = memory_facade(&state);
-        let existing = facade
-            .list_wiki_pages_for_ui(&user, &ws)
-            .ok()
-            .and_then(|pages| pages.into_iter().find(|p| p.path == req.path));
-        let reference = existing
-            .as_ref()
-            .map(|p| p.reference.clone())
-            .unwrap_or_else(|| MemoryRef::generated(MemoryRefKind::Wiki, user.clone(), ws.clone()));
-        let title = existing
-            .as_ref()
-            .map(|p| p.title.clone())
-            .unwrap_or_else(|| req.path.clone());
-        let linked_refs = existing.map(|p| p.linked_refs).unwrap_or_default();
-        let page = WikiPage {
-            reference,
-            user_id: user.clone(),
-            workspace_id: ws.clone(),
-            path: req.path.clone(),
-            title,
-            body: req.body.clone(),
-            linked_refs,
-            privacy_domain: PrivacyDomain::new("work"),
-            sensitivity: MemoryDataSensitivity::Internal,
-        };
-        facade
-            .record_wiki_page_for_ui(&page)
-            .map_err(|e| GatewayError::memory(e.to_string()))?;
-    }
-    reconcile_memory_scope(&state, &ws);
-    mark_wiki_edited(&ws, &req.path);
-    // Re-ingest: scope the MEMORY workspace to this page, then extract memories from
-    // the edited markdown into the structured store (non-empty `actions` bypasses the
-    // salience gate). Background — the save returns immediately. (Memory scope only —
-    // doesn't touch the global active workspace / Composio.)
-    set_memory_workspace(ws.as_str());
-    let st = state.clone();
-    let body = req.body.clone();
-    let reconcile_ws = ws.clone();
-    tokio::spawn(async move {
-        learn_via_service_or_inline(
-            &st,
-            &body,
-            "",
-            "The user manually corrected a project memory wiki page",
-            None,
-            None,
-            None,
-            None,
-            local_first_memory::MemoryReuseEnvelope::normal(),
-        )
-        .await;
-        reconcile_memory_scope(&st, &reconcile_ws);
-    });
-    Ok(Json(serde_json::json!({ "ok": true })))
-}
-
-/// Consolidate a scope's memory: merge fragments + prune noise (user/agent triggered).
-async fn memory_consolidate(
-    State(state): State<AppState>,
-    Query(query): Query<MemoryGraphQuery>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let user = gateway_memory_user_id();
-    let ws = if let Some(tid) = query.thread.as_deref().filter(|t| !t.trim().is_empty()) {
-        lock_store(&state)
-            .ok()
-            .and_then(|store| store.workspace_for_thread(tid).ok())
-            .filter(|w| !w.trim().is_empty())
-            .map(MemoryWorkspaceId::new)
-            .unwrap_or_else(gateway_memory_workspace_id)
-    } else if let Some(workspace) = query.workspace.filter(|w| !w.trim().is_empty()) {
-        MemoryWorkspaceId::new(workspace)
-    } else {
-        gateway_memory_workspace_id()
-    };
-    let (merged, dropped) = consolidate_scope(&state, &user, &ws).await;
-    Ok(Json(
-        serde_json::json!({ "merged": merged, "dropped": dropped }),
-    ))
 }
 
 // ------------------------------------------------------------------ contacts
