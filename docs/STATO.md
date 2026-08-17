@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-17 (write-tool allow-list PR + thread-files locale).**
+> **Ultimo aggiornamento: 2026-08-17 (thread-files owner pronto per PR).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `fabio/thread-linked-files-owner` |
-| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131, #132 e #133 mergeate in `main`; #134 aperta su `fabio/write-tool-allowlist-owner`; #117 browser draft separata |
-| HEAD codice verificato | branch locale `fabio/thread-linked-files-owner` stacked sopra #134 |
+| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131, #132, #133 e #134 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | branch `fabio/thread-linked-files-owner` sopra `main` aggiornato a #134 |
 
 ## Dove siamo
 
@@ -352,21 +352,22 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/132`.
 - #133 `Extract MCP execution route owner`:
   `https://github.com/homun-app/homun-core/pull/133`.
+- #134 `Extract write-tool allow-list owner`:
+  `https://github.com/homun-app/homun-core/pull/134`.
 
 PR aperte:
 
-- #134 `Extract write-tool allow-list owner`:
-  `https://github.com/homun-app/homun-core/pull/134` (CI principale verde;
-  `Release readiness` ancora in coda al momento della preparazione
-  `thread-files`).
+- Nessuna PR aperta per la slice corrente; prossimo passo: aprire
+  `fabio/thread-linked-files-owner`.
 
 Branch corrente:
 
-- `fabio/thread-linked-files-owner`: branch locale stacked sopra #134; contiene
-  la slice `gateway_thread_files` preparata per la prossima PR, da rebasare su
-  `main` dopo merge di #134.
-- `fabio/write-tool-allowlist-owner`: branch PR sopra `main` aggiornato a #133;
-  contiene solo la slice `gateway_write_tool_allowlist`.
+- `fabio/thread-linked-files-owner`: branch PR sopra `main` aggiornato a #134;
+  contiene solo la slice `gateway_thread_files`.
+- `fabio/chat-transcription-owner`: branch locale da rebasare dopo merge
+  thread-files; contiene la slice `gateway_transcription`.
+- `fabio/usage-routes-owner`: branch locale da rebasare dopo merge
+  transcription; contiene la slice `gateway_usage_routes`.
 - `fabio/write-tool-allowlist-contracts`: branch locale cumulativa rebased su
   `main`, da usare solo come parcheggio per separare le prossime slice
   `gateway_thread_files`, `gateway_transcription` e `gateway_usage_routes`.
@@ -393,11 +394,11 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Attendere `Release readiness` di #134; se verde, mergeare #134 e aggiornare
-   `main`.
-2. Rebasare `fabio/thread-linked-files-owner` su `main`, verificare e aprire la
-   PR piccola per `gateway_thread_files`.
-3. Separare poi `gateway_transcription` e `gateway_usage_routes` in PR piccole.
+1. Verificare e aprire la PR piccola per `gateway_thread_files`.
+2. Dopo merge, aggiornare `main`, rebasare `fabio/chat-transcription-owner` e
+   aprire PR piccola per `gateway_transcription`.
+3. Dopo merge transcription, rebasare `fabio/usage-routes-owner` e aprire PR
+   piccola per `gateway_usage_routes`.
 4. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -405,8 +406,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/thread-linked-files-owner se #134 e' ancora aperta o appena
-mergeata; altrimenti main aggiornato dopo #134.
+branch fabio/thread-linked-files-owner se la PR thread-files e' ancora da aprire
+o e' aperta; altrimenti main aggiornato e prossima slice piccola disponibile.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
