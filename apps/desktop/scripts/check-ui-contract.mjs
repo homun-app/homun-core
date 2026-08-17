@@ -381,6 +381,11 @@ assertRepoContains(
   "Gateway memory tools must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_memory_tools.rs",
+  "memory_decide",
+  "Gateway memory decide route must share the memory tools owner",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_plan_tools.rs",
   "step_advance_tool_schema",
   "Gateway plan tools must have a dedicated owner",

@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-17 (memory UI routes owner verificato localmente).**
+> **Ultimo aggiornamento: 2026-08-18 (memory decide route owner verificato localmente).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/gateway-memory-ui-routes-owner` |
-| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131, #132, #133, #134, #135, #136, #137, #138, #139, #140, #141, #142, #143, #144 e #145 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | branch `fabio/gateway-memory-ui-routes-owner` sopra `main` aggiornato a #145 |
+| Branch | `fabio/gateway-memory-decide-route-owner` |
+| PR | #108-#116, #118-#150 mergeate in `main`; #117 browser draft separata; slice memory decide in corso |
+| HEAD codice verificato | branch `fabio/gateway-memory-decide-route-owner` sopra `main` aggiornato a #150 |
 
 ## Dove siamo
 
@@ -169,6 +169,10 @@ Slice Runtime V2 recenti:
 - Estrazione locale `gateway_memory_goals`: route `/api/memory/goals`,
   `/api/memory/project-briefing` e mutazioni goals add/promote/suggest escono dal
   monolite `main.rs`; wiki rebuild e turn-context restano negli owner dedicati.
+- Estrazione locale `gateway_memory_tools`: la route `/api/memory/decide`
+  conferma/rifiuta/cancella/edita candidati accanto ai tool schema
+  recall/decision/forget; dashboard/export, graph projection e wiki restano owner
+  separati.
 - `/api/health` non esegue piu' probe Docker nel percorso watchdog: lo stato
   contained-computer letto dall'health handler arriva dal coordinator in memoria,
   mentre le verifiche Docker restano negli owner setup/browser dedicati.
@@ -306,6 +310,13 @@ Slice browser/projection successive:
   `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway health_stays_live_while_a_store_lock_is_held -- --nocapture`,
   `HOMUN_WORKSPACE_ID=project-b cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway workspace -- --nocapture`,
   `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway -- --nocapture`,
+  `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
+  `cd apps/desktop && npm run test:ui-contract`,
+  `python3 scripts/kernel_regression_gate.py` e
+  `python3 scripts/pre_release_gate.py` verdi.
+- Slice `fabio/gateway-memory-decide-route-owner` verificata localmente con:
+  `cargo fmt --check`, `python3 scripts/check_gateway_main_contract.py`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_memory_tools -- --nocapture`,
   `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
   `cd apps/desktop && npm run test:ui-contract`,
   `python3 scripts/kernel_regression_gate.py` e

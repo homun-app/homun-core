@@ -248,6 +248,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn recall_memory_tool_schema(": "memory tool schemas must stay in gateway_memory_tools",
         "fn record_decision_tool_schema(": "memory tool schemas must stay in gateway_memory_tools",
         "fn record_decision(": "memory decision recording must stay in gateway_memory_tools",
+        "struct MemoryDecideRequest": "memory decide DTO must stay in gateway_memory_tools",
+        "async fn memory_decide(": "memory decide route must stay in gateway_memory_tools",
         "fn forget_memory_tool_schema(": "memory tool schemas must stay in gateway_memory_tools",
         "fn forget_in_scope(": "memory forget search must stay in gateway_memory_tools",
         "fn forget_topic_in_scope(": "memory topic forget must stay in gateway_memory_tools",
