@@ -45,6 +45,7 @@ mod gateway_chat_memory;
 mod gateway_chat_streams;
 mod gateway_chat_tasks;
 mod gateway_chat_threads;
+mod gateway_contact_perimeter;
 mod gateway_contact_profile;
 mod gateway_contact_relationships;
 mod gateway_cors;
@@ -298,6 +299,7 @@ pub(crate) use gateway_capability_registry::{
 };
 pub(crate) use gateway_channels::*;
 use gateway_chat_markers::strip_chat_markers;
+use gateway_contact_perimeter::{contact_perimeter_get, contact_perimeter_set};
 use gateway_contact_profile::{contact_profile, contact_profile_refresh};
 use gateway_contact_relationships::{
     contact_relationship_add, contact_relationship_remove, contact_relationships,
@@ -19928,88 +19930,6 @@ async fn contact_delete(
         message: error.to_string(),
     })?;
     Ok(Json(serde_json::json!({ "ok": true })))
-}
-
-/// Wire shape of a contact's isolation perimeter (GET returns defaults when no row).
-#[derive(Serialize, Deserialize)]
-struct PerimeterView {
-    memory_scope: String,
-    #[serde(default)]
-    knowledge_folders: Vec<String>,
-    #[serde(default)]
-    tools_allowed: Vec<String>,
-    #[serde(default)]
-    tools_denied: Vec<String>,
-    can_see_contacts: bool,
-    can_see_calendar: bool,
-}
-
-async fn contact_perimeter_get(
-    State(state): State<AppState>,
-    Json(request): Json<ContactRefRequest>,
-) -> Result<Json<PerimeterView>, GatewayError> {
-    let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
-        status: StatusCode::NOT_FOUND,
-        code: "contact_not_found",
-        message: "contact not found".to_string(),
-    })?;
-    let store = lock_store(&state)?;
-    let p = store.perimeter_or_default(id);
-    Ok(Json(PerimeterView {
-        memory_scope: p.memory_scope,
-        knowledge_folders: p.knowledge_folders,
-        tools_allowed: p.tools_allowed,
-        tools_denied: p.tools_denied,
-        can_see_contacts: p.can_see_contacts,
-        can_see_calendar: p.can_see_calendar,
-    }))
-}
-
-#[derive(Deserialize)]
-struct PerimeterUpdateRequest {
-    reference: String,
-    #[serde(flatten)]
-    perimeter: PerimeterView,
-}
-
-async fn contact_perimeter_set(
-    State(state): State<AppState>,
-    Json(request): Json<PerimeterUpdateRequest>,
-) -> Result<Json<PerimeterView>, GatewayError> {
-    let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
-        status: StatusCode::NOT_FOUND,
-        code: "contact_not_found",
-        message: "contact not found".to_string(),
-    })?;
-    let scope = match request.perimeter.memory_scope.as_str() {
-        "personal" => "personal",
-        _ => "contact_only",
-    };
-    let stored = chat_store::StoredPerimeter {
-        memory_scope: scope.to_string(),
-        knowledge_folders: request.perimeter.knowledge_folders.clone(),
-        tools_allowed: request.perimeter.tools_allowed.clone(),
-        tools_denied: request.perimeter.tools_denied.clone(),
-        can_see_contacts: request.perimeter.can_see_contacts,
-        can_see_calendar: request.perimeter.can_see_calendar,
-    };
-    let store = lock_store(&state)?;
-    store
-        .set_perimeter(id, &stored)
-        .map_err(|error| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "contact_perimeter",
-            message: error.to_string(),
-        })?;
-    let p = store.perimeter_or_default(id);
-    Ok(Json(PerimeterView {
-        memory_scope: p.memory_scope,
-        knowledge_folders: p.knowledge_folders,
-        tools_allowed: p.tools_allowed,
-        tools_denied: p.tools_denied,
-        can_see_contacts: p.can_see_contacts,
-        can_see_calendar: p.can_see_calendar,
-    }))
 }
 
 // ---- Named profiles (P3): reusable personas + per-(contact, channel) binding ----
