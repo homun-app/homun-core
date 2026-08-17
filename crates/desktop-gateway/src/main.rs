@@ -103,6 +103,7 @@ mod gateway_tool_timeouts;
 mod gateway_transcription;
 mod gateway_turn_broker;
 mod gateway_turn_recovery;
+mod gateway_update_routes;
 mod gateway_usage_routes;
 mod gateway_user_preferences;
 mod gateway_vault_key;
@@ -24388,65 +24389,6 @@ async fn local_computer_stop() -> Json<LocalComputerActionResponse> {
         enabled: sandbox::container_up(),
         message: None,
     })
-}
-
-fn update_webhook() -> Option<String> {
-    env::var("HOMUN_UPDATE_WEBHOOK")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-#[derive(Serialize)]
-struct UpdateInfoResponse {
-    /// True on a server deploy where a redeploy webhook (Coolify/PaaS) is set —
-    /// the only way a container can "update itself" is to ask the orchestrator
-    /// to pull the new image and recreate it.
-    webhook_configured: bool,
-}
-
-async fn update_info() -> Json<UpdateInfoResponse> {
-    Json(UpdateInfoResponse {
-        webhook_configured: update_webhook().is_some(),
-    })
-}
-
-#[derive(Serialize)]
-struct UpdateTriggerResponse {
-    ok: bool,
-    message: Option<String>,
-}
-
-/// Fires the configured redeploy webhook (e.g. Coolify) so the PaaS pulls the
-/// latest image and recreates the container. The webhook URL stays server-side
-/// (never shipped to the browser bundle).
-async fn update_trigger(State(state): State<AppState>) -> Json<UpdateTriggerResponse> {
-    let Some(webhook) = update_webhook() else {
-        return Json(UpdateTriggerResponse {
-            ok: false,
-            message: Some("No update webhook configured (set HOMUN_UPDATE_WEBHOOK).".to_string()),
-        });
-    };
-    match state
-        .http
-        .post(&webhook)
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await
-    {
-        Ok(response) if response.status().is_success() => Json(UpdateTriggerResponse {
-            ok: true,
-            message: None,
-        }),
-        Ok(response) => Json(UpdateTriggerResponse {
-            ok: false,
-            message: Some(format!("Webhook returned HTTP {}", response.status())),
-        }),
-        Err(error) => Json(UpdateTriggerResponse {
-            ok: false,
-            message: Some(format!("Webhook call failed: {error}")),
-        }),
-    }
 }
 
 /// Builds the contained computer live read-model: whether the live view is
