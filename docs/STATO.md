@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (main pulito dopo PR #151).**
+> **Ultimo aggiornamento: 2026-08-18 (contact profile owner verificato localmente).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
-| PR | #108-#116, #118-#151 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #151 |
+| Branch | `fabio/gateway-contact-profile-owner` |
+| PR | #108-#116, #118-#152 mergeate in `main`; #117 browser draft separata; slice contact profile in corso |
+| HEAD codice verificato | branch `fabio/gateway-contact-profile-owner` sopra `main` aggiornato a #152 |
 
 ## Dove siamo
 
@@ -173,6 +173,10 @@ Slice Runtime V2 recenti:
   conferma/rifiuta/cancella/edita candidati accanto ai tool schema
   recall/decision/forget; dashboard/export, graph projection e wiki restano owner
   separati.
+- Estrazione locale `gateway_contact_profile`: route
+  `/api/memory/contacts/profile` e `/api/memory/contacts/profile/refresh`,
+  distillazione facts contatto e lettura fact via graph escono dal monolite
+  `main.rs`; CRUD contatti, relationship e profili globali restano separati.
 - `/api/health` non esegue piu' probe Docker nel percorso watchdog: lo stato
   contained-computer letto dall'health handler arriva dal coordinator in memoria,
   mentre le verifiche Docker restano negli owner setup/browser dedicati.
@@ -317,6 +321,14 @@ Slice browser/projection successive:
 - Slice `fabio/gateway-memory-decide-route-owner` verificata localmente con:
   `cargo fmt --check`, `python3 scripts/check_gateway_main_contract.py`,
   `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_memory_tools -- --nocapture`,
+  `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
+  `cd apps/desktop && npm run test:ui-contract`,
+  `python3 scripts/kernel_regression_gate.py` e
+  `python3 scripts/pre_release_gate.py` verdi.
+- Slice `fabio/gateway-contact-profile-owner` verificata localmente con:
+  RED `python3 scripts/check_gateway_main_contract.py`, poi
+  `cargo fmt --check`, `python3 scripts/check_gateway_main_contract.py`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_contact_profile -- --nocapture`,
   `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
   `cd apps/desktop && npm run test:ui-contract`,
   `python3 scripts/kernel_regression_gate.py` e
