@@ -214,6 +214,21 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn sweep_graph_orphans(": "memory graph orphan sweep must stay in gateway_memory_graph_maintenance",
         "fn regenerate_graph_links(": "memory graph regeneration must stay in gateway_memory_graph_maintenance",
         "fn reconcile_memory_scope(": "memory graph scope reconciliation must stay in gateway_memory_graph_maintenance",
+        "struct MemoryGraphQuery": "memory graph route query DTO must stay in gateway_memory_graph_routes",
+        "struct GraphNode": "memory graph route node DTO must stay in gateway_memory_graph_routes",
+        "struct GraphEdge": "memory graph route edge DTO must stay in gateway_memory_graph_routes",
+        "struct MemoryGraphResponse": "memory graph route response DTO must stay in gateway_memory_graph_routes",
+        "fn resolve_memory_query_scope(": "memory graph route scope resolution must stay in gateway_memory_graph_routes",
+        "struct MemoryGraphMergeRequest": "memory graph merge DTO must stay in gateway_memory_graph_routes",
+        "fn graph_push_node(": "memory graph projection assembly must stay in gateway_memory_graph_routes",
+        "fn graph_entity_alias_detail(": "memory graph projection alias detail must stay in gateway_memory_graph_routes",
+        "fn project_graph_entity_duplicates_root(": "memory graph duplicate root filtering must stay in gateway_memory_graph_routes",
+        "fn dedupe_graph_edges(": "memory graph projection edge dedupe must stay in gateway_memory_graph_routes",
+        "fn ensure_project_graph_connectivity(": "memory graph projection connectivity must stay in gateway_memory_graph_routes",
+        "struct GraphifyImportRequest": "memory graphify import DTO must stay in gateway_memory_graph_routes",
+        "async fn memory_graphify_import(": "memory graphify import route must stay in gateway_memory_graph_routes",
+        "async fn memory_graph(": "memory graph route must stay in gateway_memory_graph_routes",
+        "async fn memory_graph_merge(": "memory graph merge route must stay in gateway_memory_graph_routes",
         "struct MemoryHygieneSuggestion": "memory hygiene suggestion type must stay in gateway_memory_hygiene",
         "fn normalized_entity_name(": "memory hygiene entity-name normalization must stay in gateway_memory_hygiene",
         "fn verified_identity_aliases(": "memory hygiene identity alias detection must stay in gateway_memory_hygiene",
@@ -847,6 +862,11 @@ def main() -> int:
         "gateway root must declare memory recall service owner",
     )
     assert_contains(source, "mod gateway_memory_graph;", "gateway root must declare memory graph owner")
+    assert_contains(
+        source,
+        "mod gateway_memory_graph_routes;",
+        "gateway root must declare memory graph routes owner",
+    )
     assert_contains(
         source,
         "mod gateway_memory_graph_maintenance;",

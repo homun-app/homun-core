@@ -156,6 +156,10 @@ Slice Runtime V2 recenti:
   memory e full user-data export escono dal monolite `main.rs`; MemoryBench,
   memory graph build/mutation e storage semantics del `MemoryFacade` restano
   separati.
+- Estrazione locale `gateway_memory_graph_routes`: route `/api/memory/graph`,
+  merge entity graph e adapter import Graphify escono dal monolite `main.rs`;
+  maintenance/reconcile, persistence graph e relation helper restano owner
+  separati.
 - `/api/health` non esegue piu' probe Docker nel percorso watchdog: lo stato
   contained-computer letto dall'health handler arriva dal coordinator in memoria,
   mentre le verifiche Docker restano negli owner setup/browser dedicati.
