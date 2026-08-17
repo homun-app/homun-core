@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-17 (project access owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-17 (skill routes owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/gateway-project-access-owner` |
-| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131, #132, #133, #134, #135, #136, #137, #138 e #139 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | branch `fabio/gateway-project-access-owner` sopra `main` aggiornato a #139 |
+| Branch | `fabio/gateway-skill-routes-owner` |
+| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131, #132, #133, #134, #135, #136, #137, #138, #139 e #140 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | branch `fabio/gateway-skill-routes-owner` sopra `main` aggiornato a #140 |
 
 ## Dove siamo
 
@@ -134,6 +134,9 @@ Slice Runtime V2 recenti:
 - Estrazione locale `gateway_project_access`: grant accesso progetto,
   persistenza `project-access`, route access/upsert/remove e resolver policy
   condiviso da channels/automazioni escono dal monolite `main.rs`.
+- Estrazione locale `gateway_skill_routes`: route skills locali, enable/disable,
+  catalogo ClawHub, preview/install e registry GitHub escono dal monolite
+  `main.rs`; scanner/catalog/security engine e seed default restano separati.
 
 ## Invarianti ora protetti
 
@@ -334,10 +337,17 @@ Slice browser/projection successive:
   verde; contract `python3 scripts/check_gateway_main_contract.py`,
   `cargo fmt --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
   `git diff --check` e `python3 scripts/kernel_regression_gate.py` verdi.
-- Slice locale `gateway_project_access` in verifica sul branch
+- Slice locale `gateway_project_access` verificata sul branch
   `fabio/gateway-project-access-owner`: nuovo owner per grant accesso progetto,
   persistenza, route access/upsert/remove e resolver policy condiviso da
-  channels/automazioni.
+  channels/automazioni; owner-level
+  `cargo test -p local-first-desktop-gateway project_access -- --nocapture`
+  verde; contract `python3 scripts/check_gateway_main_contract.py`,
+  `cargo fmt --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+  `git diff --check` e `python3 scripts/kernel_regression_gate.py` verdi.
+- Slice locale `gateway_skill_routes` in verifica sul branch
+  `fabio/gateway-skill-routes-owner`: nuovo owner per route skills locali,
+  enable/disable, catalogo ClawHub, preview/install e registry GitHub.
 
 ## PR / CI
 
@@ -405,16 +415,18 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/138`.
 - #139 `Extract gateway update routes owner`:
   `https://github.com/homun-app/homun-core/pull/139`.
+- #140 `Extract gateway project access owner`:
+  `https://github.com/homun-app/homun-core/pull/140`.
 
 PR aperte:
 
 - Nessuna PR aperta per la slice corrente; prossimo passo: aprire
-  `fabio/gateway-project-access-owner`.
+  `fabio/gateway-skill-routes-owner`.
 
 Branch corrente:
 
-- `fabio/gateway-project-access-owner`: branch sopra `main` aggiornato a #139;
-  contiene solo la slice `gateway_project_access`.
+- `fabio/gateway-skill-routes-owner`: branch sopra `main` aggiornato a #140;
+  contiene solo la slice `gateway_skill_routes`.
 - `fabio/write-tool-allowlist-contracts`: branch locale cumulativa rebased su
   `main`, da usare solo come parcheggio per separare le prossime slice
   successive.
@@ -441,8 +453,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Verificare e aprire PR piccola per `gateway_project_access`.
-2. Dopo merge project access, aggiornare `main` e riprendere la prossima slice non-browser
+1. Verificare e aprire PR piccola per `gateway_skill_routes`.
+2. Dopo merge skill routes, aggiornare `main` e riprendere la prossima slice non-browser
    solo dopo nuova lettura owner-level di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.

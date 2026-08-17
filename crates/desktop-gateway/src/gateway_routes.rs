@@ -23,6 +23,10 @@ use crate::gateway_chat_threads::{
 use crate::gateway_project_access::{
     project_access_list, project_access_remove, project_access_upsert,
 };
+use crate::gateway_skill_routes::{
+    install_catalog_skill, install_registry_skill, list_skills, preview_catalog_skill,
+    registry_skills, set_skill_enabled, skill_catalog, skill_catalog_refresh, skill_detail,
+};
 use crate::gateway_tags::{
     tags_all_assignments, tags_assign, tags_create, tags_delete, tags_entities,
     tags_for_entity_handler, tags_list, tags_rename, tags_set_color, tags_unassign,
