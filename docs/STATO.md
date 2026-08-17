@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-17 (workspace owner in estrazione locale).**
+> **Ultimo aggiornamento: 2026-08-17 (MemoryBench owner in estrazione locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/gateway-workspaces-owner` |
-| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131, #132, #133, #134, #135, #136, #137, #138, #139, #140, #141, #142 e #143 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | branch `fabio/gateway-workspaces-owner` sopra `main` aggiornato a #143 |
+| Branch | `fabio/gateway-memory-bench-owner` |
+| PR | #108-#116, #118, #119, #120, #121, #122, #123, #124, #125, #126, #127, #128, #129, #130, #131, #132, #133, #134, #135, #136, #137, #138, #139, #140, #141, #142, #143 e #144 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | branch `fabio/gateway-memory-bench-owner` sopra `main` aggiornato a #144 |
 
 ## Dove siamo
 
@@ -148,6 +148,10 @@ Slice Runtime V2 recenti:
 - Estrazione locale `gateway_workspaces`: registry `workspaces.json`,
   CRUD/policy workspace, selezione workspace attivo a boot e purge retry-safe
   su delete escono dal monolite `main.rs`.
+- Estrazione locale `gateway_memory_bench`: adapter HTTP opt-in MemoryBench,
+  DTO benchmark, materializzazione workspace benchmark, ingest governato,
+  status e search escono dal monolite `main.rs`; dashboard/export memory e
+  registry workspace generale restano separati.
 
 ## Invarianti ora protetti
 
@@ -267,6 +271,12 @@ Slice browser/projection successive:
   `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`
   e `python3 scripts/kernel_regression_gate.py` verde con voce
   `gateway workspaces`.
+- Slice `fabio/gateway-memory-bench-owner` verificata localmente con:
+  `cargo fmt --check`, `python3 scripts/check_gateway_main_contract.py`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway memorybench`,
+  `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`
+  e `python3 scripts/kernel_regression_gate.py` verde con voce
+  `gateway memory bench`.
 - Slice `fabio/capability-registry-contracts` verificata localmente: RED del contract
   `check_gateway_main_contract.py` osservato prima dell'estrazione; GREEN
   mirati con `python3 scripts/check_gateway_main_contract.py`,
