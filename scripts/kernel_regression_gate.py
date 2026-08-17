@@ -590,6 +590,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway workspaces",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "workspace",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway skill routes",
             [
                 "cargo",
