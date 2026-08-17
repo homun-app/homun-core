@@ -1,5 +1,13 @@
 use std::{fs, path::Path};
 
+/// True if a candidate path stays inside `root` after canonicalization.
+pub(crate) fn path_within(root: &Path, candidate: &Path) -> bool {
+    match (root.canonicalize(), candidate.canonicalize()) {
+        (Ok(r), Ok(c)) => c.starts_with(&r),
+        _ => false,
+    }
+}
+
 /// Make every top-level file in the data directory owner-only (0600). The
 /// personal stores are plaintext on disk; world-readable files would expose
 /// memory, contacts and messages to another local user or casual backups.
@@ -58,6 +66,28 @@ pub(crate) fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), std::i
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn path_within_rejects_parent_traversal() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "gateway-file-security-test-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let inside = temp_dir.join("inside.txt");
+        let outside = temp_dir.with_file_name(format!(
+            "gateway-file-security-outside-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::write(&inside, b"inside").unwrap();
+        fs::write(&outside, b"outside").unwrap();
+
+        assert!(path_within(&temp_dir, &inside));
+        assert!(!path_within(&temp_dir, &outside));
+
+        let _ = fs::remove_file(outside);
+        let _ = fs::remove_dir_all(temp_dir);
+    }
 
     #[cfg(unix)]
     #[test]
