@@ -1,4 +1,7 @@
 // Tool schemas and handlers for long-term memory recall, decisions, and forgetting.
+use axum::{Json, extract::State};
+use serde::Deserialize;
+
 use crate::gateway_memory_graph_maintenance::reconcile_memory_scope;
 use crate::gateway_memory_wiki::rebuild_decisions_wiki;
 use crate::*;
@@ -337,6 +340,96 @@ pub(crate) fn forget_memory(state: &AppState, args: &serde_json::Value) -> Strin
             .join("\n");
         format!("🗑️ I forgot {} item(s) from memory:\n{list}", deleted.len())
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct MemoryDecideRequest {
+    reference: String,
+    /// "confirm" | "reject" | "delete" | "edit"
+    action: String,
+    /// New text for the "edit" action.
+    #[serde(default)]
+    text: Option<String>,
+}
+
+/// Confirm / reject / delete a single memory by ref (M5 management actions). The
+/// lifecycle scope is taken from the ref itself so personal + project both work.
+pub(crate) async fn memory_decide(
+    State(state): State<AppState>,
+    Json(request): Json<MemoryDecideRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let reference = request
+        .reference
+        .parse::<MemoryRef>()
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "memory_bad_ref",
+            message: error,
+        })?;
+    let facade = memory_facade(&state);
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "desktop-ui".to_string(),
+        user_id: reference.user_id.clone(),
+        workspace_id: reference.workspace_id.clone(),
+        purpose: "memory_management".to_string(),
+    };
+    match request.action.as_str() {
+        "confirm" => {
+            facade
+                .confirm_memory(&lifecycle, &reference, "user confirmed")
+                .map_err(|error| GatewayError::memory(error.to_string()))?;
+        }
+        "reject" => {
+            facade
+                .reject_memory(&lifecycle, &reference, "user rejected")
+                .map_err(|error| GatewayError::memory(error.to_string()))?;
+        }
+        "delete" => {
+            if reference.kind == MemoryRefKind::Entity {
+                facade
+                    .tombstone_entity(
+                        &reference,
+                        &reference.user_id,
+                        &reference.workspace_id,
+                        "user deleted",
+                    )
+                    .map_err(|error| GatewayError::memory(error.to_string()))?;
+            } else {
+                facade
+                    .delete_memory(&lifecycle, &reference, "user deleted")
+                    .map_err(|error| GatewayError::memory(error.to_string()))?;
+            }
+        }
+        "edit" => {
+            let text = request.text.unwrap_or_default();
+            if text.trim().is_empty() {
+                return Err(GatewayError {
+                    status: StatusCode::BAD_REQUEST,
+                    code: "memory_empty_text",
+                    message: "empty text".to_string(),
+                });
+            }
+            let patch = MemoryUpdatePatch {
+                text: Some(text),
+                ..Default::default()
+            };
+            facade
+                .update_memory(&lifecycle, &reference, patch)
+                .map_err(|error| GatewayError::memory(error.to_string()))?;
+        }
+        _ => {
+            return Err(GatewayError {
+                status: StatusCode::BAD_REQUEST,
+                code: "memory_bad_action",
+                message: "invalid action (confirm|reject|delete)".to_string(),
+            });
+        }
+    }
+    // G5: a deletion can orphan entities and leave dangling edges - re-optimize
+    // the graph of the touched scope. ADR 0027: no facade lock; the store is
+    // internally serialized, so the re-optimize sweep needs no explicit release.
+    reconcile_memory_scope(&state, &reference.workspace_id);
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 #[cfg(test)]
