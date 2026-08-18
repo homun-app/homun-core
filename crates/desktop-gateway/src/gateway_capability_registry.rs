@@ -4,8 +4,132 @@
 //! connector toolkit search, and best-effort connected-tool pre-retrieval. Keep
 //! these contracts here so `main.rs` only materializes the per-turn corpus.
 
+use crate::GatewayError;
 use crate::gateway_identity::gateway_user_id;
 use crate::gateway_memory_dedup::cosine;
+use local_first_capabilities::{
+    CachedCapabilityTool, CapabilityConnectionConfig, CapabilityRegistryStore, PolicyContext,
+    UserId as CapabilityUserId, WorkspaceId as CapabilityWorkspaceId,
+};
+use serde::Serialize;
+use serde_json::Value;
+
+#[derive(Debug, Serialize)]
+pub(crate) struct CapabilityConnectionResponse {
+    id: String,
+    provider_id: String,
+    display_name: String,
+    status: String,
+    privacy_domains: Vec<String>,
+    metadata: Value,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct CapabilityToolResponse {
+    provider_id: String,
+    name: String,
+    provider_kind: String,
+    action: String,
+    description: String,
+    privacy_domains: Vec<String>,
+    sensitivity: String,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct CapabilityPolicyResponse {
+    enabled_providers: Vec<String>,
+    allow_managed_cloud: bool,
+    privacy_domains: Vec<String>,
+    max_autonomy_level: u8,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct CapabilitySnapshotResponse {
+    connections: Vec<CapabilityConnectionResponse>,
+    tools: Vec<CapabilityToolResponse>,
+    policy: CapabilityPolicyResponse,
+}
+
+pub(crate) fn capability_snapshot_response(
+    registry: &CapabilityRegistryStore,
+    user: &CapabilityUserId,
+    workspace: &CapabilityWorkspaceId,
+    policy: PolicyContext,
+) -> Result<CapabilitySnapshotResponse, GatewayError> {
+    let connections = registry
+        .connection_configs(user, workspace)
+        .map_err(GatewayError::capability)?
+        .into_iter()
+        .map(capability_connection_response)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut tools = Vec::new();
+    for provider in &policy.enabled_providers {
+        for cached in registry
+            .cached_tools(provider)
+            .map_err(GatewayError::capability)?
+        {
+            tools.push(capability_tool_response(cached)?);
+        }
+    }
+    tools.sort_by(|left, right| {
+        left.provider_id
+            .cmp(&right.provider_id)
+            .then(left.name.cmp(&right.name))
+    });
+
+    Ok(CapabilitySnapshotResponse {
+        connections,
+        tools,
+        policy: CapabilityPolicyResponse {
+            enabled_providers: policy
+                .enabled_providers
+                .into_iter()
+                .map(|provider| provider.as_str().to_string())
+                .collect(),
+            allow_managed_cloud: policy.allow_managed_cloud,
+            privacy_domains: policy.privacy_domains,
+            max_autonomy_level: policy.max_autonomy_level,
+        },
+    })
+}
+
+fn capability_connection_response(
+    config: CapabilityConnectionConfig,
+) -> Result<CapabilityConnectionResponse, GatewayError> {
+    Ok(CapabilityConnectionResponse {
+        id: config.connection_id,
+        provider_id: config.provider_id.as_str().to_string(),
+        display_name: config.display_name,
+        status: enum_label(&config.status)?,
+        privacy_domains: config.privacy_domains,
+        metadata: config.metadata,
+    })
+}
+
+fn capability_tool_response(
+    cached: CachedCapabilityTool,
+) -> Result<CapabilityToolResponse, GatewayError> {
+    Ok(CapabilityToolResponse {
+        provider_id: cached.tool.provider_id.as_str().to_string(),
+        name: cached.tool.name,
+        provider_kind: enum_label(&cached.tool.provider_kind)?,
+        action: enum_label(&cached.tool.action)?,
+        description: cached.tool.description,
+        privacy_domains: cached.tool.privacy_domains,
+        sensitivity: cached.tool.sensitivity,
+    })
+}
+
+fn enum_label(value: &impl Serialize) -> Result<String, GatewayError> {
+    serde_json::to_string(value)
+        .map(|encoded| encoded.trim_matches('"').to_string())
+        .map_err(|error| GatewayError {
+            status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            code: "enum_serialization_failed",
+            message: error.to_string(),
+        })
+}
 
 /// The discovery meta-tool: the model searches connected-service tools by intent
 /// instead of receiving all of them up front (progressive tool disclosure).
@@ -518,6 +642,96 @@ mod tests {
         let trace = capability_discovery_trace_line("calendar event", &[ranked[0].clone()])
             .expect("trace line");
         assert!(trace.contains("mcp:calendar_list"), "{trace}");
+    }
+
+    #[test]
+    fn owner_projects_capability_snapshot_read_model() {
+        use local_first_capabilities::{
+            ActionClass, CachedCapabilityTool, CapabilityConnectionConfig,
+            CapabilityProviderConfig, CapabilityProviderGrant, CapabilityProviderKind,
+            CapabilityRegistryStore, ProviderId, UserId, WorkspaceId,
+        };
+
+        let registry = CapabilityRegistryStore::open_in_memory().expect("capability registry");
+        let provider = ProviderId::new("github");
+        let user = UserId::new("user_1");
+        let workspace = WorkspaceId::new("workspace_1");
+
+        registry
+            .upsert_provider_config(&CapabilityProviderConfig::new(
+                provider.clone(),
+                CapabilityProviderKind::Native,
+                "GitHub".to_string(),
+                true,
+            ))
+            .expect("provider config");
+        registry
+            .upsert_provider_grant(
+                &CapabilityProviderGrant::new(provider.clone(), user.clone(), workspace.clone())
+                    .with_allow_managed_cloud(true)
+                    .with_privacy_domains(vec!["work".to_string()])
+                    .with_allowed_actions(vec![
+                        ActionClass::Read,
+                        ActionClass::WriteWithConfirmation,
+                    ])
+                    .with_max_autonomy_level(2),
+            )
+            .expect("provider grant");
+        registry
+            .upsert_connection_config(
+                &CapabilityConnectionConfig::new(
+                    "github-local",
+                    provider.clone(),
+                    user.clone(),
+                    workspace.clone(),
+                    "GitHub",
+                    "secret-ref",
+                )
+                .with_privacy_domains(vec!["work".to_string()])
+                .with_metadata(serde_json::json!({"data_boundary": "managed_cloud"})),
+            )
+            .expect("connection config");
+
+        for (name, action) in [
+            ("github.zeta", ActionClass::WriteWithConfirmation),
+            ("github.alpha", ActionClass::Read),
+        ] {
+            registry
+                .upsert_cached_tool(&CachedCapabilityTool::new(
+                    provider.clone(),
+                    name,
+                    CapabilityProviderKind::Native,
+                    action,
+                    format!("Tool {name}"),
+                    vec!["work".to_string()],
+                    "private",
+                    serde_json::json!({"type": "object"}),
+                ))
+                .expect("cached tool");
+        }
+
+        let policy = registry
+            .policy_context(&user, &workspace)
+            .expect("policy context");
+        let snapshot =
+            capability_snapshot_response(&registry, &user, &workspace, policy).expect("snapshot");
+
+        assert_eq!(snapshot.connections.len(), 1);
+        assert_eq!(snapshot.connections[0].id, "github-local");
+        assert_eq!(snapshot.connections[0].status, "active");
+        assert_eq!(snapshot.policy.enabled_providers, vec!["github"]);
+        assert!(snapshot.policy.allow_managed_cloud);
+        assert_eq!(snapshot.policy.max_autonomy_level, 2);
+        assert_eq!(
+            snapshot
+                .tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["github.alpha", "github.zeta"]
+        );
+        assert_eq!(snapshot.tools[0].provider_kind, "native");
+        assert_eq!(snapshot.tools[1].action, "write_with_confirmation");
     }
 
     #[test]

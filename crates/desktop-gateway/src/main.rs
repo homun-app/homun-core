@@ -295,9 +295,10 @@ pub(crate) use gateway_browser_tools::{
     manager_browser_max_elapsed_ms,
 };
 pub(crate) use gateway_capability_registry::{
-    CapabilityCorpusMaterializationInput, CapabilityEntry, CapabilitySource,
-    auto_retrieve_composio, bm25_rank, cap_tokenize, capability_discovery_trace_line,
-    capability_source_label, find_capability_tool_schema, materialize_capability_corpus,
+    CapabilityCorpusMaterializationInput, CapabilityEntry, CapabilitySnapshotResponse,
+    CapabilitySource, auto_retrieve_composio, bm25_rank, cap_tokenize,
+    capability_discovery_trace_line, capability_snapshot_response, capability_source_label,
+    find_capability_tool_schema, materialize_capability_corpus,
     search_connector_capability_entries, suggest_capabilities_tool_schema,
 };
 #[cfg(test)]
@@ -516,8 +517,7 @@ use local_first_capabilities::{
     CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, CapabilityResult,
     CapabilityTaskPayload, CapabilityTool, InMemoryCapabilityAudit, McpCapabilityProvider,
     McpToolPolicy, PluginRegistryEntry, PluginRegistryIndex, PolicyContext,
-    ProviderId as CapabilityProviderId, UserId as CapabilityUserId, WorkflowRoutingRegistry,
-    WorkspaceId as CapabilityWorkspaceId,
+    ProviderId as CapabilityProviderId, WorkflowRoutingRegistry,
 };
 use local_first_desktop_gateway::browser_checkpoint::BrowserCheckpointSecretStore;
 use local_first_desktop_gateway::integrity_api::{
@@ -1273,42 +1273,6 @@ struct ComputerArtifactPreviewResponse {
     kind: String,
     size_bytes: u64,
     data_url: String,
-}
-
-#[derive(Debug, Serialize)]
-struct CapabilityConnectionResponse {
-    id: String,
-    provider_id: String,
-    display_name: String,
-    status: String,
-    privacy_domains: Vec<String>,
-    metadata: Value,
-}
-
-#[derive(Debug, Serialize)]
-struct CapabilityToolResponse {
-    provider_id: String,
-    name: String,
-    provider_kind: String,
-    action: String,
-    description: String,
-    privacy_domains: Vec<String>,
-    sensitivity: String,
-}
-
-#[derive(Debug, Serialize)]
-struct CapabilityPolicyResponse {
-    enabled_providers: Vec<String>,
-    allow_managed_cloud: bool,
-    privacy_domains: Vec<String>,
-    max_autonomy_level: u8,
-}
-
-#[derive(Debug, Serialize)]
-struct CapabilitySnapshotResponse {
-    connections: Vec<CapabilityConnectionResponse>,
-    tools: Vec<CapabilityToolResponse>,
-    policy: CapabilityPolicyResponse,
 }
 
 #[derive(Debug, Serialize)]
@@ -17411,77 +17375,6 @@ fn task_effective_goal(task: &TaskRecord) -> String {
         .to_string()
 }
 
-fn capability_snapshot_response(
-    registry: &CapabilityRegistryStore,
-    user: &CapabilityUserId,
-    workspace: &CapabilityWorkspaceId,
-    policy: PolicyContext,
-) -> Result<CapabilitySnapshotResponse, GatewayError> {
-    let connections = registry
-        .connection_configs(user, workspace)
-        .map_err(GatewayError::capability)?
-        .into_iter()
-        .map(capability_connection_response)
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let mut tools = Vec::new();
-    for provider in &policy.enabled_providers {
-        for cached in registry
-            .cached_tools(provider)
-            .map_err(GatewayError::capability)?
-        {
-            tools.push(capability_tool_response(cached)?);
-        }
-    }
-    tools.sort_by(|left, right| {
-        left.provider_id
-            .cmp(&right.provider_id)
-            .then(left.name.cmp(&right.name))
-    });
-
-    Ok(CapabilitySnapshotResponse {
-        connections,
-        tools,
-        policy: CapabilityPolicyResponse {
-            enabled_providers: policy
-                .enabled_providers
-                .into_iter()
-                .map(|provider| provider.as_str().to_string())
-                .collect(),
-            allow_managed_cloud: policy.allow_managed_cloud,
-            privacy_domains: policy.privacy_domains,
-            max_autonomy_level: policy.max_autonomy_level,
-        },
-    })
-}
-
-fn capability_connection_response(
-    config: CapabilityConnectionConfig,
-) -> Result<CapabilityConnectionResponse, GatewayError> {
-    Ok(CapabilityConnectionResponse {
-        id: config.connection_id,
-        provider_id: config.provider_id.as_str().to_string(),
-        display_name: config.display_name,
-        status: enum_label(&config.status)?,
-        privacy_domains: config.privacy_domains,
-        metadata: config.metadata,
-    })
-}
-
-fn capability_tool_response(
-    cached: CachedCapabilityTool,
-) -> Result<CapabilityToolResponse, GatewayError> {
-    Ok(CapabilityToolResponse {
-        provider_id: cached.tool.provider_id.as_str().to_string(),
-        name: cached.tool.name,
-        provider_kind: enum_label(&cached.tool.provider_kind)?,
-        action: enum_label(&cached.tool.action)?,
-        description: cached.tool.description,
-        privacy_domains: cached.tool.privacy_domains,
-        sensitivity: cached.tool.sensitivity,
-    })
-}
-
 fn open_seeded_capability_registry() -> Result<CapabilityRegistryStore, std::io::Error> {
     let registry = CapabilityRegistryStore::open(gateway_capability_database_path()?)
         .map_err(|error| std::io::Error::other(error.to_string()))?;
@@ -17596,22 +17489,6 @@ fn browser_registry_cached_tools() -> Vec<CachedCapabilityTool> {
         ))
     })
     .collect()
-}
-
-fn enum_label(value: &impl Serialize) -> Result<String, GatewayError> {
-    serde_json::to_value(value)
-        .map_err(|error| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "enum_serialize_failed",
-            message: error.to_string(),
-        })?
-        .as_str()
-        .map(str::to_string)
-        .ok_or_else(|| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "enum_serialize_failed",
-            message: "enum did not serialize to string".to_string(),
-        })
 }
 
 fn resource_class_label(resource: ResourceClass) -> &'static str {

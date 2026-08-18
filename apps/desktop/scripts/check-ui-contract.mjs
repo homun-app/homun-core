@@ -416,6 +416,31 @@ assertRepoContains(
   "Gateway capability routing must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_capability_registry.rs",
+  "pub(crate) struct CapabilitySnapshotResponse",
+  "Gateway capability snapshot DTOs must live with the capability registry owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_capability_registry.rs",
+  "pub(crate) fn capability_snapshot_response",
+  "Gateway capability snapshot read model must live with the capability registry owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_capability_registry.rs",
+  "owner_projects_capability_snapshot_read_model",
+  "Gateway capability snapshot owner must have a read-model smoke test",
+);
+assertRepoNotContains(
+  "crates/desktop-gateway/src/main.rs",
+  "struct CapabilitySnapshotResponse",
+  "Gateway main must not own capability snapshot DTOs",
+);
+assertRepoNotContains(
+  "crates/desktop-gateway/src/main.rs",
+  "fn capability_snapshot_response(",
+  "Gateway main must not own capability snapshot read-model mapping",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway model routes"',
   "Kernel regression gate must run the gateway model routes owner test",

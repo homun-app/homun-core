@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (task executor read model owner verificato localmente).**
+> **Ultimo aggiornamento: 2026-08-18 (capability snapshot read model owner verificato localmente).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/gateway-task-executor-read-model-owner` |
-| PR | #108-#116, #118-#160 mergeate in `main`; #117 browser draft separata; slice task executor read model verificata localmente |
-| HEAD codice verificato | branch `fabio/gateway-task-executor-read-model-owner` sopra `main` aggiornato a #160 |
+| Branch | `fabio/capability-snapshot-read-model-owner` |
+| PR | #108-#116, #118-#161 mergeate in `main`; #117 browser draft separata; slice capability snapshot read model verificata localmente |
+| HEAD codice verificato | branch `fabio/capability-snapshot-read-model-owner` sopra `main` aggiornato a #161 |
 
 ## Dove siamo
 
@@ -427,6 +427,18 @@ Slice browser/projection successive:
   `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway queue_hides_internal_subtasks_and_humanizes_kinds -- --nocapture`,
   `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway uncertain_effect_projection_is_bounded_and_metadata_only -- --nocapture`,
   `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway task_queue_scope_retains_only_matching_uncertain_effects -- --nocapture`,
+  `cd apps/desktop && npm run test:ui-contract`,
+  `python3 scripts/kernel_regression_gate.py` e
+  `python3 scripts/pre_release_gate.py`.
+- Slice `fabio/capability-snapshot-read-model-owner` verificata localmente:
+  DTO e mapping dello snapshot `/api/capabilities/snapshot` spostati da
+  `main.rs` a `gateway_capability_registry`; la route HTTP resta thin adapter e
+  il registry capability diventa l'unico owner della projection connections/tool
+  usata dalla UI. Verifiche verdi: `cargo fmt --check`,
+  `python3 scripts/check_gateway_main_contract.py`,
+  `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_capability_registry -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_task_executor -- --nocapture`,
   `cd apps/desktop && npm run test:ui-contract`,
   `python3 scripts/kernel_regression_gate.py` e
   `python3 scripts/pre_release_gate.py`.

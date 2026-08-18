@@ -591,6 +591,22 @@ pub(crate) fn humanize_task_kind(kind: &str) -> String {
     }
 }
 
+fn enum_label(value: &impl Serialize) -> Result<String, GatewayError> {
+    serde_json::to_value(value)
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "task_executor_enum_serialize_failed",
+            message: error.to_string(),
+        })?
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "task_executor_enum_serialize_failed",
+            message: "enum did not serialize to string".to_string(),
+        })
+}
+
 pub(crate) fn task_item_response(item: TaskUiItem) -> Result<TaskItemResponse, GatewayError> {
     Ok(TaskItemResponse {
         task_id: item.task_id.as_str().to_string(),
