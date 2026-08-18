@@ -43,6 +43,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_chat_markers.rs` | Rimozione marker app-only prima della consegna plain text. |
 | `crates/desktop-gateway/src/gateway_browser_tools.rs` | Schemi e parsing tool browser, `browser_done`, outcome hints e stale-ref recovery policy. |
 | `crates/desktop-gateway/src/gateway_browser_runtime.rs` | Sidecar browser, checkpoint save/restore, sessioni warm, reaper e activity runtime. |
+| `crates/desktop-gateway/src/gateway_capability_routing.rs` | Definizioni native workflow/atomic, registry semantico, decisione semantica turn/steering, binding deterministico plugin, forced tool e pruning tool per route; non possiede corpus discovery generico, dispatch tool o payload modello. |
 | `crates/desktop-gateway/src/gateway_mcp_chat_tools.rs` | Naming/parse tool MCP chat e catalogo schema cached. |
 | `crates/desktop-gateway/src/gateway_mcp_runtime.rs` | Transport MCP stdio/http, metadata connect/execution, secret header migration, discovery/cache e `run_mcp_chat_tool`. |
 | `crates/desktop-gateway/src/gateway_mcp_connections.rs` | DTO/route MCP per connect, registry search, connected list e disconnect; non possiede execute. |
