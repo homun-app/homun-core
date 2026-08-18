@@ -264,6 +264,43 @@ fn task_executor_surface_has_one_gateway_owner() {
 }
 
 #[test]
+fn runtime_plan_state_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let plan_state = production_source(&root.join("src/gateway_runtime_plan_state.rs"));
+
+    let owned = [
+        "fn plan_steps_reconciled_on_delivery(",
+        "fn runtime_plan_thread_key(",
+        "fn runtime_plan_control_scope(",
+        "fn runtime_plan_memory_text(",
+        "fn runtime_plan_memory_metadata(",
+        "fn canonical_plan_value(",
+        "fn plan_value_from(",
+        "fn runtime_execution_plan(",
+        "fn execution_plan_steps(",
+        "fn merge_execution_plan(",
+        "fn runtime_plan_record_from_state(",
+        "fn record_runtime_plan_step_outcome_from_state(",
+        "fn upsert_runtime_plan_memory_from_state(",
+        "fn merge_plan(",
+        "fn plan_tool_sent(",
+        "pub(crate) struct GatewayPlanProgress",
+    ];
+
+    for pattern in owned {
+        assert!(
+            plan_state.contains(pattern),
+            "runtime plan state owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain runtime plan state surface {pattern}"
+        );
+    }
+}
+
+#[test]
 fn startup_background_writers_follow_process_fencing() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
