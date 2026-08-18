@@ -1369,6 +1369,36 @@ pub(crate) async fn compact_for_context_budget(
     true
 }
 
+/// The gateway's `ContextCompactor` port wraps the two harness-driven compaction
+/// paths: completed-step compaction and token-budget compaction. The chat loop
+/// constructs it live, but model-visible context policy stays in this owner.
+pub(crate) struct GatewayContextCompactor {
+    pub(crate) state: AppState,
+    pub(crate) thread_id: Option<String>,
+}
+
+impl local_first_engine::ContextCompactor for GatewayContextCompactor {
+    async fn compact(&self, messages: &mut Vec<serde_json::Value>, start: &mut usize) -> bool {
+        compact_completed_step(&self.state.http, messages, start).await
+    }
+
+    async fn compact_for_budget(
+        &self,
+        messages: &mut Vec<serde_json::Value>,
+        context_window: Option<usize>,
+        memory_reads: &local_first_engine::events::TurnMemoryReadSet,
+    ) -> bool {
+        compact_for_context_budget(
+            &self.state,
+            messages,
+            context_window,
+            self.thread_id.as_deref(),
+            memory_reads,
+        )
+        .await
+    }
+}
+
 /// Whether the active orchestrator provider runs locally (loopback base_url).
 /// Mirrors the locality derivation in `build_router_from` (main.rs ~20438).
 pub(crate) fn orchestrator_is_local() -> bool {

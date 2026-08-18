@@ -948,6 +948,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn parse_ollama_capabilities(": "Ollama capability parsing must stay in gateway_model_routing",
         "fn resolve_context_budget_chars(": "model context budget resolution must stay in gateway_model_routing",
         "async fn compact_for_context_budget(": "model-visible context compaction must stay in gateway_model_routing",
+        "struct GatewayContextCompactor": "context compactor port must stay in gateway_model_routing",
         "fn zai_thinking_enabled(": "Z.ai thinking policy must stay in gateway_model_routing",
         "struct RoutingDecision ": "routing decision log DTO must stay in gateway_model_routing",
         "fn log_routing_decision(": "routing decision log writer must stay in gateway_model_routing",
@@ -1422,6 +1423,11 @@ def main() -> int:
         model_routing_source,
         "pub(crate) struct RoutingDecision",
         "model routing owner must expose routing decision log DTO",
+    )
+    assert_contains(
+        model_routing_source,
+        "pub(crate) struct GatewayContextCompactor",
+        "model routing owner must expose context compactor port",
     )
     assert_contains(
         model_routing_source,

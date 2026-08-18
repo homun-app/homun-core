@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (gateway brain runtime locale).**
+> **Ultimo aggiornamento: 2026-08-18 (gateway context compactor locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-brain-runtime-owner` |
-| Branch | `fabio/gateway-brain-runtime-owner` |
-| PR | #108-#116, #118-#181 mergeate in `main`; #117 browser draft separata; slice `gateway_brain_runtime` locale non ancora in PR |
-| HEAD codice verificato | branch `fabio/gateway-brain-runtime-owner` sopra `main` aggiornato a #181 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-context-compactor-owner` |
+| Branch | `fabio/gateway-context-compactor-owner` |
+| PR | #108-#116, #118-#182 mergeate in `main`; #117 browser draft separata; slice `gateway_context_compactor` locale non ancora in PR |
+| HEAD codice verificato | branch `fabio/gateway-context-compactor-owner` sopra `main` aggiornato a #182 |
 
 ## Dove siamo
 
@@ -195,10 +195,14 @@ Slice Runtime V2 recenti:
   core/workspace/project/thread/runtime escono dal monolite `main.rs`; prompt
   instructions, policy memoria, runtime plan, routing decision e loop agente
   restano owner separati.
-- Slice corrente `gateway_brain_runtime`: flag di abilitazione Brain, adapter
+- Estrazione mergeata `gateway_brain_runtime`: flag di abilitazione Brain, adapter
   `GatewayBrainMemory` e budget orchestrator scalati sul context window escono
   dal monolite `main.rs`; materializzazione durable dei task, capability facade,
   routing workflow e loop agente restano owner separati.
+- Slice corrente `gateway_context_compactor`: adapter port `GatewayContextCompactor`
+  esce dal monolite `main.rs` e vive nell'owner `gateway_model_routing`, accanto
+  alle policy di compaction visibili al modello; `GatewayTurnPolicy`,
+  `GatewayTurnCompletionJudge` e il loop agente restano owner separati.
 - Estrazione locale `gateway_memory_publications`: route memory publication
   create/get/edit/approve/reject, DTO request, mapping errori facade e
   validazione owned-scope escono dal monolite `main.rs`; source grant
@@ -790,9 +794,9 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Completare gate, commit e PR piccola per `gateway_brain_runtime`.
-2. Dopo merge gateway brain runtime, aggiornare `main` e riprendere la prossima
-   slice non-browser solo dopo nuova lettura owner-level di `main.rs`.
+1. Completare gate, commit e PR piccola per `gateway_context_compactor`.
+2. Dopo merge gateway context compactor, aggiornare `main` e riprendere la
+   prossima slice non-browser solo dopo nuova lettura owner-level di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -800,8 +804,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/gateway-brain-runtime-owner se la slice brain runtime e' ancora da aprire o e' aperta;
-altrimenti main aggiornato a #181/#successive e scegli la prossima slice non-browser owner-level.
+branch fabio/gateway-context-compactor-owner se la slice context compactor e' ancora da aprire o e' aperta;
+altrimenti main aggiornato a #182/#successive e scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
