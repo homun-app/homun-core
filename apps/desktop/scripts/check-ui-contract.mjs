@@ -440,6 +440,21 @@ assertRepoContains(
   "owner_seeds_browser_provider_with_chat_browser_tools",
   "Gateway capability registry bootstrap must have owner-level coverage",
 );
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_browser_runtime.rs",
+  "pub(crate) struct ComputerArtifactPreviewResponse",
+  "Gateway local computer preview DTO must live with the browser runtime owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_browser_runtime.rs",
+  "pub(crate) async fn local_computer_session",
+  "Gateway local computer session route must live with the browser runtime owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_browser_runtime.rs",
+  "owner_projects_local_computer_artifact_preview",
+  "Gateway local computer preview owner must have read-model coverage",
+);
 assertRepoNotContains(
   "crates/desktop-gateway/src/main.rs",
   "struct CapabilitySnapshotResponse",
@@ -459,6 +474,21 @@ assertRepoNotContains(
   "crates/desktop-gateway/src/main.rs",
   "fn browser_registry_cached_tools(",
   "Gateway main must not own browser capability seed tools",
+);
+assertRepoNotContains(
+  "crates/desktop-gateway/src/main.rs",
+  "struct ComputerArtifactPreviewResponse",
+  "Gateway main must not own local computer preview DTOs",
+);
+assertRepoNotContains(
+  "crates/desktop-gateway/src/main.rs",
+  "async fn local_computer_session",
+  "Gateway main must not own local computer session route",
+);
+assertRepoNotContains(
+  "crates/desktop-gateway/src/main.rs",
+  "async fn local_computer_artifact_preview",
+  "Gateway main must not own local computer artifact preview route",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",
