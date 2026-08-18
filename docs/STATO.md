@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (project graph owner verificato localmente).**
+> **Ultimo aggiornamento: 2026-08-18 (capability routing owner verificato localmente).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/gateway-project-graph-owner` |
-| PR | #108-#116, #118-#158 mergeate in `main`; #117 browser draft separata; slice project graph/integrity verificata localmente |
-| HEAD codice verificato | branch `fabio/gateway-project-graph-owner` sopra `main` aggiornato a #158, kernel/pre-release gate verdi |
+| Branch | `fabio/gateway-capability-routing-owner` |
+| PR | #108-#116, #118-#159 mergeate in `main`; #117 browser draft separata; slice capability routing verificata localmente |
+| HEAD codice verificato | branch `fabio/gateway-capability-routing-owner` sopra `main` aggiornato a #159, kernel/pre-release gate verdi |
 
 ## Dove siamo
 
@@ -395,6 +395,22 @@ Slice browser/projection successive:
   `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway project_graph -- --nocapture`,
   `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway project_change_fingerprint -- --nocapture`,
   `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway integrity_ -- --nocapture`,
+  `cd apps/desktop && npm run test:ui-contract`,
+  `python3 scripts/kernel_regression_gate.py` e
+  `python3 scripts/pre_release_gate.py`.
+- Slice `fabio/gateway-capability-routing-owner` verificata localmente:
+  definizioni native workflow/atomic, registry semantico, decisione semantica
+  turn/steering, binding deterministico plugin, forced tool e pruning per route
+  spostati in `gateway_capability_routing`; `gateway_capability_registry` resta
+  owner del corpus discovery generico e `gateway_tool_execution` resta owner del
+  dispatch tool. Gate verdi: `cargo fmt --check`,
+  `python3 scripts/check_gateway_main_contract.py`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_capability_routing -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway semantic_decision -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway workflow_route -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway forced_tool_for_turn -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway native_atomic -- --nocapture`,
+  `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
   `cd apps/desktop && npm run test:ui-contract`,
   `python3 scripts/kernel_regression_gate.py` e
   `python3 scripts/pre_release_gate.py`.
