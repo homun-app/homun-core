@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (image generation owner in verifica locale).**
+> **Ultimo aggiornamento: 2026-08-18 (task executor config constants in verifica locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-image-generation-owner` |
-| Branch | `fabio/gateway-image-generation-owner` |
-| PR | #108-#116, #118-#172 mergeate in `main`; #117 browser draft separata; slice image generation in verifica locale |
-| HEAD codice verificato | branch `fabio/gateway-image-generation-owner` sopra `main` aggiornato a #172 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-task-executor-config-constants` |
+| Branch | `fabio/gateway-task-executor-config-constants` |
+| PR | #108-#116, #118-#173 mergeate in `main`; #117 browser draft separata; slice task executor config constants in verifica locale |
+| HEAD codice verificato | branch `fabio/gateway-task-executor-config-constants` sopra `main` aggiornato a #173 |
 
 ## Dove siamo
 
@@ -134,11 +134,15 @@ Slice Runtime V2 recenti:
   `successful:false` Composio escono dal monolite `main.rs`; dispatch execute,
   confirmation card, payment approval, remote approval e browser restano owner
   separati.
-- Slice corrente `gateway_image_generation`: config provider OpenAI-compatible
+- Estrazione mergeata `gateway_image_generation`: config provider OpenAI-compatible
   per image generation, env/default locali, timeout immagine, prompt immagini
   deck e fetch/decode PNG escono dal monolite `main.rs`; orchestrazione
   deliverable, artifact persistence, embedding, model routing testuale e browser
   restano owner separati.
+- Slice corrente `gateway_task_executor_config`: worker manuale e poll interval
+  del task executor escono dal monolite `main.rs` e si aggiungono ai worker id
+  stabili e alla configurazione env gia' posseduti dall'owner; route queue,
+  lease/acquire, execution adapter e finalizzazione task restano owner separati.
 - Estrazione locale `gateway_thread_files`: cartella collegata per thread,
   precedenza workspace attivo e route `@ file` search/read escono dal monolite
   `main.rs`; `path_within` viene portato nell'owner condiviso
@@ -702,20 +706,20 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#171: slice owner-level successive mergeate in `main`, fino a
-  `gateway_composio_routes`; `main` verificato e riallineato a #171 prima
+- #143-#173: slice owner-level successive mergeate in `main`, fino a
+  `gateway_image_generation`; `main` verificato e riallineato a #173 prima
   della slice corrente.
 
 PR aperte:
 
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
 - Nessuna PR aperta per la slice corrente; prossimo passo: completare gate e
-  aprire `fabio/gateway-image-generation-owner`.
+  aprire `fabio/gateway-task-executor-config-constants`.
 
 Branch corrente:
 
-- `fabio/gateway-image-generation-owner`: branch sopra `main` aggiornato a #172;
-  contiene solo la slice `gateway_image_generation`.
+- `fabio/gateway-task-executor-config-constants`: branch sopra `main`
+  aggiornato a #173; contiene solo la slice task executor config constants.
 - `fabio/write-tool-allowlist-contracts`: branch locale cumulativa rebased su
   `main`, da usare solo come parcheggio per separare le prossime slice
   successive.
@@ -742,8 +746,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Completare gate, commit e PR piccola per `gateway_image_generation`.
-2. Dopo merge image generation, aggiornare `main` e riprendere la prossima
+1. Completare gate, commit e PR piccola per `gateway_task_executor_config`.
+2. Dopo merge task executor config, aggiornare `main` e riprendere la prossima
    slice non-browser solo dopo nuova lettura owner-level di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.

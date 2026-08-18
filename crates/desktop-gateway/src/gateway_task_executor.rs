@@ -63,7 +63,7 @@ impl TaskExecutorStatus {
             } else {
                 gateway_task_executor_config::TASK_EXECUTOR_WORKER_ID.to_string()
             },
-            poll_interval_ms: TASK_EXECUTOR_POLL_INTERVAL_MS,
+            poll_interval_ms: gateway_task_executor_config::TASK_EXECUTOR_POLL_INTERVAL_MS,
             status: if enabled { "starting" } else { "disabled" }.to_string(),
             last_tick_at: None,
             last_task_id: None,
@@ -892,7 +892,10 @@ pub(crate) async fn run_next_task(
 ) -> Result<Json<TaskRunBatchResponse>, GatewayError> {
     let state_for_task = state.clone();
     let result = tokio::task::spawn_blocking(move || {
-        run_next_task_once(&state_for_task, TASK_EXECUTOR_MANUAL_WORKER_ID)
+        run_next_task_once(
+            &state_for_task,
+            gateway_task_executor_config::TASK_EXECUTOR_MANUAL_WORKER_ID,
+        )
     })
     .await
     .map_err(|error| GatewayError {
@@ -1656,7 +1659,7 @@ pub(crate) fn start_task_executor_worker(state: AppState) {
     eprintln!(
         "task executor: starting {count} background worker{} (poll {}ms, ResourceGovernor gates concurrency)",
         if count == 1 { "" } else { "s" },
-        TASK_EXECUTOR_POLL_INTERVAL_MS
+        gateway_task_executor_config::TASK_EXECUTOR_POLL_INTERVAL_MS
     );
     for index in 0..count {
         let worker_state = state.clone();
@@ -1664,13 +1667,15 @@ pub(crate) fn start_task_executor_worker(state: AppState) {
         // Stagger the first tick across workers so they don't all hit SQLite at
         // once on startup; the interval stays shared afterwards.
         let stagger = StdDuration::from_millis(
-            TASK_EXECUTOR_POLL_INTERVAL_MS / count.max(1) as u64 * index as u64,
+            gateway_task_executor_config::TASK_EXECUTOR_POLL_INTERVAL_MS / count.max(1) as u64
+                * index as u64,
         );
         tokio::spawn(async move {
             // Initial offset before the steady-state interval begins.
             tokio::time::sleep(stagger).await;
-            let mut interval =
-                tokio::time::interval(StdDuration::from_millis(TASK_EXECUTOR_POLL_INTERVAL_MS));
+            let mut interval = tokio::time::interval(StdDuration::from_millis(
+                gateway_task_executor_config::TASK_EXECUTOR_POLL_INTERVAL_MS,
+            ));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 interval.tick().await;
