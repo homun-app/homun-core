@@ -5,6 +5,7 @@
 //! activity state exposed to the desktop UI.
 
 use super::*;
+use base64::Engine as _;
 
 #[test]
 fn browser_runtime_owner_smoke() {
