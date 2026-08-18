@@ -281,6 +281,16 @@ assertRepoContains(
   "Gateway proactivity review engine must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_proactivity_routes.rs",
+  "pub(crate) async fn suggestions_list(",
+  "Gateway proactivity routes must have a dedicated owner",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway proactivity routes"',
+  "Kernel regression gate must run the gateway proactivity routes owner test",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_task_maintenance.rs",
   "gc_stale_tasks",
   "Gateway task maintenance must have a dedicated owner",
@@ -1260,6 +1270,10 @@ assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn improve_pr
 assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn chat_suggestions(", "chat utility routes must not live in gateway main");
 assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn autotitle_chat_thread(", "chat utility routes must not live in gateway main");
 assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn proactive_answer(", "chat utility routes must not live in gateway main");
+assertRepoContains("crates/desktop-gateway/src/gateway_proactivity_routes.rs", "fn proactive_memory_request_for_suggestion_action(", "proactive suggestion write-back must stay in the proactivity routes owner");
+assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn suggestions_list(", "proactivity routes must not live in gateway main");
+assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn suggestion_act(", "proactivity routes must not live in gateway main");
+assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn proactivity_review_now(", "proactivity routes must not live in gateway main");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "\"type\": \"thread.turn_started\"", "external turns must publish a visible-turn event after messages are persisted");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "start_visible_conversation_turn", "external channels and scheduled work must use the shared visible-turn helper");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "\"approval\"", "remote approval continuations must identify their visible-turn source");
