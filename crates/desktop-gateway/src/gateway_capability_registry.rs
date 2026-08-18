@@ -5,11 +5,21 @@
 //! these contracts here so `main.rs` only materializes the per-turn corpus.
 
 use crate::GatewayError;
-use crate::gateway_identity::gateway_user_id;
+use crate::gateway_browser_tools::{
+    browser_act_tool_schema, browser_dialog_tool_schema, browser_navigate_tool_schema,
+    browser_rehydrate_tool_schema, browser_screenshot_tool_schema, browser_snapshot_tool_schema,
+    browser_tabs_tool_schema,
+};
+use crate::gateway_identity::{
+    gateway_capability_user_id, gateway_capability_workspace_id, gateway_user_id,
+};
 use crate::gateway_memory_dedup::cosine;
+use crate::gateway_paths::gateway_capability_database_path;
 use local_first_capabilities::{
-    CachedCapabilityTool, CapabilityConnectionConfig, CapabilityRegistryStore, PolicyContext,
-    UserId as CapabilityUserId, WorkspaceId as CapabilityWorkspaceId,
+    ActionClass, CachedCapabilityTool, CapabilityConnectionConfig, CapabilityProviderConfig,
+    CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, PolicyContext,
+    ProviderId as CapabilityProviderId, UserId as CapabilityUserId,
+    WorkspaceId as CapabilityWorkspaceId,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -129,6 +139,111 @@ fn enum_label(value: &impl Serialize) -> Result<String, GatewayError> {
             code: "enum_serialization_failed",
             message: error.to_string(),
         })
+}
+
+pub(crate) fn open_seeded_capability_registry() -> Result<CapabilityRegistryStore, std::io::Error> {
+    let registry = CapabilityRegistryStore::open(gateway_capability_database_path()?)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    seed_default_capabilities(&registry)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    Ok(registry)
+}
+
+pub(crate) fn seed_default_capabilities(
+    registry: &CapabilityRegistryStore,
+) -> Result<(), local_first_capabilities::CapabilityError> {
+    let browser_provider = CapabilityProviderId::new("browser");
+    registry.upsert_provider_config(&CapabilityProviderConfig::new(
+        browser_provider.clone(),
+        CapabilityProviderKind::Browser,
+        "My browser".to_string(),
+        true,
+    ))?;
+    registry.upsert_provider_grant(
+        &CapabilityProviderGrant::new(
+            browser_provider.clone(),
+            gateway_capability_user_id(),
+            gateway_capability_workspace_id(),
+        )
+        .with_privacy_domains(vec!["browser".to_string(), "local".to_string()])
+        .with_allowed_actions(vec![ActionClass::Read, ActionClass::WriteWithConfirmation])
+        .with_max_autonomy_level(3),
+    )?;
+    registry.upsert_connection_config(
+        &CapabilityConnectionConfig::new(
+            "browser-local",
+            browser_provider.clone(),
+            gateway_capability_user_id(),
+            gateway_capability_workspace_id(),
+            "My browser",
+            "local-browser-profile",
+        )
+        .with_privacy_domains(vec!["browser".to_string()])
+        .with_metadata(serde_json::json!({
+            "data_boundary": "local",
+            "transport": "playwright_cdp",
+            "requires_confirmation": true
+        })),
+    )?;
+
+    // The planner indexes cached tools from the registry; seed the same chat browser
+    // tool schemas that the live tool set exposes, not the lower-level sidecar methods.
+    registry.clear_cached_tools(&browser_provider)?;
+    for tool in browser_registry_cached_tools() {
+        registry.upsert_cached_tool(&tool)?;
+    }
+    Ok(())
+}
+
+/// The browser capability as the model sees it: chat-browser tool names and schemas.
+pub(crate) fn browser_registry_cached_tools() -> Vec<CachedCapabilityTool> {
+    let browser_provider = CapabilityProviderId::new("browser");
+    [
+        (
+            browser_navigate_tool_schema(),
+            ActionClass::WriteWithConfirmation,
+        ),
+        (browser_snapshot_tool_schema(), ActionClass::Read),
+        (
+            browser_rehydrate_tool_schema(),
+            ActionClass::WriteWithConfirmation,
+        ),
+        (
+            browser_act_tool_schema(),
+            ActionClass::WriteWithConfirmation,
+        ),
+        (browser_tabs_tool_schema(), ActionClass::Read),
+        (browser_screenshot_tool_schema(), ActionClass::Read),
+        (
+            browser_dialog_tool_schema(),
+            ActionClass::WriteWithConfirmation,
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(schema, action)| {
+        let function = schema.get("function")?;
+        let name = function.get("name")?.as_str()?.to_string();
+        let description = function
+            .get("description")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string();
+        let input_schema = function
+            .get("parameters")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({"type": "object"}));
+        Some(CachedCapabilityTool::new(
+            browser_provider.clone(),
+            name,
+            CapabilityProviderKind::Browser,
+            action,
+            description,
+            vec!["browser".to_string()],
+            "private",
+            input_schema,
+        ))
+    })
+    .collect()
 }
 
 /// The discovery meta-tool: the model searches connected-service tools by intent
@@ -732,6 +847,39 @@ mod tests {
         );
         assert_eq!(snapshot.tools[0].provider_kind, "native");
         assert_eq!(snapshot.tools[1].action, "write_with_confirmation");
+    }
+
+    #[test]
+    fn owner_seeds_browser_provider_with_chat_browser_tools() {
+        let registry = CapabilityRegistryStore::open_in_memory().expect("capability registry");
+        seed_default_capabilities(&registry).expect("seed browser capabilities");
+
+        let browser_provider = CapabilityProviderId::new("browser");
+        let tools = registry
+            .cached_tools(&browser_provider)
+            .expect("cached browser tools");
+        let tool_names: std::collections::BTreeSet<&str> = tools
+            .iter()
+            .map(|cached| cached.tool.name.as_str())
+            .collect();
+
+        assert!(tool_names.contains("browser_navigate"));
+        assert!(tool_names.contains("browser_snapshot"));
+        assert!(tool_names.contains("browser_rehydrate"));
+        assert!(tool_names.contains("browser_act"));
+        assert!(tool_names.contains("browser_tabs"));
+        assert!(tool_names.contains("browser_screenshot"));
+        assert!(tool_names.contains("browser_dialog"));
+        assert!(!tool_names.contains("browser_done"));
+
+        let policy = registry
+            .policy_context(
+                &gateway_capability_user_id(),
+                &gateway_capability_workspace_id(),
+            )
+            .expect("browser policy");
+        assert_eq!(policy.enabled_providers, vec![browser_provider]);
+        assert_eq!(policy.max_autonomy_level, 3);
     }
 
     #[test]

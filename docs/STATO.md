@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (capability snapshot read model owner verificato localmente).**
+> **Ultimo aggiornamento: 2026-08-18 (capability registry bootstrap owner verificato localmente).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/capability-snapshot-read-model-owner` |
-| PR | #108-#116, #118-#161 mergeate in `main`; #117 browser draft separata; slice capability snapshot read model verificata localmente |
-| HEAD codice verificato | branch `fabio/capability-snapshot-read-model-owner` sopra `main` aggiornato a #161 |
+| Branch | `fabio/capability-registry-bootstrap-owner` |
+| PR | #108-#116, #118-#162 mergeate in `main`; #117 browser draft separata; slice capability registry bootstrap verificata localmente |
+| HEAD codice verificato | branch `fabio/capability-registry-bootstrap-owner` sopra `main` aggiornato a #162 |
 
 ## Dove siamo
 
@@ -439,6 +439,20 @@ Slice browser/projection successive:
   `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
   `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_capability_registry -- --nocapture`,
   `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_task_executor -- --nocapture`,
+  `cd apps/desktop && npm run test:ui-contract`,
+  `python3 scripts/kernel_regression_gate.py` e
+  `python3 scripts/pre_release_gate.py`.
+- Slice `fabio/capability-registry-bootstrap-owner` verificata localmente:
+  apertura seeded del registry capability, seed provider browser e materializzazione
+  dei tool browser cacheati spostati da `main.rs` a `gateway_capability_registry`;
+  il root resta consumer del registry pronto e non possiede piu' il bootstrap.
+  Verifiche verdi: `cargo fmt --check`,
+  `python3 scripts/check_gateway_main_contract.py`,
+  `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_capability_registry -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway browser_registry_tools -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway seed_browser_provider -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway seeded_browser_tools -- --nocapture`,
   `cd apps/desktop && npm run test:ui-contract`,
   `python3 scripts/kernel_regression_gate.py` e
   `python3 scripts/pre_release_gate.py`.
