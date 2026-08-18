@@ -12,6 +12,10 @@ fn task_executor_owner_smoke() {
     let response = lease_stolen_task_response("task-smoke".to_string());
     assert_eq!(response.status, "lease_stolen");
     assert_eq!(response.completed, 0);
+    let status = TaskExecutorStatus::new(false);
+    assert_eq!(status.status, "disabled");
+    assert!(is_internal_task_kind("capability.browser.snapshot"));
+    assert_eq!(humanize_task_kind("proactive_prompt"), "Automation");
 }
 
 #[derive(Debug, Deserialize)]
@@ -20,19 +24,217 @@ pub(crate) struct TaskQueueQuery {
     /// Workbench Attività tab is per-chat, like its File/Piano tabs). Omitted →
     /// the full cross-thread queue (the top-level Tasks view).
     #[serde(default)]
-    thread_id: Option<String>,
+    pub(crate) thread_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
 pub(crate) struct UncertainEffectQuery {
     #[serde(default)]
-    thread_id: Option<String>,
+    pub(crate) thread_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TaskExecutorStatus {
+    pub(crate) enabled: bool,
+    pub(crate) worker_id: String,
+    pub(crate) poll_interval_ms: u64,
+    pub(crate) status: String,
+    pub(crate) last_tick_at: Option<String>,
+    pub(crate) last_task_id: Option<String>,
+    pub(crate) last_message: String,
+    pub(crate) completed_count: u64,
+    pub(crate) failure_count: u64,
+}
+
+impl TaskExecutorStatus {
+    pub(crate) fn new(enabled: bool) -> Self {
+        let count = if enabled {
+            gateway_task_executor_config::task_executor_worker_count()
+        } else {
+            0
+        };
+        Self {
+            enabled,
+            worker_id: if count > 1 {
+                format!(
+                    "{}-0..{count}",
+                    gateway_task_executor_config::TASK_EXECUTOR_WORKER_ID
+                )
+            } else {
+                gateway_task_executor_config::TASK_EXECUTOR_WORKER_ID.to_string()
+            },
+            poll_interval_ms: TASK_EXECUTOR_POLL_INTERVAL_MS,
+            status: if enabled { "starting" } else { "disabled" }.to_string(),
+            last_tick_at: None,
+            last_task_id: None,
+            last_message: if enabled {
+                "Worker executor locale in avvio.".to_string()
+            } else {
+                "Worker executor locale disabilitato da ambiente.".to_string()
+            },
+            completed_count: 0,
+            failure_count: 0,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct TaskItemResponse {
+    pub(crate) task_id: String,
+    pub(crate) kind: String,
+    /// Human-readable label for the kind (e.g. "Automazione", "Browser: snapshot").
+    pub(crate) label: String,
+    pub(crate) goal: String,
+    pub(crate) thread_id: Option<String>,
+    pub(crate) status: String,
+    pub(crate) priority: String,
+    pub(crate) blocked_reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ApprovalItemResponse {
+    pub(crate) approval_id: String,
+    pub(crate) task_id: String,
+    pub(crate) action: String,
+    pub(crate) risk_level: String,
+    pub(crate) data_boundary: String,
+    pub(crate) explanation: String,
+    pub(crate) status: String,
+    pub(crate) scope_options: Vec<String>,
+    pub(crate) browser_visibility_options: Vec<String>,
+    pub(crate) default_browser_visibility: String,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ResourceUsageResponse {
+    pub(crate) resource_class: String,
+    pub(crate) units: u32,
+    pub(crate) limit_units: Option<u32>,
+    pub(crate) available_units: Option<u32>,
+    pub(crate) saturated: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct UncertainEffectResponse {
+    pub(crate) receipt_ref: String,
+    pub(crate) execution_id: String,
+    pub(crate) thread_id: Option<String>,
+    pub(crate) operation_family: &'static str,
+    pub(crate) status: &'static str,
+    pub(crate) evidence: Value,
+    pub(crate) uncertain_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct TaskQueueResponse {
+    pub(crate) queued: Vec<TaskItemResponse>,
+    pub(crate) active: Vec<TaskItemResponse>,
+    pub(crate) blocked: Vec<TaskItemResponse>,
+    pub(crate) waiting_approvals: Vec<ApprovalItemResponse>,
+    pub(crate) uncertain_effects: Vec<UncertainEffectResponse>,
+    pub(crate) recent_failures: Vec<TaskItemResponse>,
+    pub(crate) resource_usage: Vec<ResourceUsageResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct TaskDetailResponse {
+    #[serde(flatten)]
+    pub(crate) item: TaskItemResponse,
+    pub(crate) latest_checkpoint: Option<Value>,
+    pub(crate) runtime_metadata: Option<Value>,
+    pub(crate) exposes_raw_input: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct TaskRunStepResponse {
+    pub(crate) status: String,
+    pub(crate) task_id: Option<String>,
+    pub(crate) message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct TaskRunBatchResponse {
+    pub(crate) status: String,
+    pub(crate) completed: u32,
+    pub(crate) stopped_reason: Option<String>,
+    pub(crate) results: Vec<TaskRunStepResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct TaskExecutorStatusResponse {
+    pub(crate) enabled: bool,
+    pub(crate) worker_id: String,
+    pub(crate) poll_interval_ms: u64,
+    pub(crate) status: String,
+    pub(crate) last_tick_at: Option<String>,
+    pub(crate) last_task_id: Option<String>,
+    pub(crate) last_message: String,
+    pub(crate) completed_count: u64,
+    pub(crate) failure_count: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct TaskExecutionPresentation {
+    pub(crate) pending_approval: Option<PendingExecutorApproval>,
+    pub(crate) summary: String,
+    pub(crate) checkpoint_payload: Value,
+    pub(crate) checkpoint_redacted: Value,
+    pub(crate) chat_message: String,
+    pub(crate) result_surfacing: TaskResultSurfacing,
+    pub(crate) surface: SurfaceKind,
+    pub(crate) event_kind: String,
+    pub(crate) event_title: String,
+    pub(crate) event_subtitle: String,
+    pub(crate) event_payload: Value,
+    pub(crate) artifacts: Vec<TaskArtifactOutput>,
+}
+
+/// Whether the task executor has already persisted its final visible reply.
+///
+/// Broker and proactive turns stream into a stable assistant bubble themselves;
+/// the runner must not append their outcome again. Other executors rely on the
+/// runner to materialize their chat result.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum TaskResultSurfacing {
+    AppendToChat,
+    AlreadyPersisted,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct PendingExecutorApproval {
+    pub(crate) action: String,
+    pub(crate) risk_level: String,
+    pub(crate) data_boundary: String,
+    pub(crate) explanation: String,
+    pub(crate) inline_action_card: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct TaskArtifactOutput {
+    pub(crate) artifact_id: String,
+    pub(crate) title: String,
+    pub(crate) kind: String,
+    pub(crate) path_ref: String,
+    pub(crate) size_bytes: u64,
+    pub(crate) preview_ref: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct RejectApprovalRequest {
+    pub(crate) reason: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct ApproveApprovalRequest {
+    pub(crate) scope: Option<String>,
+    pub(crate) browser_visibility: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub(crate) struct ResolveEffectResponse {
-    receipt: local_first_task_runtime::ExecutionEffectReceipt,
-    projections_requeued: usize,
+    pub(crate) receipt: local_first_task_runtime::ExecutionEffectReceipt,
+    pub(crate) projections_requeued: usize,
 }
 
 type EffectResolutionLocks = std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>;
@@ -53,9 +255,9 @@ fn effect_resolution_lock(receipt_ref: &str) -> Arc<tokio::sync::Mutex<()>> {
 }
 
 pub(crate) struct EffectResolutionGuard {
-    receipt_ref: String,
-    lock: Arc<tokio::sync::Mutex<()>>,
-    _guard: tokio::sync::OwnedMutexGuard<()>,
+    pub(crate) receipt_ref: String,
+    pub(crate) lock: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) _guard: tokio::sync::OwnedMutexGuard<()>,
 }
 
 impl Drop for EffectResolutionGuard {
@@ -229,6 +431,208 @@ pub(crate) async fn task_queue(
         retain_task_queue_scope(&mut response, &allowed, thread_id);
     }
     Ok(Json(response))
+}
+
+pub(crate) fn task_queue_response_for_state(
+    state: &AppState,
+) -> Result<TaskQueueResponse, GatewayError> {
+    let user = gateway_user_id();
+    let workspace = gateway_workspace_id();
+    let store = lock_task_store(state)?;
+    let snapshot = TaskUiReadModel::new(&store)
+        .queue_snapshot(&user, &workspace)
+        .map_err(GatewayError::task)?;
+    let uncertain_effects = store
+        .uncertain_effect_receipts_for_user(user.as_str())
+        .map_err(GatewayError::task)?
+        .iter()
+        .map(uncertain_effect_response)
+        .collect();
+    let limits = effective_task_resource_limits();
+    task_queue_response(snapshot, &limits, uncertain_effects)
+}
+
+pub(crate) fn task_queue_response(
+    snapshot: TaskQueueSnapshot,
+    limits: &ResourceLimits,
+    uncertain_effects: Vec<UncertainEffectResponse>,
+) -> Result<TaskQueueResponse, GatewayError> {
+    let mut resource_usage = snapshot
+        .resource_usage
+        .into_iter()
+        .map(|(resource_class, units)| {
+            let limit = limits.limit_for(resource_class);
+            ResourceUsageResponse {
+                resource_class: resource_class_label(resource_class).to_string(),
+                units,
+                limit_units: limit,
+                available_units: limit.map(|limit| limit.saturating_sub(units)),
+                saturated: limit.is_some_and(|limit| units >= limit),
+            }
+        })
+        .collect::<Vec<_>>();
+    resource_usage.sort_by(|left, right| left.resource_class.cmp(&right.resource_class));
+
+    // The queue lists USER-meaningful runs (automations, proactive prompts). Internal
+    // execution sub-tasks (capability.* / subagent.*) are filtered out — they belong to
+    // the Computer/activity view, not the queue. This is the fix for the "browser noise".
+    let user_facing = |items: Vec<TaskUiItem>| {
+        items
+            .into_iter()
+            .filter(|i| !is_internal_task_kind(&i.kind))
+            .map(task_item_response)
+            .collect::<Result<Vec<_>, _>>()
+    };
+    Ok(TaskQueueResponse {
+        queued: user_facing(snapshot.queued)?,
+        active: user_facing(snapshot.active)?,
+        blocked: user_facing(snapshot.blocked)?,
+        waiting_approvals: snapshot
+            .waiting_approvals
+            .into_iter()
+            .map(approval_item_response)
+            .collect::<Result<Vec<_>, _>>()?,
+        uncertain_effects,
+        recent_failures: user_facing(snapshot.recent_failures)?,
+        resource_usage,
+    })
+}
+
+pub(crate) fn uncertain_effect_response(
+    receipt: &local_first_task_runtime::ExecutionEffectReceipt,
+) -> UncertainEffectResponse {
+    let operation_family = if receipt.operation.starts_with("browser") {
+        "browser"
+    } else if receipt.operation.starts_with("channel.") {
+        "channel"
+    } else if receipt.operation.starts_with("connector.")
+        || receipt.operation.starts_with("composio")
+        || receipt.operation.starts_with("mcp")
+    {
+        "connector"
+    } else {
+        "external_write"
+    };
+    let mut evidence = serde_json::Map::new();
+    if let Some(source) = receipt.effects_json.as_ref().and_then(Value::as_object) {
+        for key in [
+            "attempted",
+            "dispatch_started",
+            "request_dispatched",
+            "side_effect_started",
+            "unknown_remote_outcome",
+        ] {
+            if let Some(value @ Value::Bool(_)) = source.get(key) {
+                evidence.insert(key.to_string(), value.clone());
+            }
+        }
+    }
+    UncertainEffectResponse {
+        receipt_ref: receipt.receipt_ref.as_ref().to_string(),
+        execution_id: receipt.execution_id.clone(),
+        thread_id: receipt.thread_id.clone(),
+        operation_family,
+        status: receipt.status.as_str(),
+        evidence: Value::Object(evidence),
+        uncertain_at: receipt.started_at.unwrap_or(receipt.prepared_at),
+    }
+}
+
+fn task_detail_response(detail: TaskUiDetail) -> Result<TaskDetailResponse, GatewayError> {
+    Ok(TaskDetailResponse {
+        item: task_item_response(TaskUiItem {
+            task_id: detail.task_id,
+            kind: detail.kind,
+            goal: detail.goal,
+            thread_id: detail.thread_id,
+            status: detail.status,
+            priority: detail.priority,
+            blocked_reason: detail.blocked_reason,
+        })?,
+        latest_checkpoint: detail.latest_checkpoint,
+        runtime_metadata: detail.runtime_metadata,
+        exposes_raw_input: detail.exposes_raw_input,
+    })
+}
+
+/// Execution sub-tasks the user shouldn't see in the queue — internal steps of a run
+/// (capability calls, subagent workflows). They surface in the Computer/activity view, not
+/// in the user-facing queue (which lists automations runs + proactive prompts).
+pub(crate) fn is_internal_task_kind(kind: &str) -> bool {
+    kind.starts_with("capability.") || kind.starts_with("subagent.")
+}
+
+/// Human label for a task kind shown in the queue.
+pub(crate) fn humanize_task_kind(kind: &str) -> String {
+    let cap = |s: &str| {
+        let mut chars = s.chars();
+        chars
+            .next()
+            .map(|f| f.to_uppercase().collect::<String>() + chars.as_str())
+            .unwrap_or_default()
+    };
+    match kind {
+        "proactive_prompt" => "Automation".to_string(),
+        other if other.starts_with("capability.") => {
+            let rest = other.trim_start_matches("capability.");
+            let mut parts = rest.splitn(2, '.');
+            let provider = parts.next().unwrap_or(rest);
+            let tool = parts.next().unwrap_or("");
+            if tool.is_empty() {
+                cap(provider)
+            } else {
+                format!("{}: {}", cap(provider), tool.replace('_', " "))
+            }
+        }
+        other if other.starts_with("subagent.") => {
+            format!("Sub-agent: {}", other.trim_start_matches("subagent."))
+        }
+        other => cap(&other.replace('_', " ")),
+    }
+}
+
+pub(crate) fn task_item_response(item: TaskUiItem) -> Result<TaskItemResponse, GatewayError> {
+    Ok(TaskItemResponse {
+        task_id: item.task_id.as_str().to_string(),
+        label: humanize_task_kind(&item.kind),
+        kind: item.kind,
+        goal: item.goal,
+        thread_id: item.thread_id,
+        status: enum_label(&item.status)?,
+        priority: enum_label(&item.priority)?,
+        blocked_reason: item.blocked_reason,
+    })
+}
+
+fn approval_item_response(approval: ApprovalRequest) -> Result<ApprovalItemResponse, GatewayError> {
+    let browser_scoped = approval.action == "browser.manual_action"
+        || approval.action == "prompt_plan.approve_step"
+        || approval.data_boundary.contains("browser")
+        || approval.explanation.to_lowercase().contains("browser");
+    Ok(ApprovalItemResponse {
+        approval_id: approval.approval_id,
+        task_id: approval.task_id.as_str().to_string(),
+        action: approval.action,
+        risk_level: approval.risk_level,
+        data_boundary: approval.data_boundary,
+        explanation: approval.explanation,
+        status: enum_label(&approval.status)?,
+        scope_options: if browser_scoped {
+            vec!["once".to_string(), "always".to_string()]
+        } else {
+            vec!["once".to_string()]
+        },
+        browser_visibility_options: if browser_scoped {
+            vec![
+                "auto".to_string(),
+                "visible".to_string(),
+                "headless".to_string(),
+            ]
+        } else {
+            Vec::new()
+        },
+        default_browser_visibility: "auto".to_string(),
+    })
 }
 
 pub(crate) async fn task_detail(
@@ -1317,6 +1721,19 @@ fn update_task_executor_status(state: &AppState, update: impl FnOnce(&mut TaskEx
     if let Ok(mut status) = state.task_executor_status.lock() {
         update(&mut status);
     }
+}
+
+fn lock_task_executor_status(
+    state: &AppState,
+) -> Result<MutexGuard<'_, TaskExecutorStatus>, GatewayError> {
+    state
+        .task_executor_status
+        .lock()
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "task_executor_status_lock_error",
+            message: error.to_string(),
+        })
 }
 
 fn task_executor_status_response(
