@@ -14045,10 +14045,9 @@ fn workflow_route_allows_exactly_one_matching_tool_call_per_turn() {
         super::semantic_decision::ExecutionShape::Workflow,
         Some("make_deck"),
     );
-    let policy = super::GatewayTurnPolicy {
-        route: super::route_capability_from_semantic(Some(&workflow_semantic)),
-        workflow_tool_calls: std::sync::atomic::AtomicUsize::new(0),
-    };
+    let policy = super::GatewayTurnPolicy::new(super::route_capability_from_semantic(Some(
+        &workflow_semantic,
+    )));
 
     assert!(local_first_engine::TurnPolicy::route_blocked(&policy, "make_deck").is_none());
     let blocked = local_first_engine::TurnPolicy::route_blocked(&policy, "make_deck")

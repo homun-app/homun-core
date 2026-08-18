@@ -29,6 +29,9 @@ COMPOSIO_ROUTES_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gat
 CONNECTOR_ERRORS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_connector_errors.rs")
 IMAGE_GENERATION_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_image_generation.rs")
 MODEL_ROUTING_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_model_routing.rs")
+CAPABILITY_ROUTING_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_capability_routing.rs"
+)
 TASK_EXECUTOR_CONFIG_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_task_executor_config.rs"
 )
@@ -949,6 +952,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn resolve_context_budget_chars(": "model context budget resolution must stay in gateway_model_routing",
         "async fn compact_for_context_budget(": "model-visible context compaction must stay in gateway_model_routing",
         "struct GatewayContextCompactor": "context compactor port must stay in gateway_model_routing",
+        "struct GatewayTurnPolicy": "turn policy port must stay in gateway_capability_routing",
         "fn zai_thinking_enabled(": "Z.ai thinking policy must stay in gateway_model_routing",
         "struct RoutingDecision ": "routing decision log DTO must stay in gateway_model_routing",
         "fn log_routing_decision(": "routing decision log writer must stay in gateway_model_routing",
@@ -1225,6 +1229,8 @@ def main() -> int:
         image_generation_source = handle.read()
     with open(MODEL_ROUTING_RS, "r", encoding="utf-8") as handle:
         model_routing_source = handle.read()
+    with open(CAPABILITY_ROUTING_RS, "r", encoding="utf-8") as handle:
+        capability_routing_source = handle.read()
     with open(TASK_EXECUTOR_CONFIG_RS, "r", encoding="utf-8") as handle:
         task_executor_config_source = handle.read()
     with open(BOOT_MAINTENANCE_RS, "r", encoding="utf-8") as handle:
@@ -1404,6 +1410,11 @@ def main() -> int:
         source,
         "mod gateway_capability_routing;",
         "gateway root must declare capability routing owner",
+    )
+    assert_contains(
+        capability_routing_source,
+        "pub(crate) struct GatewayTurnPolicy",
+        "capability routing owner must expose turn policy port",
     )
     assert_contains(
         source,
