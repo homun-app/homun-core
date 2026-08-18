@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (capability routing owner verificato localmente).**
+> **Ultimo aggiornamento: 2026-08-18 (task executor read model owner verificato localmente).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/gateway-capability-routing-owner` |
-| PR | #108-#116, #118-#159 mergeate in `main`; #117 browser draft separata; slice capability routing verificata localmente |
-| HEAD codice verificato | branch `fabio/gateway-capability-routing-owner` sopra `main` aggiornato a #159, kernel/pre-release gate verdi |
+| Branch | `fabio/gateway-task-executor-read-model-owner` |
+| PR | #108-#116, #118-#160 mergeate in `main`; #117 browser draft separata; slice task executor read model verificata localmente |
+| HEAD codice verificato | branch `fabio/gateway-task-executor-read-model-owner` sopra `main` aggiornato a #160 |
 
 ## Dove siamo
 
@@ -411,6 +411,22 @@ Slice browser/projection successive:
   `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway forced_tool_for_turn -- --nocapture`,
   `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway native_atomic -- --nocapture`,
   `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
+  `cd apps/desktop && npm run test:ui-contract`,
+  `python3 scripts/kernel_regression_gate.py` e
+  `python3 scripts/pre_release_gate.py`.
+- Slice `fabio/gateway-task-executor-read-model-owner` verificata localmente:
+  DTO/status executor, queue/detail read model mapping, projection uncertain
+  effects e label/filter task user-facing spostati in `gateway_task_executor`;
+  `main.rs` resta solo consumatore del tipo `TaskExecutorStatus` nello stato
+  applicativo e non possiede piu' il read model della coda. Verifiche verdi:
+  `cargo fmt --check`,
+  `python3 scripts/check_gateway_main_contract.py`,
+  `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_task_executor -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway task_queue_response -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway queue_hides_internal_subtasks_and_humanizes_kinds -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway uncertain_effect_projection_is_bounded_and_metadata_only -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway task_queue_scope_retains_only_matching_uncertain_effects -- --nocapture`,
   `cd apps/desktop && npm run test:ui-contract`,
   `python3 scripts/kernel_regression_gate.py` e
   `python3 scripts/pre_release_gate.py`.

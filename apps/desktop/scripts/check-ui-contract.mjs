@@ -1725,11 +1725,16 @@ assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/tasks/q
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/tasks/executor", "desktop gateway must expose task executor status endpoint");
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/tasks/run_next", "desktop gateway must expose the first local task executor endpoint");
 assertRepoContains("crates/desktop-gateway/src/gateway_task_executor.rs", "start_task_executor_worker", "desktop gateway must start a background task executor worker");
+assertRepoContains("crates/desktop-gateway/src/gateway_task_executor.rs", "pub(crate) struct TaskQueueResponse", "task executor read model DTOs must stay in the task executor owner");
+assertRepoContains("crates/desktop-gateway/src/gateway_task_executor.rs", "pub(crate) fn task_queue_response_for_state", "task executor queue read model mapping must stay in the task executor owner");
+assertRepoContains("crates/desktop-gateway/src/gateway_task_executor.rs", "task_executor_owner_smoke", "task executor owner must keep a focused owner smoke test");
+assertRepoNotContains("crates/desktop-gateway/src/main.rs", "struct TaskQueueResponse", "gateway main must not own task executor queue DTOs");
+assertRepoNotContains("crates/desktop-gateway/src/main.rs", "fn task_queue_response_for_state", "gateway main must not own task executor queue mapping");
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/local-computer/sessions/{session_id}", "desktop gateway must expose local computer session read model endpoint");
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/local-computer/sessions/{session_id}/artifacts/{artifact_id}/preview", "desktop gateway must expose redacted local computer artifact previews");
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/memory/dashboard", "desktop gateway must expose memory dashboard read model endpoint");
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/capabilities/snapshot", "desktop gateway must expose capability registry snapshot endpoint");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "TaskUiReadModel", "desktop gateway must use the task runtime UI read model");
+assertRepoContains("crates/desktop-gateway/src/gateway_task_executor.rs", "TaskUiReadModel", "desktop gateway task executor owner must use the task runtime UI read model");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "LocalComputerReadModel", "desktop gateway must use the local computer UI read model");
 assertRepoContains("crates/desktop-gateway/src/gateway_memory_ui_routes.rs", "MemoryUiReadModel", "desktop gateway must use the memory UI read model");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "CapabilityRegistryStore", "desktop gateway must use the capability registry store");
