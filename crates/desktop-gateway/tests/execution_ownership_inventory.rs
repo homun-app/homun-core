@@ -360,6 +360,42 @@ fn prompt_packets_have_one_gateway_owner() {
 }
 
 #[test]
+fn brain_runtime_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let brain_runtime = production_source(&root.join("src/gateway_brain_runtime.rs"));
+
+    let owned = [
+        "const CAPABLE_MODEL_CONTEXT_WINDOW",
+        "struct GatewayBrainMemory",
+        "fn brain_materialize_enabled(",
+        "fn open_brain_memory(",
+        "fn brain_budgets_for_context_window(",
+    ];
+
+    for pattern in owned {
+        assert!(
+            brain_runtime.contains(pattern),
+            "brain runtime owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain brain runtime surface {pattern}"
+        );
+    }
+    for adjacent in [
+        "fn brain_materialize_tasks(",
+        "fn run_agent_rounds(",
+        "fn recall_memory(",
+    ] {
+        assert!(
+            !brain_runtime.contains(adjacent),
+            "brain runtime owner must not absorb adjacent owner {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn startup_background_writers_follow_process_fencing() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

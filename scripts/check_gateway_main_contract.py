@@ -45,6 +45,9 @@ THREAD_EPISODES_RS = os.path.join(
 PROMPT_PACKETS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_prompt_packets.rs"
 )
+BRAIN_RUNTIME_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_brain_runtime.rs"
+)
 
 
 def extract_async_main_body(source: str) -> str:
@@ -476,6 +479,11 @@ def forbidden_root_snippets() -> dict[str, str]:
         "const MAX_PROJECT_INSTRUCTION_CHARS": "project instruction limits must stay in gateway_prompt_packets",
         "fn read_project_instruction(": "project instruction reads must stay in gateway_prompt_packets",
         "fn compose_gateway_prompt_packets(": "prompt packet composition must stay in gateway_prompt_packets",
+        "const CAPABLE_MODEL_CONTEXT_WINDOW": "brain context-window threshold must stay in gateway_brain_runtime",
+        "struct GatewayBrainMemory": "brain memory adapter must stay in gateway_brain_runtime",
+        "fn brain_materialize_enabled(": "brain enablement flag must stay in gateway_brain_runtime",
+        "fn open_brain_memory(": "brain memory opening must stay in gateway_brain_runtime",
+        "fn brain_budgets_for_context_window(": "brain budget policy must stay in gateway_brain_runtime",
         "fn strip_chat_markers(": "chat marker stripping must stay in gateway_chat_markers",
         "fn query_code_graph_tool_schema(": "project search tool schemas must stay in gateway_project_search_tools",
         "fn query_git_history_tool_schema(": "project search tool schemas must stay in gateway_project_search_tools",
@@ -1228,6 +1236,8 @@ def main() -> int:
         thread_episodes_source = handle.read()
     with open(PROMPT_PACKETS_RS, "r", encoding="utf-8") as handle:
         prompt_packets_source = handle.read()
+    with open(BRAIN_RUNTIME_RS, "r", encoding="utf-8") as handle:
+        brain_runtime_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1458,6 +1468,12 @@ def main() -> int:
         "pub(crate) use gateway_prompt_packets::*;",
         "gateway root must re-export prompt packet owner",
     )
+    assert_contains(source, "mod gateway_brain_runtime;", "gateway root must declare brain runtime owner")
+    assert_contains(
+        source,
+        "pub(crate) use gateway_brain_runtime::*;",
+        "gateway root must re-export brain runtime owner",
+    )
     assert_contains(source, "mod gateway_automation_tools;", "gateway root must declare automation tools owner")
     assert_contains(
         source,
@@ -1679,6 +1695,31 @@ def main() -> int:
         prompt_packets_source,
         "pub(crate) fn compose_gateway_prompt_packets(",
         "prompt packet owner must expose packet composition",
+    )
+    assert_contains(
+        brain_runtime_source,
+        "pub(crate) const CAPABLE_MODEL_CONTEXT_WINDOW",
+        "brain runtime owner must expose context-window threshold",
+    )
+    assert_contains(
+        brain_runtime_source,
+        "pub(crate) struct GatewayBrainMemory",
+        "brain runtime owner must expose memory adapter",
+    )
+    assert_contains(
+        brain_runtime_source,
+        "pub(crate) fn brain_materialize_enabled(",
+        "brain runtime owner must expose enablement flag",
+    )
+    assert_contains(
+        brain_runtime_source,
+        "pub(crate) fn open_brain_memory(",
+        "brain runtime owner must expose memory opener",
+    )
+    assert_contains(
+        brain_runtime_source,
+        "pub(crate) fn brain_budgets_for_context_window(",
+        "brain runtime owner must expose budget policy",
     )
 
     assert_ordered(
