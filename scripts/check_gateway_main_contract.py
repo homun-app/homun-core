@@ -39,6 +39,9 @@ SKILL_RUNTIME_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gatew
 RUNTIME_PLAN_STATE_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_runtime_plan_state.rs"
 )
+THREAD_EPISODES_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_thread_episodes.rs"
+)
 
 
 def extract_async_main_body(source: str) -> str:
@@ -463,6 +466,10 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn merge_plan(": "runtime plan merge must stay in gateway_runtime_plan_state",
         "fn plan_tool_sent(": "runtime plan tool argument parsing must stay in gateway_runtime_plan_state",
         "pub(crate) struct GatewayPlanProgress": "engine plan progress port must stay in gateway_runtime_plan_state",
+        "const THREADS_WORKSPACE:": "thread episode memory workspace must stay in gateway_thread_episodes",
+        "fn store_episode(": "thread episode persistence must stay in gateway_thread_episodes",
+        "fn current_thread_episode_block(": "thread episode prompt block must stay in gateway_thread_episodes",
+        "fn episode_metadata_matches_scope(": "thread episode scope matching must stay in gateway_thread_episodes",
         "fn strip_chat_markers(": "chat marker stripping must stay in gateway_chat_markers",
         "fn query_code_graph_tool_schema(": "project search tool schemas must stay in gateway_project_search_tools",
         "fn query_git_history_tool_schema(": "project search tool schemas must stay in gateway_project_search_tools",
@@ -1211,6 +1218,8 @@ def main() -> int:
         skill_runtime_source = handle.read()
     with open(RUNTIME_PLAN_STATE_RS, "r", encoding="utf-8") as handle:
         runtime_plan_state_source = handle.read()
+    with open(THREAD_EPISODES_RS, "r", encoding="utf-8") as handle:
+        thread_episodes_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1357,6 +1366,12 @@ def main() -> int:
         source,
         "pub(crate) use gateway_runtime_plan_state::*;",
         "gateway root must re-export runtime plan state owner",
+    )
+    assert_contains(source, "mod gateway_thread_episodes;", "gateway root must declare thread episode owner")
+    assert_contains(
+        source,
+        "pub(crate) use gateway_thread_episodes::*;",
+        "gateway root must re-export thread episode owner",
     )
     assert_contains(source, "mod gateway_chat_markers;", "gateway root must declare chat marker owner")
     assert_contains(source, "mod gateway_tool_budget;", "gateway root must declare tool budget owner")
@@ -1615,6 +1630,26 @@ def main() -> int:
         runtime_plan_state_source,
         "pub(crate) struct GatewayPlanProgress",
         "runtime plan state owner must expose engine plan progress port",
+    )
+    assert_contains(
+        thread_episodes_source,
+        "pub(crate) const THREADS_WORKSPACE",
+        "thread episode owner must expose the reserved thread workspace",
+    )
+    assert_contains(
+        thread_episodes_source,
+        "pub(crate) fn store_episode(",
+        "thread episode owner must expose episode persistence",
+    )
+    assert_contains(
+        thread_episodes_source,
+        "pub(crate) fn current_thread_episode_block(",
+        "thread episode owner must expose prompt block projection",
+    )
+    assert_contains(
+        thread_episodes_source,
+        "pub(crate) fn episode_metadata_matches_scope(",
+        "thread episode owner must expose exact scope matching",
     )
 
     assert_ordered(
