@@ -112,6 +112,7 @@ mod gateway_runtime_flags;
 mod gateway_runtime_settings;
 mod gateway_secrets;
 mod gateway_skill_routes;
+mod gateway_skill_runtime;
 mod gateway_store_integrity;
 mod gateway_system_status;
 mod gateway_tags;
@@ -207,9 +208,6 @@ use gateway_remote_approval::{
 pub(crate) use gateway_runtime_settings::*;
 #[cfg(test)]
 pub(crate) use gateway_skill_routes::{clawhub_origin, valid_catalog_owner};
-use gateway_skill_routes::{
-    load_skills_disabled, load_skills_origins, save_skills_origins, skills_catalog_path,
-};
 pub(crate) use gateway_system_status::*;
 pub(crate) use gateway_user_preferences::*;
 pub(crate) use gateway_vault_routes::*;
@@ -476,6 +474,7 @@ use gateway_recall_context::{
     recall_stream_payload_from_hits, recall_stream_payload_from_pack, sanitize_dedup_key,
     seed_loop_memory_reads,
 };
+pub(crate) use gateway_skill_runtime::*;
 // `memory_service_flag` is resolved via `crate::` from cfg(test) code only.
 #[cfg_attr(not(test), allow(unused_imports))]
 use gateway_runtime_flags::{
@@ -4177,186 +4176,6 @@ fn vault_reveal_marker(record: &VaultRecordSummary) -> String {
 // at a time (navigate -> snapshot -> act -> re-snapshot) needs many more
 // model/tool round-trips than a normal chat turn. Env-overridable via
 // `HOMUN_CHAT_BROWSER_MAX_ROUNDS`.
-
-/// `"Riepilogo Spese Q1"` → `"riepilogo-spese-q1"`. Lowercase, alnum runs joined
-/// by single hyphens, trimmed, capped — a stable directory id for a new skill.
-fn slugify_skill_name(name: &str) -> String {
-    let mut out = String::new();
-    let mut last_hyphen = true; // suppress leading hyphen
-    for ch in name.to_lowercase().chars() {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch);
-            last_hyphen = false;
-        } else if !last_hyphen {
-            out.push('-');
-            last_hyphen = true;
-        }
-    }
-    out.trim_matches('-').chars().take(48).collect()
-}
-
-/// Creates a user-authored skill from a prompt: writes `skills_root/<slug>/SKILL.md`
-/// (frontmatter + instructions), marks its origin "authored", and the scanner makes
-/// it available (enabled). Called by the `create_skill` tool when the user asks to
-/// create one. A skill is just instructions the agent follows; for skills that run
-/// commands, the instructions reference `run_in_sandbox`.
-fn create_skill(name: &str, description: &str, instructions: &str) -> String {
-    let name = name.trim();
-    let description = description.trim();
-    let instructions = instructions.trim();
-    if name.is_empty() || description.is_empty() || instructions.is_empty() {
-        return "Creating a skill requires: name, description (WHEN to use it) and instructions (what to do).".to_string();
-    }
-    let Ok(data_dir) = gateway_data_dir() else {
-        return "Data folder unavailable.".to_string();
-    };
-    let dir = skills::skills_root(&data_dir);
-    let slug = slugify_skill_name(name);
-    if slug.is_empty() {
-        return "The name doesn't produce a valid id: use letters or numbers.".to_string();
-    }
-    let skill_dir = dir.join(&slug);
-    if skill_dir.exists() {
-        return format!("A skill with id '{slug}' already exists. Choose another name.");
-    }
-    if let Err(error) = fs::create_dir_all(&skill_dir) {
-        return format!("Could not create the skill folder: {error}");
-    }
-    let desc_yaml =
-        serde_json::to_string(description).unwrap_or_else(|_| format!("\"{description}\""));
-    let content = format!(
-        "---\nname: {name}\nslug: {slug}\nversion: 1.0.0\ndescription: {desc_yaml}\n---\n\n{instructions}\n"
-    );
-    if let Err(error) = fs::write(skill_dir.join("SKILL.md"), &content) {
-        let _ = fs::remove_dir_all(&skill_dir);
-        return format!("Could not write the skill: {error}");
-    }
-    let mut origins = load_skills_origins();
-    origins.insert(slug.clone(), "authored".to_string());
-    let _ = save_skills_origins(&origins);
-    format!(
-        "✅ Skill «{name}» created (id={slug}) and active. Try it: tell me \"use the skill {name}\" \
-or ask me something that triggers it."
-    )
-}
-
-/// Enabled installed skills as (id, name, description) for prompt discovery (L1).
-fn enabled_skills_summary() -> Vec<(String, String, String)> {
-    let Ok(dir) = skills_dir() else {
-        return Vec::new();
-    };
-    let disabled = load_skills_disabled();
-    let origins = load_skills_origins();
-    skills::scan_skills(&dir, &disabled, &origins)
-        .into_iter()
-        .filter(|s| s.enabled)
-        .map(|s| (s.id, s.name, s.description))
-        .collect()
-}
-
-/// The HomunCoder methodology skill ids (from the sync manifest). Used to
-/// scope the methodology to PROJECT chats (HomunCoder mode) instead of flooding every
-/// chat, and to group them in Settings.
-fn homuncoder_skill_ids() -> std::collections::HashSet<String> {
-    skills_dir()
-        .ok()
-        .map(|dir| dir.join("homuncoder-skills.txt"))
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .map(|content| {
-            content
-                .lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Loads an installed skill's SKILL.md body (instructions) by id.
-#[allow(dead_code)]
-fn load_skill_body(id: &str) -> Option<String> {
-    load_skill_body_and_sensitive(id).map(|(body, _)| body)
-}
-
-/// Loads a skill's adapted body PLUS its declared sensitive categories in one pass
-/// (ADR 0023 Step 5 / Fase 0.3). `use_skill` uses the body to show instructions and
-/// the categories to arm the turn's force-confirm (`ctx.active_sensitive`).
-fn load_skill_body_and_sensitive(id: &str) -> Option<(String, Vec<skills::SensitiveCategory>)> {
-    let dir = skills_dir().ok()?;
-    let disabled = load_skills_disabled();
-    let origins = load_skills_origins();
-    skills::load_detail(&dir, id, &disabled, &origins)
-        .ok()
-        .flatten()
-        .map(|detail| (adapt_skill_body(&detail.body, id), detail.summary.sensitive))
-}
-
-/// Extracts a skill id from a sandbox command that references the container skill
-/// path `/home/agent/skills/<id>/…`, so we can sync that skill's files even when
-/// the model omitted the `skill_id` argument.
-fn skill_id_from_command(command: &str) -> Option<String> {
-    let marker = "/home/agent/skills/";
-    let start = command.find(marker)? + marker.len();
-    let rest = &command[start..];
-    let id: String = rest
-        .chars()
-        .take_while(|c| *c != '/' && *c != ' ' && *c != '"' && *c != '\'')
-        .collect();
-    if id.is_empty() { None } else { Some(id) }
-}
-
-/// Adapts a skill's SKILL.md for execution in the contained computer: substitutes
-/// the `{baseDir}` template variable (and common aliases) with the skill's real
-/// path inside the container, so commands like `python3 {baseDir}/scripts/x.py`
-/// resolve. This is the runtime "skill adaptation" step.
-fn adapt_skill_body(body: &str, id: &str) -> String {
-    let base = sandbox::container_skill_dir(id);
-    body.replace("{baseDir}", &base)
-        .replace("${baseDir}", &base)
-        .replace("{base_dir}", &base)
-        .replace("{BASE_DIR}", &base)
-        .replace("$BASEDIR", &base)
-}
-
-/// The skill-activation tool: loads a skill's full SKILL.md instructions on demand
-/// (progressive disclosure L2).
-fn use_skill_tool_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "function",
-        "function": {
-            "name": "use_skill",
-            "description": "Load the full instructions (SKILL.md) of an installed skill, given its id. Call it when the request matches a skill listed in INSTALLED SKILLS, then follow the received instructions.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "id": { "type": "string", "description": "id of the skill, e.g. 'weather'" }
-                },
-                "required": ["id"]
-            }
-        }
-    })
-}
-
-/// The skill-execution tool: runs a shell command from a skill's instructions
-/// inside the contained-computer sandbox.
-fn run_in_sandbox_tool_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "function",
-        "function": {
-            "name": "run_in_sandbox",
-            "description": "Run a shell command in the contained computer (isolated sandbox: bash, curl, python, git, compilers). Use it to: run commands/scripts, process data (incl. fetching STRUCTURED data — RSS/JSON APIs — with curl), and ABOVE ALL to VERIFY BY EXECUTING — run build/test/lint or execute the code and read the REAL output instead of assuming code or calculations are correct. Returns stdout/stderr. Iterate on failures until the verification passes. For browsing or SEARCHING rendered websites prefer the `browse` tool over scraping HTML with curl, and NEVER use this tool to continue a task started in a browser (a search, a form, a booking, a checkout): the site's interactive session lives in the browser session, so only another `browse` call can carry it. (A skill/automation's own instructions win — follow what its SKILL.md / steps say.)",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": { "type": "string", "description": "Shell command to run, e.g. \"curl -s https://example.com/feed.rss\" or \"pytest -q\"" },
-                    "skill_id": { "type": "string", "description": "id of the context skill (optional; sets the working dir)" }
-                },
-                "required": ["command"]
-            }
-        }
-    })
-}
 
 /// Capable (OpenAI-compatible) chat path with NATIVE TOOL-CALLING. The model is
 /// given real tools and decides when to use them (no keyword routing). Tool
@@ -11477,16 +11296,6 @@ fn now_epoch_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
-}
-
-// ----------------------------------------------------------------- skills API
-
-/// Resolves the skills directory, creating it on demand so a fresh install has
-/// a place for the user (or the future marketplace) to drop skill folders.
-fn skills_dir() -> Result<PathBuf, std::io::Error> {
-    let dir = skills::skills_root(&gateway_data_dir()?);
-    fs::create_dir_all(&dir)?;
-    Ok(dir)
 }
 
 /// STAGE 2 (semantic): among the models eligible for `role`, ask a fast model

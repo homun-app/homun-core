@@ -7,6 +7,8 @@
 
 use super::*;
 
+use crate::gateway_skill_routes::skills_catalog_path;
+
 // ---- P4.3 Composio connect -------------------------------------------------
 
 #[derive(Debug, Deserialize)]

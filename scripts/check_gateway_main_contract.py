@@ -35,6 +35,7 @@ TASK_EXECUTOR_CONFIG_RS = os.path.join(
 BOOT_MAINTENANCE_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_boot_maintenance.rs"
 )
+SKILL_RUNTIME_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_skill_runtime.rs")
 
 
 def extract_async_main_body(source: str) -> str:
@@ -921,6 +922,17 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn copy_dir_recursive(": "default skill tree copy must stay in gateway_boot_maintenance",
         "fn skill_tree_hash(": "default skill tree hashing must stay in gateway_boot_maintenance",
         "fn seed_default_skills(": "default skill seeding implementation must stay in gateway_boot_maintenance",
+        "fn skills_dir(": "shared skill directory resolution must stay in gateway_skill_runtime",
+        "fn slugify_skill_name(": "skill id normalization must stay in gateway_skill_runtime",
+        "fn create_skill(": "skill authoring runtime must stay in gateway_skill_runtime",
+        "fn enabled_skills_summary(": "skill prompt discovery runtime must stay in gateway_skill_runtime",
+        "fn homuncoder_skill_ids(": "HomunCoder skill manifest loading must stay in gateway_skill_runtime",
+        "fn load_skill_body(": "skill progressive disclosure runtime must stay in gateway_skill_runtime",
+        "fn load_skill_body_and_sensitive(": "skill sensitive disclosure runtime must stay in gateway_skill_runtime",
+        "fn skill_id_from_command(": "skill command id extraction must stay in gateway_skill_runtime",
+        "fn adapt_skill_body(": "skill body adaptation must stay in gateway_skill_runtime",
+        "fn use_skill_tool_schema(": "skill use schema must stay in gateway_skill_runtime",
+        "fn run_in_sandbox_tool_schema(": "skill sandbox schema must stay in gateway_skill_runtime",
         "struct ActiveModelResponse": "runtime model response DTO must stay in gateway_model_routes",
         "struct ProviderModelsGroup": "runtime model list DTO must stay in gateway_model_routes",
         "struct RuntimeModelsResponse": "runtime model list DTO must stay in gateway_model_routes",
@@ -1176,6 +1188,8 @@ def main() -> int:
         task_executor_config_source = handle.read()
     with open(BOOT_MAINTENANCE_RS, "r", encoding="utf-8") as handle:
         boot_maintenance_source = handle.read()
+    with open(SKILL_RUNTIME_RS, "r", encoding="utf-8") as handle:
+        skill_runtime_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1190,6 +1204,12 @@ def main() -> int:
     assert_contains(source, "mod gateway_tags;", "gateway root must declare tag route owner")
     assert_contains(source, "mod gateway_update_routes;", "gateway root must declare update route owner")
     assert_contains(source, "mod gateway_skill_routes;", "gateway root must declare skill route owner")
+    assert_contains(source, "mod gateway_skill_runtime;", "gateway root must declare skill runtime owner")
+    assert_contains(
+        source,
+        "pub(crate) use gateway_skill_runtime::*;",
+        "gateway root must re-export skill runtime owner",
+    )
     assert_contains(
         source,
         "mod gateway_memory_publications;",
@@ -1534,6 +1554,21 @@ def main() -> int:
         boot_maintenance_source,
         "fn skill_tree_hash(",
         "boot maintenance owner must own default skill tree hashing",
+    )
+    assert_contains(
+        skill_runtime_source,
+        "pub(crate) fn use_skill_tool_schema(",
+        "skill runtime owner must expose use_skill schema",
+    )
+    assert_contains(
+        skill_runtime_source,
+        "pub(crate) fn slugify_skill_name(",
+        "skill runtime owner must expose skill id normalization",
+    )
+    assert_contains(
+        skill_runtime_source,
+        "pub(crate) fn load_skill_body_and_sensitive(",
+        "skill runtime owner must expose progressive skill loading with sensitive metadata",
     )
 
     assert_ordered(

@@ -5,9 +5,9 @@ use super::{
     MAX_PLAN_STALL_RESUMES, MemoryBenchIngestRequest, MemoryBenchMessage, MemoryBenchSearchRequest,
     MemoryBenchSession, MemoryBenchStatusRequest, MemoryCandidate, MemoryDataSensitivity,
     MemorySourceOverrideInput, MemorySourceUpsertRequest, ValidatedMemorySourceInput,
-    WorkspaceRecord, WorkspacesFile, active_llm_concurrency, adapt_skill_body,
-    aggregate_session_state_from_counts, authorize_managed_capability_tool, block_stalled_step,
-    brain_budgets_for_context_window, browser_anti_loop_nudge, browser_capability_action_refusal,
+    WorkspaceRecord, WorkspacesFile, active_llm_concurrency, aggregate_session_state_from_counts,
+    authorize_managed_capability_tool, block_stalled_step, brain_budgets_for_context_window,
+    browser_anti_loop_nudge, browser_capability_action_refusal,
     browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
     browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_browse_goal,
     build_memory_source_grant, build_plan_markdown, capability_call_completed_outcome,
@@ -30,7 +30,7 @@ use super::{
     requeue_waiting_resource_tasks, response_language_instruction, rewrite_confirm_to_done,
     run_bash_unsandboxed_result, sanitize_dedup_key, scheduled_thread_sender_for_task_id,
     scheduled_thread_title, search_composio_catalog, should_try_tool_compatibility_fallback,
-    skill_id_from_command, strip_json_fences, suggestion_choices_json, task_effective_goal,
+    strip_json_fences, suggestion_choices_json, task_effective_goal,
     task_execution_outcome_from_executor_result, task_goal_summary, task_queue_response,
     tool_touches_calendar, tool_touches_contacts, valid_catalog_owner,
     validate_memory_source_input, validate_memory_source_overrides,
@@ -6422,15 +6422,6 @@ fn connector_errors_classify_into_actionable_kinds() {
     assert!(mcp_error_hint("401").unwrap().contains("Settings"));
     assert!(connector_error_hint("ok, all good").is_none());
     assert!(mcp_error_hint("ok, all good").is_none());
-}
-
-#[test]
-fn adapt_skill_body_substitutes_base_dir() {
-    let body = "Run `python3 {baseDir}/scripts/x.py` and ${baseDir}/a";
-    let out = adapt_skill_body(body, "weather");
-    assert!(out.contains("/home/agent/skills/weather/scripts/x.py"));
-    assert!(!out.contains("{baseDir}"));
-    assert!(!out.contains("${baseDir}"));
 }
 
 #[test]
@@ -20068,18 +20059,6 @@ fn strip_fences_and_normalize() {
         normalize_for_dedup("  Preferisce   risposte  BREVI "),
         "preferisce risposte brevi"
     );
-}
-
-#[test]
-fn skill_id_from_command_extracts_id() {
-    assert_eq!(
-        skill_id_from_command(
-            "python3 /home/agent/skills/polymarket-trade/scripts/p.py search btc"
-        ),
-        Some("polymarket-trade".to_string())
-    );
-    assert_eq!(skill_id_from_command("ls -la"), None);
-    assert_eq!(skill_id_from_command("cat /home/agent/skills/"), None);
 }
 
 #[test]
