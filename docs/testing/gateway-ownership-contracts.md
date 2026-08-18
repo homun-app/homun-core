@@ -42,6 +42,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_chat_memory.rs` | Azione esplicita save-to-memory da messaggio e relativa proiezione wiki. |
 | `crates/desktop-gateway/src/gateway_chat_streams.rs` | Trasporto stream chat e marker/eventi di output, senza ownership del broker. |
 | `crates/desktop-gateway/src/gateway_chat_markers.rs` | Rimozione marker app-only prima della consegna plain text. |
+| `crates/desktop-gateway/src/gateway_chat_utility_routes.rs` | Route utility chat per improve prompt, suggestions, autotitle, seed assistant e proactive answer; possiede helper payload/title e capture memoria della proactive answer, ma non loop agente, stream, proactivity review o recall inline. |
 | `crates/desktop-gateway/src/gateway_browser_tools.rs` | Schemi e parsing tool browser, `browser_done`, outcome hints e stale-ref recovery policy. |
 | `crates/desktop-gateway/src/gateway_browser_runtime.rs` | Sidecar browser, checkpoint save/restore, sessioni warm, reaper, activity runtime, CDP/noVNC readiness e route/read-model Local Computer per sessione, preview artifact, start/stop e live publisher. |
 | `crates/desktop-gateway/src/gateway_capability_registry.rs` | Corpus discovery generico, materializzazione capability per turno, source labels/ranking, MCP/connector projection, search Composio, read model snapshot `/api/capabilities/snapshot` e bootstrap/seeding registry; non possiede routing semantico o dispatch tool. |

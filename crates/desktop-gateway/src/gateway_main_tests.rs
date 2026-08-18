@@ -25,13 +25,13 @@ use super::{
     next_ready_task_across_workspaces, normalize_for_dedup, parse_plan_marker,
     parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
     plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
-    proactive_answer_memory_request, proactive_memory_request_for_suggestion_action,
-    project_filesystem_mcp_instruction, prune_browser_history, redact_sensitive_text,
-    repeated_browser_action_nudge, repeated_browser_failed_action_nudge,
-    requeue_waiting_resource_tasks, response_language_instruction, rewrite_confirm_to_done,
-    run_bash_unsandboxed_result, sanitize_dedup_key, scheduled_thread_sender_for_task_id,
-    scheduled_thread_title, search_composio_catalog, should_try_tool_compatibility_fallback,
-    skill_id_from_command, strip_json_fences, suggestion_choices_json, task_effective_goal,
+    proactive_memory_request_for_suggestion_action, project_filesystem_mcp_instruction,
+    prune_browser_history, redact_sensitive_text, repeated_browser_action_nudge,
+    repeated_browser_failed_action_nudge, requeue_waiting_resource_tasks,
+    response_language_instruction, rewrite_confirm_to_done, run_bash_unsandboxed_result,
+    sanitize_dedup_key, scheduled_thread_sender_for_task_id, scheduled_thread_title,
+    search_composio_catalog, should_try_tool_compatibility_fallback, skill_id_from_command,
+    strip_json_fences, suggestion_choices_json, task_effective_goal,
     task_execution_outcome_from_executor_result, task_goal_summary, task_queue_response,
     tool_touches_calendar, tool_touches_contacts, valid_catalog_owner,
     validate_memory_source_input, validate_memory_source_overrides,
@@ -6363,45 +6363,6 @@ fn proactive_action_memory_writeback_maps_statuses() {
         proactive_memory_request_for_suggestion_action(&row, "unknown", None, None, lifecycle,)
             .is_none()
     );
-}
-
-#[test]
-fn proactive_answer_capture_is_a_recallable_preference() {
-    // The onboarding-answer fix: a picked answer must be captured as a `preference`
-    // (the only types gather_scope_memory recalls are fact|preference|decision|goal),
-    // so future proactive reviews are grounded on it. It must NOT run the agent loop —
-    // this pure request builder is the whole capture payload.
-    let lifecycle = local_first_memory::MemoryLifecycleRequest {
-        actor_id: "proactivity".to_string(),
-        user_id: local_first_memory::UserId::new("user"),
-        workspace_id: local_first_memory::WorkspaceId::new("__personal__"),
-        purpose: "proactive_answer_capture".to_string(),
-    };
-    let req = proactive_answer_memory_request(
-        "Che ruolo ricopri nel progetto Homun?",
-        "Sviluppatore",
-        "thread_42",
-        lifecycle,
-    );
-    assert_eq!(req.memory_type, "preference");
-    assert!(req.text.contains("Sviluppatore"));
-    assert!(req.text.contains("Che ruolo"));
-    assert_eq!(req.metadata["source"], "proactive_answer");
-    assert_eq!(req.metadata["thread_id"], "thread_42");
-
-    // Empty question → still a self-describing fact, never an empty capture.
-    let bare = proactive_answer_memory_request(
-        "",
-        "Founder",
-        "t1",
-        local_first_memory::MemoryLifecycleRequest {
-            actor_id: "proactivity".to_string(),
-            user_id: local_first_memory::UserId::new("user"),
-            workspace_id: local_first_memory::WorkspaceId::new("__personal__"),
-            purpose: "proactive_answer_capture".to_string(),
-        },
-    );
-    assert!(bare.text.contains("Founder"));
 }
 
 #[test]
@@ -15753,25 +15714,6 @@ fn privacy_guard_payload_disables_reasoning_and_requires_json_content() {
 }
 
 #[test]
-fn suggestions_payload_disables_reasoning_only_for_ollama() {
-    let ollama = super::chat_suggestions_payload(
-        "https://ollama.com/v1",
-        "deepseek-v4-pro",
-        "system",
-        "user",
-    );
-    assert_eq!(ollama["reasoning_effort"], "none");
-
-    let generic = super::chat_suggestions_payload(
-        "https://api.openai.com/v1",
-        "gpt-4.1-mini",
-        "system",
-        "user",
-    );
-    assert!(generic.get("reasoning_effort").is_none());
-}
-
-#[test]
 fn privacy_guard_prompt_defines_contextual_credentials_without_keywords() {
     let payload = super::privacy_guard_payload("qwen3.5:4b", "testo");
     let system = payload["messages"][0]["content"].as_str().unwrap();
@@ -24207,20 +24149,6 @@ fn approval_continuation_visible_text_is_short_and_explicit() {
     );
     assert_eq!(input.source.as_str(), "interactive");
     assert_eq!(input.approval.as_str(), "full");
-}
-
-#[test]
-fn title_model_inputs_strip_plan_markers_from_answer() {
-    // The final assistant text can carry a ‹‹PLAN›› card; the title model must not
-    // read it as content and latch onto a mid-turn step ("Step 2 in corso – …").
-    let prompt = "LangGraph pro e contro";
-    let answer = "‹‹PLAN››- [-] **Step 2 in corso** (`s2`): confronto‹‹/PLAN››\
-LangGraph conviene per grafi di stato espliciti; per flussi lineari è overhead.";
-    let (clean_prompt, clean_answer) = super::title_model_inputs(prompt, answer);
-    assert_eq!(clean_prompt, prompt);
-    assert!(!clean_answer.contains("Step 2"));
-    assert!(!clean_answer.contains("‹‹PLAN"));
-    assert!(clean_answer.starts_with("LangGraph conviene"));
 }
 
 #[test]

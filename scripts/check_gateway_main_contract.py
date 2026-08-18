@@ -15,6 +15,9 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAIN_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "main.rs")
 BROWSER_TOOLS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_browser_tools.rs")
+CHAT_UTILITY_ROUTES_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_chat_utility_routes.rs"
+)
 
 
 def extract_async_main_body(source: str) -> str:
@@ -150,6 +153,22 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn create_chat_thread(": "chat thread create endpoint must stay in gateway_chat_threads",
         "async fn delete_chat_thread(": "chat thread delete endpoint must stay in gateway_chat_threads",
         "async fn chat_messages(": "chat message list endpoint must stay in gateway_chat_threads",
+        "struct ImprovePromptRequest ": "chat utility route DTOs must stay in gateway_chat_utility_routes",
+        "struct ImprovePromptResponse ": "chat utility route DTOs must stay in gateway_chat_utility_routes",
+        "async fn improve_prompt(": "chat utility routes must stay in gateway_chat_utility_routes",
+        "struct SuggestionsRequest ": "chat utility route DTOs must stay in gateway_chat_utility_routes",
+        "struct SuggestionsResponse ": "chat utility route DTOs must stay in gateway_chat_utility_routes",
+        "fn chat_suggestions_payload(": "chat utility payload policy must stay in gateway_chat_utility_routes",
+        "async fn chat_suggestions(": "chat utility routes must stay in gateway_chat_utility_routes",
+        "struct AutoTitleRequest ": "chat utility route DTOs must stay in gateway_chat_utility_routes",
+        "fn title_model_inputs(": "chat title model inputs must stay in gateway_chat_utility_routes",
+        "async fn autotitle_chat_thread(": "chat utility routes must stay in gateway_chat_utility_routes",
+        "fn is_placeholder_chat_title(": "chat title placeholder policy must stay in gateway_chat_utility_routes",
+        "struct SeedAssistantRequest ": "chat utility route DTOs must stay in gateway_chat_utility_routes",
+        "async fn seed_assistant_message(": "chat utility routes must stay in gateway_chat_utility_routes",
+        "struct ProactiveAnswerRequest ": "chat utility route DTOs must stay in gateway_chat_utility_routes",
+        "async fn proactive_answer(": "chat utility routes must stay in gateway_chat_utility_routes",
+        "fn proactive_answer_memory_request(": "proactive answer memory capture must stay in gateway_chat_utility_routes",
         "async fn chat_branches(": "chat branch list endpoint must stay in gateway_chat_branches",
         "async fn set_active_leaf(": "chat branch active leaf endpoint must stay in gateway_chat_branches",
         "async fn set_branch_label(": "chat branch label endpoint must stay in gateway_chat_branches",
@@ -1006,6 +1025,8 @@ def main() -> int:
         source = handle.read()
     with open(BROWSER_TOOLS_RS, "r", encoding="utf-8") as handle:
         browser_tools_source = handle.read()
+    with open(CHAT_UTILITY_ROUTES_RS, "r", encoding="utf-8") as handle:
+        chat_utility_routes_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1048,6 +1069,26 @@ def main() -> int:
     assert_contains(source, "mod gateway_chat_branches;", "gateway root must declare chat branch owner")
     assert_contains(source, "mod gateway_chat_tasks;", "gateway root must declare chat task owner")
     assert_contains(source, "mod gateway_chat_memory;", "gateway root must declare chat memory owner")
+    assert_contains(
+        source,
+        "mod gateway_chat_utility_routes;",
+        "gateway root must declare chat utility route owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_chat_utility_routes::",
+        "gateway root must re-export chat utility route owner",
+    )
+    assert_contains(
+        chat_utility_routes_source,
+        "pub(crate) async fn improve_prompt(",
+        "chat utility route owner must expose improve-prompt handler",
+    )
+    assert_contains(
+        chat_utility_routes_source,
+        "fn title_model_inputs(",
+        "chat utility route owner must own title model input cleanup",
+    )
     assert_contains(source, "mod gateway_turn_broker;", "gateway root must declare turn broker owner")
     assert_contains(
         source,
