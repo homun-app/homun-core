@@ -5168,9 +5168,7 @@ async fn run_agent_rounds(
         thread_id: thread_id.clone(),
     };
     let turn_policy = GatewayTurnPolicy::new(capability_route_for_runtime);
-    let completion_judge = GatewayTurnCompletionJudge {
-        state: state_owned.clone(),
-    };
+    let completion_judge = GatewayTurnCompletionJudge::new(state_owned.clone());
 
     // Vision fallback (`AttachmentPlan::InlineWithFallback`): this turn's images ride the manager's
     // first call on nothing better than a catalog's opinion. Keep the turn's PRISTINE seed so we can
@@ -6406,22 +6404,6 @@ async fn run_agent_turn_into_message_with_fanout(
     };
     let _ = body_task.await;
     result
-}
-
-/// The engine's turn-completion judge port (ADR 0024 inc 5, Point 2a): when the loop moves into the
-/// engine it asks "did the model stop with the request unfinished (and no plan)?" through this seam
-/// instead of calling `task_appears_incomplete` directly. Holds an `AppState` only to reach the shared
-/// HTTP client (the judge is a `memory`-role LLM call); delegates verbatim so behavior is unchanged —
-/// the loop still calls the free fn until inc 5e adopts this adapter.
-// Constructed live in run_agent_rounds (5.D1c.7-followup): the no-plan completion judge.
-pub(crate) struct GatewayTurnCompletionJudge {
-    pub state: AppState,
-}
-
-impl local_first_engine::TurnCompletionJudge for GatewayTurnCompletionJudge {
-    async fn task_appears_incomplete(&self, request: &str, work: &str) -> bool {
-        task_appears_incomplete(&self.state.http, request, work).await
-    }
 }
 
 fn agent_output_incomplete_reason(answer: &str) -> Option<String> {
