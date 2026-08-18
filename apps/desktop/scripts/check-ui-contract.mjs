@@ -401,6 +401,16 @@ assertRepoContains(
   "Gateway named contact profile routes must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_model_routes.rs",
+  "runtime_models",
+  "Gateway runtime model/provider routes must have a dedicated owner",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway model routes"',
+  "Kernel regression gate must run the gateway model routes owner test",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_memory_tools.rs",
   "record_decision",
   "Gateway memory tools must have a dedicated owner",
