@@ -416,10 +416,7 @@ fn context_compactor_has_one_gateway_owner() {
             "main.rs must not retain context compactor surface {pattern}"
         );
     }
-    for adjacent in [
-        "struct GatewayTurnPolicy",
-        "struct GatewayTurnCompletionJudge",
-    ] {
+    for adjacent in ["struct GatewayTurnPolicy", "struct GatewayPlanProgress"] {
         assert!(
             !model_routing.contains(adjacent),
             "model routing owner must not absorb adjacent loop port {adjacent}"
@@ -455,6 +452,35 @@ fn turn_policy_has_one_gateway_owner() {
         assert!(
             !capability_routing.contains(adjacent),
             "capability routing owner must not absorb adjacent loop port {adjacent}"
+        );
+    }
+}
+
+#[test]
+fn turn_completion_judge_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let model_routing = production_source(&root.join("src/gateway_model_routing.rs"));
+
+    let owned = [
+        "struct GatewayTurnCompletionJudge",
+        "impl local_first_engine::TurnCompletionJudge for GatewayTurnCompletionJudge",
+    ];
+
+    for pattern in owned {
+        assert!(
+            model_routing.contains(pattern),
+            "model routing owner must contain turn completion judge surface {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain turn completion judge surface {pattern}"
+        );
+    }
+    for adjacent in ["struct GatewayTurnPolicy", "struct GatewayPlanProgress"] {
+        assert!(
+            !model_routing.contains(adjacent),
+            "model routing owner must not absorb adjacent loop port {adjacent}"
         );
     }
 }

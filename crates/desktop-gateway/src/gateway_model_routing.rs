@@ -1100,6 +1100,27 @@ request is COMPLETE. Reply with STRICT JSON only, no prose: \
     }
 }
 
+/// Gateway `TurnCompletionJudge` adapter for model-routed no-plan completion checks.
+///
+/// The engine consults this port after a model stops without a tracked plan. The
+/// decision remains owned by model routing because it is a `memory`-role model
+/// call through the shared gateway HTTP client.
+pub(crate) struct GatewayTurnCompletionJudge {
+    state: AppState,
+}
+
+impl GatewayTurnCompletionJudge {
+    pub(crate) fn new(state: AppState) -> Self {
+        Self { state }
+    }
+}
+
+impl local_first_engine::TurnCompletionJudge for GatewayTurnCompletionJudge {
+    async fn task_appears_incomplete(&self, request: &str, work: &str) -> bool {
+        task_appears_incomplete(&self.state.http, request, work).await
+    }
+}
+
 /// Fraction of a model's context window at which token-budget auto-compaction fires
 /// (Fase 1.1). Conservative: leaves headroom for the model's output (~6k) + tool schemas.
 pub(crate) const CONTEXT_COMPACTION_THRESHOLD: f64 = 0.75;
