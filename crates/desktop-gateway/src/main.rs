@@ -6411,38 +6411,6 @@ async fn run_agent_turn_into_message_with_fanout(
     result
 }
 
-/// The gateway's `ContextCompactor` (ADR 0024 inc 5, 5.D1c.6): wraps the two harness-driven
-/// compaction paths — `compact_completed_step` (F3 per-step summary) and `compact_for_context_budget`
-/// (Fase 1.1 token-budget checkpoint). Holds the `AppState` (a cheap Arc clone) because the budget path
-/// writes the dropped span to the memory engine, and the turn's `thread_id` so that write is scoped.
-/// Constructed live in run_agent_rounds.
-pub(crate) struct GatewayContextCompactor {
-    pub state: AppState,
-    pub thread_id: Option<String>,
-}
-
-impl local_first_engine::ContextCompactor for GatewayContextCompactor {
-    async fn compact(&self, messages: &mut Vec<serde_json::Value>, start: &mut usize) -> bool {
-        compact_completed_step(&self.state.http, messages, start).await
-    }
-
-    async fn compact_for_budget(
-        &self,
-        messages: &mut Vec<serde_json::Value>,
-        context_window: Option<usize>,
-        memory_reads: &local_first_engine::events::TurnMemoryReadSet,
-    ) -> bool {
-        compact_for_context_budget(
-            &self.state,
-            messages,
-            context_window,
-            self.thread_id.as_deref(),
-            memory_reads,
-        )
-        .await
-    }
-}
-
 /// The gateway's `TurnPolicy` (ADR 0024 inc 5, 5.D1c.7): the two sync gates the loop consults —
 /// workflow-route blocking (holds the turn's `CapabilityRouteDecision`, a gateway type) and provider
 /// vision capability (reads the cached `ollama_capabilities`). Constructed live in run_agent_rounds.
