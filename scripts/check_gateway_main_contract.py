@@ -21,6 +21,7 @@ CHAT_UTILITY_ROUTES_RS = os.path.join(
 PROACTIVITY_ROUTES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_proactivity_routes.rs"
 )
+VAULT_ROUTES_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_vault_routes.rs")
 
 
 def extract_async_main_body(source: str) -> str:
@@ -182,6 +183,24 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn proactive_memory_request_for_suggestion_action(": "proactivity suggestion write-back must stay in gateway_proactivity_routes",
         "struct ProactiveReviewRequest ": "proactivity review route DTOs must stay in gateway_proactivity_routes",
         "async fn proactivity_review_now(": "proactivity review routes must stay in gateway_proactivity_routes",
+        "struct VaultProposalActionRequest": "vault route DTOs must stay in gateway_vault_routes",
+        "struct VaultRecordSummary": "vault route DTOs must stay in gateway_vault_routes",
+        "struct VaultRecordUpdateRequest": "vault route DTOs must stay in gateway_vault_routes",
+        "struct VaultRecordRevealRequest": "vault route DTOs must stay in gateway_vault_routes",
+        "struct VaultPinStatusResponse": "vault route DTOs must stay in gateway_vault_routes",
+        "struct VaultPinSetupRequest": "vault route DTOs must stay in gateway_vault_routes",
+        "struct VaultPinVerifyRequest": "vault route DTOs must stay in gateway_vault_routes",
+        "struct VaultPaymentApprovalRequest": "vault route DTOs must stay in gateway_vault_routes",
+        "async fn vault_proposal_accept(": "vault routes must stay in gateway_vault_routes",
+        "async fn vault_proposal_dismiss(": "vault routes must stay in gateway_vault_routes",
+        "async fn vault_records_list(": "vault routes must stay in gateway_vault_routes",
+        "async fn vault_record_delete(": "vault routes must stay in gateway_vault_routes",
+        "async fn vault_record_update(": "vault routes must stay in gateway_vault_routes",
+        "async fn vault_record_reveal(": "vault routes must stay in gateway_vault_routes",
+        "async fn vault_pin_status(": "vault routes must stay in gateway_vault_routes",
+        "async fn vault_pin_setup(": "vault routes must stay in gateway_vault_routes",
+        "async fn vault_pin_verify(": "vault routes must stay in gateway_vault_routes",
+        "async fn vault_payment_approval_approve(": "vault payment approval route must stay in gateway_vault_routes",
         "async fn chat_branches(": "chat branch list endpoint must stay in gateway_chat_branches",
         "async fn set_active_leaf(": "chat branch active leaf endpoint must stay in gateway_chat_branches",
         "async fn set_branch_label(": "chat branch label endpoint must stay in gateway_chat_branches",
@@ -1042,6 +1061,8 @@ def main() -> int:
         chat_utility_routes_source = handle.read()
     with open(PROACTIVITY_ROUTES_RS, "r", encoding="utf-8") as handle:
         proactivity_routes_source = handle.read()
+    with open(VAULT_ROUTES_RS, "r", encoding="utf-8") as handle:
+        vault_routes_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1200,6 +1221,7 @@ def main() -> int:
     )
     assert_contains(source, "mod gateway_model_routes;", "gateway root must declare model route owner")
     assert_contains(source, "mod gateway_model_routing;", "gateway root must declare model routing owner")
+    assert_contains(source, "mod gateway_vault_routes;", "gateway root must declare vault route owner")
     assert_contains(
         source,
         "mod gateway_prompt_instructions;",
@@ -1286,6 +1308,11 @@ def main() -> int:
         browser_tools_source,
         "fn mcp_call_timeout(",
         "MCP timeout policy must not be owned by browser tools",
+    )
+    assert_contains(
+        vault_routes_source,
+        "pub(crate) async fn vault_records_list(",
+        "vault route owner must expose vault records list route",
     )
 
     assert_ordered(
