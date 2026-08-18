@@ -28,8 +28,7 @@ use super::{
     proactive_answer_memory_request, proactive_memory_request_for_suggestion_action,
     project_filesystem_mcp_instruction, prune_browser_history, redact_sensitive_text,
     repeated_browser_action_nudge, repeated_browser_failed_action_nudge,
-    requeue_waiting_resource_tasks, resolve_contained_computer_cdp,
-    resolve_contained_computer_novnc, response_language_instruction, rewrite_confirm_to_done,
+    requeue_waiting_resource_tasks, response_language_instruction, rewrite_confirm_to_done,
     run_bash_unsandboxed_result, sanitize_dedup_key, scheduled_thread_sender_for_task_id,
     scheduled_thread_title, search_composio_catalog, should_try_tool_compatibility_fallback,
     skill_id_from_command, strip_json_fences, suggestion_choices_json, task_effective_goal,
@@ -21355,71 +21354,6 @@ fn mcp_legacy_header_migration_moves_plaintext_into_secret_store() {
     assert_eq!(
         crate::migrate_legacy_mcp_http_header_secrets(&state).expect("idempotent migration"),
         0
-    );
-}
-
-#[test]
-fn contained_computer_cdp_resolves_from_config() {
-    // Off by default → use the on-host browser.
-    assert_eq!(resolve_contained_computer_cdp(None, None), None);
-    assert_eq!(resolve_contained_computer_cdp(None, Some("0")), None);
-    assert_eq!(
-        resolve_contained_computer_cdp(Some("   "), Some("false")),
-        None
-    );
-    // Flag enables the default local endpoint.
-    assert_eq!(
-        resolve_contained_computer_cdp(None, Some("1")),
-        Some("http://127.0.0.1:9222".to_string())
-    );
-    assert_eq!(
-        resolve_contained_computer_cdp(None, Some("true")),
-        Some("http://127.0.0.1:9222".to_string())
-    );
-    // Explicit endpoint wins over the flag.
-    assert_eq!(
-        resolve_contained_computer_cdp(Some("http://10.0.0.5:9333"), Some("0")),
-        Some("http://10.0.0.5:9333".to_string())
-    );
-}
-
-#[test]
-fn readiness_requires_container_cdp_and_novnc() {
-    assert_eq!(
-        super::computer_readiness(true, true, true, None).phase,
-        "ready"
-    );
-    assert_eq!(
-        super::computer_readiness(true, false, true, None).phase,
-        "starting"
-    );
-    assert_eq!(
-        super::computer_readiness(true, true, false, Some("novnc_unreachable")).phase,
-        "failed"
-    );
-}
-
-#[test]
-fn contained_computer_novnc_resolves_when_enabled() {
-    assert_eq!(resolve_contained_computer_novnc(false, None, false), None);
-    assert_eq!(
-        resolve_contained_computer_novnc(true, None, false),
-        Some("http://127.0.0.1:6080/vnc.html".to_string())
-    );
-    assert_eq!(
-        resolve_contained_computer_novnc(true, Some("http://10.0.0.5:6080/vnc.html"), false),
-        Some("http://10.0.0.5:6080/vnc.html".to_string())
-    );
-    // Blank explicit falls back to the default (desktop).
-    assert_eq!(
-        resolve_contained_computer_novnc(true, Some("  "), false),
-        Some("http://127.0.0.1:6080/vnc.html".to_string())
-    );
-    // Server mode → the gateway-proxied relative URL, ignoring the internal
-    // explicit endpoint (unreachable from a remote browser).
-    assert_eq!(
-        resolve_contained_computer_novnc(true, Some("http://homun-cc:6080/vnc.html"), true),
-        Some("/api/computer/novnc/vnc.html".to_string())
     );
 }
 
