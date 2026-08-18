@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (local computer live owner verificato localmente).**
+> **Ultimo aggiornamento: 2026-08-18 (system status owner verificato localmente).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/local-computer-live-owner` |
-| PR | #108-#116, #118-#164 mergeate in `main`; #117 browser draft separata; slice local computer live verificata localmente |
-| HEAD codice verificato | branch `fabio/local-computer-live-owner` sopra `main` aggiornato a #164 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-system-status-owner` |
+| Branch | `fabio/gateway-system-status-owner` |
+| PR | #108-#116, #118-#165 mergeate in `main`; #117 browser draft separata; slice system status verificata localmente |
+| HEAD codice verificato | branch `fabio/gateway-system-status-owner` sopra `main` aggiornato a #165 |
 
 ## Dove siamo
 
@@ -145,6 +145,9 @@ Slice Runtime V2 recenti:
   list/upsert/revoke/candidates, DTO request/query, validazione policy e
   proiezioni grant/candidate escono dal monolite `main.rs`; persistenza
   workspace generale e storage semantics del `MemoryFacade` restano separati.
+- Estrazione locale `gateway_system_status`: route `/api/system/status`, DTO
+  diagnostici Docker/gateway e parser memoria container escono dal monolite
+  `main.rs`; le route di controllo browser restano fuori da questa slice.
 - Estrazione locale `gateway_workspaces`: registry `workspaces.json`,
   CRUD/policy workspace, selezione workspace attivo a boot e purge retry-safe
   su delete escono dal monolite `main.rs`.
