@@ -27,6 +27,7 @@ LOCAL_AUTHORIZATION_ROUTES_RS = os.path.join(
 )
 COMPOSIO_ROUTES_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_composio_routes.rs")
 CONNECTOR_ERRORS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_connector_errors.rs")
+IMAGE_GENERATION_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_image_generation.rs")
 
 
 def extract_async_main_body(source: str) -> str:
@@ -271,6 +272,12 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn record_connector_run(": "connector audit logging must stay in gateway_connector_errors",
         "fn mcp_error_hint(": "MCP connector hints must stay in gateway_connector_errors",
         "fn composio_execution_error(": "Composio execution failure detection must stay in gateway_connector_errors",
+        "fn default_image_base(": "image generation defaults must stay in gateway_image_generation",
+        "fn image_env_key(": "image generation env keys must stay in gateway_image_generation",
+        "fn image_provider_config(": "image generation provider routing must stay in gateway_image_generation",
+        "fn image_timeout_secs(": "image generation timeout policy must stay in gateway_image_generation",
+        "fn deck_slide_image_prompt(": "deck image prompt policy must stay in gateway_image_generation",
+        "async fn generate_image_png(": "image provider execution must stay in gateway_image_generation",
         "async fn chat_branches(": "chat branch list endpoint must stay in gateway_chat_branches",
         "async fn set_active_leaf(": "chat branch active leaf endpoint must stay in gateway_chat_branches",
         "async fn set_branch_label(": "chat branch label endpoint must stay in gateway_chat_branches",
@@ -1139,6 +1146,8 @@ def main() -> int:
         composio_routes_source = handle.read()
     with open(CONNECTOR_ERRORS_RS, "r", encoding="utf-8") as handle:
         connector_errors_source = handle.read()
+    with open(IMAGE_GENERATION_RS, "r", encoding="utf-8") as handle:
+        image_generation_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1305,6 +1314,12 @@ def main() -> int:
     )
     assert_contains(source, "mod gateway_composio_routes;", "gateway root must declare Composio route owner")
     assert_contains(source, "mod gateway_connector_errors;", "gateway root must declare connector error owner")
+    assert_contains(source, "mod gateway_image_generation;", "gateway root must declare image generation owner")
+    assert_contains(
+        source,
+        "pub(crate) use gateway_image_generation::*;",
+        "gateway root must re-export image generation owner",
+    )
     assert_contains(
         source,
         "mod gateway_prompt_instructions;",
@@ -1436,6 +1451,16 @@ def main() -> int:
         connector_errors_source,
         "pub(crate) fn composio_execution_error(",
         "connector error owner must expose Composio execution failure detection",
+    )
+    assert_contains(
+        image_generation_source,
+        "pub(crate) fn deck_slide_image_prompt(",
+        "image generation owner must expose deck slide prompt policy",
+    )
+    assert_contains(
+        image_generation_source,
+        "pub(crate) async fn generate_image_png(",
+        "image generation owner must expose image provider execution",
     )
 
     assert_ordered(

@@ -5,6 +5,7 @@
 //! write/detect helpers consumed by tool execution.
 
 use super::*;
+use base64::Engine as _;
 
 #[test]
 fn artifacts_owner_smoke() {

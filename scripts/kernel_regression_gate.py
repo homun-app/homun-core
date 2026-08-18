@@ -566,6 +566,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway image generation",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "gateway_image_generation",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway MCP chat tools",
             [
                 "cargo",

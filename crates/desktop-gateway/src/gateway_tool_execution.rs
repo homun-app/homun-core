@@ -6,6 +6,7 @@
 //! until its own owner boundary is extracted.
 
 use super::*;
+use base64::Engine as _;
 
 #[test]
 fn tool_execution_owner_smoke() {
