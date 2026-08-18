@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (local computer read-model owner verificato localmente).**
+> **Ultimo aggiornamento: 2026-08-18 (local computer live owner verificato localmente).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/local-computer-read-model-owner` |
-| PR | #108-#116, #118-#163 mergeate in `main`; #117 browser draft separata; slice local computer read-model verificata localmente |
-| HEAD codice verificato | branch `fabio/local-computer-read-model-owner` sopra `main` aggiornato a #163 |
+| Branch | `fabio/local-computer-live-owner` |
+| PR | #108-#116, #118-#164 mergeate in `main`; #117 browser draft separata; slice local computer live verificata localmente |
+| HEAD codice verificato | branch `fabio/local-computer-live-owner` sopra `main` aggiornato a #164 |
 
 ## Dove siamo
 
@@ -189,6 +189,10 @@ Slice Runtime V2 recenti:
 - `/api/health` non esegue piu' probe Docker nel percorso watchdog: lo stato
   contained-computer letto dall'health handler arriva dal coordinator in memoria,
   mentre le verifiche Docker restano negli owner setup/browser dedicati.
+- Estrazione locale `gateway_browser_runtime`: DTO/route live Local Computer,
+  readiness CDP/noVNC, start/stop contained computer e publisher WS
+  `computer.live` escono dal monolite `main.rs` e restano accanto a sessioni,
+  preview artifact, sidecar browser e activity runtime.
 
 ## Invarianti ora protetti
 

@@ -455,6 +455,26 @@ assertRepoContains(
   "owner_projects_local_computer_artifact_preview",
   "Gateway local computer preview owner must have read-model coverage",
 );
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_browser_runtime.rs",
+  "pub(crate) struct ContainedComputerLiveResponse",
+  "Gateway local computer live DTO must live with the browser runtime owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_browser_runtime.rs",
+  "pub(crate) async fn contained_computer_live",
+  "Gateway local computer live route must live with the browser runtime owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_browser_runtime.rs",
+  "pub(crate) fn spawn_computer_live_publisher",
+  "Gateway local computer live publisher must live with the browser runtime owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_browser_runtime.rs",
+  "owner_projects_local_computer_live_readiness",
+  "Gateway local computer live owner must have readiness coverage",
+);
 assertRepoNotContains(
   "crates/desktop-gateway/src/main.rs",
   "struct CapabilitySnapshotResponse",
@@ -489,6 +509,21 @@ assertRepoNotContains(
   "crates/desktop-gateway/src/main.rs",
   "async fn local_computer_artifact_preview",
   "Gateway main must not own local computer artifact preview route",
+);
+assertRepoNotContains(
+  "crates/desktop-gateway/src/main.rs",
+  "struct ContainedComputerLiveResponse",
+  "Gateway main must not own local computer live DTOs",
+);
+assertRepoNotContains(
+  "crates/desktop-gateway/src/main.rs",
+  "async fn contained_computer_live",
+  "Gateway main must not own local computer live route",
+);
+assertRepoNotContains(
+  "crates/desktop-gateway/src/main.rs",
+  "fn spawn_computer_live_publisher",
+  "Gateway main must not own local computer live publisher",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",
