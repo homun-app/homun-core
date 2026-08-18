@@ -542,6 +542,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway Composio routes",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "gateway_composio_routes",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway MCP chat tools",
             [
                 "cargo",
