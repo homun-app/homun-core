@@ -326,6 +326,40 @@ fn thread_episode_memory_has_one_gateway_owner() {
 }
 
 #[test]
+fn prompt_packets_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_packets = production_source(&root.join("src/gateway_prompt_packets.rs"));
+
+    let owned = [
+        "const MAX_PROJECT_INSTRUCTION_CHARS",
+        "fn read_project_instruction(",
+        "fn compose_gateway_prompt_packets(",
+    ];
+
+    for pattern in owned {
+        assert!(
+            prompt_packets.contains(pattern),
+            "prompt packet owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain prompt packet surface {pattern}"
+        );
+    }
+    for adjacent in [
+        "fn current_thread_episode_block(",
+        "fn memory_injection_policy(",
+        "fn run_agent_rounds(",
+    ] {
+        assert!(
+            !prompt_packets.contains(adjacent),
+            "prompt packet owner must not absorb adjacent owner {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn startup_background_writers_follow_process_fencing() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
