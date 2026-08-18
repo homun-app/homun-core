@@ -5167,10 +5167,7 @@ async fn run_agent_rounds(
         state: state_owned.clone(),
         thread_id: thread_id.clone(),
     };
-    let turn_policy = GatewayTurnPolicy {
-        route: capability_route_for_runtime,
-        workflow_tool_calls: std::sync::atomic::AtomicUsize::new(0),
-    };
+    let turn_policy = GatewayTurnPolicy::new(capability_route_for_runtime);
     let completion_judge = GatewayTurnCompletionJudge {
         state: state_owned.clone(),
     };
@@ -6409,51 +6406,6 @@ async fn run_agent_turn_into_message_with_fanout(
     };
     let _ = body_task.await;
     result
-}
-
-/// The gateway's `TurnPolicy` (ADR 0024 inc 5, 5.D1c.7): the two sync gates the loop consults —
-/// workflow-route blocking (holds the turn's `CapabilityRouteDecision`, a gateway type) and provider
-/// vision capability (reads the cached `ollama_capabilities`). Constructed live in run_agent_rounds.
-pub(crate) struct GatewayTurnPolicy {
-    pub route: CapabilityRouteDecision,
-    workflow_tool_calls: std::sync::atomic::AtomicUsize,
-}
-
-impl local_first_engine::TurnPolicy for GatewayTurnPolicy {
-    fn route_blocked(&self, tool: &str) -> Option<String> {
-        if let CapabilityRouteDecision::Workflow {
-            workflow_id,
-            tool_name,
-            ..
-        } = &self.route
-            && tool == *tool_name
-            && self
-                .workflow_tool_calls
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                > 0
-        {
-            return Some(format!(
-                "WORKFLOW_ROUTE_ALREADY_CALLED: workflow `{workflow_id}` already called `{tool_name}` in this turn. Do not retry or change parameters. Report the first result accurately and stop."
-            ));
-        }
-        workflow_route_blocked_tool_message(&self.route, tool)
-    }
-
-    fn route_block_ends_turn(&self) -> bool {
-        matches!(self.route, CapabilityRouteDecision::Workflow { .. })
-            && self
-                .workflow_tool_calls
-                .load(std::sync::atomic::Ordering::Relaxed)
-                > 0
-    }
-
-    fn supports_vision(&self, base_url: &str, model: &str) -> bool {
-        // The browser's screenshot gate: skip the image ONLY for a model the catalog confidently calls
-        // text-only. `Unknown` still sends — a screenshot wasted on a blind model costs one round,
-        // whereas withholding it from a model that CAN see blinds the whole browsing turn. (The user's
-        // own uploads make the opposite trade: see `vision::plan_attachments`.)
-        model_supports_vision(base_url, model)
-    }
 }
 
 /// The engine's turn-completion judge port (ADR 0024 inc 5, Point 2a): when the loop moves into the

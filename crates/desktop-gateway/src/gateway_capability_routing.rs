@@ -986,6 +986,62 @@ provider or start the required local service."
     }
 }
 
+/// Gateway `TurnPolicy` adapter for turn-level capability routing.
+///
+/// The engine consults this port for synchronous routing checks. Keeping it in
+/// the capability routing owner ensures workflow route enforcement has one
+/// authority, while the vision predicate remains delegated to model routing.
+pub(crate) struct GatewayTurnPolicy {
+    pub(crate) route: CapabilityRouteDecision,
+    workflow_tool_calls: std::sync::atomic::AtomicUsize,
+}
+
+impl GatewayTurnPolicy {
+    pub(crate) fn new(route: CapabilityRouteDecision) -> Self {
+        Self {
+            route,
+            workflow_tool_calls: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+}
+
+impl local_first_engine::TurnPolicy for GatewayTurnPolicy {
+    fn route_blocked(&self, tool: &str) -> Option<String> {
+        if let CapabilityRouteDecision::Workflow {
+            workflow_id,
+            tool_name,
+            ..
+        } = &self.route
+            && tool == *tool_name
+            && self
+                .workflow_tool_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                > 0
+        {
+            return Some(format!(
+                "WORKFLOW_ROUTE_ALREADY_CALLED: workflow `{workflow_id}` already called `{tool_name}` in this turn. Do not retry or change parameters. Report the first result accurately and stop."
+            ));
+        }
+        workflow_route_blocked_tool_message(&self.route, tool)
+    }
+
+    fn route_block_ends_turn(&self) -> bool {
+        matches!(self.route, CapabilityRouteDecision::Workflow { .. })
+            && self
+                .workflow_tool_calls
+                .load(std::sync::atomic::Ordering::Relaxed)
+                > 0
+    }
+
+    fn supports_vision(&self, base_url: &str, model: &str) -> bool {
+        // The browser's screenshot gate: skip the image ONLY for a model the catalog confidently calls
+        // text-only. `Unknown` still sends — a screenshot wasted on a blind model costs one round,
+        // whereas withholding it from a model that CAN see blinds the whole browsing turn. (The user's
+        // own uploads make the opposite trade: see `vision::plan_attachments`.)
+        model_supports_vision(base_url, model)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

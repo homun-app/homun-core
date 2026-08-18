@@ -428,6 +428,38 @@ fn context_compactor_has_one_gateway_owner() {
 }
 
 #[test]
+fn turn_policy_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let capability_routing = production_source(&root.join("src/gateway_capability_routing.rs"));
+
+    let owned = [
+        "struct GatewayTurnPolicy",
+        "impl local_first_engine::TurnPolicy for GatewayTurnPolicy",
+    ];
+
+    for pattern in owned {
+        assert!(
+            capability_routing.contains(pattern),
+            "capability routing owner must contain turn policy surface {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain turn policy surface {pattern}"
+        );
+    }
+    for adjacent in [
+        "struct GatewayContextCompactor",
+        "struct GatewayTurnCompletionJudge",
+    ] {
+        assert!(
+            !capability_routing.contains(adjacent),
+            "capability routing owner must not absorb adjacent loop port {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn startup_background_writers_follow_process_fencing() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
