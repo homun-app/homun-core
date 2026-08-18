@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (Composio routes owner in verifica locale).**
+> **Ultimo aggiornamento: 2026-08-18 (connector errors owner in verifica locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-composio-routes-owner` |
-| Branch | `fabio/gateway-composio-routes-owner` |
-| PR | #108-#116, #118-#170 mergeate in `main`; #117 browser draft separata; slice Composio routes in verifica locale |
-| HEAD codice verificato | branch `fabio/gateway-composio-routes-owner` sopra `main` aggiornato a #170 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-connector-errors-owner` |
+| Branch | `fabio/gateway-connector-errors-owner` |
+| PR | #108-#116, #118-#171 mergeate in `main`; #117 browser draft separata; slice connector errors in verifica locale |
+| HEAD codice verificato | branch `fabio/gateway-connector-errors-owner` sopra `main` aggiornato a #171 |
 
 ## Dove siamo
 
@@ -124,11 +124,16 @@ Slice Runtime V2 recenti:
 - Estrazione locale `gateway_local_authorization_routes`: route/DTO e marker
   locali per filesystem authorization, sandbox escalation, read-only card e
   connect-suggestion mark escono dal monolite `main.rs`.
-- Slice corrente `gateway_composio_routes`: route/DTO Composio per connect,
+- Estrazione mergeata `gateway_composio_routes`: route/DTO Composio per connect,
   toolkits/auth/link/connections/disconnect/logo, catalogo chat-tool,
   classificazione read/write e suggest capability escono dal monolite
   `main.rs`; `composio_execute_tool`, payment approval claim e remote approval
   dispatch restano owner separati.
+- Slice corrente `gateway_connector_errors`: classificazione errori connector,
+  hint azionabili Composio/MCP, audit log esecuzioni connector e rilevamento
+  `successful:false` Composio escono dal monolite `main.rs`; dispatch execute,
+  confirmation card, payment approval, remote approval e browser restano owner
+  separati.
 - Estrazione locale `gateway_thread_files`: cartella collegata per thread,
   precedenza workspace attivo e route `@ file` search/read escono dal monolite
   `main.rs`; `path_within` viene portato nell'owner condiviso
@@ -692,16 +697,20 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
+- #143-#171: slice owner-level successive mergeate in `main`, fino a
+  `gateway_composio_routes`; `main` verificato e riallineato a #171 prima
+  della slice corrente.
 
 PR aperte:
 
-- Nessuna PR aperta per la slice corrente; prossimo passo: aprire
-  `fabio/gateway-memory-sources-owner`.
+- #117 browser draft separata, fuori dal lavoro non-browser corrente.
+- Nessuna PR aperta per la slice corrente; prossimo passo: completare gate e
+  aprire `fabio/gateway-connector-errors-owner`.
 
 Branch corrente:
 
-- `fabio/gateway-memory-sources-owner`: branch sopra `main` aggiornato a #142;
-  contiene solo la slice `gateway_memory_sources`.
+- `fabio/gateway-connector-errors-owner`: branch sopra `main` aggiornato a #171;
+  contiene solo la slice `gateway_connector_errors`.
 - `fabio/write-tool-allowlist-contracts`: branch locale cumulativa rebased su
   `main`, da usare solo come parcheggio per separare le prossime slice
   successive.
@@ -728,8 +737,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Completare gate, commit e PR piccola per `gateway_composio_routes`.
-2. Dopo merge Composio routes, aggiornare `main` e riprendere la prossima
+1. Completare gate, commit e PR piccola per `gateway_connector_errors`.
+2. Dopo merge connector errors, aggiornare `main` e riprendere la prossima
    slice non-browser solo dopo nuova lettura owner-level di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
@@ -738,7 +747,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/gateway-composio-routes-owner se la PR Composio routes e' ancora da aprire o e' aperta;
+branch fabio/gateway-connector-errors-owner se la PR connector errors e' ancora da aprire o e' aperta;
 altrimenti main aggiornato e scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.

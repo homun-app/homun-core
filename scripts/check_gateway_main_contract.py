@@ -26,6 +26,7 @@ LOCAL_AUTHORIZATION_ROUTES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_local_authorization_routes.rs"
 )
 COMPOSIO_ROUTES_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_composio_routes.rs")
+CONNECTOR_ERRORS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_connector_errors.rs")
 
 
 def extract_async_main_body(source: str) -> str:
@@ -263,6 +264,13 @@ def forbidden_root_snippets() -> dict[str, str]:
         "const COMPOSIO_LOGO_MAX_BYTES": "Composio logo proxy limits must stay in gateway_composio_routes",
         "async fn composio_toolkit_logo(": "Composio logo route must stay in gateway_composio_routes",
         "fn composio_logo_response(": "Composio logo response helper must stay in gateway_composio_routes",
+        "enum ConnectorErrorKind": "connector error classification must stay in gateway_connector_errors",
+        "fn classify_connector_error(": "connector error classification must stay in gateway_connector_errors",
+        "fn connector_error_hint(": "connector user hints must stay in gateway_connector_errors",
+        "fn connector_error_kind_str(": "connector error labels must stay in gateway_connector_errors",
+        "fn record_connector_run(": "connector audit logging must stay in gateway_connector_errors",
+        "fn mcp_error_hint(": "MCP connector hints must stay in gateway_connector_errors",
+        "fn composio_execution_error(": "Composio execution failure detection must stay in gateway_connector_errors",
         "async fn chat_branches(": "chat branch list endpoint must stay in gateway_chat_branches",
         "async fn set_active_leaf(": "chat branch active leaf endpoint must stay in gateway_chat_branches",
         "async fn set_branch_label(": "chat branch label endpoint must stay in gateway_chat_branches",
@@ -1129,6 +1137,8 @@ def main() -> int:
         local_authorization_routes_source = handle.read()
     with open(COMPOSIO_ROUTES_RS, "r", encoding="utf-8") as handle:
         composio_routes_source = handle.read()
+    with open(CONNECTOR_ERRORS_RS, "r", encoding="utf-8") as handle:
+        connector_errors_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1294,6 +1304,7 @@ def main() -> int:
         "gateway root must declare local authorization route owner",
     )
     assert_contains(source, "mod gateway_composio_routes;", "gateway root must declare Composio route owner")
+    assert_contains(source, "mod gateway_connector_errors;", "gateway root must declare connector error owner")
     assert_contains(
         source,
         "mod gateway_prompt_instructions;",
@@ -1395,6 +1406,36 @@ def main() -> int:
         composio_routes_source,
         "pub(crate) async fn connect_composio(",
         "Composio route owner must expose connection route",
+    )
+    assert_contains(
+        connector_errors_source,
+        "pub(crate) enum ConnectorErrorKind",
+        "connector error owner must expose classified error kinds",
+    )
+    assert_contains(
+        connector_errors_source,
+        "pub(crate) fn classify_connector_error(",
+        "connector error owner must expose connector error classification",
+    )
+    assert_contains(
+        connector_errors_source,
+        "pub(crate) fn connector_error_hint(",
+        "connector error owner must expose connector user hints",
+    )
+    assert_contains(
+        connector_errors_source,
+        "pub(crate) fn mcp_error_hint(",
+        "connector error owner must expose MCP user hints",
+    )
+    assert_contains(
+        connector_errors_source,
+        "pub(crate) fn record_connector_run(",
+        "connector error owner must expose connector audit logging",
+    )
+    assert_contains(
+        connector_errors_source,
+        "pub(crate) fn composio_execution_error(",
+        "connector error owner must expose Composio execution failure detection",
     )
 
     assert_ordered(
