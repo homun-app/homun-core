@@ -32,6 +32,9 @@ MODEL_ROUTING_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gatew
 TASK_EXECUTOR_CONFIG_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_task_executor_config.rs"
 )
+BOOT_MAINTENANCE_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_boot_maintenance.rs"
+)
 
 
 def extract_async_main_body(source: str) -> str:
@@ -914,6 +917,10 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn router_for_role(": "role router factory must stay in gateway_model_routing",
         "fn semantic_router_enabled(": "semantic router flag must stay in gateway_model_routing",
         "fn build_inference_router_from_env(": "legacy env router factory must stay in gateway_model_routing",
+        "fn default_skills_dir(": "default skill source resolution must stay in gateway_boot_maintenance",
+        "fn copy_dir_recursive(": "default skill tree copy must stay in gateway_boot_maintenance",
+        "fn skill_tree_hash(": "default skill tree hashing must stay in gateway_boot_maintenance",
+        "fn seed_default_skills(": "default skill seeding implementation must stay in gateway_boot_maintenance",
         "struct ActiveModelResponse": "runtime model response DTO must stay in gateway_model_routes",
         "struct ProviderModelsGroup": "runtime model list DTO must stay in gateway_model_routes",
         "struct RuntimeModelsResponse": "runtime model list DTO must stay in gateway_model_routes",
@@ -1167,6 +1174,8 @@ def main() -> int:
         model_routing_source = handle.read()
     with open(TASK_EXECUTOR_CONFIG_RS, "r", encoding="utf-8") as handle:
         task_executor_config_source = handle.read()
+    with open(BOOT_MAINTENANCE_RS, "r", encoding="utf-8") as handle:
+        boot_maintenance_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1515,6 +1524,16 @@ def main() -> int:
         task_executor_config_source,
         "pub(crate) const TASK_EXECUTOR_POLL_INTERVAL_MS: u64 = 1_000;",
         "task executor config must expose poll interval",
+    )
+    assert_contains(
+        boot_maintenance_source,
+        "fn seed_default_skills(",
+        "boot maintenance owner must own default skill seeding",
+    )
+    assert_contains(
+        boot_maintenance_source,
+        "fn skill_tree_hash(",
+        "boot maintenance owner must own default skill tree hashing",
     )
 
     assert_ordered(
