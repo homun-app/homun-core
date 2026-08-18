@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (model router factories in verifica locale).**
+> **Ultimo aggiornamento: 2026-08-18 (default skill seeding in verifica locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-model-router-factories` |
-| Branch | `fabio/gateway-model-router-factories` |
-| PR | #108-#116, #118-#175 mergeate in `main`; #117 browser draft separata; slice model router factories in verifica locale |
-| HEAD codice verificato | branch `fabio/gateway-model-router-factories` sopra `main` aggiornato a #175 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-default-skill-seeding` |
+| Branch | `fabio/gateway-default-skill-seeding` |
+| PR | #108-#116, #118-#176 mergeate in `main`; #117 browser draft separata; slice default skill seeding in verifica locale |
+| HEAD codice verificato | branch `fabio/gateway-default-skill-seeding` sopra `main` aggiornato a #176 |
 
 ## Dove siamo
 
@@ -148,10 +148,14 @@ Slice Runtime V2 recenti:
   `main.rs`; la surface HTTP `/api/routing-decisions` resta in
   `gateway_model_routes`, mentre `now_epoch_secs` resta nel root perche'
   condiviso da runtime, memory, browser e workspace.
-- Slice corrente `gateway_model_routing`: resolver API key inference,
+- Estrazione mergeata `gateway_model_routing`: resolver API key inference,
   fallback env, factory `ModelRouter` da provider/ruolo e router legacy da env
   escono dal monolite `main.rs`; `resolve_role_for_task` e il wrapper browser
   restano fuori da questa slice.
+- Slice corrente `gateway_boot_maintenance`: risoluzione sorgente default skills,
+  copy ricorsivo, hash skill-tree e seed default skills escono dal monolite
+  `main.rs`; `skills_dir` resta nel root per ora perche' condivisa da route
+  skill e tool execution.
 - Estrazione locale `gateway_thread_files`: cartella collegata per thread,
   precedenza workspace attivo e route `@ file` search/read escono dal monolite
   `main.rs`; `path_within` viene portato nell'owner condiviso
@@ -715,20 +719,20 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#174: slice owner-level successive mergeate in `main`, fino a
-  `gateway_task_executor_config`; `main` verificato e riallineato a #174 prima
-  della slice corrente.
+- #143-#176: slice owner-level successive mergeate in `main`, fino a
+  `gateway_model_routing` router factories; `main` verificato e riallineato a
+  #176 prima della slice corrente.
 
 PR aperte:
 
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
 - Nessuna PR aperta per la slice corrente; prossimo passo: completare gate e
-  aprire `fabio/gateway-model-router-factories`.
+  aprire `fabio/gateway-default-skill-seeding`.
 
 Branch corrente:
 
-- `fabio/gateway-model-router-factories`: branch sopra `main` aggiornato a
-  #175; contiene solo la slice factory/router dell'owner model routing.
+- `fabio/gateway-default-skill-seeding`: branch sopra `main` aggiornato a
+  #176; contiene solo la slice default skill seeding dell'owner boot maintenance.
 - `fabio/write-tool-allowlist-contracts`: branch locale cumulativa rebased su
   `main`, da usare solo come parcheggio per separare le prossime slice
   successive.
@@ -755,8 +759,9 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Completare gate, commit e PR piccola per `gateway_model_routing` router factories.
-2. Dopo merge model router factories, aggiornare `main` e riprendere la prossima
+1. Completare gate, commit e PR piccola per `gateway_boot_maintenance` default
+   skill seeding.
+2. Dopo merge default skill seeding, aggiornare `main` e riprendere la prossima
    slice non-browser solo dopo nuova lettura owner-level di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
@@ -765,8 +770,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/gateway-model-router-factories se la slice router factories e' ancora da aprire o e' aperta;
-altrimenti main aggiornato a #175/#successive e scegli la prossima slice non-browser owner-level.
+branch fabio/gateway-default-skill-seeding se la slice default skill seeding e' ancora da aprire o e' aperta;
+altrimenti main aggiornato a #176/#successive e scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

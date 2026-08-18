@@ -20083,29 +20083,6 @@ fn skill_id_from_command_extracts_id() {
 }
 
 #[test]
-fn skill_tree_hash_tracks_script_changes() {
-    let root = std::env::temp_dir().join(format!(
-        "homun-skill-hash-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-    ));
-    let scripts = root.join("scripts");
-    std::fs::create_dir_all(&scripts).expect("scripts dir");
-    std::fs::write(root.join("SKILL.md"), "---\nname: demo\n---\n# Demo\n").expect("skill");
-    std::fs::write(scripts.join("run.sh"), "echo one\n").expect("script");
-
-    let first = super::skill_tree_hash(&root).expect("first hash");
-    std::fs::write(scripts.join("run.sh"), "echo two\n").expect("script update");
-    let second = super::skill_tree_hash(&root).expect("second hash");
-    let _ = std::fs::remove_dir_all(&root);
-
-    assert_ne!(first, second);
-}
-
-#[test]
 fn deck_slide_image_prompt_avoids_rendering_title_text() {
     let prompt = super::deck_slide_image_prompt("Local-first AI for PMI 2026", "#14947d");
 
