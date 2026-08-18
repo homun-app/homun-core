@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (model routes owner verificato localmente).**
+> **Ultimo aggiornamento: 2026-08-18 (project graph owner verificato localmente).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/gateway-model-routes-owner` |
-| PR | #108-#116, #118-#157 mergeate in `main`; #117 browser draft separata; slice model routes verificata localmente |
-| HEAD codice verificato | branch `fabio/gateway-model-routes-owner` sopra `main` aggiornato a #157, pre-release gate verde |
+| Branch | `fabio/gateway-project-graph-owner` |
+| PR | #108-#116, #118-#158 mergeate in `main`; #117 browser draft separata; slice project graph/integrity verificata localmente |
+| HEAD codice verificato | branch `fabio/gateway-project-graph-owner` sopra `main` aggiornato a #158, kernel/pre-release gate verdi |
 
 ## Dove siamo
 
@@ -384,6 +384,20 @@ Slice browser/projection successive:
   `cd apps/desktop && npm run test:ui-contract`,
   `python3 scripts/kernel_regression_gate.py` e
   `python3 scripts/pre_release_gate.py` verdi.
+- Slice `fabio/gateway-project-graph-owner` verificata localmente: fingerprint
+  sorgenti, refresh Graphify, route `/api/memory/project-graph/*` e route
+  integrity/repair spostati in `gateway_project_graph_routes`; `main.rs` resta
+  solo consumer del refresh dopo modifiche codice. Verifiche verdi:
+  `cargo fmt --check`,
+  `python3 scripts/check_gateway_main_contract.py`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_project_graph_routes -- --nocapture`,
+  `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway project_graph -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway project_change_fingerprint -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway integrity_ -- --nocapture`,
+  `cd apps/desktop && npm run test:ui-contract`,
+  `python3 scripts/kernel_regression_gate.py` e
+  `python3 scripts/pre_release_gate.py`.
 - Slice `fabio/capability-registry-contracts` verificata localmente: RED del contract
   `check_gateway_main_contract.py` osservato prima dell'estrazione; GREEN
   mirati con `python3 scripts/check_gateway_main_contract.py`,

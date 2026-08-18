@@ -645,6 +645,30 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn write_project_file(": "project file writes must stay in gateway_project_files",
         "fn apply_patch_in_project(": "project patch application must stay in gateway_project_files",
         "async fn run_in_project(": "project command execution must stay in gateway_project_files",
+        "fn is_noise_dir(": "project graph source filtering must stay in gateway_project_graph_routes",
+        "fn is_code_file(": "project graph source filtering must stay in gateway_project_graph_routes",
+        "fn project_change_fingerprint(": "project graph fingerprinting must stay in gateway_project_graph_routes",
+        "fn graphify_out_dir(": "project graph output paths must stay in gateway_project_graph_routes",
+        "fn integrity_known_scopes(": "integrity scope projection must stay in gateway_project_graph_routes",
+        "fn integrity_graph_statuses(": "integrity graph freshness projection must stay in gateway_project_graph_routes",
+        "fn integrity_graph_status_for_workspace(": "integrity graph freshness projection must stay in gateway_project_graph_routes",
+        "fn integrity_bad_request(": "integrity route error mapping must stay in gateway_project_graph_routes",
+        "fn integrity_internal_error(": "integrity route error mapping must stay in gateway_project_graph_routes",
+        "fn integrity_preview_for_actions(": "integrity preview assembly must stay in gateway_project_graph_routes",
+        "async fn integrity_audit(": "integrity route must stay in gateway_project_graph_routes",
+        "async fn integrity_repair_preview(": "integrity route must stay in gateway_project_graph_routes",
+        "async fn linked_memory_repair_preview(": "linked-memory repair route must stay in gateway_project_graph_routes",
+        "async fn linked_memory_repair_apply(": "linked-memory repair route must stay in gateway_project_graph_routes",
+        "fn next_integrity_backup_path(": "integrity backup path creation must stay in gateway_project_graph_routes",
+        "async fn integrity_repair_apply(": "integrity route must stay in gateway_project_graph_routes",
+        "fn spawn_project_graph_refresh(": "project graph refresh orchestration must stay in gateway_project_graph_routes",
+        "fn project_graph_error_code(": "project graph error mapping must stay in gateway_project_graph_routes",
+        "fn publish_project_graph_result(": "project graph event publication must stay in gateway_project_graph_routes",
+        "fn build_project_graph(": "project graph build orchestration must stay in gateway_project_graph_routes",
+        "struct ProjectGraphEnsureRequest": "project graph request DTO must stay in gateway_project_graph_routes",
+        "async fn project_graph_ensure(": "project graph route must stay in gateway_project_graph_routes",
+        "struct ProjectSubdirsQuery": "project graph request DTO must stay in gateway_project_graph_routes",
+        "async fn project_graph_subdirs(": "project graph route must stay in gateway_project_graph_routes",
         "fn chat_browser_budget(": "browser budget policy must stay in gateway_browser_tools",
         "fn browse_tool_schema(": "delegated browse schema must stay in gateway_browser_tools",
         "fn browser_done_tool_schema(": "browser done schema must stay in gateway_browser_tools",
@@ -1039,6 +1063,11 @@ def main() -> int:
         "mod gateway_browser_runtime;",
         "gateway root must declare browser runtime owner",
     )
+    assert_contains(
+        source,
+        "mod gateway_project_graph_routes;",
+        "gateway root must declare project graph route owner",
+    )
     assert_contains(source, "mod gateway_deliverables;", "gateway root must declare deliverables owner")
     assert_contains(source, "mod gateway_tool_execution;", "gateway root must declare tool execution owner")
     assert_contains(source, "mod gateway_channels;", "gateway root must declare channels owner")
@@ -1052,6 +1081,11 @@ def main() -> int:
         source,
         "pub(crate) use gateway_model_routes::*;",
         "gateway root must re-export model route owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_project_graph_routes::*;",
+        "gateway root must re-export project graph route owner",
     )
     assert_contains(
         source,

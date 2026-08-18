@@ -842,6 +842,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway project graph routes",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "gateway_project_graph_routes",
+            ],
+        ),
+        Step(
             "gateway browser tools",
             [
                 "cargo",

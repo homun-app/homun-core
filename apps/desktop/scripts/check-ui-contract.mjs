@@ -406,9 +406,19 @@ assertRepoContains(
   "Gateway runtime model/provider routes must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_project_graph_routes.rs",
+  "project_graph_ensure",
+  "Gateway project graph and integrity routes must have a dedicated owner",
+);
+assertRepoContains(
   "scripts/kernel_regression_gate.py",
   '"gateway model routes"',
   "Kernel regression gate must run the gateway model routes owner test",
+);
+assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway project graph routes"',
+  "Kernel regression gate must run the gateway project graph routes owner test",
 );
 assertRepoContains(
   "crates/desktop-gateway/src/gateway_memory_tools.rs",
