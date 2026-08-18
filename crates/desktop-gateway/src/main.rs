@@ -47,6 +47,7 @@ mod gateway_chat_tasks;
 mod gateway_chat_threads;
 mod gateway_contact_perimeter;
 mod gateway_contact_profile;
+mod gateway_contact_profiles;
 mod gateway_contact_relationships;
 mod gateway_cors;
 mod gateway_datetime_tools;
@@ -301,6 +302,9 @@ pub(crate) use gateway_channels::*;
 use gateway_chat_markers::strip_chat_markers;
 use gateway_contact_perimeter::{contact_perimeter_get, contact_perimeter_set};
 use gateway_contact_profile::{contact_profile, contact_profile_refresh};
+use gateway_contact_profiles::{
+    contact_assign_profile, profile_create, profile_delete, profile_update, profiles_list,
+};
 use gateway_contact_relationships::{
     contact_relationship_add, contact_relationship_remove, contact_relationships,
 };
@@ -19324,13 +19328,13 @@ async fn project_graph_subdirs(
 // episodes whose thread_id matches one of its handles.
 
 #[derive(Serialize)]
-struct ContactChannel {
+pub(crate) struct ContactChannel {
     channel: String,
     address: String,
 }
 
 #[derive(Serialize)]
-struct ContactView {
+pub(crate) struct ContactView {
     reference: String,
     name: String,
     contact_type: String,
@@ -19350,7 +19354,7 @@ struct ContactView {
 }
 
 #[derive(Serialize)]
-struct ChannelProfileView {
+pub(crate) struct ChannelProfileView {
     channel: String,
     profile_id: i64,
 }
@@ -19488,7 +19492,7 @@ fn episode_refs_by_date(
         .collect()
 }
 
-fn contact_view_from_stored(
+pub(crate) fn contact_view_from_stored(
     store: &ChatStore,
     c: &chat_store::StoredContact,
     memory_count: usize,
@@ -19930,185 +19934,6 @@ async fn contact_delete(
         message: error.to_string(),
     })?;
     Ok(Json(serde_json::json!({ "ok": true })))
-}
-
-// ---- Named profiles (P3): reusable personas + per-(contact, channel) binding ----
-
-#[derive(Serialize)]
-struct ProfileView {
-    id: i64,
-    name: String,
-    tone_of_voice: String,
-    instructions: String,
-}
-
-fn profile_view(p: chat_store::StoredProfile) -> ProfileView {
-    ProfileView {
-        id: p.id,
-        name: p.name,
-        tone_of_voice: p.tone_of_voice,
-        instructions: p.instructions,
-    }
-}
-
-async fn profiles_list(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<ProfileView>>, GatewayError> {
-    let store = lock_store(&state)?;
-    let profiles = store.list_profiles().map_err(|error| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "profiles_list",
-        message: error.to_string(),
-    })?;
-    Ok(Json(profiles.into_iter().map(profile_view).collect()))
-}
-
-#[derive(Deserialize)]
-struct ProfileCreateRequest {
-    name: String,
-    #[serde(default)]
-    tone_of_voice: String,
-    #[serde(default)]
-    instructions: String,
-}
-
-async fn profile_create(
-    State(state): State<AppState>,
-    Json(request): Json<ProfileCreateRequest>,
-) -> Result<Json<ProfileView>, GatewayError> {
-    let name = request.name.trim();
-    if name.is_empty() {
-        return Err(GatewayError {
-            status: StatusCode::BAD_REQUEST,
-            code: "profile_name_required",
-            message: "name required".to_string(),
-        });
-    }
-    let store = lock_store(&state)?;
-    let id = store
-        .create_profile(
-            name,
-            request.tone_of_voice.trim(),
-            request.instructions.trim(),
-        )
-        .map_err(|error| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "profile_create",
-            message: error.to_string(),
-        })?;
-    let profile = store
-        .profile_by_id(id)
-        .ok()
-        .flatten()
-        .ok_or_else(|| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "profile_create",
-            message: "profile not created".to_string(),
-        })?;
-    Ok(Json(profile_view(profile)))
-}
-
-#[derive(Deserialize)]
-struct ProfileUpdateRequest {
-    id: i64,
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    tone_of_voice: Option<String>,
-    #[serde(default)]
-    instructions: Option<String>,
-}
-
-async fn profile_update(
-    State(state): State<AppState>,
-    Json(request): Json<ProfileUpdateRequest>,
-) -> Result<Json<ProfileView>, GatewayError> {
-    let store = lock_store(&state)?;
-    store
-        .update_profile(
-            request.id,
-            request.name.as_deref().filter(|s| !s.trim().is_empty()),
-            request.tone_of_voice.as_deref(),
-            request.instructions.as_deref(),
-        )
-        .map_err(|error| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "profile_update",
-            message: error.to_string(),
-        })?;
-    let profile = store
-        .profile_by_id(request.id)
-        .ok()
-        .flatten()
-        .ok_or_else(|| GatewayError {
-            status: StatusCode::NOT_FOUND,
-            code: "profile_not_found",
-            message: "profile not found".to_string(),
-        })?;
-    Ok(Json(profile_view(profile)))
-}
-
-#[derive(Deserialize)]
-struct ProfileDeleteRequest {
-    id: i64,
-}
-
-async fn profile_delete(
-    State(state): State<AppState>,
-    Json(request): Json<ProfileDeleteRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let store = lock_store(&state)?;
-    store
-        .delete_profile(request.id)
-        .map_err(|error| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "profile_delete",
-            message: error.to_string(),
-        })?;
-    Ok(Json(serde_json::json!({ "ok": true })))
-}
-
-#[derive(Deserialize)]
-struct ContactAssignProfileRequest {
-    reference: String,
-    /// Absent/null = clear (back to inline persona). For the channel variant the
-    /// override is removed instead.
-    #[serde(default)]
-    profile_id: Option<i64>,
-    /// When set, binds the profile for THIS channel only (override).
-    #[serde(default)]
-    channel: Option<String>,
-}
-
-async fn contact_assign_profile(
-    State(state): State<AppState>,
-    Json(request): Json<ContactAssignProfileRequest>,
-) -> Result<Json<ContactView>, GatewayError> {
-    let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
-        status: StatusCode::NOT_FOUND,
-        code: "contact_not_found",
-        message: "contact not found".to_string(),
-    })?;
-    let store = lock_store(&state)?;
-    let result = match request.channel.as_deref().filter(|c| !c.trim().is_empty()) {
-        Some(channel) => store.set_channel_profile(id, channel.trim(), request.profile_id),
-        None => store.set_contact_profile(id, request.profile_id),
-    };
-    result.map_err(|error| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "contact_assign_profile",
-        message: error.to_string(),
-    })?;
-    let contact = store
-        .contact_by_id(id)
-        .ok()
-        .flatten()
-        .ok_or_else(|| GatewayError {
-            status: StatusCode::NOT_FOUND,
-            code: "contact_not_found",
-            message: "contact not found".to_string(),
-        })?;
-    Ok(Json(contact_view_from_stored(&store, &contact, 0)))
 }
 
 /// Epoch seconds → "YYYY-MM-DD" (civil calendar, dependency-free — avoids chrono).

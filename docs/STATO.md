@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (contact perimeter owner verificato localmente).**
+> **Ultimo aggiornamento: 2026-08-18 (named contact profiles owner verificato localmente).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/gateway-contact-perimeter-owner` |
-| PR | #108-#116, #118-#154 mergeate in `main`; #117 browser draft separata; slice contact perimeter in corso |
-| HEAD codice verificato | branch `fabio/gateway-contact-perimeter-owner` sopra `main` aggiornato a #154 |
+| Branch | `fabio/gateway-contact-profiles-owner` |
+| PR | #108-#116, #118-#155 mergeate in `main`; #117 browser draft separata; slice named contact profiles in corso |
+| HEAD codice verificato | branch `fabio/gateway-contact-profiles-owner` sopra `main` aggiornato a #155 |
 
 ## Dove siamo
 
@@ -177,6 +177,10 @@ Slice Runtime V2 recenti:
   `/api/memory/contacts/profile` e `/api/memory/contacts/profile/refresh`,
   distillazione facts contatto e lettura fact via graph escono dal monolite
   `main.rs`; CRUD contatti, relationship e profili globali restano separati.
+- Estrazione locale `gateway_contact_profiles`: route `/api/profiles*`,
+  DTO named persona e binding profilo su contatto/canale escono dal monolite
+  `main.rs`; CRUD contatti, perimetri, relationship e fact profile restano
+  owner separati.
 - `/api/health` non esegue piu' probe Docker nel percorso watchdog: lo stato
   contained-computer letto dall'health handler arriva dal coordinator in memoria,
   mentre le verifiche Docker restano negli owner setup/browser dedicati.
@@ -343,6 +347,15 @@ Slice browser/projection successive:
 - Slice `fabio/gateway-contact-perimeter-owner` verificata localmente con:
   `cargo fmt --check`, `python3 scripts/check_gateway_main_contract.py`,
   `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_contact_perimeter -- --nocapture`,
+  `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
+  `cd apps/desktop && npm run test:ui-contract`,
+  `python3 scripts/kernel_regression_gate.py` e
+  `python3 scripts/pre_release_gate.py` verdi.
+- Slice `fabio/gateway-contact-profiles-owner` verificata localmente: owner
+  `/api/profiles*` e `/api/memory/contacts/assign-profile` spostato in
+  `gateway_contact_profiles`; verificata localmente con `cargo fmt --check`,
+  `python3 scripts/check_gateway_main_contract.py`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_contact_profiles -- --nocapture`,
   `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
   `cd apps/desktop && npm run test:ui-contract`,
   `python3 scripts/kernel_regression_gate.py` e
