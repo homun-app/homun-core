@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (proactivity routes owner in verifica locale).**
+> **Ultimo aggiornamento: 2026-08-18 (vault routes owner in verifica locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/proactivity-routes-owner` |
-| Branch | `fabio/proactivity-routes-owner` |
-| PR | #108-#116, #118-#167 mergeate in `main`; #117 browser draft separata; slice proactivity routes in verifica locale |
-| HEAD codice verificato | branch `fabio/proactivity-routes-owner` sopra `main` aggiornato a #167 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-vault-routes-owner` |
+| Branch | `fabio/gateway-vault-routes-owner` |
+| PR | #108-#116, #118-#168 mergeate in `main`; #117 browser draft separata; slice vault routes in verifica locale |
+| HEAD codice verificato | branch `fabio/gateway-vault-routes-owner` sopra `main` aggiornato a #168 |
 
 ## Dove siamo
 
@@ -209,6 +209,10 @@ Slice Runtime V2 recenti:
   manuale `/api/proactivity/review-now` escono dal monolite `main.rs`; lo stesso
   owner mantiene il write-back memoria delle azioni sulle card, mentre il motore
   supervisor resta in `gateway_proactivity`.
+- Estrazione locale `gateway_vault_routes`: route `/api/vault/*`, DTO PIN/record,
+  save/reveal/update/dedup/search dei record Vault e approvazione payment card
+  escono dal monolite `main.rs`; il claim/enforcement delle azioni browser
+  payment resta fuori da questa slice.
 
 ## Invarianti ora protetti
 
@@ -712,8 +716,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Completare gate, commit e PR piccola per `gateway_proactivity_routes`.
-2. Dopo merge proactivity routes, aggiornare `main` e riprendere la prossima
+1. Completare gate, commit e PR piccola per `gateway_vault_routes`.
+2. Dopo merge vault routes, aggiornare `main` e riprendere la prossima
    slice non-browser solo dopo nuova lettura owner-level di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
