@@ -35,6 +35,7 @@ mod gateway_automation_tools;
 mod gateway_background_startup;
 mod gateway_bind;
 mod gateway_boot_maintenance;
+mod gateway_brain_runtime;
 mod gateway_browser_runtime;
 mod gateway_browser_tools;
 mod gateway_capability_registry;
@@ -154,6 +155,7 @@ use local_first_engine::model_normalize;
 // calling the method directly outside that generic context does.
 pub(crate) use gateway_artifacts::*;
 pub(crate) use gateway_automation_routes::*;
+pub(crate) use gateway_brain_runtime::*;
 pub(crate) use gateway_browser_runtime::*;
 pub(crate) use gateway_chat_streams::*;
 pub(crate) use gateway_composio_routes::*;
@@ -616,8 +618,7 @@ use local_first_memory::{
     WorkspaceId as MemoryWorkspaceId, briefing_cache, memory_record_revision, prompt_fingerprint,
 };
 use local_first_orchestrator::{
-    ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
-    OrchestratorBudgets, OrchestratorRequest, OrchestratorResult, OrchestratorRoute, PlanStep,
+    ExecutionPlan, OrchestratorBrain, OrchestratorRequest, OrchestratorRoute, PlanStep,
     PlanStepKind, StepExecutionPolicy,
 };
 use local_first_secrets::{
@@ -9592,20 +9593,6 @@ fn run_read_only_command(command: &str, args: &[&str]) -> Result<String, LocalTa
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn brain_materialize_enabled() -> bool {
-    match env::var("HOMUN_BRAIN_MATERIALIZE") {
-        // Explicit override always wins.
-        Ok(value) => matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "on"
-        ),
-        // A1.6: default ON. The only backends are capable cloud/router providers
-        // (the weak local MLX/gemma path that this used to disable is gone), so
-        // every configured setup plans through the Brain without a flag.
-        Err(_) => true,
-    }
-}
-
 /// A1.1: runs the OrchestratorBrain so it MATERIALIZES durable tasks into the
 /// shared TaskStore (the same DB the background worker polls). Durable-only:
 /// the request policy has empty `allowed_actions`, so every tool is
@@ -9613,64 +9600,6 @@ fn brain_materialize_enabled() -> bool {
 /// planning-only CachedToolProvider is safe) and enqueues every step as a
 /// durable task, executed by the worker's real executors (browser/subagent).
 /// Returns the materialized task ids, or an error so the caller can fall back.
-/// P3 (read): the Brain's memory context provider, backed by a second handle on
-/// the gateway's memory SQLite DB (same pattern as the shared task store). Holds
-/// an `Option` so a memory-DB hiccup degrades to "no memory context" rather than
-/// failing planning. `MemoryFacade` already implements the orchestrator's
-/// `MemoryContextProvider` (policy-filtered `context_pack` → snippets), so this
-/// just delegates.
-struct GatewayBrainMemory(Option<MemoryFacade>);
-
-impl MemoryContextProvider for GatewayBrainMemory {
-    fn load_context(
-        &self,
-        request: &OrchestratorRequest,
-    ) -> OrchestratorResult<Vec<MemoryContextSnippet>> {
-        match &self.0 {
-            Some(facade) => facade.load_context(request),
-            None => Ok(Vec::new()),
-        }
-    }
-}
-
-fn open_brain_memory() -> GatewayBrainMemory {
-    GatewayBrainMemory(
-        gateway_memory_database_path()
-            .ok()
-            .and_then(|path| SQLiteMemoryStore::open(path).ok())
-            .map(MemoryFacade::new),
-    )
-}
-
-/// Context window (tokens) at/above which we treat the model as "capable" and
-/// stop clamping its context — promptjuice becomes a no-op rather than a gate.
-const CAPABLE_MODEL_CONTEXT_WINDOW: u32 = 32_000;
-
-/// Budgets scaled to the active model's context window.
-///
-/// promptjuice (context compression) was built to optimize tokens for cost/time,
-/// not to block: under budget it passes content through untouched, and a
-/// `max_chars` of 0 means "unlimited". The earlier small-model hard-coded defaults are
-/// tiny (1.2–3.2K chars, 768 planner tokens), which makes the compressor clamp
-/// essential context away even when a capable model has room to spare. So scale
-/// by the window: a big-context model gets generous/unlimited budgets
-/// (passthrough); a small or unknown model keeps the cheap defaults.
-fn brain_budgets_for_context_window(context_window: Option<u32>) -> OrchestratorBudgets {
-    let mut budgets = OrchestratorBudgets::default();
-    if context_window.is_some_and(|window| window >= CAPABLE_MODEL_CONTEXT_WINDOW) {
-        budgets.max_planner_tokens = 8_000;
-        budgets.max_loaded_tools = 16;
-        budgets.max_tool_search_rounds = 2;
-        // 0 = unlimited: let the compressor pass context through instead of
-        // clamping the middle out from under a model that can read it all.
-        budgets.max_conversation_summary_chars = 0;
-        budgets.max_memory_context_chars = 0;
-        budgets.max_tool_cards_context_chars = 0;
-        budgets.max_loaded_tool_context_chars = 0;
-    }
-    budgets
-}
-
 /// Real HTTP transport for Composio. It is deliberately API-agnostic: callers pass the
 /// method/path/body (the v3 shapes), and it adds `x-api-key` auth over a configurable base
 /// URL. Implements the `ComposioTransport` trait (the only piece kept from the `capabilities`
