@@ -391,6 +391,11 @@ assertRepoContains(
   "Gateway contact relationship routes must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_contact_profiles.rs",
+  "contact_assign_profile",
+  "Gateway named contact profile routes must have a dedicated owner",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_memory_tools.rs",
   "record_decision",
   "Gateway memory tools must have a dedicated owner",
