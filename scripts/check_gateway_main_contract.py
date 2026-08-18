@@ -252,6 +252,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn connect_composio(": "Composio connection route must stay in gateway_composio_routes",
         "struct ComposioToolkit": "Composio toolkit DTOs must stay in gateway_composio_routes",
         "struct ComposioToolkitsResponse": "Composio toolkit DTOs must stay in gateway_composio_routes",
+        "struct GatewayComposioTransport": "Composio HTTP transport must stay in gateway_composio_routes",
         "fn composio_transport_for(": "Composio transport lookup must stay in gateway_composio_routes",
         "fn composio_toolkits_blocking(": "Composio toolkit route helpers must stay in gateway_composio_routes",
         "async fn composio_toolkits(": "Composio toolkit route must stay in gateway_composio_routes",
@@ -1593,6 +1594,11 @@ def main() -> int:
         composio_routes_source,
         "pub(crate) async fn connect_composio(",
         "Composio route owner must expose connection route",
+    )
+    assert_contains(
+        composio_routes_source,
+        "pub(crate) struct GatewayComposioTransport",
+        "Composio route owner must expose HTTP transport",
     )
     assert_contains(
         connector_errors_source,

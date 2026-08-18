@@ -486,6 +486,39 @@ fn turn_completion_judge_has_one_gateway_owner() {
 }
 
 #[test]
+fn composio_transport_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let composio_routes = production_source(&root.join("src/gateway_composio_routes.rs"));
+
+    let owned = [
+        "struct GatewayComposioTransport",
+        "impl GatewayComposioTransport",
+    ];
+
+    for pattern in owned {
+        assert!(
+            composio_routes.contains(pattern),
+            "Composio route owner must contain transport surface {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain Composio transport surface {pattern}"
+        );
+    }
+    for adjacent in [
+        "fn composio_execute_tool(",
+        "fn claim_remote_approval_card(",
+        "fn browser_action_requires_payment_grant(",
+    ] {
+        assert!(
+            !composio_routes.contains(adjacent),
+            "Composio route owner must not absorb adjacent execution/payment surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn startup_background_writers_follow_process_fencing() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
