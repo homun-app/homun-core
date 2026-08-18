@@ -248,6 +248,32 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn extract_contact_facts(": "contact profile distillation must stay in gateway_contact_profile",
         "async fn contact_profile(": "contact profile route must stay in gateway_contact_profile",
         "async fn contact_profile_refresh(": "contact profile refresh route must stay in gateway_contact_profile",
+        "struct ContactChannel": "core contact DTO must stay in gateway_contacts",
+        "struct ContactView": "core contact DTO must stay in gateway_contacts",
+        "struct ChannelProfileView": "core contact DTO must stay in gateway_contacts",
+        "struct ContactRefRequest": "core contact request DTO must stay in gateway_contacts",
+        "struct ContactUpdateRequest": "core contact request DTO must stay in gateway_contacts",
+        "struct ContactMergeRequest": "core contact request DTO must stay in gateway_contacts",
+        "struct ContactCreateRequest": "core contact request DTO must stay in gateway_contacts",
+        "struct ContactIdentityRequest": "core contact request DTO must stay in gateway_contacts",
+        "fn parse_contact_ref(": "core contact ref parsing must stay in gateway_contacts",
+        "fn contact_meta_str(": "core contact metadata helpers must stay in gateway_contacts",
+        "fn contact_is_self(": "core contact identity helpers must stay in gateway_contacts",
+        "fn contact_handles(": "core contact handle helpers must stay in gateway_contacts",
+        "fn episode_texts_by_handles(": "core contact memory helpers must stay in gateway_contacts",
+        "fn episodes_dated_by_handles(": "core contact memory helpers must stay in gateway_contacts",
+        "fn episode_refs_by_date(": "core contact memory helpers must stay in gateway_contacts",
+        "fn contact_view_from_stored(": "core contact projection must stay in gateway_contacts",
+        "async fn contacts_list(": "core contact route must stay in gateway_contacts",
+        "async fn contact_memories(": "core contact route must stay in gateway_contacts",
+        "async fn contact_update(": "core contact route must stay in gateway_contacts",
+        "async fn contacts_merge(": "core contact route must stay in gateway_contacts",
+        "async fn contact_create(": "core contact route must stay in gateway_contacts",
+        "async fn contact_identity_add(": "core contact identity route must stay in gateway_contacts",
+        "async fn contact_identity_remove(": "core contact identity route must stay in gateway_contacts",
+        "async fn contact_delete(": "core contact route must stay in gateway_contacts",
+        "fn epoch_to_iso_date(": "core contact date helpers must stay in gateway_contacts",
+        "fn parse_memory_date(": "core contact date helpers must stay in gateway_contacts",
         "struct PerimeterView": "contact perimeter DTO must stay in gateway_contact_perimeter",
         "struct PerimeterUpdateRequest": "contact perimeter request DTO must stay in gateway_contact_perimeter",
         "async fn contact_perimeter_get(": "contact perimeter route must stay in gateway_contact_perimeter",
@@ -977,6 +1003,12 @@ def main() -> int:
     assert_contains(source, "mod gateway_deliverables;", "gateway root must declare deliverables owner")
     assert_contains(source, "mod gateway_tool_execution;", "gateway root must declare tool execution owner")
     assert_contains(source, "mod gateway_channels;", "gateway root must declare channels owner")
+    assert_contains(source, "mod gateway_contacts;", "gateway root must declare core contacts owner")
+    assert_contains(
+        source,
+        "pub(crate) use gateway_contacts::*;",
+        "gateway root must re-export core contacts owner",
+    )
     assert_contains(
         source,
         "#[cfg(test)]\nmod gateway_main_tests;",

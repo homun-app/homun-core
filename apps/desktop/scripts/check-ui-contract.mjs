@@ -381,6 +381,11 @@ assertRepoContains(
   "Gateway contact profile routes must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_contacts.rs",
+  "contacts_list",
+  "Gateway core contact routes must have a dedicated owner",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_contact_perimeter.rs",
   "contact_perimeter_set",
   "Gateway contact perimeter routes must have a dedicated owner",
