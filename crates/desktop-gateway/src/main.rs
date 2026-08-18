@@ -298,12 +298,13 @@ pub(crate) use gateway_capability_registry::{
     CapabilityCorpusMaterializationInput, CapabilityEntry, CapabilitySnapshotResponse,
     CapabilitySource, auto_retrieve_composio, bm25_rank, cap_tokenize,
     capability_discovery_trace_line, capability_snapshot_response, capability_source_label,
-    find_capability_tool_schema, materialize_capability_corpus,
+    find_capability_tool_schema, materialize_capability_corpus, open_seeded_capability_registry,
     search_connector_capability_entries, suggest_capabilities_tool_schema,
 };
 #[cfg(test)]
 pub(crate) use gateway_capability_registry::{
-    connector_capability_entry, mcp_capability_entries, search_composio_catalog,
+    browser_registry_cached_tools, connector_capability_entry, mcp_capability_entries,
+    search_composio_catalog, seed_default_capabilities,
 };
 pub(crate) use gateway_capability_routing::*;
 pub(crate) use gateway_channels::*;
@@ -410,10 +411,10 @@ pub(crate) use gateway_model_timeouts::{
     model_request_timeout_secs,
 };
 use gateway_paths::{
-    gateway_browser_policy_database_path, gateway_capability_database_path, gateway_data_dir,
-    gateway_database_path, gateway_local_computer_database_path, gateway_logs_dir,
-    gateway_memory_database_path, gateway_memory_wiki_dir, gateway_task_database_path,
-    gateway_vault_database_path, gateway_workspaces_path,
+    gateway_browser_policy_database_path, gateway_data_dir, gateway_database_path,
+    gateway_local_computer_database_path, gateway_logs_dir, gateway_memory_database_path,
+    gateway_memory_wiki_dir, gateway_task_database_path, gateway_vault_database_path,
+    gateway_workspaces_path,
 };
 pub(crate) use gateway_plan_stall::{
     MAX_PLAN_STALL_RESUMES, block_stalled_step, plan_stall_check_and_bump,
@@ -510,14 +511,16 @@ use local_first_browser_automation::{
     BrowserUrlApprovalScope, BrowserUrlPolicyStore, BrowserVisibilityMode,
 };
 #[cfg(test)]
+pub(crate) use local_first_capabilities::CachedCapabilityTool;
+#[cfg(test)]
 use local_first_capabilities::CapabilityCall;
 use local_first_capabilities::{
-    ActionClass, CachedCapabilityTool, CachedToolProvider, CapabilityConnectionConfig,
-    CapabilityError, CapabilityFacade, CapabilityPolicy, CapabilityProviderConfig,
-    CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, CapabilityResult,
-    CapabilityTaskPayload, CapabilityTool, InMemoryCapabilityAudit, McpCapabilityProvider,
-    McpToolPolicy, PluginRegistryEntry, PluginRegistryIndex, PolicyContext,
-    ProviderId as CapabilityProviderId, WorkflowRoutingRegistry,
+    ActionClass, CachedToolProvider, CapabilityConnectionConfig, CapabilityError, CapabilityFacade,
+    CapabilityPolicy, CapabilityProviderConfig, CapabilityProviderGrant, CapabilityProviderKind,
+    CapabilityRegistryStore, CapabilityResult, CapabilityTaskPayload, CapabilityTool,
+    InMemoryCapabilityAudit, McpCapabilityProvider, McpToolPolicy, PluginRegistryEntry,
+    PluginRegistryIndex, PolicyContext, ProviderId as CapabilityProviderId,
+    WorkflowRoutingRegistry,
 };
 use local_first_desktop_gateway::browser_checkpoint::BrowserCheckpointSecretStore;
 use local_first_desktop_gateway::integrity_api::{
@@ -17373,122 +17376,6 @@ fn task_effective_goal(task: &TaskRecord) -> String {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(task.goal.as_str())
         .to_string()
-}
-
-fn open_seeded_capability_registry() -> Result<CapabilityRegistryStore, std::io::Error> {
-    let registry = CapabilityRegistryStore::open(gateway_capability_database_path()?)
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
-    seed_default_capabilities(&registry)
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
-    Ok(registry)
-}
-
-fn seed_default_capabilities(
-    registry: &CapabilityRegistryStore,
-) -> Result<(), local_first_capabilities::CapabilityError> {
-    let browser_provider = CapabilityProviderId::new("browser");
-    registry.upsert_provider_config(&CapabilityProviderConfig::new(
-        browser_provider.clone(),
-        CapabilityProviderKind::Browser,
-        "My browser".to_string(),
-        true,
-    ))?;
-    registry.upsert_provider_grant(
-        &CapabilityProviderGrant::new(
-            browser_provider.clone(),
-            gateway_capability_user_id(),
-            gateway_capability_workspace_id(),
-        )
-        .with_privacy_domains(vec!["browser".to_string(), "local".to_string()])
-        .with_allowed_actions(vec![ActionClass::Read, ActionClass::WriteWithConfirmation])
-        .with_max_autonomy_level(3),
-    )?;
-    registry.upsert_connection_config(
-        &CapabilityConnectionConfig::new(
-            "browser-local",
-            browser_provider.clone(),
-            gateway_capability_user_id(),
-            gateway_capability_workspace_id(),
-            "My browser",
-            "local-browser-profile",
-        )
-        .with_privacy_domains(vec!["browser".to_string()])
-        .with_metadata(serde_json::json!({
-            "data_boundary": "local",
-            "transport": "playwright_cdp",
-            "requires_confirmation": true
-        })),
-    )?;
-
-    // (F1.d / ADR 0020) Seed the browser provider with the SAME six tools the chat loop
-    // offers the model — `browser_navigate`/`_snapshot`/`_act`/`_tabs`/`_screenshot`/
-    // `_dialog`, with their REAL schemas — NOT the low-level dot-named sidecar methods with
-    // placeholder `{"type":"object"}` schemas it used to carry. The orchestrator planner
-    // indexes the registry's cached tools (`cached_tools`); seeding the executable model
-    // tools is what makes the planner finally SEE the browser as a routable capability whose
-    // names match what the chat loop actually runs, instead of a shadow set it can't use.
-    // Clear first so an existing DB sheds the renamed `browser.*` rows (caposaldo #5/#7).
-    registry.clear_cached_tools(&browser_provider)?;
-    for tool in browser_registry_cached_tools() {
-        registry.upsert_cached_tool(&tool)?;
-    }
-    Ok(())
-}
-
-/// The browser capability AS THE MODEL SEES IT: the seven chat browser tools with their real
-/// names + schemas, built from the SAME `browser_*_tool_schema()` functions the live tool
-/// set uses, so the registry never becomes a second source of truth for the browser surface
-/// (caposaldo #5). Read vs WriteWithConfirmation mirrors the chat safety posture: reading
-/// the page (snapshot/tabs/screenshot) is Read; navigating, acting and answering dialogs can
-/// have side effects → WriteWithConfirmation.
-fn browser_registry_cached_tools() -> Vec<CachedCapabilityTool> {
-    let browser_provider = CapabilityProviderId::new("browser");
-    [
-        (
-            browser_navigate_tool_schema(),
-            ActionClass::WriteWithConfirmation,
-        ),
-        (browser_snapshot_tool_schema(), ActionClass::Read),
-        (
-            browser_rehydrate_tool_schema(),
-            ActionClass::WriteWithConfirmation,
-        ),
-        (
-            browser_act_tool_schema(),
-            ActionClass::WriteWithConfirmation,
-        ),
-        (browser_tabs_tool_schema(), ActionClass::Read),
-        (browser_screenshot_tool_schema(), ActionClass::Read),
-        (
-            browser_dialog_tool_schema(),
-            ActionClass::WriteWithConfirmation,
-        ),
-    ]
-    .into_iter()
-    .filter_map(|(schema, action)| {
-        let function = schema.get("function")?;
-        let name = function.get("name")?.as_str()?.to_string();
-        let description = function
-            .get("description")
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .to_string();
-        let input_schema = function
-            .get("parameters")
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({"type": "object"}));
-        Some(CachedCapabilityTool::new(
-            browser_provider.clone(),
-            name,
-            CapabilityProviderKind::Browser,
-            action,
-            description,
-            vec!["browser".to_string()],
-            "private",
-            input_schema,
-        ))
-    })
-    .collect()
 }
 
 fn resource_class_label(resource: ResourceClass) -> &'static str {

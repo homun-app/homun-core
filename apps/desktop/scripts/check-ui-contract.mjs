@@ -430,6 +430,16 @@ assertRepoContains(
   "owner_projects_capability_snapshot_read_model",
   "Gateway capability snapshot owner must have a read-model smoke test",
 );
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_capability_registry.rs",
+  "pub(crate) fn open_seeded_capability_registry",
+  "Gateway capability registry bootstrap must live with the capability registry owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_capability_registry.rs",
+  "owner_seeds_browser_provider_with_chat_browser_tools",
+  "Gateway capability registry bootstrap must have owner-level coverage",
+);
 assertRepoNotContains(
   "crates/desktop-gateway/src/main.rs",
   "struct CapabilitySnapshotResponse",
@@ -439,6 +449,16 @@ assertRepoNotContains(
   "crates/desktop-gateway/src/main.rs",
   "fn capability_snapshot_response(",
   "Gateway main must not own capability snapshot read-model mapping",
+);
+assertRepoNotContains(
+  "crates/desktop-gateway/src/main.rs",
+  "fn open_seeded_capability_registry(",
+  "Gateway main must not own capability registry bootstrap",
+);
+assertRepoNotContains(
+  "crates/desktop-gateway/src/main.rs",
+  "fn browser_registry_cached_tools(",
+  "Gateway main must not own browser capability seed tools",
 );
 assertRepoContains(
   "scripts/kernel_regression_gate.py",
