@@ -1,5 +1,9 @@
 // collapse_plan_markers moved to the engine (5.D2); the gateway no longer uses it in prod,
 // only these unit tests do — import it here rather than re-exporting it at the crate root.
+use local_first_engine::plan::{
+    enforce_monotonic_plan_progress, plan_is_complete, plan_is_settled, plan_next_open,
+};
+
 use super::{
     AppState, ChannelSettings, CommandOutputError, ConnectorErrorKind, InboundAction,
     MAX_PLAN_STALL_RESUMES, MemoryBenchIngestRequest, MemoryBenchMessage, MemoryBenchSearchRequest,
@@ -14,17 +18,16 @@ use super::{
     classify_connector_error, clawhub_origin, collect_member_counts, command_output_with_timeout,
     composio_tool_is_read, connector_error_hint, default_browser_headless_value,
     delegated_browse_tool_outcome, delete_workspace, earlier_browse_call_in_current_round,
-    enforce_monotonic_plan_progress, extract_source_urls, fonti_section, format_memory_block,
-    gateway_memory_user_id, humanize_task_kind, hybrid_memory_score, inbound_action,
-    is_auto_confirmable, is_internal_task_kind, is_low_value_source_url, is_semantic_duplicate,
-    jail_in_root, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
-    mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days,
-    memory_bench_ingest, memory_bench_search, memory_bench_status, memory_facade,
-    memory_source_candidates_from_records, memory_source_facade_error, memory_source_grant_views,
-    memory_sources_flag, memorybench_workspace_id, merge_plan, next_plan_stall,
-    next_ready_task_across_workspaces, normalize_for_dedup, parse_plan_marker,
-    parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
-    plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
+    extract_source_urls, fonti_section, format_memory_block, gateway_memory_user_id,
+    humanize_task_kind, hybrid_memory_score, inbound_action, is_auto_confirmable,
+    is_internal_task_kind, is_low_value_source_url, is_semantic_duplicate, jail_in_root,
+    llm_concurrency_view, mcp_error_hint, mcp_provider_slug, mcp_stdio_config_from_metadata,
+    mcp_stdio_config_to_metadata, memory_age_days, memory_bench_ingest, memory_bench_search,
+    memory_bench_status, memory_facade, memory_source_candidates_from_records,
+    memory_source_facade_error, memory_source_grant_views, memory_sources_flag,
+    memorybench_workspace_id, merge_plan, next_plan_stall, next_ready_task_across_workspaces,
+    normalize_for_dedup, parse_plan_marker, parse_review_suggestion, plan_done_count,
+    plan_incomplete_reason, plan_stall_exhausted, plan_step_status,
     project_filesystem_mcp_instruction, prune_browser_history, redact_sensitive_text,
     repeated_browser_action_nudge, repeated_browser_failed_action_nudge,
     requeue_waiting_resource_tasks, response_language_instruction, rewrite_confirm_to_done,

@@ -36,6 +36,9 @@ BOOT_MAINTENANCE_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_boot_maintenance.rs"
 )
 SKILL_RUNTIME_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_skill_runtime.rs")
+RUNTIME_PLAN_STATE_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_runtime_plan_state.rs"
+)
 
 
 def extract_async_main_body(source: str) -> str:
@@ -444,6 +447,22 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn forget_memory(": "memory forget orchestration must stay in gateway_memory_tools",
         "fn update_plan_tool_schema(": "runtime plan tool schemas must stay in gateway_plan_tools",
         "fn step_advance_tool_schema(": "runtime plan tool schemas must stay in gateway_plan_tools",
+        "fn plan_steps_reconciled_on_delivery(": "runtime plan delivery reconcile must stay in gateway_runtime_plan_state",
+        "fn runtime_plan_thread_key(": "runtime plan thread scoping must stay in gateway_runtime_plan_state",
+        "fn runtime_plan_control_scope(": "runtime plan control scoping must stay in gateway_runtime_plan_state",
+        "fn runtime_plan_memory_text(": "runtime plan memory projection must stay in gateway_runtime_plan_state",
+        "fn runtime_plan_memory_metadata(": "runtime plan memory projection must stay in gateway_runtime_plan_state",
+        "fn canonical_plan_value(": "runtime plan canonical shape must stay in gateway_runtime_plan_state",
+        "fn plan_value_from(": "runtime plan value bridge must stay in gateway_runtime_plan_state",
+        "fn runtime_execution_plan(": "runtime plan orchestrator bridge must stay in gateway_runtime_plan_state",
+        "fn execution_plan_steps(": "runtime plan step projection must stay in gateway_runtime_plan_state",
+        "fn merge_execution_plan(": "runtime plan merge must stay in gateway_runtime_plan_state",
+        "fn runtime_plan_record_from_state(": "runtime plan store read must stay in gateway_runtime_plan_state",
+        "fn record_runtime_plan_step_outcome_from_state(": "runtime plan outcome write must stay in gateway_runtime_plan_state",
+        "fn upsert_runtime_plan_memory_from_state(": "runtime plan store write must stay in gateway_runtime_plan_state",
+        "fn merge_plan(": "runtime plan merge must stay in gateway_runtime_plan_state",
+        "fn plan_tool_sent(": "runtime plan tool argument parsing must stay in gateway_runtime_plan_state",
+        "pub(crate) struct GatewayPlanProgress": "engine plan progress port must stay in gateway_runtime_plan_state",
         "fn strip_chat_markers(": "chat marker stripping must stay in gateway_chat_markers",
         "fn query_code_graph_tool_schema(": "project search tool schemas must stay in gateway_project_search_tools",
         "fn query_git_history_tool_schema(": "project search tool schemas must stay in gateway_project_search_tools",
@@ -1190,6 +1209,8 @@ def main() -> int:
         boot_maintenance_source = handle.read()
     with open(SKILL_RUNTIME_RS, "r", encoding="utf-8") as handle:
         skill_runtime_source = handle.read()
+    with open(RUNTIME_PLAN_STATE_RS, "r", encoding="utf-8") as handle:
+        runtime_plan_state_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1327,6 +1348,16 @@ def main() -> int:
     )
     assert_contains(source, "mod gateway_memory_tools;", "gateway root must declare memory tools owner")
     assert_contains(source, "mod gateway_plan_tools;", "gateway root must declare plan tools owner")
+    assert_contains(
+        source,
+        "mod gateway_runtime_plan_state;",
+        "gateway root must declare runtime plan state owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_runtime_plan_state::*;",
+        "gateway root must re-export runtime plan state owner",
+    )
     assert_contains(source, "mod gateway_chat_markers;", "gateway root must declare chat marker owner")
     assert_contains(source, "mod gateway_tool_budget;", "gateway root must declare tool budget owner")
     assert_contains(source, "mod gateway_tool_timeouts;", "gateway root must declare tool timeout owner")
@@ -1569,6 +1600,21 @@ def main() -> int:
         skill_runtime_source,
         "pub(crate) fn load_skill_body_and_sensitive(",
         "skill runtime owner must expose progressive skill loading with sensitive metadata",
+    )
+    assert_contains(
+        runtime_plan_state_source,
+        "pub(crate) fn upsert_runtime_plan_memory_from_state(",
+        "runtime plan state owner must expose canonical plan persistence",
+    )
+    assert_contains(
+        runtime_plan_state_source,
+        "pub(crate) fn plan_tool_sent(",
+        "runtime plan state owner must expose plan tool parsing",
+    )
+    assert_contains(
+        runtime_plan_state_source,
+        "pub(crate) struct GatewayPlanProgress",
+        "runtime plan state owner must expose engine plan progress port",
     )
 
     assert_ordered(

@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (gateway skill runtime verificato localmente).**
+> **Ultimo aggiornamento: 2026-08-18 (gateway runtime plan state in PR).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-skill-runtime-owner` |
-| Branch | `fabio/gateway-skill-runtime-owner` |
-| PR | #108-#116, #118-#177 mergeate in `main`; #117 browser draft separata; #178 gateway skill runtime draft aperta |
-| HEAD codice verificato | branch `fabio/gateway-skill-runtime-owner` sopra `main` aggiornato a #177 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-runtime-plan-state-owner` |
+| Branch | `fabio/gateway-runtime-plan-state-owner` |
+| PR | #108-#116, #118-#178 mergeate in `main`; #117 browser draft separata; #179 gateway runtime plan state draft aperta |
+| HEAD codice verificato | branch `fabio/gateway-runtime-plan-state-owner` sopra `main` aggiornato a #178 |
 
 ## Dove siamo
 
@@ -175,11 +175,16 @@ Slice Runtime V2 recenti:
 - Estrazione locale `gateway_skill_routes`: route skills locali, enable/disable,
   catalogo ClawHub, preview/install e registry GitHub escono dal monolite
   `main.rs`; scanner/catalog/security engine e seed default restano separati.
-- Slice corrente `gateway_skill_runtime`: directory skill condivisa,
+- Estrazione mergeata `gateway_skill_runtime`: directory skill condivisa,
   normalizzazione id, creazione skill, discovery prompt, caricamento
   progressive-disclosure/adattamento SKILL.md e schemi `use_skill` /
   `run_in_sandbox` escono dal monolite `main.rs`; route skill, seed default a
   boot, dispatch tool e routing capability restano owner separati.
+- Slice corrente `gateway_runtime_plan_state`: shape canonica del runtime plan,
+  bridge `ExecutionPlan`, merge/reconcile delivery, lettura/scrittura
+  `runtime_plans`, proiezione memoria/graph degli step e port engine
+  `GatewayPlanProgress` escono dal monolite `main.rs`; tool schema, stall
+  budget, prompt packet e dispatch tool restano owner separati.
 - Estrazione locale `gateway_memory_publications`: route memory publication
   create/get/edit/approve/reject, DTO request, mapping errori facade e
   validazione owned-scope escono dal monolite `main.rs`; source grant
