@@ -87,6 +87,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_model_routing.rs` | Risoluzione provider/modello/API key, factory `ModelRouter`, payload provider, log persistito decisioni routing, compaction visibile al modello e policy reasoning. |
 | `crates/desktop-gateway/src/gateway_tool_execution.rs` | Dispatch tool chat/browser, effect receipts e confini capability/computer/browse. |
 | `crates/desktop-gateway/src/gateway_runtime_plan_state.rs` | Shape canonica runtime plan, bridge `ExecutionPlan`, merge/reconcile delivery, lettura/scrittura `runtime_plans`, proiezione memoria/graph degli step e port engine `GatewayPlanProgress`; non possiede tool schema, stall budget, prompt packet o dispatch tool. |
+| `crates/desktop-gateway/src/gateway_thread_episodes.rs` | Workspace episodico riservato `__threads__`, persistenza episodi conversazionali confermati, matching esatto thread/workspace e blocco prompt del thread corrente; non possiede recall generale, memory service, graph/wiki o prompt packet. |
 | `crates/desktop-gateway/src/gateway_runtime_settings.rs` | DTO e route settings runtime persistiti. |
 | `crates/desktop-gateway/src/gateway_user_preferences.rs` | Preferenze utente/setup: lingua, timezone, Ollama, approval routing. |
 | `crates/desktop-gateway/src/gateway_process_events.rs` | Registri app event, WS process events e usage recorder. |

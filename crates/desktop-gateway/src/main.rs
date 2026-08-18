@@ -121,6 +121,7 @@ mod gateway_task_executor;
 mod gateway_task_executor_config;
 mod gateway_task_maintenance;
 mod gateway_template_catalog;
+mod gateway_thread_episodes;
 mod gateway_thread_files;
 mod gateway_tool_budget;
 mod gateway_tool_execution;
@@ -498,6 +499,7 @@ pub(crate) use gateway_template_catalog::{
     template_catalog, template_catalog_by_id, template_catalog_capability_entries,
     template_preview, template_source_attachment,
 };
+pub(crate) use gateway_thread_episodes::*;
 pub(crate) use gateway_thread_files::{
     effective_thread_folder, get_thread_folder, read_thread_file, search_thread_files,
     set_thread_folder,
@@ -603,14 +605,13 @@ use local_first_local_computer_session::{
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
     BriefingPack, CachedBriefing, DataSensitivity as MemoryDataSensitivity, Exchange,
-    ExtractedEntity, ExtractedMemory, ExtractedRelation, MemoryAccessRequest, MemoryCollectionKey,
-    MemoryCreateRequest, MemoryEntity, MemoryError, MemoryExtraction, MemoryFacade,
-    MemoryIntegrityRepairRequest, MemoryLifecycleRequest, MemoryRecallService, MemoryRecord,
-    MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySearchRequest, MemoryStatus,
-    MemoryUpdatePatch, MemoryWikiProjection, PERSONAL_WORKSPACE, PrivacyDomain,
-    ProjectGraphImportReport, RecallHit, RecallPack, SQLiteMemoryStore, UserId as MemoryUserId,
-    WikiFileStore, WikiPage, WorkspaceId as MemoryWorkspaceId, briefing_cache,
-    memory_record_revision, prompt_fingerprint,
+    ExtractedEntity, ExtractedRelation, MemoryAccessRequest, MemoryCollectionKey,
+    MemoryCreateRequest, MemoryEntity, MemoryError, MemoryFacade, MemoryIntegrityRepairRequest,
+    MemoryLifecycleRequest, MemoryRecallService, MemoryRecord, MemoryRef, MemoryRefKind,
+    MemoryRelation, MemoryScope, MemorySearchRequest, MemoryStatus, MemoryUpdatePatch,
+    MemoryWikiProjection, PERSONAL_WORKSPACE, PrivacyDomain, ProjectGraphImportReport, RecallHit,
+    RecallPack, SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore, WikiPage,
+    WorkspaceId as MemoryWorkspaceId, briefing_cache, memory_record_revision, prompt_fingerprint,
 };
 use local_first_orchestrator::{
     ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
@@ -1647,101 +1648,6 @@ async fn backfill_embeddings(
             );
         }
     }
-}
-
-/// Reserved workspace for THREAD (episodic) memory — "what we discussed". Kept
-/// out of the personal/project scopes so episodes never flood the always-on
-/// profile or the management list; reached only via recall.
-const THREADS_WORKSPACE: &str = "__threads__";
-
-/// M4: store a one-line episodic summary of a conversation turn, tagged with its
-/// thread, in the thread scope. Confirmed directly (a factual record), retrievable
-/// later via recall ("cosa dicevamo l'altra volta").
-fn store_episode(
-    facade: &MemoryFacade,
-    user_id: &MemoryUserId,
-    thread_id: &str,
-    summary: &str,
-    origin_workspace: &str,
-) {
-    let summary = summary.trim();
-    if summary.is_empty() {
-        return;
-    }
-    let workspace = MemoryWorkspaceId::new(THREADS_WORKSPACE);
-    let extracted = ExtractedMemory {
-        memory_type: "episode".to_string(),
-        text: summary.to_string(),
-        aliases: Vec::new(),
-        language_hints: Vec::new(),
-        confidence: 1.0,
-        privacy_domain: PrivacyDomain::new("personal"),
-        sensitivity: MemoryDataSensitivity::Internal,
-        evidence_refs: Vec::new(),
-        evolution: None,
-        // `workspace` = the scope this conversation belongs to, so episodic recall can be
-        // ISOLATED per project (a project recalls only its own conversations, not personal).
-        metadata: serde_json::json!({ "thread_id": thread_id, "scope": "thread", "workspace": origin_workspace }),
-    };
-    let extraction = MemoryExtraction {
-        memories: vec![extracted],
-        entities: Vec::new(),
-        relations: Vec::new(),
-    };
-    let Ok(result) = facade.apply_extraction(user_id, &workspace, extraction) else {
-        return;
-    };
-    let lifecycle = MemoryLifecycleRequest {
-        actor_id: "memory-extractor".to_string(),
-        user_id: user_id.clone(),
-        workspace_id: workspace,
-        purpose: "episode".to_string(),
-    };
-    if let Some(reference) = result.memory_refs.first() {
-        let _ = facade.confirm_memory(&lifecycle, reference, "episode");
-    }
-}
-
-fn current_thread_episode_block(state: &AppState, thread_id: &str) -> Option<String> {
-    let user = gateway_memory_user_id();
-    let threads = MemoryWorkspaceId::new(THREADS_WORKSPACE);
-    let origin_workspace = gateway_memory_workspace_id();
-    let mut episodes = memory_facade(state)
-        .list_memories_for_ui(&user, &threads)
-        .ok()?
-        .into_iter()
-        .filter(|memory| memory.status == MemoryStatus::Confirmed)
-        .filter(|memory| {
-            episode_metadata_matches_scope(&memory.metadata, thread_id, origin_workspace.as_str())
-        })
-        .collect::<Vec<_>>();
-    episodes.sort_by(|left, right| left.updated_at.cmp(&right.updated_at));
-    let mut selected = Vec::new();
-    let mut used = 0usize;
-    for episode in episodes.into_iter().rev().take(24) {
-        if used.saturating_add(episode.text.len()) > CHAT_MEMORY_BUDGET_CHARS / 2 {
-            break;
-        }
-        used += episode.text.len();
-        selected.push(episode.text);
-    }
-    if selected.is_empty() {
-        return None;
-    }
-    selected.reverse();
-    Some(format!(
-        "CURRENT THREAD MEMORY (confirmed episodes from this exact thread and workspace):\n- {}",
-        selected.join("\n- ")
-    ))
-}
-
-fn episode_metadata_matches_scope(
-    metadata: &serde_json::Value,
-    thread_id: &str,
-    workspace_id: &str,
-) -> bool {
-    metadata.get("thread_id").and_then(|value| value.as_str()) == Some(thread_id)
-        && metadata.get("workspace").and_then(|value| value.as_str()) == Some(workspace_id)
 }
 
 /// ADR 0022 — Tappa 1/4: apprendimento post-turno. Di default (service ON)

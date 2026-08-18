@@ -301,6 +301,31 @@ fn runtime_plan_state_has_one_gateway_owner() {
 }
 
 #[test]
+fn thread_episode_memory_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let episodes = production_source(&root.join("src/gateway_thread_episodes.rs"));
+
+    let owned = [
+        "pub(crate) const THREADS_WORKSPACE",
+        "fn store_episode(",
+        "fn current_thread_episode_block(",
+        "fn episode_metadata_matches_scope(",
+    ];
+
+    for pattern in owned {
+        assert!(
+            episodes.contains(pattern),
+            "thread episode owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain thread episode memory surface {pattern}"
+        );
+    }
+}
+
+#[test]
 fn startup_background_writers_follow_process_fencing() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

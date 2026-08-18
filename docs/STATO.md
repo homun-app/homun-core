@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (gateway runtime plan state in PR).**
+> **Ultimo aggiornamento: 2026-08-18 (gateway thread episodes locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-runtime-plan-state-owner` |
-| Branch | `fabio/gateway-runtime-plan-state-owner` |
-| PR | #108-#116, #118-#178 mergeate in `main`; #117 browser draft separata; #179 gateway runtime plan state draft aperta |
-| HEAD codice verificato | branch `fabio/gateway-runtime-plan-state-owner` sopra `main` aggiornato a #178 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-thread-episode-memory-owner` |
+| Branch | `fabio/gateway-thread-episode-memory-owner` |
+| PR | #108-#116, #118-#179 mergeate in `main`; #117 browser draft separata; slice `gateway_thread_episodes` locale non ancora in PR |
+| HEAD codice verificato | branch `fabio/gateway-thread-episode-memory-owner` sopra `main` aggiornato a #179 |
 
 ## Dove siamo
 
@@ -180,11 +180,16 @@ Slice Runtime V2 recenti:
   progressive-disclosure/adattamento SKILL.md e schemi `use_skill` /
   `run_in_sandbox` escono dal monolite `main.rs`; route skill, seed default a
   boot, dispatch tool e routing capability restano owner separati.
-- Slice corrente `gateway_runtime_plan_state`: shape canonica del runtime plan,
+- Estrazione mergeata `gateway_runtime_plan_state`: shape canonica del runtime plan,
   bridge `ExecutionPlan`, merge/reconcile delivery, lettura/scrittura
   `runtime_plans`, proiezione memoria/graph degli step e port engine
   `GatewayPlanProgress` escono dal monolite `main.rs`; tool schema, stall
   budget, prompt packet e dispatch tool restano owner separati.
+- Slice corrente `gateway_thread_episodes`: workspace riservato `__threads__`,
+  persistenza episodi conversazionali, projection del blocco prompt per thread
+  corrente e matching esatto thread/workspace escono dal monolite `main.rs`;
+  recall generale, memory service, graph/wiki e prompt packet restano owner
+  separati.
 - Estrazione locale `gateway_memory_publications`: route memory publication
   create/get/edit/approve/reject, DTO request, mapping errori facade e
   validazione owned-scope escono dal monolite `main.rs`; source grant
@@ -741,23 +746,18 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#177: slice owner-level successive mergeate in `main`, fino a
-  `gateway_boot_maintenance` default skill seeding; `main` verificato e
-  riallineato a #177 prima della slice corrente.
+- #143-#179: slice owner-level successive mergeate in `main`, fino a
+  `gateway_runtime_plan_state`; `main` verificato e riallineato a #179 prima
+  della slice corrente.
 
 PR aperte:
 
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
-- #178 `Move skill runtime helpers into owner`:
-  `https://github.com/homun-app/homun-core/pull/178`.
 
 Branch corrente:
 
-- `fabio/gateway-skill-runtime-owner`: branch sopra `main` aggiornato a
-  #177; contiene solo la slice runtime skill condiviso.
-- `fabio/write-tool-allowlist-contracts`: branch locale cumulativa rebased su
-  `main`, da usare solo come parcheggio per separare le prossime slice
-  successive.
+- `fabio/gateway-thread-episode-memory-owner`: branch sopra `main` aggiornato a
+  #179; contiene solo la slice episodic thread memory.
 
 ## Debito residuo
 
@@ -781,8 +781,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Completare gate, commit e PR piccola per `gateway_skill_runtime`.
-2. Dopo merge gateway skill runtime, aggiornare `main` e riprendere la prossima
+1. Completare gate, commit e PR piccola per `gateway_thread_episodes`.
+2. Dopo merge gateway thread episodes, aggiornare `main` e riprendere la prossima
    slice non-browser solo dopo nuova lettura owner-level di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
@@ -791,8 +791,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/gateway-skill-runtime-owner se la slice runtime skill e' ancora da aprire o e' aperta;
-altrimenti main aggiornato a #177/#successive e scegli la prossima slice non-browser owner-level.
+branch fabio/gateway-thread-episode-memory-owner se la slice thread episodes e' ancora da aprire o e' aperta;
+altrimenti main aggiornato a #179/#successive e scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
