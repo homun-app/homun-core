@@ -554,6 +554,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway connector errors",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "gateway_connector_errors",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway MCP chat tools",
             [
                 "cargo",
