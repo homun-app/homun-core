@@ -12,6 +12,118 @@ fn browser_runtime_owner_smoke() {
     assert!(browser_contract_fingerprint(&None).is_none());
 }
 
+#[derive(Debug, Serialize)]
+pub(crate) struct ComputerArtifactPreviewResponse {
+    artifact_id: String,
+    title_redacted: String,
+    kind: String,
+    size_bytes: u64,
+    data_url: String,
+}
+
+pub(crate) async fn local_computer_session(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Option<local_first_local_computer_session::ComputerSessionSnapshot>>, GatewayError>
+{
+    let store = lock_computer_store(&state)?;
+    let snapshot = LocalComputerReadModel::new(&store)
+        .snapshot(
+            &session_id,
+            gateway_user_id().as_str(),
+            gateway_workspace_id().as_str(),
+        )
+        .map_err(GatewayError::local_computer)?;
+    Ok(Json(snapshot))
+}
+
+pub(crate) async fn local_computer_artifact_preview(
+    State(state): State<AppState>,
+    Path((session_id, artifact_id)): Path<(String, String)>,
+) -> Result<Json<Option<ComputerArtifactPreviewResponse>>, GatewayError> {
+    let store = lock_computer_store(&state)?;
+    Ok(Json(local_computer_artifact_preview_response(
+        &store,
+        &session_id,
+        &artifact_id,
+    )?))
+}
+
+fn local_computer_artifact_preview_response(
+    store: &LocalComputerSessionStore,
+    session_id: &str,
+    artifact_id: &str,
+) -> Result<Option<ComputerArtifactPreviewResponse>, GatewayError> {
+    let artifacts = store
+        .artifacts_for_session(
+            session_id,
+            gateway_user_id().as_str(),
+            gateway_workspace_id().as_str(),
+        )
+        .map_err(GatewayError::local_computer)?;
+    let Some(artifact) = artifacts
+        .into_iter()
+        .find(|artifact| artifact.artifact_id == artifact_id)
+    else {
+        return Ok(None);
+    };
+    let path = PathBuf::from(&artifact.path_ref);
+    let bytes = fs::read(&path).map_err(|error| GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "artifact_preview_unavailable",
+        message: error.to_string(),
+    })?;
+    let mime = match path.extension().and_then(|extension| extension.to_str()) {
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        _ => "application/octet-stream",
+    };
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok(Some(ComputerArtifactPreviewResponse {
+        artifact_id: artifact.artifact_id,
+        title_redacted: redact_sensitive_text(&artifact.title),
+        kind: artifact.kind,
+        size_bytes: artifact.size_bytes,
+        data_url: format!("data:{mime};base64,{encoded}"),
+    }))
+}
+
+#[test]
+fn owner_projects_local_computer_artifact_preview() {
+    let store = LocalComputerSessionStore::open_in_memory().expect("computer store");
+    let path = std::env::temp_dir().join(format!(
+        "homun-local-computer-preview-{}.png",
+        uuid::Uuid::new_v4().simple()
+    ));
+    fs::write(&path, [0x89, b'P', b'N', b'G']).expect("preview image");
+    store
+        .upsert_artifact(&ArtifactRecord {
+            artifact_id: "artifact_1".to_string(),
+            session_id: "session_1".to_string(),
+            user_id: gateway_user_id().as_str().to_string(),
+            workspace_id: gateway_workspace_id().as_str().to_string(),
+            title: "Preview with token sk-proj-secret".to_string(),
+            kind: "image".to_string(),
+            path_ref: path.to_string_lossy().to_string(),
+            size_bytes: 4,
+            preview_ref: None,
+            created_at: OffsetDateTime::now_utc(),
+        })
+        .expect("upsert artifact");
+
+    let preview = local_computer_artifact_preview_response(&store, "session_1", "artifact_1")
+        .expect("preview response")
+        .expect("artifact present");
+
+    assert_eq!(preview.artifact_id, "artifact_1");
+    assert_eq!(preview.kind, "image");
+    assert_eq!(preview.size_bytes, 4);
+    assert!(preview.data_url.starts_with("data:image/png;base64,"));
+    assert!(!preview.title_redacted.contains("sk-proj-secret"));
+
+    let _ = fs::remove_file(path);
+}
+
 /// Global lock serializing `browse_web` runs: the contained browser is a single
 /// shared instance, so only one observe-act loop may drive it at a time.
 pub(crate) fn browse_web_lock() -> &'static tokio::sync::Mutex<()> {

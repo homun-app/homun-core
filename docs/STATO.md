@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (capability registry bootstrap owner verificato localmente).**
+> **Ultimo aggiornamento: 2026-08-18 (local computer read-model owner verificato localmente).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/capability-registry-bootstrap-owner` |
-| PR | #108-#116, #118-#162 mergeate in `main`; #117 browser draft separata; slice capability registry bootstrap verificata localmente |
-| HEAD codice verificato | branch `fabio/capability-registry-bootstrap-owner` sopra `main` aggiornato a #162 |
+| Branch | `fabio/local-computer-read-model-owner` |
+| PR | #108-#116, #118-#163 mergeate in `main`; #117 browser draft separata; slice local computer read-model verificata localmente |
+| HEAD codice verificato | branch `fabio/local-computer-read-model-owner` sopra `main` aggiornato a #163 |
 
 ## Dove siamo
 
@@ -456,6 +456,15 @@ Slice browser/projection successive:
   `cd apps/desktop && npm run test:ui-contract`,
   `python3 scripts/kernel_regression_gate.py` e
   `python3 scripts/pre_release_gate.py`.
+- Slice `fabio/local-computer-read-model-owner` verificata localmente:
+  DTO preview artifact e route/read-model `/api/local-computer/session/*` e
+  `/api/local-computer/session/*/artifact/*/preview` spostati da `main.rs` a
+  `gateway_browser_runtime`; il root resta solo composition/consumer delle route.
+  Verifiche verdi: `cargo fmt --check`,
+  `python3 scripts/check_gateway_main_contract.py`,
+  `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_browser_runtime -- --nocapture`,
+  `cd apps/desktop && npm run test:ui-contract`.
 - Slice `fabio/capability-registry-contracts` verificata localmente: RED del contract
   `check_gateway_main_contract.py` osservato prima dell'estrazione; GREEN
   mirati con `python3 scripts/check_gateway_main_contract.py`,

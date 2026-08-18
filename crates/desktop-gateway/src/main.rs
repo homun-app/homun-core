@@ -1270,15 +1270,6 @@ struct ThreadBrowserSession {
 }
 
 #[derive(Debug, Serialize)]
-struct ComputerArtifactPreviewResponse {
-    artifact_id: String,
-    title_redacted: String,
-    kind: String,
-    size_bytes: u64,
-    data_url: String,
-}
-
-#[derive(Debug, Serialize)]
 struct ErrorResponse {
     error: ErrorBody,
 }
@@ -16104,61 +16095,6 @@ fn build_inference_router_from_env() -> ModelRouter {
         resolve_inference_api_key(),
         context_window.unwrap_or(32_768),
     )
-}
-
-async fn local_computer_session(
-    State(state): State<AppState>,
-    Path(session_id): Path<String>,
-) -> Result<Json<Option<local_first_local_computer_session::ComputerSessionSnapshot>>, GatewayError>
-{
-    let store = lock_computer_store(&state)?;
-    let snapshot = LocalComputerReadModel::new(&store)
-        .snapshot(
-            &session_id,
-            gateway_user_id().as_str(),
-            gateway_workspace_id().as_str(),
-        )
-        .map_err(GatewayError::local_computer)?;
-    Ok(Json(snapshot))
-}
-
-async fn local_computer_artifact_preview(
-    State(state): State<AppState>,
-    Path((session_id, artifact_id)): Path<(String, String)>,
-) -> Result<Json<Option<ComputerArtifactPreviewResponse>>, GatewayError> {
-    let store = lock_computer_store(&state)?;
-    let artifacts = store
-        .artifacts_for_session(
-            &session_id,
-            gateway_user_id().as_str(),
-            gateway_workspace_id().as_str(),
-        )
-        .map_err(GatewayError::local_computer)?;
-    let Some(artifact) = artifacts
-        .into_iter()
-        .find(|artifact| artifact.artifact_id == artifact_id)
-    else {
-        return Ok(Json(None));
-    };
-    let path = PathBuf::from(&artifact.path_ref);
-    let bytes = fs::read(&path).map_err(|error| GatewayError {
-        status: StatusCode::BAD_GATEWAY,
-        code: "artifact_preview_unavailable",
-        message: error.to_string(),
-    })?;
-    let mime = match path.extension().and_then(|extension| extension.to_str()) {
-        Some("jpg" | "jpeg") => "image/jpeg",
-        Some("png") => "image/png",
-        _ => "application/octet-stream",
-    };
-    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-    Ok(Json(Some(ComputerArtifactPreviewResponse {
-        artifact_id: artifact.artifact_id,
-        title_redacted: redact_sensitive_text(&artifact.title),
-        kind: artifact.kind,
-        size_bytes: artifact.size_bytes,
-        data_url: format!("data:{mime};base64,{encoded}"),
-    })))
 }
 
 async fn capability_snapshot(
