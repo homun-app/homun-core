@@ -1252,7 +1252,14 @@ assertNotContains("src/components/ChatView.tsx", "function saveMessageToMemory",
 assertNotContains("src/components/ChatView.tsx", "copyText(", "ChatView must not own clipboard writes");
 assertNotContains("src/components/ChatView.tsx", "buildChatMarkdown", "ChatView must not keep unused chat markdown export imports");
 assertNotContains("src/components/ChatView.tsx", "captureAppScreenshot(", "ChatView must not own screenshot capture bridge call");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "is_placeholder_chat_title(&thread.title)", "autotitle endpoint must be a no-op for already titled chats");
+assertRepoContains("crates/desktop-gateway/src/gateway_chat_utility_routes.rs", "is_placeholder_chat_title(&thread.title)", "autotitle endpoint must be a no-op for already titled chats");
+assertRepoContains("crates/desktop-gateway/src/gateway_chat_utility_routes.rs", "fn title_model_inputs(", "chat title model input cleanup must stay in the chat utility owner");
+assertRepoContains("crates/desktop-gateway/src/gateway_chat_utility_routes.rs", "fn chat_suggestions_payload(", "follow-up suggestions payload policy must stay in the chat utility owner");
+assertRepoContains("crates/desktop-gateway/src/gateway_chat_utility_routes.rs", "fn proactive_answer_memory_request(", "proactive answer memory capture must stay in the chat utility owner");
+assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn improve_prompt(", "chat utility routes must not live in gateway main");
+assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn chat_suggestions(", "chat utility routes must not live in gateway main");
+assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn autotitle_chat_thread(", "chat utility routes must not live in gateway main");
+assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn proactive_answer(", "chat utility routes must not live in gateway main");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "\"type\": \"thread.turn_started\"", "external turns must publish a visible-turn event after messages are persisted");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "start_visible_conversation_turn", "external channels and scheduled work must use the shared visible-turn helper");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "\"approval\"", "remote approval continuations must identify their visible-turn source");
