@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (gateway thread episodes locale).**
+> **Ultimo aggiornamento: 2026-08-18 (gateway prompt packets locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-thread-episode-memory-owner` |
-| Branch | `fabio/gateway-thread-episode-memory-owner` |
-| PR | #108-#116, #118-#179 mergeate in `main`; #117 browser draft separata; slice `gateway_thread_episodes` locale non ancora in PR |
-| HEAD codice verificato | branch `fabio/gateway-thread-episode-memory-owner` sopra `main` aggiornato a #179 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-prompt-packets-owner` |
+| Branch | `fabio/gateway-prompt-packets-owner` |
+| PR | #108-#116, #118-#180 mergeate in `main`; #117 browser draft separata; slice `gateway_prompt_packets` locale non ancora in PR |
+| HEAD codice verificato | branch `fabio/gateway-prompt-packets-owner` sopra `main` aggiornato a #180 |
 
 ## Dove siamo
 
@@ -185,11 +185,16 @@ Slice Runtime V2 recenti:
   `runtime_plans`, proiezione memoria/graph degli step e port engine
   `GatewayPlanProgress` escono dal monolite `main.rs`; tool schema, stall
   budget, prompt packet e dispatch tool restano owner separati.
-- Slice corrente `gateway_thread_episodes`: workspace riservato `__threads__`,
+- Estrazione mergeata `gateway_thread_episodes`: workspace riservato `__threads__`,
   persistenza episodi conversazionali, projection del blocco prompt per thread
   corrente e matching esatto thread/workspace escono dal monolite `main.rs`;
   recall generale, memory service, graph/wiki e prompt packet restano owner
   separati.
+- Slice corrente `gateway_prompt_packets`: lettura bounded delle istruzioni
+  progetto (`AGENTS.md`, `.homun/instructions.md`) e composizione dei packet
+  core/workspace/project/thread/runtime escono dal monolite `main.rs`; prompt
+  instructions, policy memoria, runtime plan, routing decision e loop agente
+  restano owner separati.
 - Estrazione locale `gateway_memory_publications`: route memory publication
   create/get/edit/approve/reject, DTO request, mapping errori facade e
   validazione owned-scope escono dal monolite `main.rs`; source grant
@@ -781,8 +786,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Completare gate, commit e PR piccola per `gateway_thread_episodes`.
-2. Dopo merge gateway thread episodes, aggiornare `main` e riprendere la prossima
+1. Completare gate, commit e PR piccola per `gateway_prompt_packets`.
+2. Dopo merge gateway prompt packets, aggiornare `main` e riprendere la prossima
    slice non-browser solo dopo nuova lettura owner-level di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
@@ -791,8 +796,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/gateway-thread-episode-memory-owner se la slice thread episodes e' ancora da aprire o e' aperta;
-altrimenti main aggiornato a #179/#successive e scegli la prossima slice non-browser owner-level.
+branch fabio/gateway-prompt-packets-owner se la slice prompt packets e' ancora da aprire o e' aperta;
+altrimenti main aggiornato a #180/#successive e scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

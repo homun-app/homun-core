@@ -105,6 +105,7 @@ mod gateway_project_graph_routes;
 mod gateway_project_search_tools;
 mod gateway_prompt;
 mod gateway_prompt_instructions;
+mod gateway_prompt_packets;
 mod gateway_recall_context;
 mod gateway_remote_approval;
 mod gateway_routes;
@@ -469,6 +470,7 @@ use gateway_project_search_tools::{
 use gateway_prompt_instructions::{
     booking_assumption_choice_instruction, browser_open_research_discovery_instruction,
 };
+pub(crate) use gateway_prompt_packets::*;
 use gateway_recall_context::{
     gather_open_loops, memory_access_status_instruction, memory_read_effects_from_recall_payload,
     merge_automatic_recall_payload, recall_collection_token, recall_source_label,
@@ -1895,91 +1897,6 @@ fn tombstone_automation_memory_records(
         deleted += 1;
     }
     Ok(deleted)
-}
-
-fn read_project_instruction(root: &std::path::Path, relative: &str) -> Option<String> {
-    const MAX_PROJECT_INSTRUCTION_CHARS: usize = 32 * 1024;
-    let root = root.canonicalize().ok()?;
-    let path = root.join(relative).canonicalize().ok()?;
-    if !path.starts_with(&root) || !path.is_file() {
-        return None;
-    }
-    let text = std::fs::read_to_string(path).ok()?;
-    Some(text.chars().take(MAX_PROJECT_INSTRUCTION_CHARS).collect())
-}
-
-fn compose_gateway_prompt_packets(
-    state: &AppState,
-    thread_id: Option<&str>,
-    core: String,
-    workspace: String,
-    runtime: String,
-) -> (String, Vec<local_first_engine::PromptPacketMetadata>) {
-    let mut packets = vec![local_first_engine::PromptPacket {
-        id: "homun-core".to_string(),
-        source: local_first_engine::PromptPacketSource::Core,
-        priority: 10,
-        content: core,
-    }];
-    if !workspace.trim().is_empty() {
-        packets.push(local_first_engine::PromptPacket {
-            id: "workspace-context".to_string(),
-            source: local_first_engine::PromptPacketSource::Workspace,
-            priority: 20,
-            content: workspace,
-        });
-    }
-    if let Some(root) = project_root_for_thread(state, thread_id) {
-        for (id, relative, priority) in [
-            ("project-agents", "AGENTS.md", 30),
-            ("project-homun", ".homun/instructions.md", 31),
-        ] {
-            if let Some(content) = read_project_instruction(&root, relative) {
-                packets.push(local_first_engine::PromptPacket {
-                    id: id.to_string(),
-                    source: local_first_engine::PromptPacketSource::Project,
-                    priority,
-                    content,
-                });
-            }
-        }
-    }
-    if let Some(thread_id) = thread_id {
-        let thread = lock_store(state)
-            .ok()
-            .and_then(|store| store.thread(thread_id).ok().flatten());
-        let binding = active_routing_binding(state, Some(thread_id));
-        let mut lines = Vec::new();
-        if let Some(source) = thread.and_then(|thread| thread.source) {
-            lines.push(format!(
-                "THREAD PERIMETER: this conversation originates from the {source} channel; keep its configured contact and permission boundary."
-            ));
-        }
-        if let Some(binding) = binding {
-            lines.push(format!(
-                "THREAD ROUTING: preserve the explicit plugin route {}/{} until the binding is removed.",
-                binding.plugin_id, binding.route_id
-            ));
-        }
-        if !lines.is_empty() {
-            packets.push(local_first_engine::PromptPacket {
-                id: "thread-context".to_string(),
-                source: local_first_engine::PromptPacketSource::Thread,
-                priority: 40,
-                content: lines.join("\n"),
-            });
-        }
-    }
-    packets.push(local_first_engine::PromptPacket {
-        id: "runtime-control".to_string(),
-        source: local_first_engine::PromptPacketSource::Runtime,
-        priority: 100,
-        content: format!(
-            "{}\n\nRUNTIME CONTROL: preserve verified plan progress, do not repeat an effect whose receipt is uncertain, and obey the currently offered tool surface.",
-            runtime.trim()
-        ),
-    });
-    local_first_engine::compose_prompt_packets(&packets)
 }
 
 fn record_subagent_task_step_outcome(
