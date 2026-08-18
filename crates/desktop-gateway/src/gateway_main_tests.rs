@@ -25,13 +25,12 @@ use super::{
     next_ready_task_across_workspaces, normalize_for_dedup, parse_plan_marker,
     parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
     plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
-    proactive_memory_request_for_suggestion_action, project_filesystem_mcp_instruction,
-    prune_browser_history, redact_sensitive_text, repeated_browser_action_nudge,
-    repeated_browser_failed_action_nudge, requeue_waiting_resource_tasks,
-    response_language_instruction, rewrite_confirm_to_done, run_bash_unsandboxed_result,
-    sanitize_dedup_key, scheduled_thread_sender_for_task_id, scheduled_thread_title,
-    search_composio_catalog, should_try_tool_compatibility_fallback, skill_id_from_command,
-    strip_json_fences, suggestion_choices_json, task_effective_goal,
+    project_filesystem_mcp_instruction, prune_browser_history, redact_sensitive_text,
+    repeated_browser_action_nudge, repeated_browser_failed_action_nudge,
+    requeue_waiting_resource_tasks, response_language_instruction, rewrite_confirm_to_done,
+    run_bash_unsandboxed_result, sanitize_dedup_key, scheduled_thread_sender_for_task_id,
+    scheduled_thread_title, search_composio_catalog, should_try_tool_compatibility_fallback,
+    skill_id_from_command, strip_json_fences, suggestion_choices_json, task_effective_goal,
     task_execution_outcome_from_executor_result, task_goal_summary, task_queue_response,
     tool_touches_calendar, tool_touches_contacts, valid_catalog_owner,
     validate_memory_source_input, validate_memory_source_overrides,
@@ -6293,76 +6292,6 @@ fn proactive_fuzzy_dedup_blocks_paraphrases() {
     ));
     // Empty board → nothing matches.
     assert!(!is_semantic_duplicate("curiosità:tappo-moto", "x", &[]));
-}
-
-#[test]
-fn proactive_action_memory_writeback_maps_statuses() {
-    let row = chat_store::SuggestionRow {
-        id: 7,
-        scope: "project-x".to_string(),
-        kind: "follow-up".to_string(),
-        title: "Controlla Idra".to_string(),
-        body: "Idra sembra fermo.".to_string(),
-        rationale: "Nessuna attività recente.".to_string(),
-        proposed_action: Some("Controllare lo stato di Idra".to_string()),
-        choices: None,
-        status: "pending".to_string(),
-        feedback: None,
-        dedup_key: "follow-up:idra".to_string(),
-        created_at: 123,
-        source_ref: "supervisor:test".to_string(),
-        relevant_until: None,
-    };
-    let lifecycle = local_first_memory::MemoryLifecycleRequest {
-        actor_id: "test".to_string(),
-        user_id: local_first_memory::UserId::new("user"),
-        workspace_id: local_first_memory::WorkspaceId::new("project-x"),
-        purpose: "test".to_string(),
-    };
-
-    let accepted = proactive_memory_request_for_suggestion_action(
-        &row,
-        "accepted",
-        Some("liked"),
-        None,
-        lifecycle.clone(),
-    )
-    .expect("accepted writeback");
-    assert_eq!(accepted.memory_type, "open_loop");
-    assert!(accepted.text.contains("Open loop"));
-    assert!(accepted.text.contains("Controlla Idra"));
-    assert_eq!(
-        accepted.metadata["suggestion"]["dedup_key"],
-        "follow-up:idra"
-    );
-
-    let dismissed = proactive_memory_request_for_suggestion_action(
-        &row,
-        "dismissed",
-        Some("disliked"),
-        Some("non prioritario"),
-        lifecycle.clone(),
-    )
-    .expect("dismissed writeback");
-    assert_eq!(dismissed.memory_type, "decision");
-    assert!(dismissed.text.contains("dismissed"));
-    assert!(dismissed.text.contains("non prioritario"));
-
-    let snoozed = proactive_memory_request_for_suggestion_action(
-        &row,
-        "snoozed",
-        None,
-        None,
-        lifecycle.clone(),
-    )
-    .expect("snoozed writeback");
-    assert_eq!(snoozed.memory_type, "open_loop");
-    assert!(snoozed.text.contains("revisit later"));
-
-    assert!(
-        proactive_memory_request_for_suggestion_action(&row, "unknown", None, None, lifecycle,)
-            .is_none()
-    );
 }
 
 #[test]

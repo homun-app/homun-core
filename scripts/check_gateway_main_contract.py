@@ -18,6 +18,9 @@ BROWSER_TOOLS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gatew
 CHAT_UTILITY_ROUTES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_utility_routes.rs"
 )
+PROACTIVITY_ROUTES_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_proactivity_routes.rs"
+)
 
 
 def extract_async_main_body(source: str) -> str:
@@ -169,6 +172,16 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct ProactiveAnswerRequest ": "chat utility route DTOs must stay in gateway_chat_utility_routes",
         "async fn proactive_answer(": "chat utility routes must stay in gateway_chat_utility_routes",
         "fn proactive_answer_memory_request(": "proactive answer memory capture must stay in gateway_chat_utility_routes",
+        "struct ToolRunsQuery ": "tool run audit route DTOs must stay in gateway_proactivity_routes",
+        "async fn tool_runs_list(": "tool run audit routes must stay in gateway_proactivity_routes",
+        "struct SuggestionsQuery ": "proactivity suggestion route DTOs must stay in gateway_proactivity_routes",
+        "async fn suggestions_list(": "proactivity suggestion routes must stay in gateway_proactivity_routes",
+        "struct SuggestionActRequest ": "proactivity suggestion route DTOs must stay in gateway_proactivity_routes",
+        "async fn suggestion_act(": "proactivity suggestion routes must stay in gateway_proactivity_routes",
+        "fn write_proactive_action_memory(": "proactivity suggestion write-back must stay in gateway_proactivity_routes",
+        "fn proactive_memory_request_for_suggestion_action(": "proactivity suggestion write-back must stay in gateway_proactivity_routes",
+        "struct ProactiveReviewRequest ": "proactivity review route DTOs must stay in gateway_proactivity_routes",
+        "async fn proactivity_review_now(": "proactivity review routes must stay in gateway_proactivity_routes",
         "async fn chat_branches(": "chat branch list endpoint must stay in gateway_chat_branches",
         "async fn set_active_leaf(": "chat branch active leaf endpoint must stay in gateway_chat_branches",
         "async fn set_branch_label(": "chat branch label endpoint must stay in gateway_chat_branches",
@@ -1027,6 +1040,8 @@ def main() -> int:
         browser_tools_source = handle.read()
     with open(CHAT_UTILITY_ROUTES_RS, "r", encoding="utf-8") as handle:
         chat_utility_routes_source = handle.read()
+    with open(PROACTIVITY_ROUTES_RS, "r", encoding="utf-8") as handle:
+        proactivity_routes_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1088,6 +1103,26 @@ def main() -> int:
         chat_utility_routes_source,
         "fn title_model_inputs(",
         "chat utility route owner must own title model input cleanup",
+    )
+    assert_contains(
+        source,
+        "mod gateway_proactivity_routes;",
+        "gateway root must declare proactivity route owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_proactivity_routes::",
+        "gateway root must re-export proactivity route owner",
+    )
+    assert_contains(
+        proactivity_routes_source,
+        "pub(crate) async fn suggestions_list(",
+        "proactivity route owner must expose suggestion list handler",
+    )
+    assert_contains(
+        proactivity_routes_source,
+        "fn proactive_memory_request_for_suggestion_action(",
+        "proactivity route owner must own suggestion action memory write-back",
     )
     assert_contains(source, "mod gateway_turn_broker;", "gateway root must declare turn broker owner")
     assert_contains(

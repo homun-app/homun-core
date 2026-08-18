@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (chat utility routes owner in verifica locale).**
+> **Ultimo aggiornamento: 2026-08-18 (proactivity routes owner in verifica locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-utility-routes-owner` |
-| Branch | `fabio/chat-utility-routes-owner` |
-| PR | #108-#116, #118-#166 mergeate in `main`; #117 browser draft separata; slice chat utility routes in verifica locale |
-| HEAD codice verificato | branch `fabio/chat-utility-routes-owner` sopra `main` aggiornato a #166 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/proactivity-routes-owner` |
+| Branch | `fabio/proactivity-routes-owner` |
+| PR | #108-#116, #118-#167 mergeate in `main`; #117 browser draft separata; slice proactivity routes in verifica locale |
+| HEAD codice verificato | branch `fabio/proactivity-routes-owner` sopra `main` aggiornato a #167 |
 
 ## Dove siamo
 
@@ -204,6 +204,11 @@ Slice Runtime V2 recenti:
   suggestions, autotitle, seed assistant e proactive answer escono dal monolite
   `main.rs`; loop agente, streaming, proactivity review e memory recall inline
   restano negli owner dedicati.
+- Estrazione locale `gateway_proactivity_routes`: route dashboard
+  `/api/tools/runs`, `/api/suggestions`, `/api/suggestions/{id}/act` e trigger
+  manuale `/api/proactivity/review-now` escono dal monolite `main.rs`; lo stesso
+  owner mantiene il write-back memoria delle azioni sulle card, mentre il motore
+  supervisor resta in `gateway_proactivity`.
 
 ## Invarianti ora protetti
 
@@ -707,8 +712,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Completare gate, commit e PR piccola per `gateway_chat_utility_routes`.
-2. Dopo merge chat utility routes, aggiornare `main` e riprendere la prossima
+1. Completare gate, commit e PR piccola per `gateway_proactivity_routes`.
+2. Dopo merge proactivity routes, aggiornare `main` e riprendere la prossima
    slice non-browser solo dopo nuova lettura owner-level di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
@@ -717,7 +722,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/chat-utility-routes-owner se la PR chat utility routes e' ancora da aprire o e' aperta;
+branch fabio/proactivity-routes-owner se la PR proactivity routes e' ancora da aprire o e' aperta;
 altrimenti main aggiornato e scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
