@@ -907,6 +907,13 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn zai_thinking_enabled(": "Z.ai thinking policy must stay in gateway_model_routing",
         "struct RoutingDecision ": "routing decision log DTO must stay in gateway_model_routing",
         "fn log_routing_decision(": "routing decision log writer must stay in gateway_model_routing",
+        "fn resolve_inference_api_key(": "inference API key resolution must stay in gateway_model_routing",
+        "fn env_inference_api_key(": "inference env key fallback must stay in gateway_model_routing",
+        "fn build_router_from(": "model router factory must stay in gateway_model_routing",
+        "fn build_router_for_resolved(": "resolved-role router factory must stay in gateway_model_routing",
+        "fn router_for_role(": "role router factory must stay in gateway_model_routing",
+        "fn semantic_router_enabled(": "semantic router flag must stay in gateway_model_routing",
+        "fn build_inference_router_from_env(": "legacy env router factory must stay in gateway_model_routing",
         "struct ActiveModelResponse": "runtime model response DTO must stay in gateway_model_routes",
         "struct ProviderModelsGroup": "runtime model list DTO must stay in gateway_model_routes",
         "struct RuntimeModelsResponse": "runtime model list DTO must stay in gateway_model_routes",
@@ -1327,6 +1334,21 @@ def main() -> int:
         model_routing_source,
         "pub(crate) fn log_routing_decision(",
         "model routing owner must expose routing decision log writer",
+    )
+    assert_contains(
+        model_routing_source,
+        "pub(crate) fn build_router_from(",
+        "model routing owner must expose model router factory",
+    )
+    assert_contains(
+        model_routing_source,
+        "pub(crate) fn router_for_role(",
+        "model routing owner must expose role router factory",
+    )
+    assert_contains(
+        model_routing_source,
+        "pub(crate) fn build_inference_router_from_env(",
+        "model routing owner must expose legacy env router factory",
     )
     assert_contains(source, "mod gateway_vault_routes;", "gateway root must declare vault route owner")
     assert_contains(

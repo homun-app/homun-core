@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (model routing decisions owner in verifica locale).**
+> **Ultimo aggiornamento: 2026-08-18 (model router factories in verifica locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-model-routing-decisions-owner` |
-| Branch | `fabio/gateway-model-routing-decisions-owner` |
-| PR | #108-#116, #118-#174 mergeate in `main`; #117 browser draft separata; slice model routing decisions in verifica locale |
-| HEAD codice verificato | branch `fabio/gateway-model-routing-decisions-owner` sopra `main` aggiornato a #174 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-model-router-factories` |
+| Branch | `fabio/gateway-model-router-factories` |
+| PR | #108-#116, #118-#175 mergeate in `main`; #117 browser draft separata; slice model router factories in verifica locale |
+| HEAD codice verificato | branch `fabio/gateway-model-router-factories` sopra `main` aggiornato a #175 |
 
 ## Dove siamo
 
@@ -143,11 +143,15 @@ Slice Runtime V2 recenti:
   del task executor escono dal monolite `main.rs` e si aggiungono ai worker id
   stabili e alla configurazione env gia' posseduti dall'owner; route queue,
   lease/acquire, execution adapter e finalizzazione task restano owner separati.
-- Slice corrente `gateway_model_routing`: DTO `RoutingDecision`, lettura
+- Estrazione mergeata `gateway_model_routing`: DTO `RoutingDecision`, lettura
   `routing-decisions.json` e writer ring-buffer capped escono dal monolite
   `main.rs`; la surface HTTP `/api/routing-decisions` resta in
   `gateway_model_routes`, mentre `now_epoch_secs` resta nel root perche'
   condiviso da runtime, memory, browser e workspace.
+- Slice corrente `gateway_model_routing`: resolver API key inference,
+  fallback env, factory `ModelRouter` da provider/ruolo e router legacy da env
+  escono dal monolite `main.rs`; `resolve_role_for_task` e il wrapper browser
+  restano fuori da questa slice.
 - Estrazione locale `gateway_thread_files`: cartella collegata per thread,
   precedenza workspace attivo e route `@ file` search/read escono dal monolite
   `main.rs`; `path_within` viene portato nell'owner condiviso
@@ -719,13 +723,12 @@ PR aperte:
 
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
 - Nessuna PR aperta per la slice corrente; prossimo passo: completare gate e
-  aprire `fabio/gateway-model-routing-decisions-owner`.
+  aprire `fabio/gateway-model-router-factories`.
 
 Branch corrente:
 
-- `fabio/gateway-model-routing-decisions-owner`: branch sopra `main`
-  aggiornato a #174; contiene solo la slice routing decisions dell'owner
-  model routing.
+- `fabio/gateway-model-router-factories`: branch sopra `main` aggiornato a
+  #175; contiene solo la slice factory/router dell'owner model routing.
 - `fabio/write-tool-allowlist-contracts`: branch locale cumulativa rebased su
   `main`, da usare solo come parcheggio per separare le prossime slice
   successive.
@@ -752,8 +755,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Completare gate, commit e PR piccola per `gateway_model_routing` routing decisions.
-2. Dopo merge model routing decisions, aggiornare `main` e riprendere la prossima
+1. Completare gate, commit e PR piccola per `gateway_model_routing` router factories.
+2. Dopo merge model router factories, aggiornare `main` e riprendere la prossima
    slice non-browser solo dopo nuova lettura owner-level di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
@@ -762,8 +765,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/gateway-model-routing-decisions-owner se la slice routing decisions e' ancora da aprire o e' aperta;
-altrimenti main aggiornato a #174/#successive e scegli la prossima slice non-browser owner-level.
+branch fabio/gateway-model-router-factories se la slice router factories e' ancora da aprire o e' aperta;
+altrimenti main aggiornato a #175/#successive e scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

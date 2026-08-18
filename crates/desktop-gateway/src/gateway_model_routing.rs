@@ -96,6 +96,189 @@ pub(crate) fn log_routing_decision(entry: RoutingDecision) {
     }
 }
 
+/// Resolves the cloud inference API key, preferring a 0600 key file over the
+/// environment. A key file is not inherited by child processes (e.g. the browser
+/// sidecar) and is not visible in `ps`/`/proc/<pid>/environ`, so it is the safer
+/// source. Env remains supported for convenience but warns once.
+///
+/// TODO(security): migrate to `local-first-secrets` (`secret_ref`) per ADR 0007
+/// for at-rest encryption / keychain — tracked as workstream S4-full in the
+/// system elevation plan.
+pub(crate) fn resolve_inference_api_key() -> Option<String> {
+    // The active provider's own key wins (set via Settings → Modelli).
+    if let Some(provider) = load_provider_registry().active()
+        && let Some(key) = provider_api_key(&provider.id)
+    {
+        return Some(key);
+    }
+    // Legacy single-provider key in the encrypted secret store.
+    if let Some(key) = persisted_inference_api_key() {
+        return Some(key);
+    }
+    env_inference_api_key()
+}
+
+/// API key from the environment only (0600 key file preferred over the var).
+/// Used as the per-provider fallback for role routing.
+pub(crate) fn env_inference_api_key() -> Option<String> {
+    if let Ok(path) = env::var("HOMUN_INFERENCE_API_KEY_FILE")
+        && !path.trim().is_empty()
+    {
+        match fs::read_to_string(path.trim()) {
+            Ok(contents) => {
+                let key = contents.trim().to_string();
+                if !key.is_empty() {
+                    return Some(key);
+                }
+            }
+            Err(error) => {
+                eprintln!("[inference] could not read HOMUN_INFERENCE_API_KEY_FILE: {error}");
+            }
+        }
+    }
+    let from_env = env::var("HOMUN_INFERENCE_API_KEY")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    eprintln!(
+        "[inference] using API key from HOMUN_INFERENCE_API_KEY (env); prefer \
+         HOMUN_INFERENCE_API_KEY_FILE (0600) — env is inherited by child processes"
+    );
+    Some(from_env)
+}
+
+/// Builds a single-provider `ModelRouter` for an explicit (kind, base_url, model).
+/// Locality is inferred from the endpoint (loopback → local) and kind (Anthropic
+/// is always cloud), which also picks the privacy policy.
+pub(crate) fn build_router_from(
+    kind: ProviderKind,
+    base_url: &str,
+    model: &str,
+    api_key: Option<String>,
+    context_window: u32,
+) -> ModelRouter {
+    let is_local = base_url.contains("127.0.0.1") || base_url.contains("localhost");
+    if matches!(kind, ProviderKind::Anthropic)
+        && let Some(api_key) = api_key.clone()
+    {
+        let descriptor = CapabilityDescriptor {
+            id: format!("anthropic:{model}"),
+            locality: Locality::Cloud,
+            supports_vision: true,
+            supports_tools: true,
+            context_window,
+            approx_tokens_per_second: None,
+        };
+        let provider = AnthropicProvider::new(
+            descriptor,
+            model.to_string(),
+            api_key,
+            global_usage_recorder(),
+        );
+        return ModelRouter::new(PrivacyPolicy::allowing_cloud()).with_provider(Box::new(provider));
+    }
+    let locality = if is_local {
+        Locality::Local
+    } else {
+        Locality::Cloud
+    };
+    let descriptor = CapabilityDescriptor {
+        id: format!("openai-compat:{model}"),
+        locality,
+        supports_vision: true,
+        supports_tools: true,
+        context_window,
+        approx_tokens_per_second: None,
+    };
+    let provider = OpenAiCompatProvider::new(
+        descriptor,
+        base_url.to_string(),
+        model.to_string(),
+        api_key,
+        global_usage_recorder(),
+    );
+    let policy = if is_local {
+        PrivacyPolicy::local_only()
+    } else {
+        PrivacyPolicy::allowing_cloud()
+    };
+    ModelRouter::new(policy).with_provider(Box::new(provider))
+}
+
+/// Builds a `ModelRouter` from an already-resolved role/model (shared by role,
+/// agent, and semantic-router paths). Resolves the provider's key + context.
+pub(crate) fn build_router_for_resolved(resolved: &ResolvedRole) -> ModelRouter {
+    let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
+    let context_window = env::var("HOMUN_INFERENCE_CONTEXT_WINDOW")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(if matches!(resolved.kind, ProviderKind::Anthropic) {
+            200_000
+        } else {
+            32_768
+        });
+    build_router_from(
+        resolved.kind,
+        &resolved.base_url,
+        &resolved.model,
+        api_key,
+        context_window,
+    )
+}
+
+/// Builds the inference router for a named role (Phase 2). Resolves the role
+/// through the registry (manual binding or capability auto-match), falling back
+/// to the legacy env/active-provider behavior when no provider is configured.
+pub(crate) fn router_for_role(role: &str) -> ModelRouter {
+    match load_provider_registry().resolve_role(role) {
+        Some(resolved) => build_router_for_resolved(&resolved),
+        None => build_inference_router_from_env(),
+    }
+}
+
+/// Whether the semantic (LLM) model router is enabled. Default ON; set
+/// `HOMUN_SEMANTIC_ROUTER=0` to force the cheap heuristic.
+pub(crate) fn semantic_router_enabled() -> bool {
+    env::var("HOMUN_SEMANTIC_ROUTER")
+        .map(|value| value != "0" && !value.eq_ignore_ascii_case("false"))
+        .unwrap_or(true)
+}
+
+/// Legacy env-only router, used when the registry has no providers yet.
+pub(crate) fn build_inference_router_from_env() -> ModelRouter {
+    let backend = env::var("HOMUN_INFERENCE_BACKEND")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let context_window = env::var("HOMUN_INFERENCE_CONTEXT_WINDOW")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok());
+    if backend == "anthropic"
+        && let Some(api_key) = resolve_inference_api_key()
+    {
+        let model = active_inference_model();
+        return build_router_from(
+            ProviderKind::Anthropic,
+            "https://api.anthropic.com",
+            &model,
+            Some(api_key),
+            context_window.unwrap_or(200_000),
+        );
+    }
+    let base_url =
+        effective_inference_base_url().unwrap_or_else(|| "http://127.0.0.1:11434/v1".to_string());
+    let model = env::var("HOMUN_BROWSER_PLANNER_MODEL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(active_inference_model);
+    build_router_from(
+        ProviderKind::OpenaiCompat,
+        &base_url,
+        &model,
+        resolve_inference_api_key(),
+        context_window.unwrap_or(32_768),
+    )
+}
+
 #[test]
 fn routing_decision_log_keeps_recent_decisions_capped() {
     let decisions = (0..55)
