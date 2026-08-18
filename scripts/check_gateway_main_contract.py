@@ -25,6 +25,7 @@ VAULT_ROUTES_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gatewa
 LOCAL_AUTHORIZATION_ROUTES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_local_authorization_routes.rs"
 )
+COMPOSIO_ROUTES_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_composio_routes.rs")
 
 
 def extract_async_main_body(source: str) -> str:
@@ -219,6 +220,49 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn run_escalate(": "sandbox escalation route must stay in gateway_local_authorization_routes",
         "fn rewrite_connect_suggest_mark(": "connect suggestion rewrite must stay in gateway_local_authorization_routes",
         "async fn connect_mark(": "connect suggestion mark route must stay in gateway_local_authorization_routes",
+        "struct ConnectComposioRequest": "Composio connection DTOs must stay in gateway_composio_routes",
+        "struct ConnectComposioResponse": "Composio connection DTOs must stay in gateway_composio_routes",
+        "fn composio_base_url(": "Composio route helpers must stay in gateway_composio_routes",
+        "fn connect_composio_blocking(": "Composio connection route helpers must stay in gateway_composio_routes",
+        "async fn connect_composio(": "Composio connection route must stay in gateway_composio_routes",
+        "struct ComposioToolkit": "Composio toolkit DTOs must stay in gateway_composio_routes",
+        "struct ComposioToolkitsResponse": "Composio toolkit DTOs must stay in gateway_composio_routes",
+        "fn composio_transport_for(": "Composio transport lookup must stay in gateway_composio_routes",
+        "fn composio_toolkits_blocking(": "Composio toolkit route helpers must stay in gateway_composio_routes",
+        "async fn composio_toolkits(": "Composio toolkit route must stay in gateway_composio_routes",
+        "struct ComposioLinkRequest": "Composio link DTOs must stay in gateway_composio_routes",
+        "struct ComposioLinkResponse": "Composio link DTOs must stay in gateway_composio_routes",
+        "struct ComposioConnection": "Composio connection DTOs must stay in gateway_composio_routes",
+        "struct ComposioConnectionsResponse": "Composio connection DTOs must stay in gateway_composio_routes",
+        "fn composio_entity_id(": "Composio entity scoping must stay in gateway_composio_routes",
+        "struct ComposioChatTools": "Composio chat-tool catalog DTO must stay in gateway_composio_routes",
+        "fn composio_tool_is_read(": "Composio tool classification must stay in gateway_composio_routes",
+        "fn tool_touches_calendar(": "connector perimeter heuristics must stay in gateway_composio_routes",
+        "fn tool_touches_contacts(": "connector perimeter heuristics must stay in gateway_composio_routes",
+        "fn humanize_composio_tool(": "Composio display labels must stay in gateway_composio_routes",
+        "fn composio_connected_toolkits(": "Composio connected toolkit projection must stay in gateway_composio_routes",
+        "type ComposioCatalogCache": "Composio catalog cache must stay in gateway_composio_routes",
+        "fn composio_catalog_cache(": "Composio catalog cache must stay in gateway_composio_routes",
+        "fn composio_catalog_ttl(": "Composio catalog cache must stay in gateway_composio_routes",
+        "fn composio_catalog_invalidate(": "Composio catalog cache invalidation must stay in gateway_composio_routes",
+        "fn composio_chat_tools_cached(": "Composio chat-tool catalog must stay in gateway_composio_routes",
+        "fn composio_chat_tools(": "Composio chat-tool catalog must stay in gateway_composio_routes",
+        "struct CapabilitySuggestions": "capability suggestion DTO must stay in gateway_composio_routes",
+        "async fn suggest_capabilities(": "capability suggestion execution must stay in gateway_composio_routes",
+        "fn parse_composio_fields(": "Composio auth field parsing must stay in gateway_composio_routes",
+        "async fn composio_toolkit_auth(": "Composio auth route must stay in gateway_composio_routes",
+        "fn composio_auth_config_resolve(": "Composio auth config resolution must stay in gateway_composio_routes",
+        "fn composio_link_blocking(": "Composio link route helpers must stay in gateway_composio_routes",
+        "async fn composio_link(": "Composio link route must stay in gateway_composio_routes",
+        "fn composio_connections_blocking(": "Composio connection route helpers must stay in gateway_composio_routes",
+        "async fn composio_connections(": "Composio connection route must stay in gateway_composio_routes",
+        "fn composio_disconnect_blocking(": "Composio disconnect route helpers must stay in gateway_composio_routes",
+        "async fn composio_disconnect(": "Composio disconnect route must stay in gateway_composio_routes",
+        "fn composio_logo_urls(": "Composio logo proxy cache must stay in gateway_composio_routes",
+        "fn composio_logo_cache(": "Composio logo proxy cache must stay in gateway_composio_routes",
+        "const COMPOSIO_LOGO_MAX_BYTES": "Composio logo proxy limits must stay in gateway_composio_routes",
+        "async fn composio_toolkit_logo(": "Composio logo route must stay in gateway_composio_routes",
+        "fn composio_logo_response(": "Composio logo response helper must stay in gateway_composio_routes",
         "async fn chat_branches(": "chat branch list endpoint must stay in gateway_chat_branches",
         "async fn set_active_leaf(": "chat branch active leaf endpoint must stay in gateway_chat_branches",
         "async fn set_branch_label(": "chat branch label endpoint must stay in gateway_chat_branches",
@@ -1083,6 +1127,8 @@ def main() -> int:
         vault_routes_source = handle.read()
     with open(LOCAL_AUTHORIZATION_ROUTES_RS, "r", encoding="utf-8") as handle:
         local_authorization_routes_source = handle.read()
+    with open(COMPOSIO_ROUTES_RS, "r", encoding="utf-8") as handle:
+        composio_routes_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1247,6 +1293,7 @@ def main() -> int:
         "mod gateway_local_authorization_routes;",
         "gateway root must declare local authorization route owner",
     )
+    assert_contains(source, "mod gateway_composio_routes;", "gateway root must declare Composio route owner")
     assert_contains(
         source,
         "mod gateway_prompt_instructions;",
@@ -1343,6 +1390,11 @@ def main() -> int:
         local_authorization_routes_source,
         "pub(crate) async fn fs_authorize(",
         "local authorization route owner must expose filesystem authorization route",
+    )
+    assert_contains(
+        composio_routes_source,
+        "pub(crate) async fn connect_composio(",
+        "Composio route owner must expose connection route",
     )
 
     assert_ordered(
