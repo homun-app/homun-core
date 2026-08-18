@@ -1,39 +1,38 @@
 // collapse_plan_markers moved to the engine (5.D2); the gateway no longer uses it in prod,
 // only these unit tests do — import it here rather than re-exporting it at the crate root.
 use super::{
-    ActiveModelInputs, AppState, ChannelSettings, CommandOutputError, ConnectorErrorKind,
-    InboundAction, MAX_PLAN_STALL_RESUMES, MemoryBenchIngestRequest, MemoryBenchMessage,
-    MemoryBenchSearchRequest, MemoryBenchSession, MemoryBenchStatusRequest, MemoryCandidate,
-    MemoryDataSensitivity, MemorySourceOverrideInput, MemorySourceUpsertRequest,
-    ValidatedMemorySourceInput, WorkspaceRecord, WorkspacesFile, active_llm_concurrency,
-    adapt_skill_body, aggregate_session_state_from_counts, authorize_managed_capability_tool,
-    block_stalled_step, brain_budgets_for_context_window, browser_anti_loop_nudge,
-    browser_capability_action_refusal, browser_error_indicates_dead_sidecar,
-    browser_method_for_capability_tool, browser_snapshot_text, browser_targets_for_goal,
-    browser_url_for_goal, build_browse_goal, build_memory_source_grant, build_plan_markdown,
-    capability_call_completed_outcome, classify_connector_error, clawhub_origin,
-    collect_member_counts, command_output_with_timeout, composio_tool_is_read,
-    connector_error_hint, default_browser_headless_value, delegated_browse_tool_outcome,
-    delete_workspace, earlier_browse_call_in_current_round, enforce_monotonic_plan_progress,
-    extract_source_urls, fonti_section, format_memory_block, gateway_memory_user_id,
-    humanize_task_kind, hybrid_memory_score, inbound_action, is_auto_confirmable,
-    is_internal_task_kind, is_low_value_source_url, is_semantic_duplicate, jail_in_root,
-    llm_concurrency_view, mcp_error_hint, mcp_provider_slug, mcp_stdio_config_from_metadata,
-    mcp_stdio_config_to_metadata, memory_age_days, memory_bench_ingest, memory_bench_search,
-    memory_bench_status, memory_facade, memory_source_candidates_from_records,
-    memory_source_facade_error, memory_source_grant_views, memory_sources_flag,
-    memorybench_workspace_id, merge_plan, next_plan_stall, next_ready_task_across_workspaces,
-    normalize_for_dedup, parse_plan_marker, parse_review_suggestion, plan_done_count,
-    plan_incomplete_reason, plan_is_complete, plan_is_settled, plan_next_open,
-    plan_stall_exhausted, plan_step_status, proactive_answer_memory_request,
-    proactive_memory_request_for_suggestion_action, project_filesystem_mcp_instruction,
-    prune_browser_history, redact_sensitive_text, repeated_browser_action_nudge,
-    repeated_browser_failed_action_nudge, requeue_waiting_resource_tasks, resolve_active_model,
-    resolve_contained_computer_cdp, resolve_contained_computer_novnc,
-    response_language_instruction, rewrite_confirm_to_done, run_bash_unsandboxed_result,
-    sanitize_dedup_key, scheduled_thread_sender_for_task_id, scheduled_thread_title,
-    search_composio_catalog, should_try_tool_compatibility_fallback, skill_id_from_command,
-    strip_json_fences, suggestion_choices_json, task_effective_goal,
+    AppState, ChannelSettings, CommandOutputError, ConnectorErrorKind, InboundAction,
+    MAX_PLAN_STALL_RESUMES, MemoryBenchIngestRequest, MemoryBenchMessage, MemoryBenchSearchRequest,
+    MemoryBenchSession, MemoryBenchStatusRequest, MemoryCandidate, MemoryDataSensitivity,
+    MemorySourceOverrideInput, MemorySourceUpsertRequest, ValidatedMemorySourceInput,
+    WorkspaceRecord, WorkspacesFile, active_llm_concurrency, adapt_skill_body,
+    aggregate_session_state_from_counts, authorize_managed_capability_tool, block_stalled_step,
+    brain_budgets_for_context_window, browser_anti_loop_nudge, browser_capability_action_refusal,
+    browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
+    browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_browse_goal,
+    build_memory_source_grant, build_plan_markdown, capability_call_completed_outcome,
+    classify_connector_error, clawhub_origin, collect_member_counts, command_output_with_timeout,
+    composio_tool_is_read, connector_error_hint, default_browser_headless_value,
+    delegated_browse_tool_outcome, delete_workspace, earlier_browse_call_in_current_round,
+    enforce_monotonic_plan_progress, extract_source_urls, fonti_section, format_memory_block,
+    gateway_memory_user_id, humanize_task_kind, hybrid_memory_score, inbound_action,
+    is_auto_confirmable, is_internal_task_kind, is_low_value_source_url, is_semantic_duplicate,
+    jail_in_root, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
+    mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days,
+    memory_bench_ingest, memory_bench_search, memory_bench_status, memory_facade,
+    memory_source_candidates_from_records, memory_source_facade_error, memory_source_grant_views,
+    memory_sources_flag, memorybench_workspace_id, merge_plan, next_plan_stall,
+    next_ready_task_across_workspaces, normalize_for_dedup, parse_plan_marker,
+    parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
+    plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
+    proactive_answer_memory_request, proactive_memory_request_for_suggestion_action,
+    project_filesystem_mcp_instruction, prune_browser_history, redact_sensitive_text,
+    repeated_browser_action_nudge, repeated_browser_failed_action_nudge,
+    requeue_waiting_resource_tasks, resolve_contained_computer_cdp,
+    resolve_contained_computer_novnc, response_language_instruction, rewrite_confirm_to_done,
+    run_bash_unsandboxed_result, sanitize_dedup_key, scheduled_thread_sender_for_task_id,
+    scheduled_thread_title, search_composio_catalog, should_try_tool_compatibility_fallback,
+    skill_id_from_command, strip_json_fences, suggestion_choices_json, task_effective_goal,
     task_execution_outcome_from_executor_result, task_goal_summary, task_queue_response,
     tool_touches_calendar, tool_touches_contacts, valid_catalog_owner,
     validate_memory_source_input, validate_memory_source_overrides,
@@ -20858,79 +20857,6 @@ fn task_effective_goal_uses_redacted_prompt_for_execution() {
     assert!(effective.contains("voli"));
     assert!(effective.contains("10 giugno"));
     assert!(effective.contains("non acquistare"));
-}
-
-fn model_inputs(backend: &str) -> ActiveModelInputs {
-    ActiveModelInputs {
-        backend: backend.to_string(),
-        model: None,
-        cloud_flag: false,
-        context_window: None,
-        has_api_key: false,
-    }
-}
-
-#[test]
-fn active_model_anthropic_with_key_is_capable_cloud() {
-    let info = resolve_active_model(&ActiveModelInputs {
-        has_api_key: true,
-        ..model_inputs("anthropic")
-    });
-    assert_eq!(info.backend, "anthropic");
-    assert_eq!(info.locality, "cloud");
-    assert!(info.capable);
-    assert!(!info.missing_api_key);
-    assert_eq!(info.model, "claude-sonnet-4-6");
-    assert_eq!(info.context_window, 200_000);
-}
-
-#[test]
-fn active_model_anthropic_without_key_resolves_to_openai_compat() {
-    // No MLX fallback any more: anthropic-without-key resolves to the
-    // OpenAI-compatible provider, same as build_browser_inference_router.
-    let info = resolve_active_model(&model_inputs("anthropic"));
-    assert_eq!(info.backend, "openai-compat");
-    assert!(info.capable);
-}
-
-#[test]
-fn active_model_openai_cloud_without_key_is_capable_but_flags_missing() {
-    let info = resolve_active_model(&ActiveModelInputs {
-        cloud_flag: true,
-        model: Some("minimax-m2.7".to_string()),
-        ..model_inputs("openai")
-    });
-    assert_eq!(info.backend, "openai-compat");
-    assert_eq!(info.locality, "cloud");
-    assert_eq!(info.model, "minimax-m2.7");
-    assert!(info.capable);
-    // Cloud endpoint + no key → chat silently falls back; surface the warning.
-    assert!(info.missing_api_key);
-}
-
-#[test]
-fn active_model_openai_local_keyless_is_not_flagged() {
-    // A local OpenAI-compatible endpoint (e.g. Ollama) needs no key.
-    let info = resolve_active_model(&ActiveModelInputs {
-        cloud_flag: false,
-        ..model_inputs("openai")
-    });
-    assert_eq!(info.backend, "openai-compat");
-    assert_eq!(info.locality, "local");
-    assert!(!info.missing_api_key);
-}
-
-#[test]
-fn active_model_default_and_unknown_backends_resolve_to_openai_compat() {
-    // Empty/unknown backend → the OpenAI-compatible provider (local unless
-    // flagged cloud). No mistralrs/MLX branch exists in the router.
-    for backend in ["", "mistralrs", "mlx", "something-else"] {
-        let info = resolve_active_model(&model_inputs(backend));
-        assert_eq!(info.backend, "openai-compat", "backend: {backend}");
-        assert!(info.capable, "backend: {backend}");
-        assert_eq!(info.locality, "local", "backend: {backend}");
-        assert_eq!(info.model, "gpt-4o-mini", "backend: {backend}");
-    }
 }
 
 #[test]
