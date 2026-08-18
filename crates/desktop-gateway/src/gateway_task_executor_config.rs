@@ -1,5 +1,7 @@
 use std::env;
 
+pub(crate) const TASK_EXECUTOR_MANUAL_WORKER_ID: &str = "desktop-gateway-manual-run";
+pub(crate) const TASK_EXECUTOR_POLL_INTERVAL_MS: u64 = 1_000;
 pub(crate) const TASK_EXECUTOR_WORKER_ID: &str = "desktop-gateway-background-worker";
 
 /// How many independent background workers pull from the task queue. Each worker
@@ -41,7 +43,8 @@ pub(crate) fn task_executor_worker_id(index: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        TASK_EXECUTOR_DEFAULT_WORKER_COUNT, task_executor_worker_count_from_env,
+        TASK_EXECUTOR_DEFAULT_WORKER_COUNT, TASK_EXECUTOR_MANUAL_WORKER_ID,
+        TASK_EXECUTOR_POLL_INTERVAL_MS, task_executor_worker_count_from_env,
         task_executor_worker_enabled_from_env, task_executor_worker_id,
     };
 
@@ -82,5 +85,11 @@ mod tests {
             task_executor_worker_id(2),
             "desktop-gateway-background-worker-2"
         );
+    }
+
+    #[test]
+    fn manual_worker_and_poll_interval_are_stable() {
+        assert_eq!(TASK_EXECUTOR_MANUAL_WORKER_ID, "desktop-gateway-manual-run");
+        assert_eq!(TASK_EXECUTOR_POLL_INTERVAL_MS, 1_000);
     }
 }

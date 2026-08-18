@@ -28,6 +28,9 @@ LOCAL_AUTHORIZATION_ROUTES_RS = os.path.join(
 COMPOSIO_ROUTES_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_composio_routes.rs")
 CONNECTOR_ERRORS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_connector_errors.rs")
 IMAGE_GENERATION_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_image_generation.rs")
+TASK_EXECUTOR_CONFIG_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_task_executor_config.rs"
+)
 
 
 def extract_async_main_body(source: str) -> str:
@@ -278,6 +281,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn image_timeout_secs(": "image generation timeout policy must stay in gateway_image_generation",
         "fn deck_slide_image_prompt(": "deck image prompt policy must stay in gateway_image_generation",
         "async fn generate_image_png(": "image provider execution must stay in gateway_image_generation",
+        "const TASK_EXECUTOR_MANUAL_WORKER_ID": "task executor manual worker id must stay in gateway_task_executor_config",
+        "const TASK_EXECUTOR_POLL_INTERVAL_MS": "task executor poll interval must stay in gateway_task_executor_config",
         "async fn chat_branches(": "chat branch list endpoint must stay in gateway_chat_branches",
         "async fn set_active_leaf(": "chat branch active leaf endpoint must stay in gateway_chat_branches",
         "async fn set_branch_label(": "chat branch label endpoint must stay in gateway_chat_branches",
@@ -1148,6 +1153,8 @@ def main() -> int:
         connector_errors_source = handle.read()
     with open(IMAGE_GENERATION_RS, "r", encoding="utf-8") as handle:
         image_generation_source = handle.read()
+    with open(TASK_EXECUTOR_CONFIG_RS, "r", encoding="utf-8") as handle:
+        task_executor_config_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1461,6 +1468,16 @@ def main() -> int:
         image_generation_source,
         "pub(crate) async fn generate_image_png(",
         "image generation owner must expose image provider execution",
+    )
+    assert_contains(
+        task_executor_config_source,
+        'pub(crate) const TASK_EXECUTOR_MANUAL_WORKER_ID: &str = "desktop-gateway-manual-run";',
+        "task executor config must expose manual worker id",
+    )
+    assert_contains(
+        task_executor_config_source,
+        "pub(crate) const TASK_EXECUTOR_POLL_INTERVAL_MS: u64 = 1_000;",
+        "task executor config must expose poll interval",
     )
 
     assert_ordered(

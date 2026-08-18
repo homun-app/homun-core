@@ -653,9 +653,6 @@ use task_registry::TaskExecutorRegistry;
 use time::{Duration, OffsetDateTime};
 use tokio::net::TcpListener;
 
-const TASK_EXECUTOR_MANUAL_WORKER_ID: &str = "desktop-gateway-manual-run";
-const TASK_EXECUTOR_POLL_INTERVAL_MS: u64 = 1_000;
-
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) http: reqwest::Client,
