@@ -28,6 +28,7 @@ LOCAL_AUTHORIZATION_ROUTES_RS = os.path.join(
 COMPOSIO_ROUTES_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_composio_routes.rs")
 CONNECTOR_ERRORS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_connector_errors.rs")
 IMAGE_GENERATION_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_image_generation.rs")
+MODEL_ROUTING_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_model_routing.rs")
 TASK_EXECUTOR_CONFIG_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_task_executor_config.rs"
 )
@@ -904,6 +905,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn resolve_context_budget_chars(": "model context budget resolution must stay in gateway_model_routing",
         "async fn compact_for_context_budget(": "model-visible context compaction must stay in gateway_model_routing",
         "fn zai_thinking_enabled(": "Z.ai thinking policy must stay in gateway_model_routing",
+        "struct RoutingDecision ": "routing decision log DTO must stay in gateway_model_routing",
+        "fn log_routing_decision(": "routing decision log writer must stay in gateway_model_routing",
         "struct ActiveModelResponse": "runtime model response DTO must stay in gateway_model_routes",
         "struct ProviderModelsGroup": "runtime model list DTO must stay in gateway_model_routes",
         "struct RuntimeModelsResponse": "runtime model list DTO must stay in gateway_model_routes",
@@ -1153,6 +1156,8 @@ def main() -> int:
         connector_errors_source = handle.read()
     with open(IMAGE_GENERATION_RS, "r", encoding="utf-8") as handle:
         image_generation_source = handle.read()
+    with open(MODEL_ROUTING_RS, "r", encoding="utf-8") as handle:
+        model_routing_source = handle.read()
     with open(TASK_EXECUTOR_CONFIG_RS, "r", encoding="utf-8") as handle:
         task_executor_config_source = handle.read()
     main_body = extract_async_main_body(source)
@@ -1313,6 +1318,16 @@ def main() -> int:
     )
     assert_contains(source, "mod gateway_model_routes;", "gateway root must declare model route owner")
     assert_contains(source, "mod gateway_model_routing;", "gateway root must declare model routing owner")
+    assert_contains(
+        model_routing_source,
+        "pub(crate) struct RoutingDecision",
+        "model routing owner must expose routing decision log DTO",
+    )
+    assert_contains(
+        model_routing_source,
+        "pub(crate) fn log_routing_decision(",
+        "model routing owner must expose routing decision log writer",
+    )
     assert_contains(source, "mod gateway_vault_routes;", "gateway root must declare vault route owner")
     assert_contains(
         source,
