@@ -11620,56 +11620,6 @@ fn semantic_router_enabled() -> bool {
         .unwrap_or(true)
 }
 
-/// One model-routing decision, logged for observability (why a model was picked).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct RoutingDecision {
-    ts: u64,
-    role: String,
-    /// Truncated + redacted task goal.
-    goal: String,
-    /// Eligible model ids (the stage-1 gate result).
-    candidates: Vec<String>,
-    chosen_provider: String,
-    chosen_model: String,
-    /// "semantic" | "heuristic_fallback" | "single_candidate" | "heuristic_disabled".
-    stage: String,
-}
-
-const ROUTING_DECISIONS_CAP: usize = 50;
-
-fn routing_decisions_path() -> Option<PathBuf> {
-    gateway_data_dir()
-        .ok()
-        .map(|dir| dir.join("routing-decisions.json"))
-}
-
-fn load_routing_decisions() -> Vec<RoutingDecision> {
-    let Some(path) = routing_decisions_path() else {
-        return Vec::new();
-    };
-    let Ok(raw) = fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    serde_json::from_str(&raw).unwrap_or_default()
-}
-
-/// Appends a decision (capped ring of the most recent `ROUTING_DECISIONS_CAP`).
-/// Best-effort: a logging hiccup must never break routing.
-fn log_routing_decision(entry: RoutingDecision) {
-    let Some(path) = routing_decisions_path() else {
-        return;
-    };
-    let mut all = load_routing_decisions();
-    all.push(entry);
-    let len = all.len();
-    if len > ROUTING_DECISIONS_CAP {
-        all.drain(0..len - ROUTING_DECISIONS_CAP);
-    }
-    if let Ok(json) = serde_json::to_string_pretty(&all) {
-        let _ = fs::write(path, json);
-    }
-}
-
 fn now_epoch_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

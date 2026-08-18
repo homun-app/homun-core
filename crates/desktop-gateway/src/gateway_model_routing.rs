@@ -41,6 +41,82 @@ fn browser_executor_uses_the_central_vision_gate() {
     );
 }
 
+/// One model-routing decision, logged for observability (why a model was picked).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct RoutingDecision {
+    pub(crate) ts: u64,
+    pub(crate) role: String,
+    /// Truncated + redacted task goal.
+    pub(crate) goal: String,
+    /// Eligible model ids (the stage-1 gate result).
+    pub(crate) candidates: Vec<String>,
+    pub(crate) chosen_provider: String,
+    pub(crate) chosen_model: String,
+    /// "semantic" | "heuristic_fallback" | "single_candidate" | "heuristic_disabled".
+    pub(crate) stage: String,
+}
+
+const ROUTING_DECISIONS_CAP: usize = 50;
+
+fn routing_decisions_path() -> Option<PathBuf> {
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("routing-decisions.json"))
+}
+
+pub(crate) fn load_routing_decisions() -> Vec<RoutingDecision> {
+    let Some(path) = routing_decisions_path() else {
+        return Vec::new();
+    };
+    let Ok(raw) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+fn capped_routing_decisions(mut all: Vec<RoutingDecision>) -> Vec<RoutingDecision> {
+    let len = all.len();
+    if len > ROUTING_DECISIONS_CAP {
+        all.drain(0..len - ROUTING_DECISIONS_CAP);
+    }
+    all
+}
+
+/// Appends a decision (capped ring of the most recent `ROUTING_DECISIONS_CAP`).
+/// Best-effort: a logging hiccup must never break routing.
+pub(crate) fn log_routing_decision(entry: RoutingDecision) {
+    let Some(path) = routing_decisions_path() else {
+        return;
+    };
+    let mut all = load_routing_decisions();
+    all.push(entry);
+    let all = capped_routing_decisions(all);
+    if let Ok(json) = serde_json::to_string_pretty(&all) {
+        let _ = fs::write(path, json);
+    }
+}
+
+#[test]
+fn routing_decision_log_keeps_recent_decisions_capped() {
+    let decisions = (0..55)
+        .map(|index| RoutingDecision {
+            ts: index,
+            role: "orchestrator".to_string(),
+            goal: format!("goal-{index}"),
+            candidates: vec![format!("model-{index}")],
+            chosen_provider: "provider".to_string(),
+            chosen_model: format!("model-{index}"),
+            stage: "single_candidate".to_string(),
+        })
+        .collect::<Vec<_>>();
+
+    let capped = capped_routing_decisions(decisions);
+
+    assert_eq!(capped.len(), ROUTING_DECISIONS_CAP);
+    assert_eq!(capped.first().map(|decision| decision.ts), Some(5));
+    assert_eq!(capped.last().map(|decision| decision.ts), Some(54));
+}
+
 /// Chat streaming config when an OpenAI-compatible backend is selected
 /// (`HOMUN_INFERENCE_BACKEND=openai` + base URL). Returns
 /// `(base_url, model, api_key)`, else `None` when no inference provider is configured.
