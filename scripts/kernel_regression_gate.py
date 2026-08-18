@@ -530,6 +530,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway local authorization routes",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "gateway_local_authorization_routes",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway MCP chat tools",
             [
                 "cargo",

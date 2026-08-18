@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-18 (vault routes owner in verifica locale).**
+> **Ultimo aggiornamento: 2026-08-18 (local authorization routes owner in verifica locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-vault-routes-owner` |
-| Branch | `fabio/gateway-vault-routes-owner` |
-| PR | #108-#116, #118-#168 mergeate in `main`; #117 browser draft separata; slice vault routes in verifica locale |
-| HEAD codice verificato | branch `fabio/gateway-vault-routes-owner` sopra `main` aggiornato a #168 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-local-authorization-routes` |
+| Branch | `fabio/gateway-local-authorization-routes` |
+| PR | #108-#116, #118-#169 mergeate in `main`; #117 browser draft separata; slice local authorization routes in verifica locale |
+| HEAD codice verificato | branch `fabio/gateway-local-authorization-routes` sopra `main` aggiornato a #169 |
 
 ## Dove siamo
 
@@ -117,6 +117,13 @@ Slice Runtime V2 recenti:
   "always allow" per write-tool Composio/MCP escono dal monolite `main.rs`;
   il file storico `composio-tool-allow.json` resta invariato per compatibilita',
   mentre list/revoke e marker MCP server-level vivono nello stesso owner.
+- Estrazione locale `gateway_vault_routes`: route `/api/vault/*`, DTO PIN,
+  record/payment approval, storage/reveal/update/dedup/search Vault e rewrite
+  della payment card approvata escono dal monolite `main.rs`; browser action
+  enforcement e claim finale pagamento restano owner separato.
+- Slice corrente `gateway_local_authorization_routes`: route/DTO e marker
+  locali per filesystem authorization, sandbox escalation, read-only card e
+  connect-suggestion mark escono dal monolite `main.rs`.
 - Estrazione locale `gateway_thread_files`: cartella collegata per thread,
   precedenza workspace attivo e route `@ file` search/read escono dal monolite
   `main.rs`; `path_within` viene portato nell'owner condiviso
@@ -716,9 +723,9 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Completare gate, commit e PR piccola per `gateway_vault_routes`.
-2. Dopo merge vault routes, aggiornare `main` e riprendere la prossima
-   slice non-browser solo dopo nuova lettura owner-level di `main.rs`.
+1. Completare gate, commit e PR piccola per `gateway_local_authorization_routes`.
+2. Dopo merge local authorization routes, aggiornare `main` e riprendere la
+   prossima slice non-browser solo dopo nuova lettura owner-level di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -726,7 +733,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/proactivity-routes-owner se la PR proactivity routes e' ancora da aprire o e' aperta;
+branch fabio/gateway-local-authorization-routes se la PR local authorization routes e' ancora da aprire o e' aperta;
 altrimenti main aggiornato e scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.

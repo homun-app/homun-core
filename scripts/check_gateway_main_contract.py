@@ -22,6 +22,9 @@ PROACTIVITY_ROUTES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_proactivity_routes.rs"
 )
 VAULT_ROUTES_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_vault_routes.rs")
+LOCAL_AUTHORIZATION_ROUTES_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_local_authorization_routes.rs"
+)
 
 
 def extract_async_main_body(source: str) -> str:
@@ -201,6 +204,21 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn vault_pin_setup(": "vault routes must stay in gateway_vault_routes",
         "async fn vault_pin_verify(": "vault routes must stay in gateway_vault_routes",
         "async fn vault_payment_approval_approve(": "vault payment approval route must stay in gateway_vault_routes",
+        "const FS_AUTHORIZE_OPEN": "local authorization markers must stay in gateway_local_authorization_routes",
+        "const SANDBOX_ESCALATE_OPEN": "local authorization markers must stay in gateway_local_authorization_routes",
+        "const SANDBOX_READONLY_OPEN": "local authorization markers must stay in gateway_local_authorization_routes",
+        "const CONNECT_SUGGEST_OPEN": "local authorization markers must stay in gateway_local_authorization_routes",
+        "struct FsAuthorizeRequest": "filesystem authorization route DTOs must stay in gateway_local_authorization_routes",
+        "struct RunEscalateRequest": "sandbox escalation route DTOs must stay in gateway_local_authorization_routes",
+        "struct ConnectMarkRequest": "connect suggestion route DTOs must stay in gateway_local_authorization_routes",
+        "fn fs_authorize_matches(": "filesystem authorization provenance must stay in gateway_local_authorization_routes",
+        "fn rewrite_fs_authorize_to_done(": "filesystem authorization rewrite must stay in gateway_local_authorization_routes",
+        "async fn fs_authorize(": "filesystem authorization route must stay in gateway_local_authorization_routes",
+        "fn sandbox_escalate_matches(": "sandbox escalation provenance must stay in gateway_local_authorization_routes",
+        "fn rewrite_sandbox_escalate_to_done(": "sandbox escalation rewrite must stay in gateway_local_authorization_routes",
+        "async fn run_escalate(": "sandbox escalation route must stay in gateway_local_authorization_routes",
+        "fn rewrite_connect_suggest_mark(": "connect suggestion rewrite must stay in gateway_local_authorization_routes",
+        "async fn connect_mark(": "connect suggestion mark route must stay in gateway_local_authorization_routes",
         "async fn chat_branches(": "chat branch list endpoint must stay in gateway_chat_branches",
         "async fn set_active_leaf(": "chat branch active leaf endpoint must stay in gateway_chat_branches",
         "async fn set_branch_label(": "chat branch label endpoint must stay in gateway_chat_branches",
@@ -1063,6 +1081,8 @@ def main() -> int:
         proactivity_routes_source = handle.read()
     with open(VAULT_ROUTES_RS, "r", encoding="utf-8") as handle:
         vault_routes_source = handle.read()
+    with open(LOCAL_AUTHORIZATION_ROUTES_RS, "r", encoding="utf-8") as handle:
+        local_authorization_routes_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1224,6 +1244,11 @@ def main() -> int:
     assert_contains(source, "mod gateway_vault_routes;", "gateway root must declare vault route owner")
     assert_contains(
         source,
+        "mod gateway_local_authorization_routes;",
+        "gateway root must declare local authorization route owner",
+    )
+    assert_contains(
+        source,
         "mod gateway_prompt_instructions;",
         "gateway root must declare prompt instructions owner",
     )
@@ -1313,6 +1338,11 @@ def main() -> int:
         vault_routes_source,
         "pub(crate) async fn vault_records_list(",
         "vault route owner must expose vault records list route",
+    )
+    assert_contains(
+        local_authorization_routes_source,
+        "pub(crate) async fn fs_authorize(",
+        "local authorization route owner must expose filesystem authorization route",
     )
 
     assert_ordered(
