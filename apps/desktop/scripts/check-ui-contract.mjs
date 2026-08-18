@@ -266,6 +266,11 @@ assertRepoContains(
   "Gateway route assembly must have a dedicated owner",
 );
 assertRepoContains(
+  "scripts/kernel_regression_gate.py",
+  '"gateway system status"',
+  "Kernel regression gate must run the gateway system status owner test",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_recall_context.rs",
   "recall_stream_payload_from_pack",
   "Gateway memory recall context must have a dedicated owner",
@@ -475,6 +480,21 @@ assertRepoContains(
   "owner_projects_local_computer_live_readiness",
   "Gateway local computer live owner must have readiness coverage",
 );
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_system_status.rs",
+  "pub(crate) struct SystemStatusResponse",
+  "Gateway system status DTO must live with the system status owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_system_status.rs",
+  "pub(crate) async fn system_status",
+  "Gateway system status route must live with the system status owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_system_status.rs",
+  "owner_parses_docker_memory_units",
+  "Gateway system status owner must have Docker memory parsing coverage",
+);
 assertRepoNotContains(
   "crates/desktop-gateway/src/main.rs",
   "struct CapabilitySnapshotResponse",
@@ -519,6 +539,16 @@ assertRepoNotContains(
   "crates/desktop-gateway/src/main.rs",
   "async fn contained_computer_live",
   "Gateway main must not own local computer live route",
+);
+assertRepoNotContains(
+  "crates/desktop-gateway/src/main.rs",
+  "struct SystemStatusResponse",
+  "Gateway main must not own system status DTOs",
+);
+assertRepoNotContains(
+  "crates/desktop-gateway/src/main.rs",
+  "async fn system_status",
+  "Gateway main must not own system status route",
 );
 assertRepoNotContains(
   "crates/desktop-gateway/src/main.rs",

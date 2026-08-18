@@ -33,6 +33,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_boot_maintenance.rs` | Manutenzione sincrona di boot dopo apertura store e prima di recovery/worker. |
 | `crates/desktop-gateway/src/gateway_turn_recovery.rs` | Recovery durable dei turni chat, projection startup, process generation e stato delivery iniziale. |
 | `crates/desktop-gateway/src/gateway_background_startup.rs` | Servizi post-recovery: sweeper, VACUUM, worker, memory jobs, browser reaper, connector/proactivity. |
+| `crates/desktop-gateway/src/gateway_system_status.rs` | Route `/api/system/status`, DTO diagnostici Docker/gateway, memoria processo/container e parser `docker stats`; non possiede route di controllo browser o lifecycle runtime. |
 | `crates/desktop-gateway/src/gateway_turn_broker.rs` | Enqueue/resume/cancel dei turni chat, eventi, stream, activity projection e steering. |
 | `crates/desktop-gateway/src/gateway_task_executor.rs` | DTO/read model queue task, status executor, approval/effect routes, acquire/lease/finalizzazione, worker, progress checkpoint e sync sessione task. |
 | `crates/desktop-gateway/src/gateway_chat_threads.rs` | Lista e lifecycle thread chat: select, pin, rename, reorder, archive/delete, seen/attention. |
