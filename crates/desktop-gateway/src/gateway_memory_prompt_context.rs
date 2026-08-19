@@ -7,6 +7,107 @@
 use crate::gateway_recall_context::format_recall_entry;
 use crate::*;
 
+/// Decisions in memory that AFFECT a given file (matched by basename via FTS -
+/// the touched objects are stored as aliases). Returns a note to append to a
+/// file read so the agent recalls WHY a file is the way it is, instead of
+/// re-deriving it from the code. `None` when nothing relevant.
+pub(crate) fn decisions_for_path(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    path: &str,
+) -> Option<String> {
+    let base = std::path::Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .filter(|name| !name.is_empty())?;
+    let access = MemoryAccessRequest {
+        actor_id: "recall_file".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "recall".to_string(),
+        allowed_domains: vec![
+            PrivacyDomain::new("personal"),
+            PrivacyDomain::new("work"),
+            PrivacyDomain::new("general"),
+        ],
+        max_sensitivity: MemoryDataSensitivity::Private,
+        allow_raw_payload: true,
+        allow_export: true,
+        broad_query: true,
+    };
+    let page = facade
+        .search_memories(MemorySearchRequest {
+            access,
+            query: base.clone(),
+            statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
+            memory_types: vec!["decision".to_string()],
+            limit: 5,
+            offset: 0,
+        })
+        .ok()?;
+    if page.items.is_empty() {
+        return None;
+    }
+    let mut lines = vec![format!(
+        "📌 Past decisions about «{base}» (from memory - keep them in mind, don't re-derive them):"
+    )];
+    for item in page.items {
+        lines.push(format!(
+            "- {}",
+            format_recall_entry(&item.summary, &item.metadata)
+        ));
+    }
+    Some(lines.join("\n"))
+}
+
+/// Anti-rewrite anchor (push): code-graph entities whose NAME matches the
+/// request's terms, injected so the model sees "this already exists, extend it"
+/// before it re-implements something.
+pub(crate) fn relevant_code_components_for_prompt(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    prompt: &str,
+) -> Option<String> {
+    let mut seen = std::collections::HashSet::new();
+    let terms: Vec<String> = prompt
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|term| term.chars().count() >= 4)
+        .map(|term| term.to_lowercase())
+        .filter(|term| seen.insert(term.clone()))
+        .take(12)
+        .collect();
+    if terms.is_empty() {
+        return None;
+    }
+    let hits = facade
+        .search_code_entities(user, workspace, &terms, 15)
+        .ok()?;
+    if hits.is_empty() {
+        return None;
+    }
+    let kind = |entity_type: &str| match entity_type {
+        "code_symbol" => "function/method",
+        "code_file" => "file",
+        "code_doc" => "document",
+        _ => "element",
+    };
+    let mut block = String::from(
+        "ALREADY EXISTING COMPONENTS relevant to the request (from the code map - \
+do NOT recreate them, EXTEND/reuse the right ones; use query_code_graph for details):",
+    );
+    for (name, entity_type, source) in hits.iter().take(15) {
+        let loc = if source.is_empty() {
+            String::new()
+        } else {
+            format!(" - {source}")
+        };
+        block.push_str(&format!("\n- {name} ({}){loc}", kind(entity_type)));
+    }
+    Some(block)
+}
+
 pub(crate) fn artifact_quality_summary(metadata: &serde_json::Value) -> Option<String> {
     let status = metadata
         .get("quality_status")

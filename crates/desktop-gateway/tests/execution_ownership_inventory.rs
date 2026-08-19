@@ -690,6 +690,39 @@ fn memory_prompt_context_has_one_gateway_owner() {
 }
 
 #[test]
+fn memory_push_prompt_context_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_context = production_source(&root.join("src/gateway_memory_prompt_context.rs"));
+
+    for pattern in [
+        "fn decisions_for_path(",
+        "fn relevant_code_components_for_prompt(",
+    ] {
+        assert!(
+            prompt_context.contains(pattern),
+            "memory prompt context owner must contain push prompt context {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain memory push prompt context {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "fn recall_memory(",
+        "fn recall_stream_payload_from_outcome(",
+        "fn learn_via_service_or_inline(",
+        "async fn run_agent_rounds(",
+    ] {
+        assert!(
+            !prompt_context.contains(adjacent),
+            "memory prompt context owner must not absorb adjacent memory surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn attachment_prompt_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

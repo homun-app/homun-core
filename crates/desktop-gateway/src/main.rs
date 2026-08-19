@@ -196,8 +196,10 @@ use gateway_memory_dedup::{
     DEDUP_COSINE, DEDUP_JACCARD, cosine, dedup_tokens, forgotten_token_sets, is_semantic_duplicate,
     is_suppressed, jaccard,
 };
+pub(crate) use gateway_memory_prompt_context::decisions_for_path;
 use gateway_memory_prompt_context::{
-    artifact_provenance_context_for_query, workflow_status_context_for_query,
+    artifact_provenance_context_for_query, relevant_code_components_for_prompt,
+    workflow_status_context_for_query,
 };
 #[cfg(test)]
 use gateway_memory_query_embeddings::memory_recall_timing_trace_line;
@@ -1794,104 +1796,6 @@ fn record_subagent_task_step_outcome(
     }
 }
 
-/// Decisions in memory that AFFECT a given file (matched by basename via FTS — the
-/// touched objects are stored as aliases). Returns a note to append to a file read so
-/// the agent recalls WHY a file is the way it is, instead of re-deriving it from the
-/// code. `None` when nothing relevant.
-fn decisions_for_path(state: &AppState, path: &str) -> Option<String> {
-    let base = std::path::Path::new(path)
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .filter(|name| !name.is_empty())?;
-    let facade = memory_facade(state);
-    let access = MemoryAccessRequest {
-        actor_id: "recall_file".to_string(),
-        user_id: gateway_memory_user_id(),
-        workspace_id: gateway_memory_workspace_id(),
-        purpose: "recall".to_string(),
-        allowed_domains: vec![
-            PrivacyDomain::new("personal"),
-            PrivacyDomain::new("work"),
-            PrivacyDomain::new("general"),
-        ],
-        max_sensitivity: MemoryDataSensitivity::Private,
-        allow_raw_payload: true,
-        allow_export: true,
-        broad_query: true,
-    };
-    let page = facade
-        .search_memories(MemorySearchRequest {
-            access,
-            query: base.clone(),
-            statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
-            memory_types: vec!["decision".to_string()],
-            limit: 5,
-            offset: 0,
-        })
-        .ok()?;
-    if page.items.is_empty() {
-        return None;
-    }
-    let mut lines = vec![format!(
-        "📌 Past decisions about «{base}» (from memory — keep them in mind, don't re-derive them):"
-    )];
-    for item in page.items {
-        lines.push(format!(
-            "- {}",
-            format_recall_entry(&item.summary, &item.metadata)
-        ));
-    }
-    Some(lines.join("\n"))
-}
-
-/// Retrieval-augmented context: memory RELEVANT to this turn's prompt (decisions,
-/// facts, preferences in the active project + personal scope), injected into the
-/// Anti-rewrite anchor (push): code-graph entities whose NAME matches the request's
-/// terms, injected so the model SEES "this already exists, extend it" before it
-/// re-implements something. This is the strongest no-regression signal we have, and the
-/// model can't be trusted to query for what it doesn't know exists — so it's pushed, not
-/// pulled. Cheap: one capped SQL LIKE over the active project's code entities.
-fn relevant_code_components_for_prompt(state: &AppState, prompt: &str) -> Option<String> {
-    // Distinctive terms from the request: length >= 4, deduped, capped. Lowercased.
-    let mut seen = std::collections::HashSet::new();
-    let terms: Vec<String> = prompt
-        .split(|c: char| !c.is_alphanumeric() && c != '_')
-        .filter(|t| t.chars().count() >= 4)
-        .map(|t| t.to_lowercase())
-        .filter(|t| seen.insert(t.clone()))
-        .take(12)
-        .collect();
-    if terms.is_empty() {
-        return None;
-    }
-    let facade = memory_facade(state);
-    let user = gateway_memory_user_id();
-    let ws = gateway_memory_workspace_id();
-    let hits = facade.search_code_entities(&user, &ws, &terms, 15).ok()?;
-    if hits.is_empty() {
-        return None;
-    }
-    let kind = |t: &str| match t {
-        "code_symbol" => "function/method",
-        "code_file" => "file",
-        "code_doc" => "document",
-        _ => "element",
-    };
-    let mut block = String::from(
-        "ALREADY EXISTING COMPONENTS relevant to the request (from the code map — \
-do NOT recreate them, EXTEND/reuse the right ones; use query_code_graph for details):",
-    );
-    for (name, etype, src) in hits.iter().take(15) {
-        let loc = if src.is_empty() {
-            String::new()
-        } else {
-            format!(" — {src}")
-        };
-        block.push_str(&format!("\n- {name} ({}){loc}", kind(etype)));
-    }
-    Some(block)
-}
-
 /// system prompt so the model answers "why did we…" from memory WITHOUT having to call
 /// recall_memory itself — and doesn't claim "I have nothing in memory" when it does.
 /// A memory candidate for hybrid ranking: its rank in the lexical (FTS) and/or
@@ -2905,7 +2809,10 @@ normal answers."
         };
         // Anti-rewrite anchor: existing code components matching the request, so the
         // model extends/reuses instead of re-implementing (no-regression by default).
-        match relevant_code_components_for_prompt(state, &request.prompt) {
+        let facade = memory_facade(state);
+        let user = gateway_memory_user_id();
+        let workspace = gateway_memory_workspace_id();
+        match relevant_code_components_for_prompt(facade, &user, &workspace, &request.prompt) {
             Some(block) => format!("{system}\n\n{block}"),
             None => system,
         }

@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway memory prompt context mergeata).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway memory push prompt context locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -181,6 +181,11 @@ Slice Runtime V2 recenti:
   provenance artifact, qualita' artifact e stato workflow da memoria canonica
   escono dal monolite `main.rs`; `recall_memory`, learning inline, prompt
   packet, artifact persistence e loop agente restano owner separati.
+- Estrazione locale stacked `gateway_memory_prompt_context`: contesto push per
+  decisioni di file (`decisions_for_path`) e anti-rewrite code-map
+  (`relevant_code_components_for_prompt`) escono dal monolite `main.rs` e
+  restano nello stesso owner bounded; `recall_memory`, tool execution, prompt
+  packet e loop agente restano owner separati.
 - Estrazione locale `gateway_local_authorization_routes`: route/DTO e marker
   locali per filesystem authorization, sandbox escalation, read-only card e
   connect-suggestion mark escono dal monolite `main.rs`.
