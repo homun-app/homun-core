@@ -65,6 +65,10 @@ BRAIN_RUNTIME_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_brain_runtime.rs"
 )
 CHANNELS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_channels.rs")
+MEMORY_QUERY_EMBEDDINGS_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_memory_query_embeddings.rs"
+)
+MEMORY_CLIENTS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_memory_clients.rs")
 
 
 def extract_async_main_body(source: str) -> str:
@@ -358,12 +362,19 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn is_suppressed(": "memory forget suppression must stay in gateway_memory_dedup",
         "struct MemoryQueryEmbeddingCacheEntry": "memory query embedding cache entry must stay in gateway_memory_query_embeddings",
         "struct MemoryQueryEmbeddingCache": "memory query embedding cache must stay in gateway_memory_query_embeddings",
+        "fn embed_model(": "memory embedding model config must stay in gateway_memory_query_embeddings",
+        "fn embed_base(": "memory embedding base config must stay in gateway_memory_query_embeddings",
+        "async fn embed_text(": "memory embedding HTTP transport must stay in gateway_memory_query_embeddings",
+        "struct MemoryRecallTiming": "memory recall timing projection must stay in gateway_memory_query_embeddings",
+        "fn memory_recall_timing_trace_line(": "memory recall timing formatter must stay in gateway_memory_query_embeddings",
+        "async fn embed_query_for_memory_recall(": "memory recall query embedding transport must stay in gateway_memory_query_embeddings",
         "fn memory_query_embedding_cache(": "memory query embedding cache singleton must stay in gateway_memory_query_embeddings",
         "fn memory_query_embedding_cache_max_entries(": "memory query embedding cache sizing must stay in gateway_memory_query_embeddings",
         "fn memory_query_embedding_cache_ttl(": "memory query embedding cache ttl must stay in gateway_memory_query_embeddings",
         "fn memory_query_embedding_timeout(": "memory query embedding timeout must stay in gateway_memory_query_embeddings",
         "fn normalize_memory_embedding_query(": "memory query normalization must stay in gateway_memory_query_embeddings",
         "fn memory_query_embedding_cache_key(": "memory query embedding cache key must stay in gateway_memory_query_embeddings",
+        "async fn backfill_embeddings(": "memory embedding backfill must stay in gateway_memory_clients",
         "const CHAT_MEMORY_BUDGET_CHARS:": "memory briefing prompt budget must stay in gateway_memory_briefing",
         "fn briefing_authorized_sources(": "memory briefing authorized sources must stay in gateway_memory_briefing",
         "fn memory_briefing_source_fingerprint(": "memory briefing source fingerprint must stay in gateway_memory_briefing",
@@ -1314,6 +1325,10 @@ def main() -> int:
         remote_approval_execution_source = handle.read()
     with open(CHANNELS_RS, "r", encoding="utf-8") as handle:
         channels_source = handle.read()
+    with open(MEMORY_QUERY_EMBEDDINGS_RS, "r", encoding="utf-8") as handle:
+        memory_query_embeddings_source = handle.read()
+    with open(MEMORY_CLIENTS_RS, "r", encoding="utf-8") as handle:
+        memory_clients_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1528,6 +1543,18 @@ def main() -> int:
         "mod gateway_memory_query_embeddings;",
         "gateway root must declare memory query embedding owner",
     )
+    for snippet in [
+        "pub(crate) fn embed_model(",
+        "pub(crate) fn embed_base(",
+        "pub(crate) async fn embed_text(",
+        "pub(crate) struct MemoryRecallTiming",
+        "pub(crate) async fn embed_query_for_memory_recall(",
+    ]:
+        assert_contains(
+            memory_query_embeddings_source,
+            snippet,
+            "memory query embedding owner must expose embedding transport surface",
+        )
     assert_contains(source, "mod gateway_memory_briefing;", "gateway root must declare memory briefing owner")
     assert_contains(
         source,
@@ -1535,6 +1562,11 @@ def main() -> int:
         "gateway root must declare memory turn context owner",
     )
     assert_contains(source, "mod gateway_memory_clients;", "gateway root must declare memory client owner")
+    assert_contains(
+        memory_clients_source,
+        "pub(crate) async fn backfill_embeddings(",
+        "memory client owner must expose embedding backfill orchestration",
+    )
     assert_contains(
         source,
         "mod gateway_memory_recall_service;",

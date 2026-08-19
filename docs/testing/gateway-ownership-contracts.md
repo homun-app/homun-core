@@ -82,6 +82,8 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_memory_hygiene.rs` | Route `/api/memory/hygiene/suggestions`, payload suggerimenti merge person, normalizzazione entity-name e matching alias verificati; non possiede graph projection, graph persistence o source grants. |
 | `crates/desktop-gateway/src/gateway_memory_wiki.rs` | Route `/api/memory/wiki` read/save, `/api/memory/consolidate`, registry edit manuali e rebuild pagine wiki derivate; non possiede graph projection, graph persistence o source grants. |
 | `crates/desktop-gateway/src/gateway_memory_tools.rs` | Tool schema recall/decision/forget, registrazione decisioni, forget testuale/topic e route `/api/memory/decide` per confermare/rifiutare/cancellare/editare candidati; non possiede dashboard/export memory, graph projection o wiki rebuild non legati alle decisioni. |
+| `crates/desktop-gateway/src/gateway_memory_query_embeddings.rs` | Config embedding memoria, transport HTTP Ollama best-effort, cache query embedding LRU/TTL, timeout e timing recall; non possiede `recall_memory`, learn/consolidate o briefing memoria. |
+| `crates/desktop-gateway/src/gateway_memory_clients.rs` | Client capability memoria per embedding/LLM, usage telemetry context e backfill embedding bounded off-lock; non possiede recall tool, learn inline, consolidate o storage semantics del `MemoryFacade`. |
 | `crates/desktop-gateway/src/gateway_contacts.rs` | Route core rubrica `/api/memory/contacts*`, DTO `ContactView`, CRUD, merge, identity add/remove e helper memoria/handle/date condivisi; non possiede perimetri, relationship, fact profile o named profile CRUD. |
 | `crates/desktop-gateway/src/gateway_contact_perimeter.rs` | Route `/api/memory/contacts/perimeter*`, DTO perimetro e normalizzazione fail-closed dello scope; non possiede CRUD contatti, profile o relationship. |
 | `crates/desktop-gateway/src/gateway_contact_profile.rs` | Route `/api/memory/contacts/profile` e `/api/memory/contacts/profile/refresh`, distillazione LLM contact-profile e lettura fact dal graph; non possiede CRUD contatti, relationship o profili globali. |
@@ -113,7 +115,7 @@ dedicato prima del movimento:
 - loop agente e drain streaming: `run_agent_rounds`, `stream_chat_via_openai`,
   `run_agent_turn_into_message*`;
 - memoria inline/brain/recall: `recall_memory`, `learn_via_service_or_inline`,
-  `consolidate_scope`, `backfill_embeddings`;
+  `consolidate_scope`;
 - adapter concreti capability/MCP/Composio/vault/payment/browser;
 - compatibilita' storica di messaggi/eventi persistiti.
 
