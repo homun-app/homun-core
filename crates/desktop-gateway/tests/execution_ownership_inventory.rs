@@ -881,6 +881,44 @@ fn remote_approval_execution_has_one_gateway_owner() {
 }
 
 #[test]
+fn vault_memory_recall_fallback_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let vault_routes = production_source(&root.join("src/gateway_vault_routes.rs"));
+
+    let owned = [
+        "fn recall_memory_response_with_vault_fallback(",
+        "fn query_has_sensitive_vault_term(",
+        "fn vault_reveal_marker(",
+    ];
+    for pattern in owned {
+        assert!(
+            vault_routes.contains(pattern),
+            "vault route owner must contain memory recall fallback helper {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain memory recall fallback helper {pattern}"
+        );
+    }
+
+    let forbidden_in_vault = [
+        "fn recall_memory(",
+        "fn recall_stream_payload_from_outcome(",
+        "fn memory_facade(",
+        "fn run_agent_rounds(",
+        "fn apply_payment_approval_secret_for_action(",
+        "async fn execute_pending_approval(",
+    ];
+    for pattern in forbidden_in_vault {
+        assert!(
+            !vault_routes.contains(pattern),
+            "vault route owner must not absorb adjacent owner {pattern}"
+        );
+    }
+}
+
+#[test]
 fn actionable_source_resolution_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

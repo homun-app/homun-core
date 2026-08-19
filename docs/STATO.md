@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway remote approval execution mergeata).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway memory Vault recall fallback locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -160,6 +160,10 @@ Slice Runtime V2 recenti:
   record/payment approval, storage/reveal/update/dedup/search Vault e rewrite
   della payment card approvata escono dal monolite `main.rs`; browser action
   enforcement e claim finale pagamento restano owner separato.
+- Estrazione locale `gateway_vault_routes`: fallback Vault per memory recall,
+  policy termini sensibili e costruzione reveal-card metadata-only escono dal
+  monolite `main.rs`; `recall_memory` e il servizio memoria restano fuori dallo
+  scope.
 - Estrazione locale `gateway_local_authorization_routes`: route/DTO e marker
   locali per filesystem authorization, sandbox escalation, read-only card e
   connect-suggestion mark escono dal monolite `main.rs`.
@@ -837,7 +841,8 @@ PR aperte:
 
 Branch corrente:
 
-- `main`: aggiornato al merge #198; nessun branch non-browser locale aperto.
+- `fabio/gateway-memory-vault-recall-owner`: worktree locale per spostare il
+  fallback Vault di memory recall nell'owner `gateway_vault_routes`.
 
 ## Debito residuo
 

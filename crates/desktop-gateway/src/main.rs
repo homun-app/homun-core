@@ -593,7 +593,6 @@ pub(crate) use model_registry::{
 // unqualified so every call site (and the `use super::{…}` in the test module) resolves unchanged.
 // Plan helpers still used by NON-loop gateway code (titling, plan projection, etc.); the loop's own
 // plan helpers moved into the engine with `run_turn` (5.D2).
-use local_first_engine::markers::{VAULT_REVEAL_CLOSE, VAULT_REVEAL_OPEN};
 use local_first_engine::plan::{
     build_plan_markdown, parse_plan_marker, plan_done_count, plan_incomplete_reason, plan_step_id,
     plan_step_status, plan_step_title, plan_value_goal, plan_value_steps,
@@ -606,7 +605,7 @@ use execution_runtime::{ExecutionRuntime, contract_for_acquired_task};
 use local_first_engine::{
     browser::{prune_browser_history, resolve_browser_chat_tool_name},
     markers::{
-        append_vault_reveal_marker_if_missing, extract_vault_reveal_marker,
+        VAULT_REVEAL_OPEN, append_vault_reveal_marker_if_missing, extract_vault_reveal_marker,
         should_force_synthesis_for_empty_visible_answer,
     },
     plan::{answer_concludes_plan, replace_latest_plan_marker},
@@ -2843,101 +2842,6 @@ fn recall_memory(state: &AppState, query: &str, vault_value_requested: bool) -> 
             },
         },
     }
-}
-
-fn recall_memory_response_with_vault_fallback(
-    vault_store: &SQLiteVaultStore,
-    query: &str,
-    lines: Vec<String>,
-    in_project: bool,
-    vault_value_requested: bool,
-) -> String {
-    let memory_block = if lines.is_empty() {
-        format!("No memories relevant to «{query}».")
-    } else if in_project {
-        format!("Memories relevant to THIS project:\n{}", lines.join("\n"))
-    } else {
-        format!("Relevant memories from memory:\n{}", lines.join("\n"))
-    };
-    let should_check_vault = lines.is_empty()
-        || vault_value_requested
-        || (query_has_sensitive_vault_term(query) && memory_lines_mention_vault(&lines));
-    if !should_check_vault {
-        return memory_block;
-    }
-    let vault_matches = match search_vault_records(vault_store, query, 5) {
-        Ok(records) => records,
-        Err(_) => return memory_block,
-    };
-    if vault_matches.is_empty() {
-        return memory_block;
-    }
-    let vault_lines = vault_matches
-        .into_iter()
-        .map(|record| {
-            let metadata = format!(
-                "- [{}] {} — {} ({})",
-                record.category, record.label, record.redacted_preview, record.id
-            );
-            if vault_value_requested {
-                format!(
-                    "{metadata}\n  reveal_card: {}",
-                    vault_reveal_marker(&record)
-                )
-            } else {
-                metadata
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!(
-        "{memory_block}\n\nVault records matching the request (redacted metadata only; do NOT reveal or guess the secret value). If the user asked to see the value, you MUST copy the reveal_card marker exactly on its own line in your final answer so the UI can ask for the local PIN and reveal it locally:\n{vault_lines}"
-    )
-}
-
-fn query_has_sensitive_vault_term(query: &str) -> bool {
-    vault_metadata_terms(query)
-        .iter()
-        .any(|term| vault_term_is_sensitive(term))
-}
-
-fn vault_term_is_sensitive(term: &str) -> bool {
-    matches!(
-        term,
-        "codice"
-            | "fiscale"
-            | "fiscal"
-            | "identity"
-            | "targa"
-            | "plate"
-            | "license"
-            | "vehicles"
-            | "passaporto"
-            | "passport"
-            | "documento"
-            | "carta"
-            | "card"
-            | "password"
-            | "token"
-            | "salute"
-            | "health"
-    )
-}
-
-fn memory_lines_mention_vault(lines: &[String]) -> bool {
-    lines
-        .iter()
-        .any(|line| line.to_ascii_lowercase().contains("vault"))
-}
-
-fn vault_reveal_marker(record: &VaultRecordSummary) -> String {
-    let payload = serde_json::json!({
-        "record_id": record.id,
-        "category": record.category,
-        "label": record.label,
-        "redacted_preview": record.redacted_preview,
-    });
-    format!("{VAULT_REVEAL_OPEN}{payload}{VAULT_REVEAL_CLOSE}")
 }
 
 // `extract_vault_reveal_marker`, `append_vault_reveal_marker_if_missing`, and the
