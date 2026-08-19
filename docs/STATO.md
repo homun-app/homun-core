@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway actionable terminal errors mergeata).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway send_message tool locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -143,6 +143,10 @@ Slice Runtime V2 recenti:
   errore terminale executor escono dal monolite `main.rs` e vivono in
   `gateway_actionable_source`; execute pending, payment approval, remote
   approval dispatch/cancel e browser restano fuori dallo scope.
+- Estrazione locale `gateway_channels`: helper invio bottoni channel,
+  schema pseudo-tool `send_message` ed executor sidecar WhatsApp/Telegram
+  escono dal monolite `main.rs`; `composio_execute_tool`, pending approval,
+  payment approval e browser restano owner separati.
 - Estrazione locale `gateway_write_tool_allowlist`: persistenza e matching
   "always allow" per write-tool Composio/MCP escono dal monolite `main.rs`;
   il file storico `composio-tool-allow.json` resta invariato per compatibilita',
@@ -823,7 +827,8 @@ PR aperte:
 
 Branch corrente:
 
-- `main`: aggiornato al merge #195; nessun branch non-browser locale aperto.
+- `fabio/gateway-send-message-tool-owner`: worktree locale per spostare
+  `send_message` e l'invio bottoni nell'owner `gateway_channels`.
 
 ## Debito residuo
 

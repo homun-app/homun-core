@@ -58,6 +58,7 @@ PROMPT_PACKETS_RS = os.path.join(
 BRAIN_RUNTIME_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_brain_runtime.rs"
 )
+CHANNELS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_channels.rs")
 
 
 def extract_async_main_body(source: str) -> str:
@@ -1146,6 +1147,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn unify_owner_identity(": "owner identity channel unification must stay in gateway_channels",
         "fn backfill_contacts(": "channel contact backfill must stay in gateway_channels",
         "fn channel_chat_message(": "channel chat message construction must stay in gateway_channels",
+        "async fn channel_send_buttons_classified(": "channel button send sidecar helper must stay in gateway_channels",
+        "fn send_message_tool_schema(": "channel send_message pseudo-tool schema must stay in gateway_channels",
+        "fn execute_send_message(": "channel send_message pseudo-tool execution must stay in gateway_channels",
         "fn browser_open_research_discovery_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn booking_assumption_choice_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn choice_resume_instruction_legacy_backup(": "prompt instruction snippets must stay in gateway_prompt_instructions",
@@ -1287,6 +1291,8 @@ def main() -> int:
         actionable_source_source = handle.read()
     with open(REMOTE_APPROVAL_RS, "r", encoding="utf-8") as handle:
         remote_approval_source = handle.read()
+    with open(CHANNELS_RS, "r", encoding="utf-8") as handle:
+        channels_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1317,6 +1323,16 @@ def main() -> int:
             actionable_source_source,
             snippet,
             "actionable source owner must not absorb execution/payment/remote/browser surfaces",
+        )
+    for snippet in [
+        "pub(crate) async fn channel_send_buttons_classified(",
+        "pub(crate) fn send_message_tool_schema(",
+        "pub(crate) fn execute_send_message(",
+    ]:
+        assert_contains(
+            channels_source,
+            snippet,
+            "channel owner must expose send_message pseudo-tool surfaces",
         )
     assert_contains(
         action_confirmations_source,

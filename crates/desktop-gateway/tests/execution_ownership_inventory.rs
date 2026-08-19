@@ -575,6 +575,35 @@ fn composio_transport_has_one_gateway_owner() {
 }
 
 #[test]
+fn channel_send_message_tool_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let channels = production_source(&root.join("src/gateway_channels.rs"));
+    let composio_routes = production_source(&root.join("src/gateway_composio_routes.rs"));
+
+    let owned = [
+        "async fn channel_send_buttons_classified(",
+        "fn send_message_tool_schema(",
+        "fn execute_send_message(",
+    ];
+
+    for pattern in owned {
+        assert!(
+            channels.contains(pattern),
+            "channel owner must contain send_message pseudo-tool surface {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain send_message pseudo-tool surface {pattern}"
+        );
+        assert!(
+            !composio_routes.contains(pattern),
+            "Composio route owner must not absorb channel send_message pseudo-tool surface {pattern}"
+        );
+    }
+}
+
+#[test]
 fn composio_confirmation_markers_have_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
