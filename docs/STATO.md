@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway send_message tool locale).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway send_message tool mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#195 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #195 |
+| PR | #108-#116, #118-#196 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #196 |
 
 ## Dove siamo
 
@@ -143,7 +143,7 @@ Slice Runtime V2 recenti:
   errore terminale executor escono dal monolite `main.rs` e vivono in
   `gateway_actionable_source`; execute pending, payment approval, remote
   approval dispatch/cancel e browser restano fuori dallo scope.
-- Estrazione locale `gateway_channels`: helper invio bottoni channel,
+- Estrazione mergeata `gateway_channels`: helper invio bottoni channel,
   schema pseudo-tool `send_message` ed executor sidecar WhatsApp/Telegram
   escono dal monolite `main.rs`; `composio_execute_tool`, pending approval,
   payment approval e browser restano owner separati.
@@ -818,8 +818,8 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#194: slice owner-level successive mergeate in `main`, fino a
-  `gateway_actionable_source`; `main` verificato e riallineato a #194.
+- #143-#196: slice owner-level successive mergeate in `main`, fino a
+  `gateway_channels`; `main` verificato e riallineato a #196.
 
 PR aperte:
 
@@ -827,8 +827,7 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/gateway-send-message-tool-owner`: worktree locale per spostare
-  `send_message` e l'invio bottoni nell'owner `gateway_channels`.
+- `main`: aggiornato al merge #196; nessun branch non-browser locale aperto.
 
 ## Debito residuo
 
@@ -861,7 +860,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #195/#successive; scegli la prossima slice non-browser owner-level.
+main aggiornato a #196/#successive; scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
