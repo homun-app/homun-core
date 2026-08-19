@@ -310,7 +310,9 @@ pub(crate) use gateway_artifact_memory::{
     artifact_memory_kind, mcp_filesystem_project_relative_path_for_root,
     upsert_artifact_memory_record,
 };
-use gateway_automation_formatting::automation_trigger_summary;
+use gateway_automation_formatting::{
+    automation_trigger_summary, scheduled_thread_sender_for_task_id, scheduled_thread_title,
+};
 use gateway_automation_requests::{
     AutomationCreateRequest, AutomationScopeQuery, AutomationUpdateRequest,
     automation_workspace_scope,
@@ -5734,19 +5736,10 @@ fn execute_proactive_prompt_task(
     }
 }
 
-fn scheduled_thread_sender_for_task_id(task_id: &str) -> String {
-    task_id.split("@occ@").next().unwrap_or(task_id).to_string()
-}
-
 pub(crate) fn proactive_thread_scope(task_id: &str, source: &str) -> (String, String) {
     let root = scheduled_thread_sender_for_task_id(task_id);
     let thread_id = format!("channel_{source}_{root}");
     (root, thread_id)
-}
-
-fn scheduled_thread_title(goal: &str) -> String {
-    let trimmed: String = goal.chars().take(48).collect();
-    format!("Pianificato · {trimmed}")
 }
 
 fn execute_capability_browser_task(

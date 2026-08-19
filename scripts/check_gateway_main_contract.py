@@ -74,6 +74,9 @@ BRAIN_RUNTIME_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_brain_runtime.rs"
 )
 RUNTIME_FLAGS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_runtime_flags.rs")
+AUTOMATION_FORMATTING_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_automation_formatting.rs"
+)
 CHANNELS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_channels.rs")
 MEMORY_QUERY_EMBEDDINGS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_query_embeddings.rs"
@@ -1228,6 +1231,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn update_automation_tool_schema(": "automation tool schemas must stay in gateway_automation_tools",
         "fn humanize_recurrence(": "automation formatting must stay in gateway_automation_formatting",
         "fn automation_trigger_summary(": "automation formatting must stay in gateway_automation_formatting",
+        "fn scheduled_thread_sender_for_task_id(": "automation thread formatting must stay in gateway_automation_formatting",
+        "fn scheduled_thread_title(": "automation thread formatting must stay in gateway_automation_formatting",
         "struct AutomationCreateRequest ": "automation request DTOs must stay in gateway_automation_requests",
         "struct AutomationScopeQuery ": "automation request DTOs must stay in gateway_automation_requests",
         "struct AutomationUpdateRequest ": "automation request DTOs must stay in gateway_automation_requests",
@@ -1369,6 +1374,8 @@ def main() -> int:
         brain_runtime_source = handle.read()
     with open(RUNTIME_FLAGS_RS, "r", encoding="utf-8") as handle:
         runtime_flags_source = handle.read()
+    with open(AUTOMATION_FORMATTING_RS, "r", encoding="utf-8") as handle:
+        automation_formatting_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
         action_confirmations_source = handle.read()
     with open(ACTIONABLE_SOURCE_RS, "r", encoding="utf-8") as handle:
@@ -1937,6 +1944,17 @@ def main() -> int:
         "mod gateway_automation_formatting;",
         "gateway root must declare automation formatting owner",
     )
+    for snippet in [
+        "pub(crate) fn humanize_recurrence(",
+        "pub(crate) fn automation_trigger_summary(",
+        "pub(crate) fn scheduled_thread_sender_for_task_id(",
+        "pub(crate) fn scheduled_thread_title(",
+    ]:
+        assert_contains(
+            automation_formatting_source,
+            snippet,
+            "automation formatting owner must expose formatting helpers",
+        )
     assert_contains(
         source,
         "mod gateway_automation_requests;",

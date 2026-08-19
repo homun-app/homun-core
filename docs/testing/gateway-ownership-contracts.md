@@ -104,6 +104,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_brain_runtime.rs` | Configurazione runtime Brain: flag enablement, adapter `GatewayBrainMemory` e budget orchestrator scalati sul context window; non possiede materializzazione durable dei task, capability facade, routing workflow o loop agente. |
 | `crates/desktop-gateway/src/gateway_runtime_flags.rs` | Flag runtime da environment, inclusi debug diagnostico, trace bounded, memory service e plan reconcile/autoadvance; non possiede loop agente, tool execution o route. |
 | `crates/desktop-gateway/src/gateway_runtime_settings.rs` | DTO e route settings runtime persistiti. |
+| `crates/desktop-gateway/src/gateway_automation_formatting.rs` | Helper puri di formattazione automazioni: recurrence, trigger summary, sender root e titolo thread schedulato; non possiede route, materializzazione task o executor proattivo. |
 | `crates/desktop-gateway/src/gateway_user_preferences.rs` | Preferenze utente/setup: lingua, timezone, Ollama, approval routing. |
 | `crates/desktop-gateway/src/gateway_process_events.rs` | Registri app event, WS process events e usage recorder. |
 
