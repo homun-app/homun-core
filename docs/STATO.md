@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway remote approval execution locale).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway remote approval execution mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#197 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #197 |
+| PR | #108-#116, #118-#198 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #198 |
 
 ## Dove siamo
 
@@ -137,7 +137,7 @@ Slice Runtime V2 recenti:
   approval da reply canale esce dal monolite `main.rs` e vive in
   `gateway_remote_approval`; actionable source resolution, execute pending,
   payment approval e browser restano fuori dallo scope.
-- Estrazione locale `gateway_remote_approval_execution`: consumo del codice
+- Estrazione mergeata `gateway_remote_approval_execution`: consumo del codice
   approvato, claim source-card, dispatch esecuzione MCP/Composio/send_message,
   rilevamento fallimento connector, risoluzione terminale e resume del thread
   post-execute escono dal monolite `main.rs`; creazione/dispatch/cancel remote
@@ -828,8 +828,8 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#197: slice owner-level successive mergeate in `main`, fino a
-  `gateway_composio_execution`; `main` verificato e riallineato a #197.
+- #143-#198: slice owner-level successive mergeate in `main`, fino a
+  `gateway_remote_approval_execution`; `main` verificato e riallineato a #198.
 
 PR aperte:
 
@@ -837,9 +837,7 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/gateway-remote-approval-execution-owner`: worktree locale per
-  spostare l'esecuzione dei codici approvati nell'owner
-  `gateway_remote_approval_execution`.
+- `main`: aggiornato al merge #198; nessun branch non-browser locale aperto.
 
 ## Debito residuo
 
@@ -872,7 +870,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #197/#successive; scegli la prossima slice non-browser owner-level.
+main aggiornato a #198/#successive; scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
