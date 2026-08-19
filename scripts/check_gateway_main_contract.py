@@ -1004,6 +1004,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn log_routing_decision(": "routing decision log writer must stay in gateway_model_routing",
         "fn resolve_inference_api_key(": "inference API key resolution must stay in gateway_model_routing",
         "fn env_inference_api_key(": "inference env key fallback must stay in gateway_model_routing",
+        "fn inference_locality(": "inference locality classification must stay in gateway_model_routing",
+        "fn inference_provider_id(": "inference provider identity must stay in gateway_model_routing",
+        "async fn recorded_openai_value(": "recorded OpenAI transport must stay in gateway_model_routing",
         "fn build_router_from(": "model router factory must stay in gateway_model_routing",
         "fn build_router_for_resolved(": "resolved-role router factory must stay in gateway_model_routing",
         "fn router_for_role(": "role router factory must stay in gateway_model_routing",
@@ -1648,6 +1651,21 @@ def main() -> int:
         model_routing_source,
         "pub(crate) fn build_inference_router_from_env(",
         "model routing owner must expose legacy env router factory",
+    )
+    assert_contains(
+        model_routing_source,
+        "pub(crate) fn inference_locality(",
+        "model routing owner must expose inference locality classification",
+    )
+    assert_contains(
+        model_routing_source,
+        "pub(crate) fn inference_provider_id(",
+        "model routing owner must expose inference provider identity",
+    )
+    assert_contains(
+        model_routing_source,
+        "pub(crate) async fn recorded_openai_value(",
+        "model routing owner must expose recorded OpenAI transport",
     )
     assert_contains(source, "mod gateway_vault_routes;", "gateway root must declare vault route owner")
     assert_contains(

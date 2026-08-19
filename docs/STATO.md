@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway memory Vault recall fallback mergeata).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway model usage transport locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-model-usage-transport-owner` |
+| Branch | `fabio/gateway-model-usage-transport-owner` |
 | PR | #108-#116, #118-#199 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #199 |
+| HEAD codice verificato | branch locale da `main` #199 |
 
 ## Dove siamo
 
@@ -200,6 +200,10 @@ Slice Runtime V2 recenti:
   fallback env, factory `ModelRouter` da provider/ruolo e router legacy da env
   escono dal monolite `main.rs`; il wrapper browser resta fuori da questa
   slice.
+- Estrazione locale `gateway_model_routing`: classificazione local/cloud
+  inference, provider id per usage recording e transport OpenAI-compatible
+  registrato (`recorded_openai_value`) escono dal monolite `main.rs`; routing
+  browser, turn policy, plan progress e loop agente restano fuori dallo scope.
 - Estrazione mergeata `gateway_boot_maintenance`: risoluzione sorgente default skills,
   copy ricorsivo, hash skill-tree e seed default skills escono dal monolite
   `main.rs`; route skill e runtime skill restano owner separati.
@@ -835,6 +839,8 @@ PR mergeate:
 - #143-#199: slice owner-level successive mergeate in `main`, fino al fallback
   Vault per memory recall in `gateway_vault_routes`; `main` verificato e
   riallineato a #199.
+- Slice locale corrente: `gateway_model_routing` provider usage transport,
+  branch `fabio/gateway-model-usage-transport-owner`.
 
 PR aperte:
 
@@ -842,7 +848,8 @@ PR aperte:
 
 Branch corrente:
 
-- `main`: aggiornato al merge #199; nessun branch non-browser locale aperto.
+- `fabio/gateway-model-usage-transport-owner`: slice non-browser corrente;
+  `main` resta aggiornato al merge #199.
 
 ## Debito residuo
 
@@ -875,7 +882,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #199/#successive; scegli la prossima slice non-browser owner-level.
+main aggiornato a #199/#successive; continua o chiudi la slice non-browser owner-level corrente.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

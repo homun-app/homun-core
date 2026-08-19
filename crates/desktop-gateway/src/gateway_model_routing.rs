@@ -862,6 +862,75 @@ pub(crate) fn provider_endpoint_is_local(base_url: &str) -> bool {
     base_url.contains("127.0.0.1") || base_url.contains("localhost") || base_url.contains("[::1]")
 }
 
+pub(crate) fn inference_locality(base_url: &str) -> local_first_inference_usage::Locality {
+    if provider_endpoint_is_local(base_url) {
+        local_first_inference_usage::Locality::Local
+    } else {
+        local_first_inference_usage::Locality::Cloud
+    }
+}
+
+pub(crate) fn inference_provider_id(base_url: &str) -> String {
+    let canonical = canonical_provider_base_url(base_url);
+    if let Some(provider) = load_provider_registry()
+        .providers
+        .into_iter()
+        .find(|provider| canonical_provider_base_url(&provider.base_url) == canonical)
+    {
+        return provider.id;
+    }
+    let lower = canonical.to_ascii_lowercase();
+    if lower.contains("anthropic.com") {
+        "anthropic".to_string()
+    } else if lower.contains("ollama.com") || provider_endpoint_is_local(&canonical) {
+        "ollama".to_string()
+    } else if lower.contains("openai.com") {
+        "openai".to_string()
+    } else if lower.contains("openrouter.ai") {
+        "openrouter".to_string()
+    } else if lower.contains("z.ai") {
+        "zai".to_string()
+    } else {
+        "openai-compatible".to_string()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn recorded_openai_value(
+    http: &reqwest::Client,
+    base_url: &str,
+    model: &str,
+    api_key: Option<&str>,
+    payload: &serde_json::Value,
+    timeout: std::time::Duration,
+    purpose: local_first_inference_usage::InferencePurpose,
+    detail: &str,
+    estimated_input_chars: usize,
+) -> Option<inference_transport::RecordedJsonResponse> {
+    let mut usage = local_first_inference_usage::UsageContext::new(
+        uuid::Uuid::new_v4().to_string(),
+        purpose,
+        gateway_user_id().as_str(),
+    );
+    usage.purpose_detail = Some(detail.to_string());
+    usage.workspace_id = Some(gateway_workspace_id().as_str().to_string());
+    inference_transport::send_openai_json(
+        http,
+        global_usage_recorder(),
+        &usage,
+        &inference_provider_id(base_url),
+        model,
+        inference_locality(base_url),
+        base_url,
+        api_key,
+        payload,
+        Some(timeout),
+        estimated_input_chars,
+    )
+    .await
+    .ok()
+}
+
 pub(crate) fn model_id_is_cloud(model: &str) -> bool {
     model.to_ascii_lowercase().contains(":cloud")
 }
