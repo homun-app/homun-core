@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway Composio execution mergeata).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway remote approval execution locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -137,6 +137,11 @@ Slice Runtime V2 recenti:
   approval da reply canale esce dal monolite `main.rs` e vive in
   `gateway_remote_approval`; actionable source resolution, execute pending,
   payment approval e browser restano fuori dallo scope.
+- Estrazione locale `gateway_remote_approval_execution`: consumo del codice
+  approvato, claim source-card, dispatch esecuzione MCP/Composio/send_message,
+  rilevamento fallimento connector, risoluzione terminale e resume del thread
+  post-execute escono dal monolite `main.rs`; creazione/dispatch/cancel remote
+  approval, payment approval e browser restano owner separati.
 - Estrazione mergeata `gateway_actionable_source`: `ActionableSourceResolution`,
   claim/rewrite terminale, `claim_actionable_source`,
   `resolve_actionable_source`, terminal formatter e rilascio source-card su
@@ -832,7 +837,9 @@ PR aperte:
 
 Branch corrente:
 
-- `main`: aggiornato al merge #197; nessun branch non-browser locale aperto.
+- `fabio/gateway-remote-approval-execution-owner`: worktree locale per
+  spostare l'esecuzione dei codici approvati nell'owner
+  `gateway_remote_approval_execution`.
 
 ## Debito residuo
 

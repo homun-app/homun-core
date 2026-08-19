@@ -834,6 +834,53 @@ fn remote_approval_cancel_has_one_gateway_owner() {
 }
 
 #[test]
+fn remote_approval_execution_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let channels = production_source(&root.join("src/gateway_channels.rs"));
+    let remote_approval = production_source(&root.join("src/gateway_remote_approval.rs"));
+    let execution_path = root.join("src/gateway_remote_approval_execution.rs");
+    let remote_approval_execution = if execution_path.exists() {
+        production_source(&execution_path)
+    } else {
+        String::new()
+    };
+
+    let owned = ["async fn execute_pending_approval("];
+
+    for pattern in owned {
+        assert!(
+            remote_approval_execution.contains(pattern),
+            "remote approval execution owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain remote approval execution surface {pattern}"
+        );
+        assert!(
+            !channels.contains(pattern),
+            "channel owner must call but not own remote approval execution surface {pattern}"
+        );
+        assert!(
+            !remote_approval.contains(pattern),
+            "remote approval state owner must not absorb execution surface {pattern}"
+        );
+    }
+    for adjacent in [
+        "fn should_claim_payment_approval(",
+        "fn claim_payment_approval_for_action(",
+        "fn browser_action_requires_payment_grant(",
+        "async fn dispatch_remote_approval(",
+        "fn create_pending_approval(",
+    ] {
+        assert!(
+            !remote_approval_execution.contains(adjacent),
+            "remote approval execution owner must not absorb adjacent control/payment/browser surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn actionable_source_resolution_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
