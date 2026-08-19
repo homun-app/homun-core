@@ -575,6 +575,41 @@ fn composio_transport_has_one_gateway_owner() {
 }
 
 #[test]
+fn composio_confirmation_markers_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let action_confirmations = production_source(&root.join("src/gateway_action_confirmations.rs"));
+
+    let owned = [
+        "const COMPOSIO_CONFIRM_OPEN:",
+        "const COMPOSIO_CONFIRM_CLOSE:",
+        "fn composio_confirm_matches(",
+        "fn rewrite_confirm_to_done(",
+    ];
+
+    for pattern in owned {
+        assert!(
+            action_confirmations.contains(pattern),
+            "action confirmation owner must contain Composio confirmation surface {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain Composio confirmation surface {pattern}"
+        );
+    }
+    for adjacent in [
+        "fn composio_execute_tool(",
+        "fn should_claim_payment_approval(",
+        "fn dispatch_remote_approval(",
+    ] {
+        assert!(
+            !action_confirmations.contains(adjacent),
+            "action confirmation owner must not absorb adjacent execution/payment surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn startup_background_writers_follow_process_fencing() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

@@ -270,8 +270,10 @@ use axum::{
 use bytes::Bytes;
 use chat_store::{ChatStore, RemoteApprovalInput, RemoteApprovalRow};
 pub(crate) use gateway_action_confirmations::{
-    MCP_CONFIRM_CLOSE, MCP_CONFIRM_OPEN, confirm_marker_matches_approval, confirm_marker_value,
-    mcp_confirm_matches, mcp_confirm_matches_approval, rewrite_mcp_confirm_to_done,
+    COMPOSIO_CONFIRM_CLOSE, COMPOSIO_CONFIRM_OPEN, MCP_CONFIRM_CLOSE, MCP_CONFIRM_OPEN,
+    composio_confirm_matches, confirm_marker_matches_approval, confirm_marker_value,
+    mcp_confirm_matches, mcp_confirm_matches_approval, rewrite_confirm_to_done,
+    rewrite_mcp_confirm_to_done,
 };
 use gateway_artifact_memory::{
     DECK_ARTIFACT_NAMES, artifact_provenance_labels, emit_rendered_deck_artifacts,
@@ -8663,8 +8665,6 @@ struct ComposioExecuteRequest {
     message_id: Option<String>,
 }
 
-const COMPOSIO_CONFIRM_OPEN: &str = "‹‹COMPOSIO_CONFIRM››";
-const COMPOSIO_CONFIRM_CLOSE: &str = "‹‹/COMPOSIO_CONFIRM››";
 // VAULT_REVEAL_OPEN/CLOSE moved to engine::markers (ADR 0024 inc 5e.3); imported below.
 
 fn apply_payment_approval_secret_for_action(
@@ -8958,44 +8958,6 @@ fn prune_expired_payment_approvals(
     for id in expired {
         approvals.remove(&id);
     }
-}
-
-fn composio_confirm_matches(text: &str, tool: &str, arguments: &serde_json::Value) -> bool {
-    let Some(marker) = confirm_marker_value(text, COMPOSIO_CONFIRM_OPEN, COMPOSIO_CONFIRM_CLOSE)
-    else {
-        return false;
-    };
-    marker.get("tool").and_then(serde_json::Value::as_str) == Some(tool)
-        && marker.get("arguments") == Some(arguments)
-}
-
-/// Rewrites a message that carries a pending-confirmation marker into a
-/// "done" marker, dropping the "Serve la tua conferma…" prompt line. Idempotent
-/// if no confirm marker is present.
-fn rewrite_confirm_to_done(text: &str, tool: &str) -> String {
-    let Some(open) = text.find(COMPOSIO_CONFIRM_OPEN) else {
-        return text.to_string();
-    };
-    let Some(close_rel) = text[open..].find(COMPOSIO_CONFIRM_CLOSE) else {
-        return text.to_string();
-    };
-    let close = open + close_rel + COMPOSIO_CONFIRM_CLOSE.len();
-    let head_end = text[..open]
-        .rfind("I need your confirmation")
-        .unwrap_or(open);
-    let mut out = text[..head_end].trim_end().to_string();
-    let tail = text[close..].trim();
-    if !tail.is_empty() {
-        if !out.is_empty() {
-            out.push_str("\n\n");
-        }
-        out.push_str(tail);
-    }
-    if !out.is_empty() {
-        out.push_str("\n\n");
-    }
-    out.push_str(&format!("‹‹COMPOSIO_DONE››{tool}‹‹/COMPOSIO_DONE››"));
-    out
 }
 
 #[derive(Debug, Serialize)]

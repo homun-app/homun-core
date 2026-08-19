@@ -28,6 +28,9 @@ LOCAL_AUTHORIZATION_ROUTES_RS = os.path.join(
 COMPOSIO_ROUTES_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_composio_routes.rs")
 CONNECTOR_ERRORS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_connector_errors.rs")
 IMAGE_GENERATION_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_image_generation.rs")
+ACTION_CONFIRMATIONS_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_action_confirmations.rs"
+)
 MODEL_ROUTING_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_model_routing.rs")
 CAPABILITY_ROUTING_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_capability_routing.rs"
@@ -515,6 +518,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn mcp_confirm_matches(": "MCP confirmation matching must stay in gateway_action_confirmations",
         "fn mcp_confirm_matches_approval(": "MCP remote approval matching must stay in gateway_action_confirmations",
         "fn rewrite_mcp_confirm_to_done(": "MCP confirmation rewrite must stay in gateway_action_confirmations",
+        "const COMPOSIO_CONFIRM_OPEN:": "Composio confirmation marker constants must stay in gateway_action_confirmations",
+        "fn composio_confirm_matches(": "Composio confirmation matching must stay in gateway_action_confirmations",
+        "fn rewrite_confirm_to_done(": "Composio confirmation rewrite must stay in gateway_action_confirmations",
         "fn mcp_chat_tool_name(": "MCP chat tool naming must stay in gateway_mcp_chat_tools",
         "fn parse_mcp_chat_name(": "MCP chat tool parsing must stay in gateway_mcp_chat_tools",
         "struct McpChatTools": "MCP chat tool catalogue DTO must stay in gateway_mcp_chat_tools",
@@ -1249,10 +1255,27 @@ def main() -> int:
         prompt_packets_source = handle.read()
     with open(BRAIN_RUNTIME_RS, "r", encoding="utf-8") as handle:
         brain_runtime_source = handle.read()
+    with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
+        action_confirmations_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
     assert_contains(source, "mod gateway_action_confirmations;", "gateway root must declare action confirmation owner")
+    assert_contains(
+        action_confirmations_source,
+        "pub(crate) const COMPOSIO_CONFIRM_OPEN:",
+        "action confirmation owner must expose Composio confirmation marker constants",
+    )
+    assert_contains(
+        action_confirmations_source,
+        "pub(crate) fn composio_confirm_matches(",
+        "action confirmation owner must expose Composio confirmation matching",
+    )
+    assert_contains(
+        action_confirmations_source,
+        "pub(crate) fn rewrite_confirm_to_done(",
+        "action confirmation owner must expose Composio confirmation rewrite",
+    )
     assert_contains(source, "mod gateway_mcp_chat_tools;", "gateway root must declare MCP chat tools owner")
     assert_contains(source, "mod gateway_mcp_connections;", "gateway root must declare MCP connection route owner")
     assert_contains(source, "mod gateway_mcp_execution;", "gateway root must declare MCP execution route owner")
