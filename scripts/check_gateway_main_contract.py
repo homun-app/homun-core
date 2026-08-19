@@ -15,6 +15,9 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAIN_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "main.rs")
 ATTACHMENTS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "attachments.rs")
+RECALL_CONTEXT_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_recall_context.rs"
+)
 BROWSER_TOOLS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_browser_tools.rs")
 CHAT_UTILITY_ROUTES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_utility_routes.rs"
@@ -136,6 +139,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn recall_source_label(": "memory recall labeling must stay in gateway_recall_context",
         "fn recall_collection_token(": "memory recall collection labeling must stay in gateway_recall_context",
         "fn memory_access_status_instruction(": "memory access prompt status must stay in gateway_recall_context",
+        "fn format_recall_entry(": "recall entry formatting must stay in gateway_recall_context",
         "fn recall_stream_payload_from_pack(": "recall stream payload assembly must stay in gateway_recall_context",
         "fn recall_stream_payload_from_hits(": "recall stream payload assembly must stay in gateway_recall_context",
         "fn merge_automatic_recall_payload(": "automatic recall payload merging must stay in gateway_recall_context",
@@ -1300,6 +1304,8 @@ def main() -> int:
         source = handle.read()
     with open(ATTACHMENTS_RS, "r", encoding="utf-8") as handle:
         attachments_source = handle.read()
+    with open(RECALL_CONTEXT_RS, "r", encoding="utf-8") as handle:
+        recall_context_source = handle.read()
     with open(BROWSER_TOOLS_RS, "r", encoding="utf-8") as handle:
         browser_tools_source = handle.read()
     with open(CHAT_UTILITY_ROUTES_RS, "r", encoding="utf-8") as handle:
@@ -1377,6 +1383,22 @@ def main() -> int:
             "attachment owner must not absorb adjacent chat/runtime surfaces",
         )
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
+    assert_contains(
+        recall_context_source,
+        "pub(crate) fn format_recall_entry(",
+        "recall context owner must expose recall entry formatting",
+    )
+    for snippet in [
+        "fn recall_memory(",
+        "fn workflow_status_context_for_query(",
+        "fn artifact_provenance_context_for_query(",
+        "async fn run_agent_rounds(",
+    ]:
+        assert_not_contains(
+            recall_context_source,
+            snippet,
+            "recall context owner must not absorb adjacent chat/read-model surfaces",
+        )
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
     assert_contains(source, "mod gateway_action_confirmations;", "gateway root must declare action confirmation owner")
     assert_contains(source, "mod gateway_actionable_source;", "gateway root must declare actionable source owner")

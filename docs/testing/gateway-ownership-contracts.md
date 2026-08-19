@@ -106,8 +106,11 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 
 I moduli memory gia' estratti (`gateway_memory_*`, `gateway_recall_context.rs`,
 `gateway_artifact_memory.rs`, `gateway_memory_tools.rs`) restano owner locali
-delle singole funzioni di recall/learn/graph/wiki/tool, ma il flusso inline piu'
-ampio di memoria non va ulteriormente tagliato senza una slice dedicata.
+delle singole funzioni di recall/learn/graph/wiki/tool. `gateway_recall_context.rs`
+possiede anche il formatter bounded delle entry recall per i prompt, ma non
+deve assorbire recall generale, artifact/workflow read-model o loop agente.
+Il flusso inline piu' ampio di memoria non va ulteriormente tagliato senza una
+slice dedicata.
 
 ## Aree da non tagliare alla cieca
 

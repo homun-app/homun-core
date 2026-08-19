@@ -626,6 +626,35 @@ fn memory_query_embedding_transport_has_one_gateway_owner() {
 }
 
 #[test]
+fn recall_entry_formatting_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let recall_context = production_source(&root.join("src/gateway_recall_context.rs"));
+
+    let pattern = "fn format_recall_entry(";
+    assert!(
+        recall_context.contains(pattern),
+        "recall context owner must contain {pattern}"
+    );
+    assert!(
+        !main.contains(pattern),
+        "main.rs must not retain recall entry formatting {pattern}"
+    );
+
+    for adjacent in [
+        "fn recall_memory(",
+        "fn workflow_status_context_for_query(",
+        "fn artifact_provenance_context_for_query(",
+        "async fn run_agent_rounds(",
+    ] {
+        assert!(
+            !recall_context.contains(adjacent),
+            "recall context owner must not absorb adjacent owner {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn attachment_prompt_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
