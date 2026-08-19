@@ -176,6 +176,14 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn pending_approval_exists(": "remote approval control checks must stay in gateway_remote_approval",
         "fn approval_progress_reply(": "remote approval channel progress copy must stay in gateway_remote_approval",
         "fn parse_approval_reply(": "remote approval channel reply parsing must stay in gateway_remote_approval",
+        "fn approval_action_target(": "remote approval status target formatting must stay in gateway_remote_approval",
+        "fn remote_approval_thread_status(": "remote approval thread status copy must stay in gateway_remote_approval",
+        "fn append_remote_approval_thread_status(": "remote approval thread status append must stay in gateway_remote_approval",
+        "fn approval_resume_prompt(": "remote approval continuation prompt must stay in gateway_remote_approval",
+        "fn approval_source_user_text(": "remote approval continuation source lookup must stay in gateway_remote_approval",
+        "fn approval_continuation_visible_text(": "remote approval continuation visible prompt must stay in gateway_remote_approval",
+        "fn approval_continuation_turn_input(": "remote approval continuation input must stay in gateway_remote_approval",
+        "fn resume_thread_after_approval(": "remote approval continuation wake must stay in gateway_remote_approval",
         "const KNOWN_PLUGINS:": "plugin enablement registry must stay in gateway_plugins",
         "async fn plugins_list(": "plugin enablement listing must stay in gateway_plugins",
         "async fn plugin_toggle(": "plugin enablement toggle must stay in gateway_plugins",
@@ -1327,11 +1335,17 @@ def main() -> int:
         "pub(crate) fn pending_approval_exists(",
         "pub(crate) fn approval_progress_reply(",
         "pub(crate) fn parse_approval_reply(",
+        "pub(crate) fn remote_approval_thread_status(",
+        "pub(crate) fn append_remote_approval_thread_status(",
+        "pub(crate) fn approval_resume_prompt(",
+        "pub(crate) fn approval_continuation_visible_text(",
+        "pub(crate) fn approval_continuation_turn_input(",
+        "pub(crate) fn resume_thread_after_approval(",
     ]:
         assert_contains(
             remote_approval_source,
             snippet,
-            "remote approval owner must expose approval control helpers",
+            "remote approval owner must expose approval control/continuation helpers",
         )
     assert_contains(source, "mod gateway_plugins;", "gateway root must declare plugin enablement owner")
     assert_contains(source, "mod gateway_plugin_packages;", "gateway root must declare plugin package owner")

@@ -207,9 +207,15 @@ pub(crate) use gateway_project_graph_routes::*;
 #[cfg(test)]
 use gateway_remote_approval::remote_approval_matches_persisted_message;
 use gateway_remote_approval::{
-    ActionableCard, RemoteApprovalIntent, actionable_cards_from_raw_text, approval_progress_reply,
-    create_pending_approval, parse_approval_reply, pending_approval_exists,
-    remote_approval_event_part, remote_approval_intent_from_raw_text,
+    ActionableCard, RemoteApprovalIntent, actionable_cards_from_raw_text,
+    append_remote_approval_thread_status, approval_continuation_visible_text,
+    approval_progress_reply, create_pending_approval, parse_approval_reply,
+    pending_approval_exists, remote_approval_event_part, remote_approval_intent_from_raw_text,
+    resume_thread_after_approval,
+};
+#[cfg(test)]
+use gateway_remote_approval::{
+    approval_continuation_turn_input, approval_resume_prompt, remote_approval_thread_status,
 };
 pub(crate) use gateway_runtime_settings::*;
 #[cfg(test)]
@@ -7408,220 +7414,12 @@ fn verbose_debug() -> bool {
     std::env::var("HOMUN_DEBUG").is_ok()
 }
 
-fn approval_action_target(args: &serde_json::Value) -> Option<String> {
-    args.get("path")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| args.get("to").and_then(serde_json::Value::as_str))
-        .map(|value| value.chars().take(180).collect())
-}
-
-fn remote_approval_thread_status(
-    approval: &RemoteApprovalRow,
-    phase: &str,
-    detail: Option<&str>,
-) -> String {
-    let target = approval_action_target(&approval.arguments)
-        .map(|target| format!(" su `{target}`"))
-        .unwrap_or_default();
-    let detail = detail
-        .filter(|text| !text.trim().is_empty())
-        .map(|text| format!("\n\n{text}"))
-        .unwrap_or_default();
-    match phase {
-        "running" => format!(
-            "⏳ Approvazione Telegram ricevuta. Eseguo `{}`{}…{}",
-            approval.tool, target, detail
-        ),
-        "executed" => format!(
-            "✅ Azione approvata da Telegram eseguita: `{}`{}. Riprendo il task…{}",
-            approval.tool, target, detail
-        ),
-        "failed" => format!(
-            "⚠️ Azione approvata da Telegram fallita: `{}`{}.{}",
-            approval.tool, target, detail
-        ),
-        _ => format!(
-            "ℹ️ Stato approvazione Telegram: `{phase}` per `{}`{}.{detail}",
-            approval.tool, target
-        ),
-    }
-}
-
-fn append_remote_approval_thread_status(
-    state: &AppState,
-    approval: &RemoteApprovalRow,
-    phase: &str,
-    detail: Option<&str>,
-) {
-    let Some(thread_id) = approval.thread_id.as_deref() else {
-        return;
-    };
-    let text = remote_approval_thread_status(approval, phase, detail);
-    if let Ok(store) = lock_store(state) {
-        let _ =
-            store.append_assistant_message(thread_id, &channel_chat_message("assistant", &text));
-    }
-    publish_app_event(serde_json::json!({
-        "type": "thread.updated",
-        "thread_id": thread_id,
-        "workspace": base_workspace_id(),
-    }));
-}
-
 /// Execute a confirmed pending approval (by code) → user-facing reply text. Routes MCP vs
 /// Composio/send_message. Shared by the inbound-text path AND the Telegram inline-button callback.
 /// 6.1b: after a confirm-gated action is approved AND executed, re-enter the agent loop on the
 /// ORIGIN thread (if known) so a multi-step task CONTINUES instead of dead-stopping at the
 /// `pending_confirm` break. Spawned so the caller (an HTTP handler / channel callback) returns at
 /// once; the continuation streams onto the thread (the UI reattaches via `active_streams`). The
-/// snapshot of `result` is taken BEFORE the spawn so no borrow escapes into the task. No-op when
-/// the pending action carried no origin thread (e.g. a one-shot channel draft reply).
-fn approval_resume_prompt(
-    tool: &str,
-    result: &str,
-    approved_args: Option<&serde_json::Value>,
-    source_user_text: Option<&str>,
-) -> String {
-    let source = source_user_text
-        .map(|text| text.chars().take(1200).collect::<String>())
-        .unwrap_or_else(|| "(source user request unavailable)".to_string());
-    let args = approved_args
-        .map(|value| value.to_string().chars().take(1600).collect::<String>())
-        .unwrap_or_else(|| "{}".to_string());
-    let result_snip: String = result.chars().take(1200).collect();
-    format!(
-        "A user-approved action has just executed in the CURRENT chat task.\n\n\
-         ORIGINAL USER REQUEST:\n{source}\n\n\
-         APPROVED TOOL ACTION:\n{tool}\n\n\
-         APPROVED ARGUMENTS JSON:\n{args}\n\n\
-         EXECUTION RESULT:\n{result_snip}\n\n\
-         Continue ONLY this original request. Do not switch to any other file, path, \
-         task, memory, or open loop. Do not mention or act on paths that are not in \
-         the original request or approved arguments. If the approved action satisfies \
-         the request, answer with a concise completion message using the exact \
-         approved path/content/result. Continue with another tool only if the original \
-         request clearly has unfinished steps."
-    )
-}
-
-fn approval_source_user_text(
-    state: &AppState,
-    thread_id: &str,
-    source_message_id: Option<&str>,
-) -> Option<String> {
-    let source_message_id = source_message_id?;
-    let snapshot = lock_store(state).ok()?.messages(thread_id).ok()?;
-    let source_idx = snapshot
-        .messages
-        .iter()
-        .position(|message| message.id == source_message_id)?;
-    snapshot.messages[..source_idx]
-        .iter()
-        .rev()
-        .find(|message| message.role == "user")
-        .map(|message| message.text.clone())
-}
-
-fn approval_continuation_visible_text(tool: &str) -> String {
-    let tool: String = tool.trim().chars().take(80).collect();
-    if tool.is_empty() {
-        "Continue after the approved action.".to_string()
-    } else {
-        format!("Continue after approved action `{tool}`.")
-    }
-}
-
-fn approval_continuation_turn_input(
-    thread_id: &str,
-    tool: &str,
-    prompt: String,
-) -> local_first_task_runtime::broker::ChatTurnInput {
-    let request_id = format!(
-        "approval_{}_{}",
-        now_epoch_secs(),
-        uuid::Uuid::new_v4().simple()
-    );
-    local_first_task_runtime::broker::ChatTurnInput {
-        thread_id: thread_id.to_string(),
-        assistant_message_id: format!("local_assistant_{request_id}"),
-        request_id,
-        prompt,
-        visible_prompt: Some(approval_continuation_visible_text(tool)),
-        images: Vec::new(),
-        attachments: None,
-        mode: None,
-        model: None,
-        source: local_first_task_runtime::broker::ChatTurnSource::Interactive,
-        approval: local_first_task_runtime::broker::TurnApproval::Full,
-    }
-}
-
-fn resume_thread_after_approval(
-    state: &AppState,
-    thread_id: Option<String>,
-    tool: &str,
-    result: &str,
-    approved_args: Option<serde_json::Value>,
-    source_message_id: Option<String>,
-) {
-    let Some(thread_id) = thread_id else {
-        return;
-    };
-    let st = state.clone();
-    let tool = tool.to_string();
-    let result = result.to_string();
-    tokio::spawn(async move {
-        let source_user_text =
-            approval_source_user_text(&st, &thread_id, source_message_id.as_deref());
-        let prompt = approval_resume_prompt(
-            &tool,
-            &result,
-            approved_args.as_ref(),
-            source_user_text.as_deref(),
-        );
-        match resume_suspended_approval_turn_core(
-            &st,
-            &thread_id,
-            true,
-            &tool,
-            &result,
-            approved_args.as_ref(),
-            &prompt,
-        ) {
-            Ok(Some(resumed)) => {
-                publish_app_event(serde_json::json!({
-                    "type": "thread.turn_resumed",
-                    "thread_id": thread_id,
-                    "turn_id": resumed.execution_id,
-                    "revision": resumed.revision,
-                }));
-                return;
-            }
-            Ok(None) => {}
-            Err(error) => {
-                tracing::error!(
-                    target: "approval::continuation",
-                    %thread_id,
-                    %tool,
-                    %error,
-                    "could not deliver the approved-action wake"
-                );
-                return;
-            }
-        }
-        let input = approval_continuation_turn_input(&thread_id, &tool, prompt);
-        if let Err(error) = enqueue_chat_turn_core(&st, &input) {
-            tracing::error!(
-                target: "approval::continuation",
-                %thread_id,
-                %tool,
-                %error,
-                "could not enqueue the approved-action continuation"
-            );
-        }
-    });
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ActionableSourceResolution {
     Succeeded,
