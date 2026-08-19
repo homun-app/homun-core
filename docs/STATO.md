@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway memory Vault recall fallback locale).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway memory Vault recall fallback mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#198 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #198 |
+| PR | #108-#116, #118-#199 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #199 |
 
 ## Dove siamo
 
@@ -160,7 +160,7 @@ Slice Runtime V2 recenti:
   record/payment approval, storage/reveal/update/dedup/search Vault e rewrite
   della payment card approvata escono dal monolite `main.rs`; browser action
   enforcement e claim finale pagamento restano owner separato.
-- Estrazione locale `gateway_vault_routes`: fallback Vault per memory recall,
+- Estrazione mergeata `gateway_vault_routes`: fallback Vault per memory recall,
   policy termini sensibili e costruzione reveal-card metadata-only escono dal
   monolite `main.rs`; `recall_memory` e il servizio memoria restano fuori dallo
   scope.
@@ -832,8 +832,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#198: slice owner-level successive mergeate in `main`, fino a
-  `gateway_remote_approval_execution`; `main` verificato e riallineato a #198.
+- #143-#199: slice owner-level successive mergeate in `main`, fino al fallback
+  Vault per memory recall in `gateway_vault_routes`; `main` verificato e
+  riallineato a #199.
 
 PR aperte:
 
@@ -841,8 +842,7 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/gateway-memory-vault-recall-owner`: worktree locale per spostare il
-  fallback Vault di memory recall nell'owner `gateway_vault_routes`.
+- `main`: aggiornato al merge #199; nessun branch non-browser locale aperto.
 
 ## Debito residuo
 
@@ -875,7 +875,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #198/#successive; scegli la prossima slice non-browser owner-level.
+main aggiornato a #199/#successive; scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
