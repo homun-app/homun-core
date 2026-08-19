@@ -494,10 +494,10 @@ use gateway_prompt_instructions::{
 };
 pub(crate) use gateway_prompt_packets::*;
 use gateway_recall_context::{
-    gather_open_loops, memory_access_status_instruction, memory_read_effects_from_recall_payload,
-    merge_automatic_recall_payload, recall_collection_token, recall_source_label,
-    recall_stream_payload_from_hits, recall_stream_payload_from_pack, sanitize_dedup_key,
-    seed_loop_memory_reads,
+    format_recall_entry, gather_open_loops, memory_access_status_instruction,
+    memory_read_effects_from_recall_payload, merge_automatic_recall_payload,
+    recall_collection_token, recall_source_label, recall_stream_payload_from_hits,
+    recall_stream_payload_from_pack, sanitize_dedup_key, seed_loop_memory_reads,
 };
 pub(crate) use gateway_runtime_plan_state::*;
 pub(crate) use gateway_skill_runtime::*;
@@ -1794,49 +1794,6 @@ fn record_subagent_task_step_outcome(
 /// and returns a compact, readable result for the model. Includes confirmed AND
 /// candidate items and all sensitivities: the model asked explicitly, and it is
 /// the user's own data answered back to the user.
-/// Renders a recalled memory for the model. For a DECISION it surfaces the STRUCTURED
-/// "why" — the rationale and the rejected alternatives from `metadata.decision` — not
-/// just the summary text (the strong reader). Other kinds return the summary as-is.
-fn format_recall_entry(summary: &str, metadata: &serde_json::Value) -> String {
-    let Some(decision) = metadata.get("decision") else {
-        return summary.to_string();
-    };
-    let mut out = summary.to_string();
-    if let Some(rationale) = decision.get("rationale").and_then(|r| r.as_str())
-        && !rationale.is_empty()
-        && !summary.contains(rationale)
-    {
-        out.push_str(&format!(" — why: {rationale}"));
-    }
-    if let Some(alternatives) = decision.get("alternatives").and_then(|a| a.as_array()) {
-        let rejected: Vec<String> = alternatives
-            .iter()
-            .filter_map(|alt| {
-                let option = alt.get("option").and_then(|o| o.as_str())?;
-                if option.is_empty() {
-                    return None;
-                }
-                let why = alt
-                    .get("rejected_because")
-                    .and_then(|w| w.as_str())
-                    .unwrap_or("");
-                Some(if why.is_empty() {
-                    option.to_string()
-                } else {
-                    format!("{option} (rejected: {why})")
-                })
-            })
-            .collect();
-        if !rejected.is_empty() {
-            out.push_str(&format!(
-                " [rejected alternatives: {}]",
-                rejected.join("; ")
-            ));
-        }
-    }
-    out
-}
-
 fn artifact_quality_summary(metadata: &serde_json::Value) -> Option<String> {
     let status = metadata
         .get("quality_status")

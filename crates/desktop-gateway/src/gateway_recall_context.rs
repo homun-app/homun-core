@@ -69,6 +69,49 @@ pub(crate) fn memory_access_status_instruction(
     }
 }
 
+/// Renders a recalled memory for the model. For a DECISION it surfaces the
+/// structured "why" — rationale and rejected alternatives from
+/// `metadata.decision` — instead of returning only the summary text.
+pub(crate) fn format_recall_entry(summary: &str, metadata: &serde_json::Value) -> String {
+    let Some(decision) = metadata.get("decision") else {
+        return summary.to_string();
+    };
+    let mut out = summary.to_string();
+    if let Some(rationale) = decision.get("rationale").and_then(|r| r.as_str())
+        && !rationale.is_empty()
+        && !summary.contains(rationale)
+    {
+        out.push_str(&format!(" — why: {rationale}"));
+    }
+    if let Some(alternatives) = decision.get("alternatives").and_then(|a| a.as_array()) {
+        let rejected: Vec<String> = alternatives
+            .iter()
+            .filter_map(|alt| {
+                let option = alt.get("option").and_then(|o| o.as_str())?;
+                if option.is_empty() {
+                    return None;
+                }
+                let why = alt
+                    .get("rejected_because")
+                    .and_then(|w| w.as_str())
+                    .unwrap_or("");
+                Some(if why.is_empty() {
+                    option.to_string()
+                } else {
+                    format!("{option} (rejected: {why})")
+                })
+            })
+            .collect();
+        if !rejected.is_empty() {
+            out.push_str(&format!(
+                " [rejected alternatives: {}]",
+                rejected.join("; ")
+            ));
+        }
+    }
+    out
+}
+
 pub(crate) fn recall_stream_payload_from_pack(
     pack: &RecallPack,
 ) -> local_first_subagents::RecallStreamPayload {
