@@ -964,6 +964,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn build_router_from(": "model router factory must stay in gateway_model_routing",
         "fn build_router_for_resolved(": "resolved-role router factory must stay in gateway_model_routing",
         "fn router_for_role(": "role router factory must stay in gateway_model_routing",
+        "fn resolve_role_for_task(": "semantic role resolution must stay in gateway_model_routing",
         "fn semantic_router_enabled(": "semantic router flag must stay in gateway_model_routing",
         "fn build_inference_router_from_env(": "legacy env router factory must stay in gateway_model_routing",
         "fn default_skills_dir(": "default skill source resolution must stay in gateway_boot_maintenance",
@@ -1467,6 +1468,11 @@ def main() -> int:
         model_routing_source,
         "pub(crate) fn router_for_role(",
         "model routing owner must expose role router factory",
+    )
+    assert_contains(
+        model_routing_source,
+        "pub(crate) fn resolve_role_for_task(",
+        "model routing owner must expose semantic role resolution",
     )
     assert_contains(
         model_routing_source,

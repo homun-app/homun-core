@@ -236,6 +236,158 @@ pub(crate) fn router_for_role(role: &str) -> ModelRouter {
     }
 }
 
+/// STAGE 2 (semantic): among the models eligible for `role`, ask a fast model
+/// which one best fits `goal`, reading each model's profile ("in cosa eccelle").
+/// Falls back to the heuristic `resolve_role` on: disabled flag, <2 candidates,
+/// LLM error, or an unrecognized pick. Async task path only (adds one LLM hop).
+/// Every decision is logged for observability.
+pub(crate) fn resolve_role_for_task(goal: &str, role: &str) -> Option<ResolvedRole> {
+    let registry = load_provider_registry();
+    let heuristic = registry.resolve_role(role);
+    // Owned candidate tuples: (provider_id, model_id, tier, strengths, kind, base_url).
+    let candidates: Vec<(String, String, String, String, ProviderKind, String)> = registry
+        .eligible_models(role)
+        .iter()
+        .map(|(provider, model)| {
+            let (tier, strengths) = model
+                .profile
+                .as_ref()
+                .map(|p| (p.tier.as_str().to_string(), p.strengths.clone()))
+                .unwrap_or_default();
+            (
+                provider.id.clone(),
+                model.id.clone(),
+                tier,
+                strengths,
+                provider.kind,
+                provider.base_url.clone(),
+            )
+        })
+        .collect();
+    // Safe routing: drop models that will likely 401 — a `:cloud` model whose
+    // provider has no configured key (the auto-router shouldn't auto-pick something
+    // unauthenticated). Manual binding + the 401 self-heal still cover the rest.
+    // If filtering would leave <2 candidates the code below falls back to the
+    // heuristic/manual binding anyway, so this never strands a role.
+    let filtered: Vec<(String, String, String, String, ProviderKind, String)> = candidates
+        .iter()
+        .filter(|(pid, mid, ..)| !(mid.contains(":cloud") && provider_api_key(pid).is_none()))
+        .cloned()
+        .collect();
+    let candidates = if filtered.len() >= 2 {
+        filtered
+    } else {
+        candidates
+    };
+    let candidate_ids: Vec<String> = candidates.iter().map(|c| c.1.clone()).collect();
+
+    // Decide and remember which stage produced the choice.
+    let (resolved, stage): (Option<ResolvedRole>, &'static str) = if !semantic_router_enabled() {
+        (heuristic.clone(), "heuristic_disabled")
+    } else if candidates.len() < 2 {
+        (heuristic.clone(), "single_candidate")
+    } else {
+        let list = candidates
+            .iter()
+            .enumerate()
+            .map(|(i, (pid, mid, tier, strengths, _, _))| {
+                let desc = if strengths.trim().is_empty() {
+                    "(no description)"
+                } else {
+                    strengths.as_str()
+                };
+                format!(
+                    "{}. id=\"{mid}\" provider={pid} tier={tier} — {desc}",
+                    i + 1
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let prompt = format!(
+            "You are a model router. Choose the model that performs BEST on this task, \
+             based on what each model excels at.
+
+Task:
+{goal}
+
+Candidate models:
+{list}
+
+\
+             Reply ONLY with JSON: {{\"model_id\": \"<exactly one of the listed ids>\"}}."
+        );
+        let request = GenerateJsonRequest {
+            usage: {
+                let mut usage = local_first_inference_usage::UsageContext::new(
+                    uuid::Uuid::new_v4().to_string(),
+                    local_first_inference_usage::InferencePurpose::IntentRouting,
+                    gateway_user_id().as_str(),
+                );
+                usage.purpose_detail = Some(format!("semantic_model_router:{role}"));
+                usage
+            },
+            prompt,
+            // Generous ceiling: the role's heuristic model runs this selection and
+            // may be a REASONING model that spends the budget "thinking" before
+            // emitting the `{"model_id": ...}` JSON. A tight 200-token cap could be
+            // burned mid-thought, yielding invalid JSON that silently drops the
+            // semantic router back to the heuristic. `generate_json` has repair +
+            // a `valid` flag, so this only needs headroom, not extra logging. A high
+            // ceiling costs nothing for instruct models (they stop at the short JSON).
+            max_tokens: 2000,
+            temperature: 0.0,
+            wait_if_busy: true,
+            request_timeout_seconds: Some(30.0),
+            json_schema: None,
+            required_keys: vec!["model_id".to_string()],
+            repair: true,
+        };
+        // The role's heuristic model runs the cheap selection call.
+        let selector = router_for_role(role);
+        match selector.generate_json_with(&Requirements::default(), &request) {
+            Ok(response) if response.valid => {
+                let chosen = response.json.get("model_id").and_then(Value::as_str);
+                if let Some(chosen) = chosen
+                    && let Some((pid, mid, tier_str, _, kind, base_url)) =
+                        candidates.iter().find(|c| c.1 == chosen)
+                {
+                    (
+                        Some(ResolvedRole {
+                            role: role.to_string(),
+                            provider_id: pid.clone(),
+                            model: mid.clone(),
+                            kind: *kind,
+                            base_url: base_url.clone(),
+                            auto: true,
+                            // The candidate carries the tier as a string (from the
+                            // catalog profile); recover it, unknown → Balanced.
+                            tier: model_registry::ModelTier::parse(tier_str)
+                                .unwrap_or(model_registry::ModelTier::Balanced),
+                        }),
+                        "semantic",
+                    )
+                } else {
+                    (heuristic.clone(), "heuristic_fallback")
+                }
+            }
+            _ => (heuristic.clone(), "heuristic_fallback"),
+        }
+    };
+
+    if let Some(chosen) = &resolved {
+        log_routing_decision(RoutingDecision {
+            ts: now_epoch_secs(),
+            role: role.to_string(),
+            goal: truncate_chars(&redact_sensitive_text(goal), 140),
+            candidates: candidate_ids,
+            chosen_provider: chosen.provider_id.clone(),
+            chosen_model: chosen.model.clone(),
+            stage: stage.to_string(),
+        });
+    }
+    resolved
+}
+
 /// Whether the semantic (LLM) model router is enabled. Default ON; set
 /// `HOMUN_SEMANTIC_ROUTER=0` to force the cheap heuristic.
 pub(crate) fn semantic_router_enabled() -> bool {

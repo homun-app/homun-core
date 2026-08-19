@@ -512,6 +512,36 @@ fn agent_output_completion_has_one_gateway_owner() {
 }
 
 #[test]
+fn role_resolution_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let model_routing = production_source(&root.join("src/gateway_model_routing.rs"));
+
+    let owned = ["fn resolve_role_for_task("];
+
+    for pattern in owned {
+        assert!(
+            model_routing.contains(pattern),
+            "model routing owner must contain role resolution surface {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain role resolution surface {pattern}"
+        );
+    }
+    for adjacent in [
+        "fn build_browser_inference_router(",
+        "struct GatewayTurnPolicy",
+        "struct GatewayPlanProgress",
+    ] {
+        assert!(
+            !model_routing.contains(adjacent),
+            "model routing owner must not absorb adjacent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn composio_transport_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

@@ -150,8 +150,8 @@ Slice Runtime V2 recenti:
   condiviso da runtime, memory, browser e workspace.
 - Estrazione mergeata `gateway_model_routing`: resolver API key inference,
   fallback env, factory `ModelRouter` da provider/ruolo e router legacy da env
-  escono dal monolite `main.rs`; `resolve_role_for_task` e il wrapper browser
-  restano fuori da questa slice.
+  escono dal monolite `main.rs`; il wrapper browser resta fuori da questa
+  slice.
 - Estrazione mergeata `gateway_boot_maintenance`: risoluzione sorgente default skills,
   copy ricorsivo, hash skill-tree e seed default skills escono dal monolite
   `main.rs`; route skill e runtime skill restano owner separati.
@@ -218,11 +218,16 @@ Slice Runtime V2 recenti:
   `gateway_composio_routes`, accanto a connect/catalog/auth/link/connections;
   `composio_execute_tool`, payment approval claim, remote approval dispatch e
   browser restano owner separati.
-- Slice corrente `gateway_agent_output_completion`: la policy
+- Estrazione mergeata `gateway_agent_output_completion`: la policy
   `agent_output_incomplete_reason` per classificare risposte agente vuote o
   plan-marker incompleti esce dal monolite `main.rs` e vive in
   `gateway_model_routing`, accanto al completion judge no-plan; `GatewayTurnPolicy`,
   `GatewayPlanProgress` e il loop agente restano owner separati.
+- Slice corrente `gateway_role_resolution`: la risoluzione semantica
+  `resolve_role_for_task` esce dal monolite `main.rs` e vive in
+  `gateway_model_routing`, accanto a `router_for_role` e al log delle decisioni
+  routing; wrapper browser, `GatewayTurnPolicy`, `GatewayPlanProgress` e loop
+  agente restano owner separati.
 - Estrazione locale `gateway_memory_publications`: route memory publication
   create/get/edit/approve/reject, DTO request, mapping errori facade e
   validazione owned-scope escono dal monolite `main.rs`; source grant
