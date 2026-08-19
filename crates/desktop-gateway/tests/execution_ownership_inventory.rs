@@ -626,6 +626,41 @@ fn memory_query_embedding_transport_has_one_gateway_owner() {
 }
 
 #[test]
+fn attachment_prompt_context_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let attachments = production_source(&root.join("src/attachments.rs"));
+
+    for pattern in [
+        "const ATTACHMENT_TEXT_BUDGET_CHARS:",
+        "const ATTACHMENT_CONTEXT_IMAGES:",
+        "fn append_thread_attachment_context(",
+        "fn attachment_text_is_ready(",
+    ] {
+        assert!(
+            attachments.contains(pattern),
+            "attachment prompt context owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain attachment prompt context {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "fn recall_memory(",
+        "async fn run_agent_rounds(",
+        "fn build_prompt_packet(",
+    ] {
+        assert!(
+            !attachments.contains(adjacent),
+            "attachment owner must not absorb adjacent owner {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn composio_transport_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

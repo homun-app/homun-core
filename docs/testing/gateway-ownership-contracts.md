@@ -29,6 +29,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | Owner | Responsabilita' |
 | --- | --- |
 | `crates/desktop-gateway/src/main.rs` | Composition root: costruzione `AppState`, ordine di startup, delega route/background, e codice condiviso non ancora estratto. Non deve riassorbire surface gia' estratte. |
+| `crates/desktop-gateway/src/attachments.rs` | Ingestion allegati composer e contesto prompt bounded per attachment persistiti; non possiede loop chat, memory recall, prompt packet o routing agente. |
 | `crates/desktop-gateway/src/gateway_routes.rs` | Assemblaggio Axum: route protette, route pubbliche, WS, fallback statico e CORS. |
 | `crates/desktop-gateway/src/gateway_boot_maintenance.rs` | Manutenzione sincrona di boot dopo apertura store e prima di recovery/worker, inclusi seed default skills, hash/copy del bundle e manifest HomunCoder. |
 | `crates/desktop-gateway/src/gateway_turn_recovery.rs` | Recovery durable dei turni chat, projection startup, process generation e stato delivery iniziale. |

@@ -14,6 +14,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAIN_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "main.rs")
+ATTACHMENTS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "attachments.rs")
 BROWSER_TOOLS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_browser_tools.rs")
 CHAT_UTILITY_ROUTES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_utility_routes.rs"
@@ -165,6 +166,10 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn claim_payment_approval_from_map(": "payment approval claiming must stay in gateway_payment_approval",
         "fn prune_expired_payment_approvals(": "payment approval expiry must stay in gateway_payment_approval",
         "fn lock_payment_approvals(": "payment approval state lock must stay in gateway_payment_approval",
+        "const ATTACHMENT_TEXT_BUDGET_CHARS:": "attachment prompt context budget must stay in attachments",
+        "const ATTACHMENT_CONTEXT_IMAGES:": "attachment prompt image budget must stay in attachments",
+        "fn append_thread_attachment_context(": "attachment prompt context assembly must stay in attachments",
+        "fn attachment_text_is_ready(": "attachment prompt readiness policy must stay in attachments",
         "fn task_delivers_to_homun(": "Homun check-in task matching must stay in gateway_task_maintenance",
         "fn task_is_live(": "task liveness classification must stay in gateway_task_maintenance",
         "fn cancel_homun_checkins(": "Homun check-in cancellation must stay in gateway_task_maintenance",
@@ -1293,6 +1298,8 @@ def assert_ordered(source: str, snippets: list[str], message: str) -> None:
 def main() -> int:
     with open(MAIN_RS, "r", encoding="utf-8") as handle:
         source = handle.read()
+    with open(ATTACHMENTS_RS, "r", encoding="utf-8") as handle:
+        attachments_source = handle.read()
     with open(BROWSER_TOOLS_RS, "r", encoding="utf-8") as handle:
         browser_tools_source = handle.read()
     with open(CHAT_UTILITY_ROUTES_RS, "r", encoding="utf-8") as handle:
@@ -1346,6 +1353,29 @@ def main() -> int:
     with open(PAYMENT_APPROVAL_RS, "r", encoding="utf-8") as handle:
         payment_approval_source = handle.read()
     main_body = extract_async_main_body(source)
+    assert_contains(source, "mod attachments;", "gateway root must declare attachment owner")
+    for snippet in [
+        "const ATTACHMENT_TEXT_BUDGET_CHARS:",
+        "const ATTACHMENT_CONTEXT_IMAGES:",
+        "pub(crate) fn append_thread_attachment_context(",
+        "fn attachment_text_is_ready(",
+    ]:
+        assert_contains(
+            attachments_source,
+            snippet,
+            "attachment owner must expose bounded prompt context surface",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "fn recall_memory(",
+        "async fn run_agent_rounds(",
+        "fn build_prompt_packet(",
+    ]:
+        assert_not_contains(
+            attachments_source,
+            snippet,
+            "attachment owner must not absorb adjacent chat/runtime surfaces",
+        )
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
     assert_contains(source, "mod gateway_action_confirmations;", "gateway root must declare action confirmation owner")
