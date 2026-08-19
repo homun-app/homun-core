@@ -230,6 +230,7 @@ fn task_executor_surface_has_one_gateway_owner() {
         "fn mark_task_failed(",
         "fn handle_failed_task_run(",
         "fn request_task_executor_approval(",
+        "fn resource_class_label(",
         "fn sync_session_for_task_run(",
         "fn append_task_result_to_chat(",
         "fn append_task_progress_checkpoint(",

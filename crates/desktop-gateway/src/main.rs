@@ -7699,10 +7699,6 @@ fn task_effective_goal(task: &TaskRecord) -> String {
         .to_string()
 }
 
-fn resource_class_label(resource: ResourceClass) -> &'static str {
-    resource.as_str()
-}
-
 #[derive(Debug)]
 struct GatewayError {
     status: StatusCode,
