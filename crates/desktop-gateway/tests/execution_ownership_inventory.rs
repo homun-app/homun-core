@@ -542,6 +542,40 @@ fn role_resolution_has_one_gateway_owner() {
 }
 
 #[test]
+fn model_usage_transport_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let model_routing = production_source(&root.join("src/gateway_model_routing.rs"));
+
+    let owned = [
+        "fn inference_locality(",
+        "fn inference_provider_id(",
+        "async fn recorded_openai_value(",
+    ];
+
+    for pattern in owned {
+        assert!(
+            model_routing.contains(pattern),
+            "model routing owner must contain model usage transport surface {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain model usage transport surface {pattern}"
+        );
+    }
+    for adjacent in [
+        "fn build_browser_inference_router(",
+        "struct GatewayTurnPolicy",
+        "struct GatewayPlanProgress",
+    ] {
+        assert!(
+            !model_routing.contains(adjacent),
+            "model routing owner must not absorb adjacent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn composio_transport_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
