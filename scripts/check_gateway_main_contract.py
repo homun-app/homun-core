@@ -261,6 +261,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn vault_pin_setup(": "vault routes must stay in gateway_vault_routes",
         "async fn vault_pin_verify(": "vault routes must stay in gateway_vault_routes",
         "async fn vault_payment_approval_approve(": "vault payment approval route must stay in gateway_vault_routes",
+        "fn recall_memory_response_with_vault_fallback(": "Vault memory recall fallback must stay in gateway_vault_routes",
+        "fn query_has_sensitive_vault_term(": "Vault sensitive-term recall policy must stay in gateway_vault_routes",
+        "fn vault_reveal_marker(": "Vault reveal-card marker construction must stay in gateway_vault_routes",
         "const FS_AUTHORIZE_OPEN": "local authorization markers must stay in gateway_local_authorization_routes",
         "const SANDBOX_ESCALATE_OPEN": "local authorization markers must stay in gateway_local_authorization_routes",
         "const SANDBOX_READONLY_OPEN": "local authorization markers must stay in gateway_local_authorization_routes",
@@ -1773,6 +1776,21 @@ def main() -> int:
         vault_routes_source,
         "pub(crate) async fn vault_records_list(",
         "vault route owner must expose vault records list route",
+    )
+    assert_contains(
+        vault_routes_source,
+        "pub(crate) fn recall_memory_response_with_vault_fallback(",
+        "vault route owner must expose memory recall fallback",
+    )
+    assert_contains(
+        vault_routes_source,
+        "fn query_has_sensitive_vault_term(",
+        "vault route owner must own sensitive-term recall policy",
+    )
+    assert_contains(
+        vault_routes_source,
+        "fn vault_reveal_marker(",
+        "vault route owner must own reveal-card marker construction",
     )
     assert_contains(
         local_authorization_routes_source,
