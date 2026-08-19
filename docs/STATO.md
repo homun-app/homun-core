@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway memory push prompt context locale).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway memory push prompt context mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#205 mergeate in `main`; #117 browser draft separata; slice memory push prompt context in preparazione locale |
-| HEAD codice verificato | `main` aggiornato a #205; worktree locale stacked `fabio/gateway-memory-push-context-owner` |
+| PR | #108-#116, #118-#206 mergeate in `main`; #117 browser draft separata; prossima slice non-browser da selezionare |
+| HEAD codice verificato | `main` aggiornato a #206 |
 
 ## Dove siamo
 
@@ -181,7 +181,7 @@ Slice Runtime V2 recenti:
   provenance artifact, qualita' artifact e stato workflow da memoria canonica
   escono dal monolite `main.rs`; `recall_memory`, learning inline, prompt
   packet, artifact persistence e loop agente restano owner separati.
-- Estrazione locale stacked `gateway_memory_prompt_context`: contesto push per
+- Estrazione mergeata `gateway_memory_prompt_context`: contesto push per
   decisioni di file (`decisions_for_path`) e anti-rewrite code-map
   (`relevant_code_components_for_prompt`) escono dal monolite `main.rs` e
   restano nello stesso owner bounded; `recall_memory`, tool execution, prompt
