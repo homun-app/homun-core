@@ -759,6 +759,44 @@ fn remote_approval_cancel_has_one_gateway_owner() {
 }
 
 #[test]
+fn actionable_source_resolution_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let actionable_source = production_source(&root.join("src/gateway_actionable_source.rs"));
+
+    let owned = [
+        "enum ActionableSourceResolution",
+        "fn actionable_source_terminal_text(",
+        "fn claim_actionable_source<",
+        "fn resolve_actionable_source<",
+    ];
+
+    for pattern in owned {
+        assert!(
+            actionable_source.contains(pattern),
+            "actionable source owner must contain resolution surface {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain actionable source resolution surface {pattern}"
+        );
+    }
+    for adjacent in [
+        "async fn execute_pending_approval(",
+        "fn composio_execute_tool(",
+        "fn should_claim_payment_approval(",
+        "fn browser_action_requires_payment_grant(",
+        "fn cancel_pending_remote_approval(",
+        "async fn dispatch_remote_approval(",
+    ] {
+        assert!(
+            !actionable_source.contains(adjacent),
+            "actionable source owner must not absorb adjacent execution/payment/remote/browser surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn startup_background_writers_follow_process_fencing() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
