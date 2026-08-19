@@ -77,6 +77,9 @@ RUNTIME_FLAGS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gatew
 AUTOMATION_FORMATTING_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_automation_formatting.rs"
 )
+PROACTIVE_THREADS_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_proactive_threads.rs"
+)
 CHANNELS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_channels.rs")
 MEMORY_QUERY_EMBEDDINGS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_query_embeddings.rs"
@@ -1233,6 +1236,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn automation_trigger_summary(": "automation formatting must stay in gateway_automation_formatting",
         "fn scheduled_thread_sender_for_task_id(": "automation thread formatting must stay in gateway_automation_formatting",
         "fn scheduled_thread_title(": "automation thread formatting must stay in gateway_automation_formatting",
+        "struct ProactiveThreadPlan": "proactive thread planning must stay in gateway_proactive_threads",
+        "fn proactive_thread_plan(": "proactive thread planning must stay in gateway_proactive_threads",
+        "fn proactive_thread_scope(": "proactive thread planning must stay in gateway_proactive_threads",
         "struct AutomationCreateRequest ": "automation request DTOs must stay in gateway_automation_requests",
         "struct AutomationScopeQuery ": "automation request DTOs must stay in gateway_automation_requests",
         "struct AutomationUpdateRequest ": "automation request DTOs must stay in gateway_automation_requests",
@@ -1376,6 +1382,8 @@ def main() -> int:
         runtime_flags_source = handle.read()
     with open(AUTOMATION_FORMATTING_RS, "r", encoding="utf-8") as handle:
         automation_formatting_source = handle.read()
+    with open(PROACTIVE_THREADS_RS, "r", encoding="utf-8") as handle:
+        proactive_threads_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
         action_confirmations_source = handle.read()
     with open(ACTIONABLE_SOURCE_RS, "r", encoding="utf-8") as handle:
@@ -1954,6 +1962,26 @@ def main() -> int:
             automation_formatting_source,
             snippet,
             "automation formatting owner must expose formatting helpers",
+        )
+    assert_contains(
+        source,
+        "mod gateway_proactive_threads;",
+        "gateway root must declare proactive thread owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_proactive_threads::*;",
+        "gateway root must re-export proactive thread owner",
+    )
+    for snippet in [
+        "pub(crate) struct ProactiveThreadPlan",
+        "pub(crate) fn proactive_thread_plan(",
+        "pub(crate) fn proactive_thread_scope(",
+    ]:
+        assert_contains(
+            proactive_threads_source,
+            snippet,
+            "proactive thread owner must expose thread planning helpers",
         )
     assert_contains(
         source,

@@ -105,6 +105,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_runtime_flags.rs` | Flag runtime da environment, inclusi debug diagnostico, trace bounded, memory service e plan reconcile/autoadvance; non possiede loop agente, tool execution o route. |
 | `crates/desktop-gateway/src/gateway_runtime_settings.rs` | DTO e route settings runtime persistiti. |
 | `crates/desktop-gateway/src/gateway_automation_formatting.rs` | Helper puri di formattazione automazioni: recurrence, trigger summary, sender root e titolo thread schedulato; non possiede route, materializzazione task o executor proattivo. |
+| `crates/desktop-gateway/src/gateway_proactive_threads.rs` | Piano thread proattivo: derivazione workspace/source/channel/title, riuso thread schedulato e root stabile per occorrenze; non possiede visible-turn persistence, executor proattivo, route automazioni o browser. |
 | `crates/desktop-gateway/src/gateway_user_preferences.rs` | Preferenze utente/setup: lingua, timezone, Ollama, approval routing. |
 | `crates/desktop-gateway/src/gateway_process_events.rs` | Registri app event, WS process events e usage recorder. |
 
