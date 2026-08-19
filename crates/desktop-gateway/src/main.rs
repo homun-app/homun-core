@@ -209,9 +209,9 @@ use gateway_remote_approval::remote_approval_matches_persisted_message;
 use gateway_remote_approval::{
     ActionableCard, RemoteApprovalIntent, actionable_cards_from_raw_text,
     append_remote_approval_thread_status, approval_continuation_visible_text,
-    approval_progress_reply, create_pending_approval, parse_approval_reply,
-    pending_approval_exists, remote_approval_event_part, remote_approval_intent_from_raw_text,
-    resume_thread_after_approval,
+    approval_progress_reply, cancel_pending_remote_approval, create_pending_approval,
+    parse_approval_reply, pending_approval_exists, remote_approval_event_part,
+    remote_approval_intent_from_raw_text, resume_thread_after_approval,
 };
 #[cfg(test)]
 use gateway_remote_approval::{
@@ -7848,39 +7848,6 @@ fn terminal_actionable_execution_error(
         code,
         message: message.into(),
     }
-}
-
-fn cancel_pending_remote_approval(state: &AppState, code: &str) -> bool {
-    let pending = match lock_store(state)
-        .ok()
-        .and_then(|store| store.pending_remote_approval(code).ok().flatten())
-    {
-        Some(pending) => pending,
-        None => return false,
-    };
-    if pending.requires_source {
-        let (Some(thread_id), Some(message_id)) = (
-            pending.thread_id.as_deref(),
-            pending.source_message_id.as_deref(),
-        ) else {
-            return false;
-        };
-        if resolve_actionable_source(
-            state,
-            thread_id,
-            message_id,
-            |text| actionable_source_terminal_text(text, "Action cancelled."),
-            ActionableSourceResolution::Cancelled,
-        )
-        .is_err()
-        {
-            return false;
-        }
-    }
-    lock_store(state)
-        .ok()
-        .and_then(|store| store.cancel_remote_approval_by_code(code).ok())
-        .unwrap_or(false)
 }
 
 async fn execute_pending_approval(state: &AppState, code: &str) -> String {
