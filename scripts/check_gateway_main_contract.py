@@ -38,6 +38,9 @@ ACTIONABLE_SOURCE_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_actionable_source.rs"
 )
 REMOTE_APPROVAL_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_remote_approval.rs")
+REMOTE_APPROVAL_EXECUTION_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_remote_approval_execution.rs"
+)
 MODEL_ROUTING_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_model_routing.rs")
 CAPABILITY_ROUTING_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_capability_routing.rs"
@@ -194,6 +197,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn remote_approval_effect_request(": "remote approval effect receipt request must stay in gateway_remote_approval",
         "async fn dispatch_remote_approval(": "remote approval channel dispatch must stay in gateway_remote_approval",
         "fn cancel_pending_remote_approval(": "remote approval cancellation must stay in gateway_remote_approval",
+        "async fn execute_pending_approval(": "remote approval execution must stay in gateway_remote_approval_execution",
         "const KNOWN_PLUGINS:": "plugin enablement registry must stay in gateway_plugins",
         "async fn plugins_list(": "plugin enablement listing must stay in gateway_plugins",
         "async fn plugin_toggle(": "plugin enablement toggle must stay in gateway_plugins",
@@ -1300,6 +1304,8 @@ def main() -> int:
         actionable_source_source = handle.read()
     with open(REMOTE_APPROVAL_RS, "r", encoding="utf-8") as handle:
         remote_approval_source = handle.read()
+    with open(REMOTE_APPROVAL_EXECUTION_RS, "r", encoding="utf-8") as handle:
+        remote_approval_execution_source = handle.read()
     with open(CHANNELS_RS, "r", encoding="utf-8") as handle:
         channels_source = handle.read()
     main_body = extract_async_main_body(source)
@@ -1364,6 +1370,23 @@ def main() -> int:
             composio_execution_source,
             snippet,
             "Composio execution owner must not absorb payment/remote/browser surfaces",
+        )
+    assert_contains(
+        remote_approval_execution_source,
+        "pub(crate) async fn execute_pending_approval(",
+        "remote approval execution owner must expose pending approval execution",
+    )
+    for snippet in [
+        "fn should_claim_payment_approval(",
+        "fn claim_payment_approval_for_action(",
+        "fn browser_action_requires_payment_grant(",
+        "async fn dispatch_remote_approval(",
+        "fn create_pending_approval(",
+    ]:
+        assert_not_contains(
+            remote_approval_execution_source,
+            snippet,
+            "remote approval execution owner must not absorb control/payment/browser surfaces",
         )
     assert_contains(
         action_confirmations_source,
@@ -1634,6 +1657,11 @@ def main() -> int:
         source,
         "mod gateway_composio_execution;",
         "gateway root must declare Composio execution owner",
+    )
+    assert_contains(
+        source,
+        "mod gateway_remote_approval_execution;",
+        "gateway root must declare remote approval execution owner",
     )
     assert_contains(source, "mod gateway_connector_errors;", "gateway root must declare connector error owner")
     assert_contains(source, "mod gateway_image_generation;", "gateway root must declare image generation owner")
