@@ -18,6 +18,9 @@ ATTACHMENTS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "attachm
 RECALL_CONTEXT_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_recall_context.rs"
 )
+MEMORY_PROMPT_CONTEXT_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_memory_prompt_context.rs"
+)
 BROWSER_TOOLS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_browser_tools.rs")
 CHAT_UTILITY_ROUTES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_utility_routes.rs"
@@ -147,6 +150,10 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn seed_loop_memory_reads(": "loop memory-read seeding must stay in gateway_recall_context",
         "fn gather_open_loops(": "open-loop recall gathering must stay in gateway_recall_context",
         "fn sanitize_dedup_key(": "dedup-key normalization must stay in gateway_recall_context",
+        "fn artifact_quality_summary(": "artifact quality prompt context must stay in gateway_memory_prompt_context",
+        "fn artifact_provenance_context_for_query(": "artifact provenance prompt context must stay in gateway_memory_prompt_context",
+        "fn producer_workflow_contract(": "producer workflow prompt context must stay in gateway_memory_prompt_context",
+        "fn workflow_status_context_for_query(": "workflow status prompt context must stay in gateway_memory_prompt_context",
         "fn gather_scope_memory(": "proactivity scope memory gathering must stay in gateway_proactivity",
         "fn gather_recent_connector_activity(": "proactivity connector activity gathering must stay in gateway_proactivity",
         "fn parse_review_suggestion(": "proactivity suggestion parsing must stay in gateway_proactivity",
@@ -1306,6 +1313,8 @@ def main() -> int:
         attachments_source = handle.read()
     with open(RECALL_CONTEXT_RS, "r", encoding="utf-8") as handle:
         recall_context_source = handle.read()
+    with open(MEMORY_PROMPT_CONTEXT_RS, "r", encoding="utf-8") as handle:
+        memory_prompt_context_source = handle.read()
     with open(BROWSER_TOOLS_RS, "r", encoding="utf-8") as handle:
         browser_tools_source = handle.read()
     with open(CHAT_UTILITY_ROUTES_RS, "r", encoding="utf-8") as handle:
@@ -1398,6 +1407,33 @@ def main() -> int:
             recall_context_source,
             snippet,
             "recall context owner must not absorb adjacent chat/read-model surfaces",
+        )
+    assert_contains(
+        source,
+        "mod gateway_memory_prompt_context;",
+        "gateway root must declare memory prompt context owner",
+    )
+    for snippet in [
+        "pub(crate) fn artifact_quality_summary(",
+        "pub(crate) fn artifact_provenance_context_for_query(",
+        "pub(crate) fn producer_workflow_contract(",
+        "pub(crate) fn workflow_status_context_for_query(",
+    ]:
+        assert_contains(
+            memory_prompt_context_source,
+            snippet,
+            "memory prompt context owner must expose artifact/workflow prompt helpers",
+        )
+    for snippet in [
+        "fn recall_memory(",
+        "fn recall_stream_payload_from_outcome(",
+        "fn learn_via_service_or_inline(",
+        "async fn run_agent_rounds(",
+    ]:
+        assert_not_contains(
+            memory_prompt_context_source,
+            snippet,
+            "memory prompt context owner must not absorb adjacent memory/chat surfaces",
         )
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
     assert_contains(source, "mod gateway_action_confirmations;", "gateway root must declare action confirmation owner")
