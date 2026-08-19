@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (runtime flags verbose debug locale).**
+> **Ultimo aggiornamento: 2026-08-20 (runtime flags verbose debug mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#208 mergeate in `main`; #117 browser draft separata; slice `runtime_flags_verbose_debug` in preparazione locale |
-| HEAD codice verificato | `main` aggiornato a #208; worktree locale `fabio/runtime-flags-verbose-debug` |
+| PR | #108-#116, #118-#209 mergeate in `main`; #117 browser draft separata; prossima slice non-browser da selezionare |
+| HEAD codice verificato | `main` aggiornato a #209 |
 
 ## Dove siamo
 
@@ -221,7 +221,7 @@ Slice Runtime V2 recenti:
   executor esce dal monolite `main.rs` e resta accanto alla proiezione risorse
   del task executor; browser, execution adapter e loop agente restano owner
   separati.
-- Estrazione locale `gateway_runtime_flags`: il flag diagnostico `HOMUN_DEBUG`
+- Estrazione mergeata `gateway_runtime_flags`: il flag diagnostico `HOMUN_DEBUG`
   (`verbose_debug`) esce dal monolite `main.rs` e vive accanto agli altri flag
   runtime env-backed; loop agente, tool execution e route Composio restano solo
   consumatori del flag.
@@ -918,7 +918,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #208; scegli la prossima slice non-browser owner-level.
+main aggiornato a #209; scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
