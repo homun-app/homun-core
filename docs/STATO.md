@@ -233,6 +233,10 @@ Slice Runtime V2 recenti:
   (`ProactiveThreadPlan`), derivazione `thread_id`/workspace/source/channel/title
   e scope schedulato stabile escono dal monolite `main.rs`; persistenza visible
   turn, executor proattivo, automazioni e browser restano owner separati.
+- Estrazione locale `gateway_shell_tasks`: executor shell read-only,
+  wrapper comando consentito e shaping/redazione JSON output task escono dal
+  monolite `main.rs`; execution runtime, task executor, browser e sandbox
+  restano owner separati.
 - Estrazione mergeata `gateway_model_routing`: DTO `RoutingDecision`, lettura
   `routing-decisions.json` e writer ring-buffer capped escono dal monolite
   `main.rs`; la surface HTTP `/api/routing-decisions` resta in

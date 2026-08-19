@@ -327,6 +327,28 @@ fn proactive_thread_planning_has_one_gateway_owner() {
 }
 
 #[test]
+fn shell_read_only_tasks_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let shell_tasks = production_source(&root.join("src/gateway_shell_tasks.rs"));
+
+    for pattern in [
+        "fn redact_json_for_task_output(",
+        "fn execute_shell_read_only_task(",
+        "fn run_read_only_command(",
+    ] {
+        assert!(
+            shell_tasks.contains(pattern),
+            "shell task owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain shell task item {pattern}"
+        );
+    }
+}
+
+#[test]
 fn runtime_plan_state_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
