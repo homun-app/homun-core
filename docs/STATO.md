@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-actionable-source` |
-| Branch | `fabio/gateway-actionable-source` |
-| PR | #108-#116, #118-#193 mergeate in `main`; #117 browser draft separata; #194 `gateway_actionable_source` aperta |
-| HEAD codice verificato | branch `fabio/gateway-actionable-source` sopra `main` aggiornato a #193 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app` |
+| Branch | `main` |
+| PR | #108-#116, #118-#194 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #194 |
 
 ## Dove siamo
 
@@ -137,7 +137,7 @@ Slice Runtime V2 recenti:
   approval da reply canale esce dal monolite `main.rs` e vive in
   `gateway_remote_approval`; actionable source resolution, execute pending,
   payment approval e browser restano fuori dallo scope.
-- Slice corrente `gateway_actionable_source`: `ActionableSourceResolution`,
+- Estrazione mergeata `gateway_actionable_source`: `ActionableSourceResolution`,
   claim/rewrite terminale, `claim_actionable_source`,
   `resolve_actionable_source` e terminal formatter escono dal monolite
   `main.rs` e vivono in `gateway_actionable_source`; execute pending, payment
@@ -813,19 +813,16 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#193: slice owner-level successive mergeate in `main`, fino a
-  `gateway_remote_approval_cancel`; `main` verificato e riallineato a #193
-  prima della slice corrente.
+- #143-#194: slice owner-level successive mergeate in `main`, fino a
+  `gateway_actionable_source`; `main` verificato e riallineato a #194.
 
 PR aperte:
 
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
-- #194 `gateway_actionable_source`, PR non-browser corrente.
 
 Branch corrente:
 
-- `fabio/gateway-actionable-source`: branch sopra `main` aggiornato
-  a #193; contiene solo la slice `gateway_actionable_source`, aperta come #194.
+- `main`: aggiornato al merge #194; nessun branch non-browser locale aperto.
 
 ## Debito residuo
 
@@ -849,19 +846,16 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Attendere CI e merge della PR #194 `gateway_actionable_source`.
-2. Dopo merge gateway actionable source, aggiornare `main` e
-   riprendere la prossima slice non-browser solo dopo nuova lettura owner-level
+1. Scegliere la prossima slice non-browser solo dopo nuova lettura owner-level
    di `main.rs`.
-3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
+2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
 ## Prompt di ripartenza
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/gateway-actionable-source se la PR #194 actionable source e' ancora aperta;
-altrimenti main aggiornato a #194/#successive e scegli la prossima slice non-browser owner-level.
+main aggiornato a #194/#successive; scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
