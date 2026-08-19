@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway composio confirmation locale).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway composio confirmation PR).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-composio-confirmation-owner` |
 | Branch | `fabio/gateway-composio-confirmation-owner` |
-| PR | #108-#116, #118-#188 mergeate in `main`; #117 browser draft separata; slice `gateway_composio_confirmation` locale non ancora in PR |
-| HEAD codice verificato | branch `fabio/gateway-composio-confirmation-owner` sopra `main` aggiornato a #188 |
+| PR | #108-#116, #118-#188 mergeate in `main`; #117 browser draft separata; #189 `gateway_composio_confirmation` aperta |
+| HEAD codice verificato | PR #189 `fabio/gateway-composio-confirmation-owner` sopra `main` aggiornato a #188 |
 
 ## Dove siamo
 
