@@ -152,7 +152,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn sanitize_dedup_key(": "dedup-key normalization must stay in gateway_recall_context",
         "fn artifact_quality_summary(": "artifact quality prompt context must stay in gateway_memory_prompt_context",
         "fn artifact_provenance_context_for_query(": "artifact provenance prompt context must stay in gateway_memory_prompt_context",
+        "fn decisions_for_path(": "file-decision prompt context must stay in gateway_memory_prompt_context",
         "fn producer_workflow_contract(": "producer workflow prompt context must stay in gateway_memory_prompt_context",
+        "fn relevant_code_components_for_prompt(": "code-map prompt context must stay in gateway_memory_prompt_context",
         "fn workflow_status_context_for_query(": "workflow status prompt context must stay in gateway_memory_prompt_context",
         "fn gather_scope_memory(": "proactivity scope memory gathering must stay in gateway_proactivity",
         "fn gather_recent_connector_activity(": "proactivity connector activity gathering must stay in gateway_proactivity",
@@ -1416,13 +1418,15 @@ def main() -> int:
     for snippet in [
         "pub(crate) fn artifact_quality_summary(",
         "pub(crate) fn artifact_provenance_context_for_query(",
+        "pub(crate) fn decisions_for_path(",
         "pub(crate) fn producer_workflow_contract(",
+        "pub(crate) fn relevant_code_components_for_prompt(",
         "pub(crate) fn workflow_status_context_for_query(",
     ]:
         assert_contains(
             memory_prompt_context_source,
             snippet,
-            "memory prompt context owner must expose artifact/workflow prompt helpers",
+            "memory prompt context owner must expose bounded prompt helpers",
         )
     for snippet in [
         "fn recall_memory(",

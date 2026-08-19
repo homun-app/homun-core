@@ -4592,11 +4592,15 @@ loaded with use_skill):\n{}",
         // Per-file recall: surface past DECISIONS about this file so the
         // agent remembers WHY it's like this instead of re-deriving it.
         let st2 = ctx.state.clone();
-        if let Some(note) =
-            tokio::task::spawn_blocking(move || decisions_for_path(&st2, &recall_path))
-                .await
-                .ok()
-                .flatten()
+        if let Some(note) = tokio::task::spawn_blocking(move || {
+            let facade = memory_facade(&st2);
+            let user = gateway_memory_user_id();
+            let workspace = gateway_memory_workspace_id();
+            decisions_for_path(facade, &user, &workspace, &recall_path)
+        })
+        .await
+        .ok()
+        .flatten()
         {
             out.push_str("\n\n");
             out.push_str(&note);
