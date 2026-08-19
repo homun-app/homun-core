@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway remote approval cancel locale).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway actionable source locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-remote-approval-cancel` |
-| Branch | `fabio/gateway-remote-approval-cancel` |
-| PR | #108-#116, #118-#192 mergeate in `main`; #117 browser draft separata; slice `gateway_remote_approval_cancel` locale non ancora in PR |
-| HEAD codice verificato | branch `fabio/gateway-remote-approval-cancel` sopra `main` aggiornato a #192 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-actionable-source` |
+| Branch | `fabio/gateway-actionable-source` |
+| PR | #108-#116, #118-#193 mergeate in `main`; #117 browser draft separata; #194 `gateway_actionable_source` aperta |
+| HEAD codice verificato | branch `fabio/gateway-actionable-source` sopra `main` aggiornato a #193 |
 
 ## Dove siamo
 
@@ -133,10 +133,15 @@ Slice Runtime V2 recenti:
   `main.rs` e vivono in `gateway_remote_approval`; actionable source
   resolution, execute pending, payment approval e browser restano fuori dallo
   scope.
-- Slice corrente `gateway_remote_approval_cancel`: cancellazione pending remote
+- Estrazione mergeata `gateway_remote_approval_cancel`: cancellazione pending remote
   approval da reply canale esce dal monolite `main.rs` e vive in
   `gateway_remote_approval`; actionable source resolution, execute pending,
   payment approval e browser restano fuori dallo scope.
+- Slice corrente `gateway_actionable_source`: `ActionableSourceResolution`,
+  claim/rewrite terminale, `claim_actionable_source`,
+  `resolve_actionable_source` e terminal formatter escono dal monolite
+  `main.rs` e vivono in `gateway_actionable_source`; execute pending, payment
+  approval, remote approval dispatch/cancel e browser restano fuori dallo scope.
 - Estrazione locale `gateway_write_tool_allowlist`: persistenza e matching
   "always allow" per write-tool Composio/MCP escono dal monolite `main.rs`;
   il file storico `composio-tool-allow.json` resta invariato per compatibilita',
@@ -247,7 +252,7 @@ Slice Runtime V2 recenti:
   plan-marker incompleti esce dal monolite `main.rs` e vive in
   `gateway_model_routing`, accanto al completion judge no-plan; `GatewayTurnPolicy`,
   `GatewayPlanProgress` e il loop agente restano owner separati.
-- Slice corrente `gateway_role_resolution`: la risoluzione semantica
+- Estrazione mergeata `gateway_role_resolution`: la risoluzione semantica
   `resolve_role_for_task` esce dal monolite `main.rs` e vive in
   `gateway_model_routing`, accanto a `router_for_role` e al log delle decisioni
   routing; wrapper browser, `GatewayTurnPolicy`, `GatewayPlanProgress` e loop
@@ -808,18 +813,19 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#192: slice owner-level successive mergeate in `main`, fino a
-  `gateway_remote_approval_dispatch`; `main` verificato e riallineato a #192
+- #143-#193: slice owner-level successive mergeate in `main`, fino a
+  `gateway_remote_approval_cancel`; `main` verificato e riallineato a #193
   prima della slice corrente.
 
 PR aperte:
 
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
+- #194 `gateway_actionable_source`, PR non-browser corrente.
 
 Branch corrente:
 
-- `fabio/gateway-remote-approval-cancel`: branch sopra `main` aggiornato
-  a #192; contiene solo la slice `gateway_remote_approval_cancel`.
+- `fabio/gateway-actionable-source`: branch sopra `main` aggiornato
+  a #193; contiene solo la slice `gateway_actionable_source`, aperta come #194.
 
 ## Debito residuo
 
@@ -843,9 +849,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Completare gate, commit e PR piccola per
-   `gateway_remote_approval_cancel`.
-2. Dopo merge gateway remote approval cancel, aggiornare `main` e
+1. Attendere CI e merge della PR #194 `gateway_actionable_source`.
+2. Dopo merge gateway actionable source, aggiornare `main` e
    riprendere la prossima slice non-browser solo dopo nuova lettura owner-level
    di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
@@ -855,8 +860,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/gateway-remote-approval-cancel se la slice remote approval cancel e' ancora da aprire o e' aperta;
-altrimenti main aggiornato a #192/#successive e scegli la prossima slice non-browser owner-level.
+branch fabio/gateway-actionable-source se la PR #194 actionable source e' ancora aperta;
+altrimenti main aggiornato a #194/#successive e scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

@@ -31,6 +31,9 @@ IMAGE_GENERATION_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "ga
 ACTION_CONFIRMATIONS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_action_confirmations.rs"
 )
+ACTIONABLE_SOURCE_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_actionable_source.rs"
+)
 REMOTE_APPROVAL_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_remote_approval.rs")
 MODEL_ROUTING_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_model_routing.rs")
 CAPABILITY_ROUTING_RS = os.path.join(
@@ -538,6 +541,11 @@ def forbidden_root_snippets() -> dict[str, str]:
         "const COMPOSIO_CONFIRM_OPEN:": "Composio confirmation marker constants must stay in gateway_action_confirmations",
         "fn composio_confirm_matches(": "Composio confirmation matching must stay in gateway_action_confirmations",
         "fn rewrite_confirm_to_done(": "Composio confirmation rewrite must stay in gateway_action_confirmations",
+        "enum ActionableSourceResolution": "actionable source resolution must stay in gateway_actionable_source",
+        "fn actionable_source_terminal_text(": "actionable source terminal text must stay in gateway_actionable_source",
+        "fn actionable_claim_error(": "actionable source claim errors must stay in gateway_actionable_source",
+        "fn claim_actionable_source<": "actionable source claim must stay in gateway_actionable_source",
+        "fn resolve_actionable_source<": "actionable source resolution must stay in gateway_actionable_source",
         "fn mcp_chat_tool_name(": "MCP chat tool naming must stay in gateway_mcp_chat_tools",
         "fn parse_mcp_chat_name(": "MCP chat tool parsing must stay in gateway_mcp_chat_tools",
         "struct McpChatTools": "MCP chat tool catalogue DTO must stay in gateway_mcp_chat_tools",
@@ -1274,12 +1282,40 @@ def main() -> int:
         brain_runtime_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
         action_confirmations_source = handle.read()
+    with open(ACTIONABLE_SOURCE_RS, "r", encoding="utf-8") as handle:
+        actionable_source_source = handle.read()
     with open(REMOTE_APPROVAL_RS, "r", encoding="utf-8") as handle:
         remote_approval_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
     assert_contains(source, "mod gateway_action_confirmations;", "gateway root must declare action confirmation owner")
+    assert_contains(source, "mod gateway_actionable_source;", "gateway root must declare actionable source owner")
+    for snippet in [
+        "pub(crate) enum ActionableSourceResolution",
+        "pub(crate) fn actionable_source_terminal_text(",
+        "pub(crate) fn actionable_claim_error(",
+        "pub(crate) fn claim_actionable_source<",
+        "pub(crate) fn resolve_actionable_source<",
+    ]:
+        assert_contains(
+            actionable_source_source,
+            snippet,
+            "actionable source owner must expose exact source claim/resolution helpers",
+        )
+    for snippet in [
+        "async fn execute_pending_approval(",
+        "fn composio_execute_tool(",
+        "fn should_claim_payment_approval(",
+        "fn browser_action_requires_payment_grant(",
+        "fn cancel_pending_remote_approval(",
+        "async fn dispatch_remote_approval(",
+    ]:
+        assert_not_contains(
+            actionable_source_source,
+            snippet,
+            "actionable source owner must not absorb execution/payment/remote/browser surfaces",
+        )
     assert_contains(
         action_confirmations_source,
         "pub(crate) const COMPOSIO_CONFIRM_OPEN:",
