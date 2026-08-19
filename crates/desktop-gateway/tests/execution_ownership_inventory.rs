@@ -610,6 +610,44 @@ fn composio_confirmation_markers_have_one_gateway_owner() {
 }
 
 #[test]
+fn remote_approval_control_helpers_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let remote_approval = production_source(&root.join("src/gateway_remote_approval.rs"));
+
+    let owned = [
+        "fn approval_expires_at_secs(",
+        "fn create_pending_approval(",
+        "fn pending_approval_exists(",
+        "fn approval_progress_reply(",
+        "fn parse_approval_reply(",
+    ];
+
+    for pattern in owned {
+        assert!(
+            remote_approval.contains(pattern),
+            "remote approval owner must contain control helper {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain remote approval control helper {pattern}"
+        );
+    }
+    for adjacent in [
+        "async fn execute_pending_approval(",
+        "fn composio_execute_tool(",
+        "fn should_claim_payment_approval(",
+        "async fn dispatch_remote_approval(",
+        "fn browser_action_requires_payment_grant(",
+    ] {
+        assert!(
+            !remote_approval.contains(adjacent),
+            "remote approval control owner must not absorb adjacent execution/payment/browser surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn startup_background_writers_follow_process_fencing() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

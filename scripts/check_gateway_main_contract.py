@@ -31,6 +31,7 @@ IMAGE_GENERATION_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "ga
 ACTION_CONFIRMATIONS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_action_confirmations.rs"
 )
+REMOTE_APPROVAL_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_remote_approval.rs")
 MODEL_ROUTING_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_model_routing.rs")
 CAPABILITY_ROUTING_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_capability_routing.rs"
@@ -170,6 +171,11 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn remote_approval_intent_from_raw_text(": "remote approval marker parsing must stay in gateway_remote_approval",
         "fn actionable_cards_from_raw_text(": "actionable card parsing must stay in gateway_remote_approval",
         "async fn activate_remote_approvals_from_message(": "remote approval source binding and dispatch must stay in gateway_remote_approval",
+        "fn approval_expires_at_secs(": "remote approval expiry policy must stay in gateway_remote_approval",
+        "fn create_pending_approval(": "remote approval creation must stay in gateway_remote_approval",
+        "fn pending_approval_exists(": "remote approval control checks must stay in gateway_remote_approval",
+        "fn approval_progress_reply(": "remote approval channel progress copy must stay in gateway_remote_approval",
+        "fn parse_approval_reply(": "remote approval channel reply parsing must stay in gateway_remote_approval",
         "const KNOWN_PLUGINS:": "plugin enablement registry must stay in gateway_plugins",
         "async fn plugins_list(": "plugin enablement listing must stay in gateway_plugins",
         "async fn plugin_toggle(": "plugin enablement toggle must stay in gateway_plugins",
@@ -1257,6 +1263,8 @@ def main() -> int:
         brain_runtime_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
         action_confirmations_source = handle.read()
+    with open(REMOTE_APPROVAL_RS, "r", encoding="utf-8") as handle:
+        remote_approval_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1314,6 +1322,17 @@ def main() -> int:
     assert_contains(source, "mod gateway_task_maintenance;", "gateway root must declare task maintenance owner")
     assert_contains(source, "mod gateway_memory_background;", "gateway root must declare memory background owner")
     assert_contains(source, "mod gateway_remote_approval;", "gateway root must declare remote approval owner")
+    for snippet in [
+        "pub(crate) fn create_pending_approval(",
+        "pub(crate) fn pending_approval_exists(",
+        "pub(crate) fn approval_progress_reply(",
+        "pub(crate) fn parse_approval_reply(",
+    ]:
+        assert_contains(
+            remote_approval_source,
+            snippet,
+            "remote approval owner must expose approval control helpers",
+        )
     assert_contains(source, "mod gateway_plugins;", "gateway root must declare plugin enablement owner")
     assert_contains(source, "mod gateway_plugin_packages;", "gateway root must declare plugin package owner")
     assert_contains(source, "mod gateway_chat_threads;", "gateway root must declare chat thread owner")
