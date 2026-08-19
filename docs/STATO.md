@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway composio confirmation PR).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway remote approval control locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-composio-confirmation-owner` |
-| Branch | `fabio/gateway-composio-confirmation-owner` |
-| PR | #108-#116, #118-#188 mergeate in `main`; #117 browser draft separata; #189 `gateway_composio_confirmation` aperta |
-| HEAD codice verificato | PR #189 `fabio/gateway-composio-confirmation-owner` sopra `main` aggiornato a #188 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-remote-approval-control` |
+| Branch | `fabio/gateway-remote-approval-control` |
+| PR | #108-#116, #118-#189 mergeate in `main`; #117 browser draft separata; slice `gateway_remote_approval_control` locale non ancora in PR |
+| HEAD codice verificato | branch `fabio/gateway-remote-approval-control` sopra `main` aggiornato a #189 |
 
 ## Dove siamo
 
@@ -113,11 +113,16 @@ Slice Runtime V2 recenti:
   dal monolite `main.rs`; il modulo orchestra confirmation-card claim, marker
   allow-server e resume/rewrite terminale delegando runtime, timeout e parser
   conferme agli owner gia' estratti.
-- Slice corrente `gateway_composio_confirmation`: marker, matching esatto e
+- Estrazione mergeata `gateway_composio_confirmation`: marker, matching esatto e
   rewrite terminale della confirmation card Composio escono dal monolite
   `main.rs` e si affiancano ai marker MCP in `gateway_action_confirmations`;
   `composio_execute_tool`, payment approval e remote approval restano fuori
   dallo scope.
+- Slice corrente `gateway_remote_approval_control`: creazione approvazioni
+  remote, scadenza, controllo pending, parsing risposte OK/NO e testo
+  progresso escono dal monolite `main.rs` e vivono in
+  `gateway_remote_approval`; execute pending, dispatch remoto, payment approval
+  e browser restano fuori dallo scope.
 - Estrazione locale `gateway_write_tool_allowlist`: persistenza e matching
   "always allow" per write-tool Composio/MCP escono dal monolite `main.rs`;
   il file storico `composio-tool-allow.json` resta invariato per compatibilita',

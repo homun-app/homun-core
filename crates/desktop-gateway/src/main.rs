@@ -207,7 +207,8 @@ pub(crate) use gateway_project_graph_routes::*;
 #[cfg(test)]
 use gateway_remote_approval::remote_approval_matches_persisted_message;
 use gateway_remote_approval::{
-    ActionableCard, RemoteApprovalIntent, actionable_cards_from_raw_text,
+    ActionableCard, RemoteApprovalIntent, actionable_cards_from_raw_text, approval_progress_reply,
+    create_pending_approval, parse_approval_reply, pending_approval_exists,
     remote_approval_event_part, remote_approval_intent_from_raw_text,
 };
 pub(crate) use gateway_runtime_settings::*;
@@ -7407,93 +7408,6 @@ fn verbose_debug() -> bool {
     std::env::var("HOMUN_DEBUG").is_ok()
 }
 
-fn approval_expires_at_secs() -> i64 {
-    OffsetDateTime::now_utc().unix_timestamp() + 600
-}
-
-/// Register a durable remote approval. For chat-originated cards
-/// `requires_source=true`: the row is not executable until the persisted
-/// assistant message binds to the same approval_id marker.
-fn create_pending_approval(
-    state: &AppState,
-    tool: &str,
-    args: &serde_json::Value,
-    label: &str,
-    thread_id: Option<&str>,
-    requires_source: bool,
-) -> Option<RemoteApprovalRow> {
-    let prefs = load_user_prefs();
-    let channel = prefs.approval_channel.as_deref().unwrap_or("in_app");
-    let target = prefs.approval_target.unwrap_or_default();
-    if target.trim().is_empty() || channel == "in_app" {
-        return None;
-    }
-    if requires_source && thread_id.is_none() {
-        return None;
-    }
-    for _ in 0..8 {
-        let raw = uuid::Uuid::new_v4().simple().to_string();
-        let approval_id = format!("approval_{raw}");
-        let code = raw[..6].to_uppercase();
-        let expires_at = approval_expires_at_secs();
-        let objective_revision = thread_id
-            .and_then(|thread_id| objective_contract_for_execution(state, Some(thread_id)))
-            .map(|objective| objective.revision);
-        let input = RemoteApprovalInput {
-            approval_id: &approval_id,
-            code: &code,
-            tool,
-            arguments: args,
-            label,
-            thread_id,
-            objective_revision,
-            requires_source,
-            expires_at,
-        };
-        match lock_store(state).and_then(|store| {
-            store
-                .create_remote_approval(&input)
-                .map_err(GatewayError::store)
-        }) {
-            Ok(()) => {
-                return Some(RemoteApprovalRow {
-                    approval_id,
-                    code,
-                    tool: tool.to_string(),
-                    arguments: args.clone(),
-                    label: label.to_string(),
-                    thread_id: thread_id.map(ToString::to_string),
-                    objective_revision,
-                    source_message_id: None,
-                    requires_source,
-                    status: "pending".to_string(),
-                    expires_at,
-                    dispatched_at: None,
-                });
-            }
-            Err(error) => {
-                if verbose_debug() {
-                    eprintln!("remote approval create failed: {}", error.message);
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Non-consuming check: is there a live pending approval with this code? Lets
-/// channel handlers treat `OK/NO <word>` as control replies only for real codes.
-fn pending_approval_exists(state: &AppState, code: &str) -> bool {
-    lock_store(state)
-        .ok()
-        .and_then(|store| store.pending_remote_approval(code).ok().flatten())
-        .is_some()
-}
-
-fn approval_progress_reply(code: &str) -> String {
-    format!("⏳ Ricevuto ({code}). Verifico la card salvata e avvio l'azione…")
-}
-
 fn approval_action_target(args: &serde_json::Value) -> Option<String> {
     args.get("path")
         .and_then(serde_json::Value::as_str)
@@ -8514,23 +8428,6 @@ async fn dispatch_remote_approval(
         "channel": channel,
         "status": "completed",
     })))
-}
-
-/// Parse a remote-approval control reply: `OK 7F3` / `SI 7F3` (approve) or `NO 7F3` (cancel).
-/// Returns `(approve, code)`. Tolerant of leading emoji/spacing; case-insensitive.
-fn parse_approval_reply(text: &str) -> Option<(bool, String)> {
-    let t = text.trim();
-    let mut it = t.split_whitespace();
-    let verb = it.next()?.to_ascii_uppercase();
-    let code = it.next()?.trim().to_ascii_uppercase();
-    if code.is_empty() {
-        return None;
-    }
-    match verb.as_str() {
-        "OK" | "SI" | "SÌ" | "YES" | "APPROVA" => Some((true, code)),
-        "NO" | "ANNULLA" | "CANCEL" => Some((false, code)),
-        _ => None,
-    }
 }
 
 fn send_message_tool_schema() -> serde_json::Value {
