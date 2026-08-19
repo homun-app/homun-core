@@ -13,7 +13,7 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-actionable-source` |
 | Branch | `fabio/gateway-actionable-source` |
-| PR | #108-#116, #118-#193 mergeate in `main`; #117 browser draft separata; slice `gateway_actionable_source` locale non ancora in PR |
+| PR | #108-#116, #118-#193 mergeate in `main`; #117 browser draft separata; #194 `gateway_actionable_source` aperta |
 | HEAD codice verificato | branch `fabio/gateway-actionable-source` sopra `main` aggiornato a #193 |
 
 ## Dove siamo
@@ -820,11 +820,12 @@ PR mergeate:
 PR aperte:
 
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
+- #194 `gateway_actionable_source`, PR non-browser corrente.
 
 Branch corrente:
 
 - `fabio/gateway-actionable-source`: branch sopra `main` aggiornato
-  a #193; contiene solo la slice `gateway_actionable_source`.
+  a #193; contiene solo la slice `gateway_actionable_source`, aperta come #194.
 
 ## Debito residuo
 
@@ -848,8 +849,7 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Completare gate, commit e PR piccola per
-   `gateway_actionable_source`.
+1. Attendere CI e merge della PR #194 `gateway_actionable_source`.
 2. Dopo merge gateway actionable source, aggiornare `main` e
    riprendere la prossima slice non-browser solo dopo nuova lettura owner-level
    di `main.rs`.
@@ -860,8 +860,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/gateway-actionable-source se la slice actionable source e' ancora da aprire o e' aperta;
-altrimenti main aggiornato a #193/#successive e scegli la prossima slice non-browser owner-level.
+branch fabio/gateway-actionable-source se la PR #194 actionable source e' ancora aperta;
+altrimenti main aggiornato a #194/#successive e scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
