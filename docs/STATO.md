@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway Composio execution locale).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway Composio execution mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#196 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #196 |
+| PR | #108-#116, #118-#197 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #197 |
 
 ## Dove siamo
 
@@ -163,7 +163,7 @@ Slice Runtime V2 recenti:
   classificazione read/write e suggest capability escono dal monolite
   `main.rs`; `composio_execute_tool`, payment approval claim e remote approval
   dispatch restano owner separati.
-- Estrazione locale `gateway_composio_execution`: dispatcher
+- Estrazione mergeata `gateway_composio_execution`: dispatcher
   `composio_execute_tool`, DTO/route `/api/composio/execute`, claim source-card,
   allow-once/always, rilevamento `successful:false`, rewrite terminale e resume
   post-execute escono dal monolite `main.rs`; payment approval, pending remote
@@ -823,8 +823,8 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#196: slice owner-level successive mergeate in `main`, fino a
-  `gateway_channels`; `main` verificato e riallineato a #196.
+- #143-#197: slice owner-level successive mergeate in `main`, fino a
+  `gateway_composio_execution`; `main` verificato e riallineato a #197.
 
 PR aperte:
 
@@ -832,8 +832,7 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/gateway-composio-execution-owner`: worktree locale per spostare
-  la surface execute Composio nell'owner `gateway_composio_execution`.
+- `main`: aggiornato al merge #197; nessun branch non-browser locale aperto.
 
 ## Debito residuo
 
@@ -866,7 +865,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #196/#successive; scegli la prossima slice non-browser owner-level.
+main aggiornato a #197/#successive; scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
