@@ -486,6 +486,32 @@ fn turn_completion_judge_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_output_completion_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let model_routing = production_source(&root.join("src/gateway_model_routing.rs"));
+
+    let owned = ["fn agent_output_incomplete_reason("];
+
+    for pattern in owned {
+        assert!(
+            model_routing.contains(pattern),
+            "model routing owner must contain agent output completion surface {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain agent output completion surface {pattern}"
+        );
+    }
+    for adjacent in ["struct GatewayTurnPolicy", "struct GatewayPlanProgress"] {
+        assert!(
+            !model_routing.contains(adjacent),
+            "model routing owner must not absorb adjacent loop port {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn composio_transport_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
