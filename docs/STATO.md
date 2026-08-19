@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway remote approval continuation locale).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway remote approval continuation, PR #191).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,7 +13,7 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-remote-approval-continuation` |
 | Branch | `fabio/gateway-remote-approval-continuation` |
-| PR | #108-#116, #118-#190 mergeate in `main`; #117 browser draft separata; slice `gateway_remote_approval_continuation` locale non ancora in PR |
+| PR | #108-#116, #118-#190 mergeate in `main`; #117 browser draft separata; #191 `gateway_remote_approval_continuation` aperta |
 | HEAD codice verificato | branch `fabio/gateway-remote-approval-continuation` sopra `main` aggiornato a #190 |
 
 ## Dove siamo
