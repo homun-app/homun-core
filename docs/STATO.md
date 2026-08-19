@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway remote approval continuation, PR #191).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway remote approval dispatch locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-remote-approval-continuation` |
-| Branch | `fabio/gateway-remote-approval-continuation` |
-| PR | #108-#116, #118-#190 mergeate in `main`; #117 browser draft separata; #191 `gateway_remote_approval_continuation` aperta |
-| HEAD codice verificato | branch `fabio/gateway-remote-approval-continuation` sopra `main` aggiornato a #190 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-remote-approval-dispatch` |
+| Branch | `fabio/gateway-remote-approval-dispatch` |
+| PR | #108-#116, #118-#191 mergeate in `main`; #117 browser draft separata; slice `gateway_remote_approval_dispatch` locale non ancora in PR |
+| HEAD codice verificato | branch `fabio/gateway-remote-approval-dispatch` sopra `main` aggiornato a #191 |
 
 ## Dove siamo
 
@@ -123,11 +123,16 @@ Slice Runtime V2 recenti:
   progresso escono dal monolite `main.rs` e vivono in
   `gateway_remote_approval`; execute pending, dispatch remoto, payment approval
   e browser restano fuori dallo scope.
-- Slice corrente `gateway_remote_approval_continuation`: status thread,
+- Estrazione mergeata `gateway_remote_approval_continuation`: status thread,
   target formatter, source-user lookup e prompt/input continuation
   post-approval escono dal monolite `main.rs` e vivono in
   `gateway_remote_approval`; actionable source resolution, execute pending,
   dispatch remoto, payment approval e browser restano fuori dallo scope.
+- Slice corrente `gateway_remote_approval_dispatch`: richiesta effect receipt e
+  dispatch canale Telegram/WhatsApp delle approval remote escono dal monolite
+  `main.rs` e vivono in `gateway_remote_approval`; actionable source
+  resolution, execute pending, payment approval e browser restano fuori dallo
+  scope.
 - Estrazione locale `gateway_write_tool_allowlist`: persistenza e matching
   "always allow" per write-tool Composio/MCP escono dal monolite `main.rs`;
   il file storico `composio-tool-allow.json` resta invariato per compatibilita',
@@ -799,9 +804,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#186: slice owner-level successive mergeate in `main`, fino a
-  `gateway_composio_transport`; `main` verificato e riallineato a #186
-  prima della slice corrente.
+- #143-#191: slice owner-level successive mergeate in `main`, fino a
+  `gateway_remote_approval_continuation`; `main` verificato e riallineato a
+  #191 prima della slice corrente.
 
 PR aperte:
 
@@ -809,8 +814,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/gateway-remote-approval-continuation`: branch sopra `main` aggiornato
-  a #190; contiene solo la slice `gateway_remote_approval_continuation`.
+- `fabio/gateway-remote-approval-dispatch`: branch sopra `main` aggiornato
+  a #191; contiene solo la slice `gateway_remote_approval_dispatch`.
 
 ## Debito residuo
 
@@ -835,8 +840,8 @@ Branch corrente:
 ## Prossimo lavoro
 
 1. Completare gate, commit e PR piccola per
-   `gateway_remote_approval_continuation`.
-2. Dopo merge gateway remote approval continuation, aggiornare `main` e
+   `gateway_remote_approval_dispatch`.
+2. Dopo merge gateway remote approval dispatch, aggiornare `main` e
    riprendere la prossima slice non-browser solo dopo nuova lettura owner-level
    di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
@@ -846,8 +851,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/gateway-remote-approval-continuation se la slice remote approval continuation e' ancora da aprire o e' aperta;
-altrimenti main aggiornato a #190/#successive e scegli la prossima slice non-browser owner-level.
+branch fabio/gateway-remote-approval-dispatch se la slice remote approval dispatch e' ancora da aprire o e' aperta;
+altrimenti main aggiornato a #191/#successive e scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
