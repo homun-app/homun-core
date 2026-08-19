@@ -767,6 +767,7 @@ fn actionable_source_resolution_has_one_gateway_owner() {
     let owned = [
         "enum ActionableSourceResolution",
         "fn actionable_source_terminal_text(",
+        "fn terminal_actionable_execution_error(",
         "fn claim_actionable_source<",
         "fn resolve_actionable_source<",
     ];

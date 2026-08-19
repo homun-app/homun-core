@@ -7422,34 +7422,6 @@ fn verbose_debug() -> bool {
 /// ORIGIN thread (if known) so a multi-step task CONTINUES instead of dead-stopping at the
 /// `pending_confirm` break. Spawned so the caller (an HTTP handler / channel callback) returns at
 /// once; the continuation streams onto the thread (the UI reattaches via `active_streams`). The
-/// Once an endpoint has proved a request came from its exact persisted card,
-/// every terminal executor error must release that source before being returned
-/// to the caller. This keeps a retryable UI error from becoming a permanent
-/// `WaitingUserApproval`/`ThreadBusy` deadlock.
-fn terminal_actionable_execution_error(
-    state: &AppState,
-    thread_id: Option<&str>,
-    message_id: Option<&str>,
-    code: &'static str,
-    message: impl Into<String>,
-    source_note: &str,
-) -> GatewayError {
-    if let (Some(thread_id), Some(message_id)) = (thread_id, message_id) {
-        let _ = resolve_actionable_source(
-            state,
-            thread_id,
-            message_id,
-            |text| actionable_source_terminal_text(text, source_note),
-            ActionableSourceResolution::Failed,
-        );
-    }
-    GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code,
-        message: message.into(),
-    }
-}
-
 async fn execute_pending_approval(state: &AppState, code: &str) -> String {
     let pending = match lock_store(state)
         .ok()
