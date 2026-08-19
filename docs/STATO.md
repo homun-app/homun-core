@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway payment approval locale).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway payment approval mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-payment-approval-owner` |
-| Branch | `fabio/gateway-payment-approval-owner` |
-| PR | #108-#116, #118-#201 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | branch locale da `main` #201 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app` |
+| Branch | `main` |
+| PR | #108-#116, #118-#202 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #202 |
 
 ## Dove siamo
 
@@ -164,7 +164,7 @@ Slice Runtime V2 recenti:
   policy termini sensibili e costruzione reveal-card metadata-only escono dal
   monolite `main.rs`; `recall_memory` e il servizio memoria restano fuori dallo
   scope.
-- Estrazione locale `gateway_payment_approval`: grant payment approval,
+- Estrazione mergeata `gateway_payment_approval`: grant payment approval,
   sostituzione CVV one-shot, reject-before-claim, claim/validazione finale e
   lock stato payment escono dal monolite `main.rs`; route Vault, marker payment
   card, browser enforcement e remote approval restano owner separati.
@@ -845,11 +845,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#201: slice owner-level successive mergeate in `main`, fino al memory
-  query embedding transport/backfill in `gateway_memory_query_embeddings` /
-  `gateway_memory_clients`; `main` verificato e riallineato a #201.
-- Slice locale corrente: payment approval claim/secret owner,
-  branch `fabio/gateway-payment-approval-owner`.
+- #143-#202: slice owner-level successive mergeate in `main`, fino al payment
+  approval claim/secret owner in `gateway_payment_approval`; `main` verificato
+  e riallineato a #202.
 
 PR aperte:
 
@@ -857,8 +855,7 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/gateway-payment-approval-owner`: slice non-browser corrente;
-  `main` resta aggiornato al merge #201.
+- `main`: worktree pulito; nessuna branch non-browser locale aperta.
 
 ## Debito residuo
 
@@ -891,7 +888,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #201; continua o chiudi la slice non-browser owner-level corrente.
+main aggiornato a #202; scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
