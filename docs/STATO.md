@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (task executor resource label mergeata).**
+> **Ultimo aggiornamento: 2026-08-19 (runtime flags verbose debug locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#208 mergeate in `main`; #117 browser draft separata; prossima slice non-browser da selezionare |
-| HEAD codice verificato | `main` aggiornato a #208 |
+| PR | #108-#116, #118-#208 mergeate in `main`; #117 browser draft separata; slice `runtime_flags_verbose_debug` in preparazione locale |
+| HEAD codice verificato | `main` aggiornato a #208; worktree locale `fabio/runtime-flags-verbose-debug` |
 
 ## Dove siamo
 
@@ -217,10 +217,14 @@ Slice Runtime V2 recenti:
   del task executor escono dal monolite `main.rs` e si aggiungono ai worker id
   stabili e alla configurazione env gia' posseduti dall'owner; route queue,
   lease/acquire, execution adapter e finalizzazione task restano owner separati.
-- Estrazione locale `gateway_task_executor`: label `ResourceClass` per la queue
+- Estrazione mergeata `gateway_task_executor`: label `ResourceClass` per la queue
   executor esce dal monolite `main.rs` e resta accanto alla proiezione risorse
   del task executor; browser, execution adapter e loop agente restano owner
   separati.
+- Estrazione locale `gateway_runtime_flags`: il flag diagnostico `HOMUN_DEBUG`
+  (`verbose_debug`) esce dal monolite `main.rs` e vive accanto agli altri flag
+  runtime env-backed; loop agente, tool execution e route Composio restano solo
+  consumatori del flag.
 - Estrazione mergeata `gateway_model_routing`: DTO `RoutingDecision`, lettura
   `routing-decisions.json` e writer ring-buffer capped escono dal monolite
   `main.rs`; la surface HTTP `/api/routing-decisions` resta in
