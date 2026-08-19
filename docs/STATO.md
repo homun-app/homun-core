@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (automation thread formatting locale).**
+> **Ultimo aggiornamento: 2026-08-20 (automation thread formatting mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#209 mergeate in `main`; #117 browser draft separata; slice `automation_thread_formatting` in preparazione locale |
-| HEAD codice verificato | `main` aggiornato a #209; worktree locale `fabio/automation-thread-formatting` |
+| PR | #108-#116, #118-#210 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #210 |
 
 ## Dove siamo
 
@@ -225,7 +225,7 @@ Slice Runtime V2 recenti:
   (`verbose_debug`) esce dal monolite `main.rs` e vive accanto agli altri flag
   runtime env-backed; loop agente, tool execution e route Composio restano solo
   consumatori del flag.
-- Estrazione locale `gateway_automation_formatting`: helper puri per sender root
+- Estrazione mergeata `gateway_automation_formatting`: helper puri per sender root
   e titolo dei thread schedulati (`scheduled_thread_sender_for_task_id`,
   `scheduled_thread_title`) escono dal monolite `main.rs`; route automation,
   executor proattivo e scope durable restano owner separati.
@@ -490,6 +490,9 @@ Slice browser/projection successive:
 - PR #131 mergeata il 2026-08-17, merge commit `ba4dc0a8`; CI verde su
   Release readiness, Frontend, Backend, Landlock e build installer
   Linux/macOS/Windows.
+- PR #210 mergeata il 2026-08-19, merge commit `96a1e309`; gate locale
+  `python3 scripts/kernel_regression_gate.py` verde e CI verde su Backend,
+  Frontend, Landlock, Release readiness e build installer Linux/macOS/Windows.
 - Slice `fabio/app-action-budget-contracts` verificata localmente con:
   `python3 scripts/check_gateway_main_contract.py`, `cargo fmt --check`,
   `cargo test -p local-first-desktop-gateway plan_stall -- --nocapture`,
@@ -922,7 +925,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #209; scegli la prossima slice non-browser owner-level.
+main aggiornato a #210; scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
