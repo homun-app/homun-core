@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (proactive thread planning locale).**
+> **Ultimo aggiornamento: 2026-08-20 (proactive thread planning mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/proactive-thread-plan-owner` |
-| PR | #108-#116, #118-#210 mergeate in `main`; #117 browser draft separata; slice `proactive_thread_plan_owner` in preparazione locale |
-| HEAD codice verificato | `main` aggiornato a #210; branch locale `fabio/proactive-thread-plan-owner` |
+| Branch | `main` |
+| PR | #108-#116, #118-#211 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #211 |
 
 ## Dove siamo
 
@@ -229,7 +229,7 @@ Slice Runtime V2 recenti:
   e titolo dei thread schedulati (`scheduled_thread_sender_for_task_id`,
   `scheduled_thread_title`) escono dal monolite `main.rs`; route automation,
   executor proattivo e scope durable restano owner separati.
-- Estrazione locale `gateway_proactive_threads`: piano thread proattivo
+- Estrazione mergeata `gateway_proactive_threads`: piano thread proattivo
   (`ProactiveThreadPlan`), derivazione `thread_id`/workspace/source/channel/title
   e scope schedulato stabile escono dal monolite `main.rs`; persistenza visible
   turn, executor proattivo, automazioni e browser restano owner separati.
@@ -495,6 +495,9 @@ Slice browser/projection successive:
   Release readiness, Frontend, Backend, Landlock e build installer
   Linux/macOS/Windows.
 - PR #210 mergeata il 2026-08-19, merge commit `96a1e309`; gate locale
+  `python3 scripts/kernel_regression_gate.py` verde e CI verde su Backend,
+  Frontend, Landlock, Release readiness e build installer Linux/macOS/Windows.
+- PR #211 mergeata il 2026-08-19, merge commit `373eca7c`; gate locale
   `python3 scripts/kernel_regression_gate.py` verde e CI verde su Backend,
   Frontend, Landlock, Release readiness e build installer Linux/macOS/Windows.
 - Slice `fabio/app-action-budget-contracts` verificata localmente con:
@@ -929,8 +932,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #210; continua la slice locale `fabio/proactive-thread-plan-owner`
-oppure scegli la prossima slice non-browser owner-level dopo il merge.
+main aggiornato a #211; scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
