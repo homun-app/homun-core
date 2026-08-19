@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway text safety locale).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway text safety mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#206 mergeate in `main`; #117 browser draft separata; slice `gateway_text_safety` in preparazione locale |
-| HEAD codice verificato | `main` aggiornato a #206; worktree locale `fabio/gateway-text-safety-owner` |
+| PR | #108-#116, #118-#207 mergeate in `main`; #117 browser draft separata; prossima slice non-browser da selezionare |
+| HEAD codice verificato | `main` aggiornato a #207 |
 
 ## Dove siamo
 
@@ -186,7 +186,7 @@ Slice Runtime V2 recenti:
   (`relevant_code_components_for_prompt`) escono dal monolite `main.rs` e
   restano nello stesso owner bounded; `recall_memory`, tool execution, prompt
   packet e loop agente restano owner separati.
-- Estrazione locale `gateway_text_safety`: helper condivisi di redazione testo
+- Estrazione mergeata `gateway_text_safety`: helper condivisi di redazione testo
   sensibile, strip terminal controls, task goal summary e truncation escono dal
   monolite `main.rs`; task execution, JSON checkpoint shaping, agent stream,
   browser e memory recall restano owner separati.
