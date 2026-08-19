@@ -184,6 +184,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn approval_continuation_visible_text(": "remote approval continuation visible prompt must stay in gateway_remote_approval",
         "fn approval_continuation_turn_input(": "remote approval continuation input must stay in gateway_remote_approval",
         "fn resume_thread_after_approval(": "remote approval continuation wake must stay in gateway_remote_approval",
+        "fn remote_approval_effect_request(": "remote approval effect receipt request must stay in gateway_remote_approval",
+        "async fn dispatch_remote_approval(": "remote approval channel dispatch must stay in gateway_remote_approval",
         "const KNOWN_PLUGINS:": "plugin enablement registry must stay in gateway_plugins",
         "async fn plugins_list(": "plugin enablement listing must stay in gateway_plugins",
         "async fn plugin_toggle(": "plugin enablement toggle must stay in gateway_plugins",
