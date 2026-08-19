@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway memory query embedding locale).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway memory query embedding mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-memory-query-embedding-owner` |
-| Branch | `fabio/gateway-memory-query-embedding-owner` |
-| PR | #108-#116, #118-#200 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | branch locale da `main` #200 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app` |
+| Branch | `main` |
+| PR | #108-#116, #118-#201 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #201 |
 
 ## Dove siamo
 
@@ -204,7 +204,7 @@ Slice Runtime V2 recenti:
   inference, provider id per usage recording e transport OpenAI-compatible
   registrato (`recorded_openai_value`) escono dal monolite `main.rs`; routing
   browser, turn policy, plan progress e loop agente restano fuori dallo scope.
-- Estrazione locale `gateway_memory_query_embeddings` /
+- Estrazione mergeata `gateway_memory_query_embeddings` /
   `gateway_memory_clients`: config embedding memoria, transport HTTP Ollama,
   cache/timing query embedding e backfill embedding escono dal monolite
   `main.rs`; `recall_memory`, learning inline e consolidamento restano fuori
@@ -841,11 +841,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#200: slice owner-level successive mergeate in `main`, fino al provider
-  usage transport in `gateway_model_routing`; `main` verificato e riallineato
-  a #200.
-- Slice locale corrente: memory query embedding transport/backfill,
-  branch `fabio/gateway-memory-query-embedding-owner`.
+- #143-#201: slice owner-level successive mergeate in `main`, fino al memory
+  query embedding transport/backfill in `gateway_memory_query_embeddings` /
+  `gateway_memory_clients`; `main` verificato e riallineato a #201.
 
 PR aperte:
 
@@ -853,8 +851,7 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/gateway-memory-query-embedding-owner`: slice non-browser corrente;
-  `main` resta aggiornato al merge #200.
+- `main`: worktree pulito; nessuna branch non-browser locale aperta.
 
 ## Debito residuo
 
@@ -887,7 +884,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #200/#successive; continua o chiudi la slice non-browser owner-level corrente.
+main aggiornato a #201; scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
