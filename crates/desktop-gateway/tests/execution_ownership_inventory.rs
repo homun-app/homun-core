@@ -604,6 +604,52 @@ fn channel_send_message_tool_has_one_gateway_owner() {
 }
 
 #[test]
+fn composio_execution_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let composio_routes = production_source(&root.join("src/gateway_composio_routes.rs"));
+    let composio_execution_path = root.join("src/gateway_composio_execution.rs");
+    let composio_execution = if composio_execution_path.exists() {
+        production_source(&composio_execution_path)
+    } else {
+        String::new()
+    };
+
+    let owned = [
+        "fn composio_execute_tool(",
+        "struct ComposioExecuteRequest",
+        "struct ComposioExecuteResponse",
+        "async fn composio_execute(",
+    ];
+
+    for pattern in owned {
+        assert!(
+            composio_execution.contains(pattern),
+            "Composio execution owner must contain execute surface {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain Composio execute surface {pattern}"
+        );
+        assert!(
+            !composio_routes.contains(pattern),
+            "Composio connection/catalog owner must not absorb execute surface {pattern}"
+        );
+    }
+    for adjacent in [
+        "fn should_claim_payment_approval(",
+        "async fn execute_pending_approval(",
+        "fn browser_action_requires_payment_grant(",
+        "async fn dispatch_remote_approval(",
+    ] {
+        assert!(
+            !composio_execution.contains(adjacent),
+            "Composio execution owner must not absorb adjacent payment/remote/browser surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn composio_confirmation_markers_have_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

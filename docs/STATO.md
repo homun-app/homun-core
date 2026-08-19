@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway send_message tool mergeata).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway Composio execution locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -163,6 +163,11 @@ Slice Runtime V2 recenti:
   classificazione read/write e suggest capability escono dal monolite
   `main.rs`; `composio_execute_tool`, payment approval claim e remote approval
   dispatch restano owner separati.
+- Estrazione locale `gateway_composio_execution`: dispatcher
+  `composio_execute_tool`, DTO/route `/api/composio/execute`, claim source-card,
+  allow-once/always, rilevamento `successful:false`, rewrite terminale e resume
+  post-execute escono dal monolite `main.rs`; payment approval, pending remote
+  approval, browser e connection/catalog Composio restano owner separati.
 - Estrazione mergeata `gateway_connector_errors`: classificazione errori connector,
   hint azionabili Composio/MCP, audit log esecuzioni connector e rilevamento
   `successful:false` Composio escono dal monolite `main.rs`; dispatch execute,
@@ -827,7 +832,8 @@ PR aperte:
 
 Branch corrente:
 
-- `main`: aggiornato al merge #196; nessun branch non-browser locale aperto.
+- `fabio/gateway-composio-execution-owner`: worktree locale per spostare
+  la surface execute Composio nell'owner `gateway_composio_execution`.
 
 ## Debito residuo
 

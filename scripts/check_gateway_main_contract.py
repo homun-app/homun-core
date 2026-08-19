@@ -26,6 +26,9 @@ LOCAL_AUTHORIZATION_ROUTES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_local_authorization_routes.rs"
 )
 COMPOSIO_ROUTES_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_composio_routes.rs")
+COMPOSIO_EXECUTION_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_composio_execution.rs"
+)
 CONNECTOR_ERRORS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_connector_errors.rs")
 IMAGE_GENERATION_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_image_generation.rs")
 ACTION_CONFIRMATIONS_RS = os.path.join(
@@ -1150,6 +1153,10 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn channel_send_buttons_classified(": "channel button send sidecar helper must stay in gateway_channels",
         "fn send_message_tool_schema(": "channel send_message pseudo-tool schema must stay in gateway_channels",
         "fn execute_send_message(": "channel send_message pseudo-tool execution must stay in gateway_channels",
+        "fn composio_execute_tool(": "Composio execute dispatcher must stay in gateway_composio_execution",
+        "struct ComposioExecuteRequest": "Composio execute DTOs must stay in gateway_composio_execution",
+        "struct ComposioExecuteResponse": "Composio execute DTOs must stay in gateway_composio_execution",
+        "async fn composio_execute(": "Composio execute route must stay in gateway_composio_execution",
         "fn browser_open_research_discovery_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn booking_assumption_choice_instruction(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn choice_resume_instruction_legacy_backup(": "prompt instruction snippets must stay in gateway_prompt_instructions",
@@ -1263,6 +1270,8 @@ def main() -> int:
         local_authorization_routes_source = handle.read()
     with open(COMPOSIO_ROUTES_RS, "r", encoding="utf-8") as handle:
         composio_routes_source = handle.read()
+    with open(COMPOSIO_EXECUTION_RS, "r", encoding="utf-8") as handle:
+        composio_execution_source = handle.read()
     with open(CONNECTOR_ERRORS_RS, "r", encoding="utf-8") as handle:
         connector_errors_source = handle.read()
     with open(IMAGE_GENERATION_RS, "r", encoding="utf-8") as handle:
@@ -1333,6 +1342,28 @@ def main() -> int:
             channels_source,
             snippet,
             "channel owner must expose send_message pseudo-tool surfaces",
+        )
+    for snippet in [
+        "pub(crate) fn composio_execute_tool(",
+        "pub(crate) struct ComposioExecuteRequest",
+        "pub(crate) struct ComposioExecuteResponse",
+        "pub(crate) async fn composio_execute(",
+    ]:
+        assert_contains(
+            composio_execution_source,
+            snippet,
+            "Composio execution owner must expose execute surfaces",
+        )
+    for snippet in [
+        "fn should_claim_payment_approval(",
+        "async fn execute_pending_approval(",
+        "fn browser_action_requires_payment_grant(",
+        "async fn dispatch_remote_approval(",
+    ]:
+        assert_not_contains(
+            composio_execution_source,
+            snippet,
+            "Composio execution owner must not absorb payment/remote/browser surfaces",
         )
     assert_contains(
         action_confirmations_source,
@@ -1599,6 +1630,11 @@ def main() -> int:
         "gateway root must declare local authorization route owner",
     )
     assert_contains(source, "mod gateway_composio_routes;", "gateway root must declare Composio route owner")
+    assert_contains(
+        source,
+        "mod gateway_composio_execution;",
+        "gateway root must declare Composio execution owner",
+    )
     assert_contains(source, "mod gateway_connector_errors;", "gateway root must declare connector error owner")
     assert_contains(source, "mod gateway_image_generation;", "gateway root must declare image generation owner")
     assert_contains(
