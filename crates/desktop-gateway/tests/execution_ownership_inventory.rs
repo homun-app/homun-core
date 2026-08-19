@@ -723,6 +723,42 @@ fn memory_push_prompt_context_has_one_gateway_owner() {
 }
 
 #[test]
+fn text_safety_helpers_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let text_safety = production_source(&root.join("src/gateway_text_safety.rs"));
+
+    for pattern in [
+        "fn truncate_chars(",
+        "fn task_goal_summary(",
+        "fn compact_redacted_task_goal_summary(",
+        "fn redact_sensitive_text(",
+        "fn strip_terminal_control_sequences(",
+    ] {
+        assert!(
+            text_safety.contains(pattern),
+            "text safety owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain text safety helper {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "fn task_effective_goal(",
+        "fn redact_json_for_task_output(",
+        "async fn run_agent_rounds(",
+        "fn recall_memory(",
+    ] {
+        assert!(
+            !text_safety.contains(adjacent),
+            "text safety owner must not absorb adjacent gateway surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn attachment_prompt_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
