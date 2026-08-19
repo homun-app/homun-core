@@ -78,6 +78,10 @@ impl TaskExecutorStatus {
     }
 }
 
+fn resource_class_label(resource: ResourceClass) -> &'static str {
+    resource.as_str()
+}
+
 #[derive(Debug, Serialize)]
 pub(crate) struct TaskItemResponse {
     pub(crate) task_id: String,

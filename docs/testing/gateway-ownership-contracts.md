@@ -38,7 +38,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_text_safety.rs` | Helper condivisi di redazione testo sensibile, rimozione terminal control sequences, troncamento e task goal summary; non possiede task execution, JSON checkpoint shaping, agent streaming, browser o memory recall. |
 | `crates/desktop-gateway/src/gateway_turn_broker.rs` | Enqueue/resume/cancel dei turni chat, eventi, stream, activity projection e steering. |
 | `crates/desktop-gateway/src/gateway_task_executor_config.rs` | Config task executor da env, worker id stabile, worker manuale e poll interval; non possiede route queue, lease/acquire, execution adapter o finalizzazione task. |
-| `crates/desktop-gateway/src/gateway_task_executor.rs` | DTO/read model queue task, status executor, approval/effect routes, acquire/lease/finalizzazione, worker, progress checkpoint e sync sessione task. |
+| `crates/desktop-gateway/src/gateway_task_executor.rs` | DTO/read model queue task, label risorse, status executor, approval/effect routes, acquire/lease/finalizzazione, worker, progress checkpoint e sync sessione task. |
 | `crates/desktop-gateway/src/gateway_chat_threads.rs` | Lista e lifecycle thread chat: select, pin, rename, reorder, archive/delete, seen/attention. |
 | `crates/desktop-gateway/src/gateway_chat_branches.rs` | Branch del transcript e active leaf selection. |
 | `crates/desktop-gateway/src/gateway_chat_tasks.rs` | Azione transcript per creare task da messaggio. |

@@ -56,6 +56,7 @@ CAPABILITY_ROUTING_RS = os.path.join(
 TASK_EXECUTOR_CONFIG_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_task_executor_config.rs"
 )
+TASK_EXECUTOR_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_task_executor.rs")
 BOOT_MAINTENANCE_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_boot_maintenance.rs"
 )
@@ -1193,6 +1194,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn mark_task_waiting_time(": "task executor finalization must stay in gateway_task_executor",
         "fn handle_failed_task_run(": "task executor retry/failure handling must stay in gateway_task_executor",
         "fn request_task_executor_approval(": "task executor approval suspension must stay in gateway_task_executor",
+        "fn resource_class_label(": "task executor resource labels must stay in gateway_task_executor",
         "fn sync_session_for_task_run(": "task executor session sync must stay in gateway_task_executor",
         "fn append_task_result_to_chat(": "task executor result surfacing must stay in gateway_task_executor",
         "fn append_task_progress_checkpoint(": "task executor progress checkpoint must stay in gateway_task_executor",
@@ -1349,6 +1351,8 @@ def main() -> int:
         capability_routing_source = handle.read()
     with open(TASK_EXECUTOR_CONFIG_RS, "r", encoding="utf-8") as handle:
         task_executor_config_source = handle.read()
+    with open(TASK_EXECUTOR_RS, "r", encoding="utf-8") as handle:
+        task_executor_source = handle.read()
     with open(BOOT_MAINTENANCE_RS, "r", encoding="utf-8") as handle:
         boot_maintenance_source = handle.read()
     with open(SKILL_RUNTIME_RS, "r", encoding="utf-8") as handle:
@@ -1709,6 +1713,11 @@ def main() -> int:
         source,
         "pub(crate) use gateway_task_executor::*;",
         "gateway root must re-export task executor owner",
+    )
+    assert_contains(
+        task_executor_source,
+        "fn resource_class_label(",
+        "task executor owner must expose resource class labels",
     )
     assert_contains(source, "mod gateway_memory_dedup;", "gateway root must declare memory dedup owner")
     assert_contains(
