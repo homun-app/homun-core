@@ -157,6 +157,7 @@ use local_first_engine::model_normalize;
 // Brings `.record(...)` into scope for direct calls on a `GatewayJournal` (C2, browser-protocol
 // metrics); `run_turn`'s own generic `J: ExecutionJournal` parameter doesn't need this import, but
 // calling the method directly outside that generic context does.
+pub(crate) use attachments::append_thread_attachment_context;
 pub(crate) use gateway_actionable_source::*;
 pub(crate) use gateway_artifacts::*;
 pub(crate) use gateway_automation_routes::*;
@@ -2595,107 +2596,6 @@ fn recall_memory(state: &AppState, query: &str, vault_value_requested: bool) -> 
 /// given real tools and decides when to use them (no keyword routing). Tool
 /// rounds run non-streamed; the final assistant answer is emitted as Delta+Done
 /// to match the existing UI stream protocol.
-/// Max chars of attachment text re-injected per turn (across all stored files).
-const ATTACHMENT_TEXT_BUDGET_CHARS: usize = 120_000;
-/// Max attachment page-images re-injected per turn (bounds vision token cost);
-/// most-recent files win.
-const ATTACHMENT_CONTEXT_IMAGES: usize = 12;
-
-/// Appends the durable attachment working set to the user prompt and returns the
-/// bounded image payload. Extraction failures are diagnostics, not document text:
-/// keeping the two sections separate prevents the model from treating an error
-/// string as if it had read the file.
-fn append_thread_attachment_context(
-    model_text: &mut String,
-    working: &[chat_store::StoredAttachment],
-) -> Vec<String> {
-    if working.is_empty() {
-        return Vec::new();
-    }
-
-    let manifest = working
-        .iter()
-        .map(|attachment| {
-            let kind = if !attachment.images.is_empty() {
-                "images/scan"
-            } else if attachment
-                .text
-                .as_deref()
-                .is_some_and(attachment_text_is_ready)
-            {
-                "text"
-            } else {
-                "unavailable"
-            };
-            format!("- {} ({kind})", attachment.display_name)
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    model_text.push_str(&format!(
-        "\n\n[Files attached to this conversation]\n{manifest}\n\
-Ready attachment content follows. Entries marked unavailable were received but could not be \
-extracted; do not claim to have analyzed them. If the user cites a file NOT in this list, ask \
-them to attach it (don't look for it in the sandbox or folders).\n\
---- Attachment content ---"
-    ));
-
-    let mut text_budget = ATTACHMENT_TEXT_BUDGET_CHARS;
-    for attachment in working {
-        let Some(text) = attachment
-            .text
-            .as_deref()
-            .map(str::trim)
-            .filter(|text| attachment_text_is_ready(text))
-        else {
-            continue;
-        };
-        let slice: String = text.chars().take(text_budget).collect();
-        text_budget = text_budget.saturating_sub(slice.chars().count());
-        model_text.push_str(&format!("\n[{}]\n{}", attachment.display_name, slice));
-        if text_budget == 0 {
-            break;
-        }
-    }
-
-    let issues = working
-        .iter()
-        .filter(|attachment| attachment.images.is_empty())
-        .filter_map(|attachment| {
-            let text = attachment.text.as_deref().map(str::trim).unwrap_or("");
-            if text.starts_with("⚠️") {
-                Some(format!("[{}]\n{text}", attachment.display_name))
-            } else if text.is_empty() {
-                Some(format!(
-                    "[{}]\n⚠️ No extractable attachment content was produced.",
-                    attachment.display_name
-                ))
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-    if !issues.is_empty() {
-        model_text.push_str("\n\n[Attachment extraction issues]\n");
-        model_text.push_str(&issues.join("\n"));
-    }
-
-    let mut images = Vec::new();
-    'outer: for attachment in working.iter().rev() {
-        for url in &attachment.images {
-            if images.len() >= ATTACHMENT_CONTEXT_IMAGES {
-                break 'outer;
-            }
-            images.push(url.clone());
-        }
-    }
-    images
-}
-
-fn attachment_text_is_ready(text: &str) -> bool {
-    let text = text.trim();
-    !text.is_empty() && !text.starts_with("⚠️")
-}
-
 async fn stream_chat_via_openai(
     state: &AppState,
     request: ChatGenerateStreamRequest,

@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway payment approval mergeata).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway attachment prompt context verificata localmente).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
+| Branch | `fabio/gateway-attachment-context-owner` |
 | PR | #108-#116, #118-#202 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #202 |
+| HEAD codice verificato | branch locale da `main` #202 |
 
 ## Dove siamo
 
@@ -168,6 +168,11 @@ Slice Runtime V2 recenti:
   sostituzione CVV one-shot, reject-before-claim, claim/validazione finale e
   lock stato payment escono dal monolite `main.rs`; route Vault, marker payment
   card, browser enforcement e remote approval restano owner separati.
+- Estrazione locale verificata `attachments`: contesto prompt bounded degli
+  allegati persistiti (`append_thread_attachment_context`, budget testo/immagini
+  e separazione extraction issues) esce dal monolite `main.rs`; ingestion file
+  resta nello stesso owner, mentre loop chat, memory recall, prompt packet e
+  routing agente restano fuori dallo scope.
 - Estrazione locale `gateway_local_authorization_routes`: route/DTO e marker
   locali per filesystem authorization, sandbox escalation, read-only card e
   connect-suggestion mark escono dal monolite `main.rs`.
@@ -855,7 +860,8 @@ PR aperte:
 
 Branch corrente:
 
-- `main`: worktree pulito; nessuna branch non-browser locale aperta.
+- `fabio/gateway-attachment-context-owner`: worktree locale della slice
+  attachment prompt context; gate kernel verde, PR non ancora aperta.
 
 ## Debito residuo
 
@@ -879,8 +885,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Scegliere la prossima slice non-browser solo dopo nuova lettura owner-level
-   di `main.rs`.
+1. Chiudere la slice `attachments` con gate, commit, PR, merge e riallineamento
+   di `main`.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -888,7 +894,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #202; scegli la prossima slice non-browser owner-level.
+branch fabio/gateway-attachment-context-owner da main #202; chiudi la slice
+attachment prompt context con gate, PR e merge.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
