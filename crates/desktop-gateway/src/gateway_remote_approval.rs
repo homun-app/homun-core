@@ -387,6 +387,39 @@ pub(crate) fn pending_approval_exists(state: &AppState, code: &str) -> bool {
         .is_some()
 }
 
+pub(crate) fn cancel_pending_remote_approval(state: &AppState, code: &str) -> bool {
+    let pending = match lock_store(state)
+        .ok()
+        .and_then(|store| store.pending_remote_approval(code).ok().flatten())
+    {
+        Some(pending) => pending,
+        None => return false,
+    };
+    if pending.requires_source {
+        let (Some(thread_id), Some(message_id)) = (
+            pending.thread_id.as_deref(),
+            pending.source_message_id.as_deref(),
+        ) else {
+            return false;
+        };
+        if resolve_actionable_source(
+            state,
+            thread_id,
+            message_id,
+            |text| actionable_source_terminal_text(text, "Action cancelled."),
+            ActionableSourceResolution::Cancelled,
+        )
+        .is_err()
+        {
+            return false;
+        }
+    }
+    lock_store(state)
+        .ok()
+        .and_then(|store| store.cancel_remote_approval_by_code(code).ok())
+        .unwrap_or(false)
+}
+
 pub(crate) fn approval_progress_reply(code: &str) -> String {
     format!("⏳ Ricevuto ({code}). Verifico la card salvata e avvio l'azione…")
 }

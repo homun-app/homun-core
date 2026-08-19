@@ -677,7 +677,6 @@ fn remote_approval_continuation_helpers_have_one_gateway_owner() {
         "enum ActionableSourceResolution",
         "fn claim_actionable_source<",
         "fn resolve_actionable_source<",
-        "fn cancel_pending_remote_approval(",
         "async fn execute_pending_approval(",
         "fn browser_action_requires_payment_grant(",
     ] {
@@ -713,7 +712,6 @@ fn remote_approval_dispatch_has_one_gateway_owner() {
         "enum ActionableSourceResolution",
         "fn claim_actionable_source<",
         "fn resolve_actionable_source<",
-        "fn cancel_pending_remote_approval(",
         "async fn execute_pending_approval(",
         "fn composio_execute_tool(",
         "fn should_claim_payment_approval(",
@@ -722,6 +720,40 @@ fn remote_approval_dispatch_has_one_gateway_owner() {
         assert!(
             !remote_approval.contains(adjacent),
             "remote approval dispatch owner must not absorb adjacent actionable/execution/payment/browser surface {adjacent}"
+        );
+    }
+}
+
+#[test]
+fn remote_approval_cancel_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let remote_approval = production_source(&root.join("src/gateway_remote_approval.rs"));
+
+    let owned = ["fn cancel_pending_remote_approval("];
+
+    for pattern in owned {
+        assert!(
+            remote_approval.contains(pattern),
+            "remote approval owner must contain cancellation surface {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain remote approval cancellation surface {pattern}"
+        );
+    }
+    for adjacent in [
+        "enum ActionableSourceResolution",
+        "fn claim_actionable_source<",
+        "fn resolve_actionable_source<",
+        "async fn execute_pending_approval(",
+        "fn composio_execute_tool(",
+        "fn should_claim_payment_approval(",
+        "fn browser_action_requires_payment_grant(",
+    ] {
+        assert!(
+            !remote_approval.contains(adjacent),
+            "remote approval cancel owner must not absorb adjacent actionable/execution/payment/browser surface {adjacent}"
         );
     }
 }
