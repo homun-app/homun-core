@@ -686,6 +686,122 @@ pub(crate) async fn channel_send(
         .map_err(|error| error.message)
 }
 
+/// POST an outbound message to a channel sidecar WITH an inline keyboard (Telegram only).
+/// `buttons` = `[[label, callback_data], ...]`.
+pub(crate) async fn channel_send_buttons_classified(
+    state: &AppState,
+    port: u16,
+    recipient: &str,
+    text: &str,
+    buttons: Vec<[String; 2]>,
+) -> Result<(), ChannelSendFailure> {
+    let url = format!("http://127.0.0.1:{port}/send");
+    let response = state
+        .http
+        .post(&url)
+        .timeout(std::time::Duration::from_secs(30))
+        .json(&serde_json::json!({ "recipient": recipient, "text": text, "buttons": buttons }))
+        .send()
+        .await
+        .map_err(|error| ChannelSendFailure {
+            kind: if error.is_connect() {
+                ChannelSendFailureKind::ConnectFailedBeforeDispatch
+            } else {
+                ChannelSendFailureKind::UnknownRemoteOutcome
+            },
+            message: format!("sidecar unreachable: {error}"),
+        })?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(ChannelSendFailure {
+            kind: channel_send_failure_kind_for_status(response.status()),
+            message: format!("sidecar /send responded {}", response.status()),
+        })
+    }
+}
+
+pub(crate) fn send_message_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "send_message",
+            "description": "Send a message on a connected channel of the user (WhatsApp or Telegram). Use it for \"send/write/forward me a message\". The recipient MUST be an explicit number or chat ID (for «to me» ask for the number if you don't know it, do NOT make it up). Sending requires the user's confirmation before it goes out.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "channel": { "type": "string", "enum": ["whatsapp", "telegram"], "description": "Channel to send on" },
+                    "to": { "type": "string", "description": "Recipient: number (e.g. 39333…) or chat ID. NOT a generic name." },
+                    "text": { "type": "string", "description": "Message text" }
+                },
+                "required": ["channel", "to", "text"]
+            }
+        }
+    })
+}
+
+/// Routes the agent's `send_message` tool (confirmed via the standard write-confirm card) to
+/// the channel sidecar. The recipient must be an explicit id/number — a bare name that isn't
+/// id-like is refused so the agent asks the user instead of guessing. Returns a Composio-shaped
+/// `{successful, ...}` value so the existing confirm card + result handling work unchanged.
+pub(crate) fn execute_send_message(
+    state: &AppState,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, GatewayError> {
+    let channel = args
+        .get("channel")
+        .and_then(|v| v.as_str())
+        .unwrap_or("whatsapp")
+        .trim()
+        .to_lowercase();
+    let to = args
+        .get("to")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let text = args
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if to.is_empty() || text.is_empty() {
+        return Ok(serde_json::json!({
+            "successful": false,
+            "error": "The recipient (to) and the text (text) are required."
+        }));
+    }
+    let looks_like_id =
+        to.chars().any(|c| c.is_ascii_digit()) || to.contains('@') || to.starts_with('+');
+    if !looks_like_id {
+        return Ok(serde_json::json!({
+            "successful": false,
+            "error": format!("Recipient «{to}» is ambiguous: pass a number or a chat ID, not just the name.")
+        }));
+    }
+    let port = if channel == "telegram" {
+        TELEGRAM_HTTP_PORT
+    } else {
+        WHATSAPP_HTTP_PORT
+    };
+    let st = state.clone();
+    let recipient = to.clone();
+    let body = text.clone();
+    let sent = tokio::runtime::Handle::current()
+        .block_on(async move { channel_send_classified(&st, port, &recipient, &body).await });
+    match sent {
+        Ok(()) => {
+            Ok(serde_json::json!({ "successful": true, "data": { "channel": channel, "to": to } }))
+        }
+        Err(error) => Ok(serde_json::json!({
+            "successful": false,
+            "unknown_remote_outcome": error.kind == ChannelSendFailureKind::UnknownRemoteOutcome,
+            "error": format!("Send failed: {}", error.message),
+        })),
+    }
+}
+
 pub(crate) async fn telegram_send_with_rebind(
     state: &AppState,
     recipient: &str,
