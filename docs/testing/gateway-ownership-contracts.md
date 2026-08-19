@@ -51,6 +51,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_mcp_chat_tools.rs` | Naming/parse tool MCP chat e catalogo schema cached. |
 | `crates/desktop-gateway/src/gateway_mcp_runtime.rs` | Transport MCP stdio/http, metadata connect/execution, secret header migration, discovery/cache e `run_mcp_chat_tool`. |
 | `crates/desktop-gateway/src/gateway_mcp_connections.rs` | DTO/route MCP per connect, registry search, connected list e disconnect; non possiede execute. |
+| `crates/desktop-gateway/src/gateway_action_confirmations.rs` | Marker parsing e matching exact-source per confirmation card MCP/Composio, inclusi marker remote approval e rewrite terminale; non possiede execute, timeout, allow-list, payment approval o remote-approval dispatch. |
 | `crates/desktop-gateway/src/gateway_mcp_execution.rs` | DTO/route MCP per execute da confirmation card, claim della source card, marker allow-server e resume/rewrite terminale; non possiede transport, timeout o parser conferma. |
 | `crates/desktop-gateway/src/gateway_write_tool_allowlist.rs` | Persistenza e matching "always allow" per write-tool Composio/MCP, incluse route list/revoke; non possiede dispatch, approval routing o confirmation card. |
 | `crates/desktop-gateway/src/gateway_local_authorization_routes.rs` | Route/DTO e marker locali per `/api/fs/authorize`, `/api/capabilities/run/escalate`, `/api/connect/mark`, rewrite card FS/sandbox/connect e marker read-only; non possiede tool execution, sandbox policy o project-file helpers. |

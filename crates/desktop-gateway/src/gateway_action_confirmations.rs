@@ -1,5 +1,7 @@
 pub(crate) const MCP_CONFIRM_OPEN: &str = "‹‹MCP_CONFIRM››";
 pub(crate) const MCP_CONFIRM_CLOSE: &str = "‹‹/MCP_CONFIRM››";
+pub(crate) const COMPOSIO_CONFIRM_OPEN: &str = "‹‹COMPOSIO_CONFIRM››";
+pub(crate) const COMPOSIO_CONFIRM_CLOSE: &str = "‹‹/COMPOSIO_CONFIRM››";
 
 pub(crate) fn confirm_marker_value(
     text: &str,
@@ -33,6 +35,19 @@ pub(crate) fn confirm_marker_matches_approval(
 
 pub(crate) fn mcp_confirm_matches(text: &str, tool: &str, arguments: &serde_json::Value) -> bool {
     let Some(marker) = confirm_marker_value(text, MCP_CONFIRM_OPEN, MCP_CONFIRM_CLOSE) else {
+        return false;
+    };
+    marker.get("tool").and_then(serde_json::Value::as_str) == Some(tool)
+        && marker.get("arguments") == Some(arguments)
+}
+
+pub(crate) fn composio_confirm_matches(
+    text: &str,
+    tool: &str,
+    arguments: &serde_json::Value,
+) -> bool {
+    let Some(marker) = confirm_marker_value(text, COMPOSIO_CONFIRM_OPEN, COMPOSIO_CONFIRM_CLOSE)
+    else {
         return false;
     };
     marker.get("tool").and_then(serde_json::Value::as_str) == Some(tool)
@@ -86,6 +101,34 @@ pub(crate) fn rewrite_mcp_confirm_to_done(text: &str, tool: &str) -> String {
     out
 }
 
+/// Rewrites a message that carries a Composio pending-confirmation marker into
+/// a done marker. Idempotent if no confirm marker is present.
+pub(crate) fn rewrite_confirm_to_done(text: &str, tool: &str) -> String {
+    let Some(open) = text.find(COMPOSIO_CONFIRM_OPEN) else {
+        return text.to_string();
+    };
+    let Some(close_rel) = text[open..].find(COMPOSIO_CONFIRM_CLOSE) else {
+        return text.to_string();
+    };
+    let close = open + close_rel + COMPOSIO_CONFIRM_CLOSE.len();
+    let head_end = text[..open]
+        .rfind("I need your confirmation")
+        .unwrap_or(open);
+    let mut out = text[..head_end].trim_end().to_string();
+    let tail = text[close..].trim();
+    if !tail.is_empty() {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(tail);
+    }
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str(&format!("‹‹COMPOSIO_DONE››{tool}‹‹/COMPOSIO_DONE››"));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,6 +155,20 @@ mod tests {
             &serde_json::json!({ "path": "/tmp/b", "content": "x" })
         ));
         assert!(!mcp_confirm_matches(text, "mcp__filesystem__insert", &args));
+    }
+
+    #[test]
+    fn composio_confirm_match_requires_exact_tool_and_arguments() {
+        let text = "I need your confirmation\n‹‹COMPOSIO_CONFIRM››{\"tool\":\"GMAIL_SEND_EMAIL\",\"arguments\":{\"to\":\"a@example.test\"}}‹‹/COMPOSIO_CONFIRM››";
+        let args = serde_json::json!({ "to": "a@example.test" });
+
+        assert!(composio_confirm_matches(text, "GMAIL_SEND_EMAIL", &args));
+        assert!(!composio_confirm_matches(
+            text,
+            "GMAIL_SEND_EMAIL",
+            &serde_json::json!({ "to": "b@example.test" })
+        ));
+        assert!(!composio_confirm_matches(text, "GMAIL_CREATE_DRAFT", &args));
     }
 
     #[test]
@@ -147,6 +204,17 @@ mod tests {
 
         assert!(!rewritten.contains("MCP_CONFIRM"));
         assert!(rewritten.contains("✓ MCP tool executed: mcp__filesystem__create"));
+        assert!(rewritten.contains("Then continue."));
+    }
+
+    #[test]
+    fn rewrite_composio_confirm_to_done_removes_marker_and_preserves_tail() {
+        let text = "I need your confirmation\n‹‹COMPOSIO_CONFIRM››{\"tool\":\"GMAIL_SEND_EMAIL\",\"arguments\":{}}‹‹/COMPOSIO_CONFIRM››\n\nThen continue.";
+
+        let rewritten = rewrite_confirm_to_done(text, "GMAIL_SEND_EMAIL");
+
+        assert!(!rewritten.contains("COMPOSIO_CONFIRM"));
+        assert!(rewritten.contains("‹‹COMPOSIO_DONE››GMAIL_SEND_EMAIL‹‹/COMPOSIO_DONE››"));
         assert!(rewritten.contains("Then continue."));
     }
 }

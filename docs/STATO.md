@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway agent output completion locale).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway composio confirmation locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-agent-output-completion-owner` |
-| Branch | `fabio/gateway-agent-output-completion-owner` |
-| PR | #108-#116, #118-#186 mergeate in `main`; #117 browser draft separata; slice `gateway_agent_output_completion` locale non ancora in PR |
-| HEAD codice verificato | branch `fabio/gateway-agent-output-completion-owner` sopra `main` aggiornato a #186 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-composio-confirmation-owner` |
+| Branch | `fabio/gateway-composio-confirmation-owner` |
+| PR | #108-#116, #118-#188 mergeate in `main`; #117 browser draft separata; slice `gateway_composio_confirmation` locale non ancora in PR |
+| HEAD codice verificato | branch `fabio/gateway-composio-confirmation-owner` sopra `main` aggiornato a #188 |
 
 ## Dove siamo
 
@@ -113,6 +113,11 @@ Slice Runtime V2 recenti:
   dal monolite `main.rs`; il modulo orchestra confirmation-card claim, marker
   allow-server e resume/rewrite terminale delegando runtime, timeout e parser
   conferme agli owner gia' estratti.
+- Slice corrente `gateway_composio_confirmation`: marker, matching esatto e
+  rewrite terminale della confirmation card Composio escono dal monolite
+  `main.rs` e si affiancano ai marker MCP in `gateway_action_confirmations`;
+  `composio_execute_tool`, payment approval e remote approval restano fuori
+  dallo scope.
 - Estrazione locale `gateway_write_tool_allowlist`: persistenza e matching
   "always allow" per write-tool Composio/MCP escono dal monolite `main.rs`;
   il file storico `composio-tool-allow.json` resta invariato per compatibilita',
@@ -819,8 +824,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Completare gate, commit e PR piccola per `gateway_agent_output_completion`.
-2. Dopo merge gateway agent output completion, aggiornare `main` e riprendere la
+1. Completare gate, commit e PR piccola per `gateway_composio_confirmation`.
+2. Dopo merge gateway composio confirmation, aggiornare `main` e riprendere la
    prossima slice non-browser solo dopo nuova lettura owner-level di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
@@ -829,8 +834,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/gateway-agent-output-completion-owner se la slice agent output completion e' ancora da aprire o e' aperta;
-altrimenti main aggiornato a #186/#successive e scegli la prossima slice non-browser owner-level.
+branch fabio/gateway-composio-confirmation-owner se la slice composio confirmation e' ancora da aprire o e' aperta;
+altrimenti main aggiornato a #188/#successive e scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
