@@ -954,6 +954,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn compact_for_context_budget(": "model-visible context compaction must stay in gateway_model_routing",
         "struct GatewayContextCompactor": "context compactor port must stay in gateway_model_routing",
         "struct GatewayTurnCompletionJudge": "turn completion judge port must stay in gateway_model_routing",
+        "fn agent_output_incomplete_reason(": "agent output completion policy must stay in gateway_model_routing",
         "struct GatewayTurnPolicy": "turn policy port must stay in gateway_capability_routing",
         "fn zai_thinking_enabled(": "Z.ai thinking policy must stay in gateway_model_routing",
         "struct RoutingDecision ": "routing decision log DTO must stay in gateway_model_routing",
@@ -1446,6 +1447,11 @@ def main() -> int:
         model_routing_source,
         "pub(crate) struct GatewayTurnCompletionJudge",
         "model routing owner must expose turn completion judge port",
+    )
+    assert_contains(
+        model_routing_source,
+        "pub(crate) fn agent_output_incomplete_reason(",
+        "model routing owner must expose agent output completion policy",
     )
     assert_contains(
         model_routing_source,

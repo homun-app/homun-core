@@ -6406,17 +6406,6 @@ async fn run_agent_turn_into_message_with_fanout(
     result
 }
 
-fn agent_output_incomplete_reason(answer: &str) -> Option<String> {
-    let trimmed = answer.trim();
-    if trimmed.is_empty() || trimmed == "No reply generated for the scheduled task." {
-        return Some("scheduled task produced no final reply".to_string());
-    }
-
-    let plan = parse_plan_marker(trimmed);
-    plan_incomplete_reason(&plan)
-        .map(|reason| format!("agent output stopped before finishing: {reason}"))
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ProactiveThreadPlan {
     thread_id: Option<String>,
