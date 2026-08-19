@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (automation thread formatting mergeata).**
+> **Ultimo aggiornamento: 2026-08-20 (proactive thread planning locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
-| PR | #108-#116, #118-#210 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #210 |
+| Branch | `fabio/proactive-thread-plan-owner` |
+| PR | #108-#116, #118-#210 mergeate in `main`; #117 browser draft separata; slice `proactive_thread_plan_owner` in preparazione locale |
+| HEAD codice verificato | `main` aggiornato a #210; branch locale `fabio/proactive-thread-plan-owner` |
 
 ## Dove siamo
 
@@ -229,6 +229,10 @@ Slice Runtime V2 recenti:
   e titolo dei thread schedulati (`scheduled_thread_sender_for_task_id`,
   `scheduled_thread_title`) escono dal monolite `main.rs`; route automation,
   executor proattivo e scope durable restano owner separati.
+- Estrazione locale `gateway_proactive_threads`: piano thread proattivo
+  (`ProactiveThreadPlan`), derivazione `thread_id`/workspace/source/channel/title
+  e scope schedulato stabile escono dal monolite `main.rs`; persistenza visible
+  turn, executor proattivo, automazioni e browser restano owner separati.
 - Estrazione mergeata `gateway_model_routing`: DTO `RoutingDecision`, lettura
   `routing-decisions.json` e writer ring-buffer capped escono dal monolite
   `main.rs`; la surface HTTP `/api/routing-decisions` resta in
@@ -925,7 +929,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #210; scegli la prossima slice non-browser owner-level.
+main aggiornato a #210; continua la slice locale `fabio/proactive-thread-plan-owner`
+oppure scegli la prossima slice non-browser owner-level dopo il merge.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

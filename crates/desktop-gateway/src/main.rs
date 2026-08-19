@@ -101,6 +101,7 @@ mod gateway_plan_stall;
 mod gateway_plan_tools;
 mod gateway_plugin_packages;
 mod gateway_plugins;
+mod gateway_proactive_threads;
 mod gateway_proactivity;
 mod gateway_proactivity_routes;
 mod gateway_process_events;
@@ -211,6 +212,7 @@ pub(crate) use gateway_memory_ui_routes::{
     export_user_data, memory_dashboard, memory_export, memory_items,
 };
 pub(crate) use gateway_model_routes::*;
+pub(crate) use gateway_proactive_threads::*;
 pub(crate) use gateway_process_events::*;
 #[cfg(test)]
 pub(crate) use gateway_project_access::{
@@ -310,8 +312,10 @@ pub(crate) use gateway_artifact_memory::{
     artifact_memory_kind, mcp_filesystem_project_relative_path_for_root,
     upsert_artifact_memory_record,
 };
-use gateway_automation_formatting::{
-    automation_trigger_summary, scheduled_thread_sender_for_task_id, scheduled_thread_title,
+use gateway_automation_formatting::automation_trigger_summary;
+#[cfg(test)]
+pub(crate) use gateway_automation_formatting::{
+    scheduled_thread_sender_for_task_id, scheduled_thread_title,
 };
 use gateway_automation_requests::{
     AutomationCreateRequest, AutomationScopeQuery, AutomationUpdateRequest,
@@ -5412,65 +5416,6 @@ async fn run_agent_turn_into_message_with_fanout(
     result
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ProactiveThreadPlan {
-    thread_id: Option<String>,
-    workspace_id: String,
-    source: String,
-    channel: Option<String>,
-    title: String,
-    scheduled_root: Option<String>,
-}
-
-fn proactive_thread_plan(task: &TaskRecord, goal: &str) -> ProactiveThreadPlan {
-    let workspace_id = task
-        .input_json
-        .get("workspace_id")
-        .and_then(|v| v.as_str())
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| task.workspace_id.as_str())
-        .to_string();
-    let thread_id = task
-        .input_json
-        .get("thread_id")
-        .and_then(|v| v.as_str())
-        .filter(|v| !v.trim().is_empty())
-        .map(str::to_string);
-    let source = task
-        .input_json
-        .get("thread_source")
-        .or_else(|| task.input_json.get("source"))
-        .and_then(|v| v.as_str())
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or("scheduled")
-        .to_string();
-    let channel = task
-        .input_json
-        .get("thread_channel")
-        .and_then(|v| v.as_str())
-        .filter(|v| !v.trim().is_empty())
-        .map(str::to_string);
-    let title = task
-        .input_json
-        .get("thread_title")
-        .and_then(|v| v.as_str())
-        .filter(|v| !v.trim().is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| scheduled_thread_title(goal));
-    let (derived_root, derived_thread_id) = proactive_thread_scope(task.task_id.as_str(), &source);
-    let scheduled_root = (thread_id.is_none()
-        || thread_id.as_deref() == Some(derived_thread_id.as_str()))
-    .then_some(derived_root);
-    ProactiveThreadPlan {
-        thread_id,
-        workspace_id,
-        source,
-        channel,
-        title,
-        scheduled_root,
-    }
-}
-
 fn start_proactive_visible_turn(
     state: &AppState,
     task: &TaskRecord,
@@ -5734,12 +5679,6 @@ fn execute_proactive_prompt_task(
             presentation,
         )
     }
-}
-
-pub(crate) fn proactive_thread_scope(task_id: &str, source: &str) -> (String, String) {
-    let root = scheduled_thread_sender_for_task_id(task_id);
-    let thread_id = format!("channel_{source}_{root}");
-    (root, thread_id)
 }
 
 fn execute_capability_browser_task(

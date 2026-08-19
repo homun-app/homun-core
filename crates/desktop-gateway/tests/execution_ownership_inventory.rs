@@ -305,6 +305,28 @@ fn automation_formatting_has_one_gateway_owner() {
 }
 
 #[test]
+fn proactive_thread_planning_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let proactive_threads = production_source(&root.join("src/gateway_proactive_threads.rs"));
+
+    for pattern in [
+        "struct ProactiveThreadPlan",
+        "fn proactive_thread_plan(",
+        "fn proactive_thread_scope(",
+    ] {
+        assert!(
+            proactive_threads.contains(pattern),
+            "proactive thread owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain proactive thread planning item {pattern}"
+        );
+    }
+}
+
+#[test]
 fn runtime_plan_state_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
