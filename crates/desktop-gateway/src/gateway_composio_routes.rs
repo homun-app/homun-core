@@ -35,6 +35,99 @@ pub(crate) fn composio_base_url(explicit: Option<String>) -> String {
         .unwrap_or_else(|| "https://backend.composio.dev/api/v3".to_string())
 }
 
+/// Real HTTP transport for Composio. It is deliberately API-agnostic: callers
+/// pass the method/path/body (the v3 shapes), and it adds `x-api-key` auth over
+/// a configurable base URL.
+pub(crate) struct GatewayComposioTransport {
+    base_url: String,
+    api_key: String,
+    http: reqwest::blocking::Client,
+}
+
+impl GatewayComposioTransport {
+    pub(crate) fn new(base_url: impl Into<String>, api_key: impl Into<String>) -> Self {
+        Self {
+            base_url: base_url.into().trim_end_matches('/').to_string(),
+            api_key: api_key.into(),
+            http: reqwest::blocking::Client::new(),
+        }
+    }
+
+    /// Inherent (no longer a trait method): the `capabilities` crate's
+    /// pre-v3 `ComposioTransport` trait was retired. All callers use this
+    /// concrete type.
+    pub(crate) fn request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> CapabilityResult<serde_json::Value> {
+        let url = format!("{}{}", self.base_url, path);
+        let mut builder = match method.to_ascii_uppercase().as_str() {
+            "GET" => self.http.get(&url),
+            "POST" => self.http.post(&url),
+            "DELETE" => self.http.delete(&url),
+            other => {
+                return Err(CapabilityError::ProviderUnavailable(format!(
+                    "composio_unsupported_method:{other}"
+                )));
+            }
+        };
+        builder = builder.header("x-api-key", &self.api_key);
+        if let Some(body) = body {
+            builder = builder.json(&body);
+        }
+        let response = builder.send().map_err(|error| {
+            CapabilityError::ProviderUnavailable(format!("composio_http:{error}"))
+        })?;
+        let status = response.status();
+        if !status.is_success() {
+            // Composio v3 errors carry a helpful envelope:
+            // {"error":{"message":"...","code":2401,"slug":"..."}}. Surface
+            // the message so tool/auth failures are actionable.
+            let code = status.as_u16();
+            let body_text = response.text().unwrap_or_default();
+            if verbose_debug() {
+                eprintln!("[composio] {method} {path} -> {code} body={body_text}");
+            }
+            let detail = serde_json::from_str::<serde_json::Value>(&body_text)
+                .ok()
+                .and_then(|value| {
+                    let err = value.get("error").cloned().unwrap_or(value);
+                    let msg = err
+                        .get("message")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    let mut parts = Vec::new();
+                    for key in ["details", "errors", "validation_errors", "issues"] {
+                        if let Some(arr) = err.get(key).and_then(serde_json::Value::as_array) {
+                            for it in arr {
+                                parts.push(it.to_string());
+                            }
+                        }
+                    }
+                    let combined = if parts.is_empty() {
+                        msg
+                    } else {
+                        format!("{msg} | {}", parts.join("; "))
+                    };
+                    (!combined.trim().is_empty()).then_some(combined)
+                });
+            return Err(CapabilityError::ProviderUnavailable(match detail {
+                Some(message) => format!("composio_status:{code}:{message}"),
+                None => format!(
+                    "composio_status:{code}:{}",
+                    body_text.chars().take(300).collect::<String>()
+                ),
+            }));
+        }
+        response
+            .json::<serde_json::Value>()
+            .map_err(|error| CapabilityError::ProviderUnavailable(format!("composio_json:{error}")))
+    }
+}
+
 /// Registers a Composio managed provider: stores the API key as an encrypted
 /// secret (only the ref lands in the registry), records provider/grant/
 /// connection config, then lists the available tools through the live HTTP

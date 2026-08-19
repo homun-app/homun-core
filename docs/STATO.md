@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway turn completion judge locale).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway Composio transport locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-turn-completion-judge-owner` |
-| Branch | `fabio/gateway-turn-completion-judge-owner` |
-| PR | #108-#116, #118-#184 mergeate in `main`; #117 browser draft separata; slice `gateway_turn_completion_judge` locale non ancora in PR |
-| HEAD codice verificato | branch `fabio/gateway-turn-completion-judge-owner` sopra `main` aggiornato a #184 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-composio-transport-owner` |
+| Branch | `fabio/gateway-composio-transport-owner` |
+| PR | #108-#116, #118-#185 mergeate in `main`; #117 browser draft separata; slice `gateway_composio_transport` locale non ancora in PR |
+| HEAD codice verificato | branch `fabio/gateway-composio-transport-owner` sopra `main` aggiornato a #185 |
 
 ## Dove siamo
 
@@ -208,11 +208,16 @@ Slice Runtime V2 recenti:
   accanto alla decisione `CapabilityRouteDecision` e al blocco workflow
   one-shot; `GatewayTurnCompletionJudge`, `GatewayContextCompactor` e il loop
   agente restano owner separati.
-- Slice corrente `gateway_turn_completion_judge`: adapter port
+- Estrazione mergeata `gateway_turn_completion_judge`: adapter port
   `GatewayTurnCompletionJudge` esce dal monolite `main.rs` e vive nell'owner
   `gateway_model_routing`, accanto a `task_appears_incomplete` e alle decisioni
   visibili al modello per i turni senza piano; `GatewayTurnPolicy`,
   `GatewayPlanProgress` e il loop agente restano owner separati.
+- Slice corrente `gateway_composio_transport`: il trasporto HTTP concreto
+  `GatewayComposioTransport` esce dal monolite `main.rs` e vive nell'owner
+  `gateway_composio_routes`, accanto a connect/catalog/auth/link/connections;
+  `composio_execute_tool`, payment approval claim, remote approval dispatch e
+  browser restano owner separati.
 - Estrazione locale `gateway_memory_publications`: route memory publication
   create/get/edit/approve/reject, DTO request, mapping errori facade e
   validazione owned-scope escono dal monolite `main.rs`; source grant
@@ -769,9 +774,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#184: slice owner-level successive mergeate in `main`, fino a
-  `gateway_turn_policy`; `main` verificato e riallineato a #184 prima
-  della slice corrente.
+- #143-#185: slice owner-level successive mergeate in `main`, fino a
+  `gateway_turn_completion_judge`; `main` verificato e riallineato a #185
+  prima della slice corrente.
 
 PR aperte:
 
@@ -779,8 +784,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/gateway-turn-completion-judge-owner`: branch sopra `main` aggiornato a
-  #184; contiene solo la slice `GatewayTurnCompletionJudge`.
+- `fabio/gateway-composio-transport-owner`: branch sopra `main` aggiornato a
+  #185; contiene solo la slice `GatewayComposioTransport`.
 
 ## Debito residuo
 
@@ -804,9 +809,9 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Completare gate, commit e PR piccola per `gateway_turn_completion_judge`.
-2. Dopo merge gateway turn completion judge, aggiornare `main` e riprendere la prossima
-   slice non-browser solo dopo nuova lettura owner-level di `main.rs`.
+1. Completare gate, commit e PR piccola per `gateway_composio_transport`.
+2. Dopo merge gateway Composio transport, aggiornare `main` e riprendere la
+   prossima slice non-browser solo dopo nuova lettura owner-level di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -814,8 +819,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/gateway-turn-completion-judge-owner se la slice completion judge e' ancora da aprire o e' aperta;
-altrimenti main aggiornato a #184/#successive e scegli la prossima slice non-browser owner-level.
+branch fabio/gateway-composio-transport-owner se la slice Composio transport e' ancora da aprire o e' aperta;
+altrimenti main aggiornato a #185/#successive e scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
