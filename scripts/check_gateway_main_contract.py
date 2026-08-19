@@ -69,6 +69,9 @@ MEMORY_QUERY_EMBEDDINGS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_query_embeddings.rs"
 )
 MEMORY_CLIENTS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_memory_clients.rs")
+PAYMENT_APPROVAL_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_payment_approval.rs"
+)
 
 
 def extract_async_main_body(source: str) -> str:
@@ -151,6 +154,17 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn proactive_cooldown_secs(": "proactivity cadence config must stay in gateway_proactivity",
         "fn start_proactivity_auto_review(": "proactivity background tick must stay in gateway_proactivity",
         "async fn proactivity_auto_review_tick(": "proactivity background tick must stay in gateway_proactivity",
+        "struct PaymentApprovalGrant": "payment approval grants must stay in gateway_payment_approval",
+        "fn apply_payment_approval_secret_for_action(": "payment approval secret injection must stay in gateway_payment_approval",
+        "fn apply_payment_approval_secret_from_map(": "payment approval secret injection must stay in gateway_payment_approval",
+        "fn single_action_rejects_unsupported_execution_before_payment_claim(": "payment approval reject-before-claim preflight must stay in gateway_payment_approval",
+        "fn should_claim_payment_approval(": "payment approval claim policy must stay in gateway_payment_approval",
+        "fn claim_payment_approval_for_action(": "payment approval claiming must stay in gateway_payment_approval",
+        "fn validate_payment_approval_for_action(": "payment approval validation must stay in gateway_payment_approval",
+        "fn validated_payment_approval_id(": "payment approval validation must stay in gateway_payment_approval",
+        "fn claim_payment_approval_from_map(": "payment approval claiming must stay in gateway_payment_approval",
+        "fn prune_expired_payment_approvals(": "payment approval expiry must stay in gateway_payment_approval",
+        "fn lock_payment_approvals(": "payment approval state lock must stay in gateway_payment_approval",
         "fn task_delivers_to_homun(": "Homun check-in task matching must stay in gateway_task_maintenance",
         "fn task_is_live(": "task liveness classification must stay in gateway_task_maintenance",
         "fn cancel_homun_checkins(": "Homun check-in cancellation must stay in gateway_task_maintenance",
@@ -1329,6 +1343,8 @@ def main() -> int:
         memory_query_embeddings_source = handle.read()
     with open(MEMORY_CLIENTS_RS, "r", encoding="utf-8") as handle:
         memory_clients_source = handle.read()
+    with open(PAYMENT_APPROVAL_RS, "r", encoding="utf-8") as handle:
+        payment_approval_source = handle.read()
     main_body = extract_async_main_body(source)
     assert_contains(source, "mod gateway_recall_context;", "gateway root must declare recall context owner")
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
@@ -1408,6 +1424,39 @@ def main() -> int:
             remote_approval_execution_source,
             snippet,
             "remote approval execution owner must not absorb control/payment/browser surfaces",
+        )
+    for snippet in [
+        "pub(crate) struct PaymentApprovalGrant",
+        "pub(crate) fn apply_payment_approval_secret_for_action(",
+        "pub(crate) fn apply_payment_approval_secret_from_map(",
+        "pub(crate) fn single_action_rejects_unsupported_execution_before_payment_claim(",
+        "pub(crate) fn should_claim_payment_approval(",
+        "pub(crate) fn claim_payment_approval_for_action(",
+        "pub(crate) fn validate_payment_approval_for_action(",
+        "pub(crate) fn validated_payment_approval_id(",
+        "pub(crate) fn claim_payment_approval_from_map(",
+        "pub(crate) fn prune_expired_payment_approvals(",
+        "pub(crate) fn lock_payment_approvals(",
+    ]:
+        assert_contains(
+            payment_approval_source,
+            snippet,
+            "payment approval owner must expose claim/secret surfaces",
+        )
+    for snippet in [
+        "fn payment_approval_marker(",
+        "async fn vault_payment_approval_approve(",
+        "fn payment_approval_grant_from_request(",
+        "fn payment_approval_marker_matches(",
+        "fn rewrite_payment_approval_to_done(",
+        "fn browser_action_requires_payment_grant(",
+        "async fn execute_pending_approval(",
+        "async fn dispatch_remote_approval(",
+    ]:
+        assert_not_contains(
+            payment_approval_source,
+            snippet,
+            "payment approval owner must not absorb vault/browser/remote surfaces",
         )
     assert_contains(
         action_confirmations_source,

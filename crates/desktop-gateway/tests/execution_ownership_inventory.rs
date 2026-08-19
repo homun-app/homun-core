@@ -1003,6 +1003,68 @@ fn vault_memory_recall_fallback_has_one_gateway_owner() {
 }
 
 #[test]
+fn payment_approval_claims_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let vault_routes = production_source(&root.join("src/gateway_vault_routes.rs"));
+    let browser_tools = production_source(&root.join("src/gateway_browser_tools.rs"));
+    let payment_approval_path = root.join("src/gateway_payment_approval.rs");
+    let payment_approval = if payment_approval_path.exists() {
+        production_source(&payment_approval_path)
+    } else {
+        String::new()
+    };
+
+    let owned = [
+        "struct PaymentApprovalGrant",
+        "fn apply_payment_approval_secret_for_action(",
+        "fn apply_payment_approval_secret_from_map(",
+        "fn single_action_rejects_unsupported_execution_before_payment_claim(",
+        "fn should_claim_payment_approval(",
+        "fn claim_payment_approval_for_action(",
+        "fn validate_payment_approval_for_action(",
+        "fn validated_payment_approval_id(",
+        "fn claim_payment_approval_from_map(",
+        "fn prune_expired_payment_approvals(",
+        "fn lock_payment_approvals(",
+    ];
+
+    for pattern in owned {
+        assert!(
+            payment_approval.contains(pattern),
+            "payment approval owner must contain claim/secret surface {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain payment approval claim/secret surface {pattern}"
+        );
+        assert!(
+            !vault_routes.contains(pattern),
+            "vault route owner must call but not own payment approval claim/secret surface {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "fn payment_approval_marker(",
+        "async fn vault_payment_approval_approve(",
+        "fn payment_approval_grant_from_request(",
+        "fn payment_approval_marker_matches(",
+        "fn rewrite_payment_approval_to_done(",
+        "fn browser_action_execution_fields_are_schema_legal(",
+        "fn browser_action_requires_payment_grant(",
+        "async fn execute_pending_approval(",
+        "async fn dispatch_remote_approval(",
+    ] {
+        assert!(
+            !payment_approval.contains(adjacent),
+            "payment approval owner must not absorb adjacent vault/browser/remote surface {adjacent}"
+        );
+    }
+    assert!(vault_routes.contains("fn payment_approval_grant_from_request("));
+    assert!(browser_tools.contains("fn browser_action_execution_fields_are_schema_legal("));
+}
+
+#[test]
 fn actionable_source_resolution_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
