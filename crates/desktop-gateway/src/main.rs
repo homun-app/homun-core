@@ -516,7 +516,7 @@ pub(crate) use gateway_skill_runtime::*;
 use gateway_runtime_flags::{
     memory_service_enabled, memory_service_flag, plan_autoadvance_from_evidence_enabled,
     plan_reconcile_on_delivery_enabled, plan_stall_abort_enabled, turn_trace_enabled,
-    turn_trace_max_bytes,
+    turn_trace_max_bytes, verbose_debug,
 };
 use gateway_secrets::{open_browser_checkpoint_secret_store, open_gateway_secret_store};
 pub(crate) use gateway_task_executor::*;
@@ -6403,10 +6403,6 @@ fn capability_kind_not_wired_outcome(
         "Capability execution for provider kind {kind:?} not yet wired (MCP and Composio active)."
     );
     capability_call_failed_outcome(task, &reason)
-}
-
-fn verbose_debug() -> bool {
-    std::env::var("HOMUN_DEBUG").is_ok()
 }
 
 // VAULT_REVEAL_OPEN/CLOSE moved to engine::markers (ADR 0024 inc 5e.3); imported below.

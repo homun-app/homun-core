@@ -73,6 +73,10 @@ pub(crate) fn memory_service_enabled() -> bool {
     memory_service_flag(std::env::var("HOMUN_MEMORY_SERVICE").ok().as_deref())
 }
 
+pub(crate) fn verbose_debug() -> bool {
+    std::env::var("HOMUN_DEBUG").is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{memory_service_flag, plan_reconcile_on_delivery_flag};

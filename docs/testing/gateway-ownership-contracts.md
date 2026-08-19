@@ -102,6 +102,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_thread_episodes.rs` | Workspace episodico riservato `__threads__`, persistenza episodi conversazionali confermati, matching esatto thread/workspace e blocco prompt del thread corrente; non possiede recall generale, memory service, graph/wiki o prompt packet. |
 | `crates/desktop-gateway/src/gateway_prompt_packets.rs` | Composizione dei prompt packet core/workspace/project/thread/runtime, lettura bounded delle istruzioni progetto e packet perimetro/routing thread; non possiede prompt instructions, policy memoria, runtime plan, routing decision o loop agente. |
 | `crates/desktop-gateway/src/gateway_brain_runtime.rs` | Configurazione runtime Brain: flag enablement, adapter `GatewayBrainMemory` e budget orchestrator scalati sul context window; non possiede materializzazione durable dei task, capability facade, routing workflow o loop agente. |
+| `crates/desktop-gateway/src/gateway_runtime_flags.rs` | Flag runtime da environment, inclusi debug diagnostico, trace bounded, memory service e plan reconcile/autoadvance; non possiede loop agente, tool execution o route. |
 | `crates/desktop-gateway/src/gateway_runtime_settings.rs` | DTO e route settings runtime persistiti. |
 | `crates/desktop-gateway/src/gateway_user_preferences.rs` | Preferenze utente/setup: lingua, timezone, Ollama, approval routing. |
 | `crates/desktop-gateway/src/gateway_process_events.rs` | Registri app event, WS process events e usage recorder. |

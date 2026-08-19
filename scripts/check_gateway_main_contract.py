@@ -73,6 +73,7 @@ PROMPT_PACKETS_RS = os.path.join(
 BRAIN_RUNTIME_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_brain_runtime.rs"
 )
+RUNTIME_FLAGS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_runtime_flags.rs")
 CHANNELS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_channels.rs")
 MEMORY_QUERY_EMBEDDINGS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_query_embeddings.rs"
@@ -958,6 +959,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn turn_trace_max_bytes(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn plan_autoadvance_from_evidence_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn memory_service_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
+        "fn verbose_debug(": "runtime environment flags must stay in gateway_runtime_flags",
         "struct RuntimeSettings": "runtime settings DTO must stay in gateway_runtime_settings",
         "fn merge_runtime_settings(": "runtime settings merge must stay in gateway_runtime_settings",
         "async fn get_runtime_settings(": "runtime settings read route must stay in gateway_runtime_settings",
@@ -1365,6 +1367,8 @@ def main() -> int:
         prompt_packets_source = handle.read()
     with open(BRAIN_RUNTIME_RS, "r", encoding="utf-8") as handle:
         brain_runtime_source = handle.read()
+    with open(RUNTIME_FLAGS_RS, "r", encoding="utf-8") as handle:
+        runtime_flags_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
         action_confirmations_source = handle.read()
     with open(ACTIONABLE_SOURCE_RS, "r", encoding="utf-8") as handle:
@@ -1814,6 +1818,11 @@ def main() -> int:
     )
     assert_contains(source, "mod gateway_datetime_tools;", "gateway root must declare datetime tools owner")
     assert_contains(source, "mod gateway_runtime_flags;", "gateway root must declare runtime flags owner")
+    assert_contains(
+        runtime_flags_source,
+        "pub(crate) fn verbose_debug(",
+        "runtime flags owner must expose verbose debug env flag",
+    )
     assert_contains(
         source,
         "mod gateway_runtime_settings;",

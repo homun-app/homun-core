@@ -265,6 +265,25 @@ fn task_executor_surface_has_one_gateway_owner() {
 }
 
 #[test]
+fn runtime_flags_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let runtime_flags = production_source(&root.join("src/gateway_runtime_flags.rs"));
+
+    let owned = ["fn verbose_debug("];
+    for pattern in owned {
+        assert!(
+            runtime_flags.contains(pattern),
+            "runtime flags owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain runtime flags surface {pattern}"
+        );
+    }
+}
+
+#[test]
 fn runtime_plan_state_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
