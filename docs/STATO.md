@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway remote approval control locale).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway remote approval continuation locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-remote-approval-control` |
-| Branch | `fabio/gateway-remote-approval-control` |
-| PR | #108-#116, #118-#189 mergeate in `main`; #117 browser draft separata; slice `gateway_remote_approval_control` locale non ancora in PR |
-| HEAD codice verificato | branch `fabio/gateway-remote-approval-control` sopra `main` aggiornato a #189 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-remote-approval-continuation` |
+| Branch | `fabio/gateway-remote-approval-continuation` |
+| PR | #108-#116, #118-#190 mergeate in `main`; #117 browser draft separata; slice `gateway_remote_approval_continuation` locale non ancora in PR |
+| HEAD codice verificato | branch `fabio/gateway-remote-approval-continuation` sopra `main` aggiornato a #190 |
 
 ## Dove siamo
 
@@ -118,11 +118,16 @@ Slice Runtime V2 recenti:
   `main.rs` e si affiancano ai marker MCP in `gateway_action_confirmations`;
   `composio_execute_tool`, payment approval e remote approval restano fuori
   dallo scope.
-- Slice corrente `gateway_remote_approval_control`: creazione approvazioni
+- Estrazione mergeata `gateway_remote_approval_control`: creazione approvazioni
   remote, scadenza, controllo pending, parsing risposte OK/NO e testo
   progresso escono dal monolite `main.rs` e vivono in
   `gateway_remote_approval`; execute pending, dispatch remoto, payment approval
   e browser restano fuori dallo scope.
+- Slice corrente `gateway_remote_approval_continuation`: status thread,
+  target formatter, source-user lookup e prompt/input continuation
+  post-approval escono dal monolite `main.rs` e vivono in
+  `gateway_remote_approval`; actionable source resolution, execute pending,
+  dispatch remoto, payment approval e browser restano fuori dallo scope.
 - Estrazione locale `gateway_write_tool_allowlist`: persistenza e matching
   "always allow" per write-tool Composio/MCP escono dal monolite `main.rs`;
   il file storico `composio-tool-allow.json` resta invariato per compatibilita',
@@ -804,8 +809,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/gateway-agent-output-completion-owner`: branch sopra `main` aggiornato
-  a #186; contiene solo la slice `agent_output_incomplete_reason`.
+- `fabio/gateway-remote-approval-continuation`: branch sopra `main` aggiornato
+  a #190; contiene solo la slice `gateway_remote_approval_continuation`.
 
 ## Debito residuo
 
@@ -829,9 +834,11 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Completare gate, commit e PR piccola per `gateway_composio_confirmation`.
-2. Dopo merge gateway composio confirmation, aggiornare `main` e riprendere la
-   prossima slice non-browser solo dopo nuova lettura owner-level di `main.rs`.
+1. Completare gate, commit e PR piccola per
+   `gateway_remote_approval_continuation`.
+2. Dopo merge gateway remote approval continuation, aggiornare `main` e
+   riprendere la prossima slice non-browser solo dopo nuova lettura owner-level
+   di `main.rs`.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -839,8 +846,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/gateway-composio-confirmation-owner se la slice composio confirmation e' ancora da aprire o e' aperta;
-altrimenti main aggiornato a #188/#successive e scegli la prossima slice non-browser owner-level.
+branch fabio/gateway-remote-approval-continuation se la slice remote approval continuation e' ancora da aprire o e' aperta;
+altrimenti main aggiornato a #190/#successive e scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

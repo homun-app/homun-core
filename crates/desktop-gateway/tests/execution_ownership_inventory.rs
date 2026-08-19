@@ -648,6 +648,49 @@ fn remote_approval_control_helpers_have_one_gateway_owner() {
 }
 
 #[test]
+fn remote_approval_continuation_helpers_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let remote_approval = production_source(&root.join("src/gateway_remote_approval.rs"));
+
+    let owned = [
+        "fn approval_action_target(",
+        "fn remote_approval_thread_status(",
+        "fn append_remote_approval_thread_status(",
+        "fn approval_resume_prompt(",
+        "fn approval_source_user_text(",
+        "fn approval_continuation_visible_text(",
+        "fn approval_continuation_turn_input(",
+        "fn resume_thread_after_approval(",
+    ];
+
+    for pattern in owned {
+        assert!(
+            remote_approval.contains(pattern),
+            "remote approval owner must contain continuation helper {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain remote approval continuation helper {pattern}"
+        );
+    }
+    for adjacent in [
+        "enum ActionableSourceResolution",
+        "fn claim_actionable_source<",
+        "fn resolve_actionable_source<",
+        "fn cancel_pending_remote_approval(",
+        "async fn execute_pending_approval(",
+        "async fn dispatch_remote_approval(",
+        "fn browser_action_requires_payment_grant(",
+    ] {
+        assert!(
+            !remote_approval.contains(adjacent),
+            "remote approval continuation owner must not absorb adjacent actionable/execution/browser surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn startup_background_writers_follow_process_fencing() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
