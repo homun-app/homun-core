@@ -655,6 +655,41 @@ fn recall_entry_formatting_has_one_gateway_owner() {
 }
 
 #[test]
+fn memory_prompt_context_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_context = production_source(&root.join("src/gateway_memory_prompt_context.rs"));
+
+    for pattern in [
+        "fn artifact_quality_summary(",
+        "fn artifact_provenance_context_for_query(",
+        "fn producer_workflow_contract(",
+        "fn workflow_status_context_for_query(",
+    ] {
+        assert!(
+            prompt_context.contains(pattern),
+            "memory prompt context owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain memory prompt context {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "fn recall_memory(",
+        "fn recall_stream_payload_from_outcome(",
+        "fn learn_via_service_or_inline(",
+        "async fn run_agent_rounds(",
+    ] {
+        assert!(
+            !prompt_context.contains(adjacent),
+            "memory prompt context owner must not absorb adjacent memory surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn attachment_prompt_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

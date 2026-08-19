@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway recall entry formatting mergeata).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway memory prompt context locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -177,6 +177,10 @@ Slice Runtime V2 recenti:
   (`format_recall_entry`) esce dal monolite `main.rs` e resta accanto agli
   helper di recall prompt/status/effect; `recall_memory`, artifact/workflow
   read-model e loop agente restano fuori dallo scope.
+- Estrazione locale `gateway_memory_prompt_context`: read-model bounded per
+  provenance artifact, qualita' artifact e stato workflow da memoria canonica
+  escono dal monolite `main.rs`; `recall_memory`, learning inline, prompt
+  packet, artifact persistence e loop agente restano owner separati.
 - Estrazione locale `gateway_local_authorization_routes`: route/DTO e marker
   locali per filesystem authorization, sandbox escalation, read-only card e
   connect-suggestion mark escono dal monolite `main.rs`.

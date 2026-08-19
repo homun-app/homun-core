@@ -84,6 +84,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_memory_hygiene.rs` | Route `/api/memory/hygiene/suggestions`, payload suggerimenti merge person, normalizzazione entity-name e matching alias verificati; non possiede graph projection, graph persistence o source grants. |
 | `crates/desktop-gateway/src/gateway_memory_wiki.rs` | Route `/api/memory/wiki` read/save, `/api/memory/consolidate`, registry edit manuali e rebuild pagine wiki derivate; non possiede graph projection, graph persistence o source grants. |
 | `crates/desktop-gateway/src/gateway_memory_tools.rs` | Tool schema recall/decision/forget, registrazione decisioni, forget testuale/topic e route `/api/memory/decide` per confermare/rifiutare/cancellare/editare candidati; non possiede dashboard/export memory, graph projection o wiki rebuild non legati alle decisioni. |
+| `crates/desktop-gateway/src/gateway_memory_prompt_context.rs` | Read-model prompt bounded per provenance artifact, qualita' artifact e stato workflow dalla memoria canonica; non possiede `recall_memory`, learn inline, prompt packet, artifact persistence o loop agente. |
 | `crates/desktop-gateway/src/gateway_memory_query_embeddings.rs` | Config embedding memoria, transport HTTP Ollama best-effort, cache query embedding LRU/TTL, timeout e timing recall; non possiede `recall_memory`, learn/consolidate o briefing memoria. |
 | `crates/desktop-gateway/src/gateway_memory_clients.rs` | Client capability memoria per embedding/LLM, usage telemetry context e backfill embedding bounded off-lock; non possiede recall tool, learn inline, consolidate o storage semantics del `MemoryFacade`. |
 | `crates/desktop-gateway/src/gateway_contacts.rs` | Route core rubrica `/api/memory/contacts*`, DTO `ContactView`, CRUD, merge, identity add/remove e helper memoria/handle/date condivisi; non possiede perimetri, relationship, fact profile o named profile CRUD. |
@@ -107,8 +108,9 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 I moduli memory gia' estratti (`gateway_memory_*`, `gateway_recall_context.rs`,
 `gateway_artifact_memory.rs`, `gateway_memory_tools.rs`) restano owner locali
 delle singole funzioni di recall/learn/graph/wiki/tool. `gateway_recall_context.rs`
-possiede anche il formatter bounded delle entry recall per i prompt, ma non
-deve assorbire recall generale, artifact/workflow read-model o loop agente.
+possiede anche il formatter bounded delle entry recall per i prompt, mentre
+`gateway_memory_prompt_context.rs` possiede i read-model artifact/workflow; nessuno
+dei due deve assorbire recall generale, learn inline o loop agente.
 Il flusso inline piu' ampio di memoria non va ulteriormente tagliato senza una
 slice dedicata.
 
