@@ -193,10 +193,10 @@ use gateway_memory_dedup::{
     DEDUP_COSINE, DEDUP_JACCARD, cosine, dedup_tokens, forgotten_token_sets, is_semantic_duplicate,
     is_suppressed, jaccard,
 };
-use gateway_memory_query_embeddings::{
-    memory_query_embedding_cache, memory_query_embedding_cache_key,
-    memory_query_embedding_cache_max_entries, memory_query_embedding_cache_ttl,
-    memory_query_embedding_timeout,
+#[cfg(test)]
+use gateway_memory_query_embeddings::memory_recall_timing_trace_line;
+pub(crate) use gateway_memory_query_embeddings::{
+    MemoryRecallTiming, embed_model, embed_query_for_memory_recall, embed_text,
 };
 pub(crate) use gateway_memory_ui_routes::{
     export_user_data, memory_dashboard, memory_export, memory_items,
@@ -382,7 +382,9 @@ pub(crate) use gateway_mcp_runtime::{
 pub(crate) use gateway_mcp_runtime::{
     mcp_http_config_from_connection, mcp_http_headers_from_secret, mcp_stdio_config_from_metadata,
 };
-use gateway_memory_clients::{gateway_embedding_client, gateway_llm_client};
+pub(crate) use gateway_memory_clients::{
+    backfill_embeddings, gateway_embedding_client, gateway_llm_client,
+};
 #[cfg(test)]
 pub(crate) use gateway_memory_goals::GoalsListQuery;
 pub(crate) use gateway_memory_goals::{
@@ -1509,95 +1511,6 @@ fn strip_json_fences(text: &str) -> &str {
         .trim()
 }
 
-// ---- Embeddings (multilingual semantic layer) -----------------------------------
-// A multilingual embedding model (nomic-embed-text-v2-moe by default, via the local
-// Ollama) gives language-agnostic SEMANTIC similarity — fuses paraphrases of the same
-// decision (and across languages) for dedup, and powers semantic recall. Vectors are
-// stored per memory; similarity is brute-force cosine (fine at local single-user scale).
-
-fn embed_model() -> String {
-    env::var("HOMUN_EMBED_MODEL").unwrap_or_else(|_| "nomic-embed-text-v2-moe".to_string())
-}
-fn embed_base() -> String {
-    env::var("HOMUN_EMBED_BASE").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string())
-}
-
-/// Embed one text via Ollama `/api/embed`. Best-effort: `None` on any failure (the
-/// caller falls back to lexical), so embeddings never break a turn.
-async fn embed_text(
-    http: &reqwest::Client,
-    text: &str,
-    usage: &local_first_inference_usage::UsageContext,
-) -> Option<Vec<f32>> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let response = inference_transport::send_ollama_embed(
-        http,
-        global_usage_recorder(),
-        usage,
-        &embed_base(),
-        &embed_model(),
-        trimmed,
-        Some(std::time::Duration::from_secs(30)),
-    )
-    .await
-    .ok()?;
-    if !(200..300).contains(&response.status) {
-        return None;
-    }
-    let body = response.body;
-    let arr = body
-        .get("embeddings")
-        .and_then(|e| e.get(0))
-        .and_then(|v| v.as_array())
-        .cloned()
-        .or_else(|| body.get("embedding").and_then(|v| v.as_array()).cloned())?;
-    let vector: Vec<f32> = arr
-        .iter()
-        .filter_map(|x| x.as_f64().map(|f| f as f32))
-        .collect();
-    (!vector.is_empty()).then_some(vector)
-}
-
-/// Embed memories in a scope that don't yet have a vector (lazy backfill). Collects
-/// refs+texts under the lock, embeds OFF the lock (async HTTP), writes back. Bounded
-/// per call so it never stalls a turn.
-async fn backfill_embeddings(
-    state: &AppState,
-    user: &MemoryUserId,
-    workspace: &MemoryWorkspaceId,
-    limit: usize,
-) {
-    // ADR 0022 (Tappa 4): backfill ORCHESTRATO nel crate via 3 fasi Send-safe
-    // (collect lock → embed off-lock → persist lock). Il guard non attraversa await.
-    let embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient> =
-        gateway_embedding_client(state.http.clone());
-    let model = embed_model();
-    // Fase 1 (lock): collect pending + seen.
-    let collected = {
-        let facade = memory_facade(state);
-        local_first_memory::backfill_collect_pending(facade, user, workspace, limit)
-    };
-    let Some((pending, mut seen)) = collected else {
-        return;
-    };
-    // Fase 2 + 3: embed off-lock, poi persist sotto lock per ciascuno.
-    for (reference, text, mtype) in pending {
-        let vector = embedding.embed(&text).await;
-        if vector.is_empty() {
-            continue;
-        }
-        {
-            let facade = memory_facade(state);
-            local_first_memory::backfill_persist_one(
-                facade, user, workspace, &reference, &mtype, &vector, &model, &mut seen,
-            );
-        }
-    }
-}
-
 /// ADR 0022 — Tappa 1/4: apprendimento post-turno. Di default (service ON)
 /// instrada via `MemoryRecallService::learn`; anche nel
 /// path OFF usa le STESSE fn del crate (3 fasi: prepare_learn_prompt →
@@ -2460,105 +2373,6 @@ struct MemoryCandidate {
     dense_rank: Option<usize>,
     importance: f32,
     age_days: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Default)]
-struct MemoryRecallTiming {
-    lock_wait_ms: u64,
-    profile_ms: u64,
-    open_loops_ms: u64,
-    fts_ms: u64,
-    query_embedding_ms: Option<u64>,
-    query_embedding_cache_hit: bool,
-    query_embedding_timed_out: bool,
-    vector_scan_ms: Option<u64>,
-    graph_context_ms: u64,
-    total_ms: u64,
-    vector_candidates: usize,
-    fts_candidates: usize,
-    degraded: bool,
-}
-
-fn elapsed_ms(start: std::time::Instant) -> u64 {
-    start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
-}
-
-#[cfg(test)]
-fn memory_recall_timing_trace_line(timing: &MemoryRecallTiming) -> String {
-    format!(
-        "memory recall: total_ms={} lock_wait_ms={} profile_ms={} open_loops_ms={} \
-fts_ms={} query_embedding_ms={} query_embedding_cache_hit={} query_embedding_timed_out={} \
-vector_scan_ms={} graph_context_ms={} \
-fts_candidates={} vector_candidates={} degraded={}",
-        timing.total_ms,
-        timing.lock_wait_ms,
-        timing.profile_ms,
-        timing.open_loops_ms,
-        timing.fts_ms,
-        timing
-            .query_embedding_ms
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "none".to_string()),
-        timing.query_embedding_cache_hit,
-        timing.query_embedding_timed_out,
-        timing
-            .vector_scan_ms
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "none".to_string()),
-        timing.graph_context_ms,
-        timing.fts_candidates,
-        timing.vector_candidates,
-        timing.degraded
-    )
-}
-
-async fn embed_query_for_memory_recall(
-    http: &reqwest::Client,
-    query: &str,
-    workspace: &MemoryWorkspaceId,
-    timing: &mut MemoryRecallTiming,
-) -> Option<Vec<f32>> {
-    let key = memory_query_embedding_cache_key(query, workspace);
-    if let Ok(mut cache) = memory_query_embedding_cache().lock()
-        && let Some(vector) = cache.get(&key, memory_query_embedding_cache_ttl())
-    {
-        timing.query_embedding_cache_hit = true;
-        timing.query_embedding_ms = Some(0);
-        return Some(vector);
-    }
-
-    let embedding_start = std::time::Instant::now();
-    let mut usage = local_first_inference_usage::UsageContext::new(
-        uuid::Uuid::new_v4().to_string(),
-        local_first_inference_usage::InferencePurpose::MemoryRecall,
-        gateway_user_id().as_str(),
-    );
-    usage.purpose_detail = Some("query_embedding".to_string());
-    usage.workspace_id = Some(workspace.as_str().to_string());
-    let result = match tokio::time::timeout(
-        memory_query_embedding_timeout(),
-        embed_text(http, query, &usage),
-    )
-    .await
-    {
-        Ok(vector) => vector,
-        Err(_) => {
-            timing.query_embedding_timed_out = true;
-            timing.query_embedding_ms = Some(elapsed_ms(embedding_start));
-            return None;
-        }
-    };
-    timing.query_embedding_ms = Some(elapsed_ms(embedding_start));
-    if let Some(vector) = result.as_ref()
-        && let Ok(mut cache) = memory_query_embedding_cache().lock()
-    {
-        cache.insert(
-            key,
-            vector.clone(),
-            memory_query_embedding_cache_max_entries(),
-        );
-    }
-    result
 }
 
 /// Combined relevance score: RRF-fuse the two retrieval ranks (a memory strong in BOTH

@@ -1,9 +1,8 @@
 //! Query embedding cache for memory recall.
 //!
 //! This owner keeps the deterministic cache behavior for recall embeddings out
-//! of the gateway root: normalized cache keys, LRU eviction, TTL, and timeout
-//! knobs. The HTTP embedding call remains in `main.rs` until provider routing
-//! and usage recording have their own owner.
+//! of the gateway root: embedding provider config, HTTP transport, normalized
+//! cache keys, LRU eviction, TTL, timeout knobs, and recall timing projection.
 
 use std::collections::HashMap;
 use std::env;
@@ -11,8 +10,106 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use local_first_memory::WorkspaceId as MemoryWorkspaceId;
+use serde::Serialize;
 
-use crate::{embed_base, embed_model};
+use crate::{gateway_user_id, global_usage_recorder, inference_transport};
+
+pub(crate) fn embed_model() -> String {
+    env::var("HOMUN_EMBED_MODEL").unwrap_or_else(|_| "nomic-embed-text-v2-moe".to_string())
+}
+
+pub(crate) fn embed_base() -> String {
+    env::var("HOMUN_EMBED_BASE").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string())
+}
+
+/// Embed one text via Ollama `/api/embed`. Best-effort: `None` on any failure
+/// (the caller falls back to lexical), so embeddings never break a turn.
+pub(crate) async fn embed_text(
+    http: &reqwest::Client,
+    text: &str,
+    usage: &local_first_inference_usage::UsageContext,
+) -> Option<Vec<f32>> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let response = inference_transport::send_ollama_embed(
+        http,
+        global_usage_recorder(),
+        usage,
+        &embed_base(),
+        &embed_model(),
+        trimmed,
+        Some(Duration::from_secs(30)),
+    )
+    .await
+    .ok()?;
+    if !(200..300).contains(&response.status) {
+        return None;
+    }
+    let body = response.body;
+    let arr = body
+        .get("embeddings")
+        .and_then(|e| e.get(0))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .or_else(|| body.get("embedding").and_then(|v| v.as_array()).cloned())?;
+    let vector: Vec<f32> = arr
+        .iter()
+        .filter_map(|x| x.as_f64().map(|f| f as f32))
+        .collect();
+    (!vector.is_empty()).then_some(vector)
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub(crate) struct MemoryRecallTiming {
+    pub(crate) lock_wait_ms: u64,
+    pub(crate) profile_ms: u64,
+    pub(crate) open_loops_ms: u64,
+    pub(crate) fts_ms: u64,
+    pub(crate) query_embedding_ms: Option<u64>,
+    pub(crate) query_embedding_cache_hit: bool,
+    pub(crate) query_embedding_timed_out: bool,
+    pub(crate) vector_scan_ms: Option<u64>,
+    pub(crate) graph_context_ms: u64,
+    pub(crate) total_ms: u64,
+    pub(crate) vector_candidates: usize,
+    pub(crate) fts_candidates: usize,
+    pub(crate) degraded: bool,
+}
+
+fn elapsed_ms(start: Instant) -> u64 {
+    start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+#[cfg(test)]
+pub(crate) fn memory_recall_timing_trace_line(timing: &MemoryRecallTiming) -> String {
+    format!(
+        "memory recall: total_ms={} lock_wait_ms={} profile_ms={} open_loops_ms={} \
+fts_ms={} query_embedding_ms={} query_embedding_cache_hit={} query_embedding_timed_out={} \
+vector_scan_ms={} graph_context_ms={} \
+fts_candidates={} vector_candidates={} degraded={}",
+        timing.total_ms,
+        timing.lock_wait_ms,
+        timing.profile_ms,
+        timing.open_loops_ms,
+        timing.fts_ms,
+        timing
+            .query_embedding_ms
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        timing.query_embedding_cache_hit,
+        timing.query_embedding_timed_out,
+        timing
+            .vector_scan_ms
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        timing.graph_context_ms,
+        timing.fts_candidates,
+        timing.vector_candidates,
+        timing.degraded
+    )
+}
 
 #[derive(Debug, Clone)]
 struct MemoryQueryEmbeddingCacheEntry {
@@ -120,6 +217,55 @@ pub(crate) fn memory_query_embedding_cache_key(
         workspace.as_str(),
         normalize_memory_embedding_query(query)
     )
+}
+
+pub(crate) async fn embed_query_for_memory_recall(
+    http: &reqwest::Client,
+    query: &str,
+    workspace: &MemoryWorkspaceId,
+    timing: &mut MemoryRecallTiming,
+) -> Option<Vec<f32>> {
+    let key = memory_query_embedding_cache_key(query, workspace);
+    if let Ok(mut cache) = memory_query_embedding_cache().lock()
+        && let Some(vector) = cache.get(&key, memory_query_embedding_cache_ttl())
+    {
+        timing.query_embedding_cache_hit = true;
+        timing.query_embedding_ms = Some(0);
+        return Some(vector);
+    }
+
+    let embedding_start = Instant::now();
+    let mut usage = local_first_inference_usage::UsageContext::new(
+        uuid::Uuid::new_v4().to_string(),
+        local_first_inference_usage::InferencePurpose::MemoryRecall,
+        gateway_user_id().as_str(),
+    );
+    usage.purpose_detail = Some("query_embedding".to_string());
+    usage.workspace_id = Some(workspace.as_str().to_string());
+    let result = match tokio::time::timeout(
+        memory_query_embedding_timeout(),
+        embed_text(http, query, &usage),
+    )
+    .await
+    {
+        Ok(vector) => vector,
+        Err(_) => {
+            timing.query_embedding_timed_out = true;
+            timing.query_embedding_ms = Some(elapsed_ms(embedding_start));
+            return None;
+        }
+    };
+    timing.query_embedding_ms = Some(elapsed_ms(embedding_start));
+    if let Some(vector) = result.as_ref()
+        && let Ok(mut cache) = memory_query_embedding_cache().lock()
+    {
+        cache.insert(
+            key,
+            vector.clone(),
+            memory_query_embedding_cache_max_entries(),
+        );
+    }
+    result
 }
 
 #[cfg(test)]

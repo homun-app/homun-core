@@ -576,6 +576,56 @@ fn model_usage_transport_has_one_gateway_owner() {
 }
 
 #[test]
+fn memory_query_embedding_transport_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let query_embeddings = production_source(&root.join("src/gateway_memory_query_embeddings.rs"));
+    let memory_clients = production_source(&root.join("src/gateway_memory_clients.rs"));
+
+    for pattern in [
+        "fn embed_model(",
+        "fn embed_base(",
+        "async fn embed_text(",
+        "struct MemoryRecallTiming",
+        "fn memory_recall_timing_trace_line(",
+        "async fn embed_query_for_memory_recall(",
+    ] {
+        assert!(
+            query_embeddings.contains(pattern),
+            "memory query embedding owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain memory query embedding surface {pattern}"
+        );
+    }
+
+    assert!(
+        memory_clients.contains("async fn backfill_embeddings("),
+        "memory client owner must contain embedding backfill orchestration"
+    );
+    assert!(
+        !main.contains("async fn backfill_embeddings("),
+        "main.rs must not retain embedding backfill orchestration"
+    );
+
+    for adjacent in [
+        "fn recall_memory(",
+        "fn recall_stream_payload_from_outcome(",
+        "fn learn_via_service_or_inline(",
+    ] {
+        assert!(
+            !query_embeddings.contains(adjacent),
+            "memory query embedding owner must not absorb adjacent memory surface {adjacent}"
+        );
+        assert!(
+            !memory_clients.contains(adjacent),
+            "memory client owner must not absorb adjacent memory surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn composio_transport_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

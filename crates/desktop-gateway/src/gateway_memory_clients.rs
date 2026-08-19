@@ -22,6 +22,39 @@ pub(crate) fn gateway_llm_client(http: reqwest::Client) -> Arc<dyn local_first_m
     Arc::new(GatewayLlmClient { http })
 }
 
+/// Embed memories in a scope that don't yet have a vector (lazy backfill).
+/// Collects refs+texts under the lock, embeds off the lock, then persists
+/// under a fresh lock for each row. Bounded per call so it never stalls a turn.
+pub(crate) async fn backfill_embeddings(
+    state: &AppState,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    limit: usize,
+) {
+    let embedding: Arc<dyn local_first_memory::EmbeddingClient> =
+        gateway_embedding_client(state.http.clone());
+    let model = embed_model();
+    let collected = {
+        let facade = memory_facade(state);
+        local_first_memory::backfill_collect_pending(facade, user, workspace, limit)
+    };
+    let Some((pending, mut seen)) = collected else {
+        return;
+    };
+    for (reference, text, mtype) in pending {
+        let vector = embedding.embed(&text).await;
+        if vector.is_empty() {
+            continue;
+        }
+        {
+            let facade = memory_facade(state);
+            local_first_memory::backfill_persist_one(
+                facade, user, workspace, &reference, &mtype, &vector, &model, &mut seen,
+            );
+        }
+    }
+}
+
 struct GatewayEmbeddingClient {
     http: reqwest::Client,
 }
