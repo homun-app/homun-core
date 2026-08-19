@@ -5,6 +5,15 @@
 
 use local_first_task_runtime::{AutomationTrigger, EventTrigger};
 
+pub(crate) fn scheduled_thread_sender_for_task_id(task_id: &str) -> String {
+    task_id.split("@occ@").next().unwrap_or(task_id).to_string()
+}
+
+pub(crate) fn scheduled_thread_title(goal: &str) -> String {
+    let trimmed: String = goal.chars().take(48).collect();
+    format!("Pianificato · {trimmed}")
+}
+
 /// Human label for a recurrence rule (handles the flexible `dow@days@times` form).
 pub(crate) fn humanize_recurrence(rec: &str) -> String {
     fn day_label(d: &str) -> &str {

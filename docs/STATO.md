@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (runtime flags verbose debug mergeata).**
+> **Ultimo aggiornamento: 2026-08-20 (automation thread formatting locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#209 mergeate in `main`; #117 browser draft separata; prossima slice non-browser da selezionare |
-| HEAD codice verificato | `main` aggiornato a #209 |
+| PR | #108-#116, #118-#209 mergeate in `main`; #117 browser draft separata; slice `automation_thread_formatting` in preparazione locale |
+| HEAD codice verificato | `main` aggiornato a #209; worktree locale `fabio/automation-thread-formatting` |
 
 ## Dove siamo
 
@@ -225,6 +225,10 @@ Slice Runtime V2 recenti:
   (`verbose_debug`) esce dal monolite `main.rs` e vive accanto agli altri flag
   runtime env-backed; loop agente, tool execution e route Composio restano solo
   consumatori del flag.
+- Estrazione locale `gateway_automation_formatting`: helper puri per sender root
+  e titolo dei thread schedulati (`scheduled_thread_sender_for_task_id`,
+  `scheduled_thread_title`) escono dal monolite `main.rs`; route automation,
+  executor proattivo e scope durable restano owner separati.
 - Estrazione mergeata `gateway_model_routing`: DTO `RoutingDecision`, lettura
   `routing-decisions.json` e writer ring-buffer capped escono dal monolite
   `main.rs`; la surface HTTP `/api/routing-decisions` resta in

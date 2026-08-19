@@ -284,6 +284,27 @@ fn runtime_flags_have_one_gateway_owner() {
 }
 
 #[test]
+fn automation_formatting_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let formatting = production_source(&root.join("src/gateway_automation_formatting.rs"));
+
+    for pattern in [
+        "fn scheduled_thread_sender_for_task_id(",
+        "fn scheduled_thread_title(",
+    ] {
+        assert!(
+            formatting.contains(pattern),
+            "automation formatting owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain automation formatting helper {pattern}"
+        );
+    }
+}
+
+#[test]
 fn runtime_plan_state_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
