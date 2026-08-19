@@ -139,9 +139,10 @@ Slice Runtime V2 recenti:
   payment approval e browser restano fuori dallo scope.
 - Estrazione mergeata `gateway_actionable_source`: `ActionableSourceResolution`,
   claim/rewrite terminale, `claim_actionable_source`,
-  `resolve_actionable_source` e terminal formatter escono dal monolite
-  `main.rs` e vivono in `gateway_actionable_source`; execute pending, payment
-  approval, remote approval dispatch/cancel e browser restano fuori dallo scope.
+  `resolve_actionable_source`, terminal formatter e rilascio source-card su
+  errore terminale executor escono dal monolite `main.rs` e vivono in
+  `gateway_actionable_source`; execute pending, payment approval, remote
+  approval dispatch/cancel e browser restano fuori dallo scope.
 - Estrazione locale `gateway_write_tool_allowlist`: persistenza e matching
   "always allow" per write-tool Composio/MCP escono dal monolite `main.rs`;
   il file storico `composio-tool-allow.json` resta invariato per compatibilita',

@@ -56,6 +56,34 @@ pub(crate) fn actionable_claim_error(message: impl Into<String>) -> GatewayError
     }
 }
 
+/// Once an endpoint has proved a request came from its exact persisted card,
+/// every terminal executor error must release that source before being returned
+/// to the caller. This keeps a retryable UI error from becoming a permanent
+/// `WaitingUserApproval`/`ThreadBusy` deadlock.
+pub(crate) fn terminal_actionable_execution_error(
+    state: &AppState,
+    thread_id: Option<&str>,
+    message_id: Option<&str>,
+    code: &'static str,
+    message: impl Into<String>,
+    source_note: &str,
+) -> GatewayError {
+    if let (Some(thread_id), Some(message_id)) = (thread_id, message_id) {
+        let _ = resolve_actionable_source(
+            state,
+            thread_id,
+            message_id,
+            |text| actionable_source_terminal_text(text, source_note),
+            ActionableSourceResolution::Failed,
+        );
+    }
+    GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code,
+        message: message.into(),
+    }
+}
+
 /// One-shot security boundary for every actionable side effect. In production
 /// the task runtime and chat transcript share one SQLite file, so the exact
 /// linked task and exact message transition together or not at all.

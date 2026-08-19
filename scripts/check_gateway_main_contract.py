@@ -544,6 +544,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "enum ActionableSourceResolution": "actionable source resolution must stay in gateway_actionable_source",
         "fn actionable_source_terminal_text(": "actionable source terminal text must stay in gateway_actionable_source",
         "fn actionable_claim_error(": "actionable source claim errors must stay in gateway_actionable_source",
+        "fn terminal_actionable_execution_error(": "terminal actionable execution errors must stay in gateway_actionable_source",
         "fn claim_actionable_source<": "actionable source claim must stay in gateway_actionable_source",
         "fn resolve_actionable_source<": "actionable source resolution must stay in gateway_actionable_source",
         "fn mcp_chat_tool_name(": "MCP chat tool naming must stay in gateway_mcp_chat_tools",
@@ -1295,6 +1296,7 @@ def main() -> int:
         "pub(crate) enum ActionableSourceResolution",
         "pub(crate) fn actionable_source_terminal_text(",
         "pub(crate) fn actionable_claim_error(",
+        "pub(crate) fn terminal_actionable_execution_error(",
         "pub(crate) fn claim_actionable_source<",
         "pub(crate) fn resolve_actionable_source<",
     ]:
