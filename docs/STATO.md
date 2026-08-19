@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway recall entry formatting locale).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway recall entry formatting mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#203 mergeate in `main`; #117 browser draft separata; slice recall entry formatting in preparazione |
-| HEAD codice verificato | `main` aggiornato a #203; worktree locale `fabio/gateway-recall-entry-format-owner` |
+| PR | #108-#116, #118-#204 mergeate in `main`; #117 browser draft separata; slice memory prompt context in preparazione locale |
+| HEAD codice verificato | `main` aggiornato a #204; worktree locale `fabio/gateway-memory-context-owner` |
 
 ## Dove siamo
 
@@ -173,7 +173,7 @@ Slice Runtime V2 recenti:
   separazione extraction issues) esce dal monolite `main.rs`; ingestion file
   resta nello stesso owner, mentre loop chat, memory recall, prompt packet e
   routing agente restano fuori dallo scope.
-- Estrazione locale `gateway_recall_context`: formatter delle entry recall
+- Estrazione mergeata `gateway_recall_context`: formatter delle entry recall
   (`format_recall_entry`) esce dal monolite `main.rs` e resta accanto agli
   helper di recall prompt/status/effect; `recall_memory`, artifact/workflow
   read-model e loop agente restano fuori dallo scope.
