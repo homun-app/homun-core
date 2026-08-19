@@ -21,6 +21,7 @@ RECALL_CONTEXT_RS = os.path.join(
 MEMORY_PROMPT_CONTEXT_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_prompt_context.rs"
 )
+TEXT_SAFETY_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_text_safety.rs")
 BROWSER_TOOLS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_browser_tools.rs")
 CHAT_UTILITY_ROUTES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_utility_routes.rs"
@@ -156,6 +157,11 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn producer_workflow_contract(": "producer workflow prompt context must stay in gateway_memory_prompt_context",
         "fn relevant_code_components_for_prompt(": "code-map prompt context must stay in gateway_memory_prompt_context",
         "fn workflow_status_context_for_query(": "workflow status prompt context must stay in gateway_memory_prompt_context",
+        "fn compact_redacted_task_goal_summary(": "redacted task title compaction must stay in gateway_text_safety",
+        "fn redact_sensitive_text(": "shared sensitive text redaction must stay in gateway_text_safety",
+        "fn strip_terminal_control_sequences(": "terminal control stripping must stay in gateway_text_safety",
+        "fn task_goal_summary(": "task goal summary redaction must stay in gateway_text_safety",
+        "fn truncate_chars(": "shared text truncation must stay in gateway_text_safety",
         "fn gather_scope_memory(": "proactivity scope memory gathering must stay in gateway_proactivity",
         "fn gather_recent_connector_activity(": "proactivity connector activity gathering must stay in gateway_proactivity",
         "fn parse_review_suggestion(": "proactivity suggestion parsing must stay in gateway_proactivity",
@@ -1317,6 +1323,8 @@ def main() -> int:
         recall_context_source = handle.read()
     with open(MEMORY_PROMPT_CONTEXT_RS, "r", encoding="utf-8") as handle:
         memory_prompt_context_source = handle.read()
+    with open(TEXT_SAFETY_RS, "r", encoding="utf-8") as handle:
+        text_safety_source = handle.read()
     with open(BROWSER_TOOLS_RS, "r", encoding="utf-8") as handle:
         browser_tools_source = handle.read()
     with open(CHAT_UTILITY_ROUTES_RS, "r", encoding="utf-8") as handle:
@@ -1438,6 +1446,30 @@ def main() -> int:
             memory_prompt_context_source,
             snippet,
             "memory prompt context owner must not absorb adjacent memory/chat surfaces",
+        )
+    assert_contains(source, "mod gateway_text_safety;", "gateway root must declare text safety owner")
+    for snippet in [
+        "pub(crate) fn compact_redacted_task_goal_summary(",
+        "pub(crate) fn redact_sensitive_text(",
+        "pub(crate) fn strip_terminal_control_sequences(",
+        "pub(crate) fn task_goal_summary(",
+        "pub(crate) fn truncate_chars(",
+    ]:
+        assert_contains(
+            text_safety_source,
+            snippet,
+            "text safety owner must expose shared text safety helpers",
+        )
+    for snippet in [
+        "fn task_effective_goal(",
+        "fn redact_json_for_task_output(",
+        "async fn run_agent_rounds(",
+        "fn recall_memory(",
+    ]:
+        assert_not_contains(
+            text_safety_source,
+            snippet,
+            "text safety owner must not absorb adjacent gateway surfaces",
         )
     assert_contains(source, "mod gateway_proactivity;", "gateway root must declare proactivity owner")
     assert_contains(source, "mod gateway_action_confirmations;", "gateway root must declare action confirmation owner")
