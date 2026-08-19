@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-19 (gateway attachment prompt context verificata localmente).**
+> **Ultimo aggiornamento: 2026-08-19 (gateway attachment prompt context mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/gateway-attachment-context-owner` |
-| PR | #108-#116, #118-#202 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | branch locale da `main` #202 |
+| Branch | `main` |
+| PR | #108-#116, #118-#203 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #203 |
 
 ## Dove siamo
 
@@ -168,9 +168,9 @@ Slice Runtime V2 recenti:
   sostituzione CVV one-shot, reject-before-claim, claim/validazione finale e
   lock stato payment escono dal monolite `main.rs`; route Vault, marker payment
   card, browser enforcement e remote approval restano owner separati.
-- Estrazione locale verificata `attachments`: contesto prompt bounded degli
-  allegati persistiti (`append_thread_attachment_context`, budget testo/immagini
-  e separazione extraction issues) esce dal monolite `main.rs`; ingestion file
+- Estrazione mergeata `attachments`: contesto prompt bounded degli allegati
+  persistiti (`append_thread_attachment_context`, budget testo/immagini e
+  separazione extraction issues) esce dal monolite `main.rs`; ingestion file
   resta nello stesso owner, mentre loop chat, memory recall, prompt packet e
   routing agente restano fuori dallo scope.
 - Estrazione locale `gateway_local_authorization_routes`: route/DTO e marker
@@ -850,9 +850,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#202: slice owner-level successive mergeate in `main`, fino al payment
-  approval claim/secret owner in `gateway_payment_approval`; `main` verificato
-  e riallineato a #202.
+- #143-#203: slice owner-level successive mergeate in `main`, fino al contesto
+  prompt bounded degli allegati in `attachments`; `main` verificato e
+  riallineato a #203.
 
 PR aperte:
 
@@ -860,8 +860,7 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/gateway-attachment-context-owner`: worktree locale della slice
-  attachment prompt context; gate kernel verde, PR non ancora aperta.
+- `main`: worktree pulito; nessuna branch non-browser locale aperta.
 
 ## Debito residuo
 
@@ -885,8 +884,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice `attachments` con gate, commit, PR, merge e riallineamento
-   di `main`.
+1. Scegliere la prossima slice non-browser solo dopo nuova lettura owner-level
+   di `main.rs`.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -894,8 +893,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-branch fabio/gateway-attachment-context-owner da main #202; chiudi la slice
-attachment prompt context con gate, PR e merge.
+main aggiornato a #203; scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
