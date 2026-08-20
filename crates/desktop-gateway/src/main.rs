@@ -149,6 +149,7 @@ mod gateway_text_safety;
 mod gateway_thread_episodes;
 mod gateway_thread_files;
 mod gateway_thread_model_context;
+mod gateway_time;
 mod gateway_tool_budget;
 mod gateway_tool_execution;
 mod gateway_tool_timeouts;
@@ -583,6 +584,7 @@ pub(crate) use gateway_thread_files::{
     effective_thread_folder, get_thread_folder, read_thread_file, search_thread_files,
     set_thread_folder,
 };
+pub(crate) use gateway_time::now_epoch_secs;
 pub(crate) use gateway_tool_budget::{
     chat_max_rounds, hard_round_ceiling, tool_stays_live_this_turn,
 };
@@ -4403,13 +4405,6 @@ fn browser_method_for_capability_tool(tool_name: &str) -> Option<BrowserMethod> 
         "browser.wait_download" => Some(BrowserMethod::WaitDownload),
         _ => None,
     }
-}
-
-fn now_epoch_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 /// Browser-loop router (Phase 2): the "browser" role.

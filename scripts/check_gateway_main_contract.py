@@ -95,6 +95,7 @@ BRAIN_MATERIALIZATION_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_brain_materialization.rs"
 )
 RUNTIME_FLAGS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_runtime_flags.rs")
+GATEWAY_TIME_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_time.rs")
 AUTOMATION_ROUTES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_automation_routes.rs"
 )
@@ -224,6 +225,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn execute_subagent_task(": "subagent task execution must stay in gateway_subagent_execution",
         "fn apply_agent_recovery_checkpoint(": "agent turn checkpoint outcomes must stay in gateway_agent_turn_outcomes",
         "fn delivered_image_rejection_outcome(": "agent turn image rejection outcome must stay in gateway_agent_turn_outcomes",
+        "fn now_epoch_secs(": "shared gateway time helper must stay in gateway_time",
         "fn persist_hitl_wait_from_outcome(": "typed HITL wait persistence must stay in gateway_hitl_waits",
         "fn persist_hitl_wait_payload(": "HITL wait payload persistence must stay in gateway_hitl_waits",
         "fn artifact_quality_summary(": "artifact quality prompt context must stay in gateway_memory_prompt_context",
@@ -1512,6 +1514,8 @@ def main() -> int:
         brain_materialization_source = handle.read()
     with open(RUNTIME_FLAGS_RS, "r", encoding="utf-8") as handle:
         runtime_flags_source = handle.read()
+    with open(GATEWAY_TIME_RS, "r", encoding="utf-8") as handle:
+        gateway_time_source = handle.read()
     with open(AUTOMATION_ROUTES_RS, "r", encoding="utf-8") as handle:
         automation_routes_source = handle.read()
     with open(AUTOMATION_FORMATTING_RS, "r", encoding="utf-8") as handle:
@@ -2343,6 +2347,28 @@ def main() -> int:
     )
     assert_contains(source, "mod gateway_datetime_tools;", "gateway root must declare datetime tools owner")
     assert_contains(source, "mod gateway_runtime_flags;", "gateway root must declare runtime flags owner")
+    assert_contains(source, "mod gateway_time;", "gateway root must declare shared time owner")
+    assert_contains(
+        source,
+        "pub(crate) use gateway_time::now_epoch_secs;",
+        "gateway root must re-export shared time helper",
+    )
+    assert_contains(
+        gateway_time_source,
+        "pub(crate) fn now_epoch_secs(",
+        "gateway time owner must expose epoch seconds helper",
+    )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            gateway_time_source,
+            snippet,
+            "gateway time owner must not absorb execution surfaces",
+        )
     assert_contains(
         runtime_flags_source,
         "pub(crate) fn verbose_debug(",
