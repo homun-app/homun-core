@@ -40,6 +40,7 @@ UI mostra lo stato prodotto.
 | Contesto/token | `agent_loop.rs` + `ContextCompactor`, catalog model context window | compaction event + messages compattati | puo' mostrare usage, non decidere stop |
 | Tool/plugin/action timeout | `crates/desktop-gateway/src/gateway_tool_timeouts.rs` + tool runtime specifici | `ToolOutcome`, receipt/eventi | mostra call/result/approval |
 | Action confirmations | `crates/desktop-gateway/src/gateway_action_confirmations.rs` | marker di conferma, exact-card provenance, rewrite terminale MCP | mostra card/action status; non decide autorizzazione |
+| Free HITL/User wait | `crates/desktop-gateway/src/gateway_hitl_waits.rs` | `TurnOutcome.awaiting_user`, open HITL wait payload, open-work snapshot | mostra reply affordance/wait dalla projection, non dai marker |
 | Browser | `BrowserBudget` + browser sidecar result | `BrowserProgress`, `BrowserDone`, typed failure reason | sessione dedicata, non in questo slice |
 
 ## Owner UI del piano
@@ -73,7 +74,8 @@ passa il risultato del presenter, senza ricostruire `PlanStep[]` o goal.
    `gateway_action_confirmations`, `gateway_mcp_chat_tools`,
    `gateway_mcp_runtime`, `gateway_mcp_connections`,
    `gateway_mcp_execution`, `gateway_write_tool_allowlist`,
-   `gateway_thread_files`, `gateway_transcription` e `gateway_usage_routes`.
+   `gateway_thread_files`, `gateway_transcription`, `gateway_usage_routes` e
+   `gateway_hitl_waits`.
 2. Continuare a portare la UI a leggere ogni stato di lavoro da un solo
    presenter (`runtimeViewModel` / `kernelProjectionPresenter`) e rimuovere
    alias locali che ricostruiscono "sta lavorando".

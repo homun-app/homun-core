@@ -471,6 +471,46 @@ fn capability_execution_has_one_gateway_owner() {
 }
 
 #[test]
+fn hitl_wait_persistence_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let hitl_waits_path = root.join("src/gateway_hitl_waits.rs");
+    let hitl_waits = if hitl_waits_path.exists() {
+        production_source(&hitl_waits_path)
+    } else {
+        String::new()
+    };
+
+    let owned = [
+        "fn persist_hitl_wait_from_outcome(",
+        "fn persist_hitl_wait_payload(",
+    ];
+
+    for pattern in owned {
+        assert!(
+            hitl_waits.contains(pattern),
+            "HITL wait owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain HITL wait persistence surface {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn drain_agent_stream_into_message(",
+        "fn execute_persistent_browser_capability(",
+        "fn thread_browser_session_is_live(",
+        "async fn run_agent_rounds(",
+    ] {
+        assert!(
+            !hitl_waits.contains(adjacent),
+            "HITL wait owner must not absorb adjacent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn runtime_plan_state_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

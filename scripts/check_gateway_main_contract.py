@@ -80,6 +80,7 @@ AGENT_STREAM_DRAIN_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_stream_drain.rs"
 )
 AGENT_WAKE_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_agent_wake.rs")
+HITL_WAITS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_hitl_waits.rs")
 PROMPT_PACKETS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_prompt_packets.rs"
 )
@@ -210,6 +211,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn capability_kind_not_wired_outcome(": "capability execution presentation must stay in gateway_capability_execution",
         "fn task_execution_outcome_from_executor_result(": "executor result presentation mapping must stay in gateway_capability_execution",
         "fn completed_executor_outcome(": "executor completion presentation mapping must stay in gateway_capability_execution",
+        "fn persist_hitl_wait_from_outcome(": "typed HITL wait persistence must stay in gateway_hitl_waits",
+        "fn persist_hitl_wait_payload(": "HITL wait payload persistence must stay in gateway_hitl_waits",
         "fn artifact_quality_summary(": "artifact quality prompt context must stay in gateway_memory_prompt_context",
         "fn artifact_provenance_context_for_query(": "artifact provenance prompt context must stay in gateway_memory_prompt_context",
         "fn decisions_for_path(": "file-decision prompt context must stay in gateway_memory_prompt_context",
@@ -1470,6 +1473,8 @@ def main() -> int:
         agent_stream_drain_source = handle.read()
     with open(AGENT_WAKE_RS, "r", encoding="utf-8") as handle:
         agent_wake_source = handle.read()
+    with open(HITL_WAITS_RS, "r", encoding="utf-8") as handle:
+        hitl_waits_source = handle.read()
     with open(PROMPT_PACKETS_RS, "r", encoding="utf-8") as handle:
         prompt_packets_source = handle.read()
     with open(BRAIN_RUNTIME_RS, "r", encoding="utf-8") as handle:
@@ -2040,6 +2045,32 @@ def main() -> int:
             agent_wake_source,
             snippet,
             "agent wake owner must not absorb adjacent stream/HITL/browser surfaces",
+        )
+    assert_contains(source, "mod gateway_hitl_waits;", "gateway root must declare HITL wait owner")
+    assert_contains(
+        source,
+        "pub(crate) use gateway_hitl_waits::*;",
+        "gateway root must re-export HITL wait owner",
+    )
+    for snippet in [
+        "pub(crate) fn persist_hitl_wait_from_outcome(",
+        "pub(crate) fn persist_hitl_wait_payload(",
+    ]:
+        assert_contains(
+            hitl_waits_source,
+            snippet,
+            "HITL wait owner must expose typed wait persistence surface",
+        )
+    for snippet in [
+        "async fn drain_agent_stream_into_message(",
+        "fn execute_persistent_browser_capability(",
+        "fn thread_browser_session_is_live(",
+        "async fn run_agent_rounds(",
+    ]:
+        assert_not_contains(
+            hitl_waits_source,
+            snippet,
+            "HITL wait owner must not absorb adjacent stream/browser/loop surfaces",
         )
     assert_contains(source, "mod gateway_task_executor;", "gateway root must declare task executor owner")
     assert_contains(
