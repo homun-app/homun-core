@@ -99,6 +99,9 @@ MEMORY_RECALL_TOOL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_recall_tool.rs"
 )
 MEMORY_RECALL_CRATE_RS = os.path.join(ROOT, "crates", "memory", "src", "recall.rs")
+MEMORY_REUSE_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_memory_reuse.rs"
+)
 MEMORY_CLIENTS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_memory_clients.rs")
 MEMORY_UI_ROUTES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_ui_routes.rs"
@@ -180,6 +183,10 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct MemoryCandidate": "memory recall scoring must stay in the memory crate",
         "fn hybrid_memory_score(": "memory recall scoring must stay in the memory crate",
         "fn memory_age_days(": "memory recall age scoring must stay in the memory crate",
+        "fn memory_reuse_envelope_from_read_set(": "stream memory reuse attestation must stay in gateway_memory_reuse",
+        "struct StreamMemoryReuseCollector": "stream memory reuse attestation must stay in gateway_memory_reuse",
+        "fn observe_remote_approval(": "stream memory reuse approval attestation must stay in gateway_memory_reuse",
+        "fn observe_actionable_cards(": "stream memory reuse actionable attestation must stay in gateway_memory_reuse",
         "fn artifact_quality_summary(": "artifact quality prompt context must stay in gateway_memory_prompt_context",
         "fn artifact_provenance_context_for_query(": "artifact provenance prompt context must stay in gateway_memory_prompt_context",
         "fn decisions_for_path(": "file-decision prompt context must stay in gateway_memory_prompt_context",
@@ -1447,6 +1454,8 @@ def main() -> int:
         memory_recall_tool_source = handle.read()
     with open(MEMORY_RECALL_CRATE_RS, "r", encoding="utf-8") as handle:
         memory_recall_crate_source = handle.read()
+    with open(MEMORY_REUSE_RS, "r", encoding="utf-8") as handle:
+        memory_reuse_source = handle.read()
     with open(MEMORY_CLIENTS_RS, "r", encoding="utf-8") as handle:
         memory_clients_source = handle.read()
     with open(MEMORY_UI_ROUTES_RS, "r", encoding="utf-8") as handle:
@@ -1910,6 +1919,41 @@ def main() -> int:
             memory_recall_tool_source,
             snippet,
             "memory recall tool owner must not absorb adjacent memory surfaces",
+        )
+    assert_contains(
+        source,
+        "mod gateway_memory_reuse;",
+        "gateway root must declare stream memory reuse owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_memory_reuse::{\n    StreamMemoryReuseCollector, memory_reuse_envelope_from_read_set,\n};",
+        "gateway root must re-export stream memory reuse surface",
+    )
+    for snippet in [
+        "pub(crate) fn memory_reuse_envelope_from_read_set(",
+        "pub(crate) struct StreamMemoryReuseCollector",
+        "pub(crate) fn observe_line(",
+        "pub(crate) fn observe_remote_approval(",
+        "pub(crate) fn observe_actionable_cards(",
+        "pub(crate) fn envelope(",
+    ]:
+        assert_contains(
+            memory_reuse_source,
+            snippet,
+            "stream memory reuse owner must expose attestation surface",
+        )
+    for snippet in [
+        "fn finalize_streamed_assistant_message(",
+        "fn persist_hitl_wait_from_outcome(",
+        "fn drain_agent_stream_into_message(",
+        "fn actionable_cards_from_raw_text(",
+        "fn remote_approval_intent_from_raw_text(",
+    ]:
+        assert_not_contains(
+            memory_reuse_source,
+            snippet,
+            "stream memory reuse owner must not absorb adjacent stream/action surfaces",
         )
     assert_contains(source, "mod gateway_memory_briefing;", "gateway root must declare memory briefing owner")
     assert_contains(
