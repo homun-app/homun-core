@@ -6,6 +6,7 @@
 
 use crate::gateway_recall_context::format_recall_entry;
 use crate::*;
+use local_first_memory::MemoryAccessRequest;
 
 /// Decisions in memory that AFFECT a given file (matched by basename via FTS -
 /// the touched objects are stored as aliases). Returns a note to append to a
