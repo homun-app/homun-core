@@ -2,18 +2,11 @@ import { ActiveTurnStatus, type ActiveTurnStatusProps } from "./ActiveTurnStatus
 import { ComposerContainer, type ReplyContext } from "./ComposerContainer";
 import { PendingSteeringQueue } from "./PendingSteeringQueue";
 import type { TurnSteeringRecord } from "../lib/chatApi";
+import type { ChatTurnState } from "../lib/chat-runtime/chatTurnStatus";
 import type {
   ChatAttachmentInput,
   RuntimeContextResponse,
 } from "../lib/coreBridge";
-
-export interface ChatTurnState {
-  phase: string;
-  detail?: string;
-  elapsedSeconds: number;
-  attempt: number;
-  activityCount: number;
-}
 
 interface ChatComposerDockProps {
   activeWork: boolean;
