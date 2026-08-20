@@ -91,6 +91,7 @@ mod gateway_memory_publications;
 mod gateway_memory_query_embeddings;
 mod gateway_memory_recall_service;
 mod gateway_memory_recall_tool;
+mod gateway_memory_reuse;
 mod gateway_memory_sources;
 mod gateway_memory_tools;
 mod gateway_memory_turn_context;
@@ -218,6 +219,9 @@ pub(crate) use gateway_memory_query_embeddings::{
 pub(crate) use gateway_memory_recall_tool::{
     RecallOutcome, recall_memory, recall_stream_payload_from_outcome,
 };
+pub(crate) use gateway_memory_reuse::{
+    StreamMemoryReuseCollector, memory_reuse_envelope_from_read_set,
+};
 pub(crate) use gateway_memory_ui_routes::{
     export_user_data, memory_dashboard, memory_export, memory_items,
 };
@@ -233,10 +237,9 @@ pub(crate) use gateway_project_graph_routes::*;
 #[cfg(test)]
 use gateway_remote_approval::remote_approval_matches_persisted_message;
 use gateway_remote_approval::{
-    ActionableCard, RemoteApprovalIntent, actionable_cards_from_raw_text,
-    append_remote_approval_thread_status, approval_continuation_visible_text,
-    approval_progress_reply, cancel_pending_remote_approval, create_pending_approval,
-    parse_approval_reply, pending_approval_exists, remote_approval_event_part,
+    ActionableCard, actionable_cards_from_raw_text, append_remote_approval_thread_status,
+    approval_continuation_visible_text, approval_progress_reply, cancel_pending_remote_approval,
+    create_pending_approval, parse_approval_reply, pending_approval_exists,
     remote_approval_intent_from_raw_text, resume_thread_after_approval,
 };
 #[cfg(test)]
@@ -4115,91 +4118,6 @@ fn update_channel_assistant_message(
         "thread_id": thread_id,
         "workspace": base_workspace_id(),
     }));
-}
-
-fn memory_reuse_envelope_from_read_set(
-    reads: &local_first_engine::events::TurnMemoryReadSet,
-) -> local_first_memory::MemoryReuseEnvelope {
-    if reads.is_blocked_unknown() {
-        return local_first_memory::MemoryReuseEnvelope::blocked_unknown();
-    }
-    if !reads.has_linked_reads() {
-        return local_first_memory::MemoryReuseEnvelope::normal();
-    }
-    local_first_memory::MemoryReuseEnvelope::user_input_only(
-        reads
-            .linked
-            .iter()
-            .map(|read| local_first_memory::LinkedMemoryReadRef {
-                source_workspace_id: read.source_workspace_id.clone(),
-                grant_id: read.grant_id.clone(),
-                policy_version: read.policy_version,
-                memory_ref: read.memory_ref.clone(),
-                source_revision: read.source_revision.clone(),
-            })
-            .collect(),
-    )
-}
-
-#[derive(Debug, Default)]
-struct StreamMemoryReuseCollector {
-    event_parts: Vec<serde_json::Value>,
-    reads: local_first_engine::events::TurnMemoryReadSet,
-}
-
-impl StreamMemoryReuseCollector {
-    fn observe_line(&mut self, line: &str) {
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
-            return;
-        };
-        if value.get("type").and_then(serde_json::Value::as_str) != Some("recall") {
-            return;
-        }
-        let Some(payload_value) = value.get("payload").cloned() else {
-            self.reads.blocked_unknown = true;
-            return;
-        };
-        let part = serde_json::json!({
-            "type": "recall",
-            "payload": payload_value,
-        });
-        if !self.event_parts.contains(&part) {
-            self.event_parts.push(part);
-        }
-        match serde_json::from_value::<local_first_subagents::RecallStreamPayload>(payload_value) {
-            Ok(payload) => self.reads.extend_payload(&payload),
-            Err(_) => self.reads.blocked_unknown = true,
-        }
-    }
-
-    fn event_parts(&self) -> &[serde_json::Value] {
-        &self.event_parts
-    }
-
-    fn observe_remote_approval(&mut self, intent: &RemoteApprovalIntent) {
-        let part = remote_approval_event_part(intent);
-        if !self.event_parts.contains(&part) {
-            self.event_parts.push(part);
-        }
-    }
-
-    fn observe_actionable_cards(&mut self, cards: &[ActionableCard]) {
-        for card in cards {
-            let part = serde_json::json!({
-                "type": "actionable_card",
-                "kind": card.kind,
-                "payload": card.payload,
-                "raw": card.raw,
-            });
-            if !self.event_parts.contains(&part) {
-                self.event_parts.push(part);
-            }
-        }
-    }
-
-    fn envelope(&self) -> local_first_memory::MemoryReuseEnvelope {
-        memory_reuse_envelope_from_read_set(&self.reads)
-    }
 }
 
 fn finalize_streamed_assistant_message(

@@ -827,6 +827,44 @@ fn memory_recall_scoring_has_one_crate_owner() {
 }
 
 #[test]
+fn stream_memory_reuse_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let memory_reuse = production_source(&root.join("src/gateway_memory_reuse.rs"));
+
+    for pattern in [
+        "fn memory_reuse_envelope_from_read_set(",
+        "struct StreamMemoryReuseCollector",
+        "fn observe_line(",
+        "fn observe_remote_approval(",
+        "fn observe_actionable_cards(",
+        "fn envelope(",
+    ] {
+        assert!(
+            memory_reuse.contains(pattern),
+            "stream memory reuse owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain stream memory reuse surface {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "fn finalize_streamed_assistant_message(",
+        "fn persist_hitl_wait_from_outcome(",
+        "fn drain_agent_stream_into_message(",
+        "fn actionable_cards_from_raw_text(",
+        "fn remote_approval_event_part(",
+    ] {
+        assert!(
+            !memory_reuse.contains(adjacent),
+            "stream memory reuse owner must not absorb adjacent stream/action owner {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn memory_learning_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

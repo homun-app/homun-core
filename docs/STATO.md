@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (recall scoring mergeata).**
+> **Ultimo aggiornamento: 2026-08-20 (stream memory reuse locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -267,6 +267,11 @@ Slice Runtime V2 recenti:
   `hybrid_memory_score` e `memory_age_days` non hanno piu' copie test-only in
   `main.rs`; i test gateway importano lo scoring dal crate memoria, che resta
   l'owner canonico del ranking recall.
+- Estrazione locale `gateway_memory_reuse`: `StreamMemoryReuseCollector` e
+  `memory_reuse_envelope_from_read_set` escono dal monolite `main.rs`; l'owner
+  attesta recall/actionable/approval stream parts e produce il
+  `MemoryReuseEnvelope`, mentre finalizzazione messaggio, persistence HITL e
+  parser action card restano owner separati.
 - Estrazione mergeata `gateway_memory_learning`: apprendimento post-turno via
   service/inline e consolidamento scope in tre fasi Send-safe escono dal
   monolite `main.rs`; recall tool, automation tombstone e subagent plan-step
