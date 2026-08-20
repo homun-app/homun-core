@@ -259,7 +259,7 @@ Slice Runtime V2 recenti:
   task memoria/proattivita', parsing fence JSON e usage context
   `MemoryExtraction` escono dal monolite `main.rs`; `recall_memory`, learning
   inline e consolidamento restano owner separati.
-- Estrazione locale `gateway_memory_recall_tool`: tool-result `recall_memory`,
+- Estrazione mergeata `gateway_memory_recall_tool`: tool-result `recall_memory`,
   `RecallOutcome` e payload recall UI costruito dagli stessi hit autorizzati
   escono dal monolite `main.rs`; learning inline, consolidamento, automation
   tombstone e subagent plan-step memory restano owner separati.
