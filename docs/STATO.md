@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (state access owner locale).**
+> **Ultimo aggiornamento: 2026-08-20 (state access owner mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-state-access-owner` |
-| Branch | `fabio/gateway-state-access-owner` |
-| PR | #108-#116, #118-#230 mergeate in `main`; #231 state access draft; #117 browser draft separata |
-| HEAD codice verificato | branch locale basato su `main` aggiornato a #230 |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app` |
+| Branch | `main` |
+| PR | #108-#116, #118-#231 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #231 |
 
 ## Dove siamo
 
@@ -242,7 +242,7 @@ Slice Runtime V2 recenti:
   `start_visible_conversation_turn` escono dal monolite `main.rs`; broker,
   stream draining, finalizzazione messaggio ed executor proattivo restano owner
   separati.
-- Estrazione locale `gateway_state_access`: `GatewayError`, lock helper degli
+- Estrazione mergeata `gateway_state_access`: `GatewayError`, lock helper degli
   store gateway, accessor `memory_facade`, `lock_capability_registry`,
   `vacuum_all_stores` e mapping `IntoResponse` escono dal monolite `main.rs`;
   loop agente, executor proattivo, subagent e browser restano owner separati.
@@ -966,22 +966,17 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#230: slice owner-level successive mergeate in `main`, fino alla
-  persistenza Free-HITL in `gateway_hitl_waits`; `main` verificato e
-  riallineato a #230.
+- #143-#231: slice owner-level successive mergeate in `main`, fino agli accessi
+  stato gateway condivisi in `gateway_state_access`; `main` verificato e
+  riallineato a #231.
 
 PR aperte:
 
-- #231 `Move gateway state access into owner`:
-  `https://github.com/homun-app/homun-core/pull/231`.
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
 
 Branch corrente:
 
-- `main`: pulito e riallineato a #230.
-- `fabio/gateway-state-access-owner`: slice locale/PR #231 per spostare
-  `GatewayError`, lock helper degli store e `vacuum_all_stores` da `main.rs` a
-  `gateway_state_access`.
+- `main`: pulito e riallineato a #231.
 
 ## Debito residuo
 
@@ -1014,8 +1009,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #230; slice locale fabio/gateway-state-access-owner in corso
-su PR #231.
+main aggiornato a #231; prossima slice non-browser da scegliere dopo nuova
+lettura owner-level di main.rs.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
