@@ -14,6 +14,11 @@ fn chat_streams_owner_smoke() {
     assert!(stream_event_is_terminal(r#"{"type":"done"}"#));
     assert!(stream_event_is_terminal(r#"{"type":"error"}"#));
     assert!(!stream_event_is_terminal(r#"{"type":"delta","text":"x"}"#));
+    assert_eq!(
+        agent_turn_stream_request_id("assistant-1"),
+        "agentturn-assistant-1"
+    );
+    assert_eq!(broker_turn_stream_request_id("turn-1"), "broker-turn-1");
 }
 
 /// A live chat stream, kept in a server-side registry so a client that reloads
@@ -106,6 +111,14 @@ pub(crate) fn abort_stream_generation(resume_id: &str) {
     if let Ok(mut map) = stream_registry().lock() {
         map.remove(resume_id);
     }
+}
+
+pub(crate) fn agent_turn_stream_request_id(assistant_message_id: &str) -> String {
+    format!("agentturn-{assistant_message_id}")
+}
+
+pub(crate) fn broker_turn_stream_request_id(turn_id: &str) -> String {
+    format!("broker-{turn_id}")
 }
 
 fn stream_event_is_terminal(line: &str) -> bool {
