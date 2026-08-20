@@ -54,6 +54,10 @@ del read model per goal e passi del workspace; la normalizzazione/parsing
 riutilizzabile vive in `apps/desktop/src/lib/chat-runtime/planSteps.mjs`.
 `useChatActivityProjection` fa fetch/replay della `KernelThreadProjection` e
 passa il risultato del presenter, senza ricostruire `PlanStep[]` o goal.
+Il pill del turno attivo del composer passa da
+`apps/desktop/src/lib/chat-runtime/chatTurnStatus.mjs`: `ChatView` fornisce solo
+etichette tradotte, elapsed e dati proiettati, senza decidere in proprio se il
+turno e' in attesa utente o ancora al lavoro.
 
 ## Regole di refactor
 

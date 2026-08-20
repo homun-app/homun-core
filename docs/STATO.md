@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (task input helper locale).**
+> **Ultimo aggiornamento: 2026-08-20 (UI chat turn status locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#238 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #238 |
+| PR | #108-#116, #118-#239 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #239 |
 
 ## Dove siamo
 
@@ -330,9 +330,13 @@ Slice Runtime V2 recenti:
   l'owner canonico della policy di auto-confirm memoria; il gateway non mantiene
   piu' una copia test-only e le memorie legacy sensibili senza admission metadata
   restano `Candidate` invece di essere promosse solo per confidenza alta.
-- Slice locale `gateway_task_inputs`: `task_effective_goal` esce dal monolite
+- Estrazione mergeata `gateway_task_inputs`: `task_effective_goal` esce dal monolite
   `main.rs`; la policy "prompt_redacted prevale su goal" resta riutilizzabile
   da task executor/browser approval senza assorbire browser runtime o loop agente.
+- Slice locale `chatTurnStatus`: il pill del turno attivo del composer deriva
+  da `runtimeViewModel.turnUiState`, stream title/detail e blocked reason in un
+  owner puro testato; `ChatView` non mantiene piu' una seconda derivazione di
+  "Waiting for you"/"Still working".
 - Estrazione mergeata `gateway_memory_reuse`: `StreamMemoryReuseCollector` e
   `memory_reuse_envelope_from_read_set` escono dal monolite `main.rs`; l'owner
   attesta recall/actionable/approval stream parts e produce il

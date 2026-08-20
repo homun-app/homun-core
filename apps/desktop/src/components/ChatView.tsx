@@ -18,11 +18,12 @@ import {
 } from "./ChatWorkspaceProjections";
 import { projectWorkspaceSections } from "../lib/workspaceIslandSections";
 import { deriveBrowserStatus } from "../lib/chat-runtime/browserActivityLifecycle";
+import { deriveChatTurnStatus } from "../lib/chat-runtime/chatTurnStatus";
 import {
   PANEL_VIEWS,
   type IslandSource,
 } from "./InspectorView";
-import { ChatComposerDock, type ChatTurnState } from "./ChatComposerDock";
+import { ChatComposerDock } from "./ChatComposerDock";
 import { ChatInspectorDock } from "./ChatInspectorDock";
 import { ChatWorkspaceDock } from "./ChatWorkspaceDock";
 import { ChatTopbar } from "./ChatTopbar";
@@ -515,29 +516,26 @@ export function ChatView({
   });
 
   // ── Derived chat turn state for the composer dock ─────────────────────
-  const chatTurnState = useMemo<ChatTurnState | null>(() => {
-    if (!hasActiveTurn) return null;
-    return {
-      phase: turnAwaitingUser
-        ? t("chat.waitingForYou", { defaultValue: "Waiting for you" })
-        : streamStatus?.title ?? t("chat.stillWorking"),
-      detail: turnAwaitingUser
-        ? streamStatus?.detail
-        : streamStatus?.detail ?? projectedActiveTurn?.blocked_reason ?? undefined,
-      elapsedSeconds: activeTurnElapsedSeconds,
-      attempt: projectedActiveTurn?.attempt ?? 1,
-      activityCount: conversationActivity.length,
-    };
-  }, [
+  const chatTurnState = useMemo(() => deriveChatTurnStatus({
+    turnUiState: runtimeViewModel.turnUiState,
+    streamStatus,
+    labels: {
+      waitingForYou: t("chat.waitingForYou", { defaultValue: "Waiting for you" }),
+      stillWorking: t("chat.stillWorking"),
+    },
+    elapsedSeconds: activeTurnElapsedSeconds,
+    attempt: projectedActiveTurn?.attempt,
+    activityCount: conversationActivity.length,
+    activeTurnBlockedReason: projectedActiveTurn?.blocked_reason,
+  }), [
     activeTurnElapsedSeconds,
     conversationActivity.length,
-    hasActiveTurn,
     projectedActiveTurn?.attempt,
     projectedActiveTurn?.blocked_reason,
+    runtimeViewModel.turnUiState,
     streamStatus?.detail,
     streamStatus?.title,
     t,
-    turnAwaitingUser,
   ]);
 
   // ── Workspace projections ─────────────────────────────────────────────
