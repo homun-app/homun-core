@@ -1,5 +1,6 @@
 // Tool schemas and handlers for long-term memory recall, decisions, and forgetting.
 use axum::{Json, extract::State};
+use local_first_memory::MemoryAccessRequest;
 use serde::Deserialize;
 
 use crate::gateway_memory_graph_maintenance::reconcile_memory_scope;

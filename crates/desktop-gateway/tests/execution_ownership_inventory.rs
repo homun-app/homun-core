@@ -859,6 +859,34 @@ fn automation_memory_tombstone_has_one_gateway_owner() {
 }
 
 #[test]
+fn memory_ui_access_request_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let memory_ui = production_source(&root.join("src/gateway_memory_ui_routes.rs"));
+
+    let pattern = "fn gateway_memory_access_request(";
+    assert!(
+        memory_ui.contains(pattern),
+        "memory UI routes owner must contain dashboard access request helper"
+    );
+    assert!(
+        !main.contains(pattern),
+        "main.rs must not retain memory UI access request helper"
+    );
+
+    for adjacent in [
+        "fn memorybench_",
+        "fn record_decision(",
+        "fn rebuild_status_wiki(",
+    ] {
+        assert!(
+            !memory_ui.contains(adjacent),
+            "memory UI routes owner must not absorb adjacent memory surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn recall_entry_formatting_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

@@ -10,18 +10,36 @@ use time::OffsetDateTime;
 
 use local_first_desktop_gateway::{ChatMessagesSnapshot, ChatThreadSnapshot};
 use local_first_memory::{
-    MemoryDashboard, MemoryStatus, MemoryUiReadModel, PERSONAL_WORKSPACE,
-    WorkspaceId as MemoryWorkspaceId,
+    DataSensitivity as MemoryDataSensitivity, MemoryAccessRequest, MemoryDashboard, MemoryStatus,
+    MemoryUiReadModel, PERSONAL_WORKSPACE, PrivacyDomain, WorkspaceId as MemoryWorkspaceId,
 };
 
 use crate::{
-    AppState, GatewayError, THREADS_WORKSPACE, gateway_memory_access_request,
-    gateway_memory_user_id, gateway_memory_workspace_id, load_workspaces_file, lock_store,
-    memory_facade,
+    AppState, GatewayError, THREADS_WORKSPACE, gateway_memory_user_id, gateway_memory_workspace_id,
+    load_workspaces_file, lock_store, memory_facade,
 };
 
 fn memory_item_visible(status: &MemoryStatus) -> bool {
     !matches!(status, MemoryStatus::Deleted | MemoryStatus::Rejected)
+}
+
+fn gateway_memory_access_request() -> MemoryAccessRequest {
+    MemoryAccessRequest {
+        actor_id: "desktop-ui".to_string(),
+        user_id: gateway_memory_user_id(),
+        workspace_id: gateway_memory_workspace_id(),
+        purpose: "desktop_memory_dashboard".to_string(),
+        allowed_domains: vec![
+            PrivacyDomain::new("local"),
+            PrivacyDomain::new("personal"),
+            PrivacyDomain::new("work"),
+            PrivacyDomain::new("browser"),
+        ],
+        max_sensitivity: MemoryDataSensitivity::Private,
+        allow_raw_payload: false,
+        allow_export: false,
+        broad_query: true,
+    }
 }
 
 pub(crate) async fn memory_dashboard(

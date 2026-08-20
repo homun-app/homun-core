@@ -371,9 +371,9 @@ Slice Runtime V2 recenti:
   status e search escono dal monolite `main.rs`; dashboard/export memory e
   registry workspace generale restano separati.
 - Estrazione locale `gateway_memory_ui_routes`: route read-only dashboard/export/items
-  memory e full user-data export escono dal monolite `main.rs`; MemoryBench,
-  memory graph build/mutation e storage semantics del `MemoryFacade` restano
-  separati.
+  memory, access request dashboard e full user-data export escono dal monolite
+  `main.rs`; MemoryBench, memory graph build/mutation e storage semantics del
+  `MemoryFacade` restano separati.
 - Estrazione locale `gateway_memory_graph_routes`: route `/api/memory/graph`,
   merge entity graph e adapter import Graphify escono dal monolite `main.rs`;
   maintenance/reconcile, persistence graph e relation helper restano owner

@@ -99,6 +99,9 @@ MEMORY_RECALL_TOOL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_recall_tool.rs"
 )
 MEMORY_CLIENTS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_memory_clients.rs")
+MEMORY_UI_ROUTES_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_memory_ui_routes.rs"
+)
 PAYMENT_APPROVAL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_payment_approval.rs"
 )
@@ -240,6 +243,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn export_user_data(": "full user data export must stay in gateway_memory_ui_routes",
         "struct MemoryItemView ": "memory explorer DTOs must stay in gateway_memory_ui_routes",
         "async fn memory_items(": "memory explorer routes must stay in gateway_memory_ui_routes",
+        "fn gateway_memory_access_request(": "memory UI access request must stay in gateway_memory_ui_routes",
         "struct RemoteApprovalIntent ": "remote approval intent parsing must stay in gateway_remote_approval",
         "fn remote_approval_intent_from_marker(": "remote approval marker parsing must stay in gateway_remote_approval",
         "fn remote_approval_intent_from_raw_text(": "remote approval marker parsing must stay in gateway_remote_approval",
@@ -1439,6 +1443,8 @@ def main() -> int:
         memory_recall_tool_source = handle.read()
     with open(MEMORY_CLIENTS_RS, "r", encoding="utf-8") as handle:
         memory_clients_source = handle.read()
+    with open(MEMORY_UI_ROUTES_RS, "r", encoding="utf-8") as handle:
+        memory_ui_routes_source = handle.read()
     with open(PAYMENT_APPROVAL_RS, "r", encoding="utf-8") as handle:
         payment_approval_source = handle.read()
     main_body = extract_async_main_body(source)
@@ -1692,6 +1698,11 @@ def main() -> int:
         source,
         "mod gateway_memory_ui_routes;",
         "gateway root must declare memory UI routes owner",
+    )
+    assert_contains(
+        memory_ui_routes_source,
+        "fn gateway_memory_access_request(",
+        "memory UI routes owner must expose dashboard access request",
     )
     assert_contains(source, "mod gateway_project_access;", "gateway root must declare project access owner")
     assert_contains(source, "mod gateway_workspaces;", "gateway root must declare workspace registry owner")

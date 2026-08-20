@@ -661,13 +661,13 @@ use local_first_local_computer_session::{
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
     BriefingPack, CachedBriefing, DataSensitivity as MemoryDataSensitivity, Exchange,
-    ExtractedEntity, ExtractedRelation, MemoryAccessRequest, MemoryCollectionKey,
-    MemoryCreateRequest, MemoryEntity, MemoryError, MemoryFacade, MemoryIntegrityRepairRequest,
-    MemoryLifecycleRequest, MemoryRecallService, MemoryRecord, MemoryRef, MemoryRefKind,
-    MemoryRelation, MemoryScope, MemorySearchRequest, MemoryStatus, MemoryUpdatePatch,
-    MemoryWikiProjection, PERSONAL_WORKSPACE, PrivacyDomain, ProjectGraphImportReport, RecallHit,
-    RecallPack, SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore, WikiPage,
-    WorkspaceId as MemoryWorkspaceId, briefing_cache, memory_record_revision, prompt_fingerprint,
+    ExtractedEntity, ExtractedRelation, MemoryCollectionKey, MemoryCreateRequest, MemoryEntity,
+    MemoryError, MemoryFacade, MemoryIntegrityRepairRequest, MemoryLifecycleRequest,
+    MemoryRecallService, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope,
+    MemorySearchRequest, MemoryStatus, MemoryUpdatePatch, MemoryWikiProjection, PERSONAL_WORKSPACE,
+    PrivacyDomain, ProjectGraphImportReport, RecallHit, RecallPack, SQLiteMemoryStore,
+    UserId as MemoryUserId, WikiFileStore, WikiPage, WorkspaceId as MemoryWorkspaceId,
+    briefing_cache, memory_record_revision, prompt_fingerprint,
 };
 use local_first_orchestrator::{
     ExecutionPlan, OrchestratorBrain, OrchestratorRequest, OrchestratorRoute, PlanStep,
@@ -7016,25 +7016,6 @@ fn vacuum_all_stores(state: &AppState) {
         && let Err(error) = store.vacuum()
     {
         eprintln!("VACUUM usage store: {error}");
-    }
-}
-
-fn gateway_memory_access_request() -> MemoryAccessRequest {
-    MemoryAccessRequest {
-        actor_id: "desktop-ui".to_string(),
-        user_id: gateway_memory_user_id(),
-        workspace_id: gateway_memory_workspace_id(),
-        purpose: "desktop_memory_dashboard".to_string(),
-        allowed_domains: vec![
-            PrivacyDomain::new("local"),
-            PrivacyDomain::new("personal"),
-            PrivacyDomain::new("work"),
-            PrivacyDomain::new("browser"),
-        ],
-        max_sensitivity: MemoryDataSensitivity::Private,
-        allow_raw_payload: false,
-        allow_export: false,
-        broad_query: true,
     }
 }
 
