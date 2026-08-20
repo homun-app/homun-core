@@ -54,6 +54,20 @@ def create_schema(conn: sqlite3.Connection) -> None:
             linked_task_id text,
             delivery_state text not null default 'delivered'
         );
+        create table runtime_plans (
+            user_id text not null,
+            workspace_id text not null,
+            thread_id text not null,
+            status text not null,
+            plan_json text not null,
+            objective_revision integer not null default 0,
+            revision integer not null default 1,
+            stall_turns integer not null default 0,
+            last_resume_done integer,
+            created_at integer not null,
+            updated_at integer not null,
+            primary key (user_id, workspace_id, thread_id)
+        );
         """
     )
 
@@ -213,6 +227,43 @@ class AuditTurnConsistencyTests(unittest.TestCase):
         codes = {item["code"] for item in report["contradictions"]}
         self.assertIn("failed_message_empty", codes)
         self.assertIn("failed_message_delivery_state_mismatch", codes)
+
+    def test_terminal_task_with_open_runtime_plan_step_reports_plan_owner(self):
+        path, conn = self.with_db()
+        seed_task(conn, "completed", None)
+        conn.execute(
+            "insert into turn_events (turn_id, seq, kind, payload_json, created_at) values ('turn-1', 1, 'done', ?, 2)",
+            (json.dumps({"text": "done"}),),
+        )
+        conn.execute(
+            """
+            insert into runtime_plans (
+                user_id, workspace_id, thread_id, status, plan_json,
+                objective_revision, revision, stall_turns, last_resume_done,
+                created_at, updated_at
+            ) values ('user-1', 'workspace-1', 'thread-1', 'open', ?, 0, 3, 0, null, 1, 3)
+            """,
+            (
+                json.dumps(
+                    {
+                        "goal": "Build app",
+                        "steps": [
+                            {"id": "s1", "title": "Scaffold", "status": "done"},
+                            {"id": "s2", "title": "Run tests", "status": "doing"},
+                        ],
+                    }
+                ),
+            ),
+        )
+        conn.commit()
+
+        report = audit.audit_turn(path, "turn-1")
+
+        codes = {item["code"] for item in report["contradictions"]}
+        owners = {item["owner_to_remove"] for item in report["contradictions"]}
+        self.assertIn("terminal_task_with_active_runtime_plan", codes)
+        self.assertIn("runtime_plan_projection", owners)
+        self.assertEqual(report["runtime_plan"]["status"], "open")
 
     def test_missing_database_path_is_not_created(self):
         temp = tempfile.TemporaryDirectory()

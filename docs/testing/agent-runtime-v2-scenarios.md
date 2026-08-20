@@ -35,6 +35,8 @@ First automated owner:
 
 - `crates/task-runtime/src/turn_reducer.rs`
 - `scripts/audit_turn_consistency.py`
+  (`terminal_task_with_active_runtime_plan` when `runtime_plans` still has a
+  runnable open step after a terminal task)
 
 ## Scenario 2: Plan Read-Only
 
