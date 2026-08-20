@@ -55,9 +55,11 @@ riutilizzabile vive in `apps/desktop/src/lib/chat-runtime/planSteps.mjs`.
 `useChatActivityProjection` fa fetch/replay della `KernelThreadProjection` e
 passa il risultato del presenter, senza ricostruire `PlanStep[]` o goal.
 Il pill del turno attivo del composer passa da
-`apps/desktop/src/lib/chat-runtime/chatTurnStatus.mjs`: `ChatView` fornisce solo
-etichette tradotte, elapsed e dati proiettati, senza decidere in proprio se il
-turno e' in attesa utente o ancora al lavoro.
+`apps/desktop/src/lib/chat-runtime/chatTurnStatus.mjs`, con
+`apps/desktop/src/components/useChatTurnStatus.ts` come owner UI del timer
+elapsed e delle etichette tradotte: `ChatView` fornisce solo projection,
+stream copy e contatori, senza decidere in proprio se il turno e' in attesa
+utente o ancora al lavoro.
 
 ## Regole di refactor
 

@@ -18,7 +18,6 @@ import {
 } from "./ChatWorkspaceProjections";
 import { projectWorkspaceSections } from "../lib/workspaceIslandSections";
 import { deriveBrowserStatus } from "../lib/chat-runtime/browserActivityLifecycle";
-import { deriveChatTurnStatus } from "../lib/chat-runtime/chatTurnStatus";
 import {
   PANEL_VIEWS,
   type IslandSource,
@@ -29,7 +28,6 @@ import { ChatWorkspaceDock } from "./ChatWorkspaceDock";
 import { ChatTopbar } from "./ChatTopbar";
 import { ChatTranscript } from "./ChatTranscript";
 import type { ChatViewProps } from "./ChatViewTypes";
-import { useChatActiveTurnElapsed } from "./useChatActiveTurnElapsed";
 import { useChatAutoTitle } from "./useChatAutoTitle";
 import { useChatBranches } from "./useChatBranches";
 import { useChatBrowserActivityLifecycle } from "./useChatBrowserActivityLifecycle";
@@ -46,6 +44,7 @@ import { useChatStreamingNotifier } from "./useChatStreamingNotifier";
 import { useChatTurnStateMachine } from "./useChatTurnStateMachine";
 import { useChatTurnSubmission } from "./useChatTurnSubmission";
 import { useChatStreamResume } from "./useChatStreamResume";
+import { useChatTurnStatus } from "./useChatTurnStatus";
 import { usePlanStepPulse } from "./usePlanStepPulse";
 import type { ChatMessage } from "../types";
 
@@ -360,14 +359,6 @@ export function ChatView({
     activeTurnId: projectedActiveTurn?.turn_id ?? null,
   });
 
-  // ── Active turn elapsed ────────────────────────────────────────────────
-  const activeTurnKey = projectedActiveTurn?.turn_id ?? streamStatus?.requestId ?? null;
-  const activeTurnElapsedSeconds = useChatActiveTurnElapsed({
-    activeTurnKey,
-    hasActiveTurn,
-    projectedUpdatedAt: projectedActiveTurn?.updated_at,
-  });
-
   // Durable wait (approval/CHOICES hold) must not keep a live "writing" owner.
   useEffect(() => {
     if (!turnAwaitingUser || !streamingAssistantId) return;
@@ -516,27 +507,13 @@ export function ChatView({
   });
 
   // ── Derived chat turn state for the composer dock ─────────────────────
-  const chatTurnState = useMemo(() => deriveChatTurnStatus({
-    turnUiState: runtimeViewModel.turnUiState,
+  const chatTurnState = useChatTurnStatus({
+    runtimeViewModel,
     streamStatus,
-    labels: {
-      waitingForYou: t("chat.waitingForYou", { defaultValue: "Waiting for you" }),
-      stillWorking: t("chat.stillWorking"),
-    },
-    elapsedSeconds: activeTurnElapsedSeconds,
-    attempt: projectedActiveTurn?.attempt,
-    activityCount: conversationActivity.length,
-    activeTurnBlockedReason: projectedActiveTurn?.blocked_reason,
-  }), [
-    activeTurnElapsedSeconds,
-    conversationActivity.length,
-    projectedActiveTurn?.attempt,
-    projectedActiveTurn?.blocked_reason,
-    runtimeViewModel.turnUiState,
-    streamStatus?.detail,
-    streamStatus?.title,
-    t,
-  ]);
+    projectedActiveTurn,
+    conversationActivityCount: conversationActivity.length,
+    translate: t,
+  });
 
   // ── Workspace projections ─────────────────────────────────────────────
   const uploadedFiles = useMemo(() => buildUploadedFiles(messages), [messages]);
