@@ -1901,7 +1901,7 @@ assertRepoContains("crates/desktop-gateway/src/gateway_memory_ui_routes.rs", "Me
 assertRepoContains("crates/desktop-gateway/src/main.rs", "CapabilityRegistryStore", "desktop gateway must use the capability registry store");
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/api/chat/threads", "desktop gateway must expose persistent thread endpoints");
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "/messages/{message_id}/create_task", "desktop gateway must create durable tasks from chat messages");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "link_brain_tasks_to_thread", "desktop gateway must link Brain-created operational tasks to the thread (and local computer read models)");
+assertRepoContains("crates/desktop-gateway/src/gateway_brain_materialization.rs", "link_brain_tasks_to_thread", "desktop gateway must link Brain-created operational tasks to the thread (and local computer read models)");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "LocalComputerSessionStore", "desktop gateway must persist computer sessions for operational tasks");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "HOMUN_BROWSER_HEADLESS", "desktop gateway must allow visible Playwright browser sessions");
 assertRepoContains("crates/desktop-gateway/src/gateway_paths.rs", "gateway_data_dir", "desktop gateway data paths must be owned outside the monolith");
