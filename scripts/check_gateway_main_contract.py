@@ -76,6 +76,9 @@ AGENT_STREAM_EVENTS_RS = os.path.join(
 AGENT_STREAM_PERSISTENCE_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_stream_persistence.rs"
 )
+AGENT_STREAM_DRAIN_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_stream_drain.rs"
+)
 AGENT_WAKE_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_agent_wake.rs")
 PROMPT_PACKETS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_prompt_packets.rs"
@@ -1210,6 +1213,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn persist_recall_event_part(": "agent stream recall persistence must stay in gateway_agent_stream_persistence",
         "fn persist_redacted_user_text_from_stream_line(": "agent stream redacted user persistence must stay in gateway_agent_stream_persistence",
         "fn fanout_turn_event(": "agent stream turn-event fanout must stay in gateway_agent_stream_persistence",
+        "async fn drain_agent_stream_into_message(": "agent stream drain must stay in gateway_agent_stream_drain",
+        "async fn drain_agent_stream_into_message_with_fanout(": "agent stream fanout drain must stay in gateway_agent_stream_drain",
         "fn wake_for_agent_stop(": "agent wake mapping must stay in gateway_agent_wake",
         "fn cancel_chat_turn_and_finalize_bubble(": "turn broker cancel/finalize helper must stay in gateway_turn_broker",
         "async fn cancel_turn(": "turn broker cancel route must stay in gateway_turn_broker",
@@ -1453,6 +1458,8 @@ def main() -> int:
         agent_stream_events_source = handle.read()
     with open(AGENT_STREAM_PERSISTENCE_RS, "r", encoding="utf-8") as handle:
         agent_stream_persistence_source = handle.read()
+    with open(AGENT_STREAM_DRAIN_RS, "r", encoding="utf-8") as handle:
+        agent_stream_drain_source = handle.read()
     with open(AGENT_WAKE_RS, "r", encoding="utf-8") as handle:
         agent_wake_source = handle.read()
     with open(PROMPT_PACKETS_RS, "r", encoding="utf-8") as handle:
@@ -1963,6 +1970,43 @@ def main() -> int:
             agent_stream_persistence_source,
             snippet,
             "agent stream persistence owner must not absorb adjacent drain/HITL/browser surfaces",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_stream_drain;",
+        "gateway root must declare agent stream drain owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_stream_drain::*;",
+        "gateway root must re-export agent stream drain owner",
+    )
+    for snippet in [
+        "pub(crate) async fn drain_agent_stream_into_message(",
+        "pub(crate) async fn drain_agent_stream_into_message_with_fanout(",
+        "pub(crate) struct AgentTurnResult",
+        "pub(crate) struct BrokerAgentTurnResult",
+    ]:
+        assert_contains(
+            agent_stream_drain_source,
+            snippet,
+            "agent stream drain owner must expose stream drain surface and result DTOs",
+        )
+    for snippet in [
+        "fn apply_agent_stream_line(",
+        "fn turn_event_from_stream_value(",
+        "fn redacted_user_text_from_stream_line(",
+        "fn update_channel_assistant_message(",
+        "fn finalize_streamed_assistant_message(",
+        "fn persist_hitl_wait_from_outcome(",
+        "fn persist_hitl_wait_payload(",
+        "fn thread_browser_session_is_live(",
+        "fn execute_persistent_browser_capability(",
+    ]:
+        assert_not_contains(
+            agent_stream_drain_source,
+            snippet,
+            "agent stream drain owner must not absorb adjacent event/persistence/HITL/browser surfaces",
         )
     assert_contains(source, "mod gateway_agent_wake;", "gateway root must declare agent wake owner")
     assert_contains(
