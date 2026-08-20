@@ -616,6 +616,16 @@ assertRepoContains(
   "Gateway runtime flags must have a dedicated owner",
 );
 assertRepoContains(
+  "crates/desktop-gateway/src/gateway_turn_trace.rs",
+  "begin_turn_trace",
+  "Gateway turn trace entry must have a dedicated owner",
+);
+assertRepoNotContains(
+  "crates/desktop-gateway/src/main.rs",
+  "TurnEvent::TurnReceived",
+  "Gateway main must not record the turn-trace entry sentinel directly",
+);
+assertRepoContains(
   "crates/desktop-gateway/src/gateway_prompt_instructions.rs",
   "booking_assumption_choice_instruction",
   "Gateway prompt instructions must have a dedicated owner",

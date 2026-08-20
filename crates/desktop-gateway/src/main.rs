@@ -157,6 +157,7 @@ mod gateway_tool_timeouts;
 mod gateway_transcription;
 mod gateway_turn_broker;
 mod gateway_turn_recovery;
+mod gateway_turn_trace;
 mod gateway_update_routes;
 mod gateway_usage_routes;
 mod gateway_user_preferences;
@@ -279,6 +280,7 @@ pub(crate) use gateway_text_safety::{
     redact_sensitive_text, strip_terminal_control_sequences, truncate_chars,
 };
 pub(crate) use gateway_thread_model_context::*;
+pub(crate) use gateway_turn_trace::*;
 pub(crate) use gateway_user_preferences::*;
 pub(crate) use gateway_vault_routes::*;
 pub(crate) use gateway_visible_turns::*;
@@ -1574,23 +1576,14 @@ async fn stream_chat_via_openai(
     // The `turn_received` event is the FIRST thing recorded; if no `turn_start` follows, the turn
     // stalled before generation (a setup-hang would otherwise be invisible). Cheap Arc/None handle;
     // no-op when disabled. It's a pure sink — it records what the turn does, never steers it.
-    let turn_trace = if turn_trace_enabled() {
-        match gateway_logs_dir() {
-            Ok(dir) => local_first_engine::turn_trace::TurnTrace::new(
-                request.request_id.clone(),
-                dir,
-                turn_trace_max_bytes(),
-            ),
-            Err(_) => local_first_engine::turn_trace::TurnTrace::disabled(),
-        }
-    } else {
-        local_first_engine::turn_trace::TurnTrace::disabled()
-    };
-    turn_trace.record(local_first_engine::turn_trace::TurnEvent::TurnReceived {
-        prompt_head: request.prompt.chars().take(200).collect(),
-        prompt_len: request.prompt.chars().count(),
-        mode: request.mode.as_deref().unwrap_or("agent").to_string(),
+    let turn_trace = begin_turn_trace(TurnTraceEntry {
+        request_id: request.request_id.clone(),
+        prompt: request.prompt.clone(),
+        mode: request.mode.clone(),
         model: model.clone(),
+        enabled: turn_trace_enabled(),
+        logs_dir: gateway_logs_dir(),
+        max_bytes: turn_trace_max_bytes(),
     });
     // Scope MEMORY to THIS conversation's project (profile injection, recall, per-file
     // recall, extractor). Uses a dedicated memory scope — NOT the global active
