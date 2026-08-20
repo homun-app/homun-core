@@ -504,6 +504,40 @@ fn capability_execution_has_one_gateway_owner() {
 }
 
 #[test]
+fn subagent_execution_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let subagent_execution_path = root.join("src/gateway_subagent_execution.rs");
+    let subagent_execution = if subagent_execution_path.exists() {
+        production_source(&subagent_execution_path)
+    } else {
+        String::new()
+    };
+
+    let pattern = "fn execute_subagent_task(";
+    assert!(
+        subagent_execution.contains(pattern),
+        "subagent execution owner must contain {pattern}"
+    );
+    assert!(
+        !main.contains(pattern),
+        "main.rs must not retain subagent execution surface {pattern}"
+    );
+
+    for adjacent in [
+        "fn execute_capability_browser_task(",
+        "fn execute_capability_generic(",
+        "fn execute_proactive_prompt_task(",
+        "async fn run_agent_rounds(",
+    ] {
+        assert!(
+            !subagent_execution.contains(adjacent),
+            "subagent execution owner must not absorb adjacent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn hitl_wait_persistence_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

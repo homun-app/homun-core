@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (inference inventory root mergeata).**
+> **Ultimo aggiornamento: 2026-08-20 (proactive execution owner mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#233 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #233 |
+| PR | #108-#116, #118-#234 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #234 |
 
 ## Dove siamo
 
@@ -237,7 +237,7 @@ Slice Runtime V2 recenti:
   (`ProactiveThreadPlan`), derivazione `thread_id`/workspace/source/channel/title
   e scope schedulato stabile escono dal monolite `main.rs`; persistenza visible
   turn, executor proattivo, automazioni e browser restano owner separati.
-- Estrazione locale `gateway_proactive_execution`: bootstrap del turno visibile
+- Estrazione mergeata `gateway_proactive_execution`: bootstrap del turno visibile
   task-scoped per `proactive_prompt`, policy autonomia/read-only/full,
   interruzione runtime, mapping `TurnStop` -> wake e finalizzazione
   complete/suspend/fail escono dal monolite `main.rs`; planning thread, visible
@@ -282,6 +282,10 @@ Slice Runtime V2 recenti:
   capability e mapping condiviso `ExecutorResult` -> `ExecutionOutcome` escono
   dal monolite `main.rs`; browser capability, queue runner e loop agente restano
   owner separati.
+- Estrazione locale `gateway_subagent_execution`: dispatch `subagent.*`,
+  selezione router orchestrator e mapping `ExecutorResult` -> `ExecutionOutcome`
+  escono dal monolite `main.rs`; browser capability, executor proattivo,
+  queue runner e loop agente restano owner separati.
 - Estrazione mergeata `gateway_shell_tasks`: executor shell read-only,
   wrapper comando consentito e shaping/redazione JSON output task escono dal
   monolite `main.rs`; execution runtime, task executor, browser e sandbox

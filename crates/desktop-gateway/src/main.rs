@@ -137,6 +137,7 @@ mod gateway_skill_routes;
 mod gateway_skill_runtime;
 mod gateway_state_access;
 mod gateway_store_integrity;
+mod gateway_subagent_execution;
 mod gateway_system_status;
 mod gateway_tags;
 mod gateway_task_executor;
@@ -699,8 +700,7 @@ use local_first_secrets::{
     DevelopmentSecretKeyProvider, EncryptedFileSecretStore, SecretMaterial, SecretRef, SecretStore,
 };
 use local_first_subagents::{
-    GenerateJsonRequest, GenerateJsonResponse, GenerateStreamEvent, SubagentTaskExecutor,
-    TokenMetrics,
+    GenerateJsonRequest, GenerateJsonResponse, GenerateStreamEvent, TokenMetrics,
 };
 use local_first_task_runtime::{
     ApprovalGate, ApprovalPolicy, ApprovalRequest, Automation, AutomationSource, AutomationTrigger,
@@ -4351,45 +4351,6 @@ fn browser_capability_redacted_checkpoint(
             Value::String(redact_sensitive_text(&truncate_chars(snapshot, 2_000)));
     }
     browser
-}
-
-/// Runs a `subagent.*` task through the real `SubagentTaskExecutor` (trait-based)
-/// and maps its `ExecutorResult` into the canonical execution protocol.
-/// (ADR 0008 pillar #3 / GAP 4: de-stub the registered executors). The runner
-/// only needs the local LLM runtime.
-fn execute_subagent_task(
-    state: &AppState,
-    task: &TaskRecord,
-    contract: &local_first_execution_protocol::ValidatedExecutionContract,
-) -> Result<local_first_execution_protocol::ExecutionOutcome, LocalTaskExecutionError> {
-    // Pick the model that best fits THIS task's goal: the semantic stage-2 router
-    // (with heuristic fallback) over the "orchestrator" role.
-    let goal = task
-        .input_json
-        .get("goal")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let router = match resolve_role_for_task(goal, "orchestrator") {
-        Some(resolved) => build_router_for_resolved(&resolved),
-        None => router_for_role("orchestrator"),
-    };
-
-    let mut executor = SubagentTaskExecutor::new(router);
-    let executor_id = executor.executor_id().to_string();
-    let result = executor
-        .execute_step(task, None)
-        .map_err(|error| LocalTaskExecutionError {
-            message: format!("subagent executor failed: {error}"),
-        })?;
-    // Reuse the shared ExecutorResult presentation mapping used by browser capabilities.
-    gateway_capability_execution::task_execution_outcome_from_executor_result(
-        state,
-        task,
-        contract,
-        &executor_id,
-        "subagent",
-        result,
-    )
 }
 
 fn spawn_browser_sidecar_for_task(

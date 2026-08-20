@@ -105,6 +105,9 @@ PROACTIVE_EXECUTION_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_proactive_execution.rs"
 )
 SHELL_TASKS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_shell_tasks.rs")
+SUBAGENT_EXECUTION_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_subagent_execution.rs"
+)
 VISIBLE_TURNS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_visible_turns.rs"
 )
@@ -215,6 +218,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn capability_kind_not_wired_outcome(": "capability execution presentation must stay in gateway_capability_execution",
         "fn task_execution_outcome_from_executor_result(": "executor result presentation mapping must stay in gateway_capability_execution",
         "fn completed_executor_outcome(": "executor completion presentation mapping must stay in gateway_capability_execution",
+        "fn execute_subagent_task(": "subagent task execution must stay in gateway_subagent_execution",
         "fn persist_hitl_wait_from_outcome(": "typed HITL wait persistence must stay in gateway_hitl_waits",
         "fn persist_hitl_wait_payload(": "HITL wait payload persistence must stay in gateway_hitl_waits",
         "fn artifact_quality_summary(": "artifact quality prompt context must stay in gateway_memory_prompt_context",
@@ -1511,6 +1515,8 @@ def main() -> int:
         proactive_execution_source = handle.read()
     with open(SHELL_TASKS_RS, "r", encoding="utf-8") as handle:
         shell_tasks_source = handle.read()
+    with open(SUBAGENT_EXECUTION_RS, "r", encoding="utf-8") as handle:
+        subagent_execution_source = handle.read()
     with open(VISIBLE_TURNS_RS, "r", encoding="utf-8") as handle:
         visible_turns_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
@@ -2340,6 +2346,27 @@ def main() -> int:
         "mod gateway_runtime_settings;",
         "gateway root must declare runtime settings owner",
     )
+    assert_contains(
+        source,
+        "mod gateway_subagent_execution;",
+        "gateway root must declare subagent execution owner",
+    )
+    assert_contains(
+        subagent_execution_source,
+        "pub(crate) fn execute_subagent_task(",
+        "subagent execution owner must expose task dispatch",
+    )
+    for snippet in [
+        "fn execute_capability_browser_task(",
+        "fn execute_capability_generic(",
+        "fn execute_proactive_prompt_task(",
+        "async fn run_agent_rounds(",
+    ]:
+        assert_not_contains(
+            subagent_execution_source,
+            snippet,
+            "subagent execution owner must not absorb adjacent execution surfaces",
+        )
     assert_contains(source, "mod gateway_model_routes;", "gateway root must declare model route owner")
     assert_contains(source, "mod gateway_model_routing;", "gateway root must declare model routing owner")
     assert_contains(
