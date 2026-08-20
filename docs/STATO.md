@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (agent wake locale).**
+> **Ultimo aggiornamento: 2026-08-20 (agent wake mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#223 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #223 |
+| PR | #108-#116, #118-#224 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #224 |
 
 ## Dove siamo
 
@@ -242,7 +242,7 @@ Slice Runtime V2 recenti:
   messaggi storici, esclusione placeholder/current prompt e bound degli ultimi
   16 `ChatContextMessage` escono dal monolite `main.rs`; visible turn,
   finalizzazione stream, recall tool e loop agente restano owner separati.
-- Estrazione locale `gateway_agent_wake`: mapping `TurnStop` ->
+- Estrazione mergeata `gateway_agent_wake`: mapping `TurnStop` ->
   `WakeCondition` per i turni agente esce dal monolite `main.rs`, preservando
   il riferimento approval action-specific; drain stream, HITL wait e browser
   restano owner separati.
