@@ -1389,6 +1389,35 @@ fn text_safety_helpers_have_one_gateway_owner() {
 }
 
 #[test]
+fn task_input_helpers_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let task_inputs = production_source(&root.join("src/gateway_task_inputs.rs"));
+
+    assert!(
+        task_inputs.contains("fn task_effective_goal("),
+        "task input owner must contain task_effective_goal"
+    );
+    assert!(
+        !main.contains("fn task_effective_goal("),
+        "main.rs must not retain task_effective_goal"
+    );
+
+    for adjacent in [
+        "fn browser_targets_for_goal(",
+        "fn browser_url_for_goal(",
+        "async fn run_agent_rounds(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !task_inputs.contains(adjacent),
+            "task input owner must not absorb adjacent execution/browser surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn attachment_prompt_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

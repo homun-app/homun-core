@@ -45,6 +45,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_agent_stream_drain.rs` | Drain async dello stream agente verso assistant message e, per il broker, verso fanout durable/live; non possiede parser, persistence helpers, HITL wait o browser. |
 | `crates/desktop-gateway/src/gateway_agent_wake.rs` | Mapping gateway `TurnStop` -> `WakeCondition` per outcome agente, incluso approval ref action-specific; non possiede drain stream, finalizzazione messaggio, persistenza HITL o browser. |
 | `crates/desktop-gateway/src/gateway_task_executor_config.rs` | Config task executor da env, worker id stabile, worker manuale e poll interval; non possiede route queue, lease/acquire, execution adapter o finalizzazione task. |
+| `crates/desktop-gateway/src/gateway_task_inputs.rs` | Helper input task condivisi, incluso `task_effective_goal` (`prompt_redacted` prevale su `goal`); non possiede browser target/url, loop agente o dispatch task. |
 | `crates/desktop-gateway/src/gateway_task_executor.rs` | DTO/read model queue task, label risorse, status executor, approval/effect routes, acquire/lease/finalizzazione, worker, progress checkpoint e sync sessione task. |
 | `crates/desktop-gateway/src/gateway_chat_threads.rs` | Lista e lifecycle thread chat: select, pin, rename, reorder, archive/delete, seen/attention. |
 | `crates/desktop-gateway/src/gateway_chat_branches.rs` | Branch del transcript e active leaf selection. |
