@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (audit runtime plan locale).**
+> **Ultimo aggiornamento: 2026-08-20 (operational plan prompt owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#242 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #242 (`7c9b1481`) |
+| PR | #108-#116, #118-#243 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #243 (`a70f4a4e`) |
 
 ## Dove siamo
 
@@ -404,6 +404,11 @@ Slice Runtime V2 recenti:
   core/workspace/project/thread/runtime escono dal monolite `main.rs`; prompt
   instructions, policy memoria, runtime plan, routing decision e loop agente
   restano owner separati.
+- Estrazione `gateway_prompt_instructions`: il contratto prompt operativo del
+  piano (`OPERATIONAL PLAN`, `update_plan`, `step_advance`, goal e ripresa
+  piani in corso) esce dal monolite `main.rs`; `gateway_plan_tools` resta owner
+  degli schema tool, `gateway_runtime_plan_state` resta owner dello stato
+  runtime e `gateway_plan_stall` resta owner del budget cross-turn.
 - Estrazione mergeata `gateway_brain_runtime`: flag di abilitazione Brain, adapter
   `GatewayBrainMemory` e budget orchestrator scalati sul context window escono
   dal monolite `main.rs`; materializzazione durable dei task, capability facade,
@@ -1004,8 +1009,8 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#240: slice owner-level successive mergeate in `main`, fino a
-  `chatTurnStatus`; `main` verificato e riallineato a #240.
+- #143-#243: slice owner-level successive mergeate in `main`, fino a
+  `audit runtime plan`; `main` verificato e riallineato a #243.
 
 PR aperte:
 
@@ -1013,7 +1018,7 @@ PR aperte:
 
 Branch corrente:
 
-- `main`: pulito e riallineato a #240 (`717aa138`).
+- `main`: pulito e riallineato a #243 (`a70f4a4e`).
 
 ## Debito residuo
 
@@ -1046,7 +1051,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #240 (`717aa138`); prossima slice non-browser da scegliere
+main aggiornato a #243 (`a70f4a4e`); prossima slice non-browser da scegliere
 dopo nuova lettura owner-level di main.rs.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.

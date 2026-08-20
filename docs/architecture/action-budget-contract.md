@@ -24,6 +24,7 @@ UI mostra lo stato prodotto.
 | Budget | Owner attuale | Stato canonico | UI |
 | --- | --- | --- | --- |
 | Round per turno | `crates/engine/src/config.rs::TurnConfig`, `agent_loop.rs` | `TurnOutcome.stop`, eventi journal | mostra terminal/sospeso dalla projection |
+| Istruzione operativa del piano | `crates/desktop-gateway/src/gateway_prompt_instructions.rs` | prompt contract per `update_plan`, `step_advance`, goal e ripresa piani in corso | non interpreta la wording; mostra il piano proiettato |
 | Progresso dentro uno step | `LoopState.progress_anchor_round` e `ToolEffects.reset_stall_guards` | `PlanStepAdvanced`, `runtime_plans` | renderizza step proiettati |
 | Stall cross-turn del piano | `crates/desktop-gateway/src/gateway_plan_stall.rs` | `runtime_plans.stall_turns`, `last_resume_done` | non calcola il budget |
 | Budget/live-set tool normali | `crates/desktop-gateway/src/gateway_tool_budget.rs` | `TurnConfig.max_rounds`, `TurnConfig.hard_round_ceiling`, live/deferred split | non decide quali tool sono disponibili |

@@ -23,6 +23,36 @@ CHOICES marker with one option that confirms the default and one option for free
 chooses or writes the missing value."
 }
 
+pub(crate) fn operational_plan_instruction() -> &'static str {
+    "OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing \
+in the SAME turn. The plan is a live projection of the canonical objective, not a separate artifact \
+and not an approval gate. Replace or revise it autonomously when the new steps are only a better way \
+to reach the SAME objective. Ask the user before continuing only when the validated semantic decision \
+says the request changes the objective, expands its scope, or introduces new effects. Use update_plan \
+to create or revise the operational plan; do not write a free-form numbered plan in prose. \
+Use update_plan to update the step status (doing→done), shown in the \
+\"Plan\" panel. To move a step's status (e.g. doing→done) call step_advance with its id (shown in \
+parentheses after the title in the plan card) and the new status — this updates that ONE step \
+WITHOUT re-sending the plan, so steps never duplicate; use update_plan only to CREATE or revise \
+the plan. GOAL: when CREATING the plan you MUST set the top-level `goal` field to the user's \
+objective in ONE sentence, written in the USER'S language (use null when you are only updating \
+step statuses of an existing plan). The plan is ALREADY shown to the user as a CARD: do NOT \
+repeat it in the reply text too — no list or table of the steps in prose (at most one \
+line of context). For single-step requests no plan is needed. \
+STEP-AT-A-TIME EXECUTION: work the plan ONE step at a time — do, then VERIFY that step's \
+result (file written, search returned usable results, build/render succeeded), and only \
+THEN mark it `done` with update_plan before starting the next. Give each step a \
+`done_criterion` (the concrete, checkable proof it's finished): a step you mark done is \
+INDEPENDENTLY verified against its evidence before it counts — if it isn't actually complete \
+you'll be told and must keep working on it. Your working budget RESETS every time a step is \
+verified complete, so a long task (e.g. a 10-slide deck, a deep research) can run as long as \
+it KEEPS CLOSING STEPS — never rush or skip verification to save rounds, and never mark a \
+step done before its result actually exists. RESUMING: if the conversation ALREADY shows an \
+in-progress plan (some steps done, others not), CONTINUE it — re-emit the plan with update_plan \
+keeping the completed steps as done, and proceed from the first not-done step; do NOT restart \
+from scratch or re-propose."
+}
+
 /// Legacy prose backup; ResumeBinding + `choice_resume_harness_slot` own the contract.
 #[cfg(test)]
 pub(crate) fn choice_resume_instruction_legacy_backup() -> &'static str {
@@ -35,7 +65,7 @@ discovery/search from scratch."
 mod tests {
     use super::{
         booking_assumption_choice_instruction, browser_open_research_discovery_instruction,
-        choice_resume_instruction_legacy_backup,
+        choice_resume_instruction_legacy_backup, operational_plan_instruction,
     };
 
     #[test]
@@ -57,6 +87,17 @@ mod tests {
         assert!(guidance.contains("assumed critical parameter"));
         assert!(guidance.contains("CHOICES marker"));
         assert!(guidance.contains("Continue only after the user"));
+    }
+
+    #[test]
+    fn gateway_prompt_instructions_own_operational_plan_contract() {
+        let guidance = operational_plan_instruction();
+        assert!(guidance.contains("OPERATIONAL PLAN"));
+        assert!(guidance.contains("call update_plan"));
+        assert!(guidance.contains("step_advance"));
+        assert!(guidance.contains("top-level `goal`"));
+        assert!(guidance.contains("STEP-AT-A-TIME EXECUTION"));
+        assert!(guidance.contains("RESUMING"));
     }
 
     #[test]
