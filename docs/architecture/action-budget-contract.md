@@ -43,6 +43,7 @@ UI mostra lo stato prodotto.
 | Free HITL/User wait | `crates/desktop-gateway/src/gateway_hitl_waits.rs` | `TurnOutcome.awaiting_user`, open HITL wait payload, open-work snapshot | mostra reply affordance/wait dalla projection, non dai marker |
 | Subagent task execution | `crates/desktop-gateway/src/gateway_subagent_execution.rs` | `SubagentTaskExecutor` result mappato a `ExecutionOutcome` | non decide budget/liveness del turno padre |
 | Agent turn outcome/checkpoint | `crates/desktop-gateway/src/gateway_agent_turn_outcomes.rs` | restore `LoopCheckpoint` e outcome terminale image rejection | non possiede loop, budget o stream/fanout |
+| Gateway wall-clock time | `crates/desktop-gateway/src/gateway_time.rs` | `now_epoch_secs` condiviso | non decide budget, timeout o lifecycle |
 | Browser | `BrowserBudget` + browser sidecar result | `BrowserProgress`, `BrowserDone`, typed failure reason | sessione dedicata, non in questo slice |
 
 ## Owner UI del piano

@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (subagent execution owner mergeata).**
+> **Ultimo aggiornamento: 2026-08-20 (agent turn outcome owner mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#235 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #235 |
+| PR | #108-#116, #118-#236 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #236 |
 
 ## Dove siamo
 
@@ -286,10 +286,13 @@ Slice Runtime V2 recenti:
   selezione router orchestrator e mapping `ExecutorResult` -> `ExecutionOutcome`
   escono dal monolite `main.rs`; browser capability, executor proattivo,
   queue runner e loop agente restano owner separati.
-- Estrazione locale `gateway_agent_turn_outcomes`: restore checkpoint agente e
+- Estrazione mergeata `gateway_agent_turn_outcomes`: restore checkpoint agente e
   outcome terminale per image rejection gia' consegnata escono dal monolite
   `main.rs`; loop agente, stream chat/fanout e browser execution restano owner
   separati.
+- Estrazione locale `gateway_time`: helper condiviso `now_epoch_secs` esce dal
+  monolite `main.rs` e resta re-exportato dal root per compatibilita' dei moduli
+  esistenti; execution loop, browser e route non entrano nell'owner time.
 - Estrazione mergeata `gateway_shell_tasks`: executor shell read-only,
   wrapper comando consentito e shaping/redazione JSON output task escono dal
   monolite `main.rs`; execution runtime, task executor, browser e sandbox
@@ -297,8 +300,7 @@ Slice Runtime V2 recenti:
 - Estrazione mergeata `gateway_model_routing`: DTO `RoutingDecision`, lettura
   `routing-decisions.json` e writer ring-buffer capped escono dal monolite
   `main.rs`; la surface HTTP `/api/routing-decisions` resta in
-  `gateway_model_routes`, mentre `now_epoch_secs` resta nel root perche'
-  condiviso da runtime, memory, browser e workspace.
+  `gateway_model_routes`, mentre il tempo condiviso passa da `gateway_time`.
 - Estrazione mergeata `gateway_model_routing`: resolver API key inference,
   fallback env, factory `ModelRouter` da provider/ruolo e router legacy da env
   escono dal monolite `main.rs`; il wrapper browser resta fuori da questa
@@ -348,8 +350,7 @@ Slice Runtime V2 recenti:
   contained-computer escono dal monolite `main.rs`.
 - Estrazione locale `gateway_usage_routes`: route usage ledger, snapshot
   account provider, policy budget manuale e model-usage suggestions escono dal
-  monolite `main.rs`; `now_epoch_secs` resta nel root perche' condiviso da
-  runtime, memory, browser e workspace.
+  monolite `main.rs`; il tempo condiviso passa da `gateway_time`.
 - Estrazione locale `gateway_update_routes`: route update/redeploy webhook e
   DTO di stato escono dal monolite `main.rs`; startup, packaging e CI installer
   restano fuori owner.

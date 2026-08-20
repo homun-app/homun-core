@@ -577,6 +577,40 @@ fn agent_turn_outcomes_have_one_gateway_owner() {
 }
 
 #[test]
+fn gateway_time_has_one_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let gateway_time_path = root.join("src/gateway_time.rs");
+    let gateway_time = if gateway_time_path.exists() {
+        production_source(&gateway_time_path)
+    } else {
+        String::new()
+    };
+
+    let pattern = "fn now_epoch_secs(";
+    assert!(
+        gateway_time.contains(pattern),
+        "gateway time owner must contain {pattern}"
+    );
+    assert!(
+        !main.contains(pattern),
+        "main.rs must not retain shared time surface {pattern}"
+    );
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !gateway_time.contains(adjacent),
+            "gateway time owner must not absorb adjacent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn hitl_wait_persistence_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
