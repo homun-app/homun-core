@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (capability execution locale).**
+> **Ultimo aggiornamento: 2026-08-20 (capability execution mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#228 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #228; slice locale `fabio/capability-execution-owner` |
+| PR | #108-#116, #118-#229 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #229 |
 
 ## Dove siamo
 
@@ -958,9 +958,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#228: slice owner-level successive mergeate in `main`, fino alla fence
-  terminale steering in `gateway_turn_broker`; `main` verificato e riallineato
-  a #228.
+- #143-#229: slice owner-level successive mergeate in `main`, fino alla
+  capability execution non-browser in `gateway_capability_execution`; `main`
+  verificato e riallineato a #229.
 
 PR aperte:
 
@@ -968,10 +968,7 @@ PR aperte:
 
 Branch corrente:
 
-- `main`: pulito e riallineato a #228.
-- `fabio/capability-execution-owner`: slice locale per spostare execution
-  capability non-browser e outcome mapping da `main.rs` a
-  `gateway_capability_execution`.
+- `main`: pulito e riallineato a #229.
 
 ## Debito residuo
 
@@ -1004,7 +1001,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #228; scegli la prossima slice non-browser owner-level.
+main aggiornato a #229; scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
