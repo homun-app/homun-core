@@ -57,6 +57,7 @@ CAPABILITY_ROUTING_RS = os.path.join(
 TASK_EXECUTOR_CONFIG_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_task_executor_config.rs"
 )
+TASK_INPUTS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_task_inputs.rs")
 TASK_EXECUTOR_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_task_executor.rs")
 BOOT_MAINTENANCE_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_boot_maintenance.rs"
@@ -681,6 +682,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn resolve_datetime_tool_schema(": "datetime tool schema must stay in gateway_datetime_tools",
         "fn is_auto_confirmable(": "memory auto-confirm policy must stay in crates/memory/src/learn.rs",
         "fn memory_auto_confirmable(": "memory auto-confirm policy must stay in crates/memory/src/learn.rs",
+        "fn task_effective_goal(": "task input shaping must stay in gateway_task_inputs",
         "fn plan_stall_abort_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
         "const MAX_PLAN_STALL_RESUMES:": "runtime plan stall budget must stay in gateway_plan_stall",
         "fn next_plan_stall(": "runtime plan stall budget must stay in gateway_plan_stall",
@@ -1485,6 +1487,8 @@ def main() -> int:
         capability_routing_source = handle.read()
     with open(TASK_EXECUTOR_CONFIG_RS, "r", encoding="utf-8") as handle:
         task_executor_config_source = handle.read()
+    with open(TASK_INPUTS_RS, "r", encoding="utf-8") as handle:
+        task_inputs_source = handle.read()
     with open(TASK_EXECUTOR_RS, "r", encoding="utf-8") as handle:
         task_executor_source = handle.read()
     with open(BOOT_MAINTENANCE_RS, "r", encoding="utf-8") as handle:
@@ -2353,6 +2357,17 @@ def main() -> int:
     assert_contains(source, "mod gateway_datetime_tools;", "gateway root must declare datetime tools owner")
     assert_contains(source, "mod gateway_runtime_flags;", "gateway root must declare runtime flags owner")
     assert_contains(source, "mod gateway_time;", "gateway root must declare shared time owner")
+    assert_contains(source, "mod gateway_task_inputs;", "gateway root must declare task input owner")
+    assert_contains(
+        source,
+        "pub(crate) use gateway_task_inputs::task_effective_goal;",
+        "gateway root must re-export task input helper",
+    )
+    assert_contains(
+        task_inputs_source,
+        "pub(crate) fn task_effective_goal(",
+        "gateway task input owner must expose effective goal helper",
+    )
     assert_contains(
         source,
         "pub(crate) use gateway_time::now_epoch_secs;",
@@ -2378,6 +2393,18 @@ def main() -> int:
             gateway_time_source,
             snippet,
             "gateway time owner must not absorb execution surfaces",
+        )
+    for snippet in [
+        "fn browser_targets_for_goal(",
+        "fn browser_url_for_goal(",
+        "async fn run_agent_rounds(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            task_inputs_source,
+            snippet,
+            "gateway task input owner must not absorb execution/browser surfaces",
         )
     assert_contains(
         runtime_flags_source,

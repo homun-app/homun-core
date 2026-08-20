@@ -3118,9 +3118,10 @@ impl SQLiteMemoryStore {
         for row in rows {
             let (ref_string, bytes) = row.map_err(|error| error.to_string())?;
             let reference = parse_ref(ref_string)?;
-            let vector = bytes
-                .chunks_exact(4)
-                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            let (chunks, _) = bytes.as_chunks::<4>();
+            let vector = chunks
+                .iter()
+                .map(|chunk| f32::from_le_bytes(*chunk))
                 .collect();
             out.push((reference, vector));
         }

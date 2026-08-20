@@ -143,6 +143,7 @@ mod gateway_system_status;
 mod gateway_tags;
 mod gateway_task_executor;
 mod gateway_task_executor_config;
+mod gateway_task_inputs;
 mod gateway_task_maintenance;
 mod gateway_template_catalog;
 mod gateway_text_safety;
@@ -566,6 +567,7 @@ use gateway_runtime_flags::{
 };
 use gateway_secrets::{open_browser_checkpoint_secret_store, open_gateway_secret_store};
 pub(crate) use gateway_task_executor::*;
+pub(crate) use gateway_task_inputs::task_effective_goal;
 #[cfg(test)]
 pub(crate) use gateway_template_catalog::{
     FileTemplateCatalogProvider, ImportPptxTemplateRequest, ImportedTemplatePackProvider,
@@ -5002,15 +5004,6 @@ fn url_encode(value: &str) -> String {
         }
     }
     encoded
-}
-
-fn task_effective_goal(task: &TaskRecord) -> String {
-    task.input_json
-        .get("prompt_redacted")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or(task.goal.as_str())
-        .to_string()
 }
 
 #[cfg(test)]
