@@ -300,9 +300,10 @@ Slice Runtime V2 recenti:
   boot, dispatch tool e routing capability restano owner separati.
 - Estrazione mergeata `gateway_runtime_plan_state`: shape canonica del runtime plan,
   bridge `ExecutionPlan`, merge/reconcile delivery, lettura/scrittura
-  `runtime_plans`, proiezione memoria/graph degli step e port engine
-  `GatewayPlanProgress` escono dal monolite `main.rs`; tool schema, stall
-  budget, prompt packet e dispatch tool restano owner separati.
+  `runtime_plans`, proiezione memoria/graph degli step, memoria subagent
+  plan-step e port engine `GatewayPlanProgress` escono dal monolite `main.rs`;
+  tool schema, stall budget, prompt packet e dispatch tool restano owner
+  separati.
 - Estrazione mergeata `gateway_thread_episodes`: workspace riservato `__threads__`,
   persistenza episodi conversazionali, projection del blocco prompt per thread
   corrente e matching esatto thread/workspace escono dal monolite `main.rs`;

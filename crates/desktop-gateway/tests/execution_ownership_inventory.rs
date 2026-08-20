@@ -367,6 +367,7 @@ fn runtime_plan_state_has_one_gateway_owner() {
         "fn merge_execution_plan(",
         "fn runtime_plan_record_from_state(",
         "fn record_runtime_plan_step_outcome_from_state(",
+        "fn record_subagent_task_step_outcome(",
         "fn upsert_runtime_plan_memory_from_state(",
         "fn merge_plan(",
         "fn plan_tool_sent(",

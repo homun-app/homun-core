@@ -1523,44 +1523,6 @@ fn is_auto_confirmable(
         && confidence >= 0.8
 }
 
-fn record_subagent_task_step_outcome(
-    state: &AppState,
-    task: &TaskRecord,
-    outcome: &TaskExecutionPresentation,
-) {
-    let thread_id = lock_store(state)
-        .ok()
-        .and_then(|store| {
-            store
-                .thread_by_task_id(task.task_id.as_str())
-                .ok()
-                .flatten()
-        })
-        .map(|thread| thread.thread_id);
-    let facade = memory_facade(state);
-    let user = gateway_memory_user_id();
-    let workspace = gateway_memory_workspace_id();
-    let lifecycle = MemoryLifecycleRequest {
-        actor_id: "runtime-plan".to_string(),
-        user_id: user.clone(),
-        workspace_id: workspace.clone(),
-        purpose: "subagent_plan_step_verified".to_string(),
-    };
-    if record_subagent_task_step_outcome_memory(
-        facade,
-        &user,
-        &workspace,
-        &lifecycle,
-        thread_id.as_deref(),
-        task,
-        outcome,
-    )
-    .is_ok()
-    {
-        rebuild_status_wiki(facade, &user, &workspace);
-    }
-}
-
 /// system prompt so the model answers "why did we…" from memory WITHOUT having to call
 /// recall_memory itself — and doesn't claim "I have nothing in memory" when it does.
 /// A memory candidate for hybrid ranking: its rank in the lexical (FTS) and/or

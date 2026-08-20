@@ -584,6 +584,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn merge_execution_plan(": "runtime plan merge must stay in gateway_runtime_plan_state",
         "fn runtime_plan_record_from_state(": "runtime plan store read must stay in gateway_runtime_plan_state",
         "fn record_runtime_plan_step_outcome_from_state(": "runtime plan outcome write must stay in gateway_runtime_plan_state",
+        "fn record_subagent_task_step_outcome(": "subagent runtime plan memory write must stay in gateway_runtime_plan_state",
         "fn upsert_runtime_plan_memory_from_state(": "runtime plan store write must stay in gateway_runtime_plan_state",
         "fn merge_plan(": "runtime plan merge must stay in gateway_runtime_plan_state",
         "fn plan_tool_sent(": "runtime plan tool argument parsing must stay in gateway_runtime_plan_state",
@@ -2350,6 +2351,11 @@ def main() -> int:
         runtime_plan_state_source,
         "pub(crate) fn upsert_runtime_plan_memory_from_state(",
         "runtime plan state owner must expose canonical plan persistence",
+    )
+    assert_contains(
+        runtime_plan_state_source,
+        "pub(crate) fn record_subagent_task_step_outcome(",
+        "runtime plan state owner must expose subagent plan-step memory write",
     )
     assert_contains(
         runtime_plan_state_source,
