@@ -763,6 +763,40 @@ fn memory_json_transport_has_one_gateway_owner() {
 }
 
 #[test]
+fn memory_recall_tool_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let memory_recall_tool = production_source(&root.join("src/gateway_memory_recall_tool.rs"));
+
+    for pattern in [
+        "struct RecallOutcome",
+        "fn recall_stream_payload_from_outcome(",
+        "fn recall_memory(",
+    ] {
+        assert!(
+            memory_recall_tool.contains(pattern),
+            "memory recall tool owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain memory recall tool surface {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "fn learn_via_service_or_inline(",
+        "async fn consolidate_scope(",
+        "fn tombstone_automation_memory_records(",
+        "fn record_subagent_task_step_outcome(",
+    ] {
+        assert!(
+            !memory_recall_tool.contains(adjacent),
+            "memory recall tool owner must not absorb adjacent memory surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn recall_entry_formatting_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
