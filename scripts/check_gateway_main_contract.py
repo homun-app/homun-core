@@ -98,6 +98,7 @@ MEMORY_LEARNING_RS = os.path.join(
 MEMORY_RECALL_TOOL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_recall_tool.rs"
 )
+MEMORY_RECALL_CRATE_RS = os.path.join(ROOT, "crates", "memory", "src", "recall.rs")
 MEMORY_CLIENTS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_memory_clients.rs")
 MEMORY_UI_ROUTES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_ui_routes.rs"
@@ -176,6 +177,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn seed_loop_memory_reads(": "loop memory-read seeding must stay in gateway_recall_context",
         "fn gather_open_loops(": "open-loop recall gathering must stay in gateway_recall_context",
         "fn sanitize_dedup_key(": "dedup-key normalization must stay in gateway_recall_context",
+        "struct MemoryCandidate": "memory recall scoring must stay in the memory crate",
+        "fn hybrid_memory_score(": "memory recall scoring must stay in the memory crate",
+        "fn memory_age_days(": "memory recall age scoring must stay in the memory crate",
         "fn artifact_quality_summary(": "artifact quality prompt context must stay in gateway_memory_prompt_context",
         "fn artifact_provenance_context_for_query(": "artifact provenance prompt context must stay in gateway_memory_prompt_context",
         "fn decisions_for_path(": "file-decision prompt context must stay in gateway_memory_prompt_context",
@@ -1441,6 +1445,8 @@ def main() -> int:
         memory_learning_source = handle.read()
     with open(MEMORY_RECALL_TOOL_RS, "r", encoding="utf-8") as handle:
         memory_recall_tool_source = handle.read()
+    with open(MEMORY_RECALL_CRATE_RS, "r", encoding="utf-8") as handle:
+        memory_recall_crate_source = handle.read()
     with open(MEMORY_CLIENTS_RS, "r", encoding="utf-8") as handle:
         memory_clients_source = handle.read()
     with open(MEMORY_UI_ROUTES_RS, "r", encoding="utf-8") as handle:
@@ -1883,6 +1889,16 @@ def main() -> int:
             memory_recall_tool_source,
             snippet,
             "memory recall tool owner must expose recall tool surface",
+        )
+    for snippet in [
+        "pub struct MemoryCandidate",
+        "pub fn hybrid_memory_score(",
+        "pub fn memory_age_days(",
+    ]:
+        assert_contains(
+            memory_recall_crate_source,
+            snippet,
+            "memory crate recall owner must expose recall scoring surface",
         )
     for snippet in [
         "fn learn_via_service_or_inline(",

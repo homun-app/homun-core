@@ -798,6 +798,35 @@ fn memory_recall_tool_has_one_gateway_owner() {
 }
 
 #[test]
+fn memory_recall_scoring_has_one_crate_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let recall = production_source(&root.join("../memory/src/recall.rs"));
+
+    for pattern in [
+        "pub struct MemoryCandidate",
+        "pub fn hybrid_memory_score(",
+        "pub fn memory_age_days(",
+    ] {
+        assert!(
+            recall.contains(pattern),
+            "memory crate recall owner must contain {pattern}"
+        );
+    }
+
+    for duplicate in [
+        "struct MemoryCandidate",
+        "fn hybrid_memory_score(",
+        "fn memory_age_days(",
+    ] {
+        assert!(
+            !main.contains(duplicate),
+            "main.rs must not retain duplicate memory recall scoring {duplicate}"
+        );
+    }
+}
+
+#[test]
 fn memory_learning_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

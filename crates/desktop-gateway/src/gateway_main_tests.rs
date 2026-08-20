@@ -7,23 +7,22 @@ use local_first_engine::plan::{
 use super::{
     AppState, ChannelSettings, CommandOutputError, ConnectorErrorKind, InboundAction,
     MAX_PLAN_STALL_RESUMES, MemoryBenchIngestRequest, MemoryBenchMessage, MemoryBenchSearchRequest,
-    MemoryBenchSession, MemoryBenchStatusRequest, MemoryCandidate, MemoryDataSensitivity,
-    MemorySourceOverrideInput, MemorySourceUpsertRequest, ValidatedMemorySourceInput,
-    WorkspaceRecord, WorkspacesFile, active_llm_concurrency, aggregate_session_state_from_counts,
-    authorize_managed_capability_tool, block_stalled_step, brain_budgets_for_context_window,
-    browser_anti_loop_nudge, browser_capability_action_refusal,
-    browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
-    browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_browse_goal,
-    build_memory_source_grant, build_plan_markdown, capability_call_completed_outcome,
-    classify_connector_error, clawhub_origin, collect_member_counts, command_output_with_timeout,
-    composio_tool_is_read, connector_error_hint, default_browser_headless_value,
-    delegated_browse_tool_outcome, delete_workspace, earlier_browse_call_in_current_round,
-    extract_source_urls, fonti_section, format_memory_block, gateway_memory_user_id,
-    humanize_task_kind, hybrid_memory_score, inbound_action, is_auto_confirmable,
-    is_internal_task_kind, is_low_value_source_url, is_semantic_duplicate, jail_in_root,
-    llm_concurrency_view, mcp_error_hint, mcp_provider_slug, mcp_stdio_config_from_metadata,
-    mcp_stdio_config_to_metadata, memory_age_days, memory_bench_ingest, memory_bench_search,
-    memory_bench_status, memory_facade, memory_source_candidates_from_records,
+    MemoryBenchSession, MemoryBenchStatusRequest, MemoryDataSensitivity, MemorySourceOverrideInput,
+    MemorySourceUpsertRequest, ValidatedMemorySourceInput, WorkspaceRecord, WorkspacesFile,
+    active_llm_concurrency, aggregate_session_state_from_counts, authorize_managed_capability_tool,
+    block_stalled_step, brain_budgets_for_context_window, browser_anti_loop_nudge,
+    browser_capability_action_refusal, browser_error_indicates_dead_sidecar,
+    browser_method_for_capability_tool, browser_snapshot_text, browser_targets_for_goal,
+    browser_url_for_goal, build_browse_goal, build_memory_source_grant, build_plan_markdown,
+    capability_call_completed_outcome, classify_connector_error, clawhub_origin,
+    collect_member_counts, command_output_with_timeout, composio_tool_is_read,
+    connector_error_hint, default_browser_headless_value, delegated_browse_tool_outcome,
+    delete_workspace, earlier_browse_call_in_current_round, extract_source_urls, fonti_section,
+    format_memory_block, gateway_memory_user_id, humanize_task_kind, inbound_action,
+    is_auto_confirmable, is_internal_task_kind, is_low_value_source_url, is_semantic_duplicate,
+    jail_in_root, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
+    mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_bench_ingest,
+    memory_bench_search, memory_bench_status, memory_facade, memory_source_candidates_from_records,
     memory_source_facade_error, memory_source_grant_views, memory_sources_flag,
     memorybench_workspace_id, merge_plan, next_plan_stall, next_ready_task_across_workspaces,
     normalize_for_dedup, parse_plan_marker, parse_review_suggestion, plan_done_count,
@@ -39,6 +38,7 @@ use super::{
     validate_memory_source_input, validate_memory_source_overrides,
     validate_memory_source_workspaces, workspace_write_roots,
 };
+use local_first_memory::{MemoryCandidate, hybrid_memory_score, memory_age_days};
 
 #[test]
 fn gateway_main_tests_owner_smoke() {
@@ -24073,6 +24073,7 @@ fn agent_output_plan_guard_rejects_missing_reply() {
 #[test]
 fn hybrid_memory_ranking_fuses_then_refines_by_importance_and_recency() {
     let mk = |fts: Option<usize>, dense: Option<usize>, imp: f32, age: f32| MemoryCandidate {
+        reference: "mem_ref".to_string(),
         fts_rank: fts,
         dense_rank: dense,
         importance: imp,
