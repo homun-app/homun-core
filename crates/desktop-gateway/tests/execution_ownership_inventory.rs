@@ -733,6 +733,36 @@ fn memory_query_embedding_transport_has_one_gateway_owner() {
 }
 
 #[test]
+fn memory_json_transport_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let memory_json = production_source(&root.join("src/gateway_memory_json.rs"));
+
+    for pattern in ["fn strip_json_fences(", "async fn call_memory_json("] {
+        assert!(
+            memory_json.contains(pattern),
+            "memory JSON owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain memory JSON transport surface {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "fn recall_memory(",
+        "fn recall_stream_payload_from_outcome(",
+        "fn learn_via_service_or_inline(",
+        "async fn consolidate_scope(",
+    ] {
+        assert!(
+            !memory_json.contains(adjacent),
+            "memory JSON owner must not absorb adjacent memory surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn recall_entry_formatting_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

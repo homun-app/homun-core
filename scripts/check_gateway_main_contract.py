@@ -88,6 +88,7 @@ CHANNELS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_ch
 MEMORY_QUERY_EMBEDDINGS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_query_embeddings.rs"
 )
+MEMORY_JSON_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_memory_json.rs")
 MEMORY_CLIENTS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_memory_clients.rs")
 PAYMENT_APPROVAL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_payment_approval.rs"
@@ -553,6 +554,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn forget_in_scope(": "memory forget search must stay in gateway_memory_tools",
         "fn forget_topic_in_scope(": "memory topic forget must stay in gateway_memory_tools",
         "fn forget_memory(": "memory forget orchestration must stay in gateway_memory_tools",
+        "fn strip_json_fences(": "memory JSON response parsing must stay in gateway_memory_json",
+        "async fn call_memory_json(": "memory JSON transport must stay in gateway_memory_json",
         "fn update_plan_tool_schema(": "runtime plan tool schemas must stay in gateway_plan_tools",
         "fn step_advance_tool_schema(": "runtime plan tool schemas must stay in gateway_plan_tools",
         "fn plan_steps_reconciled_on_delivery(": "runtime plan delivery reconcile must stay in gateway_runtime_plan_state",
@@ -1410,6 +1413,8 @@ def main() -> int:
         channels_source = handle.read()
     with open(MEMORY_QUERY_EMBEDDINGS_RS, "r", encoding="utf-8") as handle:
         memory_query_embeddings_source = handle.read()
+    with open(MEMORY_JSON_RS, "r", encoding="utf-8") as handle:
+        memory_json_source = handle.read()
     with open(MEMORY_CLIENTS_RS, "r", encoding="utf-8") as handle:
         memory_clients_source = handle.read()
     with open(PAYMENT_APPROVAL_RS, "r", encoding="utf-8") as handle:
@@ -1769,6 +1774,32 @@ def main() -> int:
             memory_query_embeddings_source,
             snippet,
             "memory query embedding owner must expose embedding transport surface",
+        )
+    assert_contains(source, "mod gateway_memory_json;", "gateway root must declare memory JSON owner")
+    assert_contains(
+        source,
+        "pub(crate) use gateway_memory_json::{call_memory_json, strip_json_fences};",
+        "gateway root must re-export memory JSON transport",
+    )
+    for snippet in [
+        "pub(crate) fn strip_json_fences(",
+        "pub(crate) async fn call_memory_json(",
+    ]:
+        assert_contains(
+            memory_json_source,
+            snippet,
+            "memory JSON owner must expose JSON response transport",
+        )
+    for snippet in [
+        "fn recall_memory(",
+        "fn recall_stream_payload_from_outcome(",
+        "fn learn_via_service_or_inline(",
+        "async fn consolidate_scope(",
+    ]:
+        assert_not_contains(
+            memory_json_source,
+            snippet,
+            "memory JSON owner must not absorb adjacent memory surfaces",
         )
     assert_contains(source, "mod gateway_memory_briefing;", "gateway root must declare memory briefing owner")
     assert_contains(
