@@ -9,6 +9,22 @@ const APPROVED: &[&str] = &[
 
 const TEST_ONLY: &[&str] = &["crates/desktop-gateway/src/gateway_main_tests.rs"];
 
+fn workspace_root() -> PathBuf {
+    let current = std::env::current_dir().expect("test current directory");
+    for candidate in current.ancestors() {
+        if candidate.join("Cargo.lock").is_file()
+            && candidate.join("crates/desktop-gateway/src").is_dir()
+            && candidate.join("crates/inference/src").is_dir()
+        {
+            return candidate.to_path_buf();
+        }
+    }
+    panic!(
+        "could not locate Homun workspace root from {}",
+        current.display()
+    );
+}
+
 fn rust_files(root: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(root).unwrap() {
         let path = entry.unwrap().path();
@@ -21,8 +37,30 @@ fn rust_files(root: &Path, out: &mut Vec<PathBuf>) {
 }
 
 #[test]
+fn inventory_root_uses_runtime_checkout_not_compiled_worktree_path() {
+    let current = std::env::current_dir().expect("test current directory");
+    let runtime_root = current
+        .ancestors()
+        .find(|candidate| {
+            candidate.join("Cargo.lock").is_file()
+                && candidate.join("crates/desktop-gateway/src").is_dir()
+                && candidate.join("crates/inference/src").is_dir()
+        })
+        .expect("runtime workspace ancestor")
+        .canonicalize()
+        .expect("canonical runtime root");
+
+    assert_eq!(
+        workspace_root()
+            .canonicalize()
+            .expect("canonical inventory root"),
+        runtime_root
+    );
+}
+
+#[test]
 fn inference_transport_inventory() {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let workspace = workspace_root();
     let roots = [
         workspace.join("crates/desktop-gateway/src"),
         workspace.join("crates/inference/src"),
@@ -69,7 +107,7 @@ fn inference_transport_inventory() {
 
 #[test]
 fn retired_in_process_mistralrs_transport_stays_removed() {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let workspace = workspace_root();
     let manifest = std::fs::read_to_string(workspace.join("crates/inference/Cargo.toml")).unwrap();
 
     assert!(!manifest.contains("mistralrs"));
