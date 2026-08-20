@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (agent stream persistence locale).**
+> **Ultimo aggiornamento: 2026-08-20 (agent stream persistence mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#225 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #225 |
+| PR | #108-#116, #118-#226 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #226 |
 
 ## Dove siamo
 
@@ -250,7 +250,7 @@ Slice Runtime V2 recenti:
   redazione user text da evento `done` e mapping raw stream -> `TurnEventKind`
   escono dal monolite `main.rs`; drain, fanout, persistenza HITL/recall e
   browser restano owner separati.
-- Estrazione locale `gateway_agent_stream_persistence`: update/finalizzazione
+- Estrazione mergeata `gateway_agent_stream_persistence`: update/finalizzazione
   assistant message, persistenza recall/redacted user text da stream e fanout
   raw stream -> `turn_events` escono dal monolite `main.rs`; drain stream,
   HITL wait e browser restano owner separati.
