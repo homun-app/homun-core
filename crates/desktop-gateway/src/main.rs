@@ -3797,13 +3797,6 @@ async fn run_agent_rounds(
     .await
 }
 
-/// Runs an agent turn for channel-originated work while keeping the owning chat
-/// visible: the inbound user message and assistant placeholder already exist,
-/// and this function streams deltas into that assistant message.
-fn agent_turn_stream_request_id(assistant_message_id: &str) -> String {
-    format!("agentturn-{assistant_message_id}")
-}
-
 async fn run_agent_turn_into_message(
     state: &AppState,
     thread_id: &str,
@@ -3900,7 +3893,7 @@ async fn run_agent_turn_into_message_with_fanout(
         &[source_user_message_id, assistant_message_id],
     )
     .ok_or_else(|| "chat context is unavailable".to_string())?;
-    let request_id = format!("broker-{turn_id}");
+    let request_id = broker_turn_stream_request_id(turn_id);
     let request = ChatGenerateStreamRequest {
         request_id: request_id.clone(),
         agent_run_id: agent_run_id.map(str::to_string),

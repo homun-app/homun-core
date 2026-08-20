@@ -2112,6 +2112,31 @@ fn agent_stream_drain_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_stream_request_ids_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let chat_streams = production_source(&root.join("src/gateway_chat_streams.rs"));
+
+    for pattern in [
+        "fn agent_turn_stream_request_id(",
+        "fn broker_turn_stream_request_id(",
+    ] {
+        assert!(
+            chat_streams.contains(pattern),
+            "chat streams owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain agent stream request-id surface {pattern}"
+        );
+    }
+    assert!(
+        !main.contains("format!(\"broker-{turn_id}\")"),
+        "main.rs must not inline broker stream request-id formatting"
+    );
+}
+
+#[test]
 fn gateway_state_access_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

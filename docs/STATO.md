@@ -272,6 +272,10 @@ Slice Runtime V2 recenti:
   agente verso assistant message e fanout durable/live broker escono dal
   monolite `main.rs`; parser, persistence helpers, HITL wait e browser restano
   owner separati.
+- Estrazione locale `gateway_chat_streams`: costruzione request id stream per
+  turni agente/channel e broker (`agentturn-*`, `broker-*`) esce dal monolite
+  `main.rs` e vive accanto a registry/replay/abort stream; loop agente, drain
+  e browser restano owner separati.
 - Estrazione mergeata `gateway_turn_broker`: fence terminale
   `finalize_turn_steering` per chiudere steering pending/held su turni conclusi
   esce dal monolite `main.rs`; store `turn_steering`, pubblicazione eventi e

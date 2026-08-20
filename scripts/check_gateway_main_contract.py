@@ -14,6 +14,9 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAIN_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "main.rs")
+CHAT_STREAMS_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_chat_streams.rs"
+)
 MEMORY_LEARN_RS = os.path.join(ROOT, "crates", "memory", "src", "learn.rs")
 ATTACHMENTS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "attachments.rs")
 RECALL_CONTEXT_RS = os.path.join(
@@ -1047,6 +1050,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn stream_registry(": "live chat stream registry must stay in gateway_chat_streams",
         "fn stream_abort_registry(": "live chat stream abort registry must stay in gateway_chat_streams",
         "fn abort_stream_generation(": "live chat stream abort handling must stay in gateway_chat_streams",
+        "fn agent_turn_stream_request_id(": "agent turn stream request-id formatting must stay in gateway_chat_streams",
+        "fn broker_turn_stream_request_id(": "broker turn stream request-id formatting must stay in gateway_chat_streams",
+        "format!(\"broker-{turn_id}\")": "broker turn stream request-id formatting must stay in gateway_chat_streams",
         "fn stream_event_is_terminal(": "live chat stream terminal detection must stay in gateway_chat_streams",
         "fn active_stream_thread_ids(": "live chat stream activity projection must stay in gateway_chat_streams",
         "async fn active_streams(": "live chat stream activity route must stay in gateway_chat_streams",
@@ -1453,6 +1459,8 @@ def assert_ordered(source: str, snippets: list[str], message: str) -> None:
 def main() -> int:
     with open(MAIN_RS, "r", encoding="utf-8") as handle:
         source = handle.read()
+    with open(CHAT_STREAMS_RS, "r", encoding="utf-8") as handle:
+        chat_streams_source = handle.read()
     with open(MEMORY_LEARN_RS, "r", encoding="utf-8") as handle:
         memory_learn_source = handle.read()
     with open(ATTACHMENTS_RS, "r", encoding="utf-8") as handle:
@@ -1938,6 +1946,15 @@ def main() -> int:
         "pub(crate) use gateway_thread_model_context::*;",
         "gateway root must re-export thread model context owner",
     )
+    for snippet in [
+        "pub(crate) fn agent_turn_stream_request_id(",
+        "pub(crate) fn broker_turn_stream_request_id(",
+    ]:
+        assert_contains(
+            chat_streams_source,
+            snippet,
+            "chat stream owner must expose stream request-id helpers",
+        )
     for snippet in [
         "pub(crate) fn context_message_for_model(",
         "pub(crate) fn thread_context_for_model(",
