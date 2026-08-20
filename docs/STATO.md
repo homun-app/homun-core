@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (turn steering finalization locale).**
+> **Ultimo aggiornamento: 2026-08-20 (turn steering finalization mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#227 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #227; slice locale `fabio/turn-steering-finalization-owner` |
+| PR | #108-#116, #118-#228 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #228 |
 
 ## Dove siamo
 
@@ -258,7 +258,7 @@ Slice Runtime V2 recenti:
   agente verso assistant message e fanout durable/live broker escono dal
   monolite `main.rs`; parser, persistence helpers, HITL wait e browser restano
   owner separati.
-- Estrazione locale `gateway_turn_broker`: fence terminale
+- Estrazione mergeata `gateway_turn_broker`: fence terminale
   `finalize_turn_steering` per chiudere steering pending/held su turni conclusi
   esce dal monolite `main.rs`; store `turn_steering`, pubblicazione eventi e
   route steering restano nello stesso owner broker, mentre loop agente,
@@ -953,8 +953,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#227: slice owner-level successive mergeate in `main`, fino all'agent
-  stream drain owner; `main` verificato e riallineato a #227.
+- #143-#228: slice owner-level successive mergeate in `main`, fino alla fence
+  terminale steering in `gateway_turn_broker`; `main` verificato e riallineato
+  a #228.
 
 PR aperte:
 
@@ -962,9 +963,7 @@ PR aperte:
 
 Branch corrente:
 
-- `main`: pulito e riallineato a #227.
-- `fabio/turn-steering-finalization-owner`: slice locale per spostare la fence
-  terminale steering da `main.rs` a `gateway_turn_broker`.
+- `main`: pulito e riallineato a #228.
 
 ## Debito residuo
 
@@ -997,7 +996,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #219; scegli la prossima slice non-browser owner-level.
+main aggiornato a #228; scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
