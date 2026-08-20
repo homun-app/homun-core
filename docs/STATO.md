@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (capability execution mergeata).**
+> **Ultimo aggiornamento: 2026-08-20 (HITL wait locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -14,7 +14,7 @@
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
 | PR | #108-#116, #118-#229 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #229 |
+| HEAD codice verificato | `main` aggiornato a #229; slice locale `fabio/hitl-wait-owner` |
 
 ## Dove siamo
 
@@ -75,6 +75,10 @@ Slice Runtime V2 recenti:
 - Rimozione fallback legacy HITL: rimosso il fallback `threadTailAwaits*`
   che faceva derivare lifecycle/composer mode dai marker HITL del transcript
   prima del load della projection.
+- Estrazione locale `gateway_hitl_waits`: persistenza Free-HITL da
+  `TurnOutcome.awaiting_user` e payload/open-work snapshot escono dal monolite
+  `main.rs`; stream drain, projection, browser runtime e loop agente restano
+  owner separati.
 - Estrazione `gateway_plan_stall`: il budget cross-turn del piano non vive piu'
   nel monolite `main.rs`; `check_gateway_main_contract.py` ne impedisce il
   rientro.
@@ -969,6 +973,8 @@ PR aperte:
 Branch corrente:
 
 - `main`: pulito e riallineato a #229.
+- `fabio/hitl-wait-owner`: slice locale per spostare la persistenza Free-HITL
+  typed da `main.rs` a `gateway_hitl_waits`.
 
 ## Debito residuo
 
@@ -1001,7 +1007,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #229; scegli la prossima slice non-browser owner-level.
+main aggiornato a #229; slice locale fabio/hitl-wait-owner in corso.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
