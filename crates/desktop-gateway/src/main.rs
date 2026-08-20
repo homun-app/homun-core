@@ -1525,29 +1525,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Auto-confirm policy (M2): only durable, high-confidence knowledge enters memory
-/// without asking. The ceiling is `Private` — NOT `Internal` — on purpose: the
-/// extractor tags ordinary personal facts (possessions, family, city) as `private`
-/// by its own rules, so an `Internal` cap froze EVERY personal fact at `candidate`,
-/// invisible to the always-on profile (which is confirmed-only). A personal
-/// assistant must know what you own / who's in your life without re-asking, so
-/// `private` auto-confirms. Only `Confidential`/`Secret` (real PII — codice fiscale,
-/// health docs, addresses) stays a candidate for the user to confirm explicitly.
-#[cfg(test)]
-fn is_auto_confirmable(
-    memory_type: &str,
-    sensitivity: MemoryDataSensitivity,
-    confidence: f64,
-) -> bool {
-    // Decisions are factual records of choices made during work (low privacy risk),
-    // so they auto-confirm like facts/preferences when confident + non-sensitive.
-    matches!(
-        memory_type,
-        "preference" | "fact" | "decision" | "goal" | "open_loop"
-    ) && sensitivity <= MemoryDataSensitivity::Private
-        && confidence >= 0.8
-}
-
 // `extract_vault_reveal_marker`, `append_vault_reveal_marker_if_missing`, and the
 // `VAULT_REVEAL_OPEN/CLOSE` consts moved to `engine::markers` (ADR 0024 inc 5e.3); imported below.
 

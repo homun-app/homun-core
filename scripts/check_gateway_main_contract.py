@@ -14,6 +14,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAIN_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "main.rs")
+MEMORY_LEARN_RS = os.path.join(ROOT, "crates", "memory", "src", "learn.rs")
 ATTACHMENTS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "attachments.rs")
 RECALL_CONTEXT_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_recall_context.rs"
@@ -678,6 +679,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn query_git_history(": "git history search must stay in gateway_project_search_tools",
         "fn query_code_graph(": "code graph search must stay in gateway_project_search_tools",
         "fn resolve_datetime_tool_schema(": "datetime tool schema must stay in gateway_datetime_tools",
+        "fn is_auto_confirmable(": "memory auto-confirm policy must stay in crates/memory/src/learn.rs",
+        "fn memory_auto_confirmable(": "memory auto-confirm policy must stay in crates/memory/src/learn.rs",
         "fn plan_stall_abort_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
         "const MAX_PLAN_STALL_RESUMES:": "runtime plan stall budget must stay in gateway_plan_stall",
         "fn next_plan_stall(": "runtime plan stall budget must stay in gateway_plan_stall",
@@ -1448,6 +1451,8 @@ def assert_ordered(source: str, snippets: list[str], message: str) -> None:
 def main() -> int:
     with open(MAIN_RS, "r", encoding="utf-8") as handle:
         source = handle.read()
+    with open(MEMORY_LEARN_RS, "r", encoding="utf-8") as handle:
+        memory_learn_source = handle.read()
     with open(ATTACHMENTS_RS, "r", encoding="utf-8") as handle:
         attachments_source = handle.read()
     with open(RECALL_CONTEXT_RS, "r", encoding="utf-8") as handle:
@@ -2357,6 +2362,11 @@ def main() -> int:
         gateway_time_source,
         "pub(crate) fn now_epoch_secs(",
         "gateway time owner must expose epoch seconds helper",
+    )
+    assert_contains(
+        memory_learn_source,
+        "pub fn memory_auto_confirmable(",
+        "memory learn owner must expose canonical auto-confirm policy",
     )
     for snippet in [
         "async fn stream_chat_via_openai(",

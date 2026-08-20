@@ -27,6 +27,19 @@ pub fn active_open_loop_record(m: &crate::MemoryRecord) -> bool {
         && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
 }
 
+/// Auto-confirm only durable, high-confidence, low-risk memories.
+pub fn memory_auto_confirmable(
+    memory_type: &str,
+    sensitivity: DataSensitivity,
+    confidence: f64,
+) -> bool {
+    matches!(
+        memory_type,
+        "preference" | "fact" | "decision" | "goal" | "open_loop"
+    ) && sensitivity <= DataSensitivity::Private
+        && confidence >= 0.8
+}
+
 /// Sostituisce i valori default mancanti in un item estratto. Spostato fedelmente
 /// dal gateway (`fill_extraction_defaults`).
 pub fn fill_extraction_defaults(item: &serde_json::Value) -> serde_json::Value {
@@ -648,10 +661,12 @@ fn evolve_extracted_memory(
         .metadata
         .get("certainty")
         .and_then(serde_json::Value::as_str);
+    let auto_confirmable =
+        memory_auto_confirmable(&memory.memory_type, memory.sensitivity, confidence);
     let admitted_confirmed = matches!(admission_origin, Some("user_explicit" | "user_confirmed"))
         && certainty == Some("committed")
-        && confidence >= 0.8;
-    let legacy_confirmed = admission_origin.is_none() && confidence >= 0.5;
+        && auto_confirmable;
+    let legacy_confirmed = admission_origin.is_none() && auto_confirmable;
     let reference =
         MemoryRef::generated(MemoryRefKind::Memory, user_id.clone(), workspace_id.clone());
     let record = MemoryRecord {
@@ -1385,6 +1400,30 @@ mod tests {
         assert!(is_confirmation_reply("ok"));
         assert!(is_confirmation_reply("Sì"));
         assert!(!is_confirmation_reply("una frase lunga e non di conferma"));
+    }
+
+    #[test]
+    fn legacy_memory_without_admission_stays_candidate_when_sensitive() {
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().expect("memory store"));
+        let user = UserId::new("owner");
+        let workspace = WorkspaceId::new(PERSONAL_WORKSPACE);
+        let extracted = ExtractedMemory {
+            memory_type: "fact".into(),
+            text: "L'utente ha condiviso un dettaglio personale riservato".into(),
+            aliases: vec![],
+            language_hints: vec![],
+            confidence: 0.99,
+            privacy_domain: PrivacyDomain::new("personal"),
+            sensitivity: DataSensitivity::Confidential,
+            evidence_refs: vec![],
+            metadata: serde_json::json!({"scope":"personal", "certainty":"committed"}),
+            evolution: None,
+        };
+
+        let persisted = persist_scope_memories(&facade, &user, &workspace, vec![extracted]);
+
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].status, MemoryStatus::Candidate);
     }
 
     #[test]

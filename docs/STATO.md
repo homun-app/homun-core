@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (agent turn outcome owner mergeata).**
+> **Ultimo aggiornamento: 2026-08-20 (memory admission policy locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#236 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #236 |
+| PR | #108-#116, #118-#237 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #237 |
 
 ## Dove siamo
 
@@ -290,7 +290,7 @@ Slice Runtime V2 recenti:
   outcome terminale per image rejection gia' consegnata escono dal monolite
   `main.rs`; loop agente, stream chat/fanout e browser execution restano owner
   separati.
-- Estrazione locale `gateway_time`: helper condiviso `now_epoch_secs` esce dal
+- Estrazione mergeata `gateway_time`: helper condiviso `now_epoch_secs` esce dal
   monolite `main.rs` e resta re-exportato dal root per compatibilita' dei moduli
   esistenti; execution loop, browser e route non entrano nell'owner time.
 - Estrazione mergeata `gateway_shell_tasks`: executor shell read-only,
@@ -326,6 +326,10 @@ Slice Runtime V2 recenti:
   `hybrid_memory_score` e `memory_age_days` non hanno piu' copie test-only in
   `main.rs`; i test gateway importano lo scoring dal crate memoria, che resta
   l'owner canonico del ranking recall.
+- Slice locale `local_first_memory::learn`: `memory_auto_confirmable` diventa
+  l'owner canonico della policy di auto-confirm memoria; il gateway non mantiene
+  piu' una copia test-only e le memorie legacy sensibili senza admission metadata
+  restano `Candidate` invece di essere promosse solo per confidenza alta.
 - Estrazione mergeata `gateway_memory_reuse`: `StreamMemoryReuseCollector` e
   `memory_reuse_envelope_from_read_set` escono dal monolite `main.rs`; l'owner
   attesta recall/actionable/approval stream parts e produce il

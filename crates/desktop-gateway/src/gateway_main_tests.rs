@@ -22,16 +22,15 @@ use super::{
     connector_error_hint, default_browser_headless_value, delegated_browse_tool_outcome,
     delete_workspace, earlier_browse_call_in_current_round, extract_source_urls, fonti_section,
     format_memory_block, gateway_memory_user_id, humanize_task_kind, inbound_action,
-    is_auto_confirmable, is_internal_task_kind, is_low_value_source_url, is_semantic_duplicate,
-    jail_in_root, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
-    mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_bench_ingest,
-    memory_bench_search, memory_bench_status, memory_facade, memory_source_candidates_from_records,
-    memory_source_facade_error, memory_source_grant_views, memory_sources_flag,
-    memorybench_workspace_id, merge_plan, next_plan_stall, next_ready_task_across_workspaces,
-    normalize_for_dedup, parse_plan_marker, parse_review_suggestion, plan_done_count,
-    plan_incomplete_reason, plan_stall_exhausted, plan_step_status,
-    project_filesystem_mcp_instruction, prune_browser_history, redact_sensitive_text,
-    repeated_browser_action_nudge, repeated_browser_failed_action_nudge,
+    is_internal_task_kind, is_low_value_source_url, is_semantic_duplicate, jail_in_root,
+    llm_concurrency_view, mcp_error_hint, mcp_provider_slug, mcp_stdio_config_from_metadata,
+    mcp_stdio_config_to_metadata, memory_bench_ingest, memory_bench_search, memory_bench_status,
+    memory_facade, memory_source_candidates_from_records, memory_source_facade_error,
+    memory_source_grant_views, memory_sources_flag, memorybench_workspace_id, merge_plan,
+    next_plan_stall, next_ready_task_across_workspaces, normalize_for_dedup, parse_plan_marker,
+    parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_stall_exhausted,
+    plan_step_status, project_filesystem_mcp_instruction, prune_browser_history,
+    redact_sensitive_text, repeated_browser_action_nudge, repeated_browser_failed_action_nudge,
     requeue_waiting_resource_tasks, response_language_instruction, rewrite_confirm_to_done,
     run_bash_unsandboxed_result, sanitize_dedup_key, scheduled_thread_sender_for_task_id,
     scheduled_thread_title, search_composio_catalog, should_try_tool_compatibility_fallback,
@@ -40,7 +39,9 @@ use super::{
     validate_memory_source_input, validate_memory_source_overrides,
     validate_memory_source_workspaces, workspace_write_roots,
 };
-use local_first_memory::{MemoryCandidate, hybrid_memory_score, memory_age_days};
+use local_first_memory::{
+    MemoryCandidate, hybrid_memory_score, memory_age_days, memory_auto_confirmable,
+};
 
 #[test]
 fn gateway_main_tests_owner_smoke() {
@@ -18667,61 +18668,61 @@ fn auto_confirm_promotes_private_personal_facts_but_gates_pii() {
     // possessions as `private`, so the auto-confirm ceiling MUST be Private. An
     // `Internal` cap froze EVERY personal fact at `candidate`, invisible to the
     // always-on profile (which is confirmed-only).
-    assert!(is_auto_confirmable(
+    assert!(memory_auto_confirmable(
         "fact",
         MemoryDataSensitivity::Private,
         0.9
     ));
-    assert!(is_auto_confirmable(
+    assert!(memory_auto_confirmable(
         "preference",
         MemoryDataSensitivity::Private,
         0.95
     ));
-    assert!(is_auto_confirmable(
+    assert!(memory_auto_confirmable(
         "decision",
         MemoryDataSensitivity::Private,
         0.85
     ));
-    assert!(is_auto_confirmable(
+    assert!(memory_auto_confirmable(
         "goal",
         MemoryDataSensitivity::Private,
         0.9
     ));
     // Less sensitive levels still auto-confirm.
-    assert!(is_auto_confirmable(
+    assert!(memory_auto_confirmable(
         "fact",
         MemoryDataSensitivity::Internal,
         0.9
     ));
-    assert!(is_auto_confirmable(
+    assert!(memory_auto_confirmable(
         "fact",
         MemoryDataSensitivity::Public,
         0.9
     ));
     // Real PII (codice fiscale, health, addresses) stays a candidate to confirm.
-    assert!(!is_auto_confirmable(
+    assert!(!memory_auto_confirmable(
         "fact",
         MemoryDataSensitivity::Confidential,
         0.99
     ));
-    assert!(!is_auto_confirmable(
+    assert!(!memory_auto_confirmable(
         "fact",
         MemoryDataSensitivity::Secret,
         0.99
     ));
     // Low confidence never auto-confirms.
-    assert!(!is_auto_confirmable(
+    assert!(!memory_auto_confirmable(
         "fact",
         MemoryDataSensitivity::Private,
         0.5
     ));
     // Only durable knowledge types auto-confirm — not raw topics/entities.
-    assert!(!is_auto_confirmable(
+    assert!(!memory_auto_confirmable(
         "topic",
         MemoryDataSensitivity::Private,
         0.95
     ));
-    assert!(!is_auto_confirmable(
+    assert!(!memory_auto_confirmable(
         "entity",
         MemoryDataSensitivity::Private,
         0.95
@@ -19889,12 +19890,12 @@ fn ollama_native_routing_and_message_conversion() {
 
 #[test]
 fn auto_confirm_only_low_risk() {
-    assert!(is_auto_confirmable(
+    assert!(memory_auto_confirmable(
         "preference",
         MemoryDataSensitivity::Internal,
         0.9
     ));
-    assert!(is_auto_confirmable(
+    assert!(memory_auto_confirmable(
         "fact",
         MemoryDataSensitivity::Public,
         0.85
@@ -19902,42 +19903,42 @@ fn auto_confirm_only_low_risk() {
     // Ordinary personal facts (possessions, family, city) are tagged `private` by
     // the extractor — they MUST auto-confirm, else they never reach the profile
     // and the assistant keeps re-asking what it already knows.
-    assert!(is_auto_confirmable(
+    assert!(memory_auto_confirmable(
         "fact",
         MemoryDataSensitivity::Private,
         0.9
     ));
     // Real PII (codice fiscale, health docs, addresses) → confidential/secret →
     // still waits for explicit user confirmation.
-    assert!(!is_auto_confirmable(
+    assert!(!memory_auto_confirmable(
         "fact",
         MemoryDataSensitivity::Secret,
         0.99
     ));
-    assert!(!is_auto_confirmable(
+    assert!(!memory_auto_confirmable(
         "fact",
         MemoryDataSensitivity::Confidential,
         0.99
     ));
     // low confidence stays candidate
-    assert!(!is_auto_confirmable(
+    assert!(!memory_auto_confirmable(
         "preference",
         MemoryDataSensitivity::Internal,
         0.5
     ));
-    assert!(!is_auto_confirmable(
+    assert!(!memory_auto_confirmable(
         "fact",
         MemoryDataSensitivity::Private,
         0.5
     ));
     // decisions are factual records of work → auto-confirm when confident + low-risk
-    assert!(is_auto_confirmable(
+    assert!(memory_auto_confirmable(
         "decision",
         MemoryDataSensitivity::Internal,
         0.9
     ));
     // but a sensitive decision still waits for confirmation
-    assert!(!is_auto_confirmable(
+    assert!(!memory_auto_confirmable(
         "decision",
         MemoryDataSensitivity::Confidential,
         0.99
