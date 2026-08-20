@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (thread model context locale).**
+> **Ultimo aggiornamento: 2026-08-20 (thread model context mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#222 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #222 |
+| PR | #108-#116, #118-#223 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #223 |
 
 ## Dove siamo
 
@@ -238,7 +238,7 @@ Slice Runtime V2 recenti:
   `start_visible_conversation_turn` escono dal monolite `main.rs`; broker,
   stream draining, finalizzazione messaggio ed executor proattivo restano owner
   separati.
-- Estrazione locale `gateway_thread_model_context`: filtro server-side dei
+- Estrazione mergeata `gateway_thread_model_context`: filtro server-side dei
   messaggi storici, esclusione placeholder/current prompt e bound degli ultimi
   16 `ChatContextMessage` escono dal monolite `main.rs`; visible turn,
   finalizzazione stream, recall tool e loop agente restano owner separati.
