@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (HITL wait locale).**
+> **Ultimo aggiornamento: 2026-08-20 (state access owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
-| PR | #108-#116, #118-#229 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #229; slice locale `fabio/hitl-wait-owner` |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/gateway-state-access-owner` |
+| Branch | `fabio/gateway-state-access-owner` |
+| PR | #108-#116, #118-#230 mergeate in `main`; #231 state access draft; #117 browser draft separata |
+| HEAD codice verificato | branch locale basato su `main` aggiornato a #230 |
 
 ## Dove siamo
 
@@ -75,7 +75,7 @@ Slice Runtime V2 recenti:
 - Rimozione fallback legacy HITL: rimosso il fallback `threadTailAwaits*`
   che faceva derivare lifecycle/composer mode dai marker HITL del transcript
   prima del load della projection.
-- Estrazione locale `gateway_hitl_waits`: persistenza Free-HITL da
+- Estrazione mergeata `gateway_hitl_waits`: persistenza Free-HITL da
   `TurnOutcome.awaiting_user` e payload/open-work snapshot escono dal monolite
   `main.rs`; stream drain, projection, browser runtime e loop agente restano
   owner separati.
@@ -242,6 +242,10 @@ Slice Runtime V2 recenti:
   `start_visible_conversation_turn` escono dal monolite `main.rs`; broker,
   stream draining, finalizzazione messaggio ed executor proattivo restano owner
   separati.
+- Estrazione locale `gateway_state_access`: `GatewayError`, lock helper degli
+  store gateway, accessor `memory_facade`, `lock_capability_registry`,
+  `vacuum_all_stores` e mapping `IntoResponse` escono dal monolite `main.rs`;
+  loop agente, executor proattivo, subagent e browser restano owner separati.
 - Estrazione mergeata `gateway_thread_model_context`: filtro server-side dei
   messaggi storici, esclusione placeholder/current prompt e bound degli ultimi
   16 `ChatContextMessage` escono dal monolite `main.rs`; visible turn,
@@ -962,19 +966,22 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#229: slice owner-level successive mergeate in `main`, fino alla
-  capability execution non-browser in `gateway_capability_execution`; `main`
-  verificato e riallineato a #229.
+- #143-#230: slice owner-level successive mergeate in `main`, fino alla
+  persistenza Free-HITL in `gateway_hitl_waits`; `main` verificato e
+  riallineato a #230.
 
 PR aperte:
 
+- #231 `Move gateway state access into owner`:
+  `https://github.com/homun-app/homun-core/pull/231`.
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
 
 Branch corrente:
 
-- `main`: pulito e riallineato a #229.
-- `fabio/hitl-wait-owner`: slice locale per spostare la persistenza Free-HITL
-  typed da `main.rs` a `gateway_hitl_waits`.
+- `main`: pulito e riallineato a #230.
+- `fabio/gateway-state-access-owner`: slice locale/PR #231 per spostare
+  `GatewayError`, lock helper degli store e `vacuum_all_stores` da `main.rs` a
+  `gateway_state_access`.
 
 ## Debito residuo
 
@@ -1007,7 +1014,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #229; slice locale fabio/hitl-wait-owner in corso.
+main aggiornato a #230; slice locale fabio/gateway-state-access-owner in corso
+su PR #231.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

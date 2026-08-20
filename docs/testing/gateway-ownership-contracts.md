@@ -34,6 +34,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_boot_maintenance.rs` | Manutenzione sincrona di boot dopo apertura store e prima di recovery/worker, inclusi seed default skills, hash/copy del bundle e manifest HomunCoder. |
 | `crates/desktop-gateway/src/gateway_turn_recovery.rs` | Recovery durable dei turni chat, projection startup, process generation e stato delivery iniziale. |
 | `crates/desktop-gateway/src/gateway_background_startup.rs` | Servizi post-recovery: sweeper, VACUUM, worker, memory jobs, browser reaper, connector/proactivity. |
+| `crates/desktop-gateway/src/gateway_state_access.rs` | Errore HTTP condiviso del gateway, lock helper degli store, accessor lock-free `memory_facade`, lock capability registry, VACUUM degli store e mapping `IntoResponse`; non possiede loop agente, executor proattivo, subagent o browser. |
 | `crates/desktop-gateway/src/gateway_system_status.rs` | Route `/api/system/status`, DTO diagnostici Docker/gateway, memoria processo/container e parser `docker stats`; non possiede route di controllo browser o lifecycle runtime. |
 | `crates/desktop-gateway/src/gateway_text_safety.rs` | Helper condivisi di redazione testo sensibile, rimozione terminal control sequences, troncamento e task goal summary; non possiede task execution, JSON checkpoint shaping, agent streaming, browser o memory recall. |
 | `crates/desktop-gateway/src/gateway_turn_broker.rs` | Enqueue/resume/cancel dei turni chat, eventi, stream, activity projection e steering. |
