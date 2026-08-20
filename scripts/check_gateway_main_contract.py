@@ -89,6 +89,9 @@ MEMORY_QUERY_EMBEDDINGS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_query_embeddings.rs"
 )
 MEMORY_JSON_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_memory_json.rs")
+MEMORY_RECALL_TOOL_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_memory_recall_tool.rs"
+)
 MEMORY_CLIENTS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_memory_clients.rs")
 PAYMENT_APPROVAL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_payment_approval.rs"
@@ -556,6 +559,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn forget_memory(": "memory forget orchestration must stay in gateway_memory_tools",
         "fn strip_json_fences(": "memory JSON response parsing must stay in gateway_memory_json",
         "async fn call_memory_json(": "memory JSON transport must stay in gateway_memory_json",
+        "struct RecallOutcome": "memory recall tool result must stay in gateway_memory_recall_tool",
+        "fn recall_stream_payload_from_outcome(": "memory recall payload projection must stay in gateway_memory_recall_tool",
+        "fn recall_memory(": "memory recall tool execution must stay in gateway_memory_recall_tool",
         "fn update_plan_tool_schema(": "runtime plan tool schemas must stay in gateway_plan_tools",
         "fn step_advance_tool_schema(": "runtime plan tool schemas must stay in gateway_plan_tools",
         "fn plan_steps_reconciled_on_delivery(": "runtime plan delivery reconcile must stay in gateway_runtime_plan_state",
@@ -1415,6 +1421,8 @@ def main() -> int:
         memory_query_embeddings_source = handle.read()
     with open(MEMORY_JSON_RS, "r", encoding="utf-8") as handle:
         memory_json_source = handle.read()
+    with open(MEMORY_RECALL_TOOL_RS, "r", encoding="utf-8") as handle:
+        memory_recall_tool_source = handle.read()
     with open(MEMORY_CLIENTS_RS, "r", encoding="utf-8") as handle:
         memory_clients_source = handle.read()
     with open(PAYMENT_APPROVAL_RS, "r", encoding="utf-8") as handle:
@@ -1800,6 +1808,37 @@ def main() -> int:
             memory_json_source,
             snippet,
             "memory JSON owner must not absorb adjacent memory surfaces",
+        )
+    assert_contains(
+        source,
+        "mod gateway_memory_recall_tool;",
+        "gateway root must declare memory recall tool owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_memory_recall_tool::{\n    RecallOutcome, recall_memory, recall_stream_payload_from_outcome,\n};",
+        "gateway root must re-export memory recall tool surface",
+    )
+    for snippet in [
+        "pub(crate) struct RecallOutcome",
+        "pub(crate) fn recall_stream_payload_from_outcome(",
+        "pub(crate) fn recall_memory(",
+    ]:
+        assert_contains(
+            memory_recall_tool_source,
+            snippet,
+            "memory recall tool owner must expose recall tool surface",
+        )
+    for snippet in [
+        "fn learn_via_service_or_inline(",
+        "async fn consolidate_scope(",
+        "fn tombstone_automation_memory_records(",
+        "fn record_subagent_task_step_outcome(",
+    ]:
+        assert_not_contains(
+            memory_recall_tool_source,
+            snippet,
+            "memory recall tool owner must not absorb adjacent memory surfaces",
         )
     assert_contains(source, "mod gateway_memory_briefing;", "gateway root must declare memory briefing owner")
     assert_contains(
