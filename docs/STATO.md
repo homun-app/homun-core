@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (turn steering finalization mergeata).**
+> **Ultimo aggiornamento: 2026-08-20 (capability execution locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -14,7 +14,7 @@
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
 | PR | #108-#116, #118-#228 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #228 |
+| HEAD codice verificato | `main` aggiornato a #228; slice locale `fabio/capability-execution-owner` |
 
 ## Dove siamo
 
@@ -263,6 +263,11 @@ Slice Runtime V2 recenti:
   esce dal monolite `main.rs`; store `turn_steering`, pubblicazione eventi e
   route steering restano nello stesso owner broker, mentre loop agente,
   stream drain e browser restano owner separati.
+- Estrazione locale `gateway_capability_execution`: dispatch autonomo
+  non-browser `capability.*`, re-check policy Managed/Composio, presentation
+  capability e mapping condiviso `ExecutorResult` -> `ExecutionOutcome` escono
+  dal monolite `main.rs`; browser capability, queue runner e loop agente restano
+  owner separati.
 - Estrazione mergeata `gateway_shell_tasks`: executor shell read-only,
   wrapper comando consentito e shaping/redazione JSON output task escono dal
   monolite `main.rs`; execution runtime, task executor, browser e sandbox
@@ -964,6 +969,9 @@ PR aperte:
 Branch corrente:
 
 - `main`: pulito e riallineato a #228.
+- `fabio/capability-execution-owner`: slice locale per spostare execution
+  capability non-browser e outcome mapping da `main.rs` a
+  `gateway_capability_execution`.
 
 ## Debito residuo
 

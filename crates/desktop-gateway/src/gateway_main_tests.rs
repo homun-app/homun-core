@@ -4,17 +4,20 @@ use local_first_engine::plan::{
     enforce_monotonic_plan_progress, plan_is_complete, plan_is_settled, plan_next_open,
 };
 
+use super::gateway_capability_execution::{
+    authorize_managed_capability_tool, capability_call_completed_outcome,
+    task_execution_outcome_from_executor_result,
+};
 use super::{
     AppState, ChannelSettings, CommandOutputError, ConnectorErrorKind, InboundAction,
     MAX_PLAN_STALL_RESUMES, MemoryBenchIngestRequest, MemoryBenchMessage, MemoryBenchSearchRequest,
     MemoryBenchSession, MemoryBenchStatusRequest, MemoryDataSensitivity, MemorySourceOverrideInput,
     MemorySourceUpsertRequest, ValidatedMemorySourceInput, WorkspaceRecord, WorkspacesFile,
-    active_llm_concurrency, aggregate_session_state_from_counts, authorize_managed_capability_tool,
-    block_stalled_step, brain_budgets_for_context_window, browser_anti_loop_nudge,
-    browser_capability_action_refusal, browser_error_indicates_dead_sidecar,
-    browser_method_for_capability_tool, browser_snapshot_text, browser_targets_for_goal,
-    browser_url_for_goal, build_browse_goal, build_memory_source_grant, build_plan_markdown,
-    capability_call_completed_outcome, classify_connector_error, clawhub_origin,
+    active_llm_concurrency, aggregate_session_state_from_counts, block_stalled_step,
+    brain_budgets_for_context_window, browser_anti_loop_nudge, browser_capability_action_refusal,
+    browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
+    browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_browse_goal,
+    build_memory_source_grant, build_plan_markdown, classify_connector_error, clawhub_origin,
     collect_member_counts, command_output_with_timeout, composio_tool_is_read,
     connector_error_hint, default_browser_headless_value, delegated_browse_tool_outcome,
     delete_workspace, earlier_browse_call_in_current_round, extract_source_urls, fonti_section,
@@ -32,9 +35,8 @@ use super::{
     requeue_waiting_resource_tasks, response_language_instruction, rewrite_confirm_to_done,
     run_bash_unsandboxed_result, sanitize_dedup_key, scheduled_thread_sender_for_task_id,
     scheduled_thread_title, search_composio_catalog, should_try_tool_compatibility_fallback,
-    strip_json_fences, suggestion_choices_json, task_effective_goal,
-    task_execution_outcome_from_executor_result, task_goal_summary, task_queue_response,
-    tool_touches_calendar, tool_touches_contacts, valid_catalog_owner,
+    strip_json_fences, suggestion_choices_json, task_effective_goal, task_goal_summary,
+    task_queue_response, tool_touches_calendar, tool_touches_contacts, valid_catalog_owner,
     validate_memory_source_input, validate_memory_source_overrides,
     validate_memory_source_workspaces, workspace_write_roots,
 };
@@ -23449,7 +23451,7 @@ fn executor_wait_until_outcome_preserves_scheduled_resume() {
     let contract = super::execution_runtime::contract_for_acquired_task(&task).unwrap();
     let not_before = super::OffsetDateTime::from_unix_timestamp(1_800_000_000).unwrap();
 
-    let outcome = super::task_execution_outcome_from_executor_result(
+    let outcome = task_execution_outcome_from_executor_result(
         &state,
         &task,
         &contract,
