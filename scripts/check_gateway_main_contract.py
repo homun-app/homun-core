@@ -80,6 +80,7 @@ AUTOMATION_FORMATTING_RS = os.path.join(
 PROACTIVE_THREADS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_proactive_threads.rs"
 )
+SHELL_TASKS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_shell_tasks.rs")
 CHANNELS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_channels.rs")
 MEMORY_QUERY_EMBEDDINGS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_query_embeddings.rs"
@@ -1239,6 +1240,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct ProactiveThreadPlan": "proactive thread planning must stay in gateway_proactive_threads",
         "fn proactive_thread_plan(": "proactive thread planning must stay in gateway_proactive_threads",
         "fn proactive_thread_scope(": "proactive thread planning must stay in gateway_proactive_threads",
+        "fn redact_json_for_task_output(": "shell task output shaping must stay in gateway_shell_tasks",
+        "fn execute_shell_read_only_task(": "read-only shell task execution must stay in gateway_shell_tasks",
+        "fn run_read_only_command(": "read-only shell command wrapper must stay in gateway_shell_tasks",
         "struct AutomationCreateRequest ": "automation request DTOs must stay in gateway_automation_requests",
         "struct AutomationScopeQuery ": "automation request DTOs must stay in gateway_automation_requests",
         "struct AutomationUpdateRequest ": "automation request DTOs must stay in gateway_automation_requests",
@@ -1384,6 +1388,8 @@ def main() -> int:
         automation_formatting_source = handle.read()
     with open(PROACTIVE_THREADS_RS, "r", encoding="utf-8") as handle:
         proactive_threads_source = handle.read()
+    with open(SHELL_TASKS_RS, "r", encoding="utf-8") as handle:
+        shell_tasks_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
         action_confirmations_source = handle.read()
     with open(ACTIONABLE_SOURCE_RS, "r", encoding="utf-8") as handle:
@@ -1982,6 +1988,26 @@ def main() -> int:
             proactive_threads_source,
             snippet,
             "proactive thread owner must expose thread planning helpers",
+        )
+    assert_contains(
+        source,
+        "mod gateway_shell_tasks;",
+        "gateway root must declare shell task owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_shell_tasks::*;",
+        "gateway root must re-export shell task owner",
+    )
+    for snippet in [
+        "pub(crate) fn redact_json_for_task_output(",
+        "pub(crate) fn execute_shell_read_only_task(",
+        "pub(crate) fn run_read_only_command(",
+    ]:
+        assert_contains(
+            shell_tasks_source,
+            snippet,
+            "shell task owner must expose read-only shell helpers",
         )
     assert_contains(
         source,
