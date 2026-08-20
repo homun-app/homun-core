@@ -25,6 +25,7 @@ ACTIVE_AFTER_TERMINAL_KINDS = {
     "step_advance",
     "heartbeat",
 }
+RUNTIME_PLAN_RUNNABLE_STEP_STATUSES = {"todo", "doing", "in_progress"}
 
 
 def default_db_path() -> Path:
@@ -83,6 +84,26 @@ def expected_agent_run_statuses(task_status: str | None) -> set[str]:
     if task_status in {"cancelled", "expired"}:
         return {"aborted"}
     return set()
+
+
+def runtime_plan_steps(plan_json: Any) -> list[dict[str, Any]]:
+    if isinstance(plan_json, list):
+        raw_steps = plan_json
+    elif isinstance(plan_json, dict):
+        raw_steps = plan_json.get("steps", [])
+    else:
+        raw_steps = []
+    return [step for step in raw_steps if isinstance(step, dict)]
+
+
+def active_runtime_plan_steps(runtime_plan: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not runtime_plan or runtime_plan.get("status") != "open":
+        return []
+    return [
+        step
+        for step in runtime_plan_steps(runtime_plan.get("plan_json"))
+        if step.get("status") in RUNTIME_PLAN_RUNNABLE_STEP_STATUSES
+    ]
 
 
 def reduce_events(events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -190,6 +211,7 @@ def audit_turn(db_path: Path, turn_id: str) -> dict[str, Any]:
         )
         thread_id, assistant_message_id = assistant_identity(task)
         message = None
+        runtime_plan = None
         if thread_id and assistant_message_id:
             message = one(
                 conn,
@@ -200,6 +222,20 @@ def audit_turn(db_path: Path, turn_id: str) -> dict[str, Any]:
                 """,
                 (thread_id, assistant_message_id),
             )
+        if task and thread_id:
+            runtime_plan = one(
+                conn,
+                """
+                select user_id, workspace_id, thread_id, status, plan_json,
+                       objective_revision, revision, stall_turns, last_resume_done,
+                       created_at, updated_at
+                from runtime_plans
+                where user_id = ? and workspace_id = ? and thread_id = ?
+                """,
+                (task["user_id"], task["workspace_id"], thread_id),
+            )
+            if runtime_plan:
+                runtime_plan["plan_json"] = parse_json(runtime_plan.get("plan_json"))
 
         reduced = reduce_events(events)
         contradictions = list(reduced["contradictions"])
@@ -258,6 +294,19 @@ def audit_turn(db_path: Path, turn_id: str) -> dict[str, Any]:
                             "owner_to_remove": "agent_run_projection",
                         }
                     )
+            plan_steps = active_runtime_plan_steps(runtime_plan)
+            if plan_steps:
+                step_ids = [
+                    str(step.get("id") or step.get("title") or "<unnamed>")
+                    for step in plan_steps
+                ]
+                contradictions.append(
+                    {
+                        "code": "terminal_task_with_active_runtime_plan",
+                        "detail": f"task is {task_status} but runtime plan has runnable steps: {', '.join(step_ids)}",
+                        "owner_to_remove": "runtime_plan_projection",
+                    }
+                )
 
         if task_status == "failed" and message:
             if not (message["text"] or "").strip():
@@ -283,6 +332,7 @@ def audit_turn(db_path: Path, turn_id: str) -> dict[str, Any]:
             "reducer": reduced,
             "agent_runs": runs,
             "assistant_message": message,
+            "runtime_plan": runtime_plan,
             "contradictions": contradictions,
             "ok": not contradictions,
         }

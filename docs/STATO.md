@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (UI turn status hook locale).**
+> **Ultimo aggiornamento: 2026-08-20 (audit runtime plan locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#240 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #240 (`717aa138`) |
+| PR | #108-#116, #118-#242 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #242 (`7c9b1481`) |
 
 ## Dove siamo
 
@@ -390,6 +390,10 @@ Slice Runtime V2 recenti:
   plan-step e port engine `GatewayPlanProgress` escono dal monolite `main.rs`;
   tool schema, stall budget, prompt packet e dispatch tool restano owner
   separati.
+- Estrazione locale `audit_runtime_plan_state`: `scripts/audit_turn_consistency.py`
+  legge `runtime_plans` e segnala piani open/runnable che sopravvivono a task
+  terminali; non ripara righe e non diventa owner runtime, ma rende visibile la
+  contraddizione fra piano durable, reducer e UI projection.
 - Estrazione mergeata `gateway_thread_episodes`: workspace riservato `__threads__`,
   persistenza episodi conversazionali, projection del blocco prompt per thread
   corrente e matching esatto thread/workspace escono dal monolite `main.rs`;
