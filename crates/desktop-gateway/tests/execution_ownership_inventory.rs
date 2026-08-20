@@ -168,6 +168,7 @@ fn turn_broker_surface_has_one_gateway_owner() {
         "async fn update_steering(",
         "async fn delete_steering(",
         "async fn send_steering_now(",
+        "fn finalize_turn_steering(",
     ];
     for pattern in owned {
         assert!(
