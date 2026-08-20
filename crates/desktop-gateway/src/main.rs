@@ -26,6 +26,7 @@ mod execution_projection;
 mod execution_runtime;
 mod gateway_action_confirmations;
 mod gateway_actionable_source;
+mod gateway_agent_wake;
 mod gateway_artifact_memory;
 mod gateway_artifacts;
 mod gateway_auth;
@@ -170,6 +171,7 @@ use local_first_engine::model_normalize;
 // calling the method directly outside that generic context does.
 pub(crate) use attachments::append_thread_attachment_context;
 pub(crate) use gateway_actionable_source::*;
+pub(crate) use gateway_agent_wake::*;
 pub(crate) use gateway_artifacts::*;
 pub(crate) use gateway_automation_routes::*;
 pub(crate) use gateway_brain_materialization::*;
@@ -4008,45 +4010,6 @@ pub(crate) struct AgentTurnResult {
 
 pub(crate) struct BrokerAgentTurnResult {
     outcome: local_first_engine::TurnOutcome,
-}
-
-fn wake_for_agent_stop(
-    contract: &local_first_execution_protocol::ValidatedExecutionContract,
-    stop: &local_first_engine::TurnStop,
-    action: Option<&str>,
-) -> Option<local_first_execution_protocol::WakeCondition> {
-    match stop {
-        local_first_engine::TurnStop::SuspendedUser => {
-            Some(local_first_execution_protocol::WakeCondition::User {
-                wait_ref: format!(
-                    "{}:{}:user",
-                    contract.as_ref().execution_id,
-                    contract.as_ref().revision
-                ),
-            })
-        }
-        local_first_engine::TurnStop::SuspendedApproval => {
-            Some(local_first_execution_protocol::WakeCondition::Approval {
-                approval_ref: format!(
-                    "{}:{}:approval:{}",
-                    contract.as_ref().execution_id,
-                    contract.as_ref().revision,
-                    action.unwrap_or("action_card")
-                ),
-            })
-        }
-        local_first_engine::TurnStop::SuspendedEffect { receipt_ref } => Some(
-            local_first_execution_protocol::WakeCondition::EffectResolution {
-                receipt_ref: receipt_ref.clone(),
-            },
-        ),
-        local_first_engine::TurnStop::SuspendedModel { role } => Some(
-            local_first_execution_protocol::WakeCondition::ModelAvailable { role: role.clone() },
-        ),
-        local_first_engine::TurnStop::Completed | local_first_engine::TurnStop::Failed { .. } => {
-            None
-        }
-    }
 }
 
 async fn drain_agent_stream_into_message(

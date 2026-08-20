@@ -70,6 +70,7 @@ THREAD_EPISODES_RS = os.path.join(
 THREAD_MODEL_CONTEXT_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_thread_model_context.rs"
 )
+AGENT_WAKE_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_agent_wake.rs")
 PROMPT_PACKETS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_prompt_packets.rs"
 )
@@ -1195,6 +1196,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn context_message_for_model(": "thread model context shaping must stay in gateway_thread_model_context",
         "fn thread_context_for_model(": "thread model context shaping must stay in gateway_thread_model_context",
         "fn agent_turn_context(": "thread model context shaping must stay in gateway_thread_model_context",
+        "fn wake_for_agent_stop(": "agent wake mapping must stay in gateway_agent_wake",
         "fn cancel_chat_turn_and_finalize_bubble(": "turn broker cancel/finalize helper must stay in gateway_turn_broker",
         "async fn cancel_turn(": "turn broker cancel route must stay in gateway_turn_broker",
         "struct TurnSinceQuery ": "turn broker cursor query must stay in gateway_turn_broker",
@@ -1433,6 +1435,8 @@ def main() -> int:
         thread_episodes_source = handle.read()
     with open(THREAD_MODEL_CONTEXT_RS, "r", encoding="utf-8") as handle:
         thread_model_context_source = handle.read()
+    with open(AGENT_WAKE_RS, "r", encoding="utf-8") as handle:
+        agent_wake_source = handle.read()
     with open(PROMPT_PACKETS_RS, "r", encoding="utf-8") as handle:
         prompt_packets_source = handle.read()
     with open(BRAIN_RUNTIME_RS, "r", encoding="utf-8") as handle:
@@ -1871,6 +1875,31 @@ def main() -> int:
             thread_model_context_source,
             snippet,
             "thread model context owner must not absorb adjacent chat/runtime surfaces",
+        )
+    assert_contains(source, "mod gateway_agent_wake;", "gateway root must declare agent wake owner")
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_wake::*;",
+        "gateway root must re-export agent wake owner",
+    )
+    assert_contains(
+        agent_wake_source,
+        "pub(crate) fn wake_for_agent_stop(",
+        "agent wake owner must expose TurnStop wake mapping",
+    )
+    for snippet in [
+        "async fn drain_agent_stream_into_message(",
+        "fn finalize_streamed_assistant_message(",
+        "fn persist_hitl_wait_from_outcome(",
+        "fn persist_hitl_wait_payload(",
+        "fn apply_agent_stream_line(",
+        "fn turn_event_from_stream_value(",
+        "fn thread_browser_session_is_live(",
+    ]:
+        assert_not_contains(
+            agent_wake_source,
+            snippet,
+            "agent wake owner must not absorb adjacent stream/HITL/browser surfaces",
         )
     assert_contains(source, "mod gateway_task_executor;", "gateway root must declare task executor owner")
     assert_contains(
