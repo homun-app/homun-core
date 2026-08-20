@@ -1,8 +1,9 @@
 use crate::execution_control::ExecutionAttemptControl;
 use crate::gateway_capability_execution::execute_capability_generic;
+use crate::gateway_subagent_execution::execute_subagent_task;
 use crate::{
     AppState, LocalTaskExecutionError, TaskRecord, execute_capability_browser_task,
-    execute_proactive_prompt_task, execute_shell_read_only_task, execute_subagent_task,
+    execute_proactive_prompt_task, execute_shell_read_only_task,
 };
 use local_first_execution_protocol::{
     ExecutionFailure, ExecutionOutcome, ValidatedExecutionContract,
