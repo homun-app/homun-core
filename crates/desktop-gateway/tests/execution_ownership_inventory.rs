@@ -1737,6 +1737,44 @@ fn agent_wake_mapping_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_stream_events_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let stream_events = production_source(&root.join("src/gateway_agent_stream_events.rs"));
+
+    for pattern in [
+        "fn apply_agent_stream_line(",
+        "fn turn_event_from_stream_value(",
+        "fn redacted_user_text_from_stream_line(",
+    ] {
+        assert!(
+            stream_events.contains(pattern),
+            "agent stream events owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain agent stream event surface {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn drain_agent_stream_into_message(",
+        "fn finalize_streamed_assistant_message(",
+        "fn persist_hitl_wait_from_outcome(",
+        "fn persist_hitl_wait_payload(",
+        "fn persist_recall_event_part(",
+        "fn persist_redacted_user_text_from_stream_line(",
+        "fn fanout_turn_event(",
+        "fn thread_browser_session_is_live(",
+    ] {
+        assert!(
+            !stream_events.contains(adjacent),
+            "agent stream events owner must not absorb adjacent drain/persistence/browser surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn gateway_ownership_documentation_tracks_extracted_kernel_owners() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let doc = production_source(

@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (agent wake mergeata).**
+> **Ultimo aggiornamento: 2026-08-20 (agent stream events locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -246,6 +246,10 @@ Slice Runtime V2 recenti:
   `WakeCondition` per i turni agente esce dal monolite `main.rs`, preservando
   il riferimento approval action-specific; drain stream, HITL wait e browser
   restano owner separati.
+- Estrazione locale `gateway_agent_stream_events`: parser delta/done,
+  redazione user text da evento `done` e mapping raw stream -> `TurnEventKind`
+  escono dal monolite `main.rs`; drain, fanout, persistenza HITL/recall e
+  browser restano owner separati.
 - Estrazione mergeata `gateway_shell_tasks`: executor shell read-only,
   wrapper comando consentito e shaping/redazione JSON output task escono dal
   monolite `main.rs`; execution runtime, task executor, browser e sandbox
