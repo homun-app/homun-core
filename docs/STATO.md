@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (agent stream drain mergeata).**
+> **Ultimo aggiornamento: 2026-08-20 (turn steering finalization locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -14,7 +14,7 @@
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
 | PR | #108-#116, #118-#227 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #227 |
+| HEAD codice verificato | `main` aggiornato a #227; slice locale `fabio/turn-steering-finalization-owner` |
 
 ## Dove siamo
 
@@ -258,6 +258,11 @@ Slice Runtime V2 recenti:
   agente verso assistant message e fanout durable/live broker escono dal
   monolite `main.rs`; parser, persistence helpers, HITL wait e browser restano
   owner separati.
+- Estrazione locale `gateway_turn_broker`: fence terminale
+  `finalize_turn_steering` per chiudere steering pending/held su turni conclusi
+  esce dal monolite `main.rs`; store `turn_steering`, pubblicazione eventi e
+  route steering restano nello stesso owner broker, mentre loop agente,
+  stream drain e browser restano owner separati.
 - Estrazione mergeata `gateway_shell_tasks`: executor shell read-only,
   wrapper comando consentito e shaping/redazione JSON output task escono dal
   monolite `main.rs`; execution runtime, task executor, browser e sandbox
@@ -948,9 +953,8 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#219: slice owner-level successive mergeate in `main`, fino all'access
-  request dashboard memoria in `gateway_memory_ui_routes`; `main` verificato e
-  riallineato a #219.
+- #143-#227: slice owner-level successive mergeate in `main`, fino all'agent
+  stream drain owner; `main` verificato e riallineato a #227.
 
 PR aperte:
 
@@ -958,9 +962,9 @@ PR aperte:
 
 Branch corrente:
 
-- `main`: pulito e riallineato a #219.
-- `fabio/memory-recall-scoring-owner`: slice locale per rimuovere duplicati
-  test-only dello scoring recall da `main.rs`.
+- `main`: pulito e riallineato a #227.
+- `fabio/turn-steering-finalization-owner`: slice locale per spostare la fence
+  terminale steering da `main.rs` a `gateway_turn_broker`.
 
 ## Debito residuo
 

@@ -1225,6 +1225,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct SteeringMutationRequest ": "turn broker steering request DTO must stay in gateway_turn_broker",
         "struct SteeringRevisionRequest ": "turn broker steering revision DTO must stay in gateway_turn_broker",
         "fn publish_steering_changed(": "turn broker steering broadcast must stay in gateway_turn_broker",
+        "fn finalize_turn_steering(": "turn broker terminal steering cleanup must stay in gateway_turn_broker",
         "async fn list_thread_steering(": "turn broker steering routes must stay in gateway_turn_broker",
         "async fn update_steering(": "turn broker steering routes must stay in gateway_turn_broker",
         "async fn delete_steering(": "turn broker steering routes must stay in gateway_turn_broker",
