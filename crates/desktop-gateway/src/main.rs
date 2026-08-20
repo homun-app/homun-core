@@ -84,6 +84,7 @@ mod gateway_memory_graph_maintenance;
 mod gateway_memory_graph_persistence;
 mod gateway_memory_graph_routes;
 mod gateway_memory_hygiene;
+mod gateway_memory_json;
 mod gateway_memory_prompt_context;
 mod gateway_memory_publications;
 mod gateway_memory_query_embeddings;
@@ -524,6 +525,7 @@ use gateway_recall_context::{
 pub(crate) use gateway_runtime_plan_state::*;
 pub(crate) use gateway_skill_runtime::*;
 // `memory_service_flag` is resolved via `crate::` from cfg(test) code only.
+pub(crate) use gateway_memory_json::{call_memory_json, strip_json_fences};
 #[cfg_attr(not(test), allow(unused_imports))]
 use gateway_runtime_flags::{
     memory_service_enabled, memory_service_flag, plan_autoadvance_from_evidence_enabled,
@@ -1514,20 +1516,6 @@ fn is_auto_confirmable(
         && confidence >= 0.8
 }
 
-/// Strip a ```json … ``` fence the model may wrap JSON in.
-fn strip_json_fences(text: &str) -> &str {
-    let trimmed = text.trim();
-    let without_open = trimmed
-        .strip_prefix("```json")
-        .or_else(|| trimmed.strip_prefix("```"))
-        .unwrap_or(trimmed);
-    without_open
-        .trim()
-        .strip_suffix("```")
-        .unwrap_or(without_open.trim())
-        .trim()
-}
-
 /// ADR 0022 — Tappa 1/4: apprendimento post-turno. Di default (service ON)
 /// instrada via `MemoryRecallService::learn`; anche nel
 /// path OFF usa le STESSE fn del crate (3 fasi: prepare_learn_prompt →
@@ -1629,60 +1617,6 @@ fn learn_via_service_or_inline(
         })
     }
 }
-async fn call_memory_json(
-    state: &AppState,
-    system: &str,
-    user_content: &str,
-) -> Option<serde_json::Value> {
-    let (base_url, model, api_key) = extractor_openai_config()?;
-    let payload = serde_json::json!({
-        "model": model,
-        "temperature": 0.0,
-        "max_tokens": 4000,
-        "response_format": { "type": "json_object" },
-        "messages": [
-            { "role": "system", "content": system },
-            { "role": "user", "content": user_content },
-        ],
-    });
-    let mut usage = local_first_inference_usage::UsageContext::new(
-        uuid::Uuid::new_v4().to_string(),
-        local_first_inference_usage::InferencePurpose::MemoryExtraction,
-        gateway_user_id().as_str(),
-    );
-    usage.purpose_detail = Some("memory_json".to_string());
-    usage.workspace_id = Some(gateway_memory_workspace_id().as_str().to_string());
-    let response = inference_transport::send_openai_json(
-        &state.http,
-        state.usage_recorder.clone(),
-        &usage,
-        &inference_provider_id(&base_url),
-        &model,
-        inference_locality(&base_url),
-        &base_url,
-        api_key.as_deref(),
-        &payload,
-        Some(std::time::Duration::from_secs(150)),
-        system
-            .chars()
-            .count()
-            .saturating_add(user_content.chars().count()),
-    )
-    .await
-    .ok()?;
-    if !(200..300).contains(&response.status) {
-        return None;
-    }
-    let body = response.body;
-    let content = body
-        .get("choices")
-        .and_then(|c| c.get(0))
-        .and_then(|c| c.get("message"))
-        .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_str())?;
-    serde_json::from_str(strip_json_fences(content)).ok()
-}
-
 /// Memory consolidation ("reflection"): review a scope's durable memories, MERGE the
 /// fragments that say the same thing, and PRUNE noise (transient/trivial/irrelevant or
 /// redundant). Conservative — when in doubt the model keeps. Returns (merged, dropped).

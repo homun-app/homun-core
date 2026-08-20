@@ -255,6 +255,10 @@ Slice Runtime V2 recenti:
   cache/timing query embedding e backfill embedding escono dal monolite
   `main.rs`; `recall_memory`, learning inline e consolidamento restano fuori
   dallo scope.
+- Estrazione locale `gateway_memory_json`: transport JSON OpenAI-compatible per
+  task memoria/proattivita', parsing fence JSON e usage context
+  `MemoryExtraction` escono dal monolite `main.rs`; `recall_memory`, learning
+  inline e consolidamento restano owner separati.
 - Estrazione mergeata `gateway_boot_maintenance`: risoluzione sorgente default skills,
   copy ricorsivo, hash skill-tree e seed default skills escono dal monolite
   `main.rs`; route skill e runtime skill restano owner separati.
