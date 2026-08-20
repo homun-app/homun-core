@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (thread model context mergeata).**
+> **Ultimo aggiornamento: 2026-08-20 (agent wake locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -242,6 +242,10 @@ Slice Runtime V2 recenti:
   messaggi storici, esclusione placeholder/current prompt e bound degli ultimi
   16 `ChatContextMessage` escono dal monolite `main.rs`; visible turn,
   finalizzazione stream, recall tool e loop agente restano owner separati.
+- Estrazione locale `gateway_agent_wake`: mapping `TurnStop` ->
+  `WakeCondition` per i turni agente esce dal monolite `main.rs`, preservando
+  il riferimento approval action-specific; drain stream, HITL wait e browser
+  restano owner separati.
 - Estrazione mergeata `gateway_shell_tasks`: executor shell read-only,
   wrapper comando consentito e shaping/redazione JSON output task escono dal
   monolite `main.rs`; execution runtime, task executor, browser e sandbox

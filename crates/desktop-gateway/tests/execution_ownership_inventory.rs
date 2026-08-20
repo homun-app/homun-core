@@ -1705,6 +1705,38 @@ fn startup_background_writers_follow_process_fencing() {
 }
 
 #[test]
+fn agent_wake_mapping_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let agent_wake = production_source(&root.join("src/gateway_agent_wake.rs"));
+
+    let pattern = "fn wake_for_agent_stop(";
+    assert!(
+        agent_wake.contains(pattern),
+        "agent wake owner must contain {pattern}"
+    );
+    assert!(
+        !main.contains(pattern),
+        "main.rs must not retain agent wake mapping surface {pattern}"
+    );
+
+    for adjacent in [
+        "async fn drain_agent_stream_into_message(",
+        "fn finalize_streamed_assistant_message(",
+        "fn persist_hitl_wait_from_outcome(",
+        "fn persist_hitl_wait_payload(",
+        "fn apply_agent_stream_line(",
+        "fn turn_event_from_stream_value(",
+        "fn thread_browser_session_is_live(",
+    ] {
+        assert!(
+            !agent_wake.contains(adjacent),
+            "agent wake owner must not absorb adjacent stream/HITL/browser surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn gateway_ownership_documentation_tracks_extracted_kernel_owners() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let doc = production_source(
