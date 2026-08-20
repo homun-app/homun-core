@@ -1662,7 +1662,11 @@ assertContains("src/components/useChatFollowUps.ts", ".chatSuggestions", "follow
 assertContains("src/components/ChatView.tsx", "useChatFollowUps({", "ChatView must consume the focused follow-up suggestion owner");
 assertNotContains("src/components/ChatView.tsx", "coreBridge.chatSuggestions", "ChatView must not own follow-up suggestion loading");
 assertContains("src/components/useChatActiveTurnElapsed.ts", "window.setInterval(updateElapsed, 1000)", "active-turn elapsed timing must have one focused owner");
-assertContains("src/components/ChatView.tsx", "useChatActiveTurnElapsed({", "ChatView must consume the focused active-turn timer owner");
+assertContains("src/components/useChatTurnStatus.ts", "useChatActiveTurnElapsed({", "chat turn status hook must consume the focused active-turn timer owner");
+assertContains("src/components/useChatTurnStatus.ts", "deriveChatTurnStatus({", "chat turn status hook must consume the pure status owner");
+assertContains("src/components/ChatView.tsx", "useChatTurnStatus({", "ChatView must consume the focused chat turn status owner");
+assertNotContains("src/components/ChatView.tsx", "useChatActiveTurnElapsed({", "ChatView must not own active-turn elapsed timing");
+assertNotContains("src/components/ChatView.tsx", "deriveChatTurnStatus({", "ChatView must not own active-turn status derivation");
 assertNotContains("src/components/ChatView.tsx", "setActiveTurnElapsedSeconds", "ChatView must not own active-turn elapsed state");
 assertContains("src/components/useChatStreamingNotifier.ts", "onStreamingChangeRef", "streaming parent notifications must have one focused owner");
 assertContains("src/components/ChatView.tsx", "useChatStreamingNotifier(onStreamingChange)", "ChatView must consume the focused streaming notifier owner");

@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (UI chat turn status locale).**
+> **Ultimo aggiornamento: 2026-08-20 (UI turn status hook locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#239 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #239 |
+| PR | #108-#116, #118-#240 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #240 (`717aa138`) |
 
 ## Dove siamo
 
@@ -333,10 +333,14 @@ Slice Runtime V2 recenti:
 - Estrazione mergeata `gateway_task_inputs`: `task_effective_goal` esce dal monolite
   `main.rs`; la policy "prompt_redacted prevale su goal" resta riutilizzabile
   da task executor/browser approval senza assorbire browser runtime o loop agente.
-- Slice locale `chatTurnStatus`: il pill del turno attivo del composer deriva
+- Estrazione mergeata `chatTurnStatus`: il pill del turno attivo del composer deriva
   da `runtimeViewModel.turnUiState`, stream title/detail e blocked reason in un
   owner puro testato; `ChatView` non mantiene piu' una seconda derivazione di
   "Waiting for you"/"Still working".
+- Slice locale `useChatTurnStatus`: timer elapsed, traduzioni e chiamata a
+  `chatTurnStatus` escono da `ChatView` e vivono in un hook UI dedicato; il
+  guardrail `cursor-grammar-ui` impedisce a `ChatView` di reimportare
+  `deriveChatTurnStatus` o `useChatActiveTurnElapsed`.
 - Estrazione mergeata `gateway_memory_reuse`: `StreamMemoryReuseCollector` e
   `memory_reuse_envelope_from_read_set` escono dal monolite `main.rs`; l'owner
   attesta recall/actionable/approval stream parts e produce il
@@ -992,9 +996,8 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#231: slice owner-level successive mergeate in `main`, fino agli accessi
-  stato gateway condivisi in `gateway_state_access`; `main` verificato e
-  riallineato a #231.
+- #143-#240: slice owner-level successive mergeate in `main`, fino a
+  `chatTurnStatus`; `main` verificato e riallineato a #240.
 
 PR aperte:
 
@@ -1002,7 +1005,7 @@ PR aperte:
 
 Branch corrente:
 
-- `main`: pulito e riallineato a #231.
+- `main`: pulito e riallineato a #240 (`717aa138`).
 
 ## Debito residuo
 
@@ -1035,8 +1038,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #231; prossima slice non-browser da scegliere dopo nuova
-lettura owner-level di main.rs.
+main aggiornato a #240 (`717aa138`); prossima slice non-browser da scegliere
+dopo nuova lettura owner-level di main.rs.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

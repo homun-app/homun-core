@@ -127,6 +127,13 @@ const chatActiveTurnElapsed = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const chatTurnStatusHook = await readFile(
+  new URL("../src/components/useChatTurnStatus.ts", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatStreamingNotifier = await readFile(
   new URL("../src/components/useChatStreamingNotifier.ts", import.meta.url),
   "utf8",
@@ -2231,14 +2238,28 @@ test("ChatView delegates follow-up suggestion ownership to useChatFollowUps", ()
   assert.match(chatFollowUpsHook, /const \[followUps,\s*setFollowUps\]/);
 });
 
-test("ChatView delegates active-turn elapsed timing to useChatActiveTurnElapsed", () => {
-  assert.match(chatView, /from "\.\/useChatActiveTurnElapsed";/);
-  assert.match(chatView, /useChatActiveTurnElapsed\(\{\s*activeTurnKey,/);
+test("useChatTurnStatus delegates active-turn elapsed timing to useChatActiveTurnElapsed", () => {
+  assert.match(chatView, /from "\.\/useChatTurnStatus";/);
+  assert.doesNotMatch(chatView, /from "\.\/useChatActiveTurnElapsed";/);
+  assert.match(chatTurnStatusHook, /from "\.\/useChatActiveTurnElapsed";/);
+  assert.match(chatTurnStatusHook, /useChatActiveTurnElapsed\(\{\s*activeTurnKey,/);
   assert.doesNotMatch(chatView, /setActiveTurnElapsedSeconds/);
   assert.doesNotMatch(chatView, /window\.setInterval\(updateElapsed,\s*1000\)/);
   assert.match(chatActiveTurnElapsed, /export function useChatActiveTurnElapsed/);
   assert.match(chatActiveTurnElapsed, /window\.setInterval\(updateElapsed,\s*1000\)/);
   assert.match(chatActiveTurnElapsed, /projectedUpdatedAt/);
+});
+
+test("ChatView delegates active-turn status ownership to useChatTurnStatus", () => {
+  assert.match(chatView, /from "\.\/useChatTurnStatus";/);
+  assert.match(chatView, /useChatTurnStatus\(\{/);
+  assert.doesNotMatch(chatView, /deriveChatTurnStatus/);
+  assert.doesNotMatch(chatView, /useChatActiveTurnElapsed/);
+  assert.doesNotMatch(chatView, /const activeTurnKey =/);
+
+  assert.match(chatTurnStatusHook, /export function useChatTurnStatus/);
+  assert.match(chatTurnStatusHook, /useChatActiveTurnElapsed/);
+  assert.match(chatTurnStatusHook, /deriveChatTurnStatus/);
 });
 
 test("ChatView delegates streaming mount notifications to useChatStreamingNotifier", () => {
