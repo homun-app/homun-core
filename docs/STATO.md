@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (agent stream persistence mergeata).**
+> **Ultimo aggiornamento: 2026-08-20 (agent stream drain locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -254,6 +254,10 @@ Slice Runtime V2 recenti:
   assistant message, persistenza recall/redacted user text da stream e fanout
   raw stream -> `turn_events` escono dal monolite `main.rs`; drain stream,
   HITL wait e browser restano owner separati.
+- Estrazione locale `gateway_agent_stream_drain`: drain async dello stream
+  agente verso assistant message e fanout durable/live broker escono dal
+  monolite `main.rs`; parser, persistence helpers, HITL wait e browser restano
+  owner separati.
 - Estrazione mergeata `gateway_shell_tasks`: executor shell read-only,
   wrapper comando consentito e shaping/redazione JSON output task escono dal
   monolite `main.rs`; execution runtime, task executor, browser e sandbox
