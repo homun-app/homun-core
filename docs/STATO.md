@@ -255,7 +255,7 @@ Slice Runtime V2 recenti:
   cache/timing query embedding e backfill embedding escono dal monolite
   `main.rs`; `recall_memory`, learning inline e consolidamento restano fuori
   dallo scope.
-- Estrazione locale `gateway_memory_json`: transport JSON OpenAI-compatible per
+- Estrazione mergeata `gateway_memory_json`: transport JSON OpenAI-compatible per
   task memoria/proattivita', parsing fence JSON e usage context
   `MemoryExtraction` escono dal monolite `main.rs`; `recall_memory`, learning
   inline e consolidamento restano owner separati.
