@@ -421,6 +421,56 @@ fn shell_read_only_tasks_have_one_gateway_owner() {
 }
 
 #[test]
+fn capability_execution_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let capability_execution_path = root.join("src/gateway_capability_execution.rs");
+    let capability_execution = if capability_execution_path.exists() {
+        production_source(&capability_execution_path)
+    } else {
+        String::new()
+    };
+    let task_executor = production_source(&root.join("src/gateway_task_executor.rs"));
+
+    let owned = [
+        "fn execute_capability_generic(",
+        "fn authorize_managed_capability_tool(",
+        "fn capability_call_completed_outcome(",
+        "fn capability_call_failed_outcome(",
+        "fn capability_kind_not_wired_outcome(",
+        "fn task_execution_outcome_from_executor_result(",
+        "fn completed_executor_outcome(",
+    ];
+
+    for pattern in owned {
+        assert!(
+            capability_execution.contains(pattern),
+            "capability execution owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain capability execution surface {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "fn execute_capability_browser_task(",
+        "fn execute_persistent_browser_capability(",
+        "fn run_next_task_once(",
+        "async fn run_agent_rounds(",
+    ] {
+        assert!(
+            !capability_execution.contains(adjacent),
+            "capability execution owner must not absorb adjacent surface {adjacent}"
+        );
+    }
+    assert!(
+        !task_executor.contains("fn execute_capability_generic("),
+        "task executor owner must not absorb capability execution"
+    );
+}
+
+#[test]
 fn runtime_plan_state_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
