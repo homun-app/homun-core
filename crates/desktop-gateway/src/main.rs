@@ -36,6 +36,7 @@ mod gateway_automation_tools;
 mod gateway_background_startup;
 mod gateway_bind;
 mod gateway_boot_maintenance;
+mod gateway_brain_materialization;
 mod gateway_brain_runtime;
 mod gateway_browser_runtime;
 mod gateway_browser_tools;
@@ -165,6 +166,7 @@ pub(crate) use attachments::append_thread_attachment_context;
 pub(crate) use gateway_actionable_source::*;
 pub(crate) use gateway_artifacts::*;
 pub(crate) use gateway_automation_routes::*;
+pub(crate) use gateway_brain_materialization::*;
 pub(crate) use gateway_brain_runtime::*;
 pub(crate) use gateway_browser_runtime::*;
 pub(crate) use gateway_chat_streams::*;
@@ -240,8 +242,10 @@ pub(crate) use gateway_shell_tasks::*;
 #[cfg(test)]
 pub(crate) use gateway_skill_routes::{clawhub_origin, valid_catalog_owner};
 pub(crate) use gateway_system_status::*;
+#[cfg(test)]
+pub(crate) use gateway_text_safety::task_goal_summary;
 pub(crate) use gateway_text_safety::{
-    redact_sensitive_text, strip_terminal_control_sequences, task_goal_summary, truncate_chars,
+    redact_sensitive_text, strip_terminal_control_sequences, truncate_chars,
 };
 pub(crate) use gateway_user_preferences::*;
 pub(crate) use gateway_vault_routes::*;
@@ -578,10 +582,12 @@ use local_first_browser_automation::{
 #[cfg(test)]
 pub(crate) use local_first_capabilities::CachedCapabilityTool;
 #[cfg(test)]
+use local_first_capabilities::CachedToolProvider;
+#[cfg(test)]
 use local_first_capabilities::CapabilityCall;
 use local_first_capabilities::{
-    ActionClass, CachedToolProvider, CapabilityConnectionConfig, CapabilityError, CapabilityFacade,
-    CapabilityPolicy, CapabilityProviderConfig, CapabilityProviderGrant, CapabilityProviderKind,
+    ActionClass, CapabilityConnectionConfig, CapabilityError, CapabilityFacade, CapabilityPolicy,
+    CapabilityProviderConfig, CapabilityProviderGrant, CapabilityProviderKind,
     CapabilityRegistryStore, CapabilityResult, CapabilityTaskPayload, CapabilityTool,
     InMemoryCapabilityAudit, McpCapabilityProvider, McpToolPolicy, PluginRegistryEntry,
     PluginRegistryIndex, PolicyContext, ProviderId as CapabilityProviderId,
@@ -6710,212 +6716,6 @@ fn browser_method_for_capability_tool(tool_name: &str) -> Option<BrowserMethod> 
         "browser.wait_download" => Some(BrowserMethod::WaitDownload),
         _ => None,
     }
-}
-
-/// A1.1: runs the OrchestratorBrain so it MATERIALIZES durable tasks into the
-/// shared TaskStore (the same DB the background worker polls). Durable-only:
-/// the request policy has empty `allowed_actions`, so every tool is
-/// visible-but-not-executable -> the Brain never calls `call_tool` (so the
-/// planning-only CachedToolProvider is safe) and enqueues every step as a
-/// durable task, executed by the worker's real executors (browser/subagent).
-/// Returns the materialized task ids, or an error so the caller can fall back.
-fn brain_materialize_tasks(
-    state: &AppState,
-    thread_id: &str,
-    goal: &str,
-) -> Result<Vec<String>, LocalTaskExecutionError> {
-    let user = gateway_capability_user_id();
-    let workspace = gateway_capability_workspace_id();
-
-    let (mut policy_context, provider_tools) = {
-        let registry = lock_capability_registry(state).map_err(local_task_gateway_error)?;
-        let policy = registry
-            .policy_context(&user, &workspace)
-            .map_err(|error| LocalTaskExecutionError {
-                message: format!("policy context: {error}"),
-            })?;
-        let mut provider_tools = Vec::new();
-        for provider in &policy.enabled_providers {
-            let tools = registry
-                .cached_tools(provider)
-                .map_err(|error| LocalTaskExecutionError {
-                    message: format!("cached tools: {error}"),
-                })?
-                .into_iter()
-                .map(|cached| cached.tool)
-                .collect::<Vec<_>>();
-            provider_tools.push((provider.clone(), tools));
-        }
-        (policy, provider_tools)
-    };
-    // Durable-first, but allow the NON-destructive action classes (Read/Draft)
-    // so the planner can delegate sub-tasks to subagents (whose envelope must be
-    // non-empty). Destructive classes (WriteWithConfirmation/ApprovedAutomation)
-    // stay out, so no send/pay/write executes without an explicit user gate.
-    policy_context.allowed_actions = vec![ActionClass::Read, ActionClass::Draft];
-
-    let mut facade = CapabilityFacade::new(CapabilityPolicy, InMemoryCapabilityAudit::default());
-    for (provider_id, tools) in provider_tools {
-        let kind = tools
-            .first()
-            .map(|tool| tool.provider_kind)
-            .unwrap_or(CapabilityProviderKind::Native);
-        facade.register_provider(CachedToolProvider::new(provider_id, kind, tools));
-    }
-
-    let task_store =
-        TaskStore::open(
-            gateway_task_database_path().map_err(|error| LocalTaskExecutionError {
-                message: error.to_string(),
-            })?,
-        )
-        .map_err(|error| LocalTaskExecutionError {
-            message: format!("shared task store: {error}"),
-        })?;
-
-    let router = build_browser_inference_router();
-    let budgets =
-        brain_budgets_for_context_window(router.active_context_window(&Requirements::default()));
-    let mut brain = OrchestratorBrain::new(router, open_brain_memory(), facade, task_store);
-    let request = OrchestratorRequest {
-        request_id: format!("brain_{}", uuid::Uuid::new_v4().simple()),
-        policy_context,
-        user_message: goal.to_string(),
-        conversation_summary: None,
-        attachments: Vec::new(),
-        budgets,
-        language: effective_user_language(),
-    };
-    // Browser INTERACTION is no longer materialized as a durable `browser_task`:
-    // the main chat agent drives the browser inline (granular tools). The Brain
-    // here only materializes non-browser capability/subagent tasks.
-    let task_ids = {
-        let outcome = brain
-            .run(request)
-            .map_err(|error| LocalTaskExecutionError {
-                message: format!("brain run: {error}"),
-            })?;
-        let mut ids = Vec::new();
-        for summary in &outcome.enqueued_tasks {
-            ids.push(summary.task_id.as_str().to_string());
-        }
-        for summary in &outcome.enqueued_subagent_tasks {
-            ids.push(summary.task_id.as_str().to_string());
-        }
-        ids
-    };
-
-    // Keep the canonical task-runtime projection linked to the originating chat.
-    // ChatStore has its own task→thread relation for message surfacing, while the
-    // runtime column is what `/activity` uses for subagent status and timestamps.
-    let runtime_user = UserId::new(user.as_str());
-    let runtime_workspace = WorkspaceId::new(workspace.as_str());
-    for task_id in &task_ids {
-        let linked = brain
-            .task_store()
-            .link_task_to_thread(
-                &TaskId::new(task_id),
-                &runtime_user,
-                &runtime_workspace,
-                thread_id,
-            )
-            .map_err(|error| LocalTaskExecutionError {
-                message: format!("task thread linkage: {error}"),
-            })?;
-        if !linked {
-            return Err(LocalTaskExecutionError {
-                message: format!("task thread linkage: task {task_id} was not found"),
-            });
-        }
-    }
-
-    // A1.2: bind the materialized task(s) to the originating chat thread so the
-    // worker's existing session/chat surfacing (sync_session_for_task_run,
-    // append_task_result_to_chat — both keyed on thread_by_task_id) resolves
-    // them into the thread's single Local Computer session. Best-effort: a
-    // linkage hiccup must not lose the materialized tasks (they just run
-    // "headless" as before), so failures are logged, not propagated.
-    if !task_ids.is_empty()
-        && let Err(error) = link_brain_tasks_to_thread(state, thread_id, goal, &task_ids)
-    {
-        eprintln!(
-            "brain_materialize_tasks: thread linkage failed for {thread_id}: {}",
-            error.message
-        );
-    }
-
-    Ok(task_ids)
-}
-
-/// Links Brain-materialized tasks to their chat thread and seeds the thread's
-/// aggregating Local Computer session (progress_total = number of tasks), so a
-/// single prompt that fans out into N durable tasks surfaces as ONE session
-/// with per-task progress and results in chat.
-fn link_brain_tasks_to_thread(
-    state: &AppState,
-    thread_id: &str,
-    goal: &str,
-    task_ids: &[String],
-) -> Result<(), LocalTaskExecutionError> {
-    let thread = {
-        let chat_store = lock_store(state).map_err(local_task_gateway_error)?;
-        chat_store
-            .thread(thread_id)
-            .map_err(GatewayError::store)
-            .map_err(local_task_gateway_error)?
-    };
-    let Some(thread) = thread else {
-        return Ok(());
-    };
-
-    // Seed (or reuse) the aggregating session, then size its progress bar to the
-    // number of tasks the Brain planned.
-    let goal_redacted = task_goal_summary(goal);
-    ensure_computer_session_for_task(
-        state,
-        &thread.computer_session_id,
-        &thread.task_id,
-        thread_id,
-        &goal_redacted,
-        false,
-    )
-    .map_err(local_task_gateway_error)?;
-    set_session_progress_total(state, &thread.computer_session_id, task_ids.len() as u32)
-        .map_err(local_task_gateway_error)?;
-
-    // Resolve every member task back to this thread.
-    let chat_store = lock_store(state).map_err(local_task_gateway_error)?;
-    for task_id in task_ids {
-        chat_store
-            .link_task_to_thread(task_id, thread_id)
-            .map_err(GatewayError::store)
-            .map_err(local_task_gateway_error)?;
-    }
-    Ok(())
-}
-
-/// Overrides the aggregating session's `progress_total` to the planned task
-/// count (the seeding helper uses the legacy single-task default of 2/3).
-fn set_session_progress_total(
-    state: &AppState,
-    session_id: &str,
-    total: u32,
-) -> Result<(), GatewayError> {
-    let user = gateway_user_id();
-    let workspace = gateway_workspace_id();
-    let store = lock_computer_store(state)?;
-    if let Some(mut session) = store
-        .session(session_id, user.as_str(), workspace.as_str())
-        .map_err(GatewayError::local_computer)?
-    {
-        session.progress_total = total.max(1);
-        session.progress_current = session.progress_current.min(session.progress_total);
-        session.updated_at = OffsetDateTime::now_utc();
-        store
-            .upsert_session(&session)
-            .map_err(GatewayError::local_computer)?;
-    }
-    Ok(())
 }
 
 fn now_epoch_secs() -> u64 {

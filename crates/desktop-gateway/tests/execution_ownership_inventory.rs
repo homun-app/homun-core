@@ -481,6 +481,28 @@ fn brain_runtime_has_one_gateway_owner() {
 }
 
 #[test]
+fn brain_materialization_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let materialization = production_source(&root.join("src/gateway_brain_materialization.rs"));
+
+    for pattern in [
+        "fn brain_materialize_tasks(",
+        "fn link_brain_tasks_to_thread(",
+        "fn set_session_progress_total(",
+    ] {
+        assert!(
+            materialization.contains(pattern),
+            "brain materialization owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain brain materialization item {pattern}"
+        );
+    }
+}
+
+#[test]
 fn context_compactor_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

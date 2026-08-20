@@ -73,6 +73,9 @@ PROMPT_PACKETS_RS = os.path.join(
 BRAIN_RUNTIME_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_brain_runtime.rs"
 )
+BRAIN_MATERIALIZATION_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_brain_materialization.rs"
+)
 RUNTIME_FLAGS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_runtime_flags.rs")
 AUTOMATION_FORMATTING_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_automation_formatting.rs"
@@ -580,6 +583,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn brain_materialize_enabled(": "brain enablement flag must stay in gateway_brain_runtime",
         "fn open_brain_memory(": "brain memory opening must stay in gateway_brain_runtime",
         "fn brain_budgets_for_context_window(": "brain budget policy must stay in gateway_brain_runtime",
+        "fn brain_materialize_tasks(": "durable Brain task materialization must stay in gateway_brain_materialization",
+        "fn link_brain_tasks_to_thread(": "Brain task thread linkage must stay in gateway_brain_materialization",
+        "fn set_session_progress_total(": "Brain task session progress seeding must stay in gateway_brain_materialization",
         "fn strip_chat_markers(": "chat marker stripping must stay in gateway_chat_markers",
         "fn query_code_graph_tool_schema(": "project search tool schemas must stay in gateway_project_search_tools",
         "fn query_git_history_tool_schema(": "project search tool schemas must stay in gateway_project_search_tools",
@@ -1382,6 +1388,8 @@ def main() -> int:
         prompt_packets_source = handle.read()
     with open(BRAIN_RUNTIME_RS, "r", encoding="utf-8") as handle:
         brain_runtime_source = handle.read()
+    with open(BRAIN_MATERIALIZATION_RS, "r", encoding="utf-8") as handle:
+        brain_materialization_source = handle.read()
     with open(RUNTIME_FLAGS_RS, "r", encoding="utf-8") as handle:
         runtime_flags_source = handle.read()
     with open(AUTOMATION_FORMATTING_RS, "r", encoding="utf-8") as handle:
@@ -1952,6 +1960,16 @@ def main() -> int:
         "pub(crate) use gateway_brain_runtime::*;",
         "gateway root must re-export brain runtime owner",
     )
+    assert_contains(
+        source,
+        "mod gateway_brain_materialization;",
+        "gateway root must declare brain materialization owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_brain_materialization::*;",
+        "gateway root must re-export brain materialization owner",
+    )
     assert_contains(source, "mod gateway_automation_tools;", "gateway root must declare automation tools owner")
     assert_contains(
         source,
@@ -2270,6 +2288,16 @@ def main() -> int:
         "pub(crate) fn brain_budgets_for_context_window(",
         "brain runtime owner must expose budget policy",
     )
+    for snippet in [
+        "pub(crate) fn brain_materialize_tasks(",
+        "pub(crate) fn link_brain_tasks_to_thread(",
+        "pub(crate) fn set_session_progress_total(",
+    ]:
+        assert_contains(
+            brain_materialization_source,
+            snippet,
+            "brain materialization owner must expose durable task materialization helpers",
+        )
 
     assert_ordered(
         main_body,
