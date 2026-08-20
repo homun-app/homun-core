@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (stream memory reuse mergeata).**
+> **Ultimo aggiornamento: 2026-08-20 (visible turn locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -233,6 +233,11 @@ Slice Runtime V2 recenti:
   (`ProactiveThreadPlan`), derivazione `thread_id`/workspace/source/channel/title
   e scope schedulato stabile escono dal monolite `main.rs`; persistenza visible
   turn, executor proattivo, automazioni e browser restano owner separati.
+- Estrazione locale `gateway_visible_turns`: `VisibleConversationTurn`,
+  `thread_turn_started_event`, retry SQLite transiente e
+  `start_visible_conversation_turn` escono dal monolite `main.rs`; broker,
+  stream draining, finalizzazione messaggio ed executor proattivo restano owner
+  separati.
 - Estrazione mergeata `gateway_shell_tasks`: executor shell read-only,
   wrapper comando consentito e shaping/redazione JSON output task escono dal
   monolite `main.rs`; execution runtime, task executor, browser e sandbox

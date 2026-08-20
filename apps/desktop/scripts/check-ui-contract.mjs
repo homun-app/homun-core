@@ -1274,8 +1274,8 @@ assertRepoContains("crates/desktop-gateway/src/gateway_proactivity_routes.rs", "
 assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn suggestions_list(", "proactivity routes must not live in gateway main");
 assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn suggestion_act(", "proactivity routes must not live in gateway main");
 assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn proactivity_review_now(", "proactivity routes must not live in gateway main");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "\"type\": \"thread.turn_started\"", "external turns must publish a visible-turn event after messages are persisted");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "start_visible_conversation_turn", "external channels and scheduled work must use the shared visible-turn helper");
+assertRepoContains("crates/desktop-gateway/src/gateway_visible_turns.rs", "\"type\": \"thread.turn_started\"", "external turns must publish a visible-turn event after messages are persisted");
+assertRepoContains("crates/desktop-gateway/src/gateway_visible_turns.rs", "pub(crate) fn start_visible_conversation_turn", "external channels and scheduled work must use the shared visible-turn helper");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "\"approval\"", "remote approval continuations must identify their visible-turn source");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "approval_continuation_visible_text", "remote approval continuations must create an explicit visible user bubble");
 assertNotContains("src/App.tsx", "runAgentTurnHeadless", "frontend must not expose a headless agent-turn path");
