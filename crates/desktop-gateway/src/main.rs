@@ -1523,46 +1523,6 @@ fn is_auto_confirmable(
         && confidence >= 0.8
 }
 
-/// system prompt so the model answers "why did we…" from memory WITHOUT having to call
-/// recall_memory itself — and doesn't claim "I have nothing in memory" when it does.
-/// A memory candidate for hybrid ranking: its rank in the lexical (FTS) and/or
-/// semantic (dense) passes, plus importance (0..1) and age. Either rank may be absent
-/// (matched by only one pass).
-#[cfg(test)]
-struct MemoryCandidate {
-    fts_rank: Option<usize>,
-    dense_rank: Option<usize>,
-    importance: f32,
-    age_days: f32,
-}
-
-/// Combined relevance score: RRF-fuse the two retrieval ranks (a memory strong in BOTH
-/// lexical AND semantic is rewarded, unlike a plain concat), then add MILD boosts for
-/// importance and recency so relevance still leads but a crucial/fresh memory edges out
-/// an equally-relevant trivial/stale one. Weights are tuned so importance/recency act as
-/// refinements (~one RRF position), not overrides.
-#[cfg(test)]
-fn hybrid_memory_score(c: &MemoryCandidate) -> f32 {
-    const K: f32 = 60.0;
-    let rrf = c.fts_rank.map(|r| 1.0 / (K + r as f32)).unwrap_or(0.0)
-        + c.dense_rank.map(|r| 1.0 / (K + r as f32)).unwrap_or(0.0);
-    let importance_boost = 0.012 * c.importance.clamp(0.0, 1.0);
-    let recency_boost = 0.008 * (-(c.age_days.max(0.0) / 30.0)).exp();
-    rrf + importance_boost + recency_boost
-}
-
-/// Age of a memory in days from its `created_at` (`unix:<secs>` or `<secs>`).
-#[cfg(test)]
-fn memory_age_days(created_at: &str, now_secs: i64) -> f32 {
-    let s = created_at.strip_prefix("unix:").unwrap_or(created_at);
-    let secs: i64 = s
-        .split('.')
-        .next()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(now_secs);
-    ((now_secs - secs).max(0) as f32) / 86_400.0
-}
-
 // `extract_vault_reveal_marker`, `append_vault_reveal_marker_if_missing`, and the
 // `VAULT_REVEAL_OPEN/CLOSE` consts moved to `engine::markers` (ADR 0024 inc 5e.3); imported below.
 

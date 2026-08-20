@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (proactive thread planning mergeata).**
+> **Ultimo aggiornamento: 2026-08-20 (memory UI access request mergeata; recall scoring locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#211 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #211 |
+| PR | #108-#116, #118-#219 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #219 |
 
 ## Dove siamo
 
@@ -263,6 +263,10 @@ Slice Runtime V2 recenti:
   `RecallOutcome` e payload recall UI costruito dagli stessi hit autorizzati
   escono dal monolite `main.rs`; learning inline, consolidamento, automation
   tombstone e subagent plan-step memory restano owner separati.
+- Estrazione locale `local_first_memory::recall`: `MemoryCandidate`,
+  `hybrid_memory_score` e `memory_age_days` non hanno piu' copie test-only in
+  `main.rs`; i test gateway importano lo scoring dal crate memoria, che resta
+  l'owner canonico del ranking recall.
 - Estrazione mergeata `gateway_memory_learning`: apprendimento post-turno via
   service/inline e consolidamento scope in tre fasi Send-safe escono dal
   monolite `main.rs`; recall tool, automation tombstone e subagent plan-step
@@ -914,9 +918,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#203: slice owner-level successive mergeate in `main`, fino al contesto
-  prompt bounded degli allegati in `attachments`; `main` verificato e
-  riallineato a #203.
+- #143-#219: slice owner-level successive mergeate in `main`, fino all'access
+  request dashboard memoria in `gateway_memory_ui_routes`; `main` verificato e
+  riallineato a #219.
 
 PR aperte:
 
@@ -924,7 +928,9 @@ PR aperte:
 
 Branch corrente:
 
-- `main`: worktree pulito; nessuna branch non-browser locale aperta.
+- `main`: pulito e riallineato a #219.
+- `fabio/memory-recall-scoring-owner`: slice locale per rimuovere duplicati
+  test-only dello scoring recall da `main.rs`.
 
 ## Debito residuo
 
@@ -957,7 +963,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #211; scegli la prossima slice non-browser owner-level.
+main aggiornato a #219; scegli la prossima slice non-browser owner-level.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
