@@ -17,6 +17,39 @@ fn automation_routes_owner_smoke() {
     );
 }
 
+pub(crate) fn tombstone_automation_memory_records(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    automation_id: &str,
+) -> Result<usize, String> {
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "automation".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "automation_removed".to_string(),
+    };
+    let mut deleted = 0;
+    for memory in facade
+        .list_memories_for_ui(user, workspace)
+        .map_err(|error| error.to_string())?
+    {
+        let matches_id = memory
+            .metadata
+            .get("automation_id")
+            .and_then(|value| value.as_str())
+            == Some(automation_id);
+        if !matches_id {
+            continue;
+        }
+        facade
+            .delete_memory(&lifecycle, &memory.reference, "automation deleted")
+            .map_err(|error| error.to_string())?;
+        deleted += 1;
+    }
+    Ok(deleted)
+}
+
 /// Creates a recurring `proactive_prompt` task from chat. Inserts it under the
 /// gateway scope so the executor worker (`run_next_task_once`) picks it up; the
 /// first occurrence fires one interval from now, then `next_recurrence` re-enqueues.

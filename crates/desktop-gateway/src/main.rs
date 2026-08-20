@@ -1523,39 +1523,6 @@ fn is_auto_confirmable(
         && confidence >= 0.8
 }
 
-fn tombstone_automation_memory_records(
-    facade: &MemoryFacade,
-    user: &MemoryUserId,
-    workspace: &MemoryWorkspaceId,
-    automation_id: &str,
-) -> Result<usize, String> {
-    let lifecycle = MemoryLifecycleRequest {
-        actor_id: "automation".to_string(),
-        user_id: user.clone(),
-        workspace_id: workspace.clone(),
-        purpose: "automation_removed".to_string(),
-    };
-    let mut deleted = 0;
-    for memory in facade
-        .list_memories_for_ui(user, workspace)
-        .map_err(|error| error.to_string())?
-    {
-        let matches_id = memory
-            .metadata
-            .get("automation_id")
-            .and_then(|value| value.as_str())
-            == Some(automation_id);
-        if !matches_id {
-            continue;
-        }
-        facade
-            .delete_memory(&lifecycle, &memory.reference, "automation deleted")
-            .map_err(|error| error.to_string())?;
-        deleted += 1;
-    }
-    Ok(deleted)
-}
-
 fn record_subagent_task_step_outcome(
     state: &AppState,
     task: &TaskRecord,

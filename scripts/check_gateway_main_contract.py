@@ -77,6 +77,9 @@ BRAIN_MATERIALIZATION_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_brain_materialization.rs"
 )
 RUNTIME_FLAGS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_runtime_flags.rs")
+AUTOMATION_ROUTES_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_automation_routes.rs"
+)
 AUTOMATION_FORMATTING_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_automation_formatting.rs"
 )
@@ -1276,6 +1279,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "async fn automation_update(": "automation update route must stay in gateway_automation_routes",
         "async fn automation_toggle(": "automation toggle route must stay in gateway_automation_routes",
         "async fn automation_delete(": "automation delete route must stay in gateway_automation_routes",
+        "fn tombstone_automation_memory_records(": "automation memory tombstone must stay in gateway_automation_routes",
         "fn list_scheduled_tasks_tool_schema(": "scheduled task tool schemas must stay in gateway_automation_routes",
         "fn provenance_key_fragment(": "memory graph key fragments must stay in gateway_memory_graph",
         "fn upsert_memory_relation(": "memory graph relation upsert must stay in gateway_memory_graph",
@@ -1406,6 +1410,8 @@ def main() -> int:
         brain_materialization_source = handle.read()
     with open(RUNTIME_FLAGS_RS, "r", encoding="utf-8") as handle:
         runtime_flags_source = handle.read()
+    with open(AUTOMATION_ROUTES_RS, "r", encoding="utf-8") as handle:
+        automation_routes_source = handle.read()
     with open(AUTOMATION_FORMATTING_RS, "r", encoding="utf-8") as handle:
         automation_formatting_source = handle.read()
     with open(PROACTIVE_THREADS_RS, "r", encoding="utf-8") as handle:
@@ -2144,6 +2150,26 @@ def main() -> int:
         "mod gateway_automation_routes;",
         "gateway root must declare automation route owner",
     )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_automation_routes::*;",
+        "gateway root must re-export automation route owner",
+    )
+    assert_contains(
+        automation_routes_source,
+        "pub(crate) fn tombstone_automation_memory_records(",
+        "automation routes owner must expose automation memory tombstone helper",
+    )
+    for snippet in [
+        "fn learn_via_service_or_inline(",
+        "async fn consolidate_scope(",
+        "fn record_subagent_task_step_outcome(",
+    ]:
+        assert_not_contains(
+            automation_routes_source,
+            snippet,
+            "automation routes owner must not absorb adjacent memory surfaces",
+        )
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_artifacts;", "gateway root must declare artifact file owner")
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
