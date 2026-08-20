@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (memory UI access request mergeata; recall scoring locale).**
+> **Ultimo aggiornamento: 2026-08-20 (recall scoring mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#219 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #219 |
+| PR | #108-#116, #118-#220 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #220 |
 
 ## Dove siamo
 
@@ -263,7 +263,7 @@ Slice Runtime V2 recenti:
   `RecallOutcome` e payload recall UI costruito dagli stessi hit autorizzati
   escono dal monolite `main.rs`; learning inline, consolidamento, automation
   tombstone e subagent plan-step memory restano owner separati.
-- Estrazione locale `local_first_memory::recall`: `MemoryCandidate`,
+- Estrazione mergeata `local_first_memory::recall`: `MemoryCandidate`,
   `hybrid_memory_score` e `memory_age_days` non hanno piu' copie test-only in
   `main.rs`; i test gateway importano lo scoring dal crate memoria, che resta
   l'owner canonico del ranking recall.
