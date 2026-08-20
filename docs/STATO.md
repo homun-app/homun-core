@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (stream memory reuse locale).**
+> **Ultimo aggiornamento: 2026-08-20 (stream memory reuse mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#220 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #220 |
+| PR | #108-#116, #118-#221 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #221 |
 
 ## Dove siamo
 
@@ -267,7 +267,7 @@ Slice Runtime V2 recenti:
   `hybrid_memory_score` e `memory_age_days` non hanno piu' copie test-only in
   `main.rs`; i test gateway importano lo scoring dal crate memoria, che resta
   l'owner canonico del ranking recall.
-- Estrazione locale `gateway_memory_reuse`: `StreamMemoryReuseCollector` e
+- Estrazione mergeata `gateway_memory_reuse`: `StreamMemoryReuseCollector` e
   `memory_reuse_envelope_from_read_set` escono dal monolite `main.rs`; l'owner
   attesta recall/actionable/approval stream parts e produce il
   `MemoryReuseEnvelope`, mentre finalizzazione messaggio, persistence HITL e
