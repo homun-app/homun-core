@@ -29,6 +29,7 @@ mod gateway_actionable_source;
 mod gateway_agent_stream_drain;
 mod gateway_agent_stream_events;
 mod gateway_agent_stream_persistence;
+mod gateway_agent_turn_outcomes;
 mod gateway_agent_wake;
 mod gateway_artifact_memory;
 mod gateway_artifacts;
@@ -3284,7 +3285,11 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             .checkpoint_input
             .as_ref()
             .and_then(|_| ls.messages.last().cloned());
-        apply_agent_recovery_checkpoint(&mut ls, recovery_checkpoint, checkpoint_input);
+        gateway_agent_turn_outcomes::apply_agent_recovery_checkpoint(
+            &mut ls,
+            recovery_checkpoint,
+            checkpoint_input,
+        );
         // 5.D1c.1: resolve the loop's turn-constant config ONCE (env-stable for the turn) so the moved
         // loop never reads env. Behavior-preserving — same values the inline getters returned.
         let cfg = local_first_engine::TurnConfig {
@@ -3509,30 +3514,6 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         .header("content-type", "application/x-ndjson")
         .body(body)
         .expect("valid streaming response"))
-}
-
-fn apply_agent_recovery_checkpoint(
-    state: &mut local_first_engine::LoopState,
-    checkpoint: Option<local_first_engine::LoopCheckpoint>,
-    new_input: Option<serde_json::Value>,
-) {
-    if let Some(checkpoint) = checkpoint {
-        checkpoint.apply_to(state);
-        if let Some(new_input) = new_input {
-            state.messages.push(new_input);
-        }
-    }
-}
-
-/// Build the terminal outcome for an image rejection that has already been surfaced with `Done`.
-/// Keeping this pure makes the stream event and outcome delivery state move together.
-fn delivered_image_rejection_outcome(
-    mut outcome: local_first_engine::TurnOutcome,
-    rejection: String,
-) -> local_first_engine::TurnOutcome {
-    outcome.memory_answer = rejection;
-    outcome.stop = local_first_engine::TurnStop::Completed;
-    outcome
 }
 
 // ADR 0024 inc 5 (5.D1a): the agent turn's round loop + forced synthesis + post-turn
@@ -3782,7 +3763,7 @@ async fn run_agent_rounds(
             },
         )
         .await;
-        return delivered_image_rejection_outcome(outcome, rejection);
+        return gateway_agent_turn_outcomes::delivered_image_rejection_outcome(outcome, rejection);
     };
 
     let readers = vision_model_candidates();
@@ -3797,7 +3778,7 @@ async fn run_agent_rounds(
             },
         )
         .await;
-        return delivered_image_rejection_outcome(outcome, rejection);
+        return gateway_agent_turn_outcomes::delivered_image_rejection_outcome(outcome, rejection);
     }
 
     // Recover: describe the images the manager was refused, put the text where they were, run again.

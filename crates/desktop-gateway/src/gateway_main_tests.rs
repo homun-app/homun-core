@@ -177,7 +177,7 @@ async fn project_command_timeout_kills_descendant_processes() {
 
 #[test]
 fn delivered_image_rejection_marks_outcome_delivered() {
-    let outcome = super::delivered_image_rejection_outcome(
+    let outcome = super::gateway_agent_turn_outcomes::delivered_image_rejection_outcome(
         local_first_engine::TurnOutcome::default(),
         "The selected model cannot inspect this image.".to_string(),
     );
@@ -21349,7 +21349,7 @@ fn successor_checkpoint_restore_keeps_the_new_wake_input() {
         }),
     ];
 
-    super::apply_agent_recovery_checkpoint(
+    super::gateway_agent_turn_outcomes::apply_agent_recovery_checkpoint(
         &mut successor,
         Some(checkpoint),
         Some(serde_json::json!({
@@ -21375,7 +21375,11 @@ fn same_attempt_checkpoint_restore_does_not_duplicate_the_original_input() {
     let checkpoint = local_first_engine::LoopCheckpoint::from_state(1, &prior);
 
     let mut recovered = prior.clone();
-    super::apply_agent_recovery_checkpoint(&mut recovered, Some(checkpoint), None);
+    super::gateway_agent_turn_outcomes::apply_agent_recovery_checkpoint(
+        &mut recovered,
+        Some(checkpoint),
+        None,
+    );
 
     assert_eq!(recovered.messages, prior.messages);
 }

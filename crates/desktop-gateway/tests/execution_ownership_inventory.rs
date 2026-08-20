@@ -538,6 +538,45 @@ fn subagent_execution_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_turn_outcomes_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let agent_turn_outcomes_path = root.join("src/gateway_agent_turn_outcomes.rs");
+    let agent_turn_outcomes = if agent_turn_outcomes_path.exists() {
+        production_source(&agent_turn_outcomes_path)
+    } else {
+        String::new()
+    };
+
+    for pattern in [
+        "fn apply_agent_recovery_checkpoint(",
+        "fn delivered_image_rejection_outcome(",
+    ] {
+        assert!(
+            agent_turn_outcomes.contains(pattern),
+            "agent turn outcome owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain agent turn outcome surface {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "async fn run_agent_turn_into_message(",
+        "async fn run_agent_turn_into_message_with_fanout(",
+        "fn execute_capability_browser_task(",
+    ] {
+        assert!(
+            !agent_turn_outcomes.contains(adjacent),
+            "agent turn outcome owner must not absorb adjacent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn hitl_wait_persistence_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

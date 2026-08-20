@@ -80,6 +80,9 @@ AGENT_STREAM_PERSISTENCE_RS = os.path.join(
 AGENT_STREAM_DRAIN_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_stream_drain.rs"
 )
+AGENT_TURN_OUTCOMES_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_outcomes.rs"
+)
 AGENT_WAKE_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_agent_wake.rs")
 HITL_WAITS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_hitl_waits.rs")
 PROMPT_PACKETS_RS = os.path.join(
@@ -219,6 +222,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn task_execution_outcome_from_executor_result(": "executor result presentation mapping must stay in gateway_capability_execution",
         "fn completed_executor_outcome(": "executor completion presentation mapping must stay in gateway_capability_execution",
         "fn execute_subagent_task(": "subagent task execution must stay in gateway_subagent_execution",
+        "fn apply_agent_recovery_checkpoint(": "agent turn checkpoint outcomes must stay in gateway_agent_turn_outcomes",
+        "fn delivered_image_rejection_outcome(": "agent turn image rejection outcome must stay in gateway_agent_turn_outcomes",
         "fn persist_hitl_wait_from_outcome(": "typed HITL wait persistence must stay in gateway_hitl_waits",
         "fn persist_hitl_wait_payload(": "HITL wait payload persistence must stay in gateway_hitl_waits",
         "fn artifact_quality_summary(": "artifact quality prompt context must stay in gateway_memory_prompt_context",
@@ -1493,6 +1498,8 @@ def main() -> int:
         agent_stream_persistence_source = handle.read()
     with open(AGENT_STREAM_DRAIN_RS, "r", encoding="utf-8") as handle:
         agent_stream_drain_source = handle.read()
+    with open(AGENT_TURN_OUTCOMES_RS, "r", encoding="utf-8") as handle:
+        agent_turn_outcomes_source = handle.read()
     with open(AGENT_WAKE_RS, "r", encoding="utf-8") as handle:
         agent_wake_source = handle.read()
     with open(HITL_WAITS_RS, "r", encoding="utf-8") as handle:
@@ -2366,6 +2373,32 @@ def main() -> int:
             subagent_execution_source,
             snippet,
             "subagent execution owner must not absorb adjacent execution surfaces",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_turn_outcomes;",
+        "gateway root must declare agent turn outcome owner",
+    )
+    for snippet in [
+        "pub(crate) fn apply_agent_recovery_checkpoint(",
+        "pub(crate) fn delivered_image_rejection_outcome(",
+    ]:
+        assert_contains(
+            agent_turn_outcomes_source,
+            snippet,
+            "agent turn outcome owner must expose pure outcome helpers",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "async fn run_agent_turn_into_message(",
+        "async fn run_agent_turn_into_message_with_fanout(",
+        "fn execute_capability_browser_task(",
+    ]:
+        assert_not_contains(
+            agent_turn_outcomes_source,
+            snippet,
+            "agent turn outcome owner must not absorb loop, stream or browser execution",
         )
     assert_contains(source, "mod gateway_model_routes;", "gateway root must declare model route owner")
     assert_contains(source, "mod gateway_model_routing;", "gateway root must declare model routing owner")
