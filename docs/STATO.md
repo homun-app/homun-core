@@ -370,6 +370,10 @@ Slice Runtime V2 recenti:
 - Estrazione locale `gateway_usage_routes`: route usage ledger, snapshot
   account provider, policy budget manuale e model-usage suggestions escono dal
   monolite `main.rs`; il tempo condiviso passa da `gateway_time`.
+- Estrazione locale `gateway_turn_trace`: bootstrap del trace leggibile
+  `turn_received`, opt-out e fallback no-log-dir escono dal monolite
+  `main.rs`; il trace resta pura osservabilita' e non possiede loop agente,
+  budget o avanzamento piano.
 - Estrazione locale `gateway_update_routes`: route update/redeploy webhook e
   DTO di stato escono dal monolite `main.rs`; startup, packaging e CI installer
   restano fuori owner.

@@ -90,6 +90,7 @@ AGENT_TURN_OUTCOMES_RS = os.path.join(
 )
 AGENT_WAKE_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_agent_wake.rs")
 HITL_WAITS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_hitl_waits.rs")
+TURN_TRACE_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_turn_trace.rs")
 PROMPT_PACKETS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_prompt_packets.rs"
 )
@@ -1068,6 +1069,10 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn plan_autoadvance_from_evidence_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn memory_service_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn verbose_debug(": "runtime environment flags must stay in gateway_runtime_flags",
+        "TurnEvent::TurnReceived": "turn trace entry recording must stay in gateway_turn_trace",
+        "TurnTrace::new(": "turn trace creation must stay in gateway_turn_trace",
+        "struct TurnTraceEntry": "turn trace entry DTO must stay in gateway_turn_trace",
+        "fn begin_turn_trace(": "turn trace entry owner must stay in gateway_turn_trace",
         "struct RuntimeSettings": "runtime settings DTO must stay in gateway_runtime_settings",
         "fn merge_runtime_settings(": "runtime settings merge must stay in gateway_runtime_settings",
         "async fn get_runtime_settings(": "runtime settings read route must stay in gateway_runtime_settings",
@@ -1525,6 +1530,8 @@ def main() -> int:
         agent_wake_source = handle.read()
     with open(HITL_WAITS_RS, "r", encoding="utf-8") as handle:
         hitl_waits_source = handle.read()
+    with open(TURN_TRACE_RS, "r", encoding="utf-8") as handle:
+        turn_trace_source = handle.read()
     with open(PROMPT_PACKETS_RS, "r", encoding="utf-8") as handle:
         prompt_packets_source = handle.read()
     with open(BRAIN_RUNTIME_RS, "r", encoding="utf-8") as handle:
@@ -2561,6 +2568,12 @@ def main() -> int:
         "mod gateway_remote_approval_execution;",
         "gateway root must declare remote approval execution owner",
     )
+    assert_contains(source, "mod gateway_turn_trace;", "gateway root must declare turn trace owner")
+    assert_contains(
+        source,
+        "pub(crate) use gateway_turn_trace::*;",
+        "gateway root must re-export turn trace owner",
+    )
     assert_contains(source, "mod gateway_connector_errors;", "gateway root must declare connector error owner")
     assert_contains(source, "mod gateway_image_generation;", "gateway root must declare image generation owner")
     assert_contains(
@@ -2791,6 +2804,16 @@ def main() -> int:
         local_authorization_routes_source,
         "pub(crate) async fn fs_authorize(",
         "local authorization route owner must expose filesystem authorization route",
+    )
+    assert_contains(
+        turn_trace_source,
+        "pub(crate) fn begin_turn_trace(",
+        "turn trace owner must expose entry bootstrap",
+    )
+    assert_contains(
+        turn_trace_source,
+        "TurnEvent::TurnReceived",
+        "turn trace owner must record the setup-hang sentinel",
     )
     assert_contains(
         composio_routes_source,
