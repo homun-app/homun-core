@@ -546,6 +546,7 @@ use gateway_project_search_tools::{
 };
 use gateway_prompt_instructions::{
     booking_assumption_choice_instruction, browser_open_research_discovery_instruction,
+    operational_plan_instruction,
 };
 pub(crate) use gateway_prompt_packets::*;
 #[cfg(test)]
@@ -2357,35 +2358,9 @@ is required to reveal or edit it. If recall_memory returns a `reveal_card:` line
 marker and renders the PIN unlock card. Do NOT send or forward raw Vault secret values through \
 generic external channels/tools such as send_message. The configured Telegram authorization channel may \
 receive Vault/payment summaries or approval prompts, but raw-value reveal stays behind the local PIN \
-unlock card unless a dedicated approved reveal flow exists. \
-OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing \
-in the SAME turn. The plan is a live projection of the canonical objective, not a separate artifact \
-and not an approval gate. Replace or revise it autonomously when the new steps are only a better way \
-to reach the SAME objective. Ask the user before continuing only when the validated semantic decision \
-says the request changes the objective, expands its scope, or introduces new effects. Use update_plan \
-to create or revise the operational plan; do not write a free-form numbered plan in prose. \
-Use update_plan to update the step status (doing→done), shown in the \
-\"Plan\" panel. To move a step's status (e.g. doing→done) call step_advance with its id (shown in \
-parentheses after the title in the plan card) and the new status — this updates that ONE step \
-WITHOUT re-sending the plan, so steps never duplicate; use update_plan only to CREATE or revise \
-the plan. GOAL: when CREATING the plan you MUST set the top-level `goal` field to the user's \
-objective in ONE sentence, written in the USER'S language (use null when you are only updating \
-step statuses of an existing plan). The plan is ALREADY shown to the user as a CARD: do NOT \
-repeat it in the reply text too — no list or table of the steps in prose (at most one \
-line of context). For single-step requests no plan is needed. \
-STEP-AT-A-TIME EXECUTION: work the plan ONE step at a time — do, then VERIFY that step's \
-result (file written, search returned usable results, build/render succeeded), and only \
-THEN mark it `done` with update_plan before starting the next. Give each step a \
-`done_criterion` (the concrete, checkable proof it's finished): a step you mark done is \
-INDEPENDENTLY verified against its evidence before it counts — if it isn't actually complete \
-you'll be told and must keep working on it. Your working budget RESETS every time a step is \
-verified complete, so a long task (e.g. a 10-slide deck, a deep research) can run as long as \
-it KEEPS CLOSING STEPS — never rush or skip verification to save rounds, and never mark a \
-step done before its result actually exists. RESUMING: if the conversation ALREADY shows an \
-in-progress plan (some steps done, others not), CONTINUE it — re-emit the plan with update_plan \
-keeping the completed steps as done, and proceed from the first not-done step; do NOT restart \
-from scratch or re-propose."
+unlock card unless a dedicated approved reveal flow exists."
     );
+    let system = format!("{system}\n\n{}", operational_plan_instruction());
     let system = if memory_recall_allowed {
         system
     } else {

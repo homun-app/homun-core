@@ -1281,7 +1281,7 @@ assertRepoContains("crates/desktop-gateway/src/main.rs", "approval_continuation_
 assertNotContains("src/App.tsx", "runAgentTurnHeadless", "frontend must not expose a headless agent-turn path");
 assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn run_agent_turn(", "backend must not keep a headless agent-turn helper that can bypass visible placeholders");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "run_agent_turn_into_message", "backend agent turns must stream into persisted assistant messages");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing", "chat loop must maintain the canonical plan through update_plan and continue in the same turn");
+assertRepoContains("crates/desktop-gateway/src/gateway_prompt_instructions.rs", "OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing", "prompt instruction owner must maintain the canonical plan through update_plan and continue in the same turn");
 assertNotContains("src/App.tsx", "pendingEventThreadIdsRef", "background event refresh must not depend on a navigation race window");
 assertContains("src/App.tsx", "refreshThreadInBackground", "background events must refresh their own durable cache");
 assertContains("src/lib/useAppEventSubscription.ts", "event.type === \"thread.turn_started\"", "desktop client must handle visible turn start events");
