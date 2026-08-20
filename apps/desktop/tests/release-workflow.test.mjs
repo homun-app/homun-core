@@ -31,6 +31,15 @@ test("every platform publishes a deterministic checksum manifest", async () => {
   assert.match(workflow, /dist-installers\/SHA256SUMS-\*\.txt/);
 });
 
+test("package preparation has a bounded CI timeout", async () => {
+  const workflow = await readFile(workflowPath, "utf8");
+
+  assert.match(
+    workflow,
+    /- name: Prepare resources \(vite build \+ gateway release binary\)\n\s+working-directory: apps\/desktop\n\s+timeout-minutes: \d+\n\s+run: npm run package:prepare/,
+  );
+});
+
 test("CI and packaging use the same supported Node runtime", async () => {
   const workflows = await Promise.all([
     readFile(workflowPath, "utf8"),

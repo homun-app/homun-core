@@ -131,6 +131,7 @@ jobs:
 
       - name: Prepare resources (vite build + gateway release binary)
         working-directory: apps/desktop
+        timeout-minutes: 45
         run: npm run package:prepare
 
       - name: Verify prepared license resources
