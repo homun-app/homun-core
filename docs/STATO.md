@@ -302,7 +302,7 @@ Slice Runtime V2 recenti:
   `GatewayBrainMemory` e budget orchestrator scalati sul context window escono
   dal monolite `main.rs`; materializzazione durable dei task, capability facade,
   routing workflow e loop agente restano owner separati.
-- Estrazione locale `gateway_brain_materialization`: materializzazione durable
+- Estrazione mergeata `gateway_brain_materialization`: materializzazione durable
   dei task via Orchestrator Brain, policy context read/draft, provider cached,
   linking task->thread e progress totale della sessione aggregata escono dal
   monolite `main.rs`; config Brain, chat task route, worker executor, browser e
