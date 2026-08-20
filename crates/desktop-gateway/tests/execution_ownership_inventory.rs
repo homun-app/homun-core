@@ -243,6 +243,41 @@ fn visible_turn_start_has_one_gateway_owner() {
 }
 
 #[test]
+fn thread_model_context_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let thread_context = production_source(&root.join("src/gateway_thread_model_context.rs"));
+
+    for pattern in [
+        "fn context_message_for_model(",
+        "fn thread_context_for_model(",
+        "fn agent_turn_context(",
+    ] {
+        assert!(
+            thread_context.contains(pattern),
+            "thread model context owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain thread model context surface {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "fn finalize_streamed_assistant_message(",
+        "fn start_visible_conversation_turn(",
+        "async fn drain_agent_stream_into_message(",
+        "fn recall_memory(",
+        "async fn run_agent_rounds(",
+    ] {
+        assert!(
+            !thread_context.contains(adjacent),
+            "thread model context owner must not absorb adjacent chat/runtime surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn task_executor_surface_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

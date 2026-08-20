@@ -67,6 +67,9 @@ RUNTIME_PLAN_STATE_RS = os.path.join(
 THREAD_EPISODES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_thread_episodes.rs"
 )
+THREAD_MODEL_CONTEXT_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_thread_model_context.rs"
+)
 PROMPT_PACKETS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_prompt_packets.rs"
 )
@@ -1189,6 +1192,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn thread_turn_started_event(": "visible turn app event must stay in gateway_visible_turns",
         "fn is_transient_store_error(": "visible turn retry classification must stay in gateway_visible_turns",
         "fn start_visible_conversation_turn(": "visible turn persistence must stay in gateway_visible_turns",
+        "fn context_message_for_model(": "thread model context shaping must stay in gateway_thread_model_context",
+        "fn thread_context_for_model(": "thread model context shaping must stay in gateway_thread_model_context",
+        "fn agent_turn_context(": "thread model context shaping must stay in gateway_thread_model_context",
         "fn cancel_chat_turn_and_finalize_bubble(": "turn broker cancel/finalize helper must stay in gateway_turn_broker",
         "async fn cancel_turn(": "turn broker cancel route must stay in gateway_turn_broker",
         "struct TurnSinceQuery ": "turn broker cursor query must stay in gateway_turn_broker",
@@ -1425,6 +1431,8 @@ def main() -> int:
         runtime_plan_state_source = handle.read()
     with open(THREAD_EPISODES_RS, "r", encoding="utf-8") as handle:
         thread_episodes_source = handle.read()
+    with open(THREAD_MODEL_CONTEXT_RS, "r", encoding="utf-8") as handle:
+        thread_model_context_source = handle.read()
     with open(PROMPT_PACKETS_RS, "r", encoding="utf-8") as handle:
         prompt_packets_source = handle.read()
     with open(BRAIN_RUNTIME_RS, "r", encoding="utf-8") as handle:
@@ -1831,6 +1839,38 @@ def main() -> int:
             visible_turns_source,
             snippet,
             "visible turn owner must not absorb adjacent turn/stream executor surfaces",
+        )
+    assert_contains(
+        source,
+        "mod gateway_thread_model_context;",
+        "gateway root must declare thread model context owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_thread_model_context::*;",
+        "gateway root must re-export thread model context owner",
+    )
+    for snippet in [
+        "pub(crate) fn context_message_for_model(",
+        "pub(crate) fn thread_context_for_model(",
+        "pub(crate) fn agent_turn_context(",
+    ]:
+        assert_contains(
+            thread_model_context_source,
+            snippet,
+            "thread model context owner must expose context shaping helpers",
+        )
+    for snippet in [
+        "fn finalize_streamed_assistant_message(",
+        "fn start_visible_conversation_turn(",
+        "async fn drain_agent_stream_into_message(",
+        "fn recall_memory(",
+        "async fn run_agent_rounds(",
+    ]:
+        assert_not_contains(
+            thread_model_context_source,
+            snippet,
+            "thread model context owner must not absorb adjacent chat/runtime surfaces",
         )
     assert_contains(source, "mod gateway_task_executor;", "gateway root must declare task executor owner")
     assert_contains(
