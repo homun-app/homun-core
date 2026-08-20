@@ -91,6 +91,9 @@ AGENT_TURN_OUTCOMES_RS = os.path.join(
 AGENT_WAKE_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_agent_wake.rs")
 HITL_WAITS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_hitl_waits.rs")
 TURN_TRACE_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_turn_trace.rs")
+USAGE_RUNTIME_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_usage_runtime.rs"
+)
 PROMPT_PACKETS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_prompt_packets.rs"
 )
@@ -1073,6 +1076,10 @@ def forbidden_root_snippets() -> dict[str, str]:
         "TurnTrace::new(": "turn trace creation must stay in gateway_turn_trace",
         "struct TurnTraceEntry": "turn trace entry DTO must stay in gateway_turn_trace",
         "fn begin_turn_trace(": "turn trace entry owner must stay in gateway_turn_trace",
+        "BufferedUsageRecorder::start(": "usage recorder bootstrap must stay in gateway_usage_runtime",
+        "CostEnrichingUsageRecorder::new(": "usage pricing recorder bootstrap must stay in gateway_usage_runtime",
+        ".abort_orphaned_attempts(": "usage orphan cleanup must stay in gateway_usage_runtime",
+        ".rebuild_daily_rollups(": "usage rollup rebuild must stay in gateway_usage_runtime",
         "struct RuntimeSettings": "runtime settings DTO must stay in gateway_runtime_settings",
         "fn merge_runtime_settings(": "runtime settings merge must stay in gateway_runtime_settings",
         "async fn get_runtime_settings(": "runtime settings read route must stay in gateway_runtime_settings",
@@ -1532,6 +1539,8 @@ def main() -> int:
         hitl_waits_source = handle.read()
     with open(TURN_TRACE_RS, "r", encoding="utf-8") as handle:
         turn_trace_source = handle.read()
+    with open(USAGE_RUNTIME_RS, "r", encoding="utf-8") as handle:
+        usage_runtime_source = handle.read()
     with open(PROMPT_PACKETS_RS, "r", encoding="utf-8") as handle:
         prompt_packets_source = handle.read()
     with open(BRAIN_RUNTIME_RS, "r", encoding="utf-8") as handle:
@@ -1811,6 +1820,7 @@ def main() -> int:
     assert_contains(source, "mod gateway_thread_files;", "gateway root must declare thread file owner")
     assert_contains(source, "mod gateway_transcription;", "gateway root must declare transcription owner")
     assert_contains(source, "mod gateway_usage_routes;", "gateway root must declare usage route owner")
+    assert_contains(source, "mod gateway_usage_runtime;", "gateway root must declare usage runtime owner")
     assert_contains(source, "mod gateway_tags;", "gateway root must declare tag route owner")
     assert_contains(source, "mod gateway_update_routes;", "gateway root must declare update route owner")
     assert_contains(source, "mod gateway_skill_routes;", "gateway root must declare skill route owner")
@@ -2814,6 +2824,21 @@ def main() -> int:
         turn_trace_source,
         "TurnEvent::TurnReceived",
         "turn trace owner must record the setup-hang sentinel",
+    )
+    assert_contains(
+        usage_runtime_source,
+        "pub(crate) fn open_gateway_usage_runtime(",
+        "usage runtime owner must expose startup bundle construction",
+    )
+    assert_contains(
+        usage_runtime_source,
+        "pub(crate) fn install_gateway_usage_recorder(",
+        "usage runtime owner must expose process recorder installation",
+    )
+    assert_contains(
+        usage_runtime_source,
+        "BufferedUsageRecorder::start(",
+        "usage runtime owner must own buffered recorder bootstrap",
     )
     assert_contains(
         composio_routes_source,

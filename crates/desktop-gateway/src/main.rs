@@ -160,6 +160,7 @@ mod gateway_turn_recovery;
 mod gateway_turn_trace;
 mod gateway_update_routes;
 mod gateway_usage_routes;
+mod gateway_usage_runtime;
 mod gateway_user_preferences;
 mod gateway_vault_key;
 mod gateway_vault_routes;
@@ -602,6 +603,7 @@ pub(crate) use gateway_usage_routes::{
     get_usage_processes, get_usage_provider_policy, get_usage_providers, get_usage_suggestions,
     get_usage_summary, refresh_usage_provider, set_usage_provider_policy,
 };
+use gateway_usage_runtime::{install_gateway_usage_recorder, open_gateway_usage_runtime};
 #[cfg(test)]
 pub(crate) use gateway_workspaces::merge_workspace_policy;
 pub(crate) use gateway_workspaces::{
@@ -1418,32 +1420,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // hand the same Arc to AppState. Clones below are cheap Arc clones.
     let ws_registry_arc = std::sync::Arc::new(ws_gateway::WsRegistry::new());
     let _ = ws_registry().set(ws_registry_arc.clone());
-    let usage_path = gateway_database_path()?;
-    let usage_store = usage_store::UsageStore::open(&usage_path).map_err(std::io::Error::other)?;
-    usage_store
-        .abort_orphaned_attempts(i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX))
-        .map_err(std::io::Error::other)?;
-    usage_store
-        .rebuild_daily_rollups()
-        .map_err(std::io::Error::other)?;
-    let buffered_usage_recorder: Arc<dyn local_first_inference_usage::UsageRecorder> = Arc::new(
-        usage_store::BufferedUsageRecorder::start(&usage_path, 4_096)
-            .map_err(std::io::Error::other)?,
-    );
-    let usage_pricing = Arc::new(std::sync::RwLock::new(build_usage_pricing_snapshot(
-        &usage_store,
-    )));
-    let usage_recorder: Arc<dyn local_first_inference_usage::UsageRecorder> =
-        Arc::new(usage_pricing::CostEnrichingUsageRecorder::new(
-            buffered_usage_recorder,
-            usage_pricing.clone(),
-        ));
-    let _ = usage_recorder_registry().set(usage_recorder.clone());
+    let usage_runtime = open_gateway_usage_runtime(gateway_database_path()?)?;
+    install_gateway_usage_recorder(usage_runtime.recorder.clone());
     let mut state = AppState {
         http: gateway_http_client::build_gateway_http_client(),
-        usage_store: Arc::new(Mutex::new(usage_store)),
-        usage_recorder,
-        usage_pricing,
+        usage_store: usage_runtime.store,
+        usage_recorder: usage_runtime.recorder,
+        usage_pricing: usage_runtime.pricing,
         chat_store: Arc::new(Mutex::new(ChatStore::open(gateway_database_path()?)?)),
         task_store: Arc::new(Mutex::new(TaskStore::open(gateway_task_database_path()?)?)),
         computer_store: Arc::new(Mutex::new(LocalComputerSessionStore::open(

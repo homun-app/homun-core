@@ -620,10 +620,20 @@ assertRepoContains(
   "begin_turn_trace",
   "Gateway turn trace entry must have a dedicated owner",
 );
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_usage_runtime.rs",
+  "open_gateway_usage_runtime",
+  "Gateway usage runtime bootstrap must have a dedicated owner",
+);
 assertRepoNotContains(
   "crates/desktop-gateway/src/main.rs",
   "TurnEvent::TurnReceived",
   "Gateway main must not record the turn-trace entry sentinel directly",
+);
+assertRepoNotContains(
+  "crates/desktop-gateway/src/main.rs",
+  "BufferedUsageRecorder::start",
+  "Gateway main must not bootstrap the usage recorder directly",
 );
 assertRepoContains(
   "crates/desktop-gateway/src/gateway_prompt_instructions.rs",
