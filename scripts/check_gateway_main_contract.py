@@ -70,6 +70,9 @@ THREAD_EPISODES_RS = os.path.join(
 THREAD_MODEL_CONTEXT_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_thread_model_context.rs"
 )
+AGENT_STREAM_EVENTS_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_stream_events.rs"
+)
 AGENT_WAKE_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_agent_wake.rs")
 PROMPT_PACKETS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_prompt_packets.rs"
@@ -1196,6 +1199,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn context_message_for_model(": "thread model context shaping must stay in gateway_thread_model_context",
         "fn thread_context_for_model(": "thread model context shaping must stay in gateway_thread_model_context",
         "fn agent_turn_context(": "thread model context shaping must stay in gateway_thread_model_context",
+        "fn apply_agent_stream_line(": "agent stream parser must stay in gateway_agent_stream_events",
+        "fn turn_event_from_stream_value(": "agent stream event mapping must stay in gateway_agent_stream_events",
+        "fn redacted_user_text_from_stream_line(": "agent stream redaction parser must stay in gateway_agent_stream_events",
         "fn wake_for_agent_stop(": "agent wake mapping must stay in gateway_agent_wake",
         "fn cancel_chat_turn_and_finalize_bubble(": "turn broker cancel/finalize helper must stay in gateway_turn_broker",
         "async fn cancel_turn(": "turn broker cancel route must stay in gateway_turn_broker",
@@ -1435,6 +1441,8 @@ def main() -> int:
         thread_episodes_source = handle.read()
     with open(THREAD_MODEL_CONTEXT_RS, "r", encoding="utf-8") as handle:
         thread_model_context_source = handle.read()
+    with open(AGENT_STREAM_EVENTS_RS, "r", encoding="utf-8") as handle:
+        agent_stream_events_source = handle.read()
     with open(AGENT_WAKE_RS, "r", encoding="utf-8") as handle:
         agent_wake_source = handle.read()
     with open(PROMPT_PACKETS_RS, "r", encoding="utf-8") as handle:
@@ -1875,6 +1883,41 @@ def main() -> int:
             thread_model_context_source,
             snippet,
             "thread model context owner must not absorb adjacent chat/runtime surfaces",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_stream_events;",
+        "gateway root must declare agent stream events owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_stream_events::*;",
+        "gateway root must re-export agent stream events owner",
+    )
+    for snippet in [
+        "pub(crate) fn apply_agent_stream_line(",
+        "pub(crate) fn turn_event_from_stream_value(",
+        "pub(crate) fn redacted_user_text_from_stream_line(",
+    ]:
+        assert_contains(
+            agent_stream_events_source,
+            snippet,
+            "agent stream events owner must expose pure stream parsing/mapping helpers",
+        )
+    for snippet in [
+        "async fn drain_agent_stream_into_message(",
+        "fn finalize_streamed_assistant_message(",
+        "fn persist_hitl_wait_from_outcome(",
+        "fn persist_hitl_wait_payload(",
+        "fn persist_recall_event_part(",
+        "fn persist_redacted_user_text_from_stream_line(",
+        "fn fanout_turn_event(",
+        "fn thread_browser_session_is_live(",
+    ]:
+        assert_not_contains(
+            agent_stream_events_source,
+            snippet,
+            "agent stream events owner must not absorb adjacent drain/persistence/browser surfaces",
         )
     assert_contains(source, "mod gateway_agent_wake;", "gateway root must declare agent wake owner")
     assert_contains(
