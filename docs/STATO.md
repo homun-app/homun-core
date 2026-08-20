@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (state access owner mergeata).**
+> **Ultimo aggiornamento: 2026-08-20 (inference inventory root mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#231 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #231 |
+| PR | #108-#116, #118-#233 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #233 |
 
 ## Dove siamo
 
@@ -237,6 +237,12 @@ Slice Runtime V2 recenti:
   (`ProactiveThreadPlan`), derivazione `thread_id`/workspace/source/channel/title
   e scope schedulato stabile escono dal monolite `main.rs`; persistenza visible
   turn, executor proattivo, automazioni e browser restano owner separati.
+- Estrazione locale `gateway_proactive_execution`: bootstrap del turno visibile
+  task-scoped per `proactive_prompt`, policy autonomia/read-only/full,
+  interruzione runtime, mapping `TurnStop` -> wake e finalizzazione
+  complete/suspend/fail escono dal monolite `main.rs`; planning thread, visible
+  turn generico, fanout broker, capability/browser/subagent executor restano
+  owner separati.
 - Estrazione mergeata `gateway_visible_turns`: `VisibleConversationTurn`,
   `thread_turn_started_event`, retry SQLite transiente e
   `start_visible_conversation_turn` escono dal monolite `main.rs`; broker,

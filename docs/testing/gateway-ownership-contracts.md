@@ -120,6 +120,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_runtime_settings.rs` | DTO e route settings runtime persistiti. |
 | `crates/desktop-gateway/src/gateway_automation_formatting.rs` | Helper puri di formattazione automazioni: recurrence, trigger summary, sender root e titolo thread schedulato; non possiede route, materializzazione task o executor proattivo. |
 | `crates/desktop-gateway/src/gateway_proactive_threads.rs` | Piano thread proattivo: derivazione workspace/source/channel/title, riuso thread schedulato e root stabile per occorrenze; non possiede visible-turn persistence, executor proattivo, route automazioni o browser. |
+| `crates/desktop-gateway/src/gateway_proactive_execution.rs` | Esecuzione task `proactive_prompt`: bootstrap turno visibile task-scoped, policy autonomia/read-only/full, interruzione runtime, mapping `TurnStop` -> wake e finalizzazione complete/suspend/fail; non possiede planning thread, visible-turn generico, fanout broker, capability/browser/subagent executor. |
 | `crates/desktop-gateway/src/gateway_shell_tasks.rs` | Executor shell read-only locale, wrapper comando consentito e redazione/shaping JSON output task; non possiede execution runtime, worker task executor, sandbox, browser o comandi write-capable. |
 | `crates/desktop-gateway/src/gateway_user_preferences.rs` | Preferenze utente/setup: lingua, timezone, Ollama, approval routing. |
 | `crates/desktop-gateway/src/gateway_process_events.rs` | Registri app event, WS process events e usage recorder. |
