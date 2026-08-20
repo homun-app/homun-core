@@ -830,6 +830,34 @@ fn memory_learning_has_one_gateway_owner() {
 }
 
 #[test]
+fn automation_memory_tombstone_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let automation_routes = production_source(&root.join("src/gateway_automation_routes.rs"));
+
+    let pattern = "fn tombstone_automation_memory_records(";
+    assert!(
+        automation_routes.contains(pattern),
+        "automation routes owner must contain automation memory tombstone helper"
+    );
+    assert!(
+        !main.contains(pattern),
+        "main.rs must not retain automation memory tombstone helper"
+    );
+
+    for adjacent in [
+        "fn learn_via_service_or_inline(",
+        "async fn consolidate_scope(",
+        "fn record_subagent_task_step_outcome(",
+    ] {
+        assert!(
+            !automation_routes.contains(adjacent),
+            "automation routes owner must not absorb adjacent memory surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn recall_entry_formatting_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
