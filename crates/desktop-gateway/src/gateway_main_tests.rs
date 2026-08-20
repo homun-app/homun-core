@@ -147,13 +147,21 @@ async fn project_command_timeout_kills_descendant_processes() {
     let mut process = tokio::process::Command::new("bash");
     process.arg("-lc").arg(command).current_dir(&root);
 
-    let result = command_output_with_timeout(process, std::time::Duration::from_secs(1)).await;
+    let run = tokio::spawn(async move {
+        command_output_with_timeout(process, std::time::Duration::from_secs(1)).await
+    });
+    let child_pid = match wait_for_pid_file(&child_pid_path).await {
+        Ok(pid) => pid,
+        Err(error) => {
+            run.abort();
+            let _ = run.await;
+            let _ = std::fs::remove_dir_all(root);
+            panic!("descendant pid is written before timeout assertion: {error:?}");
+        }
+    };
+
+    let result = run.await.expect("timeout command task joins");
     assert!(matches!(result, Err(CommandOutputError::TimedOut)));
-    let child_pid = std::fs::read_to_string(&child_pid_path)
-        .expect("descendant pid")
-        .trim()
-        .parse::<i32>()
-        .expect("numeric descendant pid");
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
             if unsafe { libc::kill(child_pid, 0) } == -1 {

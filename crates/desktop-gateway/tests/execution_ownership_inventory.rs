@@ -399,6 +399,39 @@ fn proactive_thread_planning_has_one_gateway_owner() {
 }
 
 #[test]
+fn proactive_prompt_execution_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let proactive_execution = production_source(&root.join("src/gateway_proactive_execution.rs"));
+
+    for pattern in [
+        "fn start_proactive_visible_turn(",
+        "fn execute_proactive_prompt_task(",
+    ] {
+        assert!(
+            proactive_execution.contains(pattern),
+            "proactive execution owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain proactive execution item {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "fn proactive_thread_plan(",
+        "fn start_visible_conversation_turn(",
+        "async fn run_agent_turn_into_message_with_fanout(",
+        "fn execute_capability_browser_task(",
+    ] {
+        assert!(
+            !proactive_execution.contains(adjacent),
+            "proactive execution owner must not absorb adjacent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn shell_read_only_tasks_have_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

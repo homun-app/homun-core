@@ -101,6 +101,9 @@ AUTOMATION_FORMATTING_RS = os.path.join(
 PROACTIVE_THREADS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_proactive_threads.rs"
 )
+PROACTIVE_EXECUTION_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_proactive_execution.rs"
+)
 SHELL_TASKS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_shell_tasks.rs")
 VISIBLE_TURNS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_visible_turns.rs"
@@ -1335,6 +1338,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct ProactiveThreadPlan": "proactive thread planning must stay in gateway_proactive_threads",
         "fn proactive_thread_plan(": "proactive thread planning must stay in gateway_proactive_threads",
         "fn proactive_thread_scope(": "proactive thread planning must stay in gateway_proactive_threads",
+        "fn start_proactive_visible_turn(": "proactive prompt execution must stay in gateway_proactive_execution",
+        "fn execute_proactive_prompt_task(": "proactive prompt execution must stay in gateway_proactive_execution",
         "fn redact_json_for_task_output(": "shell task output shaping must stay in gateway_shell_tasks",
         "fn execute_shell_read_only_task(": "read-only shell task execution must stay in gateway_shell_tasks",
         "fn run_read_only_command(": "read-only shell command wrapper must stay in gateway_shell_tasks",
@@ -1502,6 +1507,8 @@ def main() -> int:
         automation_formatting_source = handle.read()
     with open(PROACTIVE_THREADS_RS, "r", encoding="utf-8") as handle:
         proactive_threads_source = handle.read()
+    with open(PROACTIVE_EXECUTION_RS, "r", encoding="utf-8") as handle:
+        proactive_execution_source = handle.read()
     with open(SHELL_TASKS_RS, "r", encoding="utf-8") as handle:
         shell_tasks_source = handle.read()
     with open(VISIBLE_TURNS_RS, "r", encoding="utf-8") as handle:
@@ -2482,6 +2489,25 @@ def main() -> int:
             proactive_threads_source,
             snippet,
             "proactive thread owner must expose thread planning helpers",
+        )
+    assert_contains(
+        source,
+        "mod gateway_proactive_execution;",
+        "gateway root must declare proactive execution owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_proactive_execution::*;",
+        "gateway root must re-export proactive execution owner",
+    )
+    for snippet in [
+        "pub(crate) fn start_proactive_visible_turn(",
+        "pub(crate) fn execute_proactive_prompt_task(",
+    ]:
+        assert_contains(
+            proactive_execution_source,
+            snippet,
+            "proactive execution owner must expose proactive prompt executor helpers",
         )
     assert_contains(
         source,
