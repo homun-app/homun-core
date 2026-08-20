@@ -974,6 +974,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct CapabilityToolResponse": "capability snapshot DTOs must stay in gateway_capability_registry",
         "struct CapabilityPolicyResponse": "capability snapshot DTOs must stay in gateway_capability_registry",
         "struct CapabilitySnapshotResponse": "capability snapshot DTOs must stay in gateway_capability_registry",
+        "async fn capability_snapshot(": "capability snapshot route must stay in gateway_capability_registry",
         "fn capability_snapshot_response(": "capability snapshot read model must stay in gateway_capability_registry",
         "fn capability_connection_response(": "capability snapshot read model must stay in gateway_capability_registry",
         "fn capability_tool_response(": "capability snapshot read model must stay in gateway_capability_registry",
@@ -2763,6 +2764,11 @@ def main() -> int:
         source,
         "pub(crate) use gateway_capability_routing::*;",
         "gateway root must re-export capability routing owner",
+    )
+    assert_contains(
+        source,
+        "capability_snapshot,",
+        "gateway root must re-export capability snapshot route handler",
     )
     assert_contains(
         source,

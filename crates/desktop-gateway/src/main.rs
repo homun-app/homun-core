@@ -386,10 +386,10 @@ pub(crate) use gateway_browser_tools::{
     manager_browser_max_elapsed_ms,
 };
 pub(crate) use gateway_capability_registry::{
-    CapabilityCorpusMaterializationInput, CapabilityEntry, CapabilitySnapshotResponse,
-    CapabilitySource, auto_retrieve_composio, bm25_rank, cap_tokenize,
-    capability_discovery_trace_line, capability_snapshot_response, capability_source_label,
-    find_capability_tool_schema, materialize_capability_corpus, open_seeded_capability_registry,
+    CapabilityCorpusMaterializationInput, CapabilityEntry, CapabilitySource,
+    auto_retrieve_composio, bm25_rank, cap_tokenize, capability_discovery_trace_line,
+    capability_snapshot, capability_source_label, find_capability_tool_schema,
+    materialize_capability_corpus, open_seeded_capability_registry,
     search_connector_capability_entries, suggest_capabilities_tool_schema,
 };
 #[cfg(test)]
@@ -4333,19 +4333,6 @@ fn browser_method_for_capability_tool(tool_name: &str) -> Option<BrowserMethod> 
 /// Browser-loop router (Phase 2): the "browser" role.
 fn build_browser_inference_router() -> ModelRouter {
     router_for_role("browser")
-}
-
-async fn capability_snapshot(
-    State(state): State<AppState>,
-) -> Result<Json<CapabilitySnapshotResponse>, GatewayError> {
-    let user = gateway_capability_user_id();
-    let workspace = gateway_capability_workspace_id();
-    let registry = lock_capability_registry(&state)?;
-    let policy = registry
-        .policy_context(&user, &workspace)
-        .map_err(GatewayError::capability)?;
-    let snapshot = capability_snapshot_response(&registry, &user, &workspace, policy)?;
-    Ok(Json(snapshot))
 }
 
 fn ensure_computer_session_for_task(
