@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (proactive execution owner mergeata).**
+> **Ultimo aggiornamento: 2026-08-20 (subagent execution owner mergeata).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#234 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #234 |
+| PR | #108-#116, #118-#235 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #235 |
 
 ## Dove siamo
 
@@ -282,10 +282,14 @@ Slice Runtime V2 recenti:
   capability e mapping condiviso `ExecutorResult` -> `ExecutionOutcome` escono
   dal monolite `main.rs`; browser capability, queue runner e loop agente restano
   owner separati.
-- Estrazione locale `gateway_subagent_execution`: dispatch `subagent.*`,
+- Estrazione mergeata `gateway_subagent_execution`: dispatch `subagent.*`,
   selezione router orchestrator e mapping `ExecutorResult` -> `ExecutionOutcome`
   escono dal monolite `main.rs`; browser capability, executor proattivo,
   queue runner e loop agente restano owner separati.
+- Estrazione locale `gateway_agent_turn_outcomes`: restore checkpoint agente e
+  outcome terminale per image rejection gia' consegnata escono dal monolite
+  `main.rs`; loop agente, stream chat/fanout e browser execution restano owner
+  separati.
 - Estrazione mergeata `gateway_shell_tasks`: executor shell read-only,
   wrapper comando consentito e shaping/redazione JSON output task escono dal
   monolite `main.rs`; execution runtime, task executor, browser e sandbox
