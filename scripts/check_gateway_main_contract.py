@@ -61,6 +61,7 @@ BOOT_MAINTENANCE_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_boot_maintenance.rs"
 )
 SKILL_RUNTIME_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_skill_runtime.rs")
+STATE_ACCESS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_state_access.rs")
 RUNTIME_PLAN_STATE_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_runtime_plan_state.rs"
 )
@@ -611,6 +612,16 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn recall_memory(": "memory recall tool execution must stay in gateway_memory_recall_tool",
         "fn learn_via_service_or_inline(": "memory learning orchestration must stay in gateway_memory_learning",
         "async fn consolidate_scope(": "memory consolidation orchestration must stay in gateway_memory_learning",
+        "struct GatewayError": "gateway error type must stay in gateway_state_access",
+        "fn lock_store(": "gateway chat-store lock helper must stay in gateway_state_access",
+        "fn lock_task_store(": "gateway task-store lock helper must stay in gateway_state_access",
+        "fn lock_computer_store(": "gateway computer-store lock helper must stay in gateway_state_access",
+        "fn lock_browser_url_policies(": "gateway browser URL policy lock helper must stay in gateway_state_access",
+        "fn memory_facade(": "gateway memory facade accessor must stay in gateway_state_access",
+        "fn lock_vault_store(": "gateway vault-store lock helper must stay in gateway_state_access",
+        "fn lock_capability_registry(": "gateway capability-registry lock helper must stay in gateway_state_access",
+        "fn vacuum_all_stores(": "gateway store vacuum helper must stay in gateway_state_access",
+        "impl IntoResponse for GatewayError": "gateway error response mapping must stay in gateway_state_access",
         "fn update_plan_tool_schema(": "runtime plan tool schemas must stay in gateway_plan_tools",
         "fn step_advance_tool_schema(": "runtime plan tool schemas must stay in gateway_plan_tools",
         "fn plan_steps_reconciled_on_delivery(": "runtime plan delivery reconcile must stay in gateway_runtime_plan_state",
@@ -1459,6 +1470,8 @@ def main() -> int:
         boot_maintenance_source = handle.read()
     with open(SKILL_RUNTIME_RS, "r", encoding="utf-8") as handle:
         skill_runtime_source = handle.read()
+    with open(STATE_ACCESS_RS, "r", encoding="utf-8") as handle:
+        state_access_source = handle.read()
     with open(RUNTIME_PLAN_STATE_RS, "r", encoding="utf-8") as handle:
         runtime_plan_state_source = handle.read()
     with open(THREAD_EPISODES_RS, "r", encoding="utf-8") as handle:
@@ -2696,6 +2709,42 @@ def main() -> int:
         "pub(crate) fn load_skill_body_and_sensitive(",
         "skill runtime owner must expose progressive skill loading with sensitive metadata",
     )
+    assert_contains(source, "mod gateway_state_access;", "gateway root must declare state access owner")
+    assert_contains(
+        source,
+        "pub(crate) use gateway_state_access::*;",
+        "gateway root must re-export state access owner",
+    )
+    for snippet in [
+        "pub(crate) struct GatewayError",
+        "pub(crate) fn lock_store(",
+        "pub(crate) fn lock_task_store(",
+        "pub(crate) fn lock_computer_store(",
+        "pub(crate) fn lock_browser_url_policies(",
+        "pub(crate) fn memory_facade(",
+        "pub(crate) fn lock_vault_store(",
+        "pub(crate) fn lock_capability_registry(",
+        "pub(crate) fn vacuum_all_stores(",
+        "impl IntoResponse for GatewayError",
+    ]:
+        assert_contains(
+            state_access_source,
+            snippet,
+            "state access owner must expose gateway error and lock helper surface",
+        )
+    for snippet in [
+        "async fn run_agent_rounds(",
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_turn_into_message(",
+        "fn execute_proactive_prompt_task(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            state_access_source,
+            snippet,
+            "state access owner must not absorb execution/browser surfaces",
+        )
     assert_contains(
         runtime_plan_state_source,
         "pub(crate) fn upsert_runtime_plan_memory_from_state(",

@@ -1943,6 +1943,49 @@ fn agent_stream_drain_has_one_gateway_owner() {
 }
 
 #[test]
+fn gateway_state_access_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let state_access = production_source(&root.join("src/gateway_state_access.rs"));
+
+    for pattern in [
+        "struct GatewayError",
+        "fn lock_store(",
+        "fn lock_task_store(",
+        "fn lock_computer_store(",
+        "fn lock_browser_url_policies(",
+        "fn memory_facade(",
+        "fn lock_vault_store(",
+        "fn lock_capability_registry(",
+        "fn vacuum_all_stores(",
+        "impl IntoResponse for GatewayError",
+    ] {
+        assert!(
+            state_access.contains(pattern),
+            "gateway state access owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain gateway state access surface {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn run_agent_rounds(",
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_turn_into_message(",
+        "fn execute_proactive_prompt_task(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !state_access.contains(adjacent),
+            "gateway state access owner must not absorb execution/browser surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn gateway_ownership_documentation_tracks_extracted_kernel_owners() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let doc = production_source(
