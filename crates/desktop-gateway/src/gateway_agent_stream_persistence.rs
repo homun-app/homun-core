@@ -1,0 +1,112 @@
+//! Agent stream persistence and fanout helpers.
+//!
+//! Owns assistant message updates/finalization plus durable turn-event fanout
+//! for raw agent stream lines. Stream draining, HITL wait snapshots, and browser
+//! liveness remain separate owners.
+
+use super::*;
+
+pub(crate) fn update_channel_assistant_message(
+    state: &AppState,
+    thread_id: &str,
+    message_id: &str,
+    text: &str,
+) {
+    if let Ok(store) = lock_store(state) {
+        let _ = store.set_message_text(thread_id, message_id, text);
+    }
+    publish_app_event(serde_json::json!({
+        "type": "thread.updated",
+        "thread_id": thread_id,
+        "workspace": base_workspace_id(),
+    }));
+}
+
+pub(crate) fn finalize_streamed_assistant_message(
+    state: &AppState,
+    thread_id: &str,
+    message_id: &str,
+    text: &str,
+    collector: &StreamMemoryReuseCollector,
+    requested_delivery_state: local_first_desktop_gateway::MessageDeliveryState,
+) -> Result<(), String> {
+    let store = lock_store(state).map_err(|error| error.message)?;
+    store
+        .finalize_assistant_message_with_delivery_state(
+            thread_id,
+            message_id,
+            text,
+            collector.event_parts(),
+            &collector.envelope(),
+            requested_delivery_state,
+        )
+        .map_err(|error| error.to_string())?;
+    publish_app_event(serde_json::json!({
+        "type": "thread.updated",
+        "thread_id": thread_id,
+        "workspace": base_workspace_id(),
+    }));
+    Ok(())
+}
+
+/// Stores an emitted Recall part with the assistant message. This is deliberately
+/// idempotent because a stream snapshot and its broadcast tail can overlap.
+pub(crate) fn persist_recall_event_part(
+    state: &AppState,
+    thread_id: &str,
+    assistant_message_id: &str,
+    line: &str,
+) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+        return;
+    };
+    if value.get("type").and_then(|kind| kind.as_str()) != Some("recall") {
+        return;
+    }
+    let Some(payload) = value.get("payload") else {
+        return;
+    };
+    let part = serde_json::json!({ "type": "recall", "payload": payload });
+    if let Ok(store) = lock_store(state) {
+        let _ = store.append_assistant_event_part(thread_id, assistant_message_id, &part);
+    }
+}
+
+pub(crate) fn persist_redacted_user_text_from_stream_line(
+    state: &AppState,
+    thread_id: &str,
+    user_message_id: &str,
+    line: &str,
+) {
+    let Some(redacted) = redacted_user_text_from_stream_line(line) else {
+        return;
+    };
+    if let Ok(store) = lock_store(state) {
+        let _ = store.set_message_text(thread_id, user_message_id, &redacted);
+    }
+}
+
+/// Maps a raw stream NDJSON line to a TurnEventKind + payload and emits it via
+/// the turn_executor fan-out (durable turn_events + live broadcast). Best-effort:
+/// unparseable lines or unknown types are silently skipped (they don't affect the
+/// assistant message accumulation either).
+pub(crate) fn fanout_turn_event(state: &AppState, turn_id: &str, line: &str) {
+    let line = line.trim();
+    if line.is_empty() {
+        return;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+        return;
+    };
+    let kind_str = value
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or("unknown");
+    tracing::debug!(target: "broker::fanout", turn_id = %turn_id, kind = %kind_str, "stream event");
+    let Some((kind, payload)) = turn_event_from_stream_value(&value) else {
+        return;
+    };
+    if let Ok(store) = state.task_store.lock() {
+        let _ = crate::turn_executor::emit_turn_event(state, &store, turn_id, kind, payload);
+    }
+}

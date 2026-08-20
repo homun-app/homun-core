@@ -73,6 +73,9 @@ THREAD_MODEL_CONTEXT_RS = os.path.join(
 AGENT_STREAM_EVENTS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_stream_events.rs"
 )
+AGENT_STREAM_PERSISTENCE_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_stream_persistence.rs"
+)
 AGENT_WAKE_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_agent_wake.rs")
 PROMPT_PACKETS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_prompt_packets.rs"
@@ -1202,6 +1205,11 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn apply_agent_stream_line(": "agent stream parser must stay in gateway_agent_stream_events",
         "fn turn_event_from_stream_value(": "agent stream event mapping must stay in gateway_agent_stream_events",
         "fn redacted_user_text_from_stream_line(": "agent stream redaction parser must stay in gateway_agent_stream_events",
+        "fn update_channel_assistant_message(": "agent stream assistant message updates must stay in gateway_agent_stream_persistence",
+        "fn finalize_streamed_assistant_message(": "agent stream assistant finalization must stay in gateway_agent_stream_persistence",
+        "fn persist_recall_event_part(": "agent stream recall persistence must stay in gateway_agent_stream_persistence",
+        "fn persist_redacted_user_text_from_stream_line(": "agent stream redacted user persistence must stay in gateway_agent_stream_persistence",
+        "fn fanout_turn_event(": "agent stream turn-event fanout must stay in gateway_agent_stream_persistence",
         "fn wake_for_agent_stop(": "agent wake mapping must stay in gateway_agent_wake",
         "fn cancel_chat_turn_and_finalize_bubble(": "turn broker cancel/finalize helper must stay in gateway_turn_broker",
         "async fn cancel_turn(": "turn broker cancel route must stay in gateway_turn_broker",
@@ -1443,6 +1451,8 @@ def main() -> int:
         thread_model_context_source = handle.read()
     with open(AGENT_STREAM_EVENTS_RS, "r", encoding="utf-8") as handle:
         agent_stream_events_source = handle.read()
+    with open(AGENT_STREAM_PERSISTENCE_RS, "r", encoding="utf-8") as handle:
+        agent_stream_persistence_source = handle.read()
     with open(AGENT_WAKE_RS, "r", encoding="utf-8") as handle:
         agent_wake_source = handle.read()
     with open(PROMPT_PACKETS_RS, "r", encoding="utf-8") as handle:
@@ -1918,6 +1928,41 @@ def main() -> int:
             agent_stream_events_source,
             snippet,
             "agent stream events owner must not absorb adjacent drain/persistence/browser surfaces",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_stream_persistence;",
+        "gateway root must declare agent stream persistence owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_stream_persistence::*;",
+        "gateway root must re-export agent stream persistence owner",
+    )
+    for snippet in [
+        "pub(crate) fn update_channel_assistant_message(",
+        "pub(crate) fn finalize_streamed_assistant_message(",
+        "pub(crate) fn persist_recall_event_part(",
+        "pub(crate) fn persist_redacted_user_text_from_stream_line(",
+        "pub(crate) fn fanout_turn_event(",
+    ]:
+        assert_contains(
+            agent_stream_persistence_source,
+            snippet,
+            "agent stream persistence owner must expose assistant persistence and fanout helpers",
+        )
+    for snippet in [
+        "async fn drain_agent_stream_into_message(",
+        "async fn drain_agent_stream_into_message_with_fanout(",
+        "fn persist_hitl_wait_from_outcome(",
+        "fn persist_hitl_wait_payload(",
+        "fn thread_browser_session_is_live(",
+        "fn execute_persistent_browser_capability(",
+    ]:
+        assert_not_contains(
+            agent_stream_persistence_source,
+            snippet,
+            "agent stream persistence owner must not absorb adjacent drain/HITL/browser surfaces",
         )
     assert_contains(source, "mod gateway_agent_wake;", "gateway root must declare agent wake owner")
     assert_contains(

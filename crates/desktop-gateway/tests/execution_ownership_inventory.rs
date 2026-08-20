@@ -1775,6 +1775,45 @@ fn agent_stream_events_have_one_gateway_owner() {
 }
 
 #[test]
+fn agent_stream_persistence_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let stream_persistence =
+        production_source(&root.join("src/gateway_agent_stream_persistence.rs"));
+
+    for pattern in [
+        "fn update_channel_assistant_message(",
+        "fn finalize_streamed_assistant_message(",
+        "fn persist_recall_event_part(",
+        "fn persist_redacted_user_text_from_stream_line(",
+        "fn fanout_turn_event(",
+    ] {
+        assert!(
+            stream_persistence.contains(pattern),
+            "agent stream persistence owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain agent stream persistence surface {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn drain_agent_stream_into_message(",
+        "async fn drain_agent_stream_into_message_with_fanout(",
+        "fn persist_hitl_wait_from_outcome(",
+        "fn persist_hitl_wait_payload(",
+        "fn thread_browser_session_is_live(",
+        "fn execute_persistent_browser_capability(",
+    ] {
+        assert!(
+            !stream_persistence.contains(adjacent),
+            "agent stream persistence owner must not absorb adjacent drain/HITL/browser surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn gateway_ownership_documentation_tracks_extracted_kernel_owners() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let doc = production_source(
