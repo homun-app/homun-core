@@ -88,6 +88,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_memory_prompt_context.rs` | Read-model prompt bounded per provenance artifact, qualita' artifact, stato workflow, decisioni di file e anti-rewrite code-map dalla memoria canonica; non possiede `recall_memory`, learn inline, prompt packet, artifact persistence, tool execution o loop agente. |
 | `crates/desktop-gateway/src/gateway_memory_query_embeddings.rs` | Config embedding memoria, transport HTTP Ollama best-effort, cache query embedding LRU/TTL, timeout e timing recall; non possiede `recall_memory`, learn/consolidate o briefing memoria. |
 | `crates/desktop-gateway/src/gateway_memory_json.rs` | Transport JSON OpenAI-compatible per task memoria/proattivita', parsing fence JSON e usage context `MemoryExtraction`; non possiede `recall_memory`, learn inline, consolidate o prompt context. |
+| `crates/desktop-gateway/src/gateway_memory_learning.rs` | Orchestrazione apprendimento post-turno via service/inline e consolidamento scope in tre fasi Send-safe; non possiede recall tool, automation tombstone o subagent plan-step memory. |
 | `crates/desktop-gateway/src/gateway_memory_recall_tool.rs` | Tool-result `recall_memory`, `RecallOutcome` e payload recall UI costruito dagli stessi hit autorizzati; non possiede learn inline, consolidate, automation tombstone o subagent plan-step memory. |
 | `crates/desktop-gateway/src/gateway_memory_clients.rs` | Client capability memoria per embedding/LLM, usage telemetry context e backfill embedding bounded off-lock; non possiede recall tool, learn inline, consolidate o storage semantics del `MemoryFacade`. |
 | `crates/desktop-gateway/src/gateway_contacts.rs` | Route core rubrica `/api/memory/contacts*`, DTO `ContactView`, CRUD, merge, identity add/remove e helper memoria/handle/date condivisi; non possiede perimetri, relationship, fact profile o named profile CRUD. |
@@ -130,8 +131,8 @@ dedicato prima del movimento:
 
 - loop agente e drain streaming: `run_agent_rounds`, `stream_chat_via_openai`,
   `run_agent_turn_into_message*`;
-- memoria inline/brain/recall: `recall_memory`, `learn_via_service_or_inline`,
-  `consolidate_scope`;
+- memoria lifecycle adiacente: tombstone automazioni, plan-step memory e
+  lifecycle runtime non devono essere assorbiti da recall/learning owner;
 - adapter concreti capability/MCP/Composio/vault/payment/browser;
 - compatibilita' storica di messaggi/eventi persistiti.
 

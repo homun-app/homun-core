@@ -89,6 +89,9 @@ MEMORY_QUERY_EMBEDDINGS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_query_embeddings.rs"
 )
 MEMORY_JSON_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_memory_json.rs")
+MEMORY_LEARNING_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_memory_learning.rs"
+)
 MEMORY_RECALL_TOOL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_recall_tool.rs"
 )
@@ -562,6 +565,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct RecallOutcome": "memory recall tool result must stay in gateway_memory_recall_tool",
         "fn recall_stream_payload_from_outcome(": "memory recall payload projection must stay in gateway_memory_recall_tool",
         "fn recall_memory(": "memory recall tool execution must stay in gateway_memory_recall_tool",
+        "fn learn_via_service_or_inline(": "memory learning orchestration must stay in gateway_memory_learning",
+        "async fn consolidate_scope(": "memory consolidation orchestration must stay in gateway_memory_learning",
         "fn update_plan_tool_schema(": "runtime plan tool schemas must stay in gateway_plan_tools",
         "fn step_advance_tool_schema(": "runtime plan tool schemas must stay in gateway_plan_tools",
         "fn plan_steps_reconciled_on_delivery(": "runtime plan delivery reconcile must stay in gateway_runtime_plan_state",
@@ -1421,6 +1426,8 @@ def main() -> int:
         memory_query_embeddings_source = handle.read()
     with open(MEMORY_JSON_RS, "r", encoding="utf-8") as handle:
         memory_json_source = handle.read()
+    with open(MEMORY_LEARNING_RS, "r", encoding="utf-8") as handle:
+        memory_learning_source = handle.read()
     with open(MEMORY_RECALL_TOOL_RS, "r", encoding="utf-8") as handle:
         memory_recall_tool_source = handle.read()
     with open(MEMORY_CLIENTS_RS, "r", encoding="utf-8") as handle:
@@ -1808,6 +1815,36 @@ def main() -> int:
             memory_json_source,
             snippet,
             "memory JSON owner must not absorb adjacent memory surfaces",
+        )
+    assert_contains(
+        source,
+        "mod gateway_memory_learning;",
+        "gateway root must declare memory learning owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_memory_learning::{consolidate_scope, learn_via_service_or_inline};",
+        "gateway root must re-export memory learning surface",
+    )
+    for snippet in [
+        "pub(crate) fn learn_via_service_or_inline(",
+        "pub(crate) async fn consolidate_scope(",
+    ]:
+        assert_contains(
+            memory_learning_source,
+            snippet,
+            "memory learning owner must expose learning and consolidation surface",
+        )
+    for snippet in [
+        "fn recall_memory(",
+        "fn recall_stream_payload_from_outcome(",
+        "fn tombstone_automation_memory_records(",
+        "fn record_subagent_task_step_outcome(",
+    ]:
+        assert_not_contains(
+            memory_learning_source,
+            snippet,
+            "memory learning owner must not absorb adjacent memory surfaces",
         )
     assert_contains(
         source,
