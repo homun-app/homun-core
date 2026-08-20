@@ -87,6 +87,9 @@ PROACTIVE_THREADS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_proactive_threads.rs"
 )
 SHELL_TASKS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_shell_tasks.rs")
+VISIBLE_TURNS_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_visible_turns.rs"
+)
 CHANNELS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_channels.rs")
 MEMORY_QUERY_EMBEDDINGS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_query_embeddings.rs"
@@ -1182,6 +1185,10 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn insert_broker_resume_user_message(": "turn broker resume transcript insertion must stay in gateway_turn_broker",
         "fn broker_turn_message_attachments(": "turn broker attachment projection must stay in gateway_turn_broker",
         "async fn enqueue_turn(": "turn broker enqueue route must stay in gateway_turn_broker",
+        "struct VisibleConversationTurn": "visible turn persistence must stay in gateway_visible_turns",
+        "fn thread_turn_started_event(": "visible turn app event must stay in gateway_visible_turns",
+        "fn is_transient_store_error(": "visible turn retry classification must stay in gateway_visible_turns",
+        "fn start_visible_conversation_turn(": "visible turn persistence must stay in gateway_visible_turns",
         "fn cancel_chat_turn_and_finalize_bubble(": "turn broker cancel/finalize helper must stay in gateway_turn_broker",
         "async fn cancel_turn(": "turn broker cancel route must stay in gateway_turn_broker",
         "struct TurnSinceQuery ": "turn broker cursor query must stay in gateway_turn_broker",
@@ -1434,6 +1441,8 @@ def main() -> int:
         proactive_threads_source = handle.read()
     with open(SHELL_TASKS_RS, "r", encoding="utf-8") as handle:
         shell_tasks_source = handle.read()
+    with open(VISIBLE_TURNS_RS, "r", encoding="utf-8") as handle:
+        visible_turns_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
         action_confirmations_source = handle.read()
     with open(ACTIONABLE_SOURCE_RS, "r", encoding="utf-8") as handle:
@@ -1794,6 +1803,35 @@ def main() -> int:
         "pub(crate) use gateway_turn_broker::*;",
         "gateway root must re-export turn broker owner",
     )
+    assert_contains(source, "mod gateway_visible_turns;", "gateway root must declare visible turn owner")
+    assert_contains(
+        source,
+        "pub(crate) use gateway_visible_turns::*;",
+        "gateway root must re-export visible turn owner",
+    )
+    for snippet in [
+        "pub(crate) struct VisibleConversationTurn",
+        "pub(crate) fn thread_turn_started_event(",
+        "fn is_transient_store_error(",
+        "pub(crate) fn start_visible_conversation_turn(",
+    ]:
+        assert_contains(
+            visible_turns_source,
+            snippet,
+            "visible turn owner must expose persisted visible-turn surface",
+        )
+    for snippet in [
+        "fn enqueue_chat_turn_core(",
+        "async fn subscribe_turn_stream(",
+        "async fn run_agent_turn_into_message(",
+        "fn finalize_streamed_assistant_message(",
+        "fn execute_proactive_prompt_task(",
+    ]:
+        assert_not_contains(
+            visible_turns_source,
+            snippet,
+            "visible turn owner must not absorb adjacent turn/stream executor surfaces",
+        )
     assert_contains(source, "mod gateway_task_executor;", "gateway root must declare task executor owner")
     assert_contains(
         source,

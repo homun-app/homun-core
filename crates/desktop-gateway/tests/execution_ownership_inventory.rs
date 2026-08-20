@@ -207,6 +207,42 @@ fn turn_broker_surface_has_one_gateway_owner() {
 }
 
 #[test]
+fn visible_turn_start_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let visible_turns = production_source(&root.join("src/gateway_visible_turns.rs"));
+
+    for pattern in [
+        "struct VisibleConversationTurn",
+        "fn thread_turn_started_event(",
+        "fn is_transient_store_error(",
+        "fn start_visible_conversation_turn(",
+    ] {
+        assert!(
+            visible_turns.contains(pattern),
+            "visible turn owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain visible turn surface {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "fn enqueue_chat_turn_core(",
+        "async fn subscribe_turn_stream(",
+        "async fn run_agent_turn_into_message(",
+        "fn finalize_streamed_assistant_message(",
+        "fn execute_proactive_prompt_task(",
+    ] {
+        assert!(
+            !visible_turns.contains(adjacent),
+            "visible turn owner must not absorb adjacent turn/stream executor {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn task_executor_surface_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
