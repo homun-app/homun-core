@@ -3378,10 +3378,25 @@ def main() -> int:
         "pub(crate) fn load_turn_effect_contract(",
         "tool execution owner must expose turn effect-contract lookup",
     )
+    assert_contains(
+        tool_execution_source,
+        "pub(crate) struct GatewayCapabilityExecutorInput",
+        "tool execution owner must expose capability executor input",
+    )
+    assert_contains(
+        tool_execution_source,
+        "pub(crate) fn new(input: GatewayCapabilityExecutorInput<'a>) -> Self",
+        "tool execution owner must construct gateway capability executor",
+    )
     assert_not_contains(
         source,
         "let effect_contract = effect_turn_id.as_deref().and_then(|execution_id|",
         "gateway root must not own turn effect-contract lookup inline",
+    )
+    assert_not_contains(
+        source,
+        "let capability_executor = GatewayCapabilityExecutor {",
+        "gateway root must not construct GatewayCapabilityExecutor inline",
     )
     assert_contains(
         composio_routes_source,

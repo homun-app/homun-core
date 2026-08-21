@@ -3046,7 +3046,7 @@ async fn run_agent_rounds(
         effect_run_id.clone(),
     );
     let effect_contract = load_turn_effect_contract(&state_owned, effect_turn_id.as_deref());
-    let capability_executor = GatewayCapabilityExecutor {
+    let capability_executor = GatewayCapabilityExecutor::new(GatewayCapabilityExecutorInput {
         state: &state_owned,
         tx,
         thread_id: thread_id.as_deref(),
@@ -3071,7 +3071,7 @@ async fn run_agent_rounds(
         turn_id: effect_turn_id.as_deref(),
         run_id: effect_run_id.as_deref(),
         execution_contract: effect_contract.as_ref(),
-    };
+    });
     // The browser tool chokepoint (ADR 0025 seam): OWNS the browser subsystem's private state (session +
     // snapshot/tab/nav bookkeeping); `&mut` because run_turn mutates it per browser call.
     let mut browser_executor = GatewayBrowserExecutor {

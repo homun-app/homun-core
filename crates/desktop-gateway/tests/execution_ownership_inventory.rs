@@ -2471,6 +2471,48 @@ fn tool_effect_contract_lookup_has_one_gateway_owner() {
 }
 
 #[test]
+fn capability_executor_constructor_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let tool_execution = production_source(&root.join("src/gateway_tool_execution.rs"));
+    let run_agent_rounds = main
+        .split("async fn run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds")
+        .split("// The browser tool chokepoint")
+        .next()
+        .expect("capability executor seam construction");
+
+    for pattern in [
+        "pub(crate) struct GatewayCapabilityExecutorInput",
+        "pub(crate) struct GatewayCapabilityExecutor",
+        "impl<'a> GatewayCapabilityExecutor<'a>",
+        "pub(crate) fn new(input: GatewayCapabilityExecutorInput<'a>) -> Self",
+    ] {
+        assert!(
+            tool_execution.contains(pattern),
+            "tool execution owner must contain capability executor constructor surface {pattern}"
+        );
+    }
+
+    assert!(
+        !run_agent_rounds.contains("let capability_executor = GatewayCapabilityExecutor {"),
+        "run_agent_rounds must not construct GatewayCapabilityExecutor inline"
+    );
+
+    for adjacent in [
+        "GatewayPlanProgress::new(",
+        "GatewayContextCompactor::new(",
+        "GatewayTurnCompletionJudge::new(",
+    ] {
+        assert!(
+            !tool_execution.contains(adjacent),
+            "tool execution capability executor owner must not absorb adjacent loop/browser surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn agent_turn_tail_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
