@@ -5327,11 +5327,7 @@ Tell the user clearly; do NOT claim it's done."
     }
 }
 
-/// The gateway's `CapabilityExecutor` (ADR 0026): holds ONLY the turn-constant read-only context
-/// execute_chat_tool needs; per call it builds a `ChatToolCtx` from the passed `&mut LoopState`
-/// (plan/step_evidence/tool_trace + provider) + that held context, and delegates. Passing `ls` per
-/// call (not capturing it) is what lets the engine loop keep `&mut ls` without a double borrow.
-pub(crate) struct GatewayCapabilityExecutor<'a> {
+pub(crate) struct GatewayCapabilityExecutorInput<'a> {
     pub(crate) state: &'a AppState,
     pub(crate) tx: &'a StreamSink,
     pub(crate) thread_id: Option<&'a str>,
@@ -5360,6 +5356,64 @@ pub(crate) struct GatewayCapabilityExecutor<'a> {
     pub(crate) run_id: Option<&'a str>,
     pub(crate) execution_contract:
         Option<&'a local_first_execution_protocol::ValidatedExecutionContract>,
+}
+
+/// The gateway's `CapabilityExecutor` (ADR 0026): holds ONLY the turn-constant read-only context
+/// execute_chat_tool needs; per call it builds a `ChatToolCtx` from the passed `&mut LoopState`
+/// (plan/step_evidence/tool_trace + provider) + that held context, and delegates. Passing `ls` per
+/// call (not capturing it) is what lets the engine loop keep `&mut ls` without a double borrow.
+pub(crate) struct GatewayCapabilityExecutor<'a> {
+    state: &'a AppState,
+    tx: &'a StreamSink,
+    thread_id: Option<&'a str>,
+    read_only: bool,
+    contact_only: bool,
+    can_see_contacts: bool,
+    can_see_calendar: bool,
+    can_use_project_memory: bool,
+    memory_recall_allowed: bool,
+    vault_value_requested: bool,
+    autonomous: bool,
+    composio_writes: &'a std::collections::BTreeSet<String>,
+    catalog_index: &'a [(String, String, serde_json::Value)],
+    capability_corpus: &'a [CapabilityEntry],
+    automation_user_id: &'a UserId,
+    automation_workspace_id: &'a WorkspaceId,
+    prompt: &'a str,
+    channel_owner: bool,
+    turn_trace: &'a local_first_engine::turn_trace::TurnTrace,
+    turn_id: Option<&'a str>,
+    run_id: Option<&'a str>,
+    execution_contract: Option<&'a local_first_execution_protocol::ValidatedExecutionContract>,
+}
+
+impl<'a> GatewayCapabilityExecutor<'a> {
+    pub(crate) fn new(input: GatewayCapabilityExecutorInput<'a>) -> Self {
+        Self {
+            state: input.state,
+            tx: input.tx,
+            thread_id: input.thread_id,
+            read_only: input.read_only,
+            contact_only: input.contact_only,
+            can_see_contacts: input.can_see_contacts,
+            can_see_calendar: input.can_see_calendar,
+            can_use_project_memory: input.can_use_project_memory,
+            memory_recall_allowed: input.memory_recall_allowed,
+            vault_value_requested: input.vault_value_requested,
+            autonomous: input.autonomous,
+            composio_writes: input.composio_writes,
+            catalog_index: input.catalog_index,
+            capability_corpus: input.capability_corpus,
+            automation_user_id: input.automation_user_id,
+            automation_workspace_id: input.automation_workspace_id,
+            prompt: input.prompt,
+            channel_owner: input.channel_owner,
+            turn_trace: input.turn_trace,
+            turn_id: input.turn_id,
+            run_id: input.run_id,
+            execution_contract: input.execution_contract,
+        }
+    }
 }
 
 /// Does this tool name look effectful? `composio_writes` is the authoritative set for connector tools;

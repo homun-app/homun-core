@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (model client constructor owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (capability executor constructor owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
-| PR | #108-#116, #118-#262 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #262 (`0206e539`) |
+| Branch | `fabio/gateway-capability-executor-constructor-owner` |
+| PR | #108-#116, #118-#263 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #263 (`a35b2f9b`) |
 
 ## Dove siamo
 
@@ -433,6 +433,11 @@ Slice Runtime V2 recenti:
   `ValidatedExecutionContract` del turno esce da `run_agent_rounds`; capability
   executor e browser executor ricevono lo stesso contratto caricato dall'owner
   dei tool, mentre il loop resta composition del turno.
+- Estrazione locale `gateway_tool_execution`: costruzione del port
+  `GatewayCapabilityExecutor` passa da struct literal in `run_agent_rounds` a
+  `GatewayCapabilityExecutor::new(GatewayCapabilityExecutorInput)`; browser
+  executor, plan progress, context compactor e model client restano owner
+  separati.
 - Estrazione locale `gateway_turn_trace`: bootstrap del trace leggibile
   `turn_received`, opt-out e fallback no-log-dir escono dal monolite
   `main.rs`; il trace resta pura osservabilita' e non possiede loop agente,
