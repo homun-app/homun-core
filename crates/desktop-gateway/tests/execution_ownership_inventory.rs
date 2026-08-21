@@ -930,6 +930,50 @@ fn core_operating_prompt_instruction_has_one_gateway_owner() {
 }
 
 #[test]
+fn connected_service_prompt_instructions_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
+
+    for pattern in [
+        "fn connected_service_tools_instruction(",
+        "fn expired_connected_services_instruction(",
+    ] {
+        assert!(
+            prompt_instructions.contains(pattern),
+            "prompt instruction owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain connected-service prompt instruction surface {pattern}"
+        );
+    }
+
+    for snippet in [
+        "CONNECTED-SERVICE TOOLS: the user has connected some services",
+        "TOOL CHOICE: use ONE SINGLE tool",
+        "WRITE ACTIONS (send/delete/modify)",
+        "COUNTS (e.g. \"how many unread emails\")",
+        "CONNECTED BUT EXPIRED SERVICES (slug)",
+        "‹‹COMPOSIO_RECONNECT››<slug>‹‹/COMPOSIO_RECONNECT››",
+    ] {
+        assert!(
+            !main.contains(snippet),
+            "main.rs must not retain connected-service prompt instruction copy {snippet}"
+        );
+    }
+
+    assert!(
+        main.contains("let has_composio = !catalog_index.is_empty();"),
+        "main.rs still owns the runtime decision to append connected-service guidance"
+    );
+    assert!(
+        main.contains("catalog.inactive"),
+        "main.rs still owns the runtime inactive-service list"
+    );
+}
+
+#[test]
 fn objective_contract_prompt_instructions_have_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
