@@ -2817,13 +2817,9 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         // F3: the first plan step's work begins after the initial context is in place.
         ls.step_messages_start = ls.messages.len();
 
-        // F0 / model-io: detect+cache this Ollama model's capability profile (thinking, tools,
-        // vision, context window) via one /api/show, so the harness can ADAPT — send `think`
-        // only to thinking models, and (future) gate tools/images and budget on the real
-        // context. The thinking gate in `build_chat_payload` reads this cache.
-        if is_ollama_base(&base_url) {
-            warm_ollama_capabilities(&http, &base_url, &model).await;
-        }
+        // F0 / model-io: detect+cache this provider's turn capabilities before the loop.
+        // The thinking gate in `build_chat_payload` reads this cache.
+        warm_turn_provider_capabilities(&http, &base_url, &model).await;
 
         // The concrete model seam (ADR 0024): borrows the turn's client + sink for the loop.
         // The outer ceiling is the BROWSER budget; the EFFECTIVE budget is dynamic

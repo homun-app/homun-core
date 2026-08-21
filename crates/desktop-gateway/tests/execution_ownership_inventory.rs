@@ -2467,6 +2467,54 @@ fn model_provider_binding_has_one_gateway_owner() {
 }
 
 #[test]
+fn model_provider_capability_warm_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let model_routing = production_source(&root.join("src/gateway_model_routing.rs"));
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai")
+        .split("// The concrete model seam")
+        .next()
+        .expect("provider capability warm construction");
+
+    for pattern in [
+        "pub(crate) async fn warm_turn_provider_capabilities(",
+        "if is_ollama_base(base_url)",
+        "warm_ollama_capabilities(http, base_url, model).await",
+    ] {
+        assert!(
+            model_routing.contains(pattern),
+            "model routing owner must contain provider capability warm surface {pattern}"
+        );
+    }
+
+    for pattern in [
+        "if is_ollama_base(&base_url)",
+        "warm_ollama_capabilities(&http, &base_url, &model).await",
+    ] {
+        assert!(
+            !stream_chat.contains(pattern),
+            "stream_chat_via_openai must not own provider capability warm logic {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "GatewayCapabilityExecutor {",
+        "GatewayBrowserExecutor {",
+        "GatewayPlanProgress::new(",
+        "GatewayTurnCompletionJudge::new(",
+    ] {
+        assert!(
+            !model_routing.contains(adjacent),
+            "model routing capability warm owner must not absorb adjacent agent loop surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn tool_effect_contract_lookup_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

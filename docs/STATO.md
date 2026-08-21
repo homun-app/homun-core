@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (provider binding owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (provider capability warm owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/gateway-provider-binding-owner` |
-| PR | #108-#116, #118-#264 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #264 (`37bc05c7`) |
+| Branch | `fabio/gateway-provider-capability-warm-owner` |
+| PR | #108-#116, #118-#265 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #265 (`93c8eb66`) |
 
 ## Dove siamo
 
@@ -433,6 +433,10 @@ Slice Runtime V2 recenti:
   del turno passa da struct literal in `stream_chat_via_openai` a
   `gateway_provider_binding`; fallback provider mid-round e transport restano
   nello stesso owner modello.
+- Estrazione locale `gateway_model_routing`: warm-up delle capability modello
+  del turno passa dal branch inline `is_ollama_base` in `stream_chat_via_openai`
+  a `warm_turn_provider_capabilities`; parsing/caching Ollama e policy provider
+  restano nello stesso owner routing modello.
 - Estrazione locale `gateway_tool_execution`: lookup del
   `ValidatedExecutionContract` del turno esce da `run_agent_rounds`; capability
   executor e browser executor ricevono lo stesso contratto caricato dall'owner

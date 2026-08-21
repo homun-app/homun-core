@@ -2280,6 +2280,16 @@ pub(crate) async fn warm_ollama_capabilities(http: &reqwest::Client, base_url: &
     }
 }
 
+pub(crate) async fn warm_turn_provider_capabilities(
+    http: &reqwest::Client,
+    base_url: &str,
+    model: &str,
+) {
+    if is_ollama_base(base_url) {
+        warm_ollama_capabilities(http, base_url, model).await
+    }
+}
+
 /// Converts OpenAI-style messages to Ollama native `/api/chat` shape: multimodal
 /// content-parts become `{content, images:[base64]}`; assistant `tool_calls`
 /// arguments are parsed from JSON STRING back to an OBJECT (native expects an object).

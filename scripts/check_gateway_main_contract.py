@@ -2604,6 +2604,11 @@ def main() -> int:
     )
     assert_contains(
         model_routing_source,
+        "pub(crate) async fn warm_turn_provider_capabilities(",
+        "model routing owner must expose provider capability warm orchestration",
+    )
+    assert_contains(
+        model_routing_source,
         "pub(crate) struct GatewayContextCompactor",
         "model routing owner must expose context compactor port",
     )
@@ -2616,6 +2621,16 @@ def main() -> int:
         source,
         "let compactor = GatewayContextCompactor {\n        state: state_owned.clone(),\n        thread_id: thread_id.clone(),\n    };",
         "gateway root must not construct GatewayContextCompactor inline",
+    )
+    assert_not_contains(
+        source,
+        "if is_ollama_base(&base_url)",
+        "gateway root must not own provider capability warm branch",
+    )
+    assert_not_contains(
+        source,
+        "warm_ollama_capabilities(&http, &base_url, &model).await",
+        "gateway root must not call Ollama capability warm directly",
     )
     assert_contains(
         model_routing_source,
