@@ -67,6 +67,19 @@ pub(crate) fn thread_context_for_model(
     Some(msgs)
 }
 
+pub(crate) fn effective_prompt_context_for_model(
+    state: &AppState,
+    thread_id: Option<&str>,
+    request_context: &[ChatContextMessage],
+    current_prompt: &str,
+) -> Vec<ChatContextMessage> {
+    match thread_id {
+        Some(thread_id) => thread_context_for_model(state, thread_id, &[], Some(current_prompt))
+            .unwrap_or_default(),
+        None => request_context.to_vec(),
+    }
+}
+
 pub(crate) fn agent_turn_context(
     state: &AppState,
     thread_id: &str,

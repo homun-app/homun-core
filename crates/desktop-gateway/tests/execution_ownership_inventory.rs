@@ -252,6 +252,7 @@ fn thread_model_context_has_one_gateway_owner() {
     for pattern in [
         "fn context_message_for_model(",
         "fn thread_context_for_model(",
+        "fn effective_prompt_context_for_model(",
         "fn agent_turn_context(",
     ] {
         assert!(
@@ -261,6 +262,17 @@ fn thread_model_context_has_one_gateway_owner() {
         assert!(
             !main.contains(pattern),
             "main.rs must not retain thread model context surface {pattern}"
+        );
+    }
+
+    for pattern in [
+        "match request.thread_id.as_deref()",
+        "thread_context_for_model(state, thread_id, &[], Some(request.prompt.as_str()))",
+        "None => request.context.clone()",
+    ] {
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not choose the effective model context inline {pattern}"
         );
     }
 
