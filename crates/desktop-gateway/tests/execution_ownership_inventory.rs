@@ -589,6 +589,38 @@ fn agent_turn_outcomes_have_one_gateway_owner() {
 }
 
 #[test]
+fn skill_prompt_instructions_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let skill_runtime = production_source(&root.join("src/gateway_skill_runtime.rs"));
+
+    let pattern = "fn skill_prompt_instructions_block(";
+    assert!(
+        skill_runtime.contains(pattern),
+        "skill runtime owner must contain {pattern}"
+    );
+
+    for snippet in ["INSTALLED SKILLS —", "METHODOLOGY (HomunCoder)"] {
+        assert!(
+            !main.contains(snippet),
+            "main.rs must not retain skill prompt instruction copy {snippet}"
+        );
+    }
+
+    for adjacent in [
+        "fn use_skill_tool_schema(",
+        "fn run_in_sandbox_tool_schema(",
+        "fn enabled_skills_summary(",
+        "fn homuncoder_skill_ids(",
+    ] {
+        assert!(
+            skill_runtime.contains(adjacent),
+            "skill prompt owner must stay with skill runtime adjacent helper {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn gateway_time_has_one_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

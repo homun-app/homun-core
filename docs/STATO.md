@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (thread model effective context owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (skill prompt instructions owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/thread-model-effective-context-owner` |
-| PR | #108-#116, #118-#266 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #266 (`8ee3af02`) |
+| Branch | `fabio/skill-prompt-instructions-owner` |
+| PR | #108-#116, #118-#267 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #267 (`73108cbf`) |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_thread_model_context`: la scelta del contesto
+- Estrazione locale `gateway_skill_runtime`: il rendering del blocco prompt
+  `INSTALLED SKILLS` / metodologia HomunCoder esce dal setup inline di
+  `stream_chat_via_openai` e vive accanto a discovery, progressive disclosure
+  e schema tool degli skill; `main.rs` conserva solo snapshot, filtro progetto
+  e append del blocco gia' renderizzato.
+- Estrazione mergeata `gateway_thread_model_context`: la scelta del contesto
   modello effettivo per il prompt (`thread_context_for_model` quando esiste un
   thread, `request.context` solo per turni senza thread) esce dal setup inline
   di `stream_chat_via_openai`; prompt assembly, loop agente e browser restano
@@ -1102,8 +1107,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#243: slice owner-level successive mergeate in `main`, fino a
-  `audit runtime plan`; `main` verificato e riallineato a #243.
+- #143-#267: slice owner-level successive mergeate in `main`, fino a
+  `thread model effective context owner`; `main` verificato e riallineato a
+  #267.
 
 PR aperte:
 
@@ -1111,8 +1117,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/thread-model-effective-context-owner`: slice locale sopra `main`
-  riallineato a #266 (`8ee3af02`).
+- `fabio/skill-prompt-instructions-owner`: slice locale sopra `main`
+  riallineato a #267 (`73108cbf`).
 
 ## Debito residuo
 
@@ -1145,8 +1151,8 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #243 (`a70f4a4e`); prossima slice non-browser da scegliere
-dopo nuova lettura owner-level di main.rs.
+main aggiornato a #267 (`73108cbf`); prossima slice non-browser da completare
+o scegliere dopo nuova lettura owner-level di main.rs.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

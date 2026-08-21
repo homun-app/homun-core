@@ -1933,37 +1933,9 @@ calendar events.",
     } else {
         system
     };
-    let system = if !has_skills {
-        system
-    } else {
-        let lines = enabled_skills
-            .iter()
-            .map(|(id, name, desc)| format!("- {id}: {name} — {desc}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let methodology = if is_project
-            && enabled_skills
-                .iter()
-                .any(|(id, _, _)| homuncoder.contains(id))
-        {
-            "\nMETHODOLOGY (HomunCoder) — for DEVELOPMENT work follow the evidence-first habits: \
-plan with update_plan, REMEMBER/record decisions with their why, and VERIFY by executing \
-(build/test/lint) before saying \"done\". When you apply one of these disciplines, call \
-`use_skill` FIRST with the right skill (roadmap-first-planning, systematic-debugging, test-first-development, \
-verification-before-completion, code-review-discipline, …) — so the user SEES which methodology \
-you're following — and then follow its instructions. Don't just cite it: actually load it with use_skill."
-        } else {
-            ""
-        };
-        format!(
-            "{system}\n\nINSTALLED SKILLS — when the request matches the description of one \
-of these, PREFER it over the browser: call `use_skill` with its id to receive the complete \
-instructions (SKILL.md). Then RUN the commands the skill indicates (e.g. `curl …`, `python …`) with the \
-`run_in_sandbox` tool, which launches them in the contained computer, and use the output to reply.\n\
-GENERATED FILES: if a skill or a command produces files (xlsx, pdf, csv, images, …), SAVE them in the \
-environment folder `$OUTPUT_DIR` (e.g. `... --output \"$OUTPUT_DIR/report.xlsx\"`): files there \
-automatically become artifacts downloadable by the user.{methodology}\n{lines}"
-        )
+    let system = match skill_prompt_instructions_block(&enabled_skills, &homuncoder, is_project) {
+        Some(block) => format!("{system}\n\n{block}"),
+        None => system,
     };
     // Inline choice prompts (Claude-Code style): when the answer is a pick among a few
     // discrete options, the model emits a CHOICES marker that the UI renders as clickable
