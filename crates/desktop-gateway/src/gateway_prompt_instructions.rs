@@ -60,6 +60,24 @@ pub(crate) fn memory_scope_restricted_instruction() -> &'static str {
     "MEMORY SCOPE FOR THIS OBJECTIVE: long-term recall and Vault lookup are not authorized. Use only current-thread context and current-turn tool evidence; do not call recall_memory."
 }
 
+pub(crate) fn plan_mode_instruction() -> &'static str {
+    "PLAN MODE (chosen by the user): maintain the canonical operational plan with \
+update_plan and continue execution in this turn. Replan autonomously while the objective, scope and effects stay unchanged."
+}
+
+pub(crate) fn ask_mode_instruction() -> &'static str {
+    "ASK MODE (chosen by the user): answer by conversing from your \
+knowledge and memory. Do NOT use tools and do NOT perform external actions (no browser, files, \
+sends, searches). If answering would require a tool, say so and suggest switching to \
+Agent mode."
+}
+
+pub(crate) fn debug_mode_instruction() -> &'static str {
+    "DEBUG MODE (chosen by the user): SYSTEMATIC debugging — reproduce the \
+problem, isolate the cause, form a hypothesis, verify it with a minimal experiment, then fix and \
+RE-VERIFY by executing. One cause at a time, no blind attempts."
+}
+
 pub(crate) fn operational_plan_instruction() -> &'static str {
     "OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing \
 in the SAME turn. The plan is a live projection of the canonical objective, not a separate artifact \
@@ -101,9 +119,10 @@ discovery/search from scratch."
 #[cfg(test)]
 mod tests {
     use super::{
-        booking_assumption_choice_instruction, browser_open_research_discovery_instruction,
-        choice_resume_instruction_legacy_backup, memory_recall_usage_instruction,
-        memory_scope_restricted_instruction, operational_plan_instruction,
+        ask_mode_instruction, booking_assumption_choice_instruction,
+        browser_open_research_discovery_instruction, choice_resume_instruction_legacy_backup,
+        debug_mode_instruction, memory_recall_usage_instruction,
+        memory_scope_restricted_instruction, operational_plan_instruction, plan_mode_instruction,
     };
 
     #[test]
@@ -156,6 +175,24 @@ mod tests {
         assert!(guidance.contains("long-term recall and Vault lookup are not authorized"));
         assert!(guidance.contains("current-thread context and current-turn tool evidence"));
         assert!(guidance.contains("do not call recall_memory"));
+    }
+
+    #[test]
+    fn gateway_prompt_instructions_own_chat_mode_contracts() {
+        let plan = plan_mode_instruction();
+        assert!(plan.contains("PLAN MODE (chosen by the user)"));
+        assert!(plan.contains("canonical operational plan"));
+        assert!(plan.contains("update_plan"));
+
+        let ask = ask_mode_instruction();
+        assert!(ask.contains("ASK MODE (chosen by the user)"));
+        assert!(ask.contains("Do NOT use tools"));
+        assert!(ask.contains("Agent mode"));
+
+        let debug = debug_mode_instruction();
+        assert!(debug.contains("DEBUG MODE (chosen by the user)"));
+        assert!(debug.contains("SYSTEMATIC debugging"));
+        assert!(debug.contains("RE-VERIFY"));
     }
 
     #[test]

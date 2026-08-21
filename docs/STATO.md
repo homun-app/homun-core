@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (memory prompt instructions owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (chat mode prompt instructions owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/memory-prompt-instructions-owner` |
-| PR | #108-#116, #118-#268 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #268 (`3596f2a4`) |
+| Branch | `fabio/chat-mode-prompt-instructions-owner` |
+| PR | #108-#116, #118-#269 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #269 (`3b4cc56f`) |
 
 ## Dove siamo
 
@@ -44,7 +44,11 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_prompt_instructions`: il contratto prompt statico
+- Estrazione locale `gateway_prompt_instructions`: i contratti prompt statici
+  per composer mode `plan`/`ask`/`debug` escono dal match inline di
+  `stream_chat_via_openai`; `main.rs` conserva solo la scelta del mode, mentre
+  toolset, runtime plan, debug flow e loop agente restano owner separati.
+- Estrazione mergeata `gateway_prompt_instructions`: il contratto prompt statico
   memoria/recall/Vault (`MEMORY`, `RECALL-BEFORE-ASKING`,
   `SENSITIVE VAULT`, scope restricted senza `recall_memory`) esce dal setup
   inline di `stream_chat_via_openai`; `main.rs` conserva solo la composizione e
@@ -1113,8 +1117,8 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#268: slice owner-level successive mergeate in `main`, fino a
-  `skill prompt instruction owner`; `main` verificato e riallineato a #268.
+- #143-#269: slice owner-level successive mergeate in `main`, fino a
+  `memory prompt instruction owner`; `main` verificato e riallineato a #269.
 
 PR aperte:
 
@@ -1122,8 +1126,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/memory-prompt-instructions-owner`: slice locale sopra `main`
-  riallineato a #268 (`3596f2a4`).
+- `fabio/chat-mode-prompt-instructions-owner`: slice locale sopra `main`
+  riallineato a #269 (`3b4cc56f`).
 
 ## Debito residuo
 

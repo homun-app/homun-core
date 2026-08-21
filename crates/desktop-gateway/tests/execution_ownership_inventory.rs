@@ -666,6 +666,50 @@ fn memory_prompt_instructions_have_one_gateway_owner() {
 }
 
 #[test]
+fn chat_mode_prompt_instructions_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
+
+    for pattern in [
+        "fn plan_mode_instruction(",
+        "fn ask_mode_instruction(",
+        "fn debug_mode_instruction(",
+    ] {
+        assert!(
+            prompt_instructions.contains(pattern),
+            "prompt instruction owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain chat mode prompt instruction surface {pattern}"
+        );
+    }
+
+    for snippet in [
+        "PLAN MODE (chosen by the user):",
+        "ASK MODE (chosen by the user):",
+        "DEBUG MODE (chosen by the user):",
+    ] {
+        assert!(
+            !main.contains(snippet),
+            "main.rs must not retain chat mode prompt instruction copy {snippet}"
+        );
+    }
+
+    for adjacent in [
+        "fn operational_plan_instruction(",
+        "fn memory_recall_usage_instruction(",
+        "fn memory_scope_restricted_instruction(",
+    ] {
+        assert!(
+            prompt_instructions.contains(adjacent),
+            "chat mode prompt owner must stay with prompt instruction adjacent helper {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn gateway_time_has_one_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

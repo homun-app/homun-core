@@ -566,9 +566,10 @@ use gateway_project_search_tools::{
     query_git_history, query_git_history_tool_schema,
 };
 use gateway_prompt_instructions::{
-    booking_assumption_choice_instruction, browser_open_research_discovery_instruction,
+    ask_mode_instruction, booking_assumption_choice_instruction,
+    browser_open_research_discovery_instruction, debug_mode_instruction,
     memory_recall_usage_instruction, memory_scope_restricted_instruction,
-    operational_plan_instruction,
+    operational_plan_instruction, plan_mode_instruction,
 };
 pub(crate) use gateway_prompt_packets::*;
 #[cfg(test)]
@@ -2338,21 +2339,9 @@ Trust the compiler and the tests, not your estimate."
         tier: turn_tier.as_str().to_string(),
     });
     let system = match mode.as_str() {
-        "plan" => format!(
-            "{system}\n\nPLAN MODE (chosen by the user): maintain the canonical operational plan with \
-update_plan and continue execution in this turn. Replan autonomously while the objective, scope and effects stay unchanged."
-        ),
-        "ask" => format!(
-            "{system}\n\nASK MODE (chosen by the user): answer by conversing from your \
-knowledge and memory. Do NOT use tools and do NOT perform external actions (no browser, files, \
-sends, searches). If answering would require a tool, say so and suggest switching to \
-Agent mode."
-        ),
-        "debug" => format!(
-            "{system}\n\nDEBUG MODE (chosen by the user): SYSTEMATIC debugging — reproduce the \
-problem, isolate the cause, form a hypothesis, verify it with a minimal experiment, then fix and \
-RE-VERIFY by executing. One cause at a time, no blind attempts."
-        ),
+        "plan" => format!("{system}\n\n{}", plan_mode_instruction()),
+        "ask" => format!("{system}\n\n{}", ask_mode_instruction()),
+        "debug" => format!("{system}\n\n{}", debug_mode_instruction()),
         _ => system,
     };
     let system = match objective_contract_for_execution(state, request.thread_id.as_deref()) {
