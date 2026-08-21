@@ -824,6 +824,51 @@ fn agent_checkpoint_preflight_has_one_gateway_owner() {
 }
 
 #[test]
+fn privacy_guard_preflight_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let preflight = production_source(&root.join("src/gateway_privacy_preflight.rs"));
+
+    for pattern in [
+        "pub(crate) async fn evaluate_privacy_guard_preflight(",
+        "PrivacyGuardPreflightOutcome::EarlyResponse",
+        "privacy_guard::failure_policy(",
+        "privacy_guard::build_privacy_guard_intercept(",
+        "privacy_guard_unavailable",
+    ] {
+        assert!(
+            preflight.contains(pattern),
+            "privacy preflight owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "privacy_guard::classify_sensitive_input_deterministic(",
+        "classify_sensitive_input_with_privacy_guard_model(",
+        "privacy_guard::failure_policy(",
+        "privacy_guard::build_privacy_guard_intercept(",
+        "privacy_guard_unavailable",
+    ] {
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain privacy guard preflight decision {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "fn execute_capability_browser_task(",
+        "fn apply_agent_recovery_checkpoint(",
+    ] {
+        assert!(
+            !preflight.contains(adjacent),
+            "privacy preflight owner must not absorb adjacent owner {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn brain_materialization_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
