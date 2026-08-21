@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (chat usage context owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (model steering context owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -421,6 +421,10 @@ Slice Runtime V2 recenti:
   `UsageContext::ChatResponse` scoped per user/workspace/thread/turn/run esce
   dal loop agente in `main.rs`; model client, loop agente, browser e routing
   restano owner separati.
+- Estrazione locale `model_client`: costruzione del `GatewaySteeringContext`
+  per thread/turn/run esce da `run_agent_rounds`; il loop agente passa solo gli
+  identificativi del turno, mentre steering persistence e model transport
+  restano dentro il model client.
 - Estrazione locale `gateway_turn_trace`: bootstrap del trace leggibile
   `turn_received`, opt-out e fallback no-log-dir escono dal monolite
   `main.rs`; il trace resta pura osservabilita' e non possiede loop agente,

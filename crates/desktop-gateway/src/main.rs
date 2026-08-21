@@ -3024,17 +3024,14 @@ async fn run_agent_rounds(
     // stores, constructed ONCE per turn from this turn's context (ADR 0024/0026). model_client borrows
     // http+tx locally; the tool chokepoints hold the turn-constant read-only context and get `&mut ls`
     // per call from the engine.
-    let steering_context = match (thread_id.as_deref(), effect_turn_id.as_deref()) {
-        (Some(thread_id), Some(turn_id)) => Some(crate::model_client::GatewaySteeringContext {
-            state: &state_owned,
-            user_id: automation_user_id.as_str(),
-            workspace_id: automation_workspace_id.as_str(),
-            thread_id,
-            turn_id,
-            run_id: effect_run_id.as_deref().unwrap_or(turn_id),
-        }),
-        _ => None,
-    };
+    let steering_context = crate::model_client::gateway_steering_context(
+        &state_owned,
+        automation_user_id.as_str(),
+        automation_workspace_id.as_str(),
+        thread_id.as_deref(),
+        effect_turn_id.as_deref(),
+        effect_run_id.as_deref(),
+    );
     let model_client = crate::model_client::GatewayModelClient {
         http: &http,
         tx,

@@ -2324,6 +2324,51 @@ fn chat_usage_context_has_one_gateway_owner() {
 }
 
 #[test]
+fn model_steering_context_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let model_client = production_source(&root.join("src/model_client.rs"));
+
+    for pattern in [
+        "pub(crate) struct GatewaySteeringContext",
+        "pub(crate) fn gateway_steering_context",
+        "effect_run_id.unwrap_or(turn_id)",
+        "thread_id.map(",
+        "turn_id.map(",
+    ] {
+        assert!(
+            model_client.contains(pattern),
+            "model client owner must contain steering context surface {pattern}"
+        );
+    }
+
+    for pattern in [
+        "crate::model_client::GatewaySteeringContext {",
+        "let steering_context = match (thread_id.as_deref(), effect_turn_id.as_deref())",
+        "run_id: effect_run_id.as_deref().unwrap_or(turn_id)",
+    ] {
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not own model steering context construction {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn run_agent_rounds(",
+        "GatewayCapabilityExecutor {",
+        "GatewayBrowserExecutor {",
+        "GatewayPlanProgress {",
+        "GatewayTurnCompletionJudge::new(",
+        "local_first_engine::agent_loop::run_turn(",
+    ] {
+        assert!(
+            !model_client.contains(adjacent),
+            "model client steering owner must not absorb adjacent agent loop surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn agent_turn_tail_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

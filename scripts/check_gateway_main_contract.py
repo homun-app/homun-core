@@ -106,6 +106,7 @@ TURN_TRACE_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_
 USAGE_RUNTIME_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_usage_runtime.rs"
 )
+MODEL_CLIENT_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "model_client.rs")
 PROMPT_PACKETS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_prompt_packets.rs"
 )
@@ -1116,6 +1117,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         ".abort_orphaned_attempts(": "usage orphan cleanup must stay in gateway_usage_runtime",
         ".rebuild_daily_rollups(": "usage rollup rebuild must stay in gateway_usage_runtime",
         "let mut usage_context = local_first_inference_usage::UsageContext::new(": "chat response usage context must stay in gateway_usage_runtime",
+        "crate::model_client::GatewaySteeringContext {": "model steering context construction must stay in model_client",
+        "let steering_context = match (thread_id.as_deref(), effect_turn_id.as_deref())": "model steering context construction must stay in model_client",
         "struct RuntimeSettings": "runtime settings DTO must stay in gateway_runtime_settings",
         "fn merge_runtime_settings(": "runtime settings merge must stay in gateway_runtime_settings",
         "async fn get_runtime_settings(": "runtime settings read route must stay in gateway_runtime_settings",
@@ -1585,6 +1588,8 @@ def main() -> int:
         turn_trace_source = handle.read()
     with open(USAGE_RUNTIME_RS, "r", encoding="utf-8") as handle:
         usage_runtime_source = handle.read()
+    with open(MODEL_CLIENT_RS, "r", encoding="utf-8") as handle:
+        model_client_source = handle.read()
     with open(PROMPT_PACKETS_RS, "r", encoding="utf-8") as handle:
         prompt_packets_source = handle.read()
     with open(BRAIN_RUNTIME_RS, "r", encoding="utf-8") as handle:
@@ -3327,6 +3332,21 @@ def main() -> int:
         source,
         "let mut usage_context = local_first_inference_usage::UsageContext::new(",
         "gateway root must not build chat response usage context inline",
+    )
+    assert_contains(
+        model_client_source,
+        "pub(crate) fn gateway_steering_context",
+        "model client owner must expose steering context construction",
+    )
+    assert_not_contains(
+        source,
+        "crate::model_client::GatewaySteeringContext {",
+        "gateway root must not build model steering context inline",
+    )
+    assert_not_contains(
+        source,
+        "let steering_context = match (thread_id.as_deref(), effect_turn_id.as_deref())",
+        "gateway root must not own model steering context match",
     )
     assert_contains(
         composio_routes_source,
