@@ -567,8 +567,8 @@ use gateway_project_search_tools::{
 };
 use gateway_prompt_instructions::{
     ask_mode_instruction, booking_assumption_choice_instruction,
-    browser_open_research_discovery_instruction, debug_mode_instruction,
-    language_follow_user_instruction, memory_recall_usage_instruction,
+    browser_open_research_discovery_instruction, code_map_available_instruction,
+    debug_mode_instruction, language_follow_user_instruction, memory_recall_usage_instruction,
     memory_scope_restricted_instruction, operational_plan_instruction, plan_mode_instruction,
 };
 pub(crate) use gateway_prompt_packets::*;
@@ -1756,16 +1756,7 @@ when the answer is long. {language_instruction} Clear and well-structured.",
         .unwrap_or(false)
     };
     let system = if has_code_map {
-        format!(
-            "{system}\n\nCODE MAP: this project has an indexed code map. \
-For questions about code STRUCTURE or DEPENDENCIES — \"what methods/functions \
-does X have\", \"who calls/uses Y\", \"what does Z use\", \"where is W defined/which files use it\" — \
-call `query_code_graph` FIRST (it's instant and authoritative). For HISTORY or the WHY \
-OVER TIME — \"why/when did X change\", \"the history of Y\" — use `query_git_history` \
-(commit messages are the why). Resort to read_file/list_files/run_in_project ONLY \
-if the map and history aren't enough (e.g. reading the BODY of a function). Do NOT grep/list \
-files for questions the map or history already answer."
-        )
+        format!("{system}\n\n{}", code_map_available_instruction())
     } else {
         system
     };

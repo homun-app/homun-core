@@ -749,6 +749,44 @@ fn language_prompt_instruction_has_one_gateway_owner() {
 }
 
 #[test]
+fn code_map_prompt_instruction_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
+
+    let pattern = "fn code_map_available_instruction(";
+    assert!(
+        prompt_instructions.contains(pattern),
+        "prompt instruction owner must contain {pattern}"
+    );
+    assert!(
+        !main.contains(pattern),
+        "main.rs must not retain code-map prompt instruction surface {pattern}"
+    );
+
+    for snippet in [
+        "CODE MAP: this project has an indexed code map",
+        "code STRUCTURE or DEPENDENCIES",
+        "query_code_graph` FIRST",
+        "Do NOT grep/list files",
+    ] {
+        assert!(
+            !main.contains(snippet),
+            "main.rs must not retain code-map prompt instruction copy {snippet}"
+        );
+    }
+
+    assert!(
+        main.contains("let has_code_map ="),
+        "main.rs still owns the scoped runtime decision to append the code-map instruction"
+    );
+    assert!(
+        prompt_instructions.contains("fn operational_plan_instruction("),
+        "code-map prompt owner must stay with prompt instruction helpers"
+    );
+}
+
+#[test]
 fn gateway_time_has_one_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

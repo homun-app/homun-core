@@ -85,6 +85,17 @@ Italian, reply entirely in Italian; if in English, in English. Match the user an
 switch language on your own. (Tool arguments, code, file paths and URLs stay as-is.)"
 }
 
+pub(crate) fn code_map_available_instruction() -> &'static str {
+    "CODE MAP: this project has an indexed code map. \
+For questions about code STRUCTURE or DEPENDENCIES — \"what methods/functions \
+does X have\", \"who calls/uses Y\", \"what does Z use\", \"where is W defined/which files use it\" — \
+call `query_code_graph` FIRST (it's instant and authoritative). For HISTORY or the WHY \
+OVER TIME — \"why/when did X change\", \"the history of Y\" — use `query_git_history` \
+(commit messages are the why). Resort to read_file/list_files/run_in_project ONLY \
+if the map and history aren't enough (e.g. reading the BODY of a function). Do NOT grep/list \
+files for questions the map or history already answer."
+}
+
 pub(crate) fn operational_plan_instruction() -> &'static str {
     "OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing \
 in the SAME turn. The plan is a live projection of the canonical objective, not a separate artifact \
@@ -128,8 +139,9 @@ mod tests {
     use super::{
         ask_mode_instruction, booking_assumption_choice_instruction,
         browser_open_research_discovery_instruction, choice_resume_instruction_legacy_backup,
-        debug_mode_instruction, language_follow_user_instruction, memory_recall_usage_instruction,
-        memory_scope_restricted_instruction, operational_plan_instruction, plan_mode_instruction,
+        code_map_available_instruction, debug_mode_instruction, language_follow_user_instruction,
+        memory_recall_usage_instruction, memory_scope_restricted_instruction,
+        operational_plan_instruction, plan_mode_instruction,
     };
 
     #[test]
@@ -210,6 +222,16 @@ mod tests {
         assert!(guidance.contains("step-by-step narration"));
         assert!(guidance.contains("final answer"));
         assert!(guidance.contains("Tool arguments, code, file paths and URLs stay as-is"));
+    }
+
+    #[test]
+    fn gateway_prompt_instructions_own_code_map_contract() {
+        let guidance = code_map_available_instruction();
+        assert!(guidance.contains("CODE MAP: this project has an indexed code map"));
+        assert!(guidance.contains("code STRUCTURE or DEPENDENCIES"));
+        assert!(guidance.contains("query_code_graph"));
+        assert!(guidance.contains("query_git_history"));
+        assert!(guidance.contains("Do NOT grep/list files"));
     }
 
     #[test]
