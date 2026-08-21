@@ -2222,6 +2222,53 @@ fn agent_stream_request_ids_have_one_gateway_owner() {
 }
 
 #[test]
+fn agent_turn_tail_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let turn_tail = production_source(&root.join("src/gateway_agent_turn_tail.rs"));
+
+    for pattern in [
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "struct AgentTurnTailInput",
+        "memory_reuse_envelope_from_read_set(",
+        "spawn_project_graph_refresh(",
+        "finalize_turn_steering(",
+        "publish_stream_outcome(",
+        "schedule_stream_registry_cleanup(",
+    ] {
+        assert!(
+            turn_tail.contains(pattern),
+            "agent turn tail owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "let learn_envelope = memory_reuse_envelope_from_read_set(",
+        "spawn_project_graph_refresh(&tail_state, &ws);",
+        "finalize_turn_steering(\n            &tail_state,",
+        "publish_stream_outcome(&tx.entry, outcome);",
+    ] {
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain agent turn tail surface {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "fn execute_capability_browser_task(",
+        "fn execute_persistent_browser_capability(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !turn_tail.contains(adjacent),
+            "agent turn tail owner must not absorb adjacent stream/loop/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn gateway_state_access_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

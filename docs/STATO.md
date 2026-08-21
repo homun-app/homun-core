@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-20 (operational plan prompt owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (agent turn tail owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#243 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #243 (`a70f4a4e`) |
+| PR | #108-#116, #118-#250 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #250 (`ab883783`) |
 
 ## Dove siamo
 
@@ -285,6 +285,11 @@ Slice Runtime V2 recenti:
   Guard, fallback local-only/block remote, errore `privacy_guard_unavailable` e
   risposta anticipata Vault proposal escono dal monolite `main.rs`; transport
   stream, checkpoint, loop agente e browser restano owner separati.
+- Estrazione locale `gateway_agent_turn_tail`: coda post-loop del turno agente
+  (HITL legacy projection, trace finale, memory learn, refresh code graph,
+  steering fence, publish outcome e cleanup stream) esce dal monolite
+  `main.rs`; stream setup, loop agente, browser e subagent restano owner
+  separati.
 - Estrazione locale `gateway_chat_streams`: costruzione request id stream per
   turni agente/channel e broker (`agentturn-*`, `broker-*`) esce dal monolite
   `main.rs` e vive accanto a registry/replay/abort stream; loop agente, drain
