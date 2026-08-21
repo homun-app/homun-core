@@ -2609,6 +2609,16 @@ def main() -> int:
     )
     assert_contains(
         model_routing_source,
+        "impl GatewayContextCompactor {\n    pub(crate) fn new(",
+        "model routing owner must expose context compactor constructor impl",
+    )
+    assert_not_contains(
+        source,
+        "let compactor = GatewayContextCompactor {\n        state: state_owned.clone(),\n        thread_id: thread_id.clone(),\n    };",
+        "gateway root must not construct GatewayContextCompactor inline",
+    )
+    assert_contains(
+        model_routing_source,
         "pub(crate) struct GatewayTurnCompletionJudge",
         "model routing owner must expose turn completion judge port",
     )

@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (plan progress constructor owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (context compactor constructor owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#260 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #260 (`9c67b117`) |
+| PR | #108-#116, #118-#261 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #261 (`110c6af7`) |
 
 ## Dove siamo
 
@@ -489,6 +489,10 @@ Slice Runtime V2 recenti:
   esce dal monolite `main.rs` e vive nell'owner `gateway_model_routing`, accanto
   alle policy di compaction visibili al modello; `GatewayTurnPolicy`,
   `GatewayTurnCompletionJudge` e il loop agente restano owner separati.
+- Estrazione locale `gateway_context_compactor`: costruzione del port engine
+  `GatewayContextCompactor` passa da struct literal in `run_agent_rounds` a
+  `GatewayContextCompactor::new`, mantenendo state/thread binding nell'owner
+  model routing.
 - Estrazione mergeata `gateway_turn_policy`: adapter port `GatewayTurnPolicy`
   esce dal monolite `main.rs` e vive nell'owner `gateway_capability_routing`,
   accanto alla decisione `CapabilityRouteDecision` e al blocco workflow

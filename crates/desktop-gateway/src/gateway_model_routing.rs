@@ -1626,8 +1626,14 @@ pub(crate) async fn compact_for_context_budget(
 /// paths: completed-step compaction and token-budget compaction. The chat loop
 /// constructs it live, but model-visible context policy stays in this owner.
 pub(crate) struct GatewayContextCompactor {
-    pub(crate) state: AppState,
-    pub(crate) thread_id: Option<String>,
+    state: AppState,
+    thread_id: Option<String>,
+}
+
+impl GatewayContextCompactor {
+    pub(crate) fn new(state: AppState, thread_id: Option<String>) -> Self {
+        Self { state, thread_id }
+    }
 }
 
 impl local_first_engine::ContextCompactor for GatewayContextCompactor {
