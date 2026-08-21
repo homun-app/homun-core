@@ -55,6 +55,7 @@ mod gateway_channels;
 mod gateway_chat_branches;
 mod gateway_chat_markers;
 mod gateway_chat_memory;
+mod gateway_chat_plan_resume;
 mod gateway_chat_streams;
 mod gateway_chat_tasks;
 mod gateway_chat_threads;
@@ -202,6 +203,7 @@ pub(crate) use gateway_automation_routes::*;
 pub(crate) use gateway_brain_materialization::*;
 pub(crate) use gateway_brain_runtime::*;
 pub(crate) use gateway_browser_runtime::*;
+pub(crate) use gateway_chat_plan_resume::*;
 pub(crate) use gateway_chat_streams::*;
 pub(crate) use gateway_chat_toolset::*;
 pub(crate) use gateway_chat_turn_context::*;
@@ -2720,62 +2722,14 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         .rev()
         .find(|m| matches!(m.role, ChatContextRole::Assistant))
         .map(|m| m.text.clone());
-    // F4: resume an interrupted long task on the CANONICAL plan so the turn continues on
-    // the same authoritative state (done steps stay done) instead of RESTARTING. Prefer the
-    // durable per-thread runtime-plan store (upserted on every plan call, survives even when
-    // the prior turn hasn't yet persisted its ‹‹PLAN›› marker into this turn's context) —
-    // reading only the context marker made a continuation turn resume 0 steps and revert
-    // done→doing (the "il piano riparta" symptom). Fall back to the context marker for a
-    // thread-less turn or a store miss.
-    let (mut resume_plan, resume_goal): (Vec<serde_json::Value>, Option<String>) = {
-        let from_store = runtime_plan_record_from_state(state, thread_id.as_deref());
-        if let Some((goal, steps)) = from_store
-            && !steps.is_empty()
-        {
-            (steps, goal)
-        } else {
-            // A marker-resumed plan carries no goal line (it was never part of the checklist
-            // grammar) — without a durable goal the canonical plan starts goal-less.
-            let steps = effective_context
-                .iter()
-                .rev()
-                .find(|m| m.text.contains("‹‹PLAN››"))
-                .map(|m| parse_plan_marker(&m.text))
-                .unwrap_or_default();
-            (steps, None)
-        }
-    };
-    // F4: a RESUMED plan that closes no new step across turns is stuck (the per-turn recovery
-    // counters reset each turn, so the same failing step retries forever). After the cap the
-    // harness BLOCKS the stuck step (caposaldo #2) — `block_stalled_step` makes the plan
-    // `settled`, so `upsert_runtime_plan_memory` stops it auto-resuming. Gated until validated
-    // live; the bookkeeping is a no-op when off.
-    if applies_new_input && !resume_plan.is_empty() && plan_stall_abort_enabled() {
-        let stalled = runtime_plan_control_scope(state, thread_id.as_deref()).is_some_and(
-            |(user_id, workspace_id, thread_id)| {
-                plan_stall_check_and_bump(
-                    state.task_store.as_ref(),
-                    &user_id,
-                    &workspace_id,
-                    &thread_id,
-                    &resume_plan,
-                )
-            },
-        );
-        if stalled && let Some(title) = block_stalled_step(&mut resume_plan) {
-            upsert_runtime_plan_memory_from_state(
-                state,
-                thread_id.as_deref(),
-                resume_goal.as_deref(),
-                &resume_plan,
-            );
-            if verbose_debug() {
-                eprintln!(
-                    "[plan] F4: blocked stalled step after {MAX_PLAN_STALL_RESUMES} no-progress resumes: «{title}»"
-                );
-            }
-        }
-    }
+    let chat_plan_resume = prepare_chat_plan_resume(ChatPlanResumeInput {
+        state,
+        thread_id: thread_id.as_deref(),
+        effective_context: &effective_context,
+        applies_new_input,
+    });
+    let resume_plan = chat_plan_resume.plan;
+    let resume_goal = chat_plan_resume.goal;
     let capability_route_for_runtime = capability_route.clone();
     let abort_resume_id = resume_id.clone();
     let engine_task = tokio::spawn(async move {

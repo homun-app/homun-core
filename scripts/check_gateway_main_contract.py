@@ -140,6 +140,9 @@ CHAT_TURN_CONTEXT_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_turn_context.rs"
 )
 CHAT_TOOLSET_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_chat_toolset.rs")
+CHAT_PLAN_RESUME_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_chat_plan_resume.rs"
+)
 CHANNELS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_channels.rs")
 MEMORY_QUERY_EMBEDDINGS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_query_embeddings.rs"
@@ -1596,6 +1599,8 @@ def main() -> int:
         chat_turn_context_source = handle.read()
     with open(CHAT_TOOLSET_RS, "r", encoding="utf-8") as handle:
         chat_toolset_source = handle.read()
+    with open(CHAT_PLAN_RESUME_RS, "r", encoding="utf-8") as handle:
+        chat_plan_resume_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
         action_confirmations_source = handle.read()
     with open(ACTIONABLE_SOURCE_RS, "r", encoding="utf-8") as handle:
@@ -3122,6 +3127,57 @@ def main() -> int:
             chat_toolset_source,
             snippet,
             "chat toolset owner must not absorb stream, loop, tail, browser, subagent or MCP runtime owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_chat_plan_resume;",
+        "gateway root must declare chat plan resume owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_chat_plan_resume::*;",
+        "gateway root must re-export chat plan resume owner",
+    )
+    for snippet in [
+        "pub(crate) fn prepare_chat_plan_resume(",
+        "pub(crate) struct ChatPlanResumeInput",
+        "pub(crate) struct ChatPlanResume",
+        "runtime_plan_record_from_state(",
+        "parse_plan_marker(",
+        "plan_stall_check_and_bump(",
+        "block_stalled_step(",
+        "upsert_runtime_plan_memory_from_state(",
+    ]:
+        assert_contains(
+            chat_plan_resume_source,
+            snippet,
+            "chat plan resume owner must own canonical plan resume and stall orchestration",
+        )
+    for snippet in [
+        "let (mut resume_plan, resume_goal): (Vec<serde_json::Value>, Option<String>) =",
+        "let from_store = runtime_plan_record_from_state(",
+        "let stalled = runtime_plan_control_scope(",
+        "state.task_store.as_ref(),\n                    &user_id,",
+        "block_stalled_step(&mut resume_plan)",
+        "upsert_runtime_plan_memory_from_state(\n                state,",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain chat plan resume/stall setup",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            chat_plan_resume_source,
+            snippet,
+            "chat plan resume owner must not absorb stream, loop, tail, toolset, browser or subagent owners",
         )
     assert_contains(
         usage_runtime_source,
