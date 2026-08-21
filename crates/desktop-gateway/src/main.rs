@@ -59,6 +59,7 @@ mod gateway_chat_plan_resume;
 mod gateway_chat_streams;
 mod gateway_chat_tasks;
 mod gateway_chat_threads;
+mod gateway_chat_tool_perimeter;
 mod gateway_chat_toolset;
 mod gateway_chat_turn_context;
 mod gateway_chat_utility_routes;
@@ -206,6 +207,7 @@ pub(crate) use gateway_brain_runtime::*;
 pub(crate) use gateway_browser_runtime::*;
 pub(crate) use gateway_chat_plan_resume::*;
 pub(crate) use gateway_chat_streams::*;
+pub(crate) use gateway_chat_tool_perimeter::*;
 pub(crate) use gateway_chat_toolset::*;
 pub(crate) use gateway_chat_turn_context::*;
 pub(crate) use gateway_chat_vision_preflight::*;
@@ -2824,49 +2826,10 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         if mode == "ask" {
             ls.tool_schemas.clear();
         }
-        // Contact perimeter tool filter (channel turns): denied wins, then the
-        // allowlist (if non-empty) narrows further. Substring match on the function
-        // name, composed ON TOP of the channel read-only policy.
-        if let Some(cx) = &contact_ctx {
-            let denied = &cx.perimeter.tools_denied;
-            let allowed = &cx.perimeter.tools_allowed;
-            if !denied.is_empty() || !allowed.is_empty() {
-                let mut dropped: Vec<String> = Vec::new();
-                ls.tool_schemas.retain(|schema| {
-                    let name = schema
-                        .pointer("/function/name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    if denied.iter().any(|d| name.contains(d.as_str())) {
-                        dropped.push(name.to_string());
-                        return false;
-                    }
-                    // An allowlist narrows CAPABILITIES, not the loop's own machinery. Applied to
-                    // everything, a perimeter allowing only e.g. "calendar" also deleted update_plan,
-                    // step_advance, find_capability and recall_memory — so the turn lost the ability to
-                    // plan, to discover what it may use, and to read memory, for a reason that has
-                    // nothing to do with the contact's perimeter. Harness tools stay unless explicitly
-                    // denied above.
-                    if !allowed.is_empty()
-                        && !HARNESS_CONTROL_TOOLS.contains(&name)
-                        && !allowed.iter().any(|a| name.contains(a.as_str()))
-                    {
-                        dropped.push(name.to_string());
-                        return false;
-                    }
-                    true
-                });
-                if !dropped.is_empty() {
-                    // Was entirely silent: a turn could lose tools with nothing to explain why the
-                    // model then said it could not do something it normally can.
-                    tracing::warn!(
-                        target: "perimeter::tools",
-                        dropped = %dropped.join(","),
-                        "contact perimeter withheld tools from this turn"
-                    );
-                }
-            }
-        }
+        apply_chat_tool_perimeter(ChatToolPerimeterInput {
+            contact: contact_ctx.as_ref(),
+            tool_schemas: &mut ls.tool_schemas,
+        });
         // Turn-local browser state now lives in the browser subsystem: the loop-visible fields
         // (browser_used / pending_browser_image / browser_tool_call_ids) travel in `LoopState`
         // (slice 5a), and the browser-private state (sidecar session, last snapshot, current tab /

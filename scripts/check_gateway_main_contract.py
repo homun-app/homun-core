@@ -146,6 +146,9 @@ CHAT_PLAN_RESUME_RS = os.path.join(
 CHAT_VISION_PREFLIGHT_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_vision_preflight.rs"
 )
+CHAT_TOOL_PERIMETER_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_chat_tool_perimeter.rs"
+)
 CHANNELS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_channels.rs")
 MEMORY_QUERY_EMBEDDINGS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_query_embeddings.rs"
@@ -1606,6 +1609,8 @@ def main() -> int:
         chat_plan_resume_source = handle.read()
     with open(CHAT_VISION_PREFLIGHT_RS, "r", encoding="utf-8") as handle:
         chat_vision_preflight_source = handle.read()
+    with open(CHAT_TOOL_PERIMETER_RS, "r", encoding="utf-8") as handle:
+        chat_tool_perimeter_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
         action_confirmations_source = handle.read()
     with open(ACTIONABLE_SOURCE_RS, "r", encoding="utf-8") as handle:
@@ -3236,6 +3241,59 @@ def main() -> int:
             chat_vision_preflight_source,
             snippet,
             "chat vision preflight owner must not absorb stream, loop, toolset, plan, browser, subagent or recovery owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_chat_tool_perimeter;",
+        "gateway root must declare chat tool perimeter owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_chat_tool_perimeter::*;",
+        "gateway root must re-export chat tool perimeter owner",
+    )
+    for snippet in [
+        "pub(crate) fn apply_chat_tool_perimeter(",
+        "pub(crate) struct ChatToolPerimeterInput",
+        "contact: Option<&'a ContactTurnContext>",
+        "tool_schemas: &'a mut Vec<serde_json::Value>",
+        "tools_denied",
+        "tools_allowed",
+        "HARNESS_CONTROL_TOOLS.contains(&name)",
+        "input.tool_schemas.retain(|schema|",
+        "tracing::warn!",
+        "contact perimeter withheld tools from this turn",
+    ]:
+        assert_contains(
+            chat_tool_perimeter_source,
+            snippet,
+            "chat tool perimeter owner must own contact tool filtering",
+        )
+    for snippet in [
+        "let denied = &cx.perimeter.tools_denied;",
+        "let allowed = &cx.perimeter.tools_allowed;",
+        "ls.tool_schemas.retain(|schema| {",
+        "&& !HARNESS_CONTROL_TOOLS.contains(&name)",
+        "contact perimeter withheld tools from this turn",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain chat tool perimeter filtering",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "pub(crate) async fn prepare_chat_vision_preflight(",
+        "pub(crate) fn prepare_chat_plan_resume(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            chat_tool_perimeter_source,
+            snippet,
+            "chat tool perimeter owner must not absorb stream, loop, toolset, vision, plan, browser or subagent owners",
         )
     assert_contains(
         usage_runtime_source,

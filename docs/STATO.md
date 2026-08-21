@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (chat vision preflight owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (chat tool perimeter owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#250 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #250 (`ab883783`) |
+| PR | #108-#116, #118-#255 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #255 (`4c0d7a0e`) |
 
 ## Dove siamo
 
@@ -303,10 +303,14 @@ Slice Runtime V2 recenti:
   `runtime_plans` canonico o marker legacy e applicazione del guard cross-turn
   `gateway_plan_stall` escono dal monolite `main.rs`; shape runtime plan,
   budget stall, loop agente, browser e toolset restano owner separati.
-- Estrazione locale `gateway_chat_vision_preflight`: decisione pre-loop per
+- Estrazione mergeata `gateway_chat_vision_preflight`: decisione pre-loop per
   allegati immagine (inline, fallback, delega al ruolo vision o risposta
   anticipata) esce dal monolite `main.rs`; recovery post-loop image rejection,
   trasporto stream, browser, toolset e loop agente restano owner separati.
+- Estrazione locale `gateway_chat_tool_perimeter`: filtro contact/channel
+  allow/deny sul toolset gia' assemblato esce dal monolite `main.rs`;
+  assemblaggio toolset, harness control tools, browser, loop agente e subagent
+  restano owner separati.
 - Estrazione locale `gateway_chat_streams`: costruzione request id stream per
   turni agente/channel e broker (`agentturn-*`, `broker-*`) esce dal monolite
   `main.rs` e vive accanto a registry/replay/abort stream; loop agente, drain

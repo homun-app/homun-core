@@ -2467,6 +2467,59 @@ fn chat_vision_preflight_has_one_gateway_owner() {
 }
 
 #[test]
+fn chat_tool_perimeter_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let tool_perimeter = production_source(&root.join("src/gateway_chat_tool_perimeter.rs"));
+
+    for pattern in [
+        "pub(crate) fn apply_chat_tool_perimeter(",
+        "struct ChatToolPerimeterInput",
+        "contact: Option<&'a ContactTurnContext>",
+        "tool_schemas: &'a mut Vec<serde_json::Value>",
+        "tools_denied",
+        "tools_allowed",
+        "HARNESS_CONTROL_TOOLS.contains(&name)",
+        "input.tool_schemas.retain(|schema|",
+        "tracing::warn!",
+        "contact perimeter withheld tools from this turn",
+    ] {
+        assert!(
+            tool_perimeter.contains(pattern),
+            "chat tool perimeter owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "let denied = &cx.perimeter.tools_denied;",
+        "let allowed = &cx.perimeter.tools_allowed;",
+        "ls.tool_schemas.retain(|schema| {",
+        "&& !HARNESS_CONTROL_TOOLS.contains(&name)",
+        "contact perimeter withheld tools from this turn",
+    ] {
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain chat tool perimeter filtering {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "pub(crate) async fn prepare_chat_vision_preflight(",
+        "pub(crate) fn prepare_chat_plan_resume(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !tool_perimeter.contains(adjacent),
+            "chat tool perimeter owner must not absorb adjacent stream/loop/toolset/vision/plan/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn gateway_state_access_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
