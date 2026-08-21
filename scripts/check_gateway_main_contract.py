@@ -88,6 +88,9 @@ AGENT_STREAM_DRAIN_RS = os.path.join(
 AGENT_TURN_RUNNER_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_runner.rs"
 )
+AGENT_TURN_TAIL_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_tail.rs"
+)
 AGENT_CHECKPOINTS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_checkpoints.rs"
 )
@@ -1545,6 +1548,8 @@ def main() -> int:
         agent_stream_drain_source = handle.read()
     with open(AGENT_TURN_RUNNER_RS, "r", encoding="utf-8") as handle:
         agent_turn_runner_source = handle.read()
+    with open(AGENT_TURN_TAIL_RS, "r", encoding="utf-8") as handle:
+        agent_turn_tail_source = handle.read()
     with open(AGENT_CHECKPOINTS_RS, "r", encoding="utf-8") as handle:
         agent_checkpoints_source = handle.read()
     with open(PRIVACY_PREFLIGHT_RS, "r", encoding="utf-8") as handle:
@@ -2968,6 +2973,53 @@ def main() -> int:
             privacy_preflight_source,
             snippet,
             "privacy preflight owner must not absorb stream, loop, browser or checkpoint owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_turn_tail;",
+        "gateway root must declare agent turn tail owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_turn_tail::*;",
+        "gateway root must re-export agent turn tail owner",
+    )
+    for snippet in [
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "pub(crate) struct AgentTurnTailInput",
+        "memory_reuse_envelope_from_read_set(",
+        "spawn_project_graph_refresh(",
+        "finalize_turn_steering(",
+        "publish_stream_outcome(",
+        "schedule_stream_registry_cleanup(",
+    ]:
+        assert_contains(
+            agent_turn_tail_source,
+            snippet,
+            "agent turn tail owner must own post-loop cleanup/projection side effects",
+        )
+    for snippet in [
+        "let learn_envelope = memory_reuse_envelope_from_read_set(",
+        "spawn_project_graph_refresh(&tail_state, &ws);",
+        "finalize_turn_steering(\n            &tail_state,",
+        "publish_stream_outcome(&tx.entry, outcome);",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain agent turn tail side effects",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "fn execute_capability_browser_task(",
+        "fn execute_persistent_browser_capability(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            agent_turn_tail_source,
+            snippet,
+            "agent turn tail owner must not absorb stream, loop, browser, or subagent owners",
         )
     assert_contains(
         usage_runtime_source,

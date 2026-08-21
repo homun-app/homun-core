@@ -32,6 +32,7 @@ mod gateway_agent_stream_events;
 mod gateway_agent_stream_persistence;
 mod gateway_agent_turn_outcomes;
 mod gateway_agent_turn_runner;
+mod gateway_agent_turn_tail;
 mod gateway_agent_wake;
 mod gateway_artifact_memory;
 mod gateway_artifacts;
@@ -192,6 +193,7 @@ pub(crate) use gateway_agent_stream_drain::*;
 pub(crate) use gateway_agent_stream_events::*;
 pub(crate) use gateway_agent_stream_persistence::*;
 pub(crate) use gateway_agent_turn_runner::*;
+pub(crate) use gateway_agent_turn_tail::*;
 pub(crate) use gateway_agent_wake::*;
 pub(crate) use gateway_artifacts::*;
 pub(crate) use gateway_automation_routes::*;
@@ -3234,116 +3236,24 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             vision_fallback_armed,
         )
         .await;
-        if !canonical_broker_turn
-            && let (Some(thread_id), Some(assistant_message_id)) = (
-                tail_thread.as_deref(),
-                tx.entry
-                    .assistant_message_id
-                    .lock()
-                    .ok()
-                    .and_then(|id| id.clone()),
-            )
-            && let Err(error) = persist_hitl_wait_from_outcome(
-                &tail_state,
-                thread_id,
-                &assistant_message_id,
-                &outcome,
-            )
-        {
-            eprintln!("[hitl] legacy turn projection failed: {error}");
-        }
-        // Turn trace: the final record. `outcome.memory_answer` is the committed answer; `final_plan` is
-        // the turn's last runtime plan (carried out for exactly this). The derived flags (incomplete
-        // steps, artifact claimed-but-absent) are the high-value signal. Observability only.
-        {
-            let final_steps = plan_value_steps(&outcome.final_plan);
-            let plan_final: Vec<String> = final_steps
-                .iter()
-                .map(|s| plan_step_status(s).to_string())
-                .collect();
-            let plan_titles: Vec<String> = final_steps
-                .iter()
-                .map(|s| plan_step_title(s).to_string())
-                .collect();
-            let artifact_count = outcome.memory_answer.matches("‹‹ARTIFACT››").count();
-            let signals = local_first_engine::turn_trace::answer_signals(
-                &outcome.memory_answer,
-                artifact_count,
-            );
-            let derived =
-                local_first_engine::turn_trace::derive_flags(&plan_final, &plan_titles, &signals);
-            turn_trace.record(local_first_engine::turn_trace::TurnEvent::TurnEnd {
-                final_len: outcome.memory_answer.chars().count(),
-                plan_final,
-                signals,
-                derived,
-            });
-        }
-        // M2: mine this exchange for durable personal memory (fire-and-forget, off the response path).
-        // Best-effort; never blocks or fails the turn. Skip for channel turns (read_only): the inbound
-        // is from a CONTACT, not the user, and the channel handler runs its own speaker-attributed learn
-        // — this one (speaker=None) would mis-attribute the contact's facts to person:self.
-        if applies_new_input && !outcome.memory_answer.trim().is_empty() && !read_only {
-            let learn_state = tail_state.clone();
-            let learn_user = tail_user;
-            let learn_answer = outcome.memory_answer.clone();
-            let learn_thread = tail_thread.clone();
-            let learn_actions = outcome.tool_actions.clone();
-            let learn_prev = memory_prev_assistant.clone();
-            let learn_envelope = memory_reuse_envelope_from_read_set(&outcome.memory_reads);
-            tokio::spawn(async move {
-                learn_via_service_or_inline(
-                    &learn_state,
-                    &learn_user,
-                    &learn_answer,
-                    &learn_actions,
-                    learn_thread.as_deref(),
-                    Some(&tail_turn_id),
-                    None,
-                    learn_prev.as_deref(),
-                    learn_envelope,
-                )
-                .await;
-            });
-        }
-        // Keep the code map FRESH on every turn in a mapped project — driven by GIT, not by who edited:
-        // spawn_project_graph_refresh re-extracts only if the git fingerprint changed since the last
-        // build, so it catches the AGENT's writes AND the user's own editor edits (and checkout/pull),
-        // while being a cheap no-op when nothing changed. Only refreshes already-mapped projects.
-        if !read_only
-            && let Some(ws) = tail_thread
-                .as_deref()
-                .and_then(|tid| {
-                    lock_store(&tail_state)
-                        .ok()
-                        .and_then(|s| s.workspace_for_thread(tid).ok())
-                })
-                .filter(|w| !w.trim().is_empty())
-        {
-            spawn_project_graph_refresh(&tail_state, &ws);
-        }
-        // INVARIANT — nothing transient outlives its turn. This runs on EVERY exit of the turn task
-        // (delivered, parked, error, abort), because the failure it prevents is not tied to any one
-        // outcome: a steering row still `pending` when its turn ends can never be applied (the turn it
-        // targeted is gone), but the next turn's finalization fence still sees PendingInput, waits its
-        // budget and PARKS — so one uninterpretable instruction silently broke every following turn in
-        // the thread. Resources with their own lifetime (the thread's warm browser session, reused for
-        // "search → then book") are deliberately NOT touched here; they are owned per thread and reaped
-        // on idle/close.
-        finalize_turn_steering(
-            &tail_state,
-            tail_thread.as_deref(),
-            &fence_turn_id,
-            &fence_user_id,
-            &fence_workspace_id,
-        );
-        publish_stream_outcome(&tx.entry, outcome);
-        // Mark the resume entry finished and evict it after a grace window so a
-        // client that reloaded right at the end can still reattach and read it.
-        tx.entry
-            .finished
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        schedule_stream_registry_cleanup(resume_id.clone());
+        complete_agent_turn_tail(AgentTurnTailInput {
+            state: tail_state,
+            tx: &tx,
+            outcome,
+            canonical_broker_turn,
+            thread_id: tail_thread,
+            fence_turn_id,
+            fence_user_id,
+            fence_workspace_id,
+            applies_new_input,
+            read_only,
+            user_message: tail_user,
+            previous_assistant: memory_prev_assistant,
+            tail_turn_id,
+            resume_id: resume_id.clone(),
+            turn_trace: &turn_trace,
+        })
+        .await;
     });
     if let Ok(mut map) = stream_abort_registry().lock() {
         map.insert(abort_resume_id, engine_task.abort_handle());
