@@ -655,6 +655,13 @@ fn runtime_plan_state_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
     let plan_state = production_source(&root.join("src/gateway_runtime_plan_state.rs"));
+    let run_agent_rounds = main
+        .split("async fn run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds")
+        .split("// Vision fallback")
+        .next()
+        .expect("run_agent_rounds seam construction");
 
     let owned = [
         "fn plan_steps_reconciled_on_delivery(",
@@ -674,6 +681,8 @@ fn runtime_plan_state_has_one_gateway_owner() {
         "fn merge_plan(",
         "fn plan_tool_sent(",
         "pub(crate) struct GatewayPlanProgress",
+        "impl GatewayPlanProgress",
+        "pub(crate) fn new(",
     ];
 
     for pattern in owned {
@@ -686,6 +695,10 @@ fn runtime_plan_state_has_one_gateway_owner() {
             "main.rs must not retain runtime plan state surface {pattern}"
         );
     }
+    assert!(
+        !run_agent_rounds.contains("GatewayPlanProgress {"),
+        "run_agent_rounds must not construct GatewayPlanProgress inline"
+    );
 }
 
 #[test]

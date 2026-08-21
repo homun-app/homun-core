@@ -1155,7 +1155,13 @@ pub(crate) fn plan_tool_sent(
 // Constructed live in run_agent_rounds (5.D1c.4): the loop routes the delivery reconcile through this
 // adapter; 5.D1c.5 adds the plan persist + step verification paths.
 pub(crate) struct GatewayPlanProgress {
-    pub state: AppState,
+    state: AppState,
+}
+
+impl GatewayPlanProgress {
+    pub(crate) fn new(state: AppState) -> Self {
+        Self { state }
+    }
 }
 
 impl local_first_engine::PlanProgress for GatewayPlanProgress {

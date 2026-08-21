@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (tool effect contract owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (plan progress constructor owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#259 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #259 (`87c0cd1a`) |
+| PR | #108-#116, #118-#260 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #260 (`9c67b117`) |
 
 ## Dove siamo
 
@@ -453,6 +453,10 @@ Slice Runtime V2 recenti:
   plan-step e port engine `GatewayPlanProgress` escono dal monolite `main.rs`;
   tool schema, stall budget, prompt packet e dispatch tool restano owner
   separati.
+- Estrazione locale `gateway_runtime_plan_state`: costruzione del port engine
+  `GatewayPlanProgress` passa da struct literal in `run_agent_rounds` a
+  `GatewayPlanProgress::new`, mantenendo il loop agente come sola composition
+  del turno.
 - Estrazione locale `audit_runtime_plan_state`: `scripts/audit_turn_consistency.py`
   legge `runtime_plans` e segnala piani open/runnable che sopravvivono a task
   terminali; non ripara righe e non diventa owner runtime, ma rende visibile la
