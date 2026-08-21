@@ -784,6 +784,46 @@ fn brain_runtime_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_checkpoint_preflight_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let checkpoints = production_source(&root.join("src/gateway_agent_checkpoints.rs"));
+
+    for pattern in [
+        "pub(crate) fn validate_agent_checkpoint_request(",
+        "local_first_desktop_gateway::checkpoint_request_applies_new_input(",
+        "fn invalid_agent_checkpoint_error(",
+    ] {
+        assert!(
+            checkpoints.contains(pattern),
+            "agent checkpoint owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "local_first_desktop_gateway::checkpoint_request_applies_new_input(",
+        "code: \"agent_checkpoint_invalid\",",
+    ] {
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain agent checkpoint preflight {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "fn apply_agent_recovery_checkpoint(",
+        "fn execute_capability_browser_task(",
+    ] {
+        assert!(
+            !checkpoints.contains(adjacent),
+            "agent checkpoint owner must not absorb adjacent owner {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn brain_materialization_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

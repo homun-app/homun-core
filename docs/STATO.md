@@ -277,6 +277,10 @@ Slice Runtime V2 recenti:
   messaggio assistente visibile escono dal monolite `main.rs`; il loop
   `stream_chat_via_openai`/`run_agent_rounds`, stream registry/drain, broker,
   proactive execution e browser restano owner separati.
+- Estrazione locale `gateway_agent_checkpoints`: parsing/validazione
+  `LoopCheckpoint`, mapping errore `agent_checkpoint_invalid` e calcolo
+  `applies_new_input` escono dal monolite `main.rs`; apply checkpoint, stream
+  chat, loop agente e browser restano owner separati.
 - Estrazione locale `gateway_chat_streams`: costruzione request id stream per
   turni agente/channel e broker (`agentturn-*`, `broker-*`) esce dal monolite
   `main.rs` e vive accanto a registry/replay/abort stream; loop agente, drain
