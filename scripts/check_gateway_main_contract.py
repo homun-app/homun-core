@@ -136,6 +136,9 @@ SUBAGENT_EXECUTION_RS = os.path.join(
 VISIBLE_TURNS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_visible_turns.rs"
 )
+CHAT_TURN_CONTEXT_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_chat_turn_context.rs"
+)
 CHANNELS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_channels.rs")
 MEMORY_QUERY_EMBEDDINGS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_query_embeddings.rs"
@@ -1588,6 +1591,8 @@ def main() -> int:
         subagent_execution_source = handle.read()
     with open(VISIBLE_TURNS_RS, "r", encoding="utf-8") as handle:
         visible_turns_source = handle.read()
+    with open(CHAT_TURN_CONTEXT_RS, "r", encoding="utf-8") as handle:
+        chat_turn_context_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
         action_confirmations_source = handle.read()
     with open(ACTIONABLE_SOURCE_RS, "r", encoding="utf-8") as handle:
@@ -3020,6 +3025,52 @@ def main() -> int:
             agent_turn_tail_source,
             snippet,
             "agent turn tail owner must not absorb stream, loop, browser, or subagent owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_chat_turn_context;",
+        "gateway root must declare chat turn context owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_chat_turn_context::*;",
+        "gateway root must re-export chat turn context owner",
+    )
+    for snippet in [
+        "pub(crate) fn prepare_chat_turn_context(",
+        "pub(crate) struct ChatTurnContextInput",
+        "pub(crate) struct ChatTurnContext",
+        "set_memory_workspace(",
+        "contact_turn_context(",
+        "note_user_activity(",
+    ]:
+        assert_contains(
+            chat_turn_context_source,
+            snippet,
+            "chat turn context owner must own pre-prompt workspace/contact/activity setup",
+        )
+    for snippet in [
+        "set_memory_workspace(&ws);",
+        'set_memory_workspace("");',
+        "let (contact_ctx, channel_owner) = contact_turn_context(",
+        "note_user_activity();",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain chat turn context setup",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            chat_turn_context_source,
+            snippet,
+            "chat turn context owner must not absorb stream, loop, tail, browser or subagent owners",
         )
     assert_contains(
         usage_runtime_source,

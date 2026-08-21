@@ -2269,6 +2269,52 @@ fn agent_turn_tail_has_one_gateway_owner() {
 }
 
 #[test]
+fn chat_turn_context_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let turn_context = production_source(&root.join("src/gateway_chat_turn_context.rs"));
+
+    for pattern in [
+        "pub(crate) fn prepare_chat_turn_context(",
+        "struct ChatTurnContextInput",
+        "struct ChatTurnContext",
+        "set_memory_workspace(",
+        "contact_turn_context(",
+        "note_user_activity(",
+    ] {
+        assert!(
+            turn_context.contains(pattern),
+            "chat turn context owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "set_memory_workspace(&ws);",
+        "set_memory_workspace(\"\");",
+        "let (contact_ctx, channel_owner) = contact_turn_context(",
+        "note_user_activity();",
+    ] {
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain chat turn context setup {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !turn_context.contains(adjacent),
+            "chat turn context owner must not absorb stream/loop/tail/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn gateway_state_access_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

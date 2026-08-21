@@ -55,6 +55,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_chat_tasks.rs` | Azione transcript per creare task da messaggio. |
 | `crates/desktop-gateway/src/gateway_chat_memory.rs` | Azione esplicita save-to-memory da messaggio e relativa proiezione wiki. |
 | `crates/desktop-gateway/src/gateway_chat_streams.rs` | Trasporto stream chat e marker/eventi di output, senza ownership del broker. |
+| `crates/desktop-gateway/src/gateway_chat_turn_context.rs` | Setup stateful pre-prompt del turno chat: workspace memoria del thread, contesto contact/channel e real-idle activity; non possiede prompt, stream, loop agente, browser o subagent. |
 | `crates/desktop-gateway/src/gateway_chat_markers.rs` | Rimozione marker app-only prima della consegna plain text. |
 | `crates/desktop-gateway/src/gateway_chat_utility_routes.rs` | Route utility chat per improve prompt, suggestions, autotitle, seed assistant e proactive answer; possiede helper payload/title e capture memoria della proactive answer, ma non loop agente, stream, proactivity review o recall inline. |
 | `crates/desktop-gateway/src/gateway_automation_routes.rs` | Route CRUD automazioni, materializzazione/cancellazione task ricorrenti, polling connector, firing channel-event, dispatch tool scheduled-task e tombstone memoria legata all'automazione; non possiede learning/consolidate memoria o plan-step memory subagent. |
