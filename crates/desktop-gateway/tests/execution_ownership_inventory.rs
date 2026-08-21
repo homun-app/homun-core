@@ -2422,6 +2422,51 @@ fn model_steering_context_has_one_gateway_owner() {
 }
 
 #[test]
+fn model_provider_binding_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let model_client = production_source(&root.join("src/model_client.rs"));
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai")
+        .split("let checkpoint_input = request")
+        .next()
+        .expect("provider binding construction");
+
+    for pattern in [
+        "pub(crate) fn gateway_provider_binding(",
+        "ProviderBinding {",
+        "model,",
+        "base_url,",
+        "api_key,",
+    ] {
+        assert!(
+            model_client.contains(pattern),
+            "model client owner must contain provider binding construction surface {pattern}"
+        );
+    }
+
+    assert!(
+        !stream_chat.contains("local_first_engine::ProviderBinding {"),
+        "stream_chat_via_openai must not construct ProviderBinding inline"
+    );
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "GatewayCapabilityExecutor {",
+        "GatewayBrowserExecutor {",
+        "GatewayPlanProgress::new(",
+        "GatewayTurnCompletionJudge::new(",
+    ] {
+        assert!(
+            !model_client.contains(adjacent),
+            "model client provider owner must not absorb adjacent agent loop surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn tool_effect_contract_lookup_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

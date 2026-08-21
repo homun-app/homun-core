@@ -33,6 +33,18 @@ pub(crate) fn chat_endpoint(base_url: &str) -> String {
     }
 }
 
+pub(crate) fn gateway_provider_binding(
+    model: String,
+    base_url: String,
+    api_key: Option<String>,
+) -> ProviderBinding {
+    ProviderBinding {
+        model,
+        base_url,
+        api_key,
+    }
+}
+
 /// Borrows the turn's reqwest client and stream sink; built once before the ReAct loop.
 pub(crate) struct GatewayModelClient<'a> {
     pub http: &'a reqwest::Client,

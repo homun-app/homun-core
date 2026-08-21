@@ -3355,6 +3355,11 @@ def main() -> int:
     )
     assert_contains(
         model_client_source,
+        "pub(crate) fn gateway_provider_binding(",
+        "model client owner must expose provider binding construction",
+    )
+    assert_contains(
+        model_client_source,
         "impl<'a> GatewayModelClient<'a> {\n    pub(crate) fn new(",
         "model client owner must expose gateway model client constructor impl",
     )
@@ -3367,6 +3372,11 @@ def main() -> int:
         source,
         "crate::model_client::GatewaySteeringContext {",
         "gateway root must not build model steering context inline",
+    )
+    assert_not_contains(
+        source,
+        "local_first_engine::ProviderBinding {",
+        "gateway root must not build model provider binding inline",
     )
     assert_not_contains(
         source,
