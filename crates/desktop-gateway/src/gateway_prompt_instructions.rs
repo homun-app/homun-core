@@ -103,6 +103,20 @@ run the code, read the REAL output and iterate on the failures until it passes, 
 Trust the compiler and the tests, not your estimate."
 }
 
+pub(crate) fn objective_contract_instruction(
+    revision: u64,
+    mode_debug: &str,
+    objective: &str,
+) -> String {
+    format!(
+        "OBJECTIVE CONTRACT (canonical, harness-enforced): revision {revision}; mode={mode_debug}; objective={objective}. Stay inside its scope and allowed actions. Replan autonomously only when the objective, scope and mutation level stay unchanged. A new objective, wider scope or newly mutating action requires explicit user confirmation. Plan completion requires recorded evidence; response length is never completion evidence."
+    )
+}
+
+pub(crate) fn objective_contract_read_only_default_instruction() -> &'static str {
+    "OBJECTIVE CONTRACT: none recorded for this task, so execution defaults to READ-ONLY analysis. Reading, searching, browsing and analysing are available; tools that change something (writing files, sending, creating, booking, purchasing) are refused until the user asks for that change. Do the read-only work and say plainly what you would need to change, rather than attempting it."
+}
+
 pub(crate) fn operational_plan_instruction() -> &'static str {
     "OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing \
 in the SAME turn. The plan is a live projection of the canonical objective, not a separate artifact \
@@ -148,7 +162,9 @@ mod tests {
         browser_open_research_discovery_instruction, choice_resume_instruction_legacy_backup,
         code_map_available_instruction, debug_mode_instruction, execution_verification_instruction,
         language_follow_user_instruction, memory_recall_usage_instruction,
-        memory_scope_restricted_instruction, operational_plan_instruction, plan_mode_instruction,
+        memory_scope_restricted_instruction, objective_contract_instruction,
+        objective_contract_read_only_default_instruction, operational_plan_instruction,
+        plan_mode_instruction,
     };
 
     #[test]
@@ -249,6 +265,22 @@ mod tests {
         assert!(guidance.contains("run_in_sandbox"));
         assert!(guidance.contains("VERIFY BY EXECUTING"));
         assert!(guidance.contains("Trust the compiler and the tests"));
+    }
+
+    #[test]
+    fn gateway_prompt_instructions_own_objective_contracts() {
+        let guidance = objective_contract_instruction(7, "Build", "Ship the kernel slice");
+        assert!(guidance.contains("OBJECTIVE CONTRACT (canonical, harness-enforced)"));
+        assert!(guidance.contains("revision 7"));
+        assert!(guidance.contains("mode=Build"));
+        assert!(guidance.contains("objective=Ship the kernel slice"));
+        assert!(guidance.contains("Plan completion requires recorded evidence"));
+
+        let fallback = objective_contract_read_only_default_instruction();
+        assert!(fallback.contains("OBJECTIVE CONTRACT: none recorded"));
+        assert!(fallback.contains("READ-ONLY analysis"));
+        assert!(fallback.contains("tools that change something"));
+        assert!(fallback.contains("refused until the user asks"));
     }
 
     #[test]
