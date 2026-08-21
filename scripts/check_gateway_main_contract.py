@@ -2041,12 +2041,23 @@ def main() -> int:
     for snippet in [
         "pub(crate) fn context_message_for_model(",
         "pub(crate) fn thread_context_for_model(",
+        "pub(crate) fn effective_prompt_context_for_model(",
         "pub(crate) fn agent_turn_context(",
     ]:
         assert_contains(
             thread_model_context_source,
             snippet,
             "thread model context owner must expose context shaping helpers",
+        )
+    for snippet in [
+        "match request.thread_id.as_deref()",
+        "thread_context_for_model(state, thread_id, &[], Some(request.prompt.as_str()))",
+        "None => request.context.clone()",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not choose the effective model context inline",
         )
     for snippet in [
         "fn finalize_streamed_assistant_message(",

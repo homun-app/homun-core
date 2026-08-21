@@ -1582,13 +1582,12 @@ async fn stream_chat_via_openai(
     let model_context_window = registry_model_capabilities(&base_url, &model)
         .and_then(|caps| caps.context_length)
         .map(|tokens| usize::try_from(tokens).unwrap_or(usize::MAX));
-    let effective_context = match request.thread_id.as_deref() {
-        Some(thread_id) => {
-            thread_context_for_model(state, thread_id, &[], Some(request.prompt.as_str()))
-                .unwrap_or_default()
-        }
-        None => request.context.clone(),
-    };
+    let effective_context = effective_prompt_context_for_model(
+        state,
+        request.thread_id.as_deref(),
+        &request.context,
+        request.prompt.as_str(),
+    );
     let prompt = request
         .checkpoint_input
         .as_ref()

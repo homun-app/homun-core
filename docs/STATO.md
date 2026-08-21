@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (provider capability warm owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (thread model effective context owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/gateway-provider-capability-warm-owner` |
-| PR | #108-#116, #118-#265 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #265 (`93c8eb66`) |
+| Branch | `fabio/thread-model-effective-context-owner` |
+| PR | #108-#116, #118-#266 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #266 (`8ee3af02`) |
 
 ## Dove siamo
 
@@ -44,6 +44,11 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
+- Estrazione locale `gateway_thread_model_context`: la scelta del contesto
+  modello effettivo per il prompt (`thread_context_for_model` quando esiste un
+  thread, `request.context` solo per turni senza thread) esce dal setup inline
+  di `stream_chat_via_openai`; prompt assembly, loop agente e browser restano
+  owner separati.
 - `TaskStore::project_kernel_thread` e DTO `KernelThreadProjection`;
 - endpoint gateway `GET /api/chat/threads/{thread_id}/kernel-projection`;
 - presenter desktop puro `kernelProjectionPresenter`;
@@ -1106,7 +1111,8 @@ PR aperte:
 
 Branch corrente:
 
-- `main`: pulito e riallineato a #243 (`a70f4a4e`).
+- `fabio/thread-model-effective-context-owner`: slice locale sopra `main`
+  riallineato a #266 (`8ee3af02`).
 
 ## Debito residuo
 
