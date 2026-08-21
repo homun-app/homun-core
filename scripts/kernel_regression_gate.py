@@ -158,6 +158,17 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway agent turn runner",
+            [
+                "cargo",
+                "check",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+            ],
+        ),
+        Step(
             "gateway recall context",
             [
                 "cargo",

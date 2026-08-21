@@ -85,6 +85,9 @@ AGENT_STREAM_PERSISTENCE_RS = os.path.join(
 AGENT_STREAM_DRAIN_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_stream_drain.rs"
 )
+AGENT_TURN_RUNNER_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_runner.rs"
+)
 AGENT_TURN_OUTCOMES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_outcomes.rs"
 )
@@ -225,6 +228,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn observe_remote_approval(": "stream memory reuse approval attestation must stay in gateway_memory_reuse",
         "fn observe_actionable_cards(": "stream memory reuse actionable attestation must stay in gateway_memory_reuse",
         "fn execute_capability_generic(": "autonomous capability execution must stay in gateway_capability_execution",
+        "async fn run_agent_turn_into_message(": "agent turn runner wrappers must stay in gateway_agent_turn_runner",
+        "async fn run_agent_turn_into_message_with_fanout(": "agent turn runner wrappers must stay in gateway_agent_turn_runner",
         "fn authorize_managed_capability_tool(": "managed capability authorization must stay in gateway_capability_execution",
         "fn capability_call_completed_outcome(": "capability execution presentation must stay in gateway_capability_execution",
         "fn capability_call_failed_outcome(": "capability execution presentation must stay in gateway_capability_execution",
@@ -1532,6 +1537,8 @@ def main() -> int:
         agent_stream_persistence_source = handle.read()
     with open(AGENT_STREAM_DRAIN_RS, "r", encoding="utf-8") as handle:
         agent_stream_drain_source = handle.read()
+    with open(AGENT_TURN_RUNNER_RS, "r", encoding="utf-8") as handle:
+        agent_turn_runner_source = handle.read()
     with open(AGENT_TURN_OUTCOMES_RS, "r", encoding="utf-8") as handle:
         agent_turn_outcomes_source = handle.read()
     with open(AGENT_WAKE_RS, "r", encoding="utf-8") as handle:
@@ -2103,6 +2110,38 @@ def main() -> int:
             agent_stream_drain_source,
             snippet,
             "agent stream drain owner must not absorb adjacent event/persistence/HITL/browser surfaces",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_turn_runner;",
+        "gateway root must declare agent turn runner owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_turn_runner::*;",
+        "gateway root must re-export agent turn runner owner",
+    )
+    for snippet in [
+        "pub(crate) async fn run_agent_turn_into_message(",
+        "pub(crate) async fn run_agent_turn_into_message_with_fanout(",
+    ]:
+        assert_contains(
+            agent_turn_runner_source,
+            snippet,
+            "agent turn runner owner must expose visible-message runner wrappers",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "fn execute_capability_browser_task(",
+        "fn execute_proactive_prompt_task(",
+        "fn drain_agent_stream_into_message(",
+        "fn drain_agent_stream_into_message_with_fanout(",
+    ]:
+        assert_not_contains(
+            agent_turn_runner_source,
+            snippet,
+            "agent turn runner owner must not absorb loop, browser, proactive or drain owners",
         )
     assert_contains(source, "mod gateway_agent_wake;", "gateway root must declare agent wake owner")
     assert_contains(

@@ -1309,8 +1309,8 @@ assertRepoContains("crates/desktop-gateway/src/gateway_visible_turns.rs", "pub(c
 assertRepoContains("crates/desktop-gateway/src/gateway_proactive_execution.rs", "\"approval\"", "proactive execution must identify its visible-turn source");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "approval_continuation_visible_text", "remote approval continuations must create an explicit visible user bubble");
 assertNotContains("src/App.tsx", "runAgentTurnHeadless", "frontend must not expose a headless agent-turn path");
-assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn run_agent_turn(", "backend must not keep a headless agent-turn helper that can bypass visible placeholders");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "run_agent_turn_into_message", "backend agent turns must stream into persisted assistant messages");
+assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn run_agent_turn_into_message(", "backend must not keep agent-turn visible-message runners in the gateway root");
+assertRepoContains("crates/desktop-gateway/src/gateway_agent_turn_runner.rs", "pub(crate) async fn run_agent_turn_into_message", "backend agent turns must stream into persisted assistant messages");
 assertRepoContains("crates/desktop-gateway/src/gateway_prompt_instructions.rs", "OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing", "prompt instruction owner must maintain the canonical plan through update_plan and continue in the same turn");
 assertNotContains("src/App.tsx", "pendingEventThreadIdsRef", "background event refresh must not depend on a navigation race window");
 assertContains("src/App.tsx", "refreshThreadInBackground", "background events must refresh their own durable cache");
