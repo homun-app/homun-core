@@ -26,6 +26,7 @@ mod execution_projection;
 mod execution_runtime;
 mod gateway_action_confirmations;
 mod gateway_actionable_source;
+mod gateway_agent_checkpoints;
 mod gateway_agent_stream_drain;
 mod gateway_agent_stream_events;
 mod gateway_agent_stream_persistence;
@@ -185,6 +186,7 @@ use local_first_engine::model_normalize;
 // calling the method directly outside that generic context does.
 pub(crate) use attachments::append_thread_attachment_context;
 pub(crate) use gateway_actionable_source::*;
+pub(crate) use gateway_agent_checkpoints::*;
 pub(crate) use gateway_agent_stream_drain::*;
 pub(crate) use gateway_agent_stream_events::*;
 pub(crate) use gateway_agent_stream_persistence::*;
@@ -1535,27 +1537,9 @@ async fn stream_chat_via_openai(
     model: String,
     api_key: Option<String>,
 ) -> Result<Response, GatewayError> {
-    let applies_new_input = local_first_desktop_gateway::checkpoint_request_applies_new_input(
-        request.agent_checkpoint.as_ref(),
-        request.checkpoint_input.as_ref(),
-    );
-    let recovery_checkpoint = request
-        .agent_checkpoint
-        .clone()
-        .map(serde_json::from_value::<local_first_engine::LoopCheckpoint>)
-        .transpose()
-        .map_err(|error| GatewayError {
-            status: StatusCode::BAD_REQUEST,
-            code: "agent_checkpoint_invalid",
-            message: format!("Agent checkpoint schema is invalid: {error}"),
-        })?;
-    if let Some(checkpoint) = recovery_checkpoint.as_ref() {
-        checkpoint.validate_schema().map_err(|error| GatewayError {
-            status: StatusCode::BAD_REQUEST,
-            code: "agent_checkpoint_invalid",
-            message: format!("Agent checkpoint schema is invalid: {error}"),
-        })?;
-    }
+    let validated_checkpoint = validate_agent_checkpoint_request(&request)?;
+    let applies_new_input = validated_checkpoint.applies_new_input;
+    let recovery_checkpoint = validated_checkpoint.recovery_checkpoint;
     // Turn trace (readable per-turn observability): handle created HERE, at the absolute entry, so a
     // hang in SETUP (memory recall, prompt-build, browser-session) is visible — see engine::turn_trace.
     // The `turn_received` event is the FIRST thing recorded; if no `turn_start` follows, the turn

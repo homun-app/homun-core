@@ -88,6 +88,9 @@ AGENT_STREAM_DRAIN_RS = os.path.join(
 AGENT_TURN_RUNNER_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_runner.rs"
 )
+AGENT_CHECKPOINTS_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_checkpoints.rs"
+)
 AGENT_TURN_OUTCOMES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_outcomes.rs"
 )
@@ -1539,6 +1542,8 @@ def main() -> int:
         agent_stream_drain_source = handle.read()
     with open(AGENT_TURN_RUNNER_RS, "r", encoding="utf-8") as handle:
         agent_turn_runner_source = handle.read()
+    with open(AGENT_CHECKPOINTS_RS, "r", encoding="utf-8") as handle:
+        agent_checkpoints_source = handle.read()
     with open(AGENT_TURN_OUTCOMES_RS, "r", encoding="utf-8") as handle:
         agent_turn_outcomes_source = handle.read()
     with open(AGENT_WAKE_RS, "r", encoding="utf-8") as handle:
@@ -2870,6 +2875,51 @@ def main() -> int:
         "TurnEvent::TurnReceived",
         "turn trace owner must record the setup-hang sentinel",
     )
+    assert_contains(
+        source,
+        "mod gateway_agent_checkpoints;",
+        "gateway root must declare agent checkpoint owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_checkpoints::*;",
+        "gateway root must re-export agent checkpoint owner",
+    )
+    assert_contains(
+        agent_checkpoints_source,
+        "pub(crate) fn validate_agent_checkpoint_request(",
+        "agent checkpoint owner must expose chat checkpoint preflight",
+    )
+    assert_contains(
+        agent_checkpoints_source,
+        "local_first_desktop_gateway::checkpoint_request_applies_new_input(",
+        "agent checkpoint owner must decide whether checkpoint input is new",
+    )
+    assert_contains(
+        agent_checkpoints_source,
+        'code: "agent_checkpoint_invalid",',
+        "agent checkpoint owner must own invalid checkpoint error mapping",
+    )
+    for snippet in [
+        "local_first_desktop_gateway::checkpoint_request_applies_new_input(",
+        'code: "agent_checkpoint_invalid",',
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain agent checkpoint preflight",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "fn apply_agent_recovery_checkpoint(",
+        "fn execute_capability_browser_task(",
+    ]:
+        assert_not_contains(
+            agent_checkpoints_source,
+            snippet,
+            "agent checkpoint owner must not absorb stream, loop, apply, or browser owners",
+        )
     assert_contains(
         usage_runtime_source,
         "pub(crate) fn open_gateway_usage_runtime(",
