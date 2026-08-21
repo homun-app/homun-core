@@ -2830,11 +2830,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         // (the normal 5 rounds until a browser tool is actually used, then the
         // larger browser budget). This keeps non-browser turns identical to today.
         // ADR 0026: provider binding travels with LoopState (per-round swap), not as separate args.
-        ls.provider = local_first_engine::ProviderBinding {
-            model,
-            base_url,
-            api_key,
-        };
+        ls.provider = crate::model_client::gateway_provider_binding(model, base_url, api_key);
         let checkpoint_input = request
             .checkpoint_input
             .as_ref()
