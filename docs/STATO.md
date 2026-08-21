@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (chat stream transport owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (chat usage context owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#256 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #256 (`9c377fb0`) |
+| PR | #108-#116, #118-#257 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #257 (`6f5fc9c3`) |
 
 ## Dove siamo
 
@@ -417,6 +417,10 @@ Slice Runtime V2 recenti:
   attempt orfani, rebuild rollup, recorder buffered e pricing snapshot escono
   dal monolite `main.rs`; le route usage e il model registry restano owner
   separati.
+- Estrazione locale `gateway_usage_runtime`: costruzione del
+  `UsageContext::ChatResponse` scoped per user/workspace/thread/turn/run esce
+  dal loop agente in `main.rs`; model client, loop agente, browser e routing
+  restano owner separati.
 - Estrazione locale `gateway_turn_trace`: bootstrap del trace leggibile
   `turn_received`, opt-out e fallback no-log-dir escono dal monolite
   `main.rs`; il trace resta pura osservabilita' e non possiede loop agente,

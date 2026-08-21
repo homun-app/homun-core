@@ -1115,6 +1115,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "CostEnrichingUsageRecorder::new(": "usage pricing recorder bootstrap must stay in gateway_usage_runtime",
         ".abort_orphaned_attempts(": "usage orphan cleanup must stay in gateway_usage_runtime",
         ".rebuild_daily_rollups(": "usage rollup rebuild must stay in gateway_usage_runtime",
+        "let mut usage_context = local_first_inference_usage::UsageContext::new(": "chat response usage context must stay in gateway_usage_runtime",
         "struct RuntimeSettings": "runtime settings DTO must stay in gateway_runtime_settings",
         "fn merge_runtime_settings(": "runtime settings merge must stay in gateway_runtime_settings",
         "async fn get_runtime_settings(": "runtime settings read route must stay in gateway_runtime_settings",
@@ -3314,8 +3315,18 @@ def main() -> int:
     )
     assert_contains(
         usage_runtime_source,
+        "pub(crate) fn chat_response_usage_context(",
+        "usage runtime owner must expose chat response usage context construction",
+    )
+    assert_contains(
+        usage_runtime_source,
         "BufferedUsageRecorder::start(",
         "usage runtime owner must own buffered recorder bootstrap",
+    )
+    assert_not_contains(
+        source,
+        "let mut usage_context = local_first_inference_usage::UsageContext::new(",
+        "gateway root must not build chat response usage context inline",
     )
     assert_contains(
         composio_routes_source,
