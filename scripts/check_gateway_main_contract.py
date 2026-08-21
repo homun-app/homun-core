@@ -1237,6 +1237,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn create_skill(": "skill authoring runtime must stay in gateway_skill_runtime",
         "fn enabled_skills_summary(": "skill prompt discovery runtime must stay in gateway_skill_runtime",
         "fn homuncoder_skill_ids(": "HomunCoder skill manifest loading must stay in gateway_skill_runtime",
+        "fn skill_prompt_instructions_block(": "skill prompt instruction rendering must stay in gateway_skill_runtime",
         "fn load_skill_body(": "skill progressive disclosure runtime must stay in gateway_skill_runtime",
         "fn load_skill_body_and_sensitive(": "skill sensitive disclosure runtime must stay in gateway_skill_runtime",
         "fn skill_id_from_command(": "skill command id extraction must stay in gateway_skill_runtime",
@@ -3519,6 +3520,20 @@ def main() -> int:
         "pub(crate) fn load_skill_body_and_sensitive(",
         "skill runtime owner must expose progressive skill loading with sensitive metadata",
     )
+    assert_contains(
+        skill_runtime_source,
+        "pub(crate) fn skill_prompt_instructions_block(",
+        "skill runtime owner must expose prompt instruction rendering",
+    )
+    for snippet in [
+        "INSTALLED SKILLS —",
+        "METHODOLOGY (HomunCoder)",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain skill prompt instruction copy",
+        )
     assert_contains(source, "mod gateway_state_access;", "gateway root must declare state access owner")
     assert_contains(
         source,

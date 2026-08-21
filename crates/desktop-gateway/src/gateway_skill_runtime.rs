@@ -114,6 +114,44 @@ pub(crate) fn homuncoder_skill_ids() -> HashSet<String> {
         .unwrap_or_default()
 }
 
+pub(crate) fn skill_prompt_instructions_block(
+    enabled_skills: &[(String, String, String)],
+    homuncoder: &HashSet<String>,
+    is_project: bool,
+) -> Option<String> {
+    if enabled_skills.is_empty() {
+        return None;
+    }
+    let lines = enabled_skills
+        .iter()
+        .map(|(id, name, desc)| format!("- {id}: {name} — {desc}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let methodology = if is_project
+        && enabled_skills
+            .iter()
+            .any(|(id, _, _)| homuncoder.contains(id))
+    {
+        "\nMETHODOLOGY (HomunCoder) — for DEVELOPMENT work follow the evidence-first habits: \
+plan with update_plan, REMEMBER/record decisions with their why, and VERIFY by executing \
+(build/test/lint) before saying \"done\". When you apply one of these disciplines, call \
+`use_skill` FIRST with the right skill (roadmap-first-planning, systematic-debugging, test-first-development, \
+verification-before-completion, code-review-discipline, …) — so the user SEES which methodology \
+you're following — and then follow its instructions. Don't just cite it: actually load it with use_skill."
+    } else {
+        ""
+    };
+    Some(format!(
+        "INSTALLED SKILLS — when the request matches the description of one \
+of these, PREFER it over the browser: call `use_skill` with its id to receive the complete \
+instructions (SKILL.md). Then RUN the commands the skill indicates (e.g. `curl …`, `python …`) with the \
+`run_in_sandbox` tool, which launches them in the contained computer, and use the output to reply.\n\
+GENERATED FILES: if a skill or a command produces files (xlsx, pdf, csv, images, …), SAVE them in the \
+environment folder `$OUTPUT_DIR` (e.g. `... --output \"$OUTPUT_DIR/report.xlsx\"`): files there \
+automatically become artifacts downloadable by the user.{methodology}\n{lines}"
+    ))
+}
+
 /// Loads an installed skill's SKILL.md body.
 #[allow(dead_code)]
 pub(crate) fn load_skill_body(id: &str) -> Option<String> {
@@ -289,5 +327,46 @@ mod tests {
                 }),
             Some(vec!["id"])
         );
+    }
+
+    #[test]
+    fn skill_prompt_instructions_block_renders_installed_skill_catalog() {
+        let skills = vec![(
+            "pdf".to_string(),
+            "PDF".to_string(),
+            "Read and create PDF files".to_string(),
+        )];
+        let block = skill_prompt_instructions_block(&skills, &HashSet::new(), true)
+            .expect("installed skill block");
+
+        assert!(block.contains("INSTALLED SKILLS"));
+        assert!(block.contains("PREFER it over the browser"));
+        assert!(block.contains("- pdf: PDF"));
+        assert!(block.contains("Read and create PDF files"));
+        assert!(!block.contains("METHODOLOGY (HomunCoder)"));
+    }
+
+    #[test]
+    fn skill_prompt_instructions_block_adds_methodology_only_for_project_homuncoder() {
+        let skills = vec![(
+            "test-first-development".to_string(),
+            "TDD".to_string(),
+            "Write tests first".to_string(),
+        )];
+        let homuncoder = HashSet::from(["test-first-development".to_string()]);
+
+        let project_block =
+            skill_prompt_instructions_block(&skills, &homuncoder, true).expect("project block");
+        assert!(project_block.contains("METHODOLOGY (HomunCoder)"));
+        assert!(project_block.contains("call `use_skill` FIRST"));
+
+        let personal_block =
+            skill_prompt_instructions_block(&skills, &homuncoder, false).expect("personal block");
+        assert!(!personal_block.contains("METHODOLOGY (HomunCoder)"));
+    }
+
+    #[test]
+    fn skill_prompt_instructions_block_is_absent_without_enabled_skills() {
+        assert!(skill_prompt_instructions_block(&[], &HashSet::new(), true).is_none());
     }
 }
