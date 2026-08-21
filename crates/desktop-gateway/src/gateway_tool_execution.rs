@@ -133,6 +133,21 @@ pub(crate) fn record_browser_navigate_source(sources: &mut Vec<String>, result: 
     }
 }
 
+pub(crate) fn load_turn_effect_contract(
+    state: &AppState,
+    execution_id: Option<&str>,
+) -> Option<local_first_execution_protocol::ValidatedExecutionContract> {
+    let execution_id = execution_id?;
+    state
+        .task_store
+        .lock()
+        .ok()?
+        .execution(execution_id)
+        .ok()
+        .flatten()
+        .map(|record| record.contract)
+}
+
 /// The browser branch's tool context (ADR 0026 / inc 5, 5.D1b slice 3). SPLIT out of `ChatToolCtx`
 /// because `execute_browser_tool` and `execute_chat_tool` have DISJOINT read-sets: the browser
 /// tool reads the browser cluster + provider + a few read-only fields, and nothing execute_chat_tool

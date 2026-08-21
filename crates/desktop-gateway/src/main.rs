@@ -3045,16 +3045,7 @@ async fn run_agent_rounds(
         effect_turn_id.clone(),
         effect_run_id.clone(),
     );
-    let effect_contract = effect_turn_id.as_deref().and_then(|execution_id| {
-        state_owned
-            .task_store
-            .lock()
-            .ok()?
-            .execution(execution_id)
-            .ok()
-            .flatten()
-            .map(|record| record.contract)
-    });
+    let effect_contract = load_turn_effect_contract(&state_owned, effect_turn_id.as_deref());
     let capability_executor = GatewayCapabilityExecutor {
         state: &state_owned,
         tx,

@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (model steering context owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (tool effect contract owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#257 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #257 (`6f5fc9c3`) |
+| PR | #108-#116, #118-#259 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #259 (`87c0cd1a`) |
 
 ## Dove siamo
 
@@ -425,6 +425,10 @@ Slice Runtime V2 recenti:
   per thread/turn/run esce da `run_agent_rounds`; il loop agente passa solo gli
   identificativi del turno, mentre steering persistence e model transport
   restano dentro il model client.
+- Estrazione locale `gateway_tool_execution`: lookup del
+  `ValidatedExecutionContract` del turno esce da `run_agent_rounds`; capability
+  executor e browser executor ricevono lo stesso contratto caricato dall'owner
+  dei tool, mentre il loop resta composition del turno.
 - Estrazione locale `gateway_turn_trace`: bootstrap del trace leggibile
   `turn_received`, opt-out e fallback no-log-dir escono dal monolite
   `main.rs`; il trace resta pura osservabilita' e non possiede loop agente,
