@@ -908,9 +908,25 @@ fn context_compactor_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
     let model_routing = production_source(&root.join("src/gateway_model_routing.rs"));
+    let run_agent_rounds = main
+        .split("async fn run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds")
+        .split("// Vision fallback")
+        .next()
+        .expect("run_agent_rounds seam construction");
+    let context_compactor_surface = model_routing
+        .split("pub(crate) struct GatewayContextCompactor")
+        .nth(1)
+        .expect("context compactor owner")
+        .split("impl local_first_engine::ContextCompactor for GatewayContextCompactor")
+        .next()
+        .expect("context compactor constructor section");
 
     let owned = [
         "struct GatewayContextCompactor",
+        "impl GatewayContextCompactor",
+        "pub(crate) fn new(",
         "impl local_first_engine::ContextCompactor for GatewayContextCompactor",
     ];
 
@@ -924,6 +940,16 @@ fn context_compactor_has_one_gateway_owner() {
             "main.rs must not retain context compactor surface {pattern}"
         );
     }
+    for pattern in ["impl GatewayContextCompactor", "pub(crate) fn new("] {
+        assert!(
+            context_compactor_surface.contains(pattern),
+            "context compactor owner must expose constructor surface {pattern}"
+        );
+    }
+    assert!(
+        !run_agent_rounds.contains("GatewayContextCompactor {"),
+        "run_agent_rounds must not construct GatewayContextCompactor inline"
+    );
     for adjacent in ["struct GatewayTurnPolicy", "struct GatewayPlanProgress"] {
         assert!(
             !model_routing.contains(adjacent),
