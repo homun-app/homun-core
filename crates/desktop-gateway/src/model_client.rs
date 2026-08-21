@@ -51,6 +51,26 @@ pub(crate) struct GatewaySteeringContext<'a> {
     pub run_id: &'a str,
 }
 
+pub(crate) fn gateway_steering_context<'a>(
+    state: &'a crate::AppState,
+    user_id: &'a str,
+    workspace_id: &'a str,
+    thread_id: Option<&'a str>,
+    turn_id: Option<&'a str>,
+    effect_run_id: Option<&'a str>,
+) -> Option<GatewaySteeringContext<'a>> {
+    thread_id.map(|thread_id| {
+        turn_id.map(|turn_id| GatewaySteeringContext {
+            state,
+            user_id,
+            workspace_id,
+            thread_id,
+            turn_id,
+            run_id: effect_run_id.unwrap_or(turn_id),
+        })
+    })?
+}
+
 pub(crate) fn current_turn_control(
     context: GatewaySteeringContext<'_>,
 ) -> Option<local_first_engine::TurnControlDecision> {
