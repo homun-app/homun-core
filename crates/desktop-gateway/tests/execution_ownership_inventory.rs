@@ -886,6 +886,50 @@ fn choice_clarify_prompt_instruction_has_one_gateway_owner() {
 }
 
 #[test]
+fn core_operating_prompt_instruction_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
+
+    let pattern = "fn core_operating_instruction(";
+    assert!(
+        prompt_instructions.contains(pattern),
+        "prompt instruction owner must contain {pattern}"
+    );
+    assert!(
+        !main.contains(pattern),
+        "main.rs must not retain core operating prompt instruction surface {pattern}"
+    );
+
+    for snippet in [
+        "You are the local assistant acting as ORCHESTRATOR",
+        "METHOD (applies to any request, not just travel)",
+        "TOOLS AND ROUTING: when a request can be satisfied by a tool",
+        "USER'S COMPUTER FILES AND FOLDERS",
+        "AUTOMATIONS: for RECURRING or REACTIVE requests",
+        "RESPONSE FORMATTING (markdown, always)",
+    ] {
+        assert!(
+            !main.contains(snippet),
+            "main.rs must not retain core operating prompt instruction copy {snippet}"
+        );
+    }
+
+    assert!(
+        main.contains("now_block()"),
+        "main.rs still owns the runtime date/time value"
+    );
+    assert!(
+        main.contains("effective_user_language()"),
+        "main.rs still owns the runtime language selection"
+    );
+    assert!(
+        prompt_instructions.contains("fn browser_open_research_discovery_instruction("),
+        "core operating prompt owner must stay with prompt instruction helpers"
+    );
+}
+
+#[test]
 fn objective_contract_prompt_instructions_have_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
