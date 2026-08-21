@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (chat mode prompt instructions owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (language prompt instructions owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/chat-mode-prompt-instructions-owner` |
-| PR | #108-#116, #118-#269 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #269 (`3b4cc56f`) |
+| Branch | `fabio/language-prompt-instructions-owner` |
+| PR | #108-#116, #118-#270 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #270 (`43048359`) |
 
 ## Dove siamo
 
@@ -45,6 +45,10 @@ Piano completato:
 Slice Runtime V2 recenti:
 
 - Estrazione locale `gateway_prompt_instructions`: i contratti prompt statici
+  per lingua utente (`LANGUAGE`) escono dal setup inline di
+  `stream_chat_via_openai`; `main.rs` conserva solo la composizione, mentre
+  prompt assembly, mode, memoria, toolset e loop agente restano owner separati.
+- Estrazione mergeata `gateway_prompt_instructions`: i contratti prompt statici
   per composer mode `plan`/`ask`/`debug` escono dal match inline di
   `stream_chat_via_openai`; `main.rs` conserva solo la scelta del mode, mentre
   toolset, runtime plan, debug flow e loop agente restano owner separati.

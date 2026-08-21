@@ -78,6 +78,13 @@ problem, isolate the cause, form a hypothesis, verify it with a minimal experime
 RE-VERIFY by executing. One cause at a time, no blind attempts."
 }
 
+pub(crate) fn language_follow_user_instruction() -> &'static str {
+    "LANGUAGE: ALWAYS write in the SAME language as the user's latest \
+message — both your step-by-step narration AND the final answer. If the user writes in \
+Italian, reply entirely in Italian; if in English, in English. Match the user and never \
+switch language on your own. (Tool arguments, code, file paths and URLs stay as-is.)"
+}
+
 pub(crate) fn operational_plan_instruction() -> &'static str {
     "OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing \
 in the SAME turn. The plan is a live projection of the canonical objective, not a separate artifact \
@@ -121,7 +128,7 @@ mod tests {
     use super::{
         ask_mode_instruction, booking_assumption_choice_instruction,
         browser_open_research_discovery_instruction, choice_resume_instruction_legacy_backup,
-        debug_mode_instruction, memory_recall_usage_instruction,
+        debug_mode_instruction, language_follow_user_instruction, memory_recall_usage_instruction,
         memory_scope_restricted_instruction, operational_plan_instruction, plan_mode_instruction,
     };
 
@@ -193,6 +200,16 @@ mod tests {
         assert!(debug.contains("DEBUG MODE (chosen by the user)"));
         assert!(debug.contains("SYSTEMATIC debugging"));
         assert!(debug.contains("RE-VERIFY"));
+    }
+
+    #[test]
+    fn gateway_prompt_instructions_own_language_contract() {
+        let guidance = language_follow_user_instruction();
+        assert!(guidance.contains("LANGUAGE: ALWAYS write"));
+        assert!(guidance.contains("SAME language as the user's latest message"));
+        assert!(guidance.contains("step-by-step narration"));
+        assert!(guidance.contains("final answer"));
+        assert!(guidance.contains("Tool arguments, code, file paths and URLs stay as-is"));
     }
 
     #[test]
