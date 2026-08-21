@@ -62,6 +62,7 @@ mod gateway_chat_threads;
 mod gateway_chat_toolset;
 mod gateway_chat_turn_context;
 mod gateway_chat_utility_routes;
+mod gateway_chat_vision_preflight;
 mod gateway_composio_execution;
 mod gateway_composio_routes;
 mod gateway_connector_errors;
@@ -207,6 +208,7 @@ pub(crate) use gateway_chat_plan_resume::*;
 pub(crate) use gateway_chat_streams::*;
 pub(crate) use gateway_chat_toolset::*;
 pub(crate) use gateway_chat_turn_context::*;
+pub(crate) use gateway_chat_vision_preflight::*;
 pub(crate) use gateway_composio_execution::*;
 pub(crate) use gateway_composio_routes::*;
 pub(crate) use gateway_connector_errors::*;
@@ -2626,54 +2628,40 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             .expect("valid streaming response"));
     }
 
-    // Vision: this turn carries images, so decide WHO is allowed to look at them before the loop
-    // starts — the manager itself, a vision model standing in for it, or nobody. The manager's model
-    // never changes (ADR 0025 retired the mid-turn model switch); what changes is what reaches it.
-    let vision_fallback_armed = if vision::messages_have_image(&messages) {
-        match vision::plan_attachments(model_vision_support(&base_url, &model), has_vision_model())
-        {
-            // Known-blind manager and nobody to read for it. Say so — shipping the image to a provider
-            // that will reject it, and calling the rejection an answer, is what we're here to stop.
-            vision::AttachmentPlan::Refuse => {
-                let _ = emit_stream_event(
-                    &tx,
-                    GenerateStreamEvent::Done {
-                        text: vision::no_vision_model_message(&model),
-                        metrics: TokenMetrics::zero(),
-                        redacted_user_text: None,
-                    },
-                )
-                .await;
-                schedule_stream_registry_cleanup(resume_id.clone());
-                let body =
-                    Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
-                        rx.recv().await.map(|item| (item, rx))
-                    }));
-                return Ok(Response::builder()
-                    .status(StatusCode::OK)
-                    .header("content-type", "application/x-ndjson")
-                    .header("x-effective-model", "vision")
-                    .body(body)
-                    .expect("valid streaming response"));
-            }
-            // Known-blind manager, but a vision model can stand in: it looks at the image and its
-            // description takes the image's place. Same message, same position — only the modality
-            // changed, and the manager keeps its own model, tools and context.
-            vision::AttachmentPlan::Delegate => {
-                let readers = vision_model_candidates();
-                let images = vision::collect_image_urls(&messages);
-                let descriptions =
-                    vision::describe_images(&state.http, &readers, &images, &prompt).await;
-                vision::replace_images_with_descriptions(&mut messages, &descriptions);
-                false
-            }
-            // Sent inline, as before. The difference is only whether a vision model exists to rescue
-            // the turn should the provider refuse the image anyway (see `run_agent_rounds`).
-            vision::AttachmentPlan::InlineWithFallback => true,
-            vision::AttachmentPlan::Inline => false,
+    let vision_preflight = prepare_chat_vision_preflight(ChatVisionPreflightInput {
+        http: &state.http,
+        base_url: &base_url,
+        model: &model,
+        messages: &mut messages,
+        prompt: &prompt,
+    })
+    .await;
+    let vision_fallback_armed = match vision_preflight {
+        ChatVisionPreflight::Continue { fallback_armed } => fallback_armed,
+        ChatVisionPreflight::EarlyResponse {
+            text,
+            effective_model,
+        } => {
+            let _ = emit_stream_event(
+                &tx,
+                GenerateStreamEvent::Done {
+                    text,
+                    metrics: TokenMetrics::zero(),
+                    redacted_user_text: None,
+                },
+            )
+            .await;
+            schedule_stream_registry_cleanup(resume_id.clone());
+            let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
+                rx.recv().await.map(|item| (item, rx))
+            }));
+            return Ok(Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/x-ndjson")
+                .header("x-effective-model", effective_model)
+                .body(body)
+                .expect("valid streaming response"));
         }
-    } else {
-        false
     };
 
     // Dedicated STREAMING client: HTTP/1.1 (avoids HTTP/2 RST_STREAM that CDNs in

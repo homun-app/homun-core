@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (chat plan resume owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (chat vision preflight owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -299,10 +299,14 @@ Slice Runtime V2 recenti:
   always-load, Composio pre-retrieve e corpus `find_capability` escono dal
   monolite `main.rs`; schema tool, routing semantico, dispatch, browser e loop
   agente restano owner separati.
-- Estrazione locale `gateway_chat_plan_resume`: seed pre-loop del piano chat da
+- Estrazione mergeata `gateway_chat_plan_resume`: seed pre-loop del piano chat da
   `runtime_plans` canonico o marker legacy e applicazione del guard cross-turn
   `gateway_plan_stall` escono dal monolite `main.rs`; shape runtime plan,
   budget stall, loop agente, browser e toolset restano owner separati.
+- Estrazione locale `gateway_chat_vision_preflight`: decisione pre-loop per
+  allegati immagine (inline, fallback, delega al ruolo vision o risposta
+  anticipata) esce dal monolite `main.rs`; recovery post-loop image rejection,
+  trasporto stream, browser, toolset e loop agente restano owner separati.
 - Estrazione locale `gateway_chat_streams`: costruzione request id stream per
   turni agente/channel e broker (`agentturn-*`, `broker-*`) esce dal monolite
   `main.rs` e vive accanto a registry/replay/abort stream; loop agente, drain

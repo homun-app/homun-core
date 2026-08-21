@@ -143,6 +143,9 @@ CHAT_TOOLSET_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gatewa
 CHAT_PLAN_RESUME_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_plan_resume.rs"
 )
+CHAT_VISION_PREFLIGHT_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_chat_vision_preflight.rs"
+)
 CHANNELS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_channels.rs")
 MEMORY_QUERY_EMBEDDINGS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_query_embeddings.rs"
@@ -1601,6 +1604,8 @@ def main() -> int:
         chat_toolset_source = handle.read()
     with open(CHAT_PLAN_RESUME_RS, "r", encoding="utf-8") as handle:
         chat_plan_resume_source = handle.read()
+    with open(CHAT_VISION_PREFLIGHT_RS, "r", encoding="utf-8") as handle:
+        chat_vision_preflight_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
         action_confirmations_source = handle.read()
     with open(ACTIONABLE_SOURCE_RS, "r", encoding="utf-8") as handle:
@@ -3178,6 +3183,59 @@ def main() -> int:
             chat_plan_resume_source,
             snippet,
             "chat plan resume owner must not absorb stream, loop, tail, toolset, browser or subagent owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_chat_vision_preflight;",
+        "gateway root must declare chat vision preflight owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_chat_vision_preflight::*;",
+        "gateway root must re-export chat vision preflight owner",
+    )
+    for snippet in [
+        "pub(crate) async fn prepare_chat_vision_preflight(",
+        "pub(crate) struct ChatVisionPreflightInput",
+        "pub(crate) enum ChatVisionPreflight",
+        "vision::messages_have_image(",
+        "vision::plan_attachments(",
+        "vision::AttachmentPlan::Refuse",
+        "vision::AttachmentPlan::Delegate",
+        "vision::describe_images(",
+        "vision::replace_images_with_descriptions(",
+        "vision::no_vision_model_message(",
+    ]:
+        assert_contains(
+            chat_vision_preflight_source,
+            snippet,
+            "chat vision preflight owner must own attachment plan orchestration",
+        )
+    for snippet in [
+        "let vision_fallback_armed = if vision::messages_have_image(&messages) {",
+        "match vision::plan_attachments(model_vision_support(&base_url, &model), has_vision_model())",
+        "vision::AttachmentPlan::Refuse => {",
+        "vision::AttachmentPlan::Delegate => {",
+        "vision::replace_images_with_descriptions(&mut messages, &descriptions);",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain chat vision preflight setup",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "pub(crate) fn prepare_chat_plan_resume(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+        "delivered_image_rejection_outcome(",
+    ]:
+        assert_not_contains(
+            chat_vision_preflight_source,
+            snippet,
+            "chat vision preflight owner must not absorb stream, loop, toolset, plan, browser, subagent or recovery owners",
         )
     assert_contains(
         usage_runtime_source,
