@@ -2367,8 +2367,18 @@ fn model_steering_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
     let model_client = production_source(&root.join("src/model_client.rs"));
+    let run_agent_rounds = main
+        .split("async fn run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds")
+        .split("let usage_context = chat_response_usage_context(")
+        .next()
+        .expect("model client seam construction");
 
     for pattern in [
+        "pub(crate) struct GatewayModelClient",
+        "impl<'a> GatewayModelClient",
+        "pub(crate) fn new(",
         "pub(crate) struct GatewaySteeringContext",
         "pub(crate) fn gateway_steering_context",
         "effect_run_id.unwrap_or(turn_id)",
@@ -2391,6 +2401,10 @@ fn model_steering_context_has_one_gateway_owner() {
             "main.rs must not own model steering context construction {pattern}"
         );
     }
+    assert!(
+        !run_agent_rounds.contains("crate::model_client::GatewayModelClient {"),
+        "run_agent_rounds must not construct GatewayModelClient inline"
+    );
 
     for adjacent in [
         "async fn run_agent_rounds(",

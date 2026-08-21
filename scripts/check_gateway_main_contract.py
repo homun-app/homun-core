@@ -3353,6 +3353,16 @@ def main() -> int:
         "pub(crate) fn gateway_steering_context",
         "model client owner must expose steering context construction",
     )
+    assert_contains(
+        model_client_source,
+        "impl<'a> GatewayModelClient<'a> {\n    pub(crate) fn new(",
+        "model client owner must expose gateway model client constructor impl",
+    )
+    assert_not_contains(
+        source,
+        "let model_client = crate::model_client::GatewayModelClient {",
+        "gateway root must not construct GatewayModelClient inline",
+    )
     assert_not_contains(
         source,
         "crate::model_client::GatewaySteeringContext {",
