@@ -568,8 +568,8 @@ use gateway_project_search_tools::{
 use gateway_prompt_instructions::{
     ask_mode_instruction, booking_assumption_choice_instruction,
     browser_open_research_discovery_instruction, debug_mode_instruction,
-    memory_recall_usage_instruction, memory_scope_restricted_instruction,
-    operational_plan_instruction, plan_mode_instruction,
+    language_follow_user_instruction, memory_recall_usage_instruction,
+    memory_scope_restricted_instruction, operational_plan_instruction, plan_mode_instruction,
 };
 pub(crate) use gateway_prompt_packets::*;
 #[cfg(test)]
@@ -2250,15 +2250,7 @@ normal answers."
     } else {
         format!("{system}\n\n{}", memory_scope_restricted_instruction())
     };
-    // LANGUAGE: the whole system prompt is in English, so without an explicit
-    // directive coding-oriented models (e.g. kimi-*-code) reply in English even to an
-    // Italian request — narration AND final answer. Pin it to the user's language.
-    let system = format!(
-        "{system}\n\nLANGUAGE: ALWAYS write in the SAME language as the user's latest \
-message — both your step-by-step narration AND the final answer. If the user writes in \
-Italian, reply entirely in Italian; if in English, in English. Match the user and never \
-switch language on your own. (Tool arguments, code, file paths and URLs stay as-is.)"
-    );
+    let system = format!("{system}\n\n{}", language_follow_user_instruction());
     // An active thread-scoped RoutingBinding records an exact route the user already selected.
     // It remains authoritative over the model-owned semantic decision; absent or malformed
     // bindings fall back to that structured decision, never to prompt keyword routing.
