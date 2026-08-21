@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (code-map prompt instructions owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (execution-verification prompt owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/code-map-prompt-instructions-owner` |
-| PR | #108-#116, #118-#271 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #271 (`50fb5b66`) |
+| Branch | `fabio/execution-verification-prompt-owner` |
+| PR | #108-#116, #118-#272 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #272 (`6ec31148`) |
 
 ## Dove siamo
 
@@ -45,6 +45,11 @@ Piano completato:
 Slice Runtime V2 recenti:
 
 - Estrazione locale `gateway_prompt_instructions`: i contratti prompt statici
+  di verifica esecuzione (`EXECUTION / VERIFICATION`) escono dal setup inline
+  di `stream_chat_via_openai`; `main.rs` conserva solo la composizione, mentre
+  tool schema, sandbox execution, build/test runner e loop agente restano owner
+  separati.
+- Estrazione mergeata `gateway_prompt_instructions`: i contratti prompt statici
   per code-map disponibile (`CODE MAP`) escono dal setup inline di
   `stream_chat_via_openai`; `main.rs` conserva solo la decisione scoped
   `has_code_map`, mentre code graph runtime, prompt assembly, tool schema e loop
