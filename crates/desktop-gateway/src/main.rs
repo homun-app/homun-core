@@ -3032,12 +3032,12 @@ async fn run_agent_rounds(
         effect_turn_id.as_deref(),
         effect_run_id.as_deref(),
     );
-    let model_client = crate::model_client::GatewayModelClient {
-        http: &http,
+    let model_client = crate::model_client::GatewayModelClient::new(
+        &http,
         tx,
-        usage: state_owned.usage_recorder.as_ref(),
-        steering: steering_context,
-    };
+        state_owned.usage_recorder.as_ref(),
+        steering_context,
+    );
     let usage_context = chat_response_usage_context(
         automation_user_id.as_str(),
         automation_workspace_id.as_str(),

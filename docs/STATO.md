@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (context compactor constructor owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (model client constructor owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#261 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #261 (`110c6af7`) |
+| PR | #108-#116, #118-#262 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #262 (`0206e539`) |
 
 ## Dove siamo
 
@@ -425,6 +425,10 @@ Slice Runtime V2 recenti:
   per thread/turn/run esce da `run_agent_rounds`; il loop agente passa solo gli
   identificativi del turno, mentre steering persistence e model transport
   restano dentro il model client.
+- Estrazione locale `model_client`: costruzione del port engine
+  `GatewayModelClient` passa da struct literal in `run_agent_rounds` a
+  `GatewayModelClient::new`; HTTP, stream sink, usage recorder e steering
+  binding restano owner del model client.
 - Estrazione locale `gateway_tool_execution`: lookup del
   `ValidatedExecutionContract` del turno esce da `run_agent_rounds`; capability
   executor e browser executor ricevono lo stesso contratto caricato dall'owner
