@@ -820,6 +820,44 @@ fn execution_verification_prompt_instruction_has_one_gateway_owner() {
 }
 
 #[test]
+fn objective_contract_prompt_instructions_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
+
+    for pattern in [
+        "fn objective_contract_instruction(",
+        "fn objective_contract_read_only_default_instruction(",
+    ] {
+        assert!(
+            prompt_instructions.contains(pattern),
+            "prompt instruction owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain objective prompt instruction surface {pattern}"
+        );
+    }
+
+    for snippet in [
+        "OBJECTIVE CONTRACT (canonical, harness-enforced)",
+        "OBJECTIVE CONTRACT: none recorded for this task",
+        "Plan completion requires recorded evidence",
+        "execution defaults to READ-ONLY analysis",
+    ] {
+        assert!(
+            !main.contains(snippet),
+            "main.rs must not retain objective prompt instruction copy {snippet}"
+        );
+    }
+
+    assert!(
+        main.contains("objective_contract_for_execution("),
+        "main.rs still owns the runtime decision to append objective contract guidance"
+    );
+}
+
+#[test]
 fn gateway_time_has_one_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

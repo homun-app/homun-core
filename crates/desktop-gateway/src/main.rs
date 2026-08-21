@@ -570,6 +570,7 @@ use gateway_prompt_instructions::{
     browser_open_research_discovery_instruction, code_map_available_instruction,
     debug_mode_instruction, execution_verification_instruction, language_follow_user_instruction,
     memory_recall_usage_instruction, memory_scope_restricted_instruction,
+    objective_contract_instruction, objective_contract_read_only_default_instruction,
     operational_plan_instruction, plan_mode_instruction,
 };
 pub(crate) use gateway_prompt_packets::*;
@@ -2325,14 +2326,19 @@ questions (concepts, logic, generic code) you can answer directly."
     };
     let system = match objective_contract_for_execution(state, request.thread_id.as_deref()) {
         Some(objective) => format!(
-            "{system}\n\nOBJECTIVE CONTRACT (canonical, harness-enforced): revision {}; mode={:?}; objective={}. Stay inside its scope and allowed actions. Replan autonomously only when the objective, scope and mutation level stay unchanged. A new objective, wider scope or newly mutating action requires explicit user confirmation. Plan completion requires recorded evidence; response length is never completion evidence.",
-            objective.revision, objective.mode, objective.objective
+            "{system}\n\n{}",
+            objective_contract_instruction(
+                objective.revision,
+                &format!("{:?}", objective.mode),
+                &objective.objective,
+            )
         ),
         // No contract does NOT mean "no rules": execution defaults to read-only analysis, so the
         // effectful tools are gated. Saying nothing here was the worst combination — the gate was armed
         // and the model had no idea, so its writes came back refused for reasons it could not see.
         None => format!(
-            "{system}\n\nOBJECTIVE CONTRACT: none recorded for this task, so execution defaults to READ-ONLY analysis. Reading, searching, browsing and analysing are available; tools that change something (writing files, sending, creating, booking, purchasing) are refused until the user asks for that change. Do the read-only work and say plainly what you would need to change, rather than attempting it."
+            "{system}\n\n{}",
+            objective_contract_read_only_default_instruction()
         ),
     };
     let prompt_runtime = system
