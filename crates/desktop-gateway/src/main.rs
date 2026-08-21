@@ -58,6 +58,7 @@ mod gateway_chat_memory;
 mod gateway_chat_streams;
 mod gateway_chat_tasks;
 mod gateway_chat_threads;
+mod gateway_chat_toolset;
 mod gateway_chat_turn_context;
 mod gateway_chat_utility_routes;
 mod gateway_composio_execution;
@@ -202,6 +203,7 @@ pub(crate) use gateway_brain_materialization::*;
 pub(crate) use gateway_brain_runtime::*;
 pub(crate) use gateway_browser_runtime::*;
 pub(crate) use gateway_chat_streams::*;
+pub(crate) use gateway_chat_toolset::*;
 pub(crate) use gateway_chat_turn_context::*;
 pub(crate) use gateway_composio_execution::*;
 pub(crate) use gateway_composio_routes::*;
@@ -2450,172 +2452,33 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // browser tools are driven ONLY inside the isolated browse sub-loop (they're seeded there directly),
     // never offered to the manager. The mid-turn model-switch + the granular-tools-on-the-manager path
     // are retired — one canonical browser path.
-    let mut base_tools = initial_manager_tool_schemas_for_test(read_only, contact_only);
-    if memory_recall_allowed {
-        base_tools.push(recall_memory_tool_schema());
-    }
-    base_tools.extend([
-        query_code_graph_tool_schema(),
-        query_git_history_tool_schema(),
-        github_search_tool_schema(),
-        // Unified capability discovery — find what to connect (MCP/skill/Composio)
-        // for a need. Read-only (search), so offered to channels too.
-        suggest_capabilities_tool_schema(),
-        // Deterministic date/time resolution (Layer C). Read-only and needed most
-        // on channels (e.g. WhatsApp "treni per domani"), so offered to everyone.
-        resolve_datetime_tool_schema(),
-    ]);
-    if !read_only {
-        if host_computer_gateway::manager_ready() {
-            base_tools.push(use_computer_tool_schema());
-        }
-        base_tools.push(create_artifact_tool_schema());
-        base_tools.push(generate_image_tool_schema());
-        base_tools.push(render_deck_tool_schema());
-        base_tools.push(make_deck_tool_schema());
-        base_tools.push(make_document_tool_schema());
-        base_tools.push(get_brand_kit_tool_schema());
-        base_tools.push(create_skill_tool_schema());
-        base_tools.push(record_decision_tool_schema());
-        base_tools.push(forget_memory_tool_schema());
-        base_tools.push(update_plan_tool_schema());
-        base_tools.push(step_advance_tool_schema());
-        base_tools.push(schedule_task_tool_schema());
-        base_tools.push(create_automation_tool_schema());
-        base_tools.push(update_automation_tool_schema());
-        base_tools.push(send_message_tool_schema());
-        base_tools.push(list_scheduled_tasks_tool_schema());
-        base_tools.push(cancel_scheduled_task_tool_schema());
-        // Shell execution is a general capability (run scripts, process data, and
-        // verify-by-execution: build/test/lint), not skill-only. The Docker
-        // sandbox + security scan are the safety boundary, so it's safe to offer
-        // whenever the turn can act (not read-only channels).
-        base_tools.push(run_in_sandbox_tool_schema());
-        // In-place file tools on the conversation's project folder (Claude-Code
-        // style, path-jailed). No-op-with-explanation when no project folder.
-        base_tools.push(read_file_tool_schema());
-        base_tools.push(write_file_tool_schema());
-        base_tools.push(edit_file_tool_schema());
-        // Codex-format multi-file patch: preferred for precise / multi-file edits.
-        // Jailed via jail_in_root, gated exactly like write_file/edit_file.
-        base_tools.push(apply_patch_tool_schema());
-        base_tools.push(list_files_tool_schema());
-        // Native filesystem (browse/read the user's authorized folders), so this
-        // fundamental capability isn't outsourced to a third-party MCP.
-        base_tools.push(list_directory_tool_schema());
-        base_tools.push(read_text_file_tool_schema());
-        base_tools.push(run_in_project_tool_schema());
-        // Addons (process-skills, ADR 0011) stay DORMANT until the post-release
-        // addon phase: foundation wired but off by default (HOMUN_ADDONS=1).
-        if addons_enabled() {
-            base_tools.push(list_addons_tool_schema());
-            base_tools.push(show_addon_tool_schema());
-            base_tools.push(customize_addon_tool_schema());
-        }
-    }
-    // NB: find_connected_tools is no longer offered separately — `find_capability` now
-    // searches connectors too (unified discovery). The connectors still enter the corpus
-    // below via `catalog_index` (gated by has_composio).
-    if has_skills {
-        base_tools.push(use_skill_tool_schema());
-    }
-    if !artifact_destinations.is_empty() && !read_only {
-        base_tools.push(save_artifact_tool_schema(&artifact_destinations));
-    }
-    prune_tools_for_objective_policy(&mut base_tools, &objective_effect_policy, &composio_writes);
-    prune_tools_for_route(&mut base_tools, &workflow_route, &workflow_deny_tools);
-    // Tool Search (Anthropic pattern): split the full toolset into a SMALL always-loaded
-    // CORE + a DEFERRED registry the model discovers via `find_capability`. Keeps the
-    // upfront tool count low (selection accuracy + context budget) as tools grow, and makes
-    // the browser a discovered last-resort instead of the silent catch-all. `find_capability`
-    // pushes matches into the live `tool_schemas` (same mechanism as `find_connected_tools`).
-    // One machine-derived exception (see `tool_stays_live_this_turn`): a thread with either a warm
-    // browser session or an active revision-matched checkpoint is MID web task, so `browse` stays
-    // live instead of requiring a discovery hop. This probe consumes neither state source.
     let browser_continuation_available = request
         .thread_id
         .as_deref()
         .is_some_and(|thread_id| thread_has_browser_continuation(state, thread_id));
-    let (mut base_tools, deferred_tools): (Vec<serde_json::Value>, Vec<serde_json::Value>) =
-        base_tools.into_iter().partition(|schema| {
-            schema
-                .pointer("/function/name")
-                .and_then(|v| v.as_str())
-                .map(|name| tool_stays_live_this_turn(name, browser_continuation_available))
-                .unwrap_or(false)
-        });
-    match &capability_route {
-        CapabilityRouteDecision::Workflow { tool_name, .. } => {
-            if let Some(capability) = native_workflow_by_tool_name(tool_name) {
-                base_tools.push((capability.schema)());
-            }
-        }
-        CapabilityRouteDecision::AtomicTool { capability_key, .. } => {
-            if let Some(capability) = native_atomic_by_key(capability_key) {
-                base_tools.push((capability.schema)());
-            }
-            base_tools.push(find_capability_tool_schema());
-        }
-        CapabilityRouteDecision::AgentLoop { .. } => {
-            base_tools.push(find_capability_tool_schema());
-        }
-    }
-    // HITL Choice resume: strip cold discovery so the model cannot derail to
-    // suggest_capabilities / CONNECT_SUGGEST. Warm state or a durable checkpoint keeps browse
-    // live via tool_stays_live_this_turn; only a truly dead continuation permits rediscovery.
-    if hitl_choice_resume.is_some() {
-        let browser_continuation_available = request
-            .thread_id
-            .as_deref()
-            .is_some_and(|tid| thread_has_browser_continuation(state, tid));
-        hitl_resume::prune_cold_discovery_tools(&mut base_tools, !browser_continuation_available);
-    }
-    // MCP servers are installed deliberately and are few, so their tools go STRAIGHT
-    // into the live tool set (not deferred behind find_capability) when the count is
-    // small — the model uses them naturally instead of having to "discover" them via
-    // a keyword search it rarely thinks to run. Past the cap they fall back to
-    // find_capability like the large Composio catalog.
-    const MCP_ALWAYS_LOAD_MAX: usize = 24;
-    if !mcp_catalog.schemas.is_empty() && mcp_catalog.schemas.len() <= MCP_ALWAYS_LOAD_MAX {
-        for schema in &mcp_catalog.schemas {
-            base_tools.push(schema.clone());
-        }
-    }
-    // Composio is the LARGE catalog (hundreds of tools) → kept behind find_capability,
-    // but pre-retrieve the few relevant to THIS message and load them up front, so the
-    // model uses them without having to think to search. Best-effort; deduped against
-    // what's already loaded (core + always-loaded MCP).
-    if has_composio && applies_new_input {
-        let loaded: std::collections::HashSet<String> = base_tools
-            .iter()
-            .filter_map(|s| {
-                s.pointer("/function/name")
-                    .and_then(|v| v.as_str())
-                    .map(String::from)
-            })
-            .collect();
-        for schema in auto_retrieve_composio(&state.http, &request.prompt, &catalog_index, 4).await
-        {
-            let name = schema
-                .pointer("/function/name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            if !name.is_empty() && !loaded.contains(&name) {
-                base_tools.push(schema);
-            }
-        }
-    }
-    prune_tools_for_objective_policy(&mut base_tools, &objective_effect_policy, &composio_writes);
-    prune_tools_for_route(&mut base_tools, &workflow_route, &workflow_deny_tools);
-    let capability_corpus = materialize_capability_corpus(CapabilityCorpusMaterializationInput {
-        deferred_tools,
+    let chat_toolset = prepare_chat_toolset(ChatToolsetInput {
+        state,
+        prompt: &request.prompt,
         read_only,
+        contact_only,
+        memory_recall_allowed,
+        has_skills,
+        artifact_destinations: &artifact_destinations,
         objective_effect_policy: &objective_effect_policy,
         composio_writes: &composio_writes,
+        workflow_route: &workflow_route,
+        workflow_deny_tools: &workflow_deny_tools,
+        browser_continuation_available,
+        capability_route: &capability_route,
+        hitl_choice_resume_active: hitl_choice_resume.is_some(),
         mcp_schemas: &mcp_catalog.schemas,
+        has_composio: has_composio && applies_new_input,
+        catalog_index: &catalog_index,
         enabled_skills: &enabled_skills,
-    });
+    })
+    .await;
+    let base_tools = chat_toolset.base_tools;
+    let capability_corpus = chat_toolset.capability_corpus;
     // Connectors are NOT flattened into the BM25 corpus: they're searched via the
     // toolkit-aware `search_composio_catalog` inside find_capability (returns a service's
     // full CRUD set together, so the model picks the right verb). The hits are still

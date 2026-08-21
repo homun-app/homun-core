@@ -139,6 +139,7 @@ VISIBLE_TURNS_RS = os.path.join(
 CHAT_TURN_CONTEXT_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_turn_context.rs"
 )
+CHAT_TOOLSET_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_chat_toolset.rs")
 CHANNELS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_channels.rs")
 MEMORY_QUERY_EMBEDDINGS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_query_embeddings.rs"
@@ -1593,6 +1594,8 @@ def main() -> int:
         visible_turns_source = handle.read()
     with open(CHAT_TURN_CONTEXT_RS, "r", encoding="utf-8") as handle:
         chat_turn_context_source = handle.read()
+    with open(CHAT_TOOLSET_RS, "r", encoding="utf-8") as handle:
+        chat_toolset_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
         action_confirmations_source = handle.read()
     with open(ACTIONABLE_SOURCE_RS, "r", encoding="utf-8") as handle:
@@ -3071,6 +3074,54 @@ def main() -> int:
             chat_turn_context_source,
             snippet,
             "chat turn context owner must not absorb stream, loop, tail, browser or subagent owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_chat_toolset;",
+        "gateway root must declare chat toolset owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_chat_toolset::*;",
+        "gateway root must re-export chat toolset owner",
+    )
+    for snippet in [
+        "pub(crate) async fn prepare_chat_toolset(",
+        "pub(crate) struct ChatToolsetInput",
+        "pub(crate) struct ChatToolset",
+        "initial_manager_tool_schemas_for_test(",
+        "tool_stays_live_this_turn(",
+        "materialize_capability_corpus(",
+        "auto_retrieve_composio(",
+    ]:
+        assert_contains(
+            chat_toolset_source,
+            snippet,
+            "chat toolset owner must own per-turn manager tool assembly",
+        )
+    for snippet in [
+        "let mut base_tools = initial_manager_tool_schemas_for_test(",
+        "base_tools.into_iter().partition(|schema|",
+        "for schema in auto_retrieve_composio(",
+        "let capability_corpus = materialize_capability_corpus(",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain chat toolset assembly",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+        "fn run_mcp_chat_tool(",
+    ]:
+        assert_not_contains(
+            chat_toolset_source,
+            snippet,
+            "chat toolset owner must not absorb stream, loop, tail, browser, subagent or MCP runtime owners",
         )
     assert_contains(
         usage_runtime_source,
