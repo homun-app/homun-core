@@ -2414,6 +2414,59 @@ fn chat_plan_resume_has_one_gateway_owner() {
 }
 
 #[test]
+fn chat_vision_preflight_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let vision_preflight = production_source(&root.join("src/gateway_chat_vision_preflight.rs"));
+
+    for pattern in [
+        "pub(crate) async fn prepare_chat_vision_preflight(",
+        "struct ChatVisionPreflightInput",
+        "enum ChatVisionPreflight",
+        "vision::messages_have_image(",
+        "vision::plan_attachments(",
+        "vision::AttachmentPlan::Refuse",
+        "vision::AttachmentPlan::Delegate",
+        "vision::describe_images(",
+        "vision::replace_images_with_descriptions(",
+        "vision::no_vision_model_message(",
+    ] {
+        assert!(
+            vision_preflight.contains(pattern),
+            "chat vision preflight owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "let vision_fallback_armed = if vision::messages_have_image(&messages) {",
+        "match vision::plan_attachments(model_vision_support(&base_url, &model), has_vision_model())",
+        "vision::AttachmentPlan::Refuse => {",
+        "vision::AttachmentPlan::Delegate => {",
+        "vision::replace_images_with_descriptions(&mut messages, &descriptions);",
+    ] {
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain chat vision preflight setup {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "pub(crate) fn prepare_chat_plan_resume(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+        "delivered_image_rejection_outcome(",
+    ] {
+        assert!(
+            !vision_preflight.contains(adjacent),
+            "chat vision preflight owner must not absorb adjacent stream/loop/toolset/plan/browser/subagent/recovery surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn gateway_state_access_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
