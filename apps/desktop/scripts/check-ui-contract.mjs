@@ -442,6 +442,11 @@ assertRepoContains(
 );
 assertRepoContains(
   "crates/desktop-gateway/src/gateway_capability_registry.rs",
+  "pub(crate) async fn capability_snapshot",
+  "Gateway capability snapshot route must live with the capability registry owner",
+);
+assertRepoContains(
+  "crates/desktop-gateway/src/gateway_capability_registry.rs",
   "owner_projects_capability_snapshot_read_model",
   "Gateway capability snapshot owner must have a read-model smoke test",
 );
@@ -514,6 +519,11 @@ assertRepoNotContains(
   "crates/desktop-gateway/src/main.rs",
   "fn capability_snapshot_response(",
   "Gateway main must not own capability snapshot read-model mapping",
+);
+assertRepoNotContains(
+  "crates/desktop-gateway/src/main.rs",
+  "async fn capability_snapshot(",
+  "Gateway main must not own capability snapshot route",
 );
 assertRepoNotContains(
   "crates/desktop-gateway/src/main.rs",

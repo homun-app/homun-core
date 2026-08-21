@@ -780,9 +780,9 @@ Slice browser/projection successive:
   `python3 scripts/pre_release_gate.py`.
 - Slice `fabio/capability-snapshot-read-model-owner` verificata localmente:
   DTO e mapping dello snapshot `/api/capabilities/snapshot` spostati da
-  `main.rs` a `gateway_capability_registry`; la route HTTP resta thin adapter e
-  il registry capability diventa l'unico owner della projection connections/tool
-  usata dalla UI. Verifiche verdi: `cargo fmt --check`,
+  `main.rs` a `gateway_capability_registry`; la route HTTP e' stata poi spostata
+  nello stesso owner, rendendo il registry capability l'unico owner della
+  projection connections/tool usata dalla UI. Verifiche verdi: `cargo fmt --check`,
   `python3 scripts/check_gateway_main_contract.py`,
   `cargo check -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
   `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_capability_registry -- --nocapture`,

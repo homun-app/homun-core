@@ -4,7 +4,8 @@
 //! connector toolkit search, and best-effort connected-tool pre-retrieval. Keep
 //! these contracts here so `main.rs` only materializes the per-turn corpus.
 
-use crate::GatewayError;
+use axum::{Json, extract::State};
+
 use crate::gateway_browser_tools::{
     browser_act_tool_schema, browser_dialog_tool_schema, browser_navigate_tool_schema,
     browser_rehydrate_tool_schema, browser_screenshot_tool_schema, browser_snapshot_tool_schema,
@@ -15,6 +16,7 @@ use crate::gateway_identity::{
 };
 use crate::gateway_memory_dedup::cosine;
 use crate::gateway_paths::gateway_capability_database_path;
+use crate::{AppState, GatewayError, lock_capability_registry};
 use local_first_capabilities::{
     ActionClass, CachedCapabilityTool, CapabilityConnectionConfig, CapabilityProviderConfig,
     CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, PolicyContext,
@@ -58,6 +60,19 @@ pub(crate) struct CapabilitySnapshotResponse {
     connections: Vec<CapabilityConnectionResponse>,
     tools: Vec<CapabilityToolResponse>,
     policy: CapabilityPolicyResponse,
+}
+
+pub(crate) async fn capability_snapshot(
+    State(state): State<AppState>,
+) -> Result<Json<CapabilitySnapshotResponse>, GatewayError> {
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+    let registry = lock_capability_registry(&state)?;
+    let policy = registry
+        .policy_context(&user, &workspace)
+        .map_err(GatewayError::capability)?;
+    let snapshot = capability_snapshot_response(&registry, &user, &workspace, policy)?;
+    Ok(Json(snapshot))
 }
 
 pub(crate) fn capability_snapshot_response(
