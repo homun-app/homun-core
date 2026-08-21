@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (skill prompt instructions owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (memory prompt instructions owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/skill-prompt-instructions-owner` |
-| PR | #108-#116, #118-#267 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #267 (`73108cbf`) |
+| Branch | `fabio/memory-prompt-instructions-owner` |
+| PR | #108-#116, #118-#268 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #268 (`3596f2a4`) |
 
 ## Dove siamo
 
@@ -44,7 +44,13 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_skill_runtime`: il rendering del blocco prompt
+- Estrazione locale `gateway_prompt_instructions`: il contratto prompt statico
+  memoria/recall/Vault (`MEMORY`, `RECALL-BEFORE-ASKING`,
+  `SENSITIVE VAULT`, scope restricted senza `recall_memory`) esce dal setup
+  inline di `stream_chat_via_openai`; `main.rs` conserva solo la composizione e
+  la scelta `memory_recall_allowed`, mentre recall service, prompt packet,
+  toolset e loop agente restano owner separati.
+- Estrazione mergeata `gateway_skill_runtime`: il rendering del blocco prompt
   `INSTALLED SKILLS` / metodologia HomunCoder esce dal setup inline di
   `stream_chat_via_openai` e vive accanto a discovery, progressive disclosure
   e schema tool degli skill; `main.rs` conserva solo snapshot, filtro progetto
@@ -1107,9 +1113,8 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#267: slice owner-level successive mergeate in `main`, fino a
-  `thread model effective context owner`; `main` verificato e riallineato a
-  #267.
+- #143-#268: slice owner-level successive mergeate in `main`, fino a
+  `skill prompt instruction owner`; `main` verificato e riallineato a #268.
 
 PR aperte:
 
@@ -1117,8 +1122,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/skill-prompt-instructions-owner`: slice locale sopra `main`
-  riallineato a #267 (`73108cbf`).
+- `fabio/memory-prompt-instructions-owner`: slice locale sopra `main`
+  riallineato a #268 (`3596f2a4`).
 
 ## Debito residuo
 

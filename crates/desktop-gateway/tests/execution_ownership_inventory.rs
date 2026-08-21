@@ -621,6 +621,51 @@ fn skill_prompt_instructions_have_one_gateway_owner() {
 }
 
 #[test]
+fn memory_prompt_instructions_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
+
+    let owned = [
+        "fn memory_recall_usage_instruction(",
+        "fn memory_scope_restricted_instruction(",
+    ];
+    for pattern in owned {
+        assert!(
+            prompt_instructions.contains(pattern),
+            "prompt instruction owner must contain {pattern}"
+        );
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain memory prompt instruction surface {pattern}"
+        );
+    }
+
+    for snippet in [
+        "MEMORY: you have a long-term memory of the user",
+        "RECALL-BEFORE-ASKING:",
+        "SENSITIVE VAULT:",
+        "MEMORY SCOPE FOR THIS OBJECTIVE:",
+    ] {
+        assert!(
+            !main.contains(snippet),
+            "main.rs must not retain memory prompt instruction copy {snippet}"
+        );
+    }
+
+    for adjacent in [
+        "fn operational_plan_instruction(",
+        "fn browser_open_research_discovery_instruction(",
+        "fn booking_assumption_choice_instruction(",
+    ] {
+        assert!(
+            prompt_instructions.contains(adjacent),
+            "memory prompt owner must stay with prompt instruction adjacent helper {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn gateway_time_has_one_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
