@@ -567,6 +567,7 @@ use gateway_project_search_tools::{
 };
 use gateway_prompt_instructions::{
     booking_assumption_choice_instruction, browser_open_research_discovery_instruction,
+    memory_recall_usage_instruction, memory_scope_restricted_instruction,
     operational_plan_instruction,
 };
 pub(crate) use gateway_prompt_packets::*;
@@ -2241,45 +2242,12 @@ normal answers."
         .trim()
         .to_string();
     let system = prompt_core.clone();
-    let system = format!(
-        "{system}\n\nMEMORY: you have a long-term memory of the user. If you need a personal \
-or project detail you may have already learned (a name, a preference, a fact, a \
-past decision and its why), OR if the user asks what was discussed or decided in \
-PREVIOUS conversations, and the information is NOT already in the profile above, ALWAYS call the \
-recall_memory tool BEFORE saying you don't know or don't remember. \
-RECALL-BEFORE-ASKING: when the user refers to a POSSESSION, a PERSON or a \
-CONTEXT they take as already known (typically with a possessive: «my motorbike», «my boss», «my \
-house», «my brother», «my management software»…) and to act you need a detail about it that is NOT \
-already in the profile above, do NOT instinctively ask the user: call recall_memory FIRST and USE what \
-you find; then ask ONLY for the details that are truly still missing after the recall. \
-E.g.: «find me a fuel cap for my motorbike» → recall_memory(«user's motorbike, make \
-model year») → if you find «Moto Guzzi V7 Stone 850 2021» proceed with that and ask for the year only if \
-it's not in memory. This concerns DURABLE facts plausibly already learned, not \
-ephemeral information or things that just came up in the conversation. \
-DECISIONS: BEFORE modifying a project's code/documents, call recall_memory to remember \
-why things are the way they are (do NOT re-scan everything from scratch). AFTER a non-trivial choice — in \
-ANY domain: code, a document (e.g. a customer quote), data, configurations — call \
-record_decision with what you decided, the WHY, the rejected alternatives and the objects touched, so \
-the rationale stays and doesn't have to be reconstructed. \
-SENSITIVE VAULT: sensitive values are NOT in ordinary memory. If the user asks for a sensitive personal \
-value (identity document, fiscal/tax code, vehicle plate, health note, credentials, payment data, private \
-note), call recall_memory before saying you don't know it: if normal memory has no match, the gateway \
-checks Vault metadata internally and returns only redacted metadata. Never reveal, infer, or guess the \
-secret value from metadata. If a matching record exists, say it is saved in the Vault and local PIN unlock \
-is required to reveal or edit it. If recall_memory returns a `reveal_card:` line, COPY the marker after \
-`reveal_card:` EXACTLY into your final answer on its own line; do not paraphrase it. The UI hides that \
-marker and renders the PIN unlock card. Do NOT send or forward raw Vault secret values through \
-generic external channels/tools such as send_message. The configured Telegram authorization channel may \
-receive Vault/payment summaries or approval prompts, but raw-value reveal stays behind the local PIN \
-unlock card unless a dedicated approved reveal flow exists."
-    );
+    let system = format!("{system}\n\n{}", memory_recall_usage_instruction());
     let system = format!("{system}\n\n{}", operational_plan_instruction());
     let system = if memory_recall_allowed {
         system
     } else {
-        format!(
-            "{system}\n\nMEMORY SCOPE FOR THIS OBJECTIVE: long-term recall and Vault lookup are not authorized. Use only current-thread context and current-turn tool evidence; do not call recall_memory."
-        )
+        format!("{system}\n\n{}", memory_scope_restricted_instruction())
     };
     // LANGUAGE: the whole system prompt is in English, so without an explicit
     // directive coding-oriented models (e.g. kimi-*-code) reply in English even to an
