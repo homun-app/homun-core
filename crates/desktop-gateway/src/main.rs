@@ -58,6 +58,7 @@ mod gateway_chat_memory;
 mod gateway_chat_streams;
 mod gateway_chat_tasks;
 mod gateway_chat_threads;
+mod gateway_chat_turn_context;
 mod gateway_chat_utility_routes;
 mod gateway_composio_execution;
 mod gateway_composio_routes;
@@ -201,6 +202,7 @@ pub(crate) use gateway_brain_materialization::*;
 pub(crate) use gateway_brain_runtime::*;
 pub(crate) use gateway_browser_runtime::*;
 pub(crate) use gateway_chat_streams::*;
+pub(crate) use gateway_chat_turn_context::*;
 pub(crate) use gateway_composio_execution::*;
 pub(crate) use gateway_composio_routes::*;
 pub(crate) use gateway_connector_errors::*;
@@ -1558,48 +1560,12 @@ async fn stream_chat_via_openai(
         logs_dir: gateway_logs_dir(),
         max_bytes: turn_trace_max_bytes(),
     });
-    // Scope MEMORY to THIS conversation's project (profile injection, recall, per-file
-    // recall, extractor). Uses a dedicated memory scope — NOT the global active
-    // workspace — so Composio's entity and the user's selected workspace are untouched.
-    if let Some(tid) = request.thread_id.as_deref() {
-        if let Ok(store) = lock_store(state)
-            && let Ok(ws) = store.workspace_for_thread(tid)
-        {
-            set_memory_workspace(&ws);
-        }
-    } else {
-        set_memory_workspace("");
-    }
-    // Channel turns are bound to a curated contact: persona/tone + isolation
-    // perimeter (what memory/tools/info this reply may use). `channel_owner` = the
-    // sender is the user themselves (is_self card) → channel gates that protect the
-    // user from OTHERS (e.g. the browser click block) don't apply. Lock taken and
-    // released inside; never held across the generation.
-    let (contact_ctx, channel_owner) = contact_turn_context(state, request.thread_id.as_deref());
-    if verbose_debug()
-        && request
-            .thread_id
-            .as_deref()
-            .is_some_and(|t| t.starts_with("channel_"))
-    {
-        eprintln!(
-            "channel-turn: thread={} owner={} contact={}",
-            request.thread_id.as_deref().unwrap_or("-"),
-            channel_owner,
-            contact_ctx.as_ref().map(|c| c.name.as_str()).unwrap_or("-"),
-        );
-    }
-    // Real-idle signal (H3): only genuine user work counts — in-app turns and the
-    // OWNER writing via a channel. An inbound contact message or Homun's own
-    // headless check-in must NOT reset the idle clock.
-    {
-        let tid = request.thread_id.as_deref();
-        let is_channel = tid.is_some_and(|t| t.starts_with("channel_"));
-        let is_homun = tid == Some("homun");
-        if !is_homun && (!is_channel || channel_owner) {
-            note_user_activity();
-        }
-    }
+    let chat_turn_context = prepare_chat_turn_context(ChatTurnContextInput {
+        state,
+        thread_id: request.thread_id.as_deref(),
+    });
+    let contact_ctx = chat_turn_context.contact;
+    let channel_owner = chat_turn_context.channel_owner;
     // Budget the prompt against the model's REAL context window (catalog `context_window`,
     // auto-filled from `/api/show`, F0.3d) instead of a flat 32k default — so a 128k model
     // keeps its long history and a small local model is clamped to what it can actually read.
