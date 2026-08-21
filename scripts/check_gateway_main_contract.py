@@ -3505,6 +3505,21 @@ def main() -> int:
         "runtime plan state owner must expose engine plan progress port",
     )
     assert_contains(
+        runtime_plan_state_source,
+        "impl GatewayPlanProgress",
+        "runtime plan state owner must expose engine plan progress constructor",
+    )
+    assert_contains(
+        runtime_plan_state_source,
+        "pub(crate) fn new(",
+        "runtime plan state owner must construct engine plan progress port",
+    )
+    assert_not_contains(
+        source,
+        "let plan_progress = GatewayPlanProgress {\n        state: state_owned.clone(),\n    };",
+        "gateway root must not construct GatewayPlanProgress inline",
+    )
+    assert_contains(
         thread_episodes_source,
         "pub(crate) const THREADS_WORKSPACE",
         "thread episode owner must expose the reserved thread workspace",

@@ -3104,9 +3104,7 @@ async fn run_agent_rounds(
         recent_action_signatures: std::collections::VecDeque::new(),
         recent_failed_action_families: std::collections::VecDeque::new(),
     };
-    let plan_progress = GatewayPlanProgress {
-        state: state_owned.clone(),
-    };
+    let plan_progress = GatewayPlanProgress::new(state_owned.clone());
     let compactor = GatewayContextCompactor {
         state: state_owned.clone(),
         thread_id: thread_id.clone(),
