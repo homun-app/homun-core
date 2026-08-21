@@ -27,6 +27,9 @@ MEMORY_PROMPT_CONTEXT_RS = os.path.join(
 )
 TEXT_SAFETY_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_text_safety.rs")
 BROWSER_TOOLS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_browser_tools.rs")
+TOOL_EXECUTION_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_tool_execution.rs"
+)
 CHAT_UTILITY_ROUTES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_utility_routes.rs"
 )
@@ -1590,6 +1593,8 @@ def main() -> int:
         usage_runtime_source = handle.read()
     with open(MODEL_CLIENT_RS, "r", encoding="utf-8") as handle:
         model_client_source = handle.read()
+    with open(TOOL_EXECUTION_RS, "r", encoding="utf-8") as handle:
+        tool_execution_source = handle.read()
     with open(PROMPT_PACKETS_RS, "r", encoding="utf-8") as handle:
         prompt_packets_source = handle.read()
     with open(BRAIN_RUNTIME_RS, "r", encoding="utf-8") as handle:
@@ -3347,6 +3352,16 @@ def main() -> int:
         source,
         "let steering_context = match (thread_id.as_deref(), effect_turn_id.as_deref())",
         "gateway root must not own model steering context match",
+    )
+    assert_contains(
+        tool_execution_source,
+        "pub(crate) fn load_turn_effect_contract(",
+        "tool execution owner must expose turn effect-contract lookup",
+    )
+    assert_not_contains(
+        source,
+        "let effect_contract = effect_turn_id.as_deref().and_then(|execution_id|",
+        "gateway root must not own turn effect-contract lookup inline",
     )
     assert_contains(
         composio_routes_source,

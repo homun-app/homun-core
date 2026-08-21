@@ -323,6 +323,20 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway tool effect contract owner",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--test",
+                "execution_ownership_inventory",
+                "tool_effect_contract_lookup_has_one_gateway_owner",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway model steering context owner",
             [
                 "cargo",

@@ -2369,6 +2369,55 @@ fn model_steering_context_has_one_gateway_owner() {
 }
 
 #[test]
+fn tool_effect_contract_lookup_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let tool_execution = production_source(&root.join("src/gateway_tool_execution.rs"));
+    let run_agent_rounds = main
+        .split("async fn run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds")
+        .split("// Vision fallback")
+        .next()
+        .expect("run_agent_rounds seam construction");
+
+    for pattern in [
+        "pub(crate) fn load_turn_effect_contract(",
+        ".execution(execution_id)",
+        ".map(|record| record.contract)",
+    ] {
+        assert!(
+            tool_execution.contains(pattern),
+            "tool execution owner must contain effect-contract lookup surface {pattern}"
+        );
+    }
+
+    for pattern in [
+        "let effect_contract = effect_turn_id.as_deref().and_then(|execution_id|",
+        ".task_store\n            .lock()",
+        ".execution(execution_id)",
+        ".map(|record| record.contract)",
+    ] {
+        assert!(
+            !run_agent_rounds.contains(pattern),
+            "run_agent_rounds must not own effect-contract lookup surface {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn run_agent_rounds(",
+        "GatewayPlanProgress {",
+        "GatewayContextCompactor {",
+        "GatewayTurnCompletionJudge::new(",
+    ] {
+        assert!(
+            !tool_execution.contains(adjacent),
+            "tool execution effect-contract owner must not absorb adjacent loop/model surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn agent_turn_tail_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
