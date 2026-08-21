@@ -103,6 +103,18 @@ run the code, read the REAL output and iterate on the failures until it passes, 
 Trust the compiler and the tests, not your estimate."
 }
 
+pub(crate) fn freshness_verification_instruction() -> &'static str {
+    "FRESHNESS / VERIFICATION: your internal knowledge may be dated. For ANY \
+question whose answer depends on information that changes over time or that requires up-to-date \
+accuracy — news and current events, the state/condition/health of people, results or scores, prices, \
+schedules, rankings; but ALSO software (libraries, frameworks, APIs, SDKs, tools: versions, syntax, \
+options, best practices, current state of the art) — you MUST verify on the web with the browser, preferring the \
+OFFICIAL documentation or recent sources, BEFORE answering, instead of answering from memory. NEVER \
+cite a source (site/publication/doc) you haven't actually opened in THIS turn: no invented sources, \
+versions or dates. If you can't verify, say so openly instead of guessing. Timeless \
+questions (concepts, logic, generic code) you can answer directly."
+}
+
 pub(crate) fn objective_contract_instruction(
     revision: u64,
     mode_debug: &str,
@@ -161,10 +173,10 @@ mod tests {
         ask_mode_instruction, booking_assumption_choice_instruction,
         browser_open_research_discovery_instruction, choice_resume_instruction_legacy_backup,
         code_map_available_instruction, debug_mode_instruction, execution_verification_instruction,
-        language_follow_user_instruction, memory_recall_usage_instruction,
-        memory_scope_restricted_instruction, objective_contract_instruction,
-        objective_contract_read_only_default_instruction, operational_plan_instruction,
-        plan_mode_instruction,
+        freshness_verification_instruction, language_follow_user_instruction,
+        memory_recall_usage_instruction, memory_scope_restricted_instruction,
+        objective_contract_instruction, objective_contract_read_only_default_instruction,
+        operational_plan_instruction, plan_mode_instruction,
     };
 
     #[test]
@@ -265,6 +277,16 @@ mod tests {
         assert!(guidance.contains("run_in_sandbox"));
         assert!(guidance.contains("VERIFY BY EXECUTING"));
         assert!(guidance.contains("Trust the compiler and the tests"));
+    }
+
+    #[test]
+    fn gateway_prompt_instructions_own_freshness_verification_contract() {
+        let guidance = freshness_verification_instruction();
+        assert!(guidance.contains("FRESHNESS / VERIFICATION"));
+        assert!(guidance.contains("internal knowledge may be dated"));
+        assert!(guidance.contains("software (libraries, frameworks, APIs, SDKs, tools"));
+        assert!(guidance.contains("OFFICIAL documentation or recent sources"));
+        assert!(guidance.contains("If you can't verify, say so openly"));
     }
 
     #[test]

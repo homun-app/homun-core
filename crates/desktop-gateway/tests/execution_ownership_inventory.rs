@@ -820,6 +820,39 @@ fn execution_verification_prompt_instruction_has_one_gateway_owner() {
 }
 
 #[test]
+fn freshness_verification_prompt_instruction_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
+
+    let pattern = "fn freshness_verification_instruction(";
+    assert!(
+        prompt_instructions.contains(pattern),
+        "prompt instruction owner must contain {pattern}"
+    );
+    assert!(
+        !main.contains(pattern),
+        "main.rs must not retain freshness prompt instruction surface {pattern}"
+    );
+
+    for snippet in [
+        "FRESHNESS / VERIFICATION: your internal knowledge may be dated",
+        "OFFICIAL documentation or recent sources",
+        "If you can't verify, say so openly",
+    ] {
+        assert!(
+            !main.contains(snippet),
+            "main.rs must not retain freshness prompt instruction copy {snippet}"
+        );
+    }
+
+    assert!(
+        prompt_instructions.contains("fn execution_verification_instruction("),
+        "freshness prompt owner must stay with prompt instruction helpers"
+    );
+}
+
+#[test]
 fn objective_contract_prompt_instructions_have_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

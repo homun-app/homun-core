@@ -568,10 +568,11 @@ use gateway_project_search_tools::{
 use gateway_prompt_instructions::{
     ask_mode_instruction, booking_assumption_choice_instruction,
     browser_open_research_discovery_instruction, code_map_available_instruction,
-    debug_mode_instruction, execution_verification_instruction, language_follow_user_instruction,
-    memory_recall_usage_instruction, memory_scope_restricted_instruction,
-    objective_contract_instruction, objective_contract_read_only_default_instruction,
-    operational_plan_instruction, plan_mode_instruction,
+    debug_mode_instruction, execution_verification_instruction, freshness_verification_instruction,
+    language_follow_user_instruction, memory_recall_usage_instruction,
+    memory_scope_restricted_instruction, objective_contract_instruction,
+    objective_contract_read_only_default_instruction, operational_plan_instruction,
+    plan_mode_instruction,
 };
 pub(crate) use gateway_prompt_packets::*;
 #[cfg(test)]
@@ -2290,17 +2291,7 @@ normal answers."
         Some(instruction) => format!("{system}\n\n{instruction}"),
         None => system,
     };
-    let system = format!(
-        "{system}\n\nFRESHNESS / VERIFICATION: your internal knowledge may be dated. For ANY \
-question whose answer depends on information that changes over time or that requires up-to-date \
-accuracy — news and current events, the state/condition/health of people, results or scores, prices, \
-schedules, rankings; but ALSO software (libraries, frameworks, APIs, SDKs, tools: versions, syntax, \
-options, best practices, current state of the art) — you MUST verify on the web with the browser, preferring the \
-OFFICIAL documentation or recent sources, BEFORE answering, instead of answering from memory. NEVER \
-cite a source (site/publication/doc) you haven't actually opened in THIS turn: no invented sources, \
-versions or dates. If you can't verify, say so openly instead of guessing. Timeless \
-questions (concepts, logic, generic code) you can answer directly."
-    );
+    let system = format!("{system}\n\n{}", freshness_verification_instruction());
     let system = format!("{system}\n\n{}", execution_verification_instruction());
     let system = format!("{system}\n\n{}", manager_browser_guidance());
     // Composer interaction mode (agent = default). plan/ask/debug refine behavior;

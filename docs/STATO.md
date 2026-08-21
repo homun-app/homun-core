@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (objective-contract prompt owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (freshness prompt owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/objective-contract-prompt-owner` |
-| PR | #108-#116, #118-#273 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #273 (`2aeb4395`) |
+| Branch | `fabio/freshness-prompt-instructions-owner` |
+| PR | #108-#116, #118-#274 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #274 (`096234cb`) |
 
 ## Dove siamo
 
@@ -45,6 +45,11 @@ Piano completato:
 Slice Runtime V2 recenti:
 
 - Estrazione locale `gateway_prompt_instructions`: i contratti prompt statici
+  di freshness/verifica corrente (`FRESHNESS / VERIFICATION`) escono dal setup
+  inline di `stream_chat_via_openai`; `main.rs` conserva solo la composizione,
+  mentre browser runtime, model routing, prompt packet e loop agente restano
+  owner separati.
+- Estrazione mergeata `gateway_prompt_instructions`: i contratti prompt statici
   dell'objective contract (`OBJECTIVE CONTRACT`) escono dal setup inline di
   `stream_chat_via_openai`; `main.rs` conserva solo la decisione runtime
   `objective_contract_for_execution`, mentre store objective, policy effetti,
