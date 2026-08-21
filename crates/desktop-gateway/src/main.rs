@@ -567,12 +567,12 @@ use gateway_project_search_tools::{
 };
 use gateway_prompt_instructions::{
     ask_mode_instruction, booking_assumption_choice_instruction,
-    browser_open_research_discovery_instruction, code_map_available_instruction,
-    debug_mode_instruction, execution_verification_instruction, freshness_verification_instruction,
-    language_follow_user_instruction, memory_recall_usage_instruction,
-    memory_scope_restricted_instruction, objective_contract_instruction,
-    objective_contract_read_only_default_instruction, operational_plan_instruction,
-    plan_mode_instruction,
+    browser_open_research_discovery_instruction, choice_clarify_instruction,
+    code_map_available_instruction, debug_mode_instruction, execution_verification_instruction,
+    freshness_verification_instruction, language_follow_user_instruction,
+    memory_recall_usage_instruction, memory_scope_restricted_instruction,
+    objective_contract_instruction, objective_contract_read_only_default_instruction,
+    operational_plan_instruction, plan_mode_instruction,
 };
 pub(crate) use gateway_prompt_packets::*;
 #[cfg(test)]
@@ -1933,23 +1933,7 @@ calendar events.",
         Some(block) => format!("{system}\n\n{block}"),
         None => system,
     };
-    // Inline choice prompts (Claude-Code style): when the answer is a pick among a few
-    // discrete options, the model emits a CHOICES marker that the UI renders as clickable
-    // single/multi-select buttons, instead of listing the options in prose.
-    let system = format!(
-        "{system}\n\nCHOICES: when you ask the user to choose among discrete OPTIONS \
-(roughly 2-6 alternatives), you MUST emit on its own line the marker \
-`‹‹CHOICES››{{\"question\":\"the question\",\"multi\":false,\"options\":[\"Option A\",\"Option B\"]}}‹‹/CHOICES››` \
-(valid JSON; \"multi\":true if more than one can be chosen). Do NOT only list options in a markdown \
-table or ask \"which do you prefer?\" in prose — without the marker the UI has no clickable buttons. \
-The user will see clickable buttons and their choice will come back as a message. Use it ONLY for \
-closed choices, not for open questions (name/email/free text).\n\
-CLARIFY: when you need FREE-TEXT details from the user (name, email, phone, dates, payment prefs, …), \
-you MUST emit on its own line \
-`‹‹CLARIFY››{{\"question\":\"what you need\",\"fields\":[\"name\",\"email\"]}}‹‹/CLARIFY››` \
-(valid JSON; \"fields\" optional). Do NOT only ask in prose — without the marker the harness cannot \
-wait/resume correctly and will keep nudging the plan."
-    );
+    let system = format!("{system}\n\n{}", choice_clarify_instruction());
     let system = format!("{system}\n{booking_choices}");
     let system = match choice_resume_slot {
         Some(resume) => format!("{system}\n\n{resume}"),

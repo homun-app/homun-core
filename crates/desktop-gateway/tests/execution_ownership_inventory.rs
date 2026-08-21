@@ -853,6 +853,39 @@ fn freshness_verification_prompt_instruction_has_one_gateway_owner() {
 }
 
 #[test]
+fn choice_clarify_prompt_instruction_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
+
+    let pattern = "fn choice_clarify_instruction(";
+    assert!(
+        prompt_instructions.contains(pattern),
+        "prompt instruction owner must contain {pattern}"
+    );
+    assert!(
+        !main.contains(pattern),
+        "main.rs must not retain choice/clarify prompt instruction surface {pattern}"
+    );
+
+    for snippet in [
+        "CHOICES: when you ask the user to choose among discrete OPTIONS",
+        "CLARIFY: when you need FREE-TEXT details from the user",
+        "without the marker the harness cannot",
+    ] {
+        assert!(
+            !main.contains(snippet),
+            "main.rs must not retain choice/clarify prompt instruction copy {snippet}"
+        );
+    }
+
+    assert!(
+        prompt_instructions.contains("fn booking_assumption_choice_instruction("),
+        "choice/clarify prompt owner must stay with prompt instruction helpers"
+    );
+}
+
+#[test]
 fn objective_contract_prompt_instructions_have_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

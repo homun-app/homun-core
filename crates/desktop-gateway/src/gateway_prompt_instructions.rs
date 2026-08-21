@@ -23,6 +23,21 @@ CHOICES marker with one option that confirms the default and one option for free
 chooses or writes the missing value."
 }
 
+pub(crate) fn choice_clarify_instruction() -> &'static str {
+    "CHOICES: when you ask the user to choose among discrete OPTIONS \
+(roughly 2-6 alternatives), you MUST emit on its own line the marker \
+`‹‹CHOICES››{{\"question\":\"the question\",\"multi\":false,\"options\":[\"Option A\",\"Option B\"]}}‹‹/CHOICES››` \
+(valid JSON; \"multi\":true if more than one can be chosen). Do NOT only list options in a markdown \
+table or ask \"which do you prefer?\" in prose — without the marker the UI has no clickable buttons. \
+The user will see clickable buttons and their choice will come back as a message. Use it ONLY for \
+closed choices, not for open questions (name/email/free text).\n\
+CLARIFY: when you need FREE-TEXT details from the user (name, email, phone, dates, payment prefs, …), \
+you MUST emit on its own line \
+`‹‹CLARIFY››{{\"question\":\"what you need\",\"fields\":[\"name\",\"email\"]}}‹‹/CLARIFY››` \
+(valid JSON; \"fields\" optional). Do NOT only ask in prose — without the marker the harness cannot \
+wait/resume correctly and will keep nudging the plan."
+}
+
 pub(crate) fn memory_recall_usage_instruction() -> &'static str {
     "MEMORY: you have a long-term memory of the user. If you need a personal \
 or project detail you may have already learned (a name, a preference, a fact, a \
@@ -171,8 +186,9 @@ discovery/search from scratch."
 mod tests {
     use super::{
         ask_mode_instruction, booking_assumption_choice_instruction,
-        browser_open_research_discovery_instruction, choice_resume_instruction_legacy_backup,
-        code_map_available_instruction, debug_mode_instruction, execution_verification_instruction,
+        browser_open_research_discovery_instruction, choice_clarify_instruction,
+        choice_resume_instruction_legacy_backup, code_map_available_instruction,
+        debug_mode_instruction, execution_verification_instruction,
         freshness_verification_instruction, language_follow_user_instruction,
         memory_recall_usage_instruction, memory_scope_restricted_instruction,
         objective_contract_instruction, objective_contract_read_only_default_instruction,
@@ -198,6 +214,17 @@ mod tests {
         assert!(guidance.contains("assumed critical parameter"));
         assert!(guidance.contains("CHOICES marker"));
         assert!(guidance.contains("Continue only after the user"));
+    }
+
+    #[test]
+    fn gateway_prompt_instructions_own_choice_clarify_contract() {
+        let guidance = choice_clarify_instruction();
+        assert!(guidance.contains("CHOICES: when you ask the user"));
+        assert!(guidance.contains("‹‹CHOICES››"));
+        assert!(guidance.contains("\"multi\":false"));
+        assert!(guidance.contains("CLARIFY: when you need FREE-TEXT details"));
+        assert!(guidance.contains("‹‹CLARIFY››"));
+        assert!(guidance.contains("without the marker the harness cannot"));
     }
 
     #[test]

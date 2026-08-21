@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (freshness prompt owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (choice/clarify prompt owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/freshness-prompt-instructions-owner` |
-| PR | #108-#116, #118-#274 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #274 (`096234cb`) |
+| Branch | `fabio/choice-clarify-prompt-owner` |
+| PR | #108-#116, #118-#275 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #275 (`ba93cf6c`) |
 
 ## Dove siamo
 
@@ -45,6 +45,11 @@ Piano completato:
 Slice Runtime V2 recenti:
 
 - Estrazione locale `gateway_prompt_instructions`: i contratti prompt statici
+  per marker interattivi `CHOICES`/`CLARIFY` escono dal setup inline di
+  `stream_chat_via_openai`; `main.rs` conserva solo la composizione, mentre
+  HITL resume, UI card rendering, schema tool e loop agente restano owner
+  separati.
+- Estrazione mergeata `gateway_prompt_instructions`: i contratti prompt statici
   di freshness/verifica corrente (`FRESHNESS / VERIFICATION`) escono dal setup
   inline di `stream_chat_via_openai`; `main.rs` conserva solo la composizione,
   mentre browser runtime, model routing, prompt packet e loop agente restano
