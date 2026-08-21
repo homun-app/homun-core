@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (core operating prompt owner locale).**
+> **Ultimo aggiornamento: 2026-08-22 (post-merge core operating prompt owner).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/core-operating-prompt-owner` |
-| PR | #108-#116, #118-#276 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #276 (`05b24935`) |
+| Branch | `main` |
+| PR | #108-#116, #118-#277 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #277 (`7c7fc36d`) |
 
 ## Dove siamo
 
@@ -44,7 +44,7 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_prompt_instructions`: i contratti prompt statici
+- Estrazione mergeata `gateway_prompt_instructions`: i contratti prompt statici
   del core operating prompt dell'orchestratore escono dal setup inline di
   `stream_chat_via_openai`; `main.rs` conserva solo i valori runtime
   `now`/home/lingua/browser-discovery, mentre tool schema, browser runtime,
