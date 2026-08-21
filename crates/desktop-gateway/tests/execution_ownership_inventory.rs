@@ -2274,6 +2274,56 @@ fn chat_stream_transport_has_one_gateway_owner() {
 }
 
 #[test]
+fn chat_usage_context_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let usage_runtime = production_source(&root.join("src/gateway_usage_runtime.rs"));
+
+    for pattern in [
+        "fn chat_response_usage_context(",
+        "UsageContext::new(",
+        "InferencePurpose::ChatResponse",
+        "usage_context.workspace_id",
+        "usage_context.thread_id",
+        "usage_context.turn_id",
+        "usage_context.run_id",
+    ] {
+        assert!(
+            usage_runtime.contains(pattern),
+            "usage runtime owner must contain chat usage context surface {pattern}"
+        );
+    }
+
+    for pattern in [
+        "let mut usage_context = local_first_inference_usage::UsageContext::new(",
+        "local_first_inference_usage::InferencePurpose::ChatResponse",
+        "usage_context.workspace_id",
+        "usage_context.thread_id",
+        "usage_context.turn_id",
+        "usage_context.run_id",
+    ] {
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not own chat usage context surface {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn run_agent_rounds(",
+        "GatewayCapabilityExecutor {",
+        "GatewayBrowserExecutor {",
+        "GatewayPlanProgress {",
+        "GatewayTurnCompletionJudge::new(",
+        "local_first_engine::agent_loop::run_turn(",
+    ] {
+        assert!(
+            !usage_runtime.contains(adjacent),
+            "usage runtime owner must not absorb adjacent agent loop surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn agent_turn_tail_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

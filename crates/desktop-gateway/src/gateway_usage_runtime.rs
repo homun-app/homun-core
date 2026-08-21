@@ -10,7 +10,7 @@ use std::{
     sync::{Arc, Mutex, RwLock},
 };
 
-use local_first_inference_usage::UsageRecorder;
+use local_first_inference_usage::{InferencePurpose, UsageContext, UsageRecorder};
 
 use crate::{
     build_usage_pricing_snapshot, now_epoch_secs, usage_pricing, usage_recorder_registry,
@@ -65,9 +65,49 @@ pub(crate) fn install_gateway_usage_recorder(recorder: Arc<dyn UsageRecorder>) {
     let _ = usage_recorder_registry().set(recorder);
 }
 
+pub(crate) fn chat_response_usage_context(
+    user_id: &str,
+    workspace_id: &str,
+    thread_id: Option<String>,
+    turn_id: Option<String>,
+    run_id: Option<String>,
+) -> UsageContext {
+    let mut usage_context = UsageContext::new(
+        uuid::Uuid::new_v4().to_string(),
+        InferencePurpose::ChatResponse,
+        user_id,
+    );
+    usage_context.workspace_id = Some(workspace_id.to_string());
+    usage_context.thread_id = thread_id;
+    usage_context.turn_id = turn_id;
+    usage_context.run_id = run_id;
+    usage_context
+}
+
 #[cfg(test)]
 mod tests {
     use super::open_gateway_usage_runtime_with_capacity;
+
+    #[test]
+    fn chat_response_usage_context_scopes_turn_identifiers() {
+        let usage = super::chat_response_usage_context(
+            "user-1",
+            "workspace-1",
+            Some("thread-1".to_string()),
+            Some("turn-1".to_string()),
+            Some("run-1".to_string()),
+        );
+
+        assert_eq!(
+            usage.purpose,
+            local_first_inference_usage::InferencePurpose::ChatResponse
+        );
+        assert_eq!(usage.user_id, "user-1");
+        assert_eq!(usage.workspace_id.as_deref(), Some("workspace-1"));
+        assert_eq!(usage.thread_id.as_deref(), Some("thread-1"));
+        assert_eq!(usage.turn_id.as_deref(), Some("turn-1"));
+        assert_eq!(usage.run_id.as_deref(), Some("run-1"));
+    }
 
     #[test]
     fn gateway_usage_runtime_opens_ledger_recorder_and_pricing_snapshot() {

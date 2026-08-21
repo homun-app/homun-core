@@ -295,6 +295,34 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway chat usage context owner",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--test",
+                "execution_ownership_inventory",
+                "chat_usage_context_has_one_gateway_owner",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
+            "gateway chat usage context unit",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "chat_response_usage_context_scopes_turn_identifiers",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway recall context",
             [
                 "cargo",

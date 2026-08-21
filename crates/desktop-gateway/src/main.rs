@@ -621,7 +621,9 @@ pub(crate) use gateway_usage_routes::{
     get_usage_processes, get_usage_provider_policy, get_usage_providers, get_usage_suggestions,
     get_usage_summary, refresh_usage_provider, set_usage_provider_policy,
 };
-use gateway_usage_runtime::{install_gateway_usage_recorder, open_gateway_usage_runtime};
+use gateway_usage_runtime::{
+    chat_response_usage_context, install_gateway_usage_recorder, open_gateway_usage_runtime,
+};
 #[cfg(test)]
 pub(crate) use gateway_workspaces::merge_workspace_policy;
 pub(crate) use gateway_workspaces::{
@@ -3039,15 +3041,13 @@ async fn run_agent_rounds(
         usage: state_owned.usage_recorder.as_ref(),
         steering: steering_context,
     };
-    let mut usage_context = local_first_inference_usage::UsageContext::new(
-        uuid::Uuid::new_v4().to_string(),
-        local_first_inference_usage::InferencePurpose::ChatResponse,
+    let usage_context = chat_response_usage_context(
         automation_user_id.as_str(),
+        automation_workspace_id.as_str(),
+        thread_id.clone(),
+        effect_turn_id.clone(),
+        effect_run_id.clone(),
     );
-    usage_context.workspace_id = Some(automation_workspace_id.as_str().to_string());
-    usage_context.thread_id = thread_id.clone();
-    usage_context.turn_id = effect_turn_id.clone();
-    usage_context.run_id = effect_run_id.clone();
     let effect_contract = effect_turn_id.as_deref().and_then(|execution_id| {
         state_owned
             .task_store
