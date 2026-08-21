@@ -96,6 +96,13 @@ if the map and history aren't enough (e.g. reading the BODY of a function). Do N
 files for questions the map or history already answer."
 }
 
+pub(crate) fn execution_verification_instruction() -> &'static str {
+    "EXECUTION / VERIFICATION: when you produce CODE or a calculation and you have the \
+execution tool (run_in_sandbox), do NOT assume it works — VERIFY BY EXECUTING: run build/test/lint or \
+run the code, read the REAL output and iterate on the failures until it passes, BEFORE saying it's done. \
+Trust the compiler and the tests, not your estimate."
+}
+
 pub(crate) fn operational_plan_instruction() -> &'static str {
     "OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing \
 in the SAME turn. The plan is a live projection of the canonical objective, not a separate artifact \
@@ -139,9 +146,9 @@ mod tests {
     use super::{
         ask_mode_instruction, booking_assumption_choice_instruction,
         browser_open_research_discovery_instruction, choice_resume_instruction_legacy_backup,
-        code_map_available_instruction, debug_mode_instruction, language_follow_user_instruction,
-        memory_recall_usage_instruction, memory_scope_restricted_instruction,
-        operational_plan_instruction, plan_mode_instruction,
+        code_map_available_instruction, debug_mode_instruction, execution_verification_instruction,
+        language_follow_user_instruction, memory_recall_usage_instruction,
+        memory_scope_restricted_instruction, operational_plan_instruction, plan_mode_instruction,
     };
 
     #[test]
@@ -232,6 +239,16 @@ mod tests {
         assert!(guidance.contains("query_code_graph"));
         assert!(guidance.contains("query_git_history"));
         assert!(guidance.contains("Do NOT grep/list files"));
+    }
+
+    #[test]
+    fn gateway_prompt_instructions_own_execution_verification_contract() {
+        let guidance = execution_verification_instruction();
+        assert!(guidance.contains("EXECUTION / VERIFICATION"));
+        assert!(guidance.contains("produce CODE or a calculation"));
+        assert!(guidance.contains("run_in_sandbox"));
+        assert!(guidance.contains("VERIFY BY EXECUTING"));
+        assert!(guidance.contains("Trust the compiler and the tests"));
     }
 
     #[test]

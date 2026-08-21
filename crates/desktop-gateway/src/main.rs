@@ -568,8 +568,9 @@ use gateway_project_search_tools::{
 use gateway_prompt_instructions::{
     ask_mode_instruction, booking_assumption_choice_instruction,
     browser_open_research_discovery_instruction, code_map_available_instruction,
-    debug_mode_instruction, language_follow_user_instruction, memory_recall_usage_instruction,
-    memory_scope_restricted_instruction, operational_plan_instruction, plan_mode_instruction,
+    debug_mode_instruction, execution_verification_instruction, language_follow_user_instruction,
+    memory_recall_usage_instruction, memory_scope_restricted_instruction,
+    operational_plan_instruction, plan_mode_instruction,
 };
 pub(crate) use gateway_prompt_packets::*;
 #[cfg(test)]
@@ -2299,12 +2300,7 @@ cite a source (site/publication/doc) you haven't actually opened in THIS turn: n
 versions or dates. If you can't verify, say so openly instead of guessing. Timeless \
 questions (concepts, logic, generic code) you can answer directly."
     );
-    let system = format!(
-        "{system}\n\nEXECUTION / VERIFICATION: when you produce CODE or a calculation and you have the \
-execution tool (run_in_sandbox), do NOT assume it works — VERIFY BY EXECUTING: run build/test/lint or \
-run the code, read the REAL output and iterate on the failures until it passes, BEFORE saying it's done. \
-Trust the compiler and the tests, not your estimate."
-    );
+    let system = format!("{system}\n\n{}", execution_verification_instruction());
     let system = format!("{system}\n\n{}", manager_browser_guidance());
     // Composer interaction mode (agent = default). plan/ask/debug refine behavior;
     // "ask" also drops the toolset below (pure conversation).

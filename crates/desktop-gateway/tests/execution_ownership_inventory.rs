@@ -787,6 +787,39 @@ fn code_map_prompt_instruction_has_one_gateway_owner() {
 }
 
 #[test]
+fn execution_verification_prompt_instruction_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
+
+    let pattern = "fn execution_verification_instruction(";
+    assert!(
+        prompt_instructions.contains(pattern),
+        "prompt instruction owner must contain {pattern}"
+    );
+    assert!(
+        !main.contains(pattern),
+        "main.rs must not retain execution verification prompt instruction surface {pattern}"
+    );
+
+    for snippet in [
+        "EXECUTION / VERIFICATION: when you produce CODE",
+        "VERIFY BY EXECUTING",
+        "Trust the compiler and the tests",
+    ] {
+        assert!(
+            !main.contains(snippet),
+            "main.rs must not retain execution verification prompt instruction copy {snippet}"
+        );
+    }
+
+    assert!(
+        prompt_instructions.contains("fn operational_plan_instruction("),
+        "execution verification prompt owner must stay with prompt instruction helpers"
+    );
+}
+
+#[test]
 fn gateway_time_has_one_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
