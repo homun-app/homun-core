@@ -2363,6 +2363,57 @@ fn chat_toolset_has_one_gateway_owner() {
 }
 
 #[test]
+fn chat_plan_resume_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let plan_resume = production_source(&root.join("src/gateway_chat_plan_resume.rs"));
+
+    for pattern in [
+        "pub(crate) fn prepare_chat_plan_resume(",
+        "struct ChatPlanResumeInput",
+        "struct ChatPlanResume",
+        "runtime_plan_record_from_state(",
+        "parse_plan_marker(",
+        "plan_stall_check_and_bump(",
+        "block_stalled_step(",
+        "upsert_runtime_plan_memory_from_state(",
+    ] {
+        assert!(
+            plan_resume.contains(pattern),
+            "chat plan resume owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "let (mut resume_plan, resume_goal): (Vec<serde_json::Value>, Option<String>) =",
+        "let from_store = runtime_plan_record_from_state(",
+        "let stalled = runtime_plan_control_scope(",
+        "state.task_store.as_ref(),\n                    &user_id,",
+        "block_stalled_step(&mut resume_plan)",
+        "upsert_runtime_plan_memory_from_state(\n                state,",
+    ] {
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain chat plan resume/stall setup {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !plan_resume.contains(adjacent),
+            "chat plan resume owner must not absorb adjacent stream/loop/tail/toolset/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn gateway_state_access_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
