@@ -2222,6 +2222,58 @@ fn agent_stream_request_ids_have_one_gateway_owner() {
 }
 
 #[test]
+fn chat_stream_transport_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let chat_streams = production_source(&root.join("src/gateway_chat_streams.rs"));
+
+    for pattern in [
+        "struct ChatStreamTransport",
+        "fn open_chat_stream_transport(",
+        "fn chat_stream_response(",
+        "tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(32)",
+        "tokio::sync::broadcast::channel::<String>(512)",
+        "StreamEntry {",
+        "stream_registry().lock()",
+        "Body::from_stream(futures_util::stream::unfold(",
+        "\"content-type\", \"application/x-ndjson\"",
+        "\"x-effective-model\"",
+    ] {
+        assert!(
+            chat_streams.contains(pattern),
+            "chat stream transport owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(32)",
+        "tokio::sync::broadcast::channel::<String>(512)",
+        "StreamEntry {",
+        "Body::from_stream(futures_util::stream::unfold(rx",
+        "\"content-type\", \"application/x-ndjson\"",
+    ] {
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not own chat stream transport setup/response {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "pub(crate) fn apply_chat_tool_perimeter(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !chat_streams.contains(adjacent),
+            "chat stream transport owner must not absorb adjacent chat/tool/browser/subagent owner {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn agent_turn_tail_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

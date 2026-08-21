@@ -2578,28 +2578,11 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         serde_json::json!({ "role": "user", "content": user_content }),
     ];
 
-    let (mpsc_tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(32);
-    // Resume registry entry: the generation records here so a reloaded client can
-    // reattach to the in-flight answer (GET /api/chat/stream_resume/{id}).
-    let (broadcast_tx, _) = tokio::sync::broadcast::channel::<String>(512);
-    let stream_entry = std::sync::Arc::new(StreamEntry {
-        lines: std::sync::Mutex::new(Vec::new()),
-        tx: broadcast_tx,
-        finished: std::sync::atomic::AtomicBool::new(false),
-        last_event_at: std::sync::atomic::AtomicU64::new(now_epoch_secs()),
-        thread_id: request.thread_id.clone(),
-        assistant_message_id: std::sync::Mutex::new(None),
-        outcome: std::sync::Mutex::new(None),
-        outcome_ready: tokio::sync::Notify::new(),
-    });
-    let resume_id = request.request_id.clone();
-    if let Ok(mut map) = stream_registry().lock() {
-        map.insert(resume_id.clone(), stream_entry.clone());
-    }
-    let tx = StreamSink {
-        mpsc: mpsc_tx,
-        entry: stream_entry,
-    };
+    let transport =
+        open_chat_stream_transport(request.request_id.clone(), request.thread_id.clone());
+    let resume_id = transport.resume_id;
+    let tx = transport.sink;
+    let rx = transport.receiver;
     let orchestrator_is_local = provider_endpoint_is_local(&base_url) && !model_id_is_cloud(&model);
     let privacy_prompt = if applies_new_input {
         request.prompt.as_str()
@@ -2619,15 +2602,10 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     {
         let _ = emit_stream_event(&tx, response.event).await;
         schedule_stream_registry_cleanup(resume_id.clone());
-        let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
-            rx.recv().await.map(|item| (item, rx))
-        }));
-        return Ok(Response::builder()
-            .status(StatusCode::OK)
-            .header("content-type", "application/x-ndjson")
-            .header("x-effective-model", response.effective_model)
-            .body(body)
-            .expect("valid streaming response"));
+        return Ok(chat_stream_response_with_effective_model(
+            rx,
+            response.effective_model,
+        ));
     }
 
     let vision_preflight = prepare_chat_vision_preflight(ChatVisionPreflightInput {
@@ -2654,15 +2632,10 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             )
             .await;
             schedule_stream_registry_cleanup(resume_id.clone());
-            let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
-                rx.recv().await.map(|item| (item, rx))
-            }));
-            return Ok(Response::builder()
-                .status(StatusCode::OK)
-                .header("content-type", "application/x-ndjson")
-                .header("x-effective-model", effective_model)
-                .body(body)
-                .expect("valid streaming response"));
+            return Ok(chat_stream_response_with_effective_model(
+                rx,
+                effective_model,
+            ));
         }
     };
 
@@ -2993,14 +2966,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         map.insert(abort_resume_id, engine_task.abort_handle());
     }
 
-    let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
-        rx.recv().await.map(|item| (item, rx))
-    }));
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header("content-type", "application/x-ndjson")
-        .body(body)
-        .expect("valid streaming response"))
+    Ok(chat_stream_response(rx))
 }
 
 // ADR 0024 inc 5 (5.D1a): the agent turn's round loop + forced synthesis + post-turn

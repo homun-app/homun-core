@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (chat tool perimeter owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (chat stream transport owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#255 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #255 (`4c0d7a0e`) |
+| PR | #108-#116, #118-#256 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #256 (`9c377fb0`) |
 
 ## Dove siamo
 
@@ -307,7 +307,7 @@ Slice Runtime V2 recenti:
   allegati immagine (inline, fallback, delega al ruolo vision o risposta
   anticipata) esce dal monolite `main.rs`; recovery post-loop image rejection,
   trasporto stream, browser, toolset e loop agente restano owner separati.
-- Estrazione locale `gateway_chat_tool_perimeter`: filtro contact/channel
+- Estrazione mergeata `gateway_chat_tool_perimeter`: filtro contact/channel
   allow/deny sul toolset gia' assemblato esce dal monolite `main.rs`;
   assemblaggio toolset, harness control tools, browser, loop agente e subagent
   restano owner separati.
@@ -315,6 +315,10 @@ Slice Runtime V2 recenti:
   turni agente/channel e broker (`agentturn-*`, `broker-*`) esce dal monolite
   `main.rs` e vive accanto a registry/replay/abort stream; loop agente, drain
   e browser restano owner separati.
+- Estrazione locale `gateway_chat_streams`: setup transport stream chat
+  (`mpsc`, broadcast, registry entry) e response HTTP NDJSON escono dal
+  monolite `main.rs`; early response preflight, loop agente, drain persistenza,
+  browser e subagent restano owner separati.
 - Estrazione mergeata `gateway_turn_broker`: fence terminale
   `finalize_turn_steering` per chiudere steering pending/held su turni conclusi
   esce dal monolite `main.rs`; store `turn_steering`, pubblicazione eventi e
