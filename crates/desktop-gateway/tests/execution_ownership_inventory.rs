@@ -2315,6 +2315,54 @@ fn chat_turn_context_has_one_gateway_owner() {
 }
 
 #[test]
+fn chat_toolset_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let toolset = production_source(&root.join("src/gateway_chat_toolset.rs"));
+
+    for pattern in [
+        "pub(crate) async fn prepare_chat_toolset(",
+        "struct ChatToolsetInput",
+        "struct ChatToolset",
+        "initial_manager_tool_schemas_for_test(",
+        "tool_stays_live_this_turn(",
+        "materialize_capability_corpus(",
+        "auto_retrieve_composio(",
+    ] {
+        assert!(
+            toolset.contains(pattern),
+            "chat toolset owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "let mut base_tools = initial_manager_tool_schemas_for_test(",
+        "base_tools.into_iter().partition(|schema|",
+        "for schema in auto_retrieve_composio(",
+        "let capability_corpus = materialize_capability_corpus(",
+    ] {
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain chat toolset assembly {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+        "fn run_mcp_chat_tool(",
+    ] {
+        assert!(
+            !toolset.contains(adjacent),
+            "chat toolset owner must not absorb adjacent stream/loop/tail/browser/subagent/MCP runtime surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn gateway_state_access_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

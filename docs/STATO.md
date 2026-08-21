@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-21 (chat turn context owner locale).**
+> **Ultimo aggiornamento: 2026-08-21 (chat toolset owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -294,6 +294,11 @@ Slice Runtime V2 recenti:
   turno chat (workspace memoria del thread, contesto contact/channel e
   real-idle activity) esce dal monolite `main.rs`; prompt, stream, loop agente,
   browser e subagent restano owner separati.
+- Estrazione locale `gateway_chat_toolset`: assemblaggio per-turno del toolset
+  manager, split live/deferred, pruning objective/workflow, MCP small
+  always-load, Composio pre-retrieve e corpus `find_capability` escono dal
+  monolite `main.rs`; schema tool, routing semantico, dispatch, browser e loop
+  agente restano owner separati.
 - Estrazione locale `gateway_chat_streams`: costruzione request id stream per
   turni agente/channel e broker (`agentturn-*`, `broker-*`) esce dal monolite
   `main.rs` e vive accanto a registry/replay/abort stream; loop agente, drain
