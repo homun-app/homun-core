@@ -281,6 +281,10 @@ Slice Runtime V2 recenti:
   `LoopCheckpoint`, mapping errore `agent_checkpoint_invalid` e calcolo
   `applies_new_input` escono dal monolite `main.rs`; apply checkpoint, stream
   chat, loop agente e browser restano owner separati.
+- Estrazione locale `gateway_privacy_preflight`: decisione pre-loop Privacy
+  Guard, fallback local-only/block remote, errore `privacy_guard_unavailable` e
+  risposta anticipata Vault proposal escono dal monolite `main.rs`; transport
+  stream, checkpoint, loop agente e browser restano owner separati.
 - Estrazione locale `gateway_chat_streams`: costruzione request id stream per
   turni agente/channel e broker (`agentturn-*`, `broker-*`) esce dal monolite
   `main.rs` e vive accanto a registry/replay/abort stream; loop agente, drain

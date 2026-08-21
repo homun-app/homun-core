@@ -91,6 +91,9 @@ AGENT_TURN_RUNNER_RS = os.path.join(
 AGENT_CHECKPOINTS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_checkpoints.rs"
 )
+PRIVACY_PREFLIGHT_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_privacy_preflight.rs"
+)
 AGENT_TURN_OUTCOMES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_outcomes.rs"
 )
@@ -1544,6 +1547,8 @@ def main() -> int:
         agent_turn_runner_source = handle.read()
     with open(AGENT_CHECKPOINTS_RS, "r", encoding="utf-8") as handle:
         agent_checkpoints_source = handle.read()
+    with open(PRIVACY_PREFLIGHT_RS, "r", encoding="utf-8") as handle:
+        privacy_preflight_source = handle.read()
     with open(AGENT_TURN_OUTCOMES_RS, "r", encoding="utf-8") as handle:
         agent_turn_outcomes_source = handle.read()
     with open(AGENT_WAKE_RS, "r", encoding="utf-8") as handle:
@@ -2919,6 +2924,50 @@ def main() -> int:
             agent_checkpoints_source,
             snippet,
             "agent checkpoint owner must not absorb stream, loop, apply, or browser owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_privacy_preflight;",
+        "gateway root must declare privacy preflight owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_privacy_preflight::*;",
+        "gateway root must re-export privacy preflight owner",
+    )
+    for snippet in [
+        "pub(crate) async fn evaluate_privacy_guard_preflight(",
+        "PrivacyGuardPreflightOutcome::EarlyResponse",
+        'code: "privacy_guard_unavailable".to_string(),',
+        "privacy_guard::build_privacy_guard_intercept(",
+    ]:
+        assert_contains(
+            privacy_preflight_source,
+            snippet,
+            "privacy preflight owner must own guard fallback and early-response decisions",
+        )
+    for snippet in [
+        "privacy_guard::classify_sensitive_input_deterministic(",
+        "classify_sensitive_input_with_privacy_guard_model(",
+        "privacy_guard::failure_policy(",
+        "privacy_guard::build_privacy_guard_intercept(",
+        'code: "privacy_guard_unavailable".to_string(),',
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain privacy guard preflight decisions",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "fn execute_capability_browser_task(",
+        "fn apply_agent_recovery_checkpoint(",
+    ]:
+        assert_not_contains(
+            privacy_preflight_source,
+            snippet,
+            "privacy preflight owner must not absorb stream, loop, browser or checkpoint owners",
         )
     assert_contains(
         usage_runtime_source,

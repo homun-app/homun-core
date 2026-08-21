@@ -132,6 +132,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_proactive_threads.rs` | Piano thread proattivo: derivazione workspace/source/channel/title, riuso thread schedulato e root stabile per occorrenze; non possiede visible-turn persistence, executor proattivo, route automazioni o browser. |
 | `crates/desktop-gateway/src/gateway_proactive_execution.rs` | Esecuzione task `proactive_prompt`: bootstrap turno visibile task-scoped, policy autonomia/read-only/full, interruzione runtime, mapping `TurnStop` -> wake e finalizzazione complete/suspend/fail; non possiede planning thread, visible-turn generico, fanout broker, capability/browser/subagent executor. |
 | `crates/desktop-gateway/src/gateway_shell_tasks.rs` | Executor shell read-only locale, wrapper comando consentito e redazione/shaping JSON output task; non possiede execution runtime, worker task executor, sandbox, browser o comandi write-capable. |
+| `crates/desktop-gateway/src/gateway_privacy_preflight.rs` | Decisione pre-loop Privacy Guard per turni chat: fallback guard locale/remoto, errore `privacy_guard_unavailable` e risposta anticipata Vault proposal; non possiede transport stream, loop agente, checkpoint o browser. |
 | `crates/desktop-gateway/src/gateway_user_preferences.rs` | Preferenze utente/setup: lingua, timezone, Ollama, approval routing. |
 | `crates/desktop-gateway/src/gateway_process_events.rs` | Registri app event, WS process events e usage recorder. |
 

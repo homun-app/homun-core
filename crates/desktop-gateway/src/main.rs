@@ -115,6 +115,7 @@ mod gateway_plan_stall;
 mod gateway_plan_tools;
 mod gateway_plugin_packages;
 mod gateway_plugins;
+mod gateway_privacy_preflight;
 mod gateway_proactive_execution;
 mod gateway_proactive_threads;
 mod gateway_proactivity;
@@ -251,6 +252,7 @@ pub(crate) use gateway_memory_ui_routes::{
     export_user_data, memory_dashboard, memory_export, memory_items,
 };
 pub(crate) use gateway_model_routes::*;
+pub(crate) use gateway_privacy_preflight::*;
 pub(crate) use gateway_proactive_execution::*;
 pub(crate) use gateway_proactive_threads::*;
 pub(crate) use gateway_process_events::*;
@@ -2767,95 +2769,18 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     } else {
         ""
     };
-    let deterministic_privacy_decision =
-        privacy_guard::classify_sensitive_input_deterministic(privacy_prompt);
-    let guarded_decision = if applies_new_input {
-        match classify_sensitive_input_with_privacy_guard_model(&state.http, privacy_prompt).await {
-            privacy_guard::PrivacyGuardModelOutcome::Classified(model_decision) => {
-                Ok(privacy_guard::merge_guard_decisions(
-                    privacy_prompt,
-                    model_decision,
-                    deterministic_privacy_decision.clone(),
-                ))
-            }
-            privacy_guard::PrivacyGuardModelOutcome::Unavailable(reason) => Err(reason),
-            privacy_guard::PrivacyGuardModelOutcome::InvalidOutput => Err("invalid_output"),
-        }
-    } else {
-        Ok(deterministic_privacy_decision.clone())
-    };
-    let privacy_decision = match guarded_decision {
-        Ok(decision) => decision,
-        Err(reason) => match privacy_guard::failure_policy(orchestrator_is_local) {
-            privacy_guard::PrivacyGuardFailurePolicy::DeterministicLocalOnly => {
-                tracing::warn!(
-                    target: "privacy::guard",
-                    %reason,
-                    "privacy guard unavailable; using deterministic local-only fallback"
-                );
-                deterministic_privacy_decision
-            }
-            privacy_guard::PrivacyGuardFailurePolicy::BlockAndRetry => {
-                tracing::warn!(
-                    target: "privacy::guard",
-                    %reason,
-                    "privacy guard unavailable; blocking remote inference"
-                );
-                let _ = emit_stream_event(
-                    &tx,
-                    GenerateStreamEvent::Error {
-                        code: "privacy_guard_unavailable".to_string(),
-                        message: "Privacy Guard non disponibile. Riprova senza inviare dati al provider remoto.".to_string(),
-                        retryable: true,
-                    },
-                )
-                .await;
-                schedule_stream_registry_cleanup(resume_id.clone());
-                let body =
-                    Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
-                        rx.recv().await.map(|item| (item, rx))
-                    }));
-                return Ok(Response::builder()
-                    .status(StatusCode::OK)
-                    .header("content-type", "application/x-ndjson")
-                    .header("x-effective-model", "privacy_guard")
-                    .body(body)
-                    .expect("valid streaming response"));
-            }
-        },
-    };
-    if let Some(intercept) = privacy_guard::build_privacy_guard_intercept(
-        &state.pending_vault_proposals,
-        &request.request_id,
-        &privacy_decision,
-    ) {
-        // The two failure branches above log; the branch that actually REWRITES the user's message
-        // did not — and that is the common one. A false positive (an ordinary path or word read as a
-        // credential) therefore silently changed what the model was asked, with nothing in the log to
-        // explain the odd answer. Categories/kinds only — never the matched value.
-        tracing::warn!(
-            target: "privacy::guard",
-            detections = privacy_decision.items.len(),
-            kinds = %privacy_decision
-                .items
-                .iter()
-                .map(|item| format!("{}:{}", item.category, item.kind))
-                .collect::<Vec<_>>()
-                .join(","),
-            "privacy guard intercepted the turn (user text rewritten)"
-        );
-        // Privacy Guard runs before the agent loop: the raw secret must not reach
-        // the main chat model or the committed user transcript. The actual value
-        // lives only in the pending sidecar until the user accepts with the PIN.
-        let _ = emit_stream_event(
-            &tx,
-            GenerateStreamEvent::Done {
-                text: intercept.assistant_text,
-                metrics: TokenMetrics::zero(),
-                redacted_user_text: Some(intercept.user_text),
-            },
-        )
-        .await;
+    if let PrivacyGuardPreflightOutcome::EarlyResponse(response) =
+        evaluate_privacy_guard_preflight(PrivacyGuardPreflightInput {
+            http: &state.http,
+            pending_vault_proposals: &state.pending_vault_proposals,
+            request_id: &request.request_id,
+            prompt: privacy_prompt,
+            applies_new_input,
+            orchestrator_is_local,
+        })
+        .await
+    {
+        let _ = emit_stream_event(&tx, response.event).await;
         schedule_stream_registry_cleanup(resume_id.clone());
         let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
             rx.recv().await.map(|item| (item, rx))
@@ -2863,7 +2788,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         return Ok(Response::builder()
             .status(StatusCode::OK)
             .header("content-type", "application/x-ndjson")
-            .header("x-effective-model", "privacy_guard")
+            .header("x-effective-model", response.effective_model)
             .body(body)
             .expect("valid streaming response"));
     }
