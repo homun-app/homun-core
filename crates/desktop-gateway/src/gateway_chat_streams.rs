@@ -76,6 +76,70 @@ pub(crate) struct StreamSink {
     pub(crate) entry: std::sync::Arc<StreamEntry>,
 }
 
+pub(crate) struct ChatStreamTransport {
+    pub(crate) sink: StreamSink,
+    pub(crate) receiver: tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>,
+    pub(crate) resume_id: String,
+}
+
+pub(crate) fn open_chat_stream_transport(
+    request_id: String,
+    thread_id: Option<String>,
+) -> ChatStreamTransport {
+    let (mpsc_tx, receiver) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(32);
+    let (broadcast_tx, _) = tokio::sync::broadcast::channel::<String>(512);
+    let stream_entry = std::sync::Arc::new(StreamEntry {
+        lines: std::sync::Mutex::new(Vec::new()),
+        tx: broadcast_tx,
+        finished: std::sync::atomic::AtomicBool::new(false),
+        last_event_at: std::sync::atomic::AtomicU64::new(now_epoch_secs()),
+        thread_id,
+        assistant_message_id: std::sync::Mutex::new(None),
+        outcome: std::sync::Mutex::new(None),
+        outcome_ready: tokio::sync::Notify::new(),
+    });
+    if let Ok(mut map) = stream_registry().lock() {
+        map.insert(request_id.clone(), stream_entry.clone());
+    }
+    ChatStreamTransport {
+        sink: StreamSink {
+            mpsc: mpsc_tx,
+            entry: stream_entry,
+        },
+        receiver,
+        resume_id: request_id,
+    }
+}
+
+fn chat_stream_body(receiver: tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>) -> Body {
+    Body::from_stream(futures_util::stream::unfold(
+        receiver,
+        |mut receiver| async move { receiver.recv().await.map(|item| (item, receiver)) },
+    ))
+}
+
+pub(crate) fn chat_stream_response(
+    receiver: tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>,
+) -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/x-ndjson")
+        .body(chat_stream_body(receiver))
+        .expect("valid streaming response")
+}
+
+pub(crate) fn chat_stream_response_with_effective_model(
+    receiver: tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>,
+    effective_model: impl AsRef<str>,
+) -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/x-ndjson")
+        .header("x-effective-model", effective_model.as_ref())
+        .body(chat_stream_body(receiver))
+        .expect("valid streaming response")
+}
+
 // The engine's output seam (ADR 0024 inc 5b): the future loop-in-the-engine emits every stream
 // event through `EventSink`; the gateway fans it onto the transport here (NDJSON body + WS mirror).
 impl local_first_engine::EventSink for StreamSink {

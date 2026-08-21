@@ -1988,7 +1988,7 @@ assertRepoContains("crates/desktop-gateway/src/gateway_health.rs", "HealthRespon
 assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "gateway_health::health", "desktop gateway must route liveness through the shared health handler");
 assertRepoContains("crates/desktop-gateway/src/chat_store.rs", "create table if not exists chat_threads", "desktop gateway must persist chat threads in SQLite");
 assertRepoContains("crates/desktop-gateway/src/chat_store.rs", "create table if not exists chat_messages", "desktop gateway must persist chat messages in SQLite");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "Body::from_stream", "desktop gateway must proxy runtime stream without buffering the full answer");
+assertRepoContains("crates/desktop-gateway/src/gateway_chat_streams.rs", "Body::from_stream", "desktop gateway must proxy runtime stream without buffering the full answer");
 
 assertContains(
   "src/components/ChatMessageContent.tsx",
