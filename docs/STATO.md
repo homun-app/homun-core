@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (slice locale contact-context prompt owner).**
+> **Ultimo aggiornamento: 2026-08-22 (post-merge contact-context prompt owner).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/contact-context-prompt-owner` |
-| PR | #108-#116, #118-#280 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | branch locale sopra `main` aggiornato a #280 (`415bb86e`) |
+| Branch | `main` |
+| PR | #108-#116, #118-#281 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #281 (`899cdd0f`) |
 
 ## Dove siamo
 
@@ -44,7 +44,7 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_prompt_instructions`: il rendering del blocco prompt
+- Estrazione mergeata `gateway_prompt_instructions`: il rendering del blocco prompt
   channel-contact/persona/privacy (`REQUESTED TONE`, `PERSONA INSTRUCTIONS`,
   relazioni note e guardrail privacy contatti/calendario) esce dal setup inline
   di `stream_chat_via_openai`; `main.rs` conserva solo la decisione runtime
