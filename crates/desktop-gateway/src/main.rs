@@ -1724,15 +1724,18 @@ async fn stream_chat_via_openai(
     let homuncoder = tokio::task::spawn_blocking(homuncoder_skill_ids)
         .await
         .unwrap_or_default();
-    // HomunCoder mode: the methodology skills surface only in PROJECT chats, so personal
-    // chats aren't flooded with ~30 dev-discipline skills.
-    let is_project = gateway_memory_workspace_id().as_str() != PERSONAL_WORKSPACE;
-    let mut enabled_skills = tokio::task::spawn_blocking(enabled_skills_summary)
+    let enabled_skills = tokio::task::spawn_blocking(enabled_skills_summary)
         .await
         .unwrap_or_default();
-    if !is_project {
-        enabled_skills.retain(|(id, _, _)| !homuncoder.contains(id));
-    }
+    // HomunCoder mode: the methodology skills surface only in PROJECT chats, so personal
+    // chats aren't flooded with ~30 dev-discipline skills.
+    let skill_prompt_catalog = skill_prompt_catalog_for_workspace(
+        enabled_skills,
+        &homuncoder,
+        gateway_memory_workspace_id().as_str(),
+    );
+    let enabled_skills = skill_prompt_catalog.enabled_skills;
+    let is_project = skill_prompt_catalog.is_project;
     let has_skills = !enabled_skills.is_empty();
     // The "Homun apprentice" persona (proactive/curious/onboarding on a dedicated
     // "homun" thread) is RETIRED: proactivity now lives solely in the Proattività
