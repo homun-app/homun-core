@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (post-merge chat turn policy owner).**
+> **Ultimo aggiornamento: 2026-08-22 (post-merge chat contact memory perimeter owner).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#298 mergeate in `main`; #299 in verifica su `fabio/chat-turn-policy-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #298 (`71f15b65`); #299 verificata localmente prima del merge |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#299 mergeate in `main`; #300 in verifica su `fabio/chat-contact-memory-perimeter-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #299 (`9f2c2461`); #300 verificata localmente prima del merge |
 
 ## Dove siamo
 
@@ -44,6 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
+- Estrazione mergeata `gateway_chat_turn_context`: la proiezione del perimetro
+  memoria contatto (`resolve_contact_memory_perimeter`) esce dal setup inline di
+  `stream_chat_via_openai`; `main.rs` consuma solo `contact_only`,
+  `can_see_contacts`, `can_see_calendar` e `can_use_project_memory`, mentre
+  prompt memoria, tool perimeter, dispatch tool, browser e loop agente restano
+  owner separati.
 - Estrazione mergeata `gateway_chat_turn_context`: la risoluzione della policy
   per-turno (`resolve_chat_turn_policy`) esce dal setup inline di
   `stream_chat_via_openai`; `main.rs` conserva solo il consumo di `mode`,
