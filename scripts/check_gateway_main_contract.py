@@ -100,6 +100,9 @@ AGENT_TURN_SENSITIVE_RS = os.path.join(
 AGENT_TURN_ROUTE_TRACE_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_route_trace.rs"
 )
+AGENT_TURN_RECALL_SEED_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_recall_seed.rs"
+)
 AGENT_TURN_TAIL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_tail.rs"
 )
@@ -1667,6 +1670,8 @@ def main() -> int:
         agent_turn_sensitive_source = handle.read()
     with open(AGENT_TURN_ROUTE_TRACE_RS, "r", encoding="utf-8") as handle:
         agent_turn_route_trace_source = handle.read()
+    with open(AGENT_TURN_RECALL_SEED_RS, "r", encoding="utf-8") as handle:
+        agent_turn_recall_seed_source = handle.read()
     with open(AGENT_TURN_TAIL_RS, "r", encoding="utf-8") as handle:
         agent_turn_tail_source = handle.read()
     with open(AGENT_CHECKPOINTS_RS, "r", encoding="utf-8") as handle:
@@ -2294,6 +2299,48 @@ def main() -> int:
             agent_turn_route_trace_source,
             snippet,
             "agent turn route trace owner must not absorb stream, loop, tail, browser, or subagent owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_turn_recall_seed;",
+        "gateway root must declare agent turn recall seed owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_turn_recall_seed::*;",
+        "gateway root must re-export agent turn recall seed owner",
+    )
+    for snippet in [
+        "pub(crate) async fn seed_agent_turn_recall(",
+        "seed_loop_memory_reads(loop_state, payload.as_ref())",
+        "GenerateStreamEvent::Recall",
+        "applies_new_input && let Some(payload) = payload",
+    ]:
+        assert_contains(
+            agent_turn_recall_seed_source,
+            snippet,
+            "agent turn recall seed owner must own pre-loop recall seeding/publication",
+        )
+    for snippet in [
+        "seed_loop_memory_reads(&mut ls, automatic_recall_payload.as_ref())",
+        "GenerateStreamEvent::Recall { payload }",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain agent turn recall seeding/publication",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            agent_turn_recall_seed_source,
+            snippet,
+            "agent turn recall seed owner must not absorb stream, loop, tail, browser, or subagent owners",
         )
     for snippet in [
         "pub(crate) fn context_message_for_model(",

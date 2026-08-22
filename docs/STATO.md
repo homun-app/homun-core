@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (agent turn route trace owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-22 (agent turn recall seed owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#304 mergeate in `main`; slice route trace in verifica su `fabio/chat-turn-route-trace-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #304 (`956d9f73`); slice route trace verificata localmente prima della PR |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#305 mergeate in `main`; slice recall seed in verifica su `fabio/chat-turn-recall-seed-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #305 (`efb19397`); slice recall seed in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_agent_turn_route_trace`: la pubblicazione pre-loop
+- Estrazione locale `gateway_agent_turn_recall_seed`: la semina pre-loop della
+  recall automatica (`seed_agent_turn_recall`: seed in `LoopState.memory_reads`
+  ed evento stream `Recall`) esce dal setup inline di `stream_chat_via_openai`;
+  retrieval/merge recall, recall tool, memory learning, browser e subagent
+  restano owner separati.
+- Estrazione mergeata `gateway_agent_turn_route_trace`: la pubblicazione pre-loop
   della traccia capability-route (`publish_agent_turn_route_trace`: push in
   `LoopState.tool_trace` e delta ACT) esce dal setup inline di
   `stream_chat_via_openai`; route selection, tool perimeter, loop agente,
@@ -1257,9 +1262,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#294: slice owner-level successive mergeate in
-  `main`, fino a `chat attachment user-content owner`; `main` verificato e
-  riallineato a #294.
+- #143-#283, #285-#286, #288-#305: slice owner-level successive mergeate in
+  `main`, fino a `agent turn route trace owner`; `main` verificato e riallineato
+  a #305.
 
 PR aperte:
 
@@ -1267,7 +1272,7 @@ PR aperte:
 
 Branch corrente:
 
-- `main` pulito e riallineato a `origin/main` (`ff8f2d10`).
+- `main` pulito e riallineato a `origin/main` (`efb19397`).
 
 ## Debito residuo
 
@@ -1300,7 +1305,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #294 (`ff8f2d10`); prossima slice non-browser da scegliere
+main aggiornato a #305 (`efb19397`); prossima slice non-browser da scegliere
 dopo nuova lettura owner-level di main.rs.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
