@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (post-merge contact-context prompt owner).**
+> **Ultimo aggiornamento: 2026-08-22 (post-merge contact-history prompt owner).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#281 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #281 (`899cdd0f`) |
+| PR | #108-#116, #118-#283, #285-#286 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #285 (`23ca3b1f`) |
 
 ## Dove siamo
 
@@ -44,6 +44,22 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
+- Estrazione mergeata `gateway_contacts`: il blocco prompt contact-only history
+  (`HISTORY WITH THIS CONTACT`) esce dal setup inline di
+  `stream_chat_via_openai` e vive accanto agli helper memoria/handle/date dei
+  contatti; `main.rs` conserva solo la decisione runtime di recuperare la
+  history contact-only, mentre perimetri, profile, relationships, prompt statici
+  e loop agente restano owner separati.
+- Estrazione mergeata `gateway_prompt_instructions`: il contratto prompt
+  `GOAL_PROPOSE` esce dal setup inline di `stream_chat_via_openai`; `main.rs`
+  conserva solo la decisione runtime workspace/mode per proporre il goal,
+  mentre goal store, cards UI, prompt packet e loop agente restano owner
+  separati.
+- Estrazione mergeata `gateway_prompt_instructions`: il contratto prompt
+  `DESTINATION FOLDERS` per `save_artifact(file, destination)` esce dal setup
+  inline di `stream_chat_via_openai`; `main.rs` conserva solo il caricamento
+  runtime delle destinazioni disponibili, mentre route artifact, salvataggio
+  autorizzato, DTO e workflow artefatti restano owner separati.
 - Estrazione mergeata `gateway_prompt_instructions`: il rendering del blocco prompt
   channel-contact/persona/privacy (`REQUESTED TONE`, `PERSONA INSTRUCTIONS`,
   relazioni note e guardrail privacy contatti/calendario) esce dal setup inline
@@ -1163,8 +1179,8 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#269: slice owner-level successive mergeate in `main`, fino a
-  `memory prompt instruction owner`; `main` verificato e riallineato a #269.
+- #143-#283, #285-#286: slice owner-level successive mergeate in `main`, fino a
+  `contact history prompt owner`; `main` verificato e riallineato a #285.
 
 PR aperte:
 
@@ -1172,8 +1188,7 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/chat-mode-prompt-instructions-owner`: slice locale sopra `main`
-  riallineato a #269 (`3b4cc56f`).
+- `main` pulito e riallineato a `origin/main` (`23ca3b1f`).
 
 ## Debito residuo
 
