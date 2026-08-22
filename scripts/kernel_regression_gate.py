@@ -225,6 +225,34 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway agent turn route trace owner",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--test",
+                "execution_ownership_inventory",
+                "agent_turn_route_trace_has_one_gateway_owner",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
+            "gateway agent turn route trace unit",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "route_trace_activity_text",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway agent turn tail owner",
             [
                 "cargo",

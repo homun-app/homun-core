@@ -97,6 +97,9 @@ AGENT_TURN_IDENTITY_RS = os.path.join(
 AGENT_TURN_SENSITIVE_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_sensitive.rs"
 )
+AGENT_TURN_ROUTE_TRACE_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_route_trace.rs"
+)
 AGENT_TURN_TAIL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_tail.rs"
 )
@@ -1662,6 +1665,8 @@ def main() -> int:
         agent_turn_identity_source = handle.read()
     with open(AGENT_TURN_SENSITIVE_RS, "r", encoding="utf-8") as handle:
         agent_turn_sensitive_source = handle.read()
+    with open(AGENT_TURN_ROUTE_TRACE_RS, "r", encoding="utf-8") as handle:
+        agent_turn_route_trace_source = handle.read()
     with open(AGENT_TURN_TAIL_RS, "r", encoding="utf-8") as handle:
         agent_turn_tail_source = handle.read()
     with open(AGENT_CHECKPOINTS_RS, "r", encoding="utf-8") as handle:
@@ -2244,6 +2249,51 @@ def main() -> int:
             agent_turn_sensitive_source,
             snippet,
             "agent turn sensitive owner must not absorb stream, loop, tail, browser, or subagent owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_turn_route_trace;",
+        "gateway root must declare agent turn route trace owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_turn_route_trace::*;",
+        "gateway root must re-export agent turn route trace owner",
+    )
+    for snippet in [
+        "pub(crate) async fn publish_agent_turn_route_trace(",
+        "pub(crate) fn agent_turn_route_trace_activity_text(",
+        "capability_route_trace_line(route)",
+        "loop_state.tool_trace.push(route_line.clone())",
+        "GenerateStreamEvent::Delta",
+        "format!(\"‹‹ACT››🧭 {route_line}‹‹/ACT››\")",
+    ]:
+        assert_contains(
+            agent_turn_route_trace_source,
+            snippet,
+            "agent turn route trace owner must own pre-loop capability route tracing",
+        )
+    for snippet in [
+        "capability_route_trace_line(&capability_route_for_runtime)",
+        "ls.tool_trace.push(route_line.clone())",
+        "format!(\"‹‹ACT››🧭 {route_line}‹‹/ACT››\")",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain agent turn route trace publication",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            agent_turn_route_trace_source,
+            snippet,
+            "agent turn route trace owner must not absorb stream, loop, tail, browser, or subagent owners",
         )
     for snippet in [
         "pub(crate) fn context_message_for_model(",

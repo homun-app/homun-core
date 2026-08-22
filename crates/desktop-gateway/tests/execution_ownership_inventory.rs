@@ -2994,6 +2994,58 @@ fn agent_turn_sensitive_confirmations_have_one_gateway_owner() {
 }
 
 #[test]
+fn agent_turn_route_trace_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let route_trace = production_source(&root.join("src/gateway_agent_turn_route_trace.rs"));
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai")
+        .split("// No-progress guard:")
+        .next()
+        .expect("agent turn route trace setup");
+
+    for pattern in [
+        "pub(crate) async fn publish_agent_turn_route_trace(",
+        "pub(crate) fn agent_turn_route_trace_activity_text(",
+        "capability_route_trace_line(route)",
+        "loop_state.tool_trace.push(route_line.clone())",
+        "GenerateStreamEvent::Delta",
+        "format!(\"‹‹ACT››🧭 {route_line}‹‹/ACT››\")",
+    ] {
+        assert!(
+            route_trace.contains(pattern),
+            "agent turn route trace owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "capability_route_trace_line(&capability_route_for_runtime)",
+        "ls.tool_trace.push(route_line.clone())",
+        "format!(\"‹‹ACT››🧭 {route_line}‹‹/ACT››\")",
+    ] {
+        assert!(
+            !stream_chat.contains(pattern),
+            "main.rs must not own agent turn route trace publication {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !route_trace.contains(adjacent),
+            "agent turn route trace owner must not absorb adjacent stream/loop/tail/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn chat_usage_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
