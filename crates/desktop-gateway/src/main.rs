@@ -2544,16 +2544,15 @@ async fn run_agent_rounds(
     // describe them on the vision role and re-run from a conversation the manager can actually read.
     // The user gets one answer, not a 400 followed by an apology. Cloning the seed is cheap (2
     // messages) and happens only for image turns that have a vision model to fall back on.
-    let vision_seed = vision_fallback_armed.then(|| {
-        (
-            ls.clone(),
-            cfg.clone(),
-            memory_user_message.clone(),
-            memory_answer.clone(),
-            last_model_error.clone(),
-            browse_sources.clone(),
-            trace_dir.clone(),
-        )
+    let vision_seed = snapshot_chat_vision_fallback_seed(ChatVisionFallbackSeedInput {
+        fallback_armed: vision_fallback_armed,
+        loop_state: &ls,
+        config: &cfg,
+        user_message: &memory_user_message,
+        memory_answer: &memory_answer,
+        last_model_error: &last_model_error,
+        browse_sources: &browse_sources,
+        trace_dir: &trace_dir,
     });
 
     // ADR 0024 inc 5, 5.D2 — THE MOVE landed: the single guarded ReAct loop (motore #1) lives in
@@ -2605,16 +2604,7 @@ async fn run_agent_rounds(
         return outcome;
     };
 
-    let Some((
-        mut seed_ls,
-        seed_cfg,
-        seed_user_msg,
-        seed_answer,
-        seed_error,
-        seed_sources,
-        seed_trace,
-    )) = vision_seed
-    else {
+    let Some(mut vision_seed) = vision_seed else {
         // The model can't read the image and we have nobody to read it for us. The turn emitted
         // nothing, so this is its answer — the one case where the provider's refusal is the honest
         // thing to show.
@@ -2646,13 +2636,13 @@ async fn run_agent_rounds(
     }
 
     // Recover: describe the images the manager was refused, put the text where they were, run again.
-    let images = vision::collect_image_urls(&seed_ls.messages);
+    let images = vision::collect_image_urls(&vision_seed.loop_state.messages);
     let descriptions = vision::describe_images(&http, &readers, &images, &prompt).await;
-    vision::replace_images_with_descriptions(&mut seed_ls.messages, &descriptions);
+    vision::replace_images_with_descriptions(&mut vision_seed.loop_state.messages, &descriptions);
 
     local_first_engine::agent_loop::run_turn(
-        seed_ls,
-        seed_cfg,
+        vision_seed.loop_state,
+        vision_seed.config,
         &usage_context,
         &model_client,
         &capability_executor,
@@ -2667,14 +2657,14 @@ async fn run_agent_rounds(
         thread_id.as_deref(),
         &composio_writes,
         &catalog_index,
-        seed_user_msg,
-        seed_answer,
-        seed_error,
+        vision_seed.user_message,
+        vision_seed.memory_answer,
+        vision_seed.last_model_error,
         final_done,
         plan_nudges,
         turn_used_tools,
-        seed_sources,
-        seed_trace,
+        vision_seed.browse_sources,
+        vision_seed.trace_dir,
         turn_trace,
     )
     .await

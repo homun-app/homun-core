@@ -4163,6 +4163,9 @@ fn chat_vision_preflight_has_one_gateway_owner() {
         "pub(crate) async fn prepare_chat_vision_preflight(",
         "struct ChatVisionPreflightInput",
         "enum ChatVisionPreflight",
+        "struct ChatVisionFallbackSeed",
+        "struct ChatVisionFallbackSeedInput",
+        "pub(crate) fn snapshot_chat_vision_fallback_seed(",
         "vision::messages_have_image(",
         "vision::plan_attachments(",
         "vision::AttachmentPlan::Refuse",
@@ -4183,6 +4186,11 @@ fn chat_vision_preflight_has_one_gateway_owner() {
         "vision::AttachmentPlan::Refuse => {",
         "vision::AttachmentPlan::Delegate => {",
         "vision::replace_images_with_descriptions(&mut messages, &descriptions);",
+        "let vision_seed = vision_fallback_armed.then(|| {",
+        "            ls.clone(),",
+        "            cfg.clone(),",
+        "            memory_user_message.clone(),",
+        "            trace_dir.clone(),",
     ] {
         assert!(
             !main.contains(pattern),
