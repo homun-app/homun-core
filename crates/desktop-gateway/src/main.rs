@@ -1629,67 +1629,22 @@ async fn stream_chat_via_openai(
     } else {
         system
     };
-    // Connected-service (Composio) tools are reached via a DISCOVERY meta-tool
-    // (`find_connected_tools`), not dumped into the prompt: the model searches by
-    // intent, we return the few relevant tools and inject their schemas for the
-    // next round. Keeps the prompt small and scales to hundreds of tools — the
-    // pattern Composio/Claude use.
-    let catalog = {
-        let st = state.clone();
-        tokio::task::spawn_blocking(move || composio_chat_tools_cached(&st, COMPOSIO_CATALOG_CAP))
-            .await
-            .unwrap_or_default()
-    };
-    let mut composio_writes = catalog.writes.clone();
-    // (name, lowercased "name + description" haystack, schema) for keyword search.
-    let mut catalog_index: Vec<(String, String, serde_json::Value)> = catalog
-        .schemas
-        .iter()
-        .filter_map(|s| {
-            let f = s.get("function")?;
-            let name = f.get("name")?.as_str()?.to_string();
-            let desc = f.get("description").and_then(|d| d.as_str()).unwrap_or("");
-            let haystack = format!("{name} {desc}").to_lowercase();
-            Some((name, haystack, s.clone()))
-        })
-        .collect();
-    // MCP server tools join the SAME discovery surface as Composio: they appear in
-    // `find_connected_tools` and their writes share the confirmation gate. Read
-    // from the local SQLite cache (cheap), still off the runtime to be safe.
-    let mcp_catalog = {
-        let st = state.clone();
-        tokio::task::spawn_blocking(move || mcp_chat_tools(&st, MCP_CATALOG_CAP))
-            .await
-            .unwrap_or_default()
-    };
-    let filesystem_mcp_connected = mcp_catalog.schemas.iter().any(|schema| {
-        schema
-            .pointer("/function/name")
-            .and_then(|name| name.as_str())
-            .is_some_and(|name| name.starts_with("mcp__filesystem__"))
-    });
-    let system = match project_filesystem_mcp_instruction(
-        project_root_for_thread(state, request.thread_id.as_deref()).as_deref(),
-        filesystem_mcp_connected,
-    ) {
+    // Connected-service and MCP tools share one discovery/write-set owner. The
+    // root only consumes the per-turn projection for prompt and toolset assembly.
+    let connected_tool_catalog = prepare_connected_tool_catalog(ConnectedToolCatalogInput {
+        state,
+        project_root: project_root_for_thread(state, request.thread_id.as_deref()).as_deref(),
+    })
+    .await;
+    let mut catalog_index = connected_tool_catalog.catalog_index;
+    let composio_writes = connected_tool_catalog.composio_writes;
+    let mcp_schemas = connected_tool_catalog.mcp_schemas;
+    let inactive_services = connected_tool_catalog.inactive_services;
+    let has_composio = !catalog_index.is_empty();
+    let system = match connected_tool_catalog.filesystem_mcp_instruction {
         Some(instruction) => format!("{system}\n\n{instruction}"),
         None => system,
     };
-    composio_writes.extend(mcp_catalog.writes.iter().cloned());
-    for schema in &mcp_catalog.schemas {
-        if let Some(f) = schema.get("function")
-            && let Some(name) = f.get("name").and_then(|n| n.as_str())
-        {
-            let desc = f.get("description").and_then(|d| d.as_str()).unwrap_or("");
-            let haystack = format!("{name} {desc}").to_lowercase();
-            catalog_index.push((name.to_string(), haystack, schema.clone()));
-        }
-    }
-    // `send_message` is a side-effecting action → route it through the same write-confirm
-    // card as Composio/MCP writes (the confirm endpoint dispatches it to channel_send).
-    composio_writes.insert("send_message".to_string());
-    let composio_writes = composio_writes; // freeze: (Composio + MCP) write tools
-    let has_composio = !catalog_index.is_empty();
     let system = if !has_composio {
         system
     } else {
@@ -1698,12 +1653,12 @@ async fn stream_chat_via_openai(
     // Connected-but-EXPIRED services: the integration EXISTS, the OAuth lapsed. Tell
     // the model so it says "reconnect" instead of "I have no integration" (the bug
     // that surfaced on a real "leggi le email" with an expired Gmail).
-    let system = if catalog.inactive.is_empty() {
+    let system = if inactive_services.is_empty() {
         system
     } else {
         format!(
             "{system}\n\n{}",
-            expired_connected_services_instruction(&catalog.inactive.join(", "))
+            expired_connected_services_instruction(&inactive_services.join(", "))
         )
     };
     // Installed skills (Anthropic Agent Skills, progressive disclosure L1): pre-load
@@ -2132,7 +2087,7 @@ async fn stream_chat_via_openai(
         browser_continuation_available,
         capability_route: &capability_route,
         hitl_choice_resume_active: hitl_choice_resume.is_some(),
-        mcp_schemas: &mcp_catalog.schemas,
+        mcp_schemas: &mcp_schemas,
         has_composio: has_composio && applies_new_input,
         catalog_index: &catalog_index,
         enabled_skills: &enabled_skills,
