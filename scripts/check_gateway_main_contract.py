@@ -309,6 +309,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "const ATTACHMENT_TEXT_BUDGET_CHARS:": "attachment prompt context budget must stay in attachments",
         "const ATTACHMENT_CONTEXT_IMAGES:": "attachment prompt image budget must stay in attachments",
         "fn append_thread_attachment_context(": "attachment prompt context assembly must stay in attachments",
+        "struct ChatAttachmentUserContentInput": "chat attachment user content input must stay in attachments",
+        "fn prepare_chat_attachment_user_content(": "chat attachment user content assembly must stay in attachments",
+        "fn attachment_user_content(": "chat attachment multimodal user content must stay in attachments",
         "fn attachment_text_is_ready(": "attachment prompt readiness policy must stay in attachments",
         "fn task_delivers_to_homun(": "Homun check-in task matching must stay in gateway_task_maintenance",
         "fn task_is_live(": "task liveness classification must stay in gateway_task_maintenance",
@@ -1733,12 +1736,30 @@ def main() -> int:
         "const ATTACHMENT_TEXT_BUDGET_CHARS:",
         "const ATTACHMENT_CONTEXT_IMAGES:",
         "pub(crate) fn append_thread_attachment_context(",
+        "pub(crate) struct ChatAttachmentUserContentInput",
+        "pub(crate) fn prepare_chat_attachment_user_content(",
+        "fn attachment_user_content(",
         "fn attachment_text_is_ready(",
     ]:
         assert_contains(
             attachments_source,
             snippet,
             "attachment owner must expose bounded prompt context surface",
+        )
+    assert_contains(
+        source,
+        "attachments::prepare_chat_attachment_user_content(",
+        "gateway root should delegate chat attachment user-content assembly",
+    )
+    for snippet in [
+        "let new_attachment_context =",
+        "let user_content = if all_images.is_empty()",
+        'serde_json::json!({ "type": "image_url"',
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not rebuild attachment user content inline",
         )
     for snippet in [
         "async fn stream_chat_via_openai(",

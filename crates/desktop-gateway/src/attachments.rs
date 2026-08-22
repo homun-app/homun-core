@@ -193,6 +193,71 @@ them to attach it (don't look for it in the sandbox or folders).\n\
     images
 }
 
+pub(crate) struct ChatAttachmentUserContentInput<'a> {
+    pub(crate) prompt: &'a str,
+    pub(crate) request_images: &'a [String],
+    pub(crate) applies_new_input: bool,
+    pub(crate) checkpoint_input_present: bool,
+    pub(crate) new_files: &'a [IngestedFile],
+    pub(crate) working: &'a [chat_store::StoredAttachment],
+}
+
+/// Builds the user message content for the chat model after merging explicit
+/// turn images with the bounded attachment prompt context. Live turns use the
+/// persisted thread working set; checkpoint/retry turns only carry the new files
+/// from that checkpoint to avoid replaying stale durable attachments.
+pub(crate) fn prepare_chat_attachment_user_content(
+    input: ChatAttachmentUserContentInput<'_>,
+) -> serde_json::Value {
+    let mut model_text = input.prompt.to_string();
+    let mut images = if input.applies_new_input {
+        input.request_images.to_vec()
+    } else {
+        Vec::new()
+    };
+
+    let new_attachment_context = input
+        .new_files
+        .iter()
+        .map(stored_attachment_from_ingested_file)
+        .collect::<Vec<_>>();
+    let attachment_context = if !input.applies_new_input || input.checkpoint_input_present {
+        &new_attachment_context
+    } else {
+        input.working
+    };
+    images.extend(append_thread_attachment_context(
+        &mut model_text,
+        attachment_context,
+    ));
+
+    attachment_user_content(&model_text, &images)
+}
+
+fn stored_attachment_from_ingested_file(file: &IngestedFile) -> chat_store::StoredAttachment {
+    chat_store::StoredAttachment {
+        display_name: file.display_name.clone(),
+        mime_type: file.mime_type.clone(),
+        text: file.text.clone(),
+        images: file.images.clone(),
+    }
+}
+
+fn attachment_user_content(model_text: &str, images: &[String]) -> serde_json::Value {
+    if images.is_empty() {
+        return serde_json::Value::String(model_text.to_string());
+    }
+
+    let mut parts = vec![serde_json::json!({ "type": "text", "text": model_text })];
+    for url in images {
+        parts.push(serde_json::json!({
+            "type": "image_url",
+            "image_url": { "url": url }
+        }));
+    }
+    serde_json::Value::Array(parts)
+}
+
 fn attachment_text_is_ready(text: &str) -> bool {
     let text = text.trim();
     !text.is_empty() && !text.starts_with("⚠️")
@@ -776,6 +841,68 @@ mod tests {
             zip.write_all(xml.as_bytes()).unwrap();
         }
         zip.finish().unwrap();
+    }
+
+    #[test]
+    fn chat_attachment_user_content_uses_the_right_context_for_live_and_checkpoint_turns() {
+        let request_images = vec!["data:image/png;base64,REQ".to_string()];
+        let new_files = vec![IngestedFile {
+            display_name: "fresh.png".to_string(),
+            mime_type: "image/png".to_string(),
+            text: Some("fresh upload".to_string()),
+            images: vec!["data:image/png;base64,FRESH".to_string()],
+        }];
+        let working = vec![chat_store::StoredAttachment {
+            display_name: "persisted.md".to_string(),
+            mime_type: "text/markdown".to_string(),
+            text: Some("persisted thread context".to_string()),
+            images: vec!["data:image/png;base64,OLD".to_string()],
+        }];
+
+        let live = prepare_chat_attachment_user_content(ChatAttachmentUserContentInput {
+            prompt: "Summarize",
+            request_images: &request_images,
+            applies_new_input: true,
+            checkpoint_input_present: false,
+            new_files: &new_files,
+            working: &working,
+        });
+        let live_parts = live.as_array().expect("live content is multimodal");
+        let live_text = live_parts[0]["text"].as_str().unwrap();
+        assert!(live_text.contains("persisted.md"));
+        assert!(live_text.contains("persisted thread context"));
+        assert!(!live_text.contains("fresh upload"));
+        let live_image_urls = live_parts
+            .iter()
+            .skip(1)
+            .map(|part| part["image_url"]["url"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            live_image_urls,
+            vec!["data:image/png;base64,REQ", "data:image/png;base64,OLD"]
+        );
+
+        let checkpoint = prepare_chat_attachment_user_content(ChatAttachmentUserContentInput {
+            prompt: "Resume",
+            request_images: &[],
+            applies_new_input: true,
+            checkpoint_input_present: true,
+            new_files: &new_files,
+            working: &working,
+        });
+        let checkpoint_parts = checkpoint
+            .as_array()
+            .expect("checkpoint content is multimodal");
+        let checkpoint_text = checkpoint_parts[0]["text"].as_str().unwrap();
+        assert!(checkpoint_text.contains("fresh.png"));
+        assert!(checkpoint_text.contains("fresh upload"));
+        assert!(!checkpoint_text.contains("persisted thread context"));
+        let checkpoint_image_urls = checkpoint_parts
+            .iter()
+            .skip(1)
+            .map(|part| part["image_url"]["url"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(checkpoint_image_urls, vec!["data:image/png;base64,FRESH"]);
     }
 
     #[test]
