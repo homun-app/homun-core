@@ -31,6 +31,7 @@ mod gateway_agent_stream_drain;
 mod gateway_agent_stream_events;
 mod gateway_agent_stream_persistence;
 mod gateway_agent_turn_config;
+mod gateway_agent_turn_hitl_resume;
 mod gateway_agent_turn_identity;
 mod gateway_agent_turn_model_seed;
 mod gateway_agent_turn_outcomes;
@@ -208,6 +209,7 @@ pub(crate) use gateway_agent_stream_drain::*;
 pub(crate) use gateway_agent_stream_events::*;
 pub(crate) use gateway_agent_stream_persistence::*;
 pub(crate) use gateway_agent_turn_config::*;
+pub(crate) use gateway_agent_turn_hitl_resume::*;
 pub(crate) use gateway_agent_turn_identity::*;
 pub(crate) use gateway_agent_turn_model_seed::*;
 pub(crate) use gateway_agent_turn_plan_seed::*;
@@ -2318,25 +2320,7 @@ async fn stream_chat_via_openai(
             recovery_checkpoint,
             request.checkpoint_input.is_some(),
         );
-        let resolved_hitl =
-            hitl_choice_resume
-                .as_ref()
-                .map(|ctx| local_first_engine::hitl::ResolvedHitlGuard {
-                    envelope: local_first_engine::hitl::HitlEnvelope {
-                        kind: match ctx.wait.kind {
-                            hitl_resume::HitlWaitKind::Choice => {
-                                local_first_engine::hitl::HitlKind::Choice
-                            }
-                            hitl_resume::HitlWaitKind::Clarify => {
-                                local_first_engine::hitl::HitlKind::Clarify
-                            }
-                        },
-                        hold_policy: local_first_engine::hitl::HoldPolicy::Free,
-                        payload: ctx.wait.payload.clone(),
-                        source_marker: "durable_resume".to_string(),
-                    },
-                    resolution: ctx.resolution.clone(),
-                });
+        let resolved_hitl = resolved_hitl_guard_for_turn(hitl_choice_resume.as_ref());
         let cfg = resolve_agent_turn_config(AgentTurnConfigInput {
             context_window: model_context_window,
             forced_tool: forced_tool.clone(),

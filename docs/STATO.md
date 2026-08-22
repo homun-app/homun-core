@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (agent turn config owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-22 (agent turn HITL resume owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-turn-config-owner` |
-| Branch | `fabio/chat-turn-config-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#310 mergeate in `main`; slice config in verifica su `fabio/chat-turn-config-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #310 (`dae7cdae`); slice config in verifica locale prima della PR |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-turn-hitl-resume-owner` |
+| Branch | `fabio/chat-turn-hitl-resume-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#311 mergeate in `main`; slice HITL resume in verifica su `fabio/chat-turn-hitl-resume-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #311 (`6968624f`); slice HITL resume in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_agent_turn_config`: la config turn-costante del
+- Estrazione locale `gateway_agent_turn_hitl_resume`: la proiezione del resume
+  HITL gia' selezionato (`resolved_hitl_guard_for_turn`: `HitlResumeTurnContext`
+  -> `local_first_engine::hitl::ResolvedHitlGuard`) esce dal setup inline di
+  `stream_chat_via_openai`; stash lookup, prompt harness text, browser liveness,
+  loop agente e subagent restano owner separati.
+- Estrazione mergeata `gateway_agent_turn_config`: la config turn-costante del
   loop agente (`resolve_agent_turn_config`: budget round, context-window,
   forced tool, HITL resume gia' risolto e flag engine) esce dal setup inline di
   `stream_chat_via_openai`; routing, HITL resolution, loop agente, browser
@@ -1287,9 +1292,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#310: slice owner-level successive mergeate in
-  `main`, fino a `agent turn model seed owner`; `main` verificato e
-  riallineato a #310.
+- #143-#283, #285-#286, #288-#311: slice owner-level successive mergeate in
+  `main`, fino a `agent turn config owner`; `main` verificato e riallineato a
+  #311.
 
 PR aperte:
 
@@ -1297,7 +1302,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/chat-turn-config-owner` in verifica locale da `main` #310 (`dae7cdae`).
+- `fabio/chat-turn-hitl-resume-owner` in verifica locale da `main` #311
+  (`6968624f`).
 
 ## Debito residuo
 
@@ -1321,8 +1327,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice non-browser `gateway_agent_turn_config` con gate kernel
-   verde, PR e merge.
+1. Chiudere la slice non-browser `gateway_agent_turn_hitl_resume` con gate
+   kernel verde, PR e merge.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -1330,9 +1336,9 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #310 (`dae7cdae`); slice non-browser corrente
-`fabio/chat-turn-config-owner` estrae `gateway_agent_turn_config` dal setup
-inline di `stream_chat_via_openai`.
+main aggiornato a #311 (`6968624f`); slice non-browser corrente
+`fabio/chat-turn-hitl-resume-owner` estrae `gateway_agent_turn_hitl_resume` dal
+setup inline di `stream_chat_via_openai`.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
