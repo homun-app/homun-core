@@ -2942,6 +2942,58 @@ fn agent_turn_execution_identity_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_turn_sensitive_confirmations_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let sensitive = production_source(&root.join("src/gateway_agent_turn_sensitive.rs"));
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai")
+        .split("// Last upstream model error this turn")
+        .next()
+        .expect("agent turn sensitive setup");
+
+    for pattern in [
+        "pub(crate) fn seed_agent_turn_sensitive_confirmations(",
+        "resolved_skill_confirmations(state, thread_id)",
+        "merged_sensitive(&existing, &project_sensitive)",
+        "crate::skills::SensitiveCategory::parse",
+        "cat.as_token().to_string()",
+    ] {
+        assert!(
+            sensitive.contains(pattern),
+            "agent turn sensitive owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        ".active_sensitive\n                .iter()",
+        "resolved_skill_confirmations(&state_owned, thread_id.as_deref())",
+        "merged_sensitive(&existing, &project_sensitive)",
+        "cat.as_token().to_string()",
+    ] {
+        assert!(
+            !stream_chat.contains(pattern),
+            "main.rs must not own agent turn sensitive confirmation seeding {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !sensitive.contains(adjacent),
+            "agent turn sensitive owner must not absorb adjacent stream/loop/tail/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn chat_usage_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

@@ -33,6 +33,7 @@ mod gateway_agent_stream_persistence;
 mod gateway_agent_turn_identity;
 mod gateway_agent_turn_outcomes;
 mod gateway_agent_turn_runner;
+mod gateway_agent_turn_sensitive;
 mod gateway_agent_turn_tail;
 mod gateway_agent_wake;
 mod gateway_artifact_memory;
@@ -201,6 +202,7 @@ pub(crate) use gateway_agent_stream_events::*;
 pub(crate) use gateway_agent_stream_persistence::*;
 pub(crate) use gateway_agent_turn_identity::*;
 pub(crate) use gateway_agent_turn_runner::*;
+pub(crate) use gateway_agent_turn_sensitive::*;
 pub(crate) use gateway_agent_turn_tail::*;
 pub(crate) use gateway_agent_wake::*;
 pub(crate) use gateway_artifacts::*;
@@ -2240,24 +2242,7 @@ async fn stream_chat_via_openai(
         if applies_new_input && let Some(payload) = automatic_recall_payload {
             let _ = emit_stream_event(&tx, GenerateStreamEvent::Recall { payload }).await;
         }
-        // Phase 3 (per-project skill confirmations): seed the turn's force-confirm set with the
-        // workspace's configured categories so an effectful action is gated even with NO
-        // sensitive skill loaded. Fail-safe — this only ADDS to `active_sensitive`; the loop
-        // later unions per-skill categories via `ToolEffects::arm_sensitive`. `merged_sensitive`
-        // dedups the (empty-at-init) skill set with the project set.
-        {
-            let existing: Vec<crate::skills::SensitiveCategory> = ls
-                .active_sensitive
-                .iter()
-                .filter_map(|t| crate::skills::SensitiveCategory::parse(t))
-                .collect();
-            let project_sensitive =
-                resolved_skill_confirmations(&state_owned, thread_id.as_deref());
-            ls.active_sensitive = merged_sensitive(&existing, &project_sensitive)
-                .iter()
-                .map(|cat| cat.as_token().to_string())
-                .collect();
-        }
+        seed_agent_turn_sensitive_confirmations(&state_owned, thread_id.as_deref(), &mut ls);
         // Last upstream model error this turn (e.g. a 410 "model retired"), already
         // human-readable. Surfaced as the final answer if the turn produces no text,
         // so a dead/blocked model is obvious instead of a generic "no answer".

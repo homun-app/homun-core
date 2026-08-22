@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (agent turn identity owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-22 (agent turn sensitive confirmation owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#302 mergeate in `main`; #303 in verifica su `fabio/chat-turn-identity-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #302 (`f33f0e01`); #303 verificata localmente prima del merge |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#303 mergeate in `main`; slice sensitive confirmation in verifica su `fabio/chat-turn-sensitive-confirmations`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #303 (`ed73ac9c`); slice sensitive confirmation verificata localmente prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_agent_turn_identity`: l'identita' esecuzione del
+- Estrazione locale `gateway_agent_turn_sensitive`: la semina pre-loop delle
+  conferme sensitive del turno (`seed_agent_turn_sensitive_confirmations`) esce
+  dal setup inline di `stream_chat_via_openai`; `main.rs` consuma solo l'owner,
+  mentre policy approval, tool execution, loop agente, browser e subagent
+  restano owner separati.
+- Estrazione mergeata `gateway_agent_turn_identity`: l'identita' esecuzione del
   turno agente (`resolve_agent_turn_execution_identity`: journal, `effect_run_id`,
   `effect_turn_id` broker e flag canonical broker) esce dal setup inline di
   `stream_chat_via_openai`; `main.rs` consuma solo la proiezione identitaria,
@@ -440,11 +445,6 @@ Slice Runtime V2 recenti:
   Guard, fallback local-only/block remote, errore `privacy_guard_unavailable` e
   risposta anticipata Vault proposal escono dal monolite `main.rs`; transport
   stream, checkpoint, loop agente e browser restano owner separati.
-- Estrazione locale `gateway_agent_turn_tail`: coda post-loop del turno agente
-  (preparazione input tail, HITL legacy projection, trace finale, memory learn,
-  refresh code graph, steering fence, publish outcome e cleanup stream) esce dal
-  monolite `main.rs`; stream setup, loop agente, browser e subagent restano
-  owner separati.
 - Estrazione locale `gateway_chat_turn_context`: setup stateful pre-prompt del
   turno chat (workspace memoria del thread, contesto contact/channel e
   real-idle activity) esce dal monolite `main.rs`; prompt, stream, loop agente,

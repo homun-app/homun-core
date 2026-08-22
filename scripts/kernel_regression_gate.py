@@ -197,6 +197,34 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway agent turn sensitive owner",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--test",
+                "execution_ownership_inventory",
+                "agent_turn_sensitive_confirmations_have_one_gateway_owner",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
+            "gateway agent turn sensitive unit",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--bin",
+                "local-first-desktop-gateway",
+                "sensitive_confirmation_tokens",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway agent turn tail owner",
             [
                 "cargo",
