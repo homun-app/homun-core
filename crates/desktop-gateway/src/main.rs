@@ -34,6 +34,7 @@ mod gateway_agent_turn_identity;
 mod gateway_agent_turn_outcomes;
 mod gateway_agent_turn_plan_seed;
 mod gateway_agent_turn_recall_seed;
+mod gateway_agent_turn_recovery_seed;
 mod gateway_agent_turn_route_trace;
 mod gateway_agent_turn_runner;
 mod gateway_agent_turn_sensitive;
@@ -207,6 +208,7 @@ pub(crate) use gateway_agent_stream_persistence::*;
 pub(crate) use gateway_agent_turn_identity::*;
 pub(crate) use gateway_agent_turn_plan_seed::*;
 pub(crate) use gateway_agent_turn_recall_seed::*;
+pub(crate) use gateway_agent_turn_recovery_seed::*;
 pub(crate) use gateway_agent_turn_route_trace::*;
 pub(crate) use gateway_agent_turn_runner::*;
 pub(crate) use gateway_agent_turn_sensitive::*;
@@ -2316,14 +2318,10 @@ async fn stream_chat_via_openai(
         // larger browser budget). This keeps non-browser turns identical to today.
         // ADR 0026: provider binding travels with LoopState (per-round swap), not as separate args.
         ls.provider = crate::model_client::gateway_provider_binding(model, base_url, api_key);
-        let checkpoint_input = request
-            .checkpoint_input
-            .as_ref()
-            .and_then(|_| ls.messages.last().cloned());
-        gateway_agent_turn_outcomes::apply_agent_recovery_checkpoint(
+        seed_agent_turn_recovery_checkpoint(
             &mut ls,
             recovery_checkpoint,
-            checkpoint_input,
+            request.checkpoint_input.is_some(),
         );
         // 5.D1c.1: resolve the loop's turn-constant config ONCE (env-stable for the turn) so the moved
         // loop never reads env. Behavior-preserving — same values the inline getters returned.

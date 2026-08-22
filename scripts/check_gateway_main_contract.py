@@ -109,6 +109,9 @@ AGENT_TURN_PLAN_SEED_RS = os.path.join(
 AGENT_TURN_TOOL_SEED_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_tool_seed.rs"
 )
+AGENT_TURN_RECOVERY_SEED_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_recovery_seed.rs"
+)
 AGENT_TURN_TAIL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_tail.rs"
 )
@@ -1682,6 +1685,8 @@ def main() -> int:
         agent_turn_plan_seed_source = handle.read()
     with open(AGENT_TURN_TOOL_SEED_RS, "r", encoding="utf-8") as handle:
         agent_turn_tool_seed_source = handle.read()
+    with open(AGENT_TURN_RECOVERY_SEED_RS, "r", encoding="utf-8") as handle:
+        agent_turn_recovery_seed_source = handle.read()
     with open(AGENT_TURN_TAIL_RS, "r", encoding="utf-8") as handle:
         agent_turn_tail_source = handle.read()
     with open(AGENT_CHECKPOINTS_RS, "r", encoding="utf-8") as handle:
@@ -2444,6 +2449,48 @@ def main() -> int:
             agent_turn_tool_seed_source,
             snippet,
             "agent turn tool seed owner must not absorb stream, toolset, loop, browser, or subagent owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_turn_recovery_seed;",
+        "gateway root must declare agent turn recovery seed owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_turn_recovery_seed::*;",
+        "gateway root must re-export agent turn recovery seed owner",
+    )
+    for snippet in [
+        "pub(crate) fn seed_agent_turn_recovery_checkpoint(",
+        "let checkpoint_input = if checkpoint_input_present",
+        "loop_state.messages.last().cloned()",
+        "gateway_agent_turn_outcomes::apply_agent_recovery_checkpoint(",
+    ]:
+        assert_contains(
+            agent_turn_recovery_seed_source,
+            snippet,
+            "agent turn recovery seed owner must own loop recovery checkpoint seeding",
+        )
+    for snippet in [
+        "let checkpoint_input = request",
+        "gateway_agent_turn_outcomes::apply_agent_recovery_checkpoint(\n            &mut ls,\n            recovery_checkpoint,\n            checkpoint_input,",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain agent turn recovery checkpoint seeding",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            agent_turn_recovery_seed_source,
+            snippet,
+            "agent turn recovery seed owner must not absorb stream, loop, tail, browser, or subagent owners",
         )
     for snippet in [
         "pub(crate) fn context_message_for_model(",
