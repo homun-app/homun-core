@@ -32,6 +32,27 @@ pub(crate) struct AgentTurnTailContext {
     pub(crate) previous_assistant: Option<String>,
 }
 
+pub(crate) struct AgentTurnTailSnapshot {
+    pub(crate) state: AppState,
+    pub(crate) thread_id: Option<String>,
+    pub(crate) fence_turn_id: String,
+    pub(crate) fence_user_id: UserId,
+    pub(crate) fence_workspace_id: WorkspaceId,
+    pub(crate) user_message: String,
+    pub(crate) previous_assistant: Option<String>,
+    pub(crate) tail_turn_id: String,
+}
+
+pub(crate) struct AgentTurnTailSnapshotInput<'a> {
+    pub(crate) state: &'a AppState,
+    pub(crate) thread_id: Option<&'a str>,
+    pub(crate) request_id: &'a str,
+    pub(crate) user_id: &'a UserId,
+    pub(crate) workspace_id: &'a WorkspaceId,
+    pub(crate) user_message: &'a str,
+    pub(crate) previous_assistant: Option<&'a str>,
+}
+
 pub(crate) fn prepare_agent_turn_tail_context(
     state: &AppState,
     thread_id: Option<&str>,
@@ -48,6 +69,21 @@ pub(crate) fn prepare_agent_turn_tail_context(
             String::new()
         },
         previous_assistant: previous_assistant_message(effective_context),
+    }
+}
+
+pub(crate) fn snapshot_agent_turn_tail(
+    input: AgentTurnTailSnapshotInput<'_>,
+) -> AgentTurnTailSnapshot {
+    AgentTurnTailSnapshot {
+        state: input.state.clone(),
+        thread_id: input.thread_id.map(str::to_string),
+        fence_turn_id: input.request_id.to_string(),
+        fence_user_id: input.user_id.clone(),
+        fence_workspace_id: input.workspace_id.clone(),
+        user_message: input.user_message.to_string(),
+        previous_assistant: input.previous_assistant.map(str::to_string),
+        tail_turn_id: input.request_id.to_string(),
     }
 }
 
