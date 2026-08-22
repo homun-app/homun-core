@@ -9,6 +9,19 @@
 
 use super::*;
 
+pub(crate) struct ConnectedToolCatalogInput<'a> {
+    pub(crate) state: &'a AppState,
+    pub(crate) project_root: Option<&'a std::path::Path>,
+}
+
+pub(crate) struct ConnectedToolCatalog {
+    pub(crate) catalog_index: Vec<(String, String, serde_json::Value)>,
+    pub(crate) composio_writes: std::collections::BTreeSet<String>,
+    pub(crate) mcp_schemas: Vec<serde_json::Value>,
+    pub(crate) inactive_services: Vec<String>,
+    pub(crate) filesystem_mcp_instruction: Option<String>,
+}
+
 pub(crate) struct ChatToolsetInput<'a> {
     pub(crate) state: &'a AppState,
     pub(crate) prompt: &'a str,
@@ -33,6 +46,75 @@ pub(crate) struct ChatToolsetInput<'a> {
 pub(crate) struct ChatToolset {
     pub(crate) base_tools: Vec<serde_json::Value>,
     pub(crate) capability_corpus: Vec<CapabilityEntry>,
+}
+
+pub(crate) async fn prepare_connected_tool_catalog(
+    input: ConnectedToolCatalogInput<'_>,
+) -> ConnectedToolCatalog {
+    let catalog = {
+        let st = input.state.clone();
+        tokio::task::spawn_blocking(move || composio_chat_tools_cached(&st, COMPOSIO_CATALOG_CAP))
+            .await
+            .unwrap_or_default()
+    };
+    let mcp_catalog = {
+        let st = input.state.clone();
+        tokio::task::spawn_blocking(move || mcp_chat_tools(&st, MCP_CATALOG_CAP))
+            .await
+            .unwrap_or_default()
+    };
+
+    connected_tool_catalog_from_sources(catalog, mcp_catalog, input.project_root)
+}
+
+fn connected_tool_catalog_from_sources(
+    catalog: ComposioChatTools,
+    mcp_catalog: McpChatTools,
+    project_root: Option<&std::path::Path>,
+) -> ConnectedToolCatalog {
+    let mut composio_writes = catalog.writes;
+    composio_writes.extend(mcp_catalog.writes.iter().cloned());
+    // `send_message` is a side-effecting action routed through the same write-confirm card.
+    composio_writes.insert("send_message".to_string());
+
+    let mut catalog_index = connected_tool_catalog_index(&catalog.schemas);
+    catalog_index.extend(connected_tool_catalog_index(&mcp_catalog.schemas));
+    let filesystem_mcp_instruction = project_filesystem_mcp_instruction(
+        project_root,
+        filesystem_mcp_connected(&mcp_catalog.schemas),
+    );
+
+    ConnectedToolCatalog {
+        catalog_index,
+        composio_writes,
+        mcp_schemas: mcp_catalog.schemas,
+        inactive_services: catalog.inactive,
+        filesystem_mcp_instruction,
+    }
+}
+
+fn connected_tool_catalog_index(
+    schemas: &[serde_json::Value],
+) -> Vec<(String, String, serde_json::Value)> {
+    schemas
+        .iter()
+        .filter_map(|schema| {
+            let f = schema.get("function")?;
+            let name = f.get("name")?.as_str()?.to_string();
+            let desc = f.get("description").and_then(|d| d.as_str()).unwrap_or("");
+            let haystack = format!("{name} {desc}").to_lowercase();
+            Some((name, haystack, schema.clone()))
+        })
+        .collect()
+}
+
+fn filesystem_mcp_connected(schemas: &[serde_json::Value]) -> bool {
+    schemas.iter().any(|schema| {
+        schema
+            .pointer("/function/name")
+            .and_then(|name| name.as_str())
+            .is_some_and(|name| name.starts_with("mcp__filesystem__"))
+    })
 }
 
 pub(crate) async fn prepare_chat_toolset(input: ChatToolsetInput<'_>) -> ChatToolset {
@@ -186,5 +268,89 @@ pub(crate) async fn prepare_chat_toolset(input: ChatToolsetInput<'_>) -> ChatToo
     ChatToolset {
         base_tools,
         capability_corpus,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool_schema(name: &str, description: &str) -> serde_json::Value {
+        serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description,
+                "parameters": { "type": "object", "properties": {} }
+            }
+        })
+    }
+
+    #[test]
+    fn connected_tool_catalog_merges_connector_and_mcp_writes() {
+        let catalog = ComposioChatTools {
+            schemas: vec![tool_schema("GMAIL_SEND_EMAIL", "Send an email")],
+            writes: std::collections::BTreeSet::from(["GMAIL_SEND_EMAIL".to_string()]),
+            inactive: vec!["gmail".to_string()],
+        };
+        let mcp_catalog = McpChatTools {
+            schemas: vec![tool_schema("mcp__filesystem__write_file", "Write a file")],
+            writes: std::collections::BTreeSet::from(["mcp__filesystem__write_file".to_string()]),
+        };
+
+        let connected = connected_tool_catalog_from_sources(
+            catalog,
+            mcp_catalog,
+            Some(std::path::Path::new("/tmp/project")),
+        );
+
+        assert!(connected.composio_writes.contains("GMAIL_SEND_EMAIL"));
+        assert!(
+            connected
+                .composio_writes
+                .contains("mcp__filesystem__write_file")
+        );
+        assert!(connected.composio_writes.contains("send_message"));
+        assert_eq!(connected.inactive_services, vec!["gmail"]);
+        assert_eq!(connected.mcp_schemas.len(), 1);
+        assert!(
+            connected
+                .filesystem_mcp_instruction
+                .as_deref()
+                .unwrap_or_default()
+                .contains("/tmp/project")
+        );
+    }
+
+    #[test]
+    fn connected_tool_catalog_indexes_names_and_descriptions_for_discovery() {
+        let catalog = ComposioChatTools {
+            schemas: vec![tool_schema("SLACK_LIST_MESSAGES", "List Slack messages")],
+            writes: std::collections::BTreeSet::new(),
+            inactive: Vec::new(),
+        };
+        let mcp_catalog = McpChatTools {
+            schemas: vec![tool_schema("mcp__drive__search", "Search Drive")],
+            writes: std::collections::BTreeSet::new(),
+        };
+
+        let connected = connected_tool_catalog_from_sources(catalog, mcp_catalog, None);
+
+        let indexed = connected
+            .catalog_index
+            .iter()
+            .map(|(name, haystack, _)| (name.as_str(), haystack.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            indexed,
+            vec![
+                (
+                    "SLACK_LIST_MESSAGES",
+                    "slack_list_messages list slack messages"
+                ),
+                ("mcp__drive__search", "mcp__drive__search search drive"),
+            ]
+        );
+        assert!(connected.filesystem_mcp_instruction.is_none());
     }
 }

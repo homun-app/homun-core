@@ -3378,6 +3378,12 @@ fn chat_toolset_has_one_gateway_owner() {
     let toolset = production_source(&root.join("src/gateway_chat_toolset.rs"));
 
     for pattern in [
+        "pub(crate) async fn prepare_connected_tool_catalog(",
+        "struct ConnectedToolCatalogInput",
+        "struct ConnectedToolCatalog",
+        "fn connected_tool_catalog_from_sources(",
+        "fn connected_tool_catalog_index(",
+        "fn filesystem_mcp_connected(",
         "pub(crate) async fn prepare_chat_toolset(",
         "struct ChatToolsetInput",
         "struct ChatToolset",
@@ -3397,6 +3403,11 @@ fn chat_toolset_has_one_gateway_owner() {
         "base_tools.into_iter().partition(|schema|",
         "for schema in auto_retrieve_composio(",
         "let capability_corpus = materialize_capability_corpus(",
+        "let mut composio_writes = catalog.writes.clone();",
+        ".filter_map(|s| {\n            let f = s.get(\"function\")?;",
+        "let filesystem_mcp_connected = mcp_catalog.schemas.iter().any(|schema|",
+        "composio_writes.extend(mcp_catalog.writes.iter().cloned());",
+        "for schema in &mcp_catalog.schemas {",
     ] {
         assert!(
             !main.contains(pattern),
