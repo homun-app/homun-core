@@ -3253,6 +3253,54 @@ fn agent_turn_recovery_seed_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_turn_model_seed_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let model_seed = production_source(&root.join("src/gateway_agent_turn_model_seed.rs"));
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai")
+        .split("seed_agent_turn_recovery_checkpoint(")
+        .next()
+        .expect("agent turn model seed setup");
+
+    for pattern in [
+        "pub(crate) async fn seed_agent_turn_model_provider(",
+        "warm_turn_provider_capabilities(http, &base_url, &model).await",
+        "loop_state.provider = crate::model_client::gateway_provider_binding(",
+    ] {
+        assert!(
+            model_seed.contains(pattern),
+            "agent turn model seed owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "warm_turn_provider_capabilities(&http, &base_url, &model).await",
+        "ls.provider = crate::model_client::gateway_provider_binding(model, base_url, api_key)",
+    ] {
+        assert!(
+            !stream_chat.contains(pattern),
+            "main.rs must not own agent turn model provider seeding {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !model_seed.contains(adjacent),
+            "agent turn model seed owner must not absorb adjacent stream/loop/tail/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn chat_usage_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

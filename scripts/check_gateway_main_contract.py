@@ -112,6 +112,9 @@ AGENT_TURN_TOOL_SEED_RS = os.path.join(
 AGENT_TURN_RECOVERY_SEED_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_recovery_seed.rs"
 )
+AGENT_TURN_MODEL_SEED_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_model_seed.rs"
+)
 AGENT_TURN_TAIL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_tail.rs"
 )
@@ -1687,6 +1690,8 @@ def main() -> int:
         agent_turn_tool_seed_source = handle.read()
     with open(AGENT_TURN_RECOVERY_SEED_RS, "r", encoding="utf-8") as handle:
         agent_turn_recovery_seed_source = handle.read()
+    with open(AGENT_TURN_MODEL_SEED_RS, "r", encoding="utf-8") as handle:
+        agent_turn_model_seed_source = handle.read()
     with open(AGENT_TURN_TAIL_RS, "r", encoding="utf-8") as handle:
         agent_turn_tail_source = handle.read()
     with open(AGENT_CHECKPOINTS_RS, "r", encoding="utf-8") as handle:
@@ -2491,6 +2496,47 @@ def main() -> int:
             agent_turn_recovery_seed_source,
             snippet,
             "agent turn recovery seed owner must not absorb stream, loop, tail, browser, or subagent owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_turn_model_seed;",
+        "gateway root must declare agent turn model seed owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_turn_model_seed::*;",
+        "gateway root must re-export agent turn model seed owner",
+    )
+    for snippet in [
+        "pub(crate) async fn seed_agent_turn_model_provider(",
+        "warm_turn_provider_capabilities(http, &base_url, &model).await",
+        "loop_state.provider = crate::model_client::gateway_provider_binding(",
+    ]:
+        assert_contains(
+            agent_turn_model_seed_source,
+            snippet,
+            "agent turn model seed owner must own loop model provider seeding",
+        )
+    for snippet in [
+        "warm_turn_provider_capabilities(&http, &base_url, &model).await",
+        "ls.provider = crate::model_client::gateway_provider_binding(model, base_url, api_key)",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain agent turn model provider seeding",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            agent_turn_model_seed_source,
+            snippet,
+            "agent turn model seed owner must not absorb stream, loop, tail, browser, or subagent owners",
         )
     for snippet in [
         "pub(crate) fn context_message_for_model(",
