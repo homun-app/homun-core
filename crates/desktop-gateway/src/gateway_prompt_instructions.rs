@@ -166,6 +166,43 @@ when the answer is long. {language_instruction} Clear and well-structured."
     )
 }
 
+pub(crate) fn connected_service_tools_instruction() -> &'static str {
+    "CONNECTED-SERVICE TOOLS: the user has connected some services (e.g. Gmail, \
+Google Calendar). To access them do NOT say you can't: call `find_capability` with a query \
+about the intent (e.g. \"unread emails\", \"send email\", \"calendar events today\") to discover the \
+right tool, then CALL the found tool with the complete arguments.\n\
+TOOL CHOICE: use ONE SINGLE tool that matches the intent EXACTLY — for \
+ADDING/CREATING use create/add/quick_add, for READING use fetch/list. NEVER call destructive \
+tools (delete/remove/cancel) unless the user explicitly asks. find_capability \
+finds the service's tools: to MODIFY something existing (e.g. the date of \
+an event) use update/patch (NOT 'move', which moves between calendars). Do NOT conclude that a \
+tool is missing after a single search.\n\
+DATES AND TIMES: ALWAYS compute the ABSOLUTE date/time starting from 'Today is ...' above (e.g. tomorrow = today \
++ 1 day) and pass it to the tool in EXPLICIT ISO 8601 format with the timezone (e.g. \
+start_datetime: 2026-06-08T11:00:00+02:00, end_datetime one hour later). Do NOT pass relative words \
+like \"tomorrow\"/\"today\" in the arguments: the service's parsing may get the day wrong. Prefer \
+a tool with explicit start/end over the textual \"quick add\" for times.\n\
+WRITE ACTIONS (send/delete/modify): CALL the tool anyway with the complete arguments \
+— the system will AUTOMATICALLY show the user a confirmation card before executing. \
+Do NOT refuse, do NOT say you can't send, and do NOT ask the user to do it manually: your \
+job is to call the right tool, the interface handles confirmation.\n\
+COUNTS (e.g. \"how many unread emails\"): use the correct filter (for Gmail query \"is:unread\") and \
+report the TOTAL indicated by the result (a field like resultSizeEstimate / total / nextPageToken \
+absent), NOT the number of messages on the single returned page; if the result is paginated and \
+doesn't give a reliable total, state that it's an estimate."
+}
+
+pub(crate) fn expired_connected_services_instruction(slugs: &str) -> String {
+    format!(
+        "CONNECTED BUT EXPIRED SERVICES (slug): {slugs}. The connection EXISTS but \
+the authorization has EXPIRED. If the user asks for one of these services: do NOT say you don't have \
+the integration; explain in ONE sentence that the connection has expired and just needs reauthorizing, and \
+INCLUDE in the reply the marker (on its own line) `‹‹COMPOSIO_RECONNECT››<slug>‹‹/COMPOSIO_RECONNECT››` \
+with only the slug of the affected service (e.g. gmail): the interface will show a \
+\"Reconnect\" button that reopens authorization in one click."
+    )
+}
+
 pub(crate) fn memory_recall_usage_instruction() -> &'static str {
     "MEMORY: you have a long-term memory of the user. If you need a personal \
 or project detail you may have already learned (a name, a preference, a fact, a \
@@ -316,7 +353,8 @@ mod tests {
         ask_mode_instruction, booking_assumption_choice_instruction,
         browser_open_research_discovery_instruction, choice_clarify_instruction,
         choice_resume_instruction_legacy_backup, code_map_available_instruction,
-        core_operating_instruction, debug_mode_instruction, execution_verification_instruction,
+        connected_service_tools_instruction, core_operating_instruction, debug_mode_instruction,
+        execution_verification_instruction, expired_connected_services_instruction,
         freshness_verification_instruction, language_follow_user_instruction,
         memory_recall_usage_instruction, memory_scope_restricted_instruction,
         objective_contract_instruction, objective_contract_read_only_default_instruction,
@@ -373,6 +411,22 @@ mod tests {
         assert!(guidance.contains("AUTOMATIONS: for RECURRING or REACTIVE requests"));
         assert!(guidance.contains("RESPONSE FORMATTING"));
         assert!(guidance.contains("Rispondi in italiano."));
+    }
+
+    #[test]
+    fn gateway_prompt_instructions_own_connected_service_contracts() {
+        let guidance = connected_service_tools_instruction();
+        assert!(guidance.contains("CONNECTED-SERVICE TOOLS"));
+        assert!(guidance.contains("find_capability"));
+        assert!(guidance.contains("TOOL CHOICE"));
+        assert!(guidance.contains("WRITE ACTIONS"));
+        assert!(guidance.contains("COUNTS"));
+
+        let expired = expired_connected_services_instruction("gmail, google_calendar");
+        assert!(expired.contains("CONNECTED BUT EXPIRED SERVICES"));
+        assert!(expired.contains("gmail, google_calendar"));
+        assert!(expired.contains("‹‹COMPOSIO_RECONNECT››"));
+        assert!(expired.contains("Reconnect"));
     }
 
     #[test]

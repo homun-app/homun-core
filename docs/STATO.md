@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (post-merge core operating prompt owner).**
+> **Ultimo aggiornamento: 2026-08-22 (connected-service prompt owner locale).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
-| PR | #108-#116, #118-#277 mergeate in `main`; #117 browser draft separata |
-| HEAD codice verificato | `main` aggiornato a #277 (`7c7fc36d`) |
+| Branch | `fabio/connected-service-prompt-owner` |
+| PR | #108-#116, #118-#278 mergeate in `main`; #117 browser draft separata |
+| HEAD codice verificato | `main` aggiornato a #278 (`df7d7a04`) |
 
 ## Dove siamo
 
@@ -44,6 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
+- Estrazione locale `gateway_prompt_instructions`: i contratti prompt statici
+  per connected-service tools e servizi collegati scaduti escono dal setup
+  inline di `stream_chat_via_openai`; `main.rs` conserva solo le decisioni
+  runtime `has_composio` e lista `catalog.inactive`, mentre schema tool,
+  capability discovery, confirmation card, Composio/MCP runtime e loop agente
+  restano owner separati.
 - Estrazione mergeata `gateway_prompt_instructions`: i contratti prompt statici
   del core operating prompt dell'orchestratore escono dal setup inline di
   `stream_chat_via_openai`; `main.rs` conserva solo i valori runtime
