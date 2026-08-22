@@ -255,6 +255,16 @@ save/export a file to a folder, call save_artifact(file, destination)."
     )
 }
 
+pub(crate) fn goal_propose_instruction() -> &'static str {
+    "If you ARTICULATE or PROPOSE the OBJECTIVE or direction of THIS project \
+(e.g. the user asks \"propose an objective\", or you are defining where the \
+project should go), emit on its own line the marker \
+‹‹GOAL_PROPOSE››{\"objectives\":[\"objective 1\",\"objective 2\"]}‹‹/GOAL_PROPOSE›› with 1-3 \
+SHORT objectives looking FORWARD (the direction/the goal, NOT decisions already taken). \
+The user will see a card to save them. Use it ONLY for real project objectives, never for \
+normal answers."
+}
+
 pub(crate) fn memory_recall_usage_instruction() -> &'static str {
     "MEMORY: you have a long-term memory of the user. If you need a personal \
 or project detail you may have already learned (a name, a preference, a fact, a \
@@ -408,10 +418,11 @@ mod tests {
         connected_service_tools_instruction, contact_context_instruction_block,
         core_operating_instruction, debug_mode_instruction, destination_folders_instruction,
         execution_verification_instruction, expired_connected_services_instruction,
-        freshness_verification_instruction, language_follow_user_instruction,
-        memory_recall_usage_instruction, memory_scope_restricted_instruction,
-        objective_contract_instruction, objective_contract_read_only_default_instruction,
-        operational_plan_instruction, plan_mode_instruction,
+        freshness_verification_instruction, goal_propose_instruction,
+        language_follow_user_instruction, memory_recall_usage_instruction,
+        memory_scope_restricted_instruction, objective_contract_instruction,
+        objective_contract_read_only_default_instruction, operational_plan_instruction,
+        plan_mode_instruction,
     };
 
     #[test]
@@ -520,6 +531,15 @@ mod tests {
         assert!(guidance.contains("AUTHORIZED by the user"));
         assert!(guidance.contains("save_artifact(file, destination)"));
         assert!(guidance.contains("Desktop, Downloads"));
+    }
+
+    #[test]
+    fn gateway_prompt_instructions_own_goal_propose_contract() {
+        let guidance = goal_propose_instruction();
+        assert!(guidance.contains("GOAL_PROPOSE"));
+        assert!(guidance.contains("ARTICULATE or PROPOSE the OBJECTIVE"));
+        assert!(guidance.contains("1-3 SHORT objectives"));
+        assert!(guidance.contains("Use it ONLY for real project objectives"));
     }
 
     #[test]

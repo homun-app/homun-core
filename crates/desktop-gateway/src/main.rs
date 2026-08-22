@@ -572,7 +572,7 @@ use gateway_prompt_instructions::{
     contact_context_instruction_block, core_operating_instruction, debug_mode_instruction,
     destination_folders_instruction, execution_verification_instruction,
     expired_connected_services_instruction, freshness_verification_instruction,
-    language_follow_user_instruction, memory_recall_usage_instruction,
+    goal_propose_instruction, language_follow_user_instruction, memory_recall_usage_instruction,
     memory_scope_restricted_instruction, objective_contract_instruction,
     objective_contract_read_only_default_instruction, operational_plan_instruction,
     plan_mode_instruction,
@@ -1957,15 +1957,7 @@ async fn stream_chat_via_openai(
         let system = {
             let ws = gateway_memory_workspace_id();
             if ws.as_str() != PERSONAL_WORKSPACE && ws.as_str() != THREADS_WORKSPACE {
-                format!(
-                    "{system}\n\nIf you ARTICULATE or PROPOSE the OBJECTIVE or direction of THIS project \
-(e.g. the user asks \"propose an objective\", or you are defining where the \
-project should go), emit on its own line the marker \
-‹‹GOAL_PROPOSE››{{\"objectives\":[\"objective 1\",\"objective 2\"]}}‹‹/GOAL_PROPOSE›› with 1-3 \
-SHORT objectives looking FORWARD (the direction/the goal, NOT decisions already taken). \
-The user will see a card to save them. Use it ONLY for real project objectives, never for \
-normal answers."
-                )
+                format!("{system}\n\n{}", goal_propose_instruction())
             } else {
                 system
             }
