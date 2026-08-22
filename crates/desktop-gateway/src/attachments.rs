@@ -10,7 +10,7 @@
 use std::io::Read;
 use std::path::Path;
 
-use crate::chat_store;
+use crate::{AppState, chat_store, lock_store};
 use base64::Engine;
 use image::ImageEncoder;
 use local_first_desktop_gateway::AttachmentInput;
@@ -95,6 +95,63 @@ pub fn ingest_attachments(attachments: &[AttachmentInput]) -> IngestedAttachment
         out.images.extend(file.images);
     }
     out
+}
+
+pub(crate) struct ChatAttachmentWorkingSetInput<'a> {
+    pub(crate) state: &'a AppState,
+    pub(crate) thread_id: Option<&'a str>,
+    pub(crate) attachments: &'a [AttachmentInput],
+    pub(crate) applies_new_input: bool,
+}
+
+pub(crate) struct ChatAttachmentWorkingSet {
+    pub(crate) new_files: Vec<IngestedFile>,
+    pub(crate) working: Vec<chat_store::StoredAttachment>,
+}
+
+/// Ingests this turn's newly attached files, persists them on the thread when
+/// possible, then returns the working set that should be visible to the model.
+pub(crate) async fn prepare_chat_attachment_working_set(
+    input: ChatAttachmentWorkingSetInput<'_>,
+) -> ChatAttachmentWorkingSet {
+    let new_files = if !input.applies_new_input || input.attachments.is_empty() {
+        Vec::new()
+    } else {
+        let atts = input.attachments.to_vec();
+        tokio::task::spawn_blocking(move || ingest_each(&atts))
+            .await
+            .unwrap_or_default()
+    };
+
+    let mut working: Vec<chat_store::StoredAttachment> = Vec::new();
+    if input.applies_new_input
+        && let Some(thread_id) = input.thread_id
+        && let Ok(store) = lock_store(input.state)
+    {
+        for file in &new_files {
+            let _ = store.upsert_thread_attachment(
+                thread_id,
+                &file.display_name,
+                &file.mime_type,
+                file.text.as_deref(),
+                &file.images,
+            );
+        }
+        working = store.thread_attachments(thread_id).unwrap_or_default();
+    }
+
+    for file in &new_files {
+        if !working.iter().any(|w| w.display_name == file.display_name) {
+            working.push(chat_store::StoredAttachment {
+                display_name: file.display_name.clone(),
+                mime_type: file.mime_type.clone(),
+                text: file.text.clone(),
+                images: file.images.clone(),
+            });
+        }
+    }
+
+    ChatAttachmentWorkingSet { new_files, working }
 }
 
 /// Max chars of attachment text re-injected per turn (across all stored files).
@@ -841,6 +898,39 @@ mod tests {
             zip.write_all(xml.as_bytes()).unwrap();
         }
         zip.finish().unwrap();
+    }
+
+    #[tokio::test]
+    async fn chat_attachment_working_set_keeps_new_files_without_thread() {
+        let dir = std::env::temp_dir().join(format!(
+            "lfpa-working-set-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("note.txt");
+        std::fs::write(&path, "fresh text").unwrap();
+        let state = crate::AppState::for_tests();
+
+        let out = prepare_chat_attachment_working_set(ChatAttachmentWorkingSetInput {
+            state: &state,
+            thread_id: None,
+            attachments: &[AttachmentInput {
+                local_path: path.to_string_lossy().to_string(),
+                display_name: "note.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                size_bytes: 10,
+            }],
+            applies_new_input: true,
+        })
+        .await;
+
+        assert_eq!(out.new_files.len(), 1);
+        assert_eq!(out.working.len(), 1);
+        assert_eq!(out.working[0].display_name, "note.txt");
+        assert_eq!(out.working[0].text.as_deref(), Some("fresh text"));
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
