@@ -247,6 +247,14 @@ calendar events.",
     block
 }
 
+pub(crate) fn destination_folders_instruction(labels: &str) -> String {
+    format!(
+        "DESTINATION FOLDERS: you can deliver generated files to these folders \
+AUTHORIZED by the user with the `save_artifact` tool: {labels}. When the user asks to \
+save/export a file to a folder, call save_artifact(file, destination)."
+    )
+}
+
 pub(crate) fn memory_recall_usage_instruction() -> &'static str {
     "MEMORY: you have a long-term memory of the user. If you need a personal \
 or project detail you may have already learned (a name, a preference, a fact, a \
@@ -398,12 +406,12 @@ mod tests {
         browser_open_research_discovery_instruction, choice_clarify_instruction,
         choice_resume_instruction_legacy_backup, code_map_available_instruction,
         connected_service_tools_instruction, contact_context_instruction_block,
-        core_operating_instruction, debug_mode_instruction, execution_verification_instruction,
-        expired_connected_services_instruction, freshness_verification_instruction,
-        language_follow_user_instruction, memory_recall_usage_instruction,
-        memory_scope_restricted_instruction, objective_contract_instruction,
-        objective_contract_read_only_default_instruction, operational_plan_instruction,
-        plan_mode_instruction,
+        core_operating_instruction, debug_mode_instruction, destination_folders_instruction,
+        execution_verification_instruction, expired_connected_services_instruction,
+        freshness_verification_instruction, language_follow_user_instruction,
+        memory_recall_usage_instruction, memory_scope_restricted_instruction,
+        objective_contract_instruction, objective_contract_read_only_default_instruction,
+        operational_plan_instruction, plan_mode_instruction,
     };
 
     #[test]
@@ -503,6 +511,15 @@ mod tests {
         assert!(!minimal.contains("PERSONA INSTRUCTIONS"));
         assert!(!minimal.contains("KNOWN RELATIONSHIPS"));
         assert!(!minimal.contains("[PRIVACY]"));
+    }
+
+    #[test]
+    fn gateway_prompt_instructions_own_destination_folders_contract() {
+        let guidance = destination_folders_instruction("Desktop, Downloads");
+        assert!(guidance.contains("DESTINATION FOLDERS"));
+        assert!(guidance.contains("AUTHORIZED by the user"));
+        assert!(guidance.contains("save_artifact(file, destination)"));
+        assert!(guidance.contains("Desktop, Downloads"));
     }
 
     #[test]
