@@ -787,6 +787,28 @@ fn code_map_prompt_instruction_has_one_gateway_owner() {
 }
 
 #[test]
+fn code_map_presence_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_context = production_source(&root.join("src/gateway_memory_prompt_context.rs"));
+
+    assert!(
+        prompt_context.contains("fn project_has_code_map("),
+        "code-map presence read-model must live with memory prompt context helpers"
+    );
+    assert!(
+        main.contains("let has_code_map ="),
+        "main.rs still owns the scoped runtime decision to append the code-map instruction"
+    );
+    assert!(
+        !main.contains(
+            "list_entities_for_ui(&gateway_memory_user_id(), &gateway_memory_workspace_id())"
+        ),
+        "main.rs must not query memory entities directly to detect code-map presence"
+    );
+}
+
+#[test]
 fn execution_verification_prompt_instruction_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

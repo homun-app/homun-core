@@ -109,6 +109,18 @@ do NOT recreate them, EXTEND/reuse the right ones; use query_code_graph for deta
     Some(block)
 }
 
+pub(crate) fn project_has_code_map(state: &AppState) -> bool {
+    memory_facade(state)
+        .list_entities_for_ui(&gateway_memory_user_id(), &gateway_memory_workspace_id())
+        .ok()
+        .map(|entities| {
+            entities
+                .iter()
+                .any(|entity| entity.entity_type.starts_with("code_"))
+        })
+        .unwrap_or(false)
+}
+
 pub(crate) fn artifact_quality_summary(metadata: &serde_json::Value) -> Option<String> {
     let status = metadata
         .get("quality_status")

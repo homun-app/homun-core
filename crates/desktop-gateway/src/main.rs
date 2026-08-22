@@ -246,8 +246,8 @@ use gateway_memory_dedup::{
 pub(crate) use gateway_memory_learning::{consolidate_scope, learn_via_service_or_inline};
 pub(crate) use gateway_memory_prompt_context::decisions_for_path;
 use gateway_memory_prompt_context::{
-    artifact_provenance_context_for_query, relevant_code_components_for_prompt,
-    workflow_status_context_for_query,
+    artifact_provenance_context_for_query, project_has_code_map,
+    relevant_code_components_for_prompt, workflow_status_context_for_query,
 };
 #[cfg(test)]
 use gateway_memory_query_embeddings::memory_recall_timing_trace_line;
@@ -1632,15 +1632,9 @@ async fn stream_chat_via_openai(
     // and grep is the correct fallback). Cheap count on the already-scoped workspace.
     let has_code_map = {
         let st = state.clone();
-        tokio::task::spawn_blocking(move || {
-            memory_facade(&st)
-                .list_entities_for_ui(&gateway_memory_user_id(), &gateway_memory_workspace_id())
-                .ok()
-                .map(|ents| ents.iter().any(|e| e.entity_type.starts_with("code_")))
-                .unwrap_or(false)
-        })
-        .await
-        .unwrap_or(false)
+        tokio::task::spawn_blocking(move || project_has_code_map(&st))
+            .await
+            .unwrap_or(false)
     };
     let system = if has_code_map {
         format!("{system}\n\n{}", code_map_available_instruction())
