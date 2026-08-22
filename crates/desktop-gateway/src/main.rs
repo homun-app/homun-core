@@ -2206,29 +2206,17 @@ async fn stream_chat_via_openai(
     // Thread this chat belongs to: lets browser work reuse a persistent
     // per-thread browser session (search → then book on the same tab).
     let thread_id = request.thread_id.clone();
-    let automation_user_id = gateway_user_id();
-    let automation_workspace_id = thread_id
-        .as_deref()
-        .and_then(|tid| {
-            lock_store(state)
-                .ok()
-                .and_then(|store| store.workspace_for_thread(tid).ok())
-        })
-        .map(WorkspaceId::new)
-        .unwrap_or_else(gateway_workspace_id);
-    // Raw user message captured for post-turn memory extraction (M2).
-    let memory_user_message = if applies_new_input {
-        request.prompt.clone()
-    } else {
-        String::new()
-    };
-    // The assistant's most recent prior turn (the question a short "sì" would answer),
-    // so the extractor can ground a confirmation into the fact it commits.
-    let memory_prev_assistant = effective_context
-        .iter()
-        .rev()
-        .find(|m| matches!(m.role, ChatContextRole::Assistant))
-        .map(|m| m.text.clone());
+    let tail_context = prepare_agent_turn_tail_context(
+        state,
+        thread_id.as_deref(),
+        &request.prompt,
+        &effective_context,
+        applies_new_input,
+    );
+    let automation_user_id = tail_context.user_id;
+    let automation_workspace_id = tail_context.workspace_id;
+    let memory_user_message = tail_context.user_message;
+    let memory_prev_assistant = tail_context.previous_assistant;
     let chat_plan_resume = prepare_chat_plan_resume(ChatPlanResumeInput {
         state,
         thread_id: thread_id.as_deref(),

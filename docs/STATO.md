@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (post-merge chat stream HTTP client owner).**
+> **Ultimo aggiornamento: 2026-08-22 (chat turn tail input owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#300 mergeate in `main`; #301 in verifica su `fabio/chat-stream-http-client-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #300 (`ba1b0d78`); #301 verificata localmente prima del merge |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#301 mergeate in `main`; #302 in verifica su `fabio/chat-turn-tail-input-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #301 (`f4f6fb99`); #302 verificata localmente prima del merge |
 
 ## Dove siamo
 
@@ -44,6 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
+- Estrazione locale `gateway_agent_turn_tail`: la preparazione degli input della
+  coda post-loop (`prepare_agent_turn_tail_context`: user/workspace fence,
+  messaggio utente per memory learn e assistant precedente) esce dal setup
+  inline di `stream_chat_via_openai`; `main.rs` consuma solo il contesto
+  proiettato, mentre stream setup, loop agente, piano, browser e subagent
+  restano owner separati.
 - Estrazione mergeata `gateway_chat_streams`: la costruzione del client HTTP
   dedicato allo streaming (`chat_streaming_http_client`) esce dal setup inline
   di `stream_chat_via_openai`; `main.rs` consuma solo il client, mentre policy
@@ -429,10 +435,10 @@ Slice Runtime V2 recenti:
   risposta anticipata Vault proposal escono dal monolite `main.rs`; transport
   stream, checkpoint, loop agente e browser restano owner separati.
 - Estrazione locale `gateway_agent_turn_tail`: coda post-loop del turno agente
-  (HITL legacy projection, trace finale, memory learn, refresh code graph,
-  steering fence, publish outcome e cleanup stream) esce dal monolite
-  `main.rs`; stream setup, loop agente, browser e subagent restano owner
-  separati.
+  (preparazione input tail, HITL legacy projection, trace finale, memory learn,
+  refresh code graph, steering fence, publish outcome e cleanup stream) esce dal
+  monolite `main.rs`; stream setup, loop agente, browser e subagent restano
+  owner separati.
 - Estrazione locale `gateway_chat_turn_context`: setup stateful pre-prompt del
   turno chat (workspace memoria del thread, contesto contact/channel e
   real-idle activity) esce dal monolite `main.rs`; prompt, stream, loop agente,

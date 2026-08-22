@@ -25,6 +25,32 @@ pub(crate) struct AgentTurnTailInput<'a> {
     pub(crate) turn_trace: &'a local_first_engine::turn_trace::TurnTrace,
 }
 
+pub(crate) struct AgentTurnTailContext {
+    pub(crate) user_id: UserId,
+    pub(crate) workspace_id: WorkspaceId,
+    pub(crate) user_message: String,
+    pub(crate) previous_assistant: Option<String>,
+}
+
+pub(crate) fn prepare_agent_turn_tail_context(
+    state: &AppState,
+    thread_id: Option<&str>,
+    prompt: &str,
+    effective_context: &[ChatContextMessage],
+    applies_new_input: bool,
+) -> AgentTurnTailContext {
+    AgentTurnTailContext {
+        user_id: gateway_user_id(),
+        workspace_id: tail_workspace_id_for_thread(state, thread_id),
+        user_message: if applies_new_input {
+            prompt.to_string()
+        } else {
+            String::new()
+        },
+        previous_assistant: previous_assistant_message(effective_context),
+    }
+}
+
 pub(crate) async fn complete_agent_turn_tail(input: AgentTurnTailInput<'_>) {
     let AgentTurnTailInput {
         state,
@@ -110,6 +136,25 @@ pub(crate) async fn complete_agent_turn_tail(input: AgentTurnTailInput<'_>) {
     schedule_stream_registry_cleanup(resume_id);
 }
 
+fn tail_workspace_id_for_thread(state: &AppState, thread_id: Option<&str>) -> WorkspaceId {
+    thread_id
+        .and_then(|thread_id| {
+            lock_store(state)
+                .ok()
+                .and_then(|store| store.workspace_for_thread(thread_id).ok())
+        })
+        .map(WorkspaceId::new)
+        .unwrap_or_else(gateway_workspace_id)
+}
+
+fn previous_assistant_message(effective_context: &[ChatContextMessage]) -> Option<String> {
+    effective_context
+        .iter()
+        .rev()
+        .find(|message| matches!(message.role, ChatContextRole::Assistant))
+        .map(|message| message.text.clone())
+}
+
 fn record_agent_turn_end_trace(
     turn_trace: &local_first_engine::turn_trace::TurnTrace,
     outcome: &local_first_engine::TurnOutcome,
@@ -133,4 +178,33 @@ fn record_agent_turn_end_trace(
         signals,
         derived,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::previous_assistant_message;
+    use local_first_desktop_gateway::{ChatContextMessage, ChatContextRole};
+
+    #[test]
+    fn previous_assistant_message_uses_latest_assistant_turn() {
+        let context = vec![
+            ChatContextMessage {
+                role: ChatContextRole::Assistant,
+                text: "old answer".to_string(),
+            },
+            ChatContextMessage {
+                role: ChatContextRole::User,
+                text: "follow up".to_string(),
+            },
+            ChatContextMessage {
+                role: ChatContextRole::Assistant,
+                text: "latest answer".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            previous_assistant_message(&context).as_deref(),
+            Some("latest answer")
+        );
+    }
 }

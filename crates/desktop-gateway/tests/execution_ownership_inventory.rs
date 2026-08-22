@@ -3192,6 +3192,8 @@ fn agent_turn_tail_has_one_gateway_owner() {
     for pattern in [
         "pub(crate) async fn complete_agent_turn_tail(",
         "struct AgentTurnTailInput",
+        "struct AgentTurnTailContext",
+        "pub(crate) fn prepare_agent_turn_tail_context(",
         "memory_reuse_envelope_from_read_set(",
         "spawn_project_graph_refresh(",
         "finalize_turn_steering(",
@@ -3206,6 +3208,9 @@ fn agent_turn_tail_has_one_gateway_owner() {
 
     for pattern in [
         "let learn_envelope = memory_reuse_envelope_from_read_set(",
+        "let automation_workspace_id = thread_id\n        .as_deref()",
+        "let memory_user_message = if applies_new_input",
+        "let memory_prev_assistant = effective_context",
         "spawn_project_graph_refresh(&tail_state, &ws);",
         "finalize_turn_steering(\n            &tail_state,",
         "publish_stream_outcome(&tx.entry, outcome);",
