@@ -4187,13 +4187,18 @@ def main() -> int:
     )
     assert_contains(
         model_client_source,
-        "impl<'a> GatewayModelClient<'a> {\n    pub(crate) fn new(",
-        "model client owner must expose gateway model client constructor impl",
+        "pub(crate) fn gateway_model_client<'a>(",
+        "model client owner must expose gateway model client factory",
     )
     assert_not_contains(
         source,
         "let model_client = crate::model_client::GatewayModelClient {",
         "gateway root must not construct GatewayModelClient inline",
+    )
+    assert_not_contains(
+        source,
+        "crate::model_client::GatewayModelClient::new(",
+        "gateway root must not call GatewayModelClient constructor directly",
     )
     assert_not_contains(
         source,
@@ -4222,8 +4227,8 @@ def main() -> int:
     )
     assert_contains(
         tool_execution_source,
-        "pub(crate) fn new(input: GatewayCapabilityExecutorInput<'a>) -> Self",
-        "tool execution owner must construct gateway capability executor",
+        "pub(crate) fn gateway_capability_executor<'a>(",
+        "tool execution owner must expose gateway capability executor factory",
     )
     assert_not_contains(
         source,
@@ -4234,6 +4239,11 @@ def main() -> int:
         source,
         "let capability_executor = GatewayCapabilityExecutor {",
         "gateway root must not construct GatewayCapabilityExecutor inline",
+    )
+    assert_not_contains(
+        source,
+        "GatewayCapabilityExecutor::new(",
+        "gateway root must not call GatewayCapabilityExecutor constructor directly",
     )
     assert_contains(
         composio_routes_source,
