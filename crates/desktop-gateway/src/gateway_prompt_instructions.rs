@@ -203,6 +203,50 @@ with only the slug of the affected service (e.g. gmail): the interface will show
     )
 }
 
+pub(crate) fn contact_context_instruction_block(
+    name: &str,
+    tone_of_voice: &str,
+    persona_instructions: &str,
+    relationships: &[String],
+    can_see_contacts: bool,
+    can_see_calendar: bool,
+) -> String {
+    let mut block = format!(
+        "REPLYING TO A CONTACT VIA CHANNEL: you are replying to {} on a \
+messaging channel, on behalf of the user. Chat style: natural and concise.",
+        name
+    );
+    if !tone_of_voice.trim().is_empty() {
+        block.push_str(&format!(" REQUESTED TONE: {}.", tone_of_voice.trim()));
+    }
+    if !persona_instructions.trim().is_empty() {
+        block.push_str(&format!(
+            "\nPERSONA INSTRUCTIONS (always follow them): {}",
+            persona_instructions.trim()
+        ));
+    }
+    if !relationships.is_empty() {
+        block.push_str(&format!(
+            "\nKNOWN RELATIONSHIPS of {}: {}.",
+            name,
+            relationships.join("; ")
+        ));
+    }
+    if !can_see_contacts {
+        block.push_str(
+            "\n[PRIVACY] NEVER mention other contacts, people or relationships \
+of the user: with this person you know ONLY them.",
+        );
+    }
+    if !can_see_calendar {
+        block.push_str(
+            "\n[PRIVACY] NEVER mention the user's commitments, appointments or \
+calendar events.",
+        );
+    }
+    block
+}
+
 pub(crate) fn memory_recall_usage_instruction() -> &'static str {
     "MEMORY: you have a long-term memory of the user. If you need a personal \
 or project detail you may have already learned (a name, a preference, a fact, a \
@@ -353,12 +397,13 @@ mod tests {
         ask_mode_instruction, booking_assumption_choice_instruction,
         browser_open_research_discovery_instruction, choice_clarify_instruction,
         choice_resume_instruction_legacy_backup, code_map_available_instruction,
-        connected_service_tools_instruction, core_operating_instruction, debug_mode_instruction,
-        execution_verification_instruction, expired_connected_services_instruction,
-        freshness_verification_instruction, language_follow_user_instruction,
-        memory_recall_usage_instruction, memory_scope_restricted_instruction,
-        objective_contract_instruction, objective_contract_read_only_default_instruction,
-        operational_plan_instruction, plan_mode_instruction,
+        connected_service_tools_instruction, contact_context_instruction_block,
+        core_operating_instruction, debug_mode_instruction, execution_verification_instruction,
+        expired_connected_services_instruction, freshness_verification_instruction,
+        language_follow_user_instruction, memory_recall_usage_instruction,
+        memory_scope_restricted_instruction, objective_contract_instruction,
+        objective_contract_read_only_default_instruction, operational_plan_instruction,
+        plan_mode_instruction,
     };
 
     #[test]
@@ -427,6 +472,37 @@ mod tests {
         assert!(expired.contains("gmail, google_calendar"));
         assert!(expired.contains("‹‹COMPOSIO_RECONNECT››"));
         assert!(expired.contains("Reconnect"));
+    }
+
+    #[test]
+    fn gateway_prompt_instructions_own_contact_context_contract() {
+        let guidance = contact_context_instruction_block(
+            "Giulia",
+            "caldo e sintetico",
+            "Scrivi come Fabio, senza formalismi.",
+            &[
+                "collega progetto Atlas".to_string(),
+                "conosce Marco".to_string(),
+            ],
+            false,
+            false,
+        );
+        assert!(guidance.contains("REPLYING TO A CONTACT VIA CHANNEL"));
+        assert!(guidance.contains("replying to Giulia"));
+        assert!(guidance.contains("REQUESTED TONE: caldo e sintetico."));
+        assert!(guidance.contains("PERSONA INSTRUCTIONS (always follow them)"));
+        assert!(guidance.contains("Scrivi come Fabio, senza formalismi."));
+        assert!(guidance.contains("KNOWN RELATIONSHIPS of Giulia"));
+        assert!(guidance.contains("collega progetto Atlas; conosce Marco"));
+        assert!(guidance.contains("[PRIVACY] NEVER mention other contacts"));
+        assert!(guidance.contains("[PRIVACY] NEVER mention the user's commitments"));
+
+        let minimal = contact_context_instruction_block("Luca", "  ", "  ", &[], true, true);
+        assert!(minimal.contains("replying to Luca"));
+        assert!(!minimal.contains("REQUESTED TONE"));
+        assert!(!minimal.contains("PERSONA INSTRUCTIONS"));
+        assert!(!minimal.contains("KNOWN RELATIONSHIPS"));
+        assert!(!minimal.contains("[PRIVACY]"));
     }
 
     #[test]
