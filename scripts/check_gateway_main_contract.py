@@ -2137,6 +2137,8 @@ def main() -> int:
         "pub(crate) fn context_message_for_model(",
         "pub(crate) fn thread_context_for_model(",
         "pub(crate) fn effective_prompt_context_for_model(",
+        "pub(crate) fn model_context_window_for_turn(",
+        "fn model_context_window_from_tokens(",
         "pub(crate) struct ChatModelPromptInput",
         "pub(crate) fn prepare_chat_model_prompt(",
         "fn chat_model_prompt_from_effective_context(",
@@ -2151,6 +2153,7 @@ def main() -> int:
         "match request.thread_id.as_deref()",
         "thread_context_for_model(state, thread_id, &[], Some(request.prompt.as_str()))",
         "None => request.context.clone()",
+        "registry_model_capabilities(&base_url, &model)\n        .and_then(|caps| caps.context_length)",
         "build_chat_runtime_prompt(&BuildPromptRequest",
         "local_first_desktop_gateway::render_checkpoint_input",
     ]:
@@ -2163,6 +2166,11 @@ def main() -> int:
         source,
         "prepare_chat_model_prompt(ChatModelPromptInput",
         "gateway root should delegate chat model prompt setup",
+    )
+    assert_contains(
+        source,
+        "model_context_window_for_turn(&base_url, &model)",
+        "gateway root should delegate model context-window resolution",
     )
     for snippet in [
         "fn finalize_streamed_assistant_message(",

@@ -83,6 +83,16 @@ pub(crate) fn effective_prompt_context_for_model(
     }
 }
 
+pub(crate) fn model_context_window_for_turn(base_url: &str, model: &str) -> Option<usize> {
+    model_context_window_from_tokens(
+        registry_model_capabilities(base_url, model).and_then(|caps| caps.context_length),
+    )
+}
+
+fn model_context_window_from_tokens(tokens: Option<u64>) -> Option<usize> {
+    tokens.map(|tokens| usize::try_from(tokens).unwrap_or(usize::MAX))
+}
+
 pub(crate) struct ChatModelPromptInput<'a> {
     pub(crate) state: &'a AppState,
     pub(crate) thread_id: Option<&'a str>,
@@ -184,5 +194,14 @@ mod tests {
 
         assert!(prompt.contains("fresh user prompt"));
         assert!(prompt.contains("prior assistant context"));
+    }
+
+    #[test]
+    fn model_context_window_maps_missing_and_present_catalog_lengths() {
+        assert_eq!(model_context_window_from_tokens(None), None);
+        assert_eq!(
+            model_context_window_from_tokens(Some(128_000)),
+            Some(128_000)
+        );
     }
 }

@@ -253,6 +253,8 @@ fn thread_model_context_has_one_gateway_owner() {
         "fn context_message_for_model(",
         "fn thread_context_for_model(",
         "fn effective_prompt_context_for_model(",
+        "pub(crate) fn model_context_window_for_turn(",
+        "fn model_context_window_from_tokens(",
         "pub(crate) struct ChatModelPromptInput",
         "pub(crate) fn prepare_chat_model_prompt(",
         "fn chat_model_prompt_from_effective_context(",
@@ -272,6 +274,7 @@ fn thread_model_context_has_one_gateway_owner() {
         "match request.thread_id.as_deref()",
         "thread_context_for_model(state, thread_id, &[], Some(request.prompt.as_str()))",
         "None => request.context.clone()",
+        "registry_model_capabilities(&base_url, &model)\n        .and_then(|caps| caps.context_length)",
         "build_chat_runtime_prompt(&BuildPromptRequest",
         "local_first_desktop_gateway::render_checkpoint_input",
     ] {
@@ -283,6 +286,10 @@ fn thread_model_context_has_one_gateway_owner() {
     assert!(
         main.contains("prepare_chat_model_prompt(ChatModelPromptInput"),
         "main.rs should delegate chat model prompt setup to the thread context owner"
+    );
+    assert!(
+        main.contains("model_context_window_for_turn(&base_url, &model)"),
+        "main.rs should delegate model context-window resolution to the thread context owner"
     );
 
     for adjacent in [
