@@ -2608,31 +2608,13 @@ async fn run_agent_rounds(
         // The model can't read the image and we have nobody to read it for us. The turn emitted
         // nothing, so this is its answer — the one case where the provider's refusal is the honest
         // thing to show.
-        let _ = emit_stream_event(
-            tx,
-            GenerateStreamEvent::Done {
-                text: rejection.clone(),
-                metrics: TokenMetrics::zero(),
-                redacted_user_text: None,
-            },
-        )
-        .await;
-        return gateway_agent_turn_outcomes::delivered_image_rejection_outcome(outcome, rejection);
+        return gateway_agent_turn_outcomes::deliver_image_rejection(tx, outcome, rejection).await;
     };
 
     let readers = vision_model_candidates();
     if readers.is_empty() {
         // Armed at seed time but gone now (the role was cleared mid-turn) — same dead end.
-        let _ = emit_stream_event(
-            tx,
-            GenerateStreamEvent::Done {
-                text: rejection.clone(),
-                metrics: TokenMetrics::zero(),
-                redacted_user_text: None,
-            },
-        )
-        .await;
-        return gateway_agent_turn_outcomes::delivered_image_rejection_outcome(outcome, rejection);
+        return gateway_agent_turn_outcomes::deliver_image_rejection(tx, outcome, rejection).await;
     }
 
     // Recover: describe the images the manager was refused, put the text where they were, run again.
