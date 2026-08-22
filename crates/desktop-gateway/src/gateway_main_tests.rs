@@ -189,6 +189,36 @@ fn delivered_image_rejection_marks_outcome_delivered() {
     );
 }
 
+#[tokio::test]
+async fn deliver_image_rejection_emits_done_and_marks_outcome_delivered() {
+    let transport = super::open_chat_stream_transport("image-rejection-test".to_string(), None);
+    let entry = transport.sink.entry.clone();
+    let mut receiver = transport.receiver;
+    let outcome = super::gateway_agent_turn_outcomes::deliver_image_rejection(
+        &transport.sink,
+        local_first_engine::TurnOutcome::default(),
+        "The selected model cannot inspect this image.".to_string(),
+    )
+    .await;
+    let line = receiver
+        .recv()
+        .await
+        .expect("done line is emitted")
+        .expect("done line is valid bytes");
+    let event: serde_json::Value = serde_json::from_slice(&line).expect("done line is valid json");
+
+    assert_eq!(outcome.stop, local_first_engine::TurnStop::Completed);
+    assert_eq!(
+        outcome.memory_answer,
+        "The selected model cannot inspect this image."
+    );
+    assert_eq!(
+        event.get("text").and_then(|value| value.as_str()),
+        Some("The selected model cannot inspect this image.")
+    );
+    assert!(entry.finished.load(std::sync::atomic::Ordering::Relaxed));
+}
+
 #[test]
 fn clawhub_origin_is_publisher_specific_and_legacy_compatible() {
     assert_eq!(

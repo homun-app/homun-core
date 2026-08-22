@@ -1,5 +1,7 @@
 //! Agent turn outcome/checkpoint helpers.
 
+use local_first_subagents::{GenerateStreamEvent, TokenMetrics};
+
 /// Apply a durable engine checkpoint and optionally append the new user input
 /// that caused the resume.
 pub(crate) fn apply_agent_recovery_checkpoint(
@@ -13,6 +15,24 @@ pub(crate) fn apply_agent_recovery_checkpoint(
             state.messages.push(new_input);
         }
     }
+}
+
+/// Surface a terminal image rejection and return the delivered turn outcome.
+pub(crate) async fn deliver_image_rejection(
+    tx: &crate::StreamSink,
+    outcome: local_first_engine::TurnOutcome,
+    rejection: String,
+) -> local_first_engine::TurnOutcome {
+    let _ = crate::emit_stream_event(
+        tx,
+        GenerateStreamEvent::Done {
+            text: rejection.clone(),
+            metrics: TokenMetrics::zero(),
+            redacted_user_text: None,
+        },
+    )
+    .await;
+    delivered_image_rejection_outcome(outcome, rejection)
 }
 
 /// Build the terminal outcome for an image rejection that has already been surfaced with `Done`.

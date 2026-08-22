@@ -3329,12 +3329,23 @@ def main() -> int:
     )
     for snippet in [
         "pub(crate) fn apply_agent_recovery_checkpoint(",
+        "pub(crate) async fn deliver_image_rejection(",
         "pub(crate) fn delivered_image_rejection_outcome(",
     ]:
         assert_contains(
             agent_turn_outcomes_source,
             snippet,
-            "agent turn outcome owner must expose pure outcome helpers",
+            "agent turn outcome owner must expose outcome helpers",
+        )
+    run_agent_rounds_source = source.split("async fn run_agent_rounds(", 1)[1]
+    for snippet in [
+        "GenerateStreamEvent::Done {\n                text: rejection.clone(),",
+        "metrics: TokenMetrics::zero(),",
+    ]:
+        assert_not_contains(
+            run_agent_rounds_source,
+            snippet,
+            "gateway root must delegate image rejection Done delivery to agent turn outcome owner",
         )
     for snippet in [
         "async fn stream_chat_via_openai(",

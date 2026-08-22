@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (agent turn core seam factories in verifica).**
+> **Ultimo aggiornamento: 2026-08-22 (agent turn image rejection delivery in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/agent-turn-core-seam-factories` |
-| Branch | `fabio/agent-turn-core-seam-factories` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#317 mergeate in `main`; slice core seam factories in verifica su `fabio/agent-turn-core-seam-factories`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #317 (`23cfff18`); slice core seam factories in verifica locale prima della PR |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/agent-turn-image-rejection-delivery` |
+| Branch | `fabio/agent-turn-image-rejection-delivery` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#318 mergeate in `main`; slice image rejection delivery in verifica su `fabio/agent-turn-image-rejection-delivery`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #318 (`4bbec44a`); slice image rejection delivery in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,11 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale core seam factory: la costruzione dei port engine
+- Estrazione locale `gateway_agent_turn_outcomes`: la consegna terminale della
+  image rejection (`deliver_image_rejection`: evento `Done` e outcome
+  completato) esce dai rami duplicati di `run_agent_rounds`; recovery post-loop,
+  loop agente, stream chat/fanout e browser execution restano owner separati.
+- Estrazione mergeata core seam factory: la costruzione dei port engine
   `GatewayModelClient` e `GatewayCapabilityExecutor` esce dai costruttori
   diretti in `run_agent_rounds` e passa ai factory dei rispettivi owner; i
   vecchi costruttori `new` non usati sono rimossi.
@@ -1320,9 +1324,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#317: slice owner-level successive mergeate in
-  `main`, fino a `agent turn non-browser seam factories`; `main` verificato e
-  riallineato a #317.
+- #143-#283, #285-#286, #288-#318: slice owner-level successive mergeate in
+  `main`, fino a `agent turn core seam factories`; `main` verificato e
+  riallineato a #318.
 
 PR aperte:
 
@@ -1330,8 +1334,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/agent-turn-core-seam-factories` in verifica locale da `main` #317
-  (`23cfff18`).
+- `fabio/agent-turn-image-rejection-delivery` in verifica locale da `main` #318
+  (`4bbec44a`).
 
 ## Debito residuo
 
@@ -1355,8 +1359,7 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice core seam factory di model/capability executor con gate
-   kernel verde, PR e merge.
+1. Chiudere la slice image rejection delivery con gate kernel verde, PR e merge.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -1364,10 +1367,10 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #317 (`23cfff18`); slice non-browser corrente
-`fabio/agent-turn-core-seam-factories` sposta i factory di `GatewayModelClient`
-e `GatewayCapabilityExecutor` fuori da `run_agent_rounds` e rimuove i
-costruttori legacy non usati.
+main aggiornato a #318 (`4bbec44a`); slice non-browser corrente
+`fabio/agent-turn-image-rejection-delivery` sposta la consegna terminale
+dell'image rejection (`Done` + outcome completato) fuori dai rami duplicati di
+`run_agent_rounds`.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

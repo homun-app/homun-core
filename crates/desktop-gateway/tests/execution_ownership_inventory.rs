@@ -578,6 +578,7 @@ fn agent_turn_outcomes_have_one_gateway_owner() {
 
     for pattern in [
         "fn apply_agent_recovery_checkpoint(",
+        "async fn deliver_image_rejection(",
         "fn delivered_image_rejection_outcome(",
     ] {
         assert!(
@@ -589,6 +590,20 @@ fn agent_turn_outcomes_have_one_gateway_owner() {
             "main.rs must not retain agent turn outcome surface {pattern}"
         );
     }
+
+    let run_agent_rounds = main
+        .split("async fn run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds");
+    assert!(
+        !run_agent_rounds
+            .contains("GenerateStreamEvent::Done {\n                text: rejection.clone(),"),
+        "run_agent_rounds must delegate image rejection Done delivery to gateway_agent_turn_outcomes"
+    );
+    assert!(
+        !run_agent_rounds.contains("metrics: TokenMetrics::zero(),"),
+        "run_agent_rounds must not own image rejection terminal metrics"
+    );
 
     for adjacent in [
         "async fn stream_chat_via_openai(",
