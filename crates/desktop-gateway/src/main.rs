@@ -1583,9 +1583,7 @@ async fn stream_chat_via_openai(
     // Budget the prompt against the model's REAL context window (catalog `context_window`,
     // auto-filled from `/api/show`, F0.3d) instead of a flat 32k default — so a 128k model
     // keeps its long history and a small local model is clamped to what it can actually read.
-    let model_context_window = registry_model_capabilities(&base_url, &model)
-        .and_then(|caps| caps.context_length)
-        .map(|tokens| usize::try_from(tokens).unwrap_or(usize::MAX));
+    let model_context_window = model_context_window_for_turn(&base_url, &model);
     let chat_model_prompt = prepare_chat_model_prompt(ChatModelPromptInput {
         state,
         thread_id: request.thread_id.as_deref(),
