@@ -3230,6 +3230,38 @@ fn contact_context_prompt_instructions_have_one_gateway_owner() {
 }
 
 #[test]
+fn contact_history_prompt_block_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let contacts = production_source(&root.join("src/gateway_contacts.rs"));
+
+    assert!(
+        contacts.contains("pub(crate) fn contact_history_prompt_block("),
+        "contact history prompt block must live with gateway_contacts handle memory helpers"
+    );
+    assert!(
+        !main.contains("fn contact_history_prompt_block("),
+        "main.rs must not retain contact history prompt block surface"
+    );
+
+    for pattern in [
+        "HISTORY WITH THIS CONTACT (the only memory available):",
+        "block.push_str(\"\\n- \");",
+        "episodes.iter().rev().take(40).rev()",
+    ] {
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain contact history prompt block text/building {pattern}"
+        );
+    }
+
+    assert!(
+        main.contains("episode_texts_by_handles("),
+        "main.rs still owns the runtime decision to fetch contact-only history"
+    );
+}
+
+#[test]
 fn chat_toolset_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

@@ -1836,20 +1836,9 @@ async fn stream_chat_via_openai(
             let user = gateway_memory_user_id();
             episode_texts_by_handles(facade, &user, &cx.handles)
         };
-        if episodes.is_empty() {
-            system
-        } else {
-            let mut block = String::from("HISTORY WITH THIS CONTACT (the only memory available):");
-            let mut used = 0usize;
-            for text in episodes.iter().rev().take(40).rev() {
-                if used + text.len() > CHAT_MEMORY_BUDGET_CHARS {
-                    break;
-                }
-                used += text.len();
-                block.push_str("\n- ");
-                block.push_str(text);
-            }
-            format!("{system}\n\n{block}")
+        match contact_history_prompt_block(&episodes) {
+            Some(block) => format!("{system}\n\n{block}"),
+            None => system,
         }
     } else if !memory_perimeter_allows_recall(
         contact_only,

@@ -8,6 +8,7 @@ use std::{
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 
+use crate::gateway_memory_briefing::CHAT_MEMORY_BUDGET_CHARS;
 use crate::*;
 
 #[derive(Serialize)]
@@ -110,6 +111,23 @@ pub(crate) fn episode_texts_by_handles(
         })
         .map(|m| m.text)
         .collect()
+}
+
+pub(crate) fn contact_history_prompt_block(episodes: &[String]) -> Option<String> {
+    if episodes.is_empty() {
+        return None;
+    }
+    let mut block = String::from("HISTORY WITH THIS CONTACT (the only memory available):");
+    let mut used = 0usize;
+    for text in episodes.iter().rev().take(40).rev() {
+        if used.saturating_add(text.len()) > CHAT_MEMORY_BUDGET_CHARS {
+            break;
+        }
+        used += text.len();
+        block.push_str("\n- ");
+        block.push_str(text);
+    }
+    Some(block)
 }
 
 /// Same, paired with each episode's ISO date (oldest first) for the fact extractor.
@@ -673,6 +691,22 @@ mod tests {
             contact_handles(&entity),
             vec!["whatsapp:456".to_string(), "telegram:123".to_string()]
         );
+    }
+
+    #[test]
+    fn gateway_contacts_owns_contact_history_prompt_block() {
+        assert!(contact_history_prompt_block(&[]).is_none());
+
+        let episodes = vec![
+            "old turn".to_string(),
+            "recent decision".to_string(),
+            "latest follow-up".to_string(),
+        ];
+        let block = contact_history_prompt_block(&episodes).expect("history block");
+
+        assert!(block.starts_with("HISTORY WITH THIS CONTACT"));
+        assert!(block.contains("the only memory available"));
+        assert!(block.contains("\n- old turn\n- recent decision\n- latest follow-up"));
     }
 
     #[test]
