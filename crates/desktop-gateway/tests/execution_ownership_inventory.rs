@@ -3150,6 +3150,60 @@ fn agent_turn_plan_seed_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_turn_tool_seed_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let tool_seed = production_source(&root.join("src/gateway_agent_turn_tool_seed.rs"));
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai")
+        .split("// Turn-local browser state now lives in the browser subsystem")
+        .next()
+        .expect("agent turn tool seed setup");
+
+    for pattern in [
+        "pub(crate) fn seed_agent_turn_tool_schemas(",
+        "loop_state.tool_schemas = base_tools",
+        "if mode == \"ask\"",
+        "loop_state.tool_schemas.clear()",
+        "apply_chat_tool_perimeter(ChatToolPerimeterInput",
+        "tool_schemas: &mut loop_state.tool_schemas",
+    ] {
+        assert!(
+            tool_seed.contains(pattern),
+            "agent turn tool seed owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "ls.tool_schemas = base_tools",
+        "if mode == \"ask\"",
+        "ls.tool_schemas.clear()",
+        "apply_chat_tool_perimeter(ChatToolPerimeterInput",
+        "tool_schemas: &mut ls.tool_schemas",
+    ] {
+        assert!(
+            !stream_chat.contains(pattern),
+            "main.rs must not own agent turn tool schema seeding {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !tool_seed.contains(adjacent),
+            "agent turn tool seed owner must not absorb adjacent stream/toolset/loop/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn chat_usage_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

@@ -106,6 +106,9 @@ AGENT_TURN_RECALL_SEED_RS = os.path.join(
 AGENT_TURN_PLAN_SEED_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_plan_seed.rs"
 )
+AGENT_TURN_TOOL_SEED_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_tool_seed.rs"
+)
 AGENT_TURN_TAIL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_tail.rs"
 )
@@ -1677,6 +1680,8 @@ def main() -> int:
         agent_turn_recall_seed_source = handle.read()
     with open(AGENT_TURN_PLAN_SEED_RS, "r", encoding="utf-8") as handle:
         agent_turn_plan_seed_source = handle.read()
+    with open(AGENT_TURN_TOOL_SEED_RS, "r", encoding="utf-8") as handle:
+        agent_turn_tool_seed_source = handle.read()
     with open(AGENT_TURN_TAIL_RS, "r", encoding="utf-8") as handle:
         agent_turn_tail_source = handle.read()
     with open(AGENT_CHECKPOINTS_RS, "r", encoding="utf-8") as handle:
@@ -2394,6 +2399,51 @@ def main() -> int:
             agent_turn_plan_seed_source,
             snippet,
             "agent turn plan seed owner must not absorb stream, loop, tail, browser, or subagent owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_turn_tool_seed;",
+        "gateway root must declare agent turn tool seed owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_turn_tool_seed::*;",
+        "gateway root must re-export agent turn tool seed owner",
+    )
+    for snippet in [
+        "pub(crate) fn seed_agent_turn_tool_schemas(",
+        "loop_state.tool_schemas = base_tools",
+        "if mode == \"ask\"",
+        "loop_state.tool_schemas.clear()",
+        "apply_chat_tool_perimeter(ChatToolPerimeterInput",
+        "tool_schemas: &mut loop_state.tool_schemas",
+    ]:
+        assert_contains(
+            agent_turn_tool_seed_source,
+            snippet,
+            "agent turn tool seed owner must own loop tool schema seeding",
+        )
+    for snippet in [
+        "ls.tool_schemas = base_tools",
+        "ls.tool_schemas.clear()",
+        "tool_schemas: &mut ls.tool_schemas",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain agent turn tool schema seeding",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            agent_turn_tool_seed_source,
+            snippet,
+            "agent turn tool seed owner must not absorb stream, toolset, loop, browser, or subagent owners",
         )
     for snippet in [
         "pub(crate) fn context_message_for_model(",

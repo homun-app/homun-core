@@ -38,6 +38,7 @@ mod gateway_agent_turn_route_trace;
 mod gateway_agent_turn_runner;
 mod gateway_agent_turn_sensitive;
 mod gateway_agent_turn_tail;
+mod gateway_agent_turn_tool_seed;
 mod gateway_agent_wake;
 mod gateway_artifact_memory;
 mod gateway_artifacts;
@@ -210,6 +211,7 @@ pub(crate) use gateway_agent_turn_route_trace::*;
 pub(crate) use gateway_agent_turn_runner::*;
 pub(crate) use gateway_agent_turn_sensitive::*;
 pub(crate) use gateway_agent_turn_tail::*;
+pub(crate) use gateway_agent_turn_tool_seed::*;
 pub(crate) use gateway_agent_wake::*;
 pub(crate) use gateway_artifacts::*;
 pub(crate) use gateway_automation_routes::*;
@@ -2284,15 +2286,7 @@ async fn stream_chat_via_openai(
         let browse_sources: Vec<String> = Vec::new();
         // Tools offered to the model this run: the base set, plus any tools the
         // model discovers via `find_connected_tools` (injected on demand).
-        ls.tool_schemas = base_tools;
-        // "Chiedi" mode: pure conversation — no tools, no actions.
-        if mode == "ask" {
-            ls.tool_schemas.clear();
-        }
-        apply_chat_tool_perimeter(ChatToolPerimeterInput {
-            contact: contact_ctx.as_ref(),
-            tool_schemas: &mut ls.tool_schemas,
-        });
+        seed_agent_turn_tool_schemas(&mut ls, base_tools, &mode, contact_ctx.as_ref());
         // Turn-local browser state now lives in the browser subsystem: the loop-visible fields
         // (browser_used / pending_browser_image / browser_tool_call_ids) travel in `LoopState`
         // (slice 5a), and the browser-private state (sidecar session, last snapshot, current tab /
