@@ -676,10 +676,9 @@ use local_first_desktop_gateway::project_graph_commit::{
     ProjectGraphCommitError, stage_project_graph_build,
 };
 use local_first_desktop_gateway::{
-    BuildPromptRequest, ChatContextMessage, ChatContextRole, ChatGenerateStreamRequest,
-    ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot, EnqueueTurnRequest,
-    RoutingBinding, SetThreadPinnedRequest, build_chat_runtime_prompt, compact_thread_title,
-    strip_display_markers,
+    ChatContextMessage, ChatContextRole, ChatGenerateStreamRequest, ChatMessage,
+    ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot, EnqueueTurnRequest, RoutingBinding,
+    SetThreadPinnedRequest, compact_thread_title, strip_display_markers,
 };
 pub(crate) use model_registry::{
     ProviderEntry, ProviderKind, ProviderRegistry, ResolvedRole, RoleBinding,
@@ -1587,24 +1586,16 @@ async fn stream_chat_via_openai(
     let model_context_window = registry_model_capabilities(&base_url, &model)
         .and_then(|caps| caps.context_length)
         .map(|tokens| usize::try_from(tokens).unwrap_or(usize::MAX));
-    let effective_context = effective_prompt_context_for_model(
+    let chat_model_prompt = prepare_chat_model_prompt(ChatModelPromptInput {
         state,
-        request.thread_id.as_deref(),
-        &request.context,
-        request.prompt.as_str(),
-    );
-    let prompt = request
-        .checkpoint_input
-        .as_ref()
-        .map(local_first_desktop_gateway::render_checkpoint_input)
-        .unwrap_or_else(|| {
-            build_chat_runtime_prompt(&BuildPromptRequest {
-                prompt: request.prompt.clone(),
-                context: effective_context.clone(),
-                max_context_chars: Some(chat_context_budget_chars(model_context_window)),
-            })
-            .runtime_prompt
-        });
+        thread_id: request.thread_id.as_deref(),
+        request_context: &request.context,
+        prompt: request.prompt.as_str(),
+        checkpoint_input: request.checkpoint_input.as_ref(),
+        model_context_window,
+    });
+    let effective_context = chat_model_prompt.effective_context;
+    let prompt = chat_model_prompt.prompt;
     let browser_discovery = browser_open_research_discovery_instruction();
     let booking_choices = booking_assumption_choice_instruction();
     // ResumeBinding: consume the per-turn stash set by semantic short-circuit (not

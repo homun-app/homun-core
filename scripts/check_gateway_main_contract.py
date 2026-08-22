@@ -1354,6 +1354,9 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn start_visible_conversation_turn(": "visible turn persistence must stay in gateway_visible_turns",
         "fn context_message_for_model(": "thread model context shaping must stay in gateway_thread_model_context",
         "fn thread_context_for_model(": "thread model context shaping must stay in gateway_thread_model_context",
+        "struct ChatModelPromptInput": "chat model prompt setup must stay in gateway_thread_model_context",
+        "fn prepare_chat_model_prompt(": "chat model prompt setup must stay in gateway_thread_model_context",
+        "fn chat_model_prompt_from_effective_context(": "chat model prompt setup must stay in gateway_thread_model_context",
         "fn agent_turn_context(": "thread model context shaping must stay in gateway_thread_model_context",
         "fn apply_agent_stream_line(": "agent stream parser must stay in gateway_agent_stream_events",
         "fn turn_event_from_stream_value(": "agent stream event mapping must stay in gateway_agent_stream_events",
@@ -2134,6 +2137,9 @@ def main() -> int:
         "pub(crate) fn context_message_for_model(",
         "pub(crate) fn thread_context_for_model(",
         "pub(crate) fn effective_prompt_context_for_model(",
+        "pub(crate) struct ChatModelPromptInput",
+        "pub(crate) fn prepare_chat_model_prompt(",
+        "fn chat_model_prompt_from_effective_context(",
         "pub(crate) fn agent_turn_context(",
     ]:
         assert_contains(
@@ -2145,12 +2151,19 @@ def main() -> int:
         "match request.thread_id.as_deref()",
         "thread_context_for_model(state, thread_id, &[], Some(request.prompt.as_str()))",
         "None => request.context.clone()",
+        "build_chat_runtime_prompt(&BuildPromptRequest",
+        "local_first_desktop_gateway::render_checkpoint_input",
     ]:
         assert_not_contains(
             source,
             snippet,
             "gateway root must not choose the effective model context inline",
         )
+    assert_contains(
+        source,
+        "prepare_chat_model_prompt(ChatModelPromptInput",
+        "gateway root should delegate chat model prompt setup",
+    )
     for snippet in [
         "fn finalize_streamed_assistant_message(",
         "fn start_visible_conversation_turn(",
