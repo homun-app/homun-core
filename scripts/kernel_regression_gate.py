@@ -463,6 +463,20 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway chat code-map prompt owner",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--test",
+                "execution_ownership_inventory",
+                "chat_code_map_prompt_has_one_gateway_owner",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway chat tool perimeter owner",
             [
                 "cargo",

@@ -192,6 +192,9 @@ CHAT_VISION_PREFLIGHT_RS = os.path.join(
 CHAT_VISION_RECOVERY_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_vision_recovery.rs"
 )
+CHAT_CODE_MAP_PROMPT_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_chat_code_map_prompt.rs"
+)
 CHAT_TOOL_PERIMETER_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_tool_perimeter.rs"
 )
@@ -1771,6 +1774,8 @@ def main() -> int:
         chat_vision_preflight_source = handle.read()
     with open(CHAT_VISION_RECOVERY_RS, "r", encoding="utf-8") as handle:
         chat_vision_recovery_source = handle.read()
+    with open(CHAT_CODE_MAP_PROMPT_RS, "r", encoding="utf-8") as handle:
+        chat_code_map_prompt_source = handle.read()
     with open(CHAT_TOOL_PERIMETER_RS, "r", encoding="utf-8") as handle:
         chat_tool_perimeter_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
@@ -4159,6 +4164,54 @@ def main() -> int:
             chat_vision_recovery_source,
             snippet,
             "chat vision recovery owner must not absorb adjacent stream, loop, preflight, toolset, browser or subagent surfaces",
+        )
+    assert_contains(
+        source,
+        "mod gateway_chat_code_map_prompt;",
+        "gateway root must declare chat code-map prompt owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_chat_code_map_prompt::*;",
+        "gateway root must re-export chat code-map prompt owner",
+    )
+    for snippet in [
+        "pub(crate) struct ChatCodeMapPromptInput",
+        "pub(crate) async fn append_chat_code_map_prompt_instruction(",
+        "project_has_code_map(&st)",
+        "code_map_available_instruction()",
+    ]:
+        assert_contains(
+            chat_code_map_prompt_source,
+            snippet,
+            "chat code-map prompt owner must compose code-map prompt guidance",
+        )
+    stream_chat_source = source.split("async fn stream_chat_via_openai(", 1)[1].split(
+        "// ADR 0024 inc 5",
+        1,
+    )[0]
+    for snippet in [
+        "let has_code_map =",
+        "project_has_code_map(&st)",
+        "code_map_available_instruction()",
+    ]:
+        assert_not_contains(
+            stream_chat_source,
+            snippet,
+            "gateway root must delegate chat code-map prompt composition",
+        )
+    for snippet in [
+        "fn project_has_code_map(",
+        "pub(crate) fn code_map_available_instruction(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "async fn run_agent_rounds(",
+        "fn query_code_graph(",
+        "fn execute_capability_browser_task(",
+    ]:
+        assert_not_contains(
+            chat_code_map_prompt_source,
+            snippet,
+            "chat code-map prompt owner must not absorb adjacent memory, prompt, toolset, loop, search or browser surfaces",
         )
     assert_contains(
         source,
