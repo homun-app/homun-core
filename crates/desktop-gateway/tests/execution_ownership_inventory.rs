@@ -974,6 +974,39 @@ fn connected_service_prompt_instructions_have_one_gateway_owner() {
 }
 
 #[test]
+fn artifact_destination_prompt_instruction_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
+
+    let pattern = "fn destination_folders_instruction(";
+    assert!(
+        prompt_instructions.contains(pattern),
+        "artifact destination prompt rendering must live in gateway_prompt_instructions"
+    );
+    assert!(
+        !main.contains(pattern),
+        "main.rs must not retain artifact destination prompt instruction surface {pattern}"
+    );
+
+    for snippet in [
+        "DESTINATION FOLDERS: you can deliver generated files",
+        "AUTHORIZED by the user with the `save_artifact` tool",
+        "call save_artifact(file, destination)",
+    ] {
+        assert!(
+            !main.contains(snippet),
+            "main.rs must not retain artifact destination prompt contract text {snippet}"
+        );
+    }
+
+    assert!(
+        main.contains("load_artifact_destinations()"),
+        "main.rs still owns the runtime decision to append destination guidance"
+    );
+}
+
+#[test]
 fn objective_contract_prompt_instructions_have_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
