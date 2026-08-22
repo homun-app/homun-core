@@ -4,7 +4,9 @@
 //! the gateway root makes browser-research and HITL-resume wording testable
 //! without growing `main.rs`.
 
-use crate::gateway_browser_tools::manager_browser_guidance;
+use crate::{
+    gateway_artifacts::ArtifactDestination, gateway_browser_tools::manager_browser_guidance,
+};
 
 pub(crate) fn browser_open_research_discovery_instruction() -> &'static str {
     "For open-ended current news or broad web research where the user did NOT name \
@@ -257,6 +259,20 @@ save/export a file to a folder, call save_artifact(file, destination)."
     )
 }
 
+pub(crate) fn artifact_destination_prompt_block(
+    destinations: &[ArtifactDestination],
+) -> Option<String> {
+    if destinations.is_empty() {
+        return None;
+    }
+    let labels = destinations
+        .iter()
+        .map(|destination| destination.label.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(destination_folders_instruction(&labels))
+}
+
 pub(crate) fn goal_propose_instruction() -> &'static str {
     "If you ARTICULATE or PROPOSE the OBJECTIVE or direction of THIS project \
 (e.g. the user asks \"propose an objective\", or you are defining where the \
@@ -453,17 +469,17 @@ discovery/search from scratch."
 #[cfg(test)]
 mod tests {
     use super::{
-        RuntimePromptControlInput, ask_mode_instruction, booking_assumption_choice_instruction,
-        browser_open_research_discovery_instruction, choice_clarify_instruction,
-        choice_resume_instruction_legacy_backup, code_map_available_instruction,
-        connected_service_tools_instruction, contact_context_instruction_block,
-        core_operating_instruction, debug_mode_instruction, destination_folders_instruction,
-        execution_verification_instruction, expired_connected_services_instruction,
-        freshness_verification_instruction, goal_propose_instruction,
-        language_follow_user_instruction, memory_recall_usage_instruction,
-        memory_scope_restricted_instruction, objective_contract_instruction,
-        objective_contract_read_only_default_instruction, operational_plan_instruction,
-        plan_mode_instruction, runtime_prompt_control_instructions,
+        RuntimePromptControlInput, artifact_destination_prompt_block, ask_mode_instruction,
+        booking_assumption_choice_instruction, browser_open_research_discovery_instruction,
+        choice_clarify_instruction, choice_resume_instruction_legacy_backup,
+        code_map_available_instruction, connected_service_tools_instruction,
+        contact_context_instruction_block, core_operating_instruction, debug_mode_instruction,
+        destination_folders_instruction, execution_verification_instruction,
+        expired_connected_services_instruction, freshness_verification_instruction,
+        goal_propose_instruction, language_follow_user_instruction,
+        memory_recall_usage_instruction, memory_scope_restricted_instruction,
+        objective_contract_instruction, objective_contract_read_only_default_instruction,
+        operational_plan_instruction, plan_mode_instruction, runtime_prompt_control_instructions,
     };
 
     #[test]
@@ -572,6 +588,27 @@ mod tests {
         assert!(guidance.contains("AUTHORIZED by the user"));
         assert!(guidance.contains("save_artifact(file, destination)"));
         assert!(guidance.contains("Desktop, Downloads"));
+    }
+
+    #[test]
+    fn gateway_prompt_instructions_render_artifact_destination_prompt_block() {
+        let destinations = vec![
+            crate::gateway_artifacts::ArtifactDestination {
+                label: "Desktop".to_string(),
+                path: "/Users/fabio/Desktop".to_string(),
+            },
+            crate::gateway_artifacts::ArtifactDestination {
+                label: "Downloads".to_string(),
+                path: "/Users/fabio/Downloads".to_string(),
+            },
+        ];
+
+        let guidance = artifact_destination_prompt_block(&destinations)
+            .expect("configured destinations should render prompt guidance");
+
+        assert!(guidance.contains("DESTINATION FOLDERS"));
+        assert!(guidance.contains("Desktop, Downloads"));
+        assert!(artifact_destination_prompt_block(&[]).is_none());
     }
 
     #[test]

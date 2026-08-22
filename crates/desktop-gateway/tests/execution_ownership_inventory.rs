@@ -1024,13 +1024,22 @@ fn artifact_destination_prompt_instruction_has_one_gateway_owner() {
     let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
 
     let pattern = "fn destination_folders_instruction(";
+    let block_pattern = "fn artifact_destination_prompt_block(";
     assert!(
         prompt_instructions.contains(pattern),
         "artifact destination prompt rendering must live in gateway_prompt_instructions"
     );
     assert!(
+        prompt_instructions.contains(block_pattern),
+        "artifact destination prompt block assembly must live in gateway_prompt_instructions"
+    );
+    assert!(
         !main.contains(pattern),
         "main.rs must not retain artifact destination prompt instruction surface {pattern}"
+    );
+    assert!(
+        !main.contains("map(|d| d.label.as_str())"),
+        "main.rs must not assemble artifact destination labels inline"
     );
 
     for snippet in [
