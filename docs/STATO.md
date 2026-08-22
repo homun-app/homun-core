@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (post-merge skill prompt catalog owner).**
+> **Ultimo aggiornamento: 2026-08-22 (post-merge chat attachment user-content owner).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#290 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #290 (`b26ce50a`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#294 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #294 (`ff8f2d10`) |
 
 ## Dove siamo
 
@@ -44,6 +44,18 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
+- Estrazione mergeata `attachments`: la costruzione del contenuto utente
+  multimodale del turno chat (`prepare_chat_attachment_user_content`) esce dal
+  setup inline di `stream_chat_via_openai`; `main.rs` conserva ingest/persistenza
+  e delega la scelta fra working set persistito e contesto checkpoint, mentre
+  vision preflight/fallback, prompt packet, loop agente e routing restano owner
+  separati.
+- Estrazione mergeata `gateway_prompt_instructions`: la composizione finale del
+  prompt runtime-control (`runtime_prompt_control_instructions`) esce dal setup
+  inline di `stream_chat_via_openai`; `main.rs` passa solo policy recall,
+  istruzione capability-route, mode e objective contract gia' caricato, evitando
+  una seconda lettura del contratto e lasciando prompt snippets, prompt packet,
+  capability routing, store objective e loop agente su owner separati.
 - Estrazione mergeata `gateway_skill_runtime`: il filtro catalogo prompt
   HomunCoder per workspace (`skill_prompt_catalog_for_workspace`) esce dal setup
   inline di `stream_chat_via_openai`; `main.rs` conserva solo la decisione
@@ -266,10 +278,12 @@ Slice Runtime V2 recenti:
   lock stato payment escono dal monolite `main.rs`; route Vault, marker payment
   card, browser enforcement e remote approval restano owner separati.
 - Estrazione mergeata `attachments`: contesto prompt bounded degli allegati
-  persistiti (`append_thread_attachment_context`, budget testo/immagini e
-  separazione extraction issues) esce dal monolite `main.rs`; ingestion file
-  resta nello stesso owner, mentre loop chat, memory recall, prompt packet e
-  routing agente restano fuori dallo scope.
+  persistiti e user-content multimodale del turno chat
+  (`append_thread_attachment_context`, `prepare_chat_attachment_user_content`,
+  budget testo/immagini e separazione extraction issues) escono dal monolite
+  `main.rs`; ingestion file resta nello stesso owner, mentre loop chat, memory
+  recall, prompt packet, vision preflight/fallback e routing agente restano fuori
+  dallo scope.
 - Estrazione mergeata `gateway_recall_context`: formatter delle entry recall
   (`format_recall_entry`) esce dal monolite `main.rs` e resta accanto agli
   helper di recall prompt/status/effect; `recall_memory`, artifact/workflow
@@ -1190,9 +1204,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#290: slice owner-level successive mergeate in
-  `main`, fino a `skill prompt catalog owner`; `main` verificato e riallineato a
-  #290.
+- #143-#283, #285-#286, #288-#294: slice owner-level successive mergeate in
+  `main`, fino a `chat attachment user-content owner`; `main` verificato e
+  riallineato a #294.
 
 PR aperte:
 
@@ -1200,7 +1214,7 @@ PR aperte:
 
 Branch corrente:
 
-- `main` pulito e riallineato a `origin/main` (`b26ce50a`).
+- `main` pulito e riallineato a `origin/main` (`ff8f2d10`).
 
 ## Debito residuo
 
@@ -1233,7 +1247,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #290 (`b26ce50a`); prossima slice non-browser da scegliere
+main aggiornato a #294 (`ff8f2d10`); prossima slice non-browser da scegliere
 dopo nuova lettura owner-level di main.rs.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
