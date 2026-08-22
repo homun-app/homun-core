@@ -3046,6 +3046,55 @@ fn agent_turn_route_trace_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_turn_recall_seed_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let recall_seed = production_source(&root.join("src/gateway_agent_turn_recall_seed.rs"));
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai")
+        .split("// Last upstream model error this turn")
+        .next()
+        .expect("agent turn recall seed setup");
+
+    for pattern in [
+        "pub(crate) async fn seed_agent_turn_recall(",
+        "seed_loop_memory_reads(loop_state, payload.as_ref())",
+        "GenerateStreamEvent::Recall",
+        "applies_new_input && let Some(payload) = payload",
+    ] {
+        assert!(
+            recall_seed.contains(pattern),
+            "agent turn recall seed owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "seed_loop_memory_reads(&mut ls, automatic_recall_payload.as_ref())",
+        "GenerateStreamEvent::Recall { payload }",
+    ] {
+        assert!(
+            !stream_chat.contains(pattern),
+            "main.rs must not own agent turn recall seeding/publication {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !recall_seed.contains(adjacent),
+            "agent turn recall seed owner must not absorb adjacent stream/loop/tail/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn chat_usage_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

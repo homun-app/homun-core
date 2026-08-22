@@ -32,6 +32,7 @@ mod gateway_agent_stream_events;
 mod gateway_agent_stream_persistence;
 mod gateway_agent_turn_identity;
 mod gateway_agent_turn_outcomes;
+mod gateway_agent_turn_recall_seed;
 mod gateway_agent_turn_route_trace;
 mod gateway_agent_turn_runner;
 mod gateway_agent_turn_sensitive;
@@ -202,6 +203,7 @@ pub(crate) use gateway_agent_stream_drain::*;
 pub(crate) use gateway_agent_stream_events::*;
 pub(crate) use gateway_agent_stream_persistence::*;
 pub(crate) use gateway_agent_turn_identity::*;
+pub(crate) use gateway_agent_turn_recall_seed::*;
 pub(crate) use gateway_agent_turn_route_trace::*;
 pub(crate) use gateway_agent_turn_runner::*;
 pub(crate) use gateway_agent_turn_sensitive::*;
@@ -2235,15 +2237,7 @@ async fn stream_chat_via_openai(
         let mut ls = local_first_engine::LoopState::new();
         ls.prompt_packets = prompt_packets;
         ls.messages = messages;
-        if applies_new_input {
-            seed_loop_memory_reads(&mut ls, automatic_recall_payload.as_ref());
-        }
-        // RAG completed before the loop starts. Publish the exact selected hits before any
-        // narration delta so a resumed client and the persisted assistant message agree on
-        // which memory sources informed this turn.
-        if applies_new_input && let Some(payload) = automatic_recall_payload {
-            let _ = emit_stream_event(&tx, GenerateStreamEvent::Recall { payload }).await;
-        }
+        seed_agent_turn_recall(&mut ls, &tx, applies_new_input, automatic_recall_payload).await;
         seed_agent_turn_sensitive_confirmations(&state_owned, thread_id.as_deref(), &mut ls);
         // Last upstream model error this turn (e.g. a 410 "model retired"), already
         // human-readable. Surfaced as the final answer if the turn produces no text,
