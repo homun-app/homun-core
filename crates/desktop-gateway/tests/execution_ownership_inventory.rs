@@ -3290,6 +3290,61 @@ fn contact_history_prompt_block_has_one_gateway_owner() {
 }
 
 #[test]
+fn runtime_prompt_control_instructions_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
+
+    for pattern in [
+        "pub(crate) struct RuntimePromptControlInput",
+        "pub(crate) fn runtime_prompt_control_instructions(",
+        "memory_recall_usage_instruction()",
+        "operational_plan_instruction()",
+        "memory_scope_restricted_instruction()",
+        "capability_router_instruction",
+        "manager_browser_guidance()",
+        "objective_contract_read_only_default_instruction()",
+    ] {
+        assert!(
+            prompt_instructions.contains(pattern),
+            "runtime prompt control owner must contain {pattern}"
+        );
+    }
+
+    let stream = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai body");
+    assert!(
+        stream.contains("runtime_prompt_control_instructions(RuntimePromptControlInput"),
+        "main.rs must delegate runtime prompt control assembly"
+    );
+    assert_eq!(
+        stream
+            .matches("objective_contract_for_execution(state, request.thread_id.as_deref())")
+            .count(),
+        1,
+        "stream setup must load the active objective contract once and pass it to prompt owners"
+    );
+
+    for pattern in [
+        "format!(\"{system}\\n\\n{}\", memory_recall_usage_instruction())",
+        "format!(\"{system}\\n\\n{}\", operational_plan_instruction())",
+        "format!(\"{system}\\n\\n{}\", memory_scope_restricted_instruction())",
+        "format!(\"{system}\\n\\n{}\", language_follow_user_instruction())",
+        "format!(\"{system}\\n\\n{}\", freshness_verification_instruction())",
+        "format!(\"{system}\\n\\n{}\", execution_verification_instruction())",
+        "format!(\"{system}\\n\\n{}\", manager_browser_guidance())",
+        "objective_contract_read_only_default_instruction()",
+    ] {
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain runtime prompt control assembly {pattern}"
+        );
+    }
+}
+
+#[test]
 fn chat_toolset_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

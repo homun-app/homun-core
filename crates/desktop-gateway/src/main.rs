@@ -394,14 +394,14 @@ pub(crate) use gateway_browser_tools::{
     browser_snapshot_tool_schema, browser_tabs_tool_schema, chat_browser_budget,
     chat_browser_max_rounds, chat_browser_nav_cap, chat_manager_browser_budget,
     computer_action_tool_schema, computer_get_state_tool_schema, computer_list_apps_tool_schema,
-    initial_manager_tool_schemas_for_test, is_stale_ref_error, manager_browser_guidance,
-    normalize_browser_action_bundle, parse_browser_done_payload, security_scan_block_reasons,
-    stale_ref_recovery_message, use_computer_tool_schema,
+    initial_manager_tool_schemas_for_test, is_stale_ref_error, normalize_browser_action_bundle,
+    parse_browser_done_payload, security_scan_block_reasons, stale_ref_recovery_message,
+    use_computer_tool_schema,
 };
 #[cfg(test)]
 pub(crate) use gateway_browser_tools::{
     BROWSER_ACT_SCHEMA_KINDS, bounded_browse_subagent_nav_cap, browse_tool_schema,
-    manager_browser_max_elapsed_ms,
+    manager_browser_guidance, manager_browser_max_elapsed_ms,
 };
 pub(crate) use gateway_capability_registry::{
     CapabilityCorpusMaterializationInput, CapabilityEntry, CapabilitySource,
@@ -566,16 +566,12 @@ use gateway_project_search_tools::{
     query_git_history, query_git_history_tool_schema,
 };
 use gateway_prompt_instructions::{
-    ask_mode_instruction, booking_assumption_choice_instruction,
+    RuntimePromptControlInput, booking_assumption_choice_instruction,
     browser_open_research_discovery_instruction, choice_clarify_instruction,
     code_map_available_instruction, connected_service_tools_instruction,
-    contact_context_instruction_block, core_operating_instruction, debug_mode_instruction,
-    destination_folders_instruction, execution_verification_instruction,
-    expired_connected_services_instruction, freshness_verification_instruction,
-    goal_propose_instruction, language_follow_user_instruction, memory_recall_usage_instruction,
-    memory_scope_restricted_instruction, objective_contract_instruction,
-    objective_contract_read_only_default_instruction, operational_plan_instruction,
-    plan_mode_instruction,
+    contact_context_instruction_block, core_operating_instruction, destination_folders_instruction,
+    expired_connected_services_instruction, goal_propose_instruction,
+    runtime_prompt_control_instructions,
 };
 pub(crate) use gateway_prompt_packets::*;
 #[cfg(test)]
@@ -2024,15 +2020,6 @@ async fn stream_chat_via_openai(
         .unwrap_or_default()
         .trim()
         .to_string();
-    let system = prompt_core.clone();
-    let system = format!("{system}\n\n{}", memory_recall_usage_instruction());
-    let system = format!("{system}\n\n{}", operational_plan_instruction());
-    let system = if memory_recall_allowed {
-        system
-    } else {
-        format!("{system}\n\n{}", memory_scope_restricted_instruction())
-    };
-    let system = format!("{system}\n\n{}", language_follow_user_instruction());
     // An active thread-scoped RoutingBinding records an exact route the user already selected.
     // It remains authoritative over the model-owned semantic decision; absent or malformed
     // bindings fall back to that structured decision, never to prompt keyword routing.
@@ -2075,13 +2062,6 @@ async fn stream_chat_via_openai(
         ),
         None => None,
     };
-    let system = match capability_router_instruction_for_decision(&capability_route) {
-        Some(instruction) => format!("{system}\n\n{instruction}"),
-        None => system,
-    };
-    let system = format!("{system}\n\n{}", freshness_verification_instruction());
-    let system = format!("{system}\n\n{}", execution_verification_instruction());
-    let system = format!("{system}\n\n{}", manager_browser_guidance());
     // Composer interaction mode (agent = default). plan/ask/debug refine behavior;
     // "ask" also drops the toolset below (pure conversation).
     let mode = request.mode.as_deref().unwrap_or("agent").to_string();
@@ -2097,29 +2077,18 @@ async fn stream_chat_via_openai(
         model: model.to_string(),
         tier: turn_tier.as_str().to_string(),
     });
-    let system = match mode.as_str() {
-        "plan" => format!("{system}\n\n{}", plan_mode_instruction()),
-        "ask" => format!("{system}\n\n{}", ask_mode_instruction()),
-        "debug" => format!("{system}\n\n{}", debug_mode_instruction()),
-        _ => system,
-    };
-    let system = match objective_contract_for_execution(state, request.thread_id.as_deref()) {
-        Some(objective) => format!(
-            "{system}\n\n{}",
-            objective_contract_instruction(
-                objective.revision,
-                &format!("{:?}", objective.mode),
-                &objective.objective,
-            )
-        ),
-        // No contract does NOT mean "no rules": execution defaults to read-only analysis, so the
-        // effectful tools are gated. Saying nothing here was the worst combination — the gate was armed
-        // and the model had no idea, so its writes came back refused for reasons it could not see.
-        None => format!(
-            "{system}\n\n{}",
-            objective_contract_read_only_default_instruction()
-        ),
-    };
+    let capability_router_instruction =
+        capability_router_instruction_for_decision(&capability_route);
+    let system = format!(
+        "{}\n\n{}",
+        prompt_core,
+        runtime_prompt_control_instructions(RuntimePromptControlInput {
+            memory_recall_allowed,
+            capability_router_instruction: capability_router_instruction.as_deref(),
+            mode: mode.as_str(),
+            objective_contract: active_objective_contract.as_ref(),
+        })
+    );
     let prompt_runtime = system
         .strip_prefix(&prompt_core)
         .unwrap_or_default()

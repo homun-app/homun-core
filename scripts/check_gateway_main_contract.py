@@ -113,6 +113,9 @@ MODEL_CLIENT_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "model_
 PROMPT_PACKETS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_prompt_packets.rs"
 )
+PROMPT_INSTRUCTIONS_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_prompt_instructions.rs"
+)
 BRAIN_RUNTIME_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_brain_runtime.rs"
 )
@@ -1468,6 +1471,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn freshness_verification_instruction(": "freshness prompt contract must stay in gateway_prompt_instructions",
         "fn objective_contract_instruction(": "objective prompt contract must stay in gateway_prompt_instructions",
         "fn objective_contract_read_only_default_instruction(": "objective prompt contract must stay in gateway_prompt_instructions",
+        "struct RuntimePromptControlInput": "runtime prompt control assembly must stay in gateway_prompt_instructions",
+        "fn runtime_prompt_control_instructions(": "runtime prompt control assembly must stay in gateway_prompt_instructions",
         "fn choice_resume_instruction_legacy_backup(": "prompt instruction snippets must stay in gateway_prompt_instructions",
         "fn schedule_task_tool_schema(": "automation tool schemas must stay in gateway_automation_tools",
         "fn create_automation_tool_schema(": "automation tool schemas must stay in gateway_automation_tools",
@@ -1660,6 +1665,8 @@ def main() -> int:
         tool_execution_source = handle.read()
     with open(PROMPT_PACKETS_RS, "r", encoding="utf-8") as handle:
         prompt_packets_source = handle.read()
+    with open(PROMPT_INSTRUCTIONS_RS, "r", encoding="utf-8") as handle:
+        prompt_instructions_source = handle.read()
     with open(BRAIN_RUNTIME_RS, "r", encoding="utf-8") as handle:
         brain_runtime_source = handle.read()
     with open(BRAIN_MATERIALIZATION_RS, "r", encoding="utf-8") as handle:
@@ -3713,6 +3720,47 @@ def main() -> int:
         "pub(crate) fn compose_gateway_prompt_packets(",
         "prompt packet owner must expose packet composition",
     )
+    assert_contains(
+        prompt_instructions_source,
+        "pub(crate) struct RuntimePromptControlInput",
+        "prompt instruction owner must expose runtime prompt control input",
+    )
+    assert_contains(
+        prompt_instructions_source,
+        "pub(crate) fn runtime_prompt_control_instructions(",
+        "prompt instruction owner must expose runtime prompt control assembly",
+    )
+    assert_contains(
+        source,
+        "runtime_prompt_control_instructions(RuntimePromptControlInput",
+        "gateway root must delegate runtime prompt control assembly",
+    )
+    stream_body = (
+        source.split("async fn stream_chat_via_openai(", 1)[1]
+        .split("async fn run_agent_rounds(", 1)[0]
+    )
+    if (
+        stream_body.count("objective_contract_for_execution(state, request.thread_id.as_deref())")
+        != 1
+    ):
+        raise AssertionError(
+            "gateway root must load the active objective contract once and pass it to prompt owners"
+        )
+    for snippet in [
+        'format!("{system}\\n\\n{}", memory_recall_usage_instruction())',
+        'format!("{system}\\n\\n{}", operational_plan_instruction())',
+        'format!("{system}\\n\\n{}", memory_scope_restricted_instruction())',
+        'format!("{system}\\n\\n{}", language_follow_user_instruction())',
+        'format!("{system}\\n\\n{}", freshness_verification_instruction())',
+        'format!("{system}\\n\\n{}", execution_verification_instruction())',
+        'format!("{system}\\n\\n{}", manager_browser_guidance())',
+        "objective_contract_read_only_default_instruction()",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain runtime prompt control assembly",
+        )
     assert_contains(
         brain_runtime_source,
         "pub(crate) const CAPABLE_MODEL_CONTEXT_WINDOW",
