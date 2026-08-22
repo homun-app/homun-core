@@ -2532,10 +2532,10 @@ async fn run_agent_rounds(
         recent_action_signatures: std::collections::VecDeque::new(),
         recent_failed_action_families: std::collections::VecDeque::new(),
     };
-    let plan_progress = GatewayPlanProgress::new(state_owned.clone());
-    let compactor = GatewayContextCompactor::new(state_owned.clone(), thread_id.clone());
-    let turn_policy = GatewayTurnPolicy::new(capability_route_for_runtime);
-    let completion_judge = GatewayTurnCompletionJudge::new(state_owned.clone());
+    let plan_progress = gateway_plan_progress(state_owned.clone());
+    let compactor = gateway_context_compactor(state_owned.clone(), thread_id.clone());
+    let turn_policy = gateway_turn_policy(capability_route_for_runtime);
+    let completion_judge = gateway_turn_completion_judge(state_owned.clone());
 
     // Vision fallback (`AttachmentPlan::InlineWithFallback`): this turn's images ride the manager's
     // first call on nothing better than a catalog's opinion. Keep the turn's PRISTINE seed so we can

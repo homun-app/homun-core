@@ -1236,8 +1236,7 @@ fn runtime_plan_state_has_one_gateway_owner() {
         "fn merge_plan(",
         "fn plan_tool_sent(",
         "pub(crate) struct GatewayPlanProgress",
-        "impl GatewayPlanProgress",
-        "pub(crate) fn new(",
+        "pub(crate) fn gateway_plan_progress(",
     ];
 
     for pattern in owned {
@@ -1253,6 +1252,10 @@ fn runtime_plan_state_has_one_gateway_owner() {
     assert!(
         !run_agent_rounds.contains("GatewayPlanProgress {"),
         "run_agent_rounds must not construct GatewayPlanProgress inline"
+    );
+    assert!(
+        !run_agent_rounds.contains("GatewayPlanProgress::new("),
+        "run_agent_rounds must not construct GatewayPlanProgress directly"
     );
 }
 
@@ -1480,8 +1483,7 @@ fn context_compactor_has_one_gateway_owner() {
 
     let owned = [
         "struct GatewayContextCompactor",
-        "impl GatewayContextCompactor",
-        "pub(crate) fn new(",
+        "pub(crate) fn gateway_context_compactor(",
         "impl local_first_engine::ContextCompactor for GatewayContextCompactor",
     ];
 
@@ -1495,15 +1497,18 @@ fn context_compactor_has_one_gateway_owner() {
             "main.rs must not retain context compactor surface {pattern}"
         );
     }
-    for pattern in ["impl GatewayContextCompactor", "pub(crate) fn new("] {
-        assert!(
-            context_compactor_surface.contains(pattern),
-            "context compactor owner must expose constructor surface {pattern}"
-        );
-    }
+    let pattern = "pub(crate) fn gateway_context_compactor(";
+    assert!(
+        context_compactor_surface.contains(pattern),
+        "context compactor owner must expose constructor surface {pattern}"
+    );
     assert!(
         !run_agent_rounds.contains("GatewayContextCompactor {"),
         "run_agent_rounds must not construct GatewayContextCompactor inline"
+    );
+    assert!(
+        !run_agent_rounds.contains("GatewayContextCompactor::new("),
+        "run_agent_rounds must not construct GatewayContextCompactor directly"
     );
     for adjacent in ["struct GatewayTurnPolicy", "struct GatewayPlanProgress"] {
         assert!(
@@ -1521,6 +1526,7 @@ fn turn_policy_has_one_gateway_owner() {
 
     let owned = [
         "struct GatewayTurnPolicy",
+        "pub(crate) fn gateway_turn_policy(",
         "impl local_first_engine::TurnPolicy for GatewayTurnPolicy",
     ];
 
@@ -1534,6 +1540,10 @@ fn turn_policy_has_one_gateway_owner() {
             "main.rs must not retain turn policy surface {pattern}"
         );
     }
+    assert!(
+        !main.contains("GatewayTurnPolicy::new("),
+        "main.rs must not construct GatewayTurnPolicy directly"
+    );
     for adjacent in [
         "struct GatewayContextCompactor",
         "struct GatewayTurnCompletionJudge",
@@ -1553,6 +1563,7 @@ fn turn_completion_judge_has_one_gateway_owner() {
 
     let owned = [
         "struct GatewayTurnCompletionJudge",
+        "pub(crate) fn gateway_turn_completion_judge(",
         "impl local_first_engine::TurnCompletionJudge for GatewayTurnCompletionJudge",
     ];
 
@@ -1566,6 +1577,10 @@ fn turn_completion_judge_has_one_gateway_owner() {
             "main.rs must not retain turn completion judge surface {pattern}"
         );
     }
+    assert!(
+        !main.contains("GatewayTurnCompletionJudge::new("),
+        "main.rs must not construct GatewayTurnCompletionJudge directly"
+    );
     for adjacent in ["struct GatewayTurnPolicy", "struct GatewayPlanProgress"] {
         assert!(
             !model_routing.contains(adjacent),

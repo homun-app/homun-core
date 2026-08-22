@@ -1158,10 +1158,8 @@ pub(crate) struct GatewayPlanProgress {
     state: AppState,
 }
 
-impl GatewayPlanProgress {
-    pub(crate) fn new(state: AppState) -> Self {
-        Self { state }
-    }
+pub(crate) fn gateway_plan_progress(state: AppState) -> GatewayPlanProgress {
+    GatewayPlanProgress { state }
 }
 
 impl local_first_engine::PlanProgress for GatewayPlanProgress {

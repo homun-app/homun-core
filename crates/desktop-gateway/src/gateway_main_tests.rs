@@ -14056,7 +14056,7 @@ fn workflow_route_allows_exactly_one_matching_tool_call_per_turn() {
         super::semantic_decision::ExecutionShape::Workflow,
         Some("make_deck"),
     );
-    let policy = super::GatewayTurnPolicy::new(super::route_capability_from_semantic(Some(
+    let policy = super::gateway_turn_policy(super::route_capability_from_semantic(Some(
         &workflow_semantic,
     )));
 
