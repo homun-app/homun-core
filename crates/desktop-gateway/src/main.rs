@@ -65,6 +65,7 @@ mod gateway_capability_registry;
 mod gateway_capability_routing;
 mod gateway_channels;
 mod gateway_chat_branches;
+mod gateway_chat_code_map_prompt;
 mod gateway_chat_markers;
 mod gateway_chat_memory;
 mod gateway_chat_plan_resume;
@@ -231,6 +232,7 @@ pub(crate) use gateway_automation_routes::*;
 pub(crate) use gateway_brain_materialization::*;
 pub(crate) use gateway_brain_runtime::*;
 pub(crate) use gateway_browser_runtime::*;
+pub(crate) use gateway_chat_code_map_prompt::*;
 pub(crate) use gateway_chat_plan_resume::*;
 pub(crate) use gateway_chat_streams::*;
 pub(crate) use gateway_chat_tool_perimeter::*;
@@ -273,8 +275,8 @@ use gateway_memory_dedup::{
 pub(crate) use gateway_memory_learning::{consolidate_scope, learn_via_service_or_inline};
 pub(crate) use gateway_memory_prompt_context::decisions_for_path;
 use gateway_memory_prompt_context::{
-    artifact_provenance_context_for_query, project_has_code_map,
-    relevant_code_components_for_prompt, workflow_status_context_for_query,
+    artifact_provenance_context_for_query, relevant_code_components_for_prompt,
+    workflow_status_context_for_query,
 };
 #[cfg(test)]
 use gateway_memory_query_embeddings::memory_recall_timing_trace_line;
@@ -595,9 +597,9 @@ use gateway_project_search_tools::{
 use gateway_prompt_instructions::{
     RuntimePromptControlInput, artifact_destination_prompt_block,
     booking_assumption_choice_instruction, browser_open_research_discovery_instruction,
-    choice_clarify_instruction, code_map_available_instruction,
-    connected_service_tools_instruction, contact_context_instruction_block,
-    core_operating_instruction, expired_connected_services_instruction, goal_propose_instruction,
+    choice_clarify_instruction, connected_service_tools_instruction,
+    contact_context_instruction_block, core_operating_instruction,
+    expired_connected_services_instruction, goal_propose_instruction,
     runtime_prompt_control_instructions,
 };
 pub(crate) use gateway_prompt_packets::*;
@@ -1637,22 +1639,8 @@ async fn stream_chat_via_openai(
     let home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());
     let language_instruction = response_language_instruction(&effective_user_language());
     let system = core_operating_instruction(&now, &home, browser_discovery, &language_instruction);
-    // Code-map steering: if THIS project has an imported code graph, tell the
-    // orchestrator to query it FIRST for structure/dependency questions instead of
-    // grepping/reading files by default (the natural reflex). Conditional: only when a
-    // map exists for the active scope (else query_code_graph would just say "no map"
-    // and grep is the correct fallback). Cheap count on the already-scoped workspace.
-    let has_code_map = {
-        let st = state.clone();
-        tokio::task::spawn_blocking(move || project_has_code_map(&st))
-            .await
-            .unwrap_or(false)
-    };
-    let system = if has_code_map {
-        format!("{system}\n\n{}", code_map_available_instruction())
-    } else {
-        system
-    };
+    let system =
+        append_chat_code_map_prompt_instruction(ChatCodeMapPromptInput { state, system }).await;
     // Connected-service and MCP tools share one discovery/write-set owner. The
     // root only consumes the per-turn projection for prompt and toolset assembly.
     let connected_tool_catalog = prepare_connected_tool_catalog(ConnectedToolCatalogInput {

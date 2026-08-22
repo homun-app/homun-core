@@ -814,10 +814,6 @@ fn code_map_prompt_instruction_has_one_gateway_owner() {
     }
 
     assert!(
-        main.contains("let has_code_map ="),
-        "main.rs still owns the scoped runtime decision to append the code-map instruction"
-    );
-    assert!(
         prompt_instructions.contains("fn operational_plan_instruction("),
         "code-map prompt owner must stay with prompt instruction helpers"
     );
@@ -834,8 +830,8 @@ fn code_map_presence_has_one_gateway_owner() {
         "code-map presence read-model must live with memory prompt context helpers"
     );
     assert!(
-        main.contains("let has_code_map ="),
-        "main.rs still owns the scoped runtime decision to append the code-map instruction"
+        !main.contains("let has_code_map ="),
+        "main.rs must delegate the scoped runtime decision to append the code-map instruction"
     );
     assert!(
         !main.contains(
@@ -843,6 +839,63 @@ fn code_map_presence_has_one_gateway_owner() {
         ),
         "main.rs must not query memory entities directly to detect code-map presence"
     );
+}
+
+#[test]
+fn chat_code_map_prompt_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let owner = production_source(&root.join("src/gateway_chat_code_map_prompt.rs"));
+
+    assert!(
+        main.contains("mod gateway_chat_code_map_prompt;"),
+        "gateway root must declare chat code-map prompt owner"
+    );
+    assert!(
+        main.contains("pub(crate) use gateway_chat_code_map_prompt::*;"),
+        "gateway root must re-export chat code-map prompt owner"
+    );
+
+    for snippet in [
+        "pub(crate) struct ChatCodeMapPromptInput",
+        "pub(crate) async fn append_chat_code_map_prompt_instruction(",
+        "project_has_code_map(&st)",
+        "code_map_available_instruction()",
+    ] {
+        assert!(
+            owner.contains(snippet),
+            "chat code-map prompt owner must contain {snippet}"
+        );
+    }
+
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai");
+    for snippet in [
+        "let has_code_map =",
+        "project_has_code_map(&st)",
+        "code_map_available_instruction()",
+    ] {
+        assert!(
+            !stream_chat.contains(snippet),
+            "stream_chat_via_openai must delegate code-map prompt composition {snippet}"
+        );
+    }
+
+    for adjacent in [
+        "fn project_has_code_map(",
+        "pub(crate) fn code_map_available_instruction(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "async fn run_agent_rounds(",
+        "fn query_code_graph(",
+        "fn execute_capability_browser_task(",
+    ] {
+        assert!(
+            !owner.contains(adjacent),
+            "chat code-map prompt owner must not absorb adjacent memory/prompt/toolset/loop/search/browser surface {adjacent}"
+        );
+    }
 }
 
 #[test]
