@@ -4025,6 +4025,9 @@ def main() -> int:
         "pub(crate) async fn prepare_chat_vision_preflight(",
         "pub(crate) struct ChatVisionPreflightInput",
         "pub(crate) enum ChatVisionPreflight",
+        "pub(crate) struct ChatVisionFallbackSeed",
+        "pub(crate) struct ChatVisionFallbackSeedInput",
+        "pub(crate) fn snapshot_chat_vision_fallback_seed(",
         "vision::messages_have_image(",
         "vision::plan_attachments(",
         "vision::AttachmentPlan::Refuse",
@@ -4044,6 +4047,11 @@ def main() -> int:
         "vision::AttachmentPlan::Refuse => {",
         "vision::AttachmentPlan::Delegate => {",
         "vision::replace_images_with_descriptions(&mut messages, &descriptions);",
+        "let vision_seed = vision_fallback_armed.then(|| {",
+        "            ls.clone(),",
+        "            cfg.clone(),",
+        "            memory_user_message.clone(),",
+        "            trace_dir.clone(),",
     ]:
         assert_not_contains(
             source,

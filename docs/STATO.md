@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (agent turn tail snapshot owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-22 (chat vision fallback snapshot owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-turn-tail-snapshot-owner` |
-| Branch | `fabio/chat-turn-tail-snapshot-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#314 mergeate in `main`; slice tail snapshot in verifica su `fabio/chat-turn-tail-snapshot-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #314 (`750d6978`); slice tail snapshot in verifica locale prima della PR |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-vision-fallback-snapshot-owner` |
+| Branch | `fabio/chat-vision-fallback-snapshot-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#315 mergeate in `main`; slice vision fallback snapshot in verifica su `fabio/chat-vision-fallback-snapshot-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #315 (`24d5552d`); slice vision fallback snapshot in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,11 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_agent_turn_tail`: lo snapshot dei valori necessari
+- Estrazione locale `gateway_chat_vision_preflight`: lo snapshot del seed di
+  replay per fallback vision (`snapshot_chat_vision_fallback_seed`) esce dal
+  blocco inline di `run_agent_rounds`; la recovery post-loop, stream transport,
+  toolset, loop agente, browser executor e subagent restano owner separati.
+- Estrazione mergeata `gateway_agent_turn_tail`: lo snapshot dei valori necessari
   alla coda post-loop (`snapshot_agent_turn_tail`: state, thread id, fence ids,
   user message, assistant precedente e turn id) esce dal setup inline di
   `stream_chat_via_openai`; effetti tail, stream setup, loop agente, browser
@@ -1307,9 +1311,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#314: slice owner-level successive mergeate in
-  `main`, fino a `agent turn trace dump owner`; `main` verificato e riallineato
-  a #314.
+- #143-#283, #285-#286, #288-#315: slice owner-level successive mergeate in
+  `main`, fino a `agent turn tail snapshot owner`; `main` verificato e
+  riallineato a #315.
 
 PR aperte:
 
@@ -1317,8 +1321,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/chat-turn-tail-snapshot-owner` in verifica locale da `main` #314
-  (`750d6978`).
+- `fabio/chat-vision-fallback-snapshot-owner` in verifica locale da `main` #315
+  (`24d5552d`).
 
 ## Debito residuo
 
@@ -1342,8 +1346,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice non-browser `gateway_agent_turn_tail` snapshot con gate
-   kernel verde, PR e merge.
+1. Chiudere la slice non-browser `gateway_chat_vision_preflight` fallback
+   snapshot con gate kernel verde, PR e merge.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -1351,9 +1355,9 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #314 (`750d6978`); slice non-browser corrente
-`fabio/chat-turn-tail-snapshot-owner` sposta lo snapshot tail post-loop da
-`stream_chat_via_openai` a `gateway_agent_turn_tail`.
+main aggiornato a #315 (`24d5552d`); slice non-browser corrente
+`fabio/chat-vision-fallback-snapshot-owner` sposta lo snapshot del seed vision
+fallback da `run_agent_rounds` a `gateway_chat_vision_preflight`.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

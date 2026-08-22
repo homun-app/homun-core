@@ -24,6 +24,41 @@ pub(crate) enum ChatVisionPreflight {
     },
 }
 
+pub(crate) struct ChatVisionFallbackSeed {
+    pub(crate) loop_state: local_first_engine::LoopState,
+    pub(crate) config: local_first_engine::TurnConfig,
+    pub(crate) user_message: String,
+    pub(crate) memory_answer: String,
+    pub(crate) last_model_error: Option<String>,
+    pub(crate) browse_sources: Vec<String>,
+    pub(crate) trace_dir: Option<std::path::PathBuf>,
+}
+
+pub(crate) struct ChatVisionFallbackSeedInput<'a> {
+    pub(crate) fallback_armed: bool,
+    pub(crate) loop_state: &'a local_first_engine::LoopState,
+    pub(crate) config: &'a local_first_engine::TurnConfig,
+    pub(crate) user_message: &'a str,
+    pub(crate) memory_answer: &'a str,
+    pub(crate) last_model_error: &'a Option<String>,
+    pub(crate) browse_sources: &'a [String],
+    pub(crate) trace_dir: &'a Option<std::path::PathBuf>,
+}
+
+pub(crate) fn snapshot_chat_vision_fallback_seed(
+    input: ChatVisionFallbackSeedInput<'_>,
+) -> Option<ChatVisionFallbackSeed> {
+    input.fallback_armed.then(|| ChatVisionFallbackSeed {
+        loop_state: input.loop_state.clone(),
+        config: input.config.clone(),
+        user_message: input.user_message.to_string(),
+        memory_answer: input.memory_answer.to_string(),
+        last_model_error: input.last_model_error.clone(),
+        browse_sources: input.browse_sources.to_vec(),
+        trace_dir: input.trace_dir.clone(),
+    })
+}
+
 pub(crate) async fn prepare_chat_vision_preflight(
     input: ChatVisionPreflightInput<'_>,
 ) -> ChatVisionPreflight {
