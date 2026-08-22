@@ -253,6 +253,9 @@ fn thread_model_context_has_one_gateway_owner() {
         "fn context_message_for_model(",
         "fn thread_context_for_model(",
         "fn effective_prompt_context_for_model(",
+        "pub(crate) struct ChatModelPromptInput",
+        "pub(crate) fn prepare_chat_model_prompt(",
+        "fn chat_model_prompt_from_effective_context(",
         "fn agent_turn_context(",
     ] {
         assert!(
@@ -269,12 +272,18 @@ fn thread_model_context_has_one_gateway_owner() {
         "match request.thread_id.as_deref()",
         "thread_context_for_model(state, thread_id, &[], Some(request.prompt.as_str()))",
         "None => request.context.clone()",
+        "build_chat_runtime_prompt(&BuildPromptRequest",
+        "local_first_desktop_gateway::render_checkpoint_input",
     ] {
         assert!(
             !main.contains(pattern),
             "main.rs must not choose the effective model context inline {pattern}"
         );
     }
+    assert!(
+        main.contains("prepare_chat_model_prompt(ChatModelPromptInput"),
+        "main.rs should delegate chat model prompt setup to the thread context owner"
+    );
 
     for adjacent in [
         "fn finalize_streamed_assistant_message(",

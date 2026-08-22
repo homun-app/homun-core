@@ -5,6 +5,9 @@
 //! final assistant persistence remain separate owners.
 
 use super::*;
+use local_first_desktop_gateway::{
+    BuildPromptRequest, build_chat_runtime_prompt, render_checkpoint_input,
+};
 
 pub(crate) fn context_message_for_model(
     _facade: &MemoryFacade,
@@ -80,10 +83,106 @@ pub(crate) fn effective_prompt_context_for_model(
     }
 }
 
+pub(crate) struct ChatModelPromptInput<'a> {
+    pub(crate) state: &'a AppState,
+    pub(crate) thread_id: Option<&'a str>,
+    pub(crate) request_context: &'a [ChatContextMessage],
+    pub(crate) prompt: &'a str,
+    pub(crate) checkpoint_input: Option<&'a serde_json::Value>,
+    pub(crate) model_context_window: Option<usize>,
+}
+
+pub(crate) struct ChatModelPrompt {
+    pub(crate) prompt: String,
+    pub(crate) effective_context: Vec<ChatContextMessage>,
+}
+
+pub(crate) fn prepare_chat_model_prompt(input: ChatModelPromptInput<'_>) -> ChatModelPrompt {
+    let effective_context = effective_prompt_context_for_model(
+        input.state,
+        input.thread_id,
+        input.request_context,
+        input.prompt,
+    );
+    let prompt = chat_model_prompt_from_effective_context(
+        input.prompt,
+        &effective_context,
+        input.checkpoint_input,
+        input.model_context_window,
+    );
+    ChatModelPrompt {
+        prompt,
+        effective_context,
+    }
+}
+
+fn chat_model_prompt_from_effective_context(
+    prompt: &str,
+    effective_context: &[ChatContextMessage],
+    checkpoint_input: Option<&serde_json::Value>,
+    model_context_window: Option<usize>,
+) -> String {
+    checkpoint_input
+        .map(render_checkpoint_input)
+        .unwrap_or_else(|| {
+            build_chat_runtime_prompt(&BuildPromptRequest {
+                prompt: prompt.to_string(),
+                context: effective_context.to_vec(),
+                max_context_chars: Some(chat_context_budget_chars(model_context_window)),
+            })
+            .runtime_prompt
+        })
+}
+
 pub(crate) fn agent_turn_context(
     state: &AppState,
     thread_id: &str,
     skip_message_ids: &[&str],
 ) -> Option<Vec<ChatContextMessage>> {
     thread_context_for_model(state, thread_id, skip_message_ids, None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chat_model_prompt_prefers_checkpoint_payload_over_runtime_prompt_builder() {
+        let context = vec![ChatContextMessage {
+            role: ChatContextRole::Assistant,
+            text: "prior assistant context that should not enter checkpoint rendering".to_string(),
+        }];
+        let checkpoint = serde_json::json!({
+            "kind": "resume",
+            "user_prompt": "resume from checkpoint"
+        });
+
+        let prompt = chat_model_prompt_from_effective_context(
+            "fresh user prompt",
+            &context,
+            Some(&checkpoint),
+            Some(128_000),
+        );
+
+        assert_eq!(prompt, render_checkpoint_input(&checkpoint));
+        assert!(!prompt.contains("prior assistant context"));
+    }
+
+    #[test]
+    fn chat_model_prompt_uses_effective_context_budget_for_normal_turns() {
+        let context = vec![ChatContextMessage {
+            role: ChatContextRole::Assistant,
+            text: "prior assistant context".to_string(),
+        }];
+
+        let prompt = chat_model_prompt_from_effective_context(
+            "fresh user prompt",
+            &context,
+            None,
+            Some(128_000),
+        );
+
+        assert!(prompt.contains("fresh user prompt"));
+        assert!(prompt.contains("prior assistant context"));
+    }
 }
