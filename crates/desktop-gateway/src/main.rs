@@ -33,6 +33,7 @@ mod gateway_agent_stream_persistence;
 mod gateway_agent_turn_config;
 mod gateway_agent_turn_hitl_resume;
 mod gateway_agent_turn_identity;
+mod gateway_agent_turn_loop_seed;
 mod gateway_agent_turn_model_seed;
 mod gateway_agent_turn_outcomes;
 mod gateway_agent_turn_plan_seed;
@@ -211,6 +212,7 @@ pub(crate) use gateway_agent_stream_persistence::*;
 pub(crate) use gateway_agent_turn_config::*;
 pub(crate) use gateway_agent_turn_hitl_resume::*;
 pub(crate) use gateway_agent_turn_identity::*;
+pub(crate) use gateway_agent_turn_loop_seed::*;
 pub(crate) use gateway_agent_turn_model_seed::*;
 pub(crate) use gateway_agent_turn_plan_seed::*;
 pub(crate) use gateway_agent_turn_recall_seed::*;
@@ -2246,19 +2248,13 @@ async fn stream_chat_via_openai(
     let capability_route_for_runtime = capability_route.clone();
     let abort_resume_id = resume_id.clone();
     let engine_task = tokio::spawn(async move {
-        let mut ls = local_first_engine::LoopState::new();
-        ls.prompt_packets = prompt_packets;
-        ls.messages = messages;
+        let loop_seed = seed_agent_turn_loop_state(prompt_packets, messages);
+        let mut ls = loop_seed.loop_state;
         seed_agent_turn_recall(&mut ls, &tx, applies_new_input, automatic_recall_payload).await;
         seed_agent_turn_sensitive_confirmations(&state_owned, thread_id.as_deref(), &mut ls);
-        // Last upstream model error this turn (e.g. a 410 "model retired"), already
-        // human-readable. Surfaced as the final answer if the turn produces no text,
-        // so a dead/blocked model is obvious instead of a generic "no answer".
-        let last_model_error: Option<String> = None;
-        // Final answer text captured for post-turn memory extraction (M2).
-        let memory_answer = String::new();
-        // Consequential actions performed this turn (any domain) → fed to the
-        // memory extractor so the "why" of each mutation is remembered.
+        let last_model_error = loop_seed.last_model_error;
+        let memory_answer = loop_seed.memory_answer;
+        let browse_sources = loop_seed.browse_sources;
         publish_agent_turn_route_trace(&mut ls, &tx, &capability_route_for_runtime).await;
         // No-progress guard: if the model repeats the EXACT same tool calls round after
         // round, it's stuck (not making progress) → stop and synthesize, instead of
@@ -2290,8 +2286,6 @@ async fn stream_chat_via_openai(
         // Slice 2.5: did the model actually ACT (use a tool) this turn? Used at the no-tool
         // stop to tell a PREMATURE stop on a real task (judge it, bootstrap a plan) apart from
         // a plain conversational answer (let it end). Latches true once any tool has run.
-        // Source URLs visited via browse_web this request, for the "Fonti" footer.
-        let browse_sources: Vec<String> = Vec::new();
         // Tools offered to the model this run: the base set, plus any tools the
         // model discovers via `find_connected_tools` (injected on demand).
         seed_agent_turn_tool_schemas(&mut ls, base_tools, &mode, contact_ctx.as_ref());
@@ -2302,7 +2296,7 @@ async fn stream_chat_via_openai(
         // inside `run_agent_rounds` (slice 5b). Nothing to seed here.
         // Fresh terminal buffer for this request; the computer panel shows the
         // CLI commands + output run during THIS response.
-        sandbox_clear(thread_id.clone());
+        reset_agent_turn_terminal_buffer(thread_id.clone());
 
         let plan_seed = seed_agent_turn_plan_state(
             &mut ls,

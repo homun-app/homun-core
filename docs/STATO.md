@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (agent turn HITL resume owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-22 (agent turn loop seed owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-turn-hitl-resume-owner` |
-| Branch | `fabio/chat-turn-hitl-resume-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#311 mergeate in `main`; slice HITL resume in verifica su `fabio/chat-turn-hitl-resume-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #311 (`6968624f`); slice HITL resume in verifica locale prima della PR |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-turn-loop-seed-owner` |
+| Branch | `fabio/chat-turn-loop-seed-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#312 mergeate in `main`; slice loop seed in verifica su `fabio/chat-turn-loop-seed-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #312 (`16a92121`); slice loop seed in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,13 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_agent_turn_hitl_resume`: la proiezione del resume
+- Estrazione locale `gateway_agent_turn_loop_seed`: l'inizializzazione
+  pre-loop di `LoopState` (`prompt_packets`, `messages`) e dei buffer terminali
+  del turno (`memory_answer`, `last_model_error`, `browse_sources`, reset
+  terminale) esce dal setup inline di `stream_chat_via_openai`; recall,
+  sensitive confirmations, route trace, plan/tool/model/recovery seed, config,
+  browser executor, loop agente e subagent restano owner separati.
+- Estrazione mergeata `gateway_agent_turn_hitl_resume`: la proiezione del resume
   HITL gia' selezionato (`resolved_hitl_guard_for_turn`: `HitlResumeTurnContext`
   -> `local_first_engine::hitl::ResolvedHitlGuard`) esce dal setup inline di
   `stream_chat_via_openai`; stash lookup, prompt harness text, browser liveness,
@@ -1292,9 +1298,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#311: slice owner-level successive mergeate in
-  `main`, fino a `agent turn config owner`; `main` verificato e riallineato a
-  #311.
+- #143-#283, #285-#286, #288-#312: slice owner-level successive mergeate in
+  `main`, fino a `agent turn HITL resume owner`; `main` verificato e
+  riallineato a #312.
 
 PR aperte:
 
@@ -1302,8 +1308,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/chat-turn-hitl-resume-owner` in verifica locale da `main` #311
-  (`6968624f`).
+- `fabio/chat-turn-loop-seed-owner` in verifica locale da `main` #312
+  (`16a92121`).
 
 ## Debito residuo
 

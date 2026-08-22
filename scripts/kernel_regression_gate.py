@@ -351,6 +351,20 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway agent turn loop seed owner",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--test",
+                "execution_ownership_inventory",
+                "agent_turn_loop_seed_has_one_gateway_owner",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway agent turn tail owner",
             [
                 "cargo",

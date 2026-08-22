@@ -3406,6 +3406,67 @@ fn agent_turn_hitl_resume_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_turn_loop_seed_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let loop_seed_owner = production_source(&root.join("src/gateway_agent_turn_loop_seed.rs"));
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai")
+        .split("seed_agent_turn_recall(")
+        .next()
+        .expect("agent turn loop seed setup");
+
+    for pattern in [
+        "pub(crate) struct AgentTurnLoopSeed",
+        "pub(crate) fn seed_agent_turn_loop_state(",
+        "pub(crate) fn reset_agent_turn_terminal_buffer(",
+        "local_first_engine::LoopState::new()",
+        "loop_state.prompt_packets = prompt_packets",
+        "loop_state.messages = messages",
+        "last_model_error: None",
+        "memory_answer: String::new()",
+        "browse_sources: Vec::new()",
+        "sandbox_clear(thread_id)",
+    ] {
+        assert!(
+            loop_seed_owner.contains(pattern),
+            "agent turn loop seed owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "let mut ls = local_first_engine::LoopState::new();",
+        "ls.prompt_packets = prompt_packets;",
+        "ls.messages = messages;",
+        "let last_model_error: Option<String> = None;",
+        "let memory_answer = String::new();",
+        "let browse_sources: Vec<String> = Vec::new();",
+        "sandbox_clear(thread_id.clone());",
+    ] {
+        assert!(
+            !stream_chat.contains(pattern),
+            "main.rs must not own agent turn loop seed state {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "GatewayBrowserExecutor {",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !loop_seed_owner.contains(adjacent),
+            "agent turn loop seed owner must not absorb adjacent stream/loop/tail/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn chat_usage_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
