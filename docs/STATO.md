@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (chat connected prompt owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-22 (chat prompt layers owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-connected-prompt-owner` |
-| Branch | `fabio/chat-connected-prompt-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#321 mergeate in `main`; slice chat connected prompt owner in verifica su `fabio/chat-connected-prompt-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #321 (`88ff8f63`); slice chat connected prompt owner in verifica locale prima della PR |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-prompt-layers-owner` |
+| Branch | `fabio/chat-prompt-layers-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#322 mergeate in `main`; slice chat prompt layers owner in verifica su `fabio/chat-prompt-layers-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #322 (`a91d2808`); slice chat prompt layers owner in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,13 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_chat_connected_prompt`: la composizione runtime
+- Estrazione locale `gateway_chat_prompt_layers`: la composizione runtime dei
+  layer prompt gia' risolti (`append_chat_prompt_layers`: contact
+  persona/privacy, installed skills, choice/booking/resume HITL e destinazioni
+  artifact autorizzate) esce da `stream_chat_via_openai`; discovery skill,
+  wording prompt, artifact storage/routes, HITL state, toolset, loop agente e
+  browser restano owner separati.
+- Estrazione mergeata `gateway_chat_connected_prompt`: la composizione runtime
   della guidance connected-service/MCP (`append_chat_connected_prompt_instructions`:
   filesystem MCP, connected tools e servizi scaduti) esce da
   `stream_chat_via_openai`; catalog discovery, toolset, wording prompt, loop
@@ -1340,9 +1346,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#321: slice owner-level successive mergeate in
-  `main`, fino a `chat code-map prompt owner`; `main` verificato e riallineato a
-  #321.
+- #143-#283, #285-#286, #288-#322: slice owner-level successive mergeate in
+  `main`, fino a `chat connected prompt owner`; `main` verificato e riallineato
+  a #322.
 
 PR aperte:
 
@@ -1350,8 +1356,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/chat-connected-prompt-owner` in verifica locale da `main` #321
-  (`88ff8f63`).
+- `fabio/chat-prompt-layers-owner` in verifica locale da `main` #322
+  (`a91d2808`).
 
 ## Debito residuo
 
@@ -1375,7 +1381,7 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice chat connected prompt owner con gate kernel verde, PR e
+1. Chiudere la slice chat prompt layers owner con gate kernel verde, PR e
    merge.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
@@ -1384,11 +1390,11 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #321 (`88ff8f63`); slice non-browser corrente
-`fabio/chat-connected-prompt-owner` sposta la composizione runtime della guidance
-connected-service/MCP (`append_chat_connected_prompt_instructions`) fuori da
-`stream_chat_via_openai`, senza assorbire catalog discovery, toolset, wording
-prompt, loop agente o browser.
+main aggiornato a #322 (`a91d2808`); slice non-browser corrente
+`fabio/chat-prompt-layers-owner` sposta la composizione runtime dei layer prompt
+gia' risolti (`append_chat_prompt_layers`) fuori da `stream_chat_via_openai`,
+senza assorbire discovery skill, wording prompt, artifact storage/routes, HITL
+state, toolset, loop agente o browser.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
