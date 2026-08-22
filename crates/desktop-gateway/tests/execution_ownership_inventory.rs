@@ -3134,6 +3134,35 @@ fn chat_turn_context_has_one_gateway_owner() {
 }
 
 #[test]
+fn contact_context_prompt_instructions_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
+
+    assert!(
+        prompt_instructions.contains("pub(crate) fn contact_context_instruction_block("),
+        "contact channel prompt rendering must live in gateway_prompt_instructions"
+    );
+
+    assert!(
+        main.contains("if let Some(cx) = &contact_ctx"),
+        "main.rs may retain the runtime decision to prepend contact context"
+    );
+
+    for pattern in [
+        "REQUESTED TONE:",
+        "PERSONA INSTRUCTIONS (always follow them):",
+        "[PRIVACY] NEVER mention other contacts, people or relationships",
+        "[PRIVACY] NEVER mention the user's commitments, appointments",
+    ] {
+        assert!(
+            !main.contains(pattern),
+            "main.rs must not retain contact prompt contract text {pattern}"
+        );
+    }
+}
+
+#[test]
 fn chat_toolset_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

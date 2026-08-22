@@ -569,12 +569,12 @@ use gateway_prompt_instructions::{
     ask_mode_instruction, booking_assumption_choice_instruction,
     browser_open_research_discovery_instruction, choice_clarify_instruction,
     code_map_available_instruction, connected_service_tools_instruction,
-    core_operating_instruction, debug_mode_instruction, execution_verification_instruction,
-    expired_connected_services_instruction, freshness_verification_instruction,
-    language_follow_user_instruction, memory_recall_usage_instruction,
-    memory_scope_restricted_instruction, objective_contract_instruction,
-    objective_contract_read_only_default_instruction, operational_plan_instruction,
-    plan_mode_instruction,
+    contact_context_instruction_block, core_operating_instruction, debug_mode_instruction,
+    execution_verification_instruction, expired_connected_services_instruction,
+    freshness_verification_instruction, language_follow_user_instruction,
+    memory_recall_usage_instruction, memory_scope_restricted_instruction,
+    objective_contract_instruction, objective_contract_read_only_default_instruction,
+    operational_plan_instruction, plan_mode_instruction,
 };
 pub(crate) use gateway_prompt_packets::*;
 #[cfg(test)]
@@ -1746,39 +1746,14 @@ async fn stream_chat_via_openai(
     // which is mutually exclusive: homun is never a channel_ thread) so the contact
     // rules dominate the generic orchestrator voice.
     let system = if let Some(cx) = &contact_ctx {
-        let mut block = format!(
-            "REPLYING TO A CONTACT VIA CHANNEL: you are replying to {} on a \
-messaging channel, on behalf of the user. Chat style: natural and concise.",
-            cx.name
+        let block = contact_context_instruction_block(
+            &cx.name,
+            &cx.tone_of_voice,
+            &cx.persona_instructions,
+            &cx.relationships,
+            cx.perimeter.can_see_contacts,
+            cx.perimeter.can_see_calendar,
         );
-        if !cx.tone_of_voice.trim().is_empty() {
-            block.push_str(&format!(" REQUESTED TONE: {}.", cx.tone_of_voice.trim()));
-        }
-        if !cx.persona_instructions.trim().is_empty() {
-            block.push_str(&format!(
-                "\nPERSONA INSTRUCTIONS (always follow them): {}",
-                cx.persona_instructions.trim()
-            ));
-        }
-        if !cx.relationships.is_empty() {
-            block.push_str(&format!(
-                "\nKNOWN RELATIONSHIPS of {}: {}.",
-                cx.name,
-                cx.relationships.join("; ")
-            ));
-        }
-        if !cx.perimeter.can_see_contacts {
-            block.push_str(
-                "\n[PRIVACY] NEVER mention other contacts, people or relationships \
-of the user: with this person you know ONLY them.",
-            );
-        }
-        if !cx.perimeter.can_see_calendar {
-            block.push_str(
-                "\n[PRIVACY] NEVER mention the user's commitments, appointments or \
-calendar events.",
-            );
-        }
         format!("{block}\n\n{system}")
     } else {
         system
