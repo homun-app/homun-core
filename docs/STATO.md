@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (chat attachment working-set owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-23 (chat privacy preflight input owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/chat-attachment-working-set-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#323 mergeate in `main`; slice chat attachment working-set owner in verifica locale; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #323 (`7a5db409`); slice chat attachment working-set owner in verifica locale prima della PR |
+| Branch | `fabio/chat-privacy-preflight-input-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#324 mergeate in `main`; slice chat privacy preflight input owner in verifica locale; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #324 (`b82b4ccc`); slice chat privacy preflight input owner in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `attachments`: ingestion allegati, persistenza/ricostruzione
+- Estrazione locale `gateway_privacy_preflight`: la selezione del prompt Privacy
+  Guard per nuovo input vs replay/checkpoint (`evaluate_chat_privacy_guard_preflight`)
+  esce da `stream_chat_via_openai`; il root passa il prompt originale e consuma
+  solo l'outcome typed, mentre transport stream, cleanup registry, loop agente,
+  checkpoint recovery e browser restano owner separati.
+- Estrazione mergeata `attachments`: ingestion allegati, persistenza/ricostruzione
   del working set per thread e garanzia dei file del turno senza thread o con
   persistenza fallita escono da `stream_chat_via_openai`; `main.rs` delega a
   `prepare_chat_attachment_working_set` e conserva solo il consumo di
@@ -1352,9 +1357,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#323: slice owner-level successive mergeate in
-  `main`, fino a `chat prompt layers owner`; `main` verificato e riallineato
-  a #323.
+- #143-#283, #285-#286, #288-#324: slice owner-level successive mergeate in
+  `main`, fino a `chat attachment working-set owner`; `main` verificato e
+  riallineato a #324.
 
 PR aperte:
 
@@ -1362,8 +1367,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/chat-attachment-working-set-owner` in verifica locale da `main` #323
-  (`7a5db409`).
+- `fabio/chat-privacy-preflight-input-owner` in verifica locale da `main` #324
+  (`b82b4ccc`).
 
 ## Debito residuo
 
@@ -1387,7 +1392,7 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice chat attachment working-set owner con gate kernel verde, PR e
+1. Chiudere la slice chat privacy preflight input owner con gate kernel verde, PR e
    merge.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
@@ -1396,10 +1401,10 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #323 (`7a5db409`); slice non-browser corrente
-`fabio/chat-attachment-working-set-owner` sposta ingestion/persistenza/working
-set degli allegati chat fuori da `stream_chat_via_openai`, senza assorbire
-vision preflight/fallback, prompt packet, loop agente, memory recall, routing,
+main aggiornato a #324 (`b82b4ccc`); slice non-browser corrente
+`fabio/chat-privacy-preflight-input-owner` sposta la selezione prompt Privacy
+Guard per nuovo input vs checkpoint fuori da `stream_chat_via_openai`, senza
+assorbire transport stream, cleanup registry, loop agente, checkpoint recovery,
 browser o subagent.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.

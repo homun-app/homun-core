@@ -2080,17 +2080,12 @@ async fn stream_chat_via_openai(
     let tx = transport.sink;
     let rx = transport.receiver;
     let orchestrator_is_local = provider_endpoint_is_local(&base_url) && !model_id_is_cloud(&model);
-    let privacy_prompt = if applies_new_input {
-        request.prompt.as_str()
-    } else {
-        ""
-    };
     if let PrivacyGuardPreflightOutcome::EarlyResponse(response) =
-        evaluate_privacy_guard_preflight(PrivacyGuardPreflightInput {
+        evaluate_chat_privacy_guard_preflight(ChatPrivacyGuardPreflightInput {
             http: &state.http,
             pending_vault_proposals: &state.pending_vault_proposals,
             request_id: &request.request_id,
-            prompt: privacy_prompt,
+            prompt: request.prompt.as_str(),
             applies_new_input,
             orchestrator_is_local,
         })

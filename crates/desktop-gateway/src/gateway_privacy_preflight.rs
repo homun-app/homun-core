@@ -15,6 +15,15 @@ pub(crate) struct PrivacyGuardPreflightInput<'a> {
     pub(crate) orchestrator_is_local: bool,
 }
 
+pub(crate) struct ChatPrivacyGuardPreflightInput<'a> {
+    pub(crate) http: &'a reqwest::Client,
+    pub(crate) pending_vault_proposals: &'a privacy_guard::PendingVaultProposalStore,
+    pub(crate) request_id: &'a str,
+    pub(crate) prompt: &'a str,
+    pub(crate) applies_new_input: bool,
+    pub(crate) orchestrator_is_local: bool,
+}
+
 pub(crate) enum PrivacyGuardPreflightOutcome {
     Continue,
     EarlyResponse(PrivacyGuardEarlyResponse),
@@ -92,6 +101,25 @@ pub(crate) async fn evaluate_privacy_guard_preflight(
     }
 }
 
+pub(crate) async fn evaluate_chat_privacy_guard_preflight(
+    input: ChatPrivacyGuardPreflightInput<'_>,
+) -> PrivacyGuardPreflightOutcome {
+    let privacy_prompt = if input.applies_new_input {
+        input.prompt
+    } else {
+        ""
+    };
+    evaluate_privacy_guard_preflight(PrivacyGuardPreflightInput {
+        http: input.http,
+        pending_vault_proposals: input.pending_vault_proposals,
+        request_id: input.request_id,
+        prompt: privacy_prompt,
+        applies_new_input: input.applies_new_input,
+        orchestrator_is_local: input.orchestrator_is_local,
+    })
+    .await
+}
+
 fn privacy_guard_intercept_response(
     pending_vault_proposals: &privacy_guard::PendingVaultProposalStore,
     request_id: &str,
@@ -128,6 +156,22 @@ fn privacy_guard_intercept_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn chat_privacy_preflight_ignores_prompt_when_no_new_input_applies() {
+        let store = privacy_guard::PendingVaultProposalStore::default();
+        let outcome = evaluate_chat_privacy_guard_preflight(ChatPrivacyGuardPreflightInput {
+            http: &reqwest::Client::new(),
+            pending_vault_proposals: &store,
+            request_id: "req_1",
+            prompt: "ricordati che la targa della mia auto e' FM470BN",
+            applies_new_input: false,
+            orchestrator_is_local: true,
+        })
+        .await;
+
+        assert!(matches!(outcome, PrivacyGuardPreflightOutcome::Continue));
+    }
 
     #[test]
     fn privacy_guard_intercept_response_redacts_secret_and_uses_privacy_model() {

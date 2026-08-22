@@ -1598,6 +1598,8 @@ fn privacy_guard_preflight_has_one_gateway_owner() {
     let preflight = production_source(&root.join("src/gateway_privacy_preflight.rs"));
 
     for pattern in [
+        "pub(crate) struct ChatPrivacyGuardPreflightInput",
+        "pub(crate) async fn evaluate_chat_privacy_guard_preflight(",
         "pub(crate) async fn evaluate_privacy_guard_preflight(",
         "PrivacyGuardPreflightOutcome::EarlyResponse",
         "privacy_guard::failure_policy(",
@@ -1611,6 +1613,7 @@ fn privacy_guard_preflight_has_one_gateway_owner() {
     }
 
     for pattern in [
+        "let privacy_prompt = if applies_new_input",
         "privacy_guard::classify_sensitive_input_deterministic(",
         "classify_sensitive_input_with_privacy_guard_model(",
         "privacy_guard::failure_policy(",

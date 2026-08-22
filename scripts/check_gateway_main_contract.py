@@ -3819,6 +3819,8 @@ def main() -> int:
         "gateway root must re-export privacy preflight owner",
     )
     for snippet in [
+        "pub(crate) struct ChatPrivacyGuardPreflightInput",
+        "pub(crate) async fn evaluate_chat_privacy_guard_preflight(",
         "pub(crate) async fn evaluate_privacy_guard_preflight(",
         "PrivacyGuardPreflightOutcome::EarlyResponse",
         'code: "privacy_guard_unavailable".to_string(),',
@@ -3830,6 +3832,7 @@ def main() -> int:
             "privacy preflight owner must own guard fallback and early-response decisions",
         )
     for snippet in [
+        "let privacy_prompt = if applies_new_input",
         "privacy_guard::classify_sensitive_input_deterministic(",
         "classify_sensitive_input_with_privacy_guard_model(",
         "privacy_guard::failure_policy(",
