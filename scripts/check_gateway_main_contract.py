@@ -272,6 +272,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn artifact_provenance_context_for_query(": "artifact provenance prompt context must stay in gateway_memory_prompt_context",
         "fn decisions_for_path(": "file-decision prompt context must stay in gateway_memory_prompt_context",
         "fn producer_workflow_contract(": "producer workflow prompt context must stay in gateway_memory_prompt_context",
+        "fn project_has_code_map(": "code-map presence read-model must stay in gateway_memory_prompt_context",
         "fn relevant_code_components_for_prompt(": "code-map prompt context must stay in gateway_memory_prompt_context",
         "fn workflow_status_context_for_query(": "workflow status prompt context must stay in gateway_memory_prompt_context",
         "fn compact_redacted_task_goal_summary(": "redacted task title compaction must stay in gateway_text_safety",
@@ -1769,6 +1770,7 @@ def main() -> int:
         "pub(crate) fn artifact_provenance_context_for_query(",
         "pub(crate) fn decisions_for_path(",
         "pub(crate) fn producer_workflow_contract(",
+        "pub(crate) fn project_has_code_map(",
         "pub(crate) fn relevant_code_components_for_prompt(",
         "pub(crate) fn workflow_status_context_for_query(",
     ]:
