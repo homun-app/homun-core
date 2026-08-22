@@ -567,11 +567,11 @@ use gateway_project_search_tools::{
     query_git_history, query_git_history_tool_schema,
 };
 use gateway_prompt_instructions::{
-    RuntimePromptControlInput, booking_assumption_choice_instruction,
-    browser_open_research_discovery_instruction, choice_clarify_instruction,
-    code_map_available_instruction, connected_service_tools_instruction,
-    contact_context_instruction_block, core_operating_instruction, destination_folders_instruction,
-    expired_connected_services_instruction, goal_propose_instruction,
+    RuntimePromptControlInput, artifact_destination_prompt_block,
+    booking_assumption_choice_instruction, browser_open_research_discovery_instruction,
+    choice_clarify_instruction, code_map_available_instruction,
+    connected_service_tools_instruction, contact_context_instruction_block,
+    core_operating_instruction, expired_connected_services_instruction, goal_propose_instruction,
     runtime_prompt_control_instructions,
 };
 pub(crate) use gateway_prompt_packets::*;
@@ -1710,15 +1710,9 @@ async fn stream_chat_via_openai(
     // Authorized write destinations: when present, the model can deliver
     // generated files to user-granted folders via `save_artifact`.
     let artifact_destinations = load_artifact_destinations();
-    let system = if artifact_destinations.is_empty() {
-        system
-    } else {
-        let labels = artifact_destinations
-            .iter()
-            .map(|d| d.label.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("{system}\n\n{}", destination_folders_instruction(&labels))
+    let system = match artifact_destination_prompt_block(&artifact_destinations) {
+        Some(block) => format!("{system}\n\n{block}"),
+        None => system,
     };
     // Layer boundary: everything added below through the end of recall assembly
     // is workspace/thread knowledge, not a core instruction. Keep the provider

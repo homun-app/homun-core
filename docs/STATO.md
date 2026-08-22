@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (post-merge chat connected tool catalog owner).**
+> **Ultimo aggiornamento: 2026-08-22 (post-merge chat model context-window owner).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#296 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #296 (`9012cdff`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#297 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #297 (`60183c2e`) |
 
 ## Dove siamo
 
@@ -44,6 +44,10 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
+- Estrazione mergeata `gateway_thread_model_context`: la risoluzione della
+  context window modello del turno (`model_context_window_for_turn`) esce dal
+  setup inline di `stream_chat_via_openai`; registry provider, prompt modello,
+  prompt packet e loop agente restano owner separati.
 - Estrazione mergeata `gateway_chat_toolset`: la proiezione per-turno del
   catalogo tool connessi (`prepare_connected_tool_catalog`), inclusi indice
   discovery Composio/MCP, write-set di conferma e istruzione filesystem MCP,
