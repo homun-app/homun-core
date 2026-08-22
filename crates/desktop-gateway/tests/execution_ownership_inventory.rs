@@ -3355,6 +3355,57 @@ fn agent_turn_config_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_turn_hitl_resume_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let hitl_resume_owner = production_source(&root.join("src/gateway_agent_turn_hitl_resume.rs"));
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai")
+        .split("let cfg = resolve_agent_turn_config(")
+        .next()
+        .expect("agent turn HITL resume setup");
+
+    for pattern in [
+        "pub(crate) fn resolved_hitl_guard_for_turn(",
+        "local_first_engine::hitl::ResolvedHitlGuard",
+        "local_first_engine::hitl::HitlEnvelope",
+        "hitl_resume::HitlWaitKind::Choice",
+        "source_marker: \"durable_resume\".to_string()",
+    ] {
+        assert!(
+            hitl_resume_owner.contains(pattern),
+            "agent turn HITL resume owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "local_first_engine::hitl::ResolvedHitlGuard {",
+        "source_marker: \"durable_resume\".to_string(),",
+    ] {
+        assert!(
+            !stream_chat.contains(pattern),
+            "main.rs must not own engine HITL resume projection {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "GatewayBrowserExecutor {",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !hitl_resume_owner.contains(adjacent),
+            "agent turn HITL resume owner must not absorb adjacent stream/loop/tail/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn chat_usage_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
