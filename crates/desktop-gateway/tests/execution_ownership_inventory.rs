@@ -2081,6 +2081,9 @@ fn attachment_prompt_context_has_one_gateway_owner() {
         "const ATTACHMENT_TEXT_BUDGET_CHARS:",
         "const ATTACHMENT_CONTEXT_IMAGES:",
         "fn append_thread_attachment_context(",
+        "pub(crate) struct ChatAttachmentUserContentInput",
+        "pub(crate) fn prepare_chat_attachment_user_content(",
+        "fn attachment_user_content(",
         "fn attachment_text_is_ready(",
     ] {
         assert!(
@@ -2090,6 +2093,21 @@ fn attachment_prompt_context_has_one_gateway_owner() {
         assert!(
             !main.contains(pattern),
             "main.rs must not retain attachment prompt context {pattern}"
+        );
+    }
+
+    assert!(
+        main.contains("attachments::prepare_chat_attachment_user_content("),
+        "main.rs should delegate chat attachment user-content assembly to attachments"
+    );
+    for snippet in [
+        "let new_attachment_context =",
+        "let user_content = if all_images.is_empty()",
+        "serde_json::json!({ \"type\": \"image_url\"",
+    ] {
+        assert!(
+            !main.contains(snippet),
+            "main.rs must not rebuild attachment user content inline: {snippet}"
         );
     }
 

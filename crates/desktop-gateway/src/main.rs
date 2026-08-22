@@ -191,6 +191,7 @@ use local_first_engine::model_normalize;
 // Brings `.record(...)` into scope for direct calls on a `GatewayJournal` (C2, browser-protocol
 // metrics); `run_turn`'s own generic `J: ExecutionJournal` parameter doesn't need this import, but
 // calling the method directly outside that generic context does.
+#[cfg(test)]
 pub(crate) use attachments::append_thread_attachment_context;
 pub(crate) use gateway_actionable_source::*;
 pub(crate) use gateway_agent_checkpoints::*;
@@ -2193,46 +2194,16 @@ async fn stream_chat_via_openai(
         }
     }
 
-    let mut model_text = prompt.clone();
-    let mut all_images = if applies_new_input {
-        request.images.clone()
-    } else {
-        Vec::new()
-    };
-    let new_attachment_context = new_files
-        .iter()
-        .map(|file| chat_store::StoredAttachment {
-            display_name: file.display_name.clone(),
-            mime_type: file.mime_type.clone(),
-            text: file.text.clone(),
-            images: file.images.clone(),
-        })
-        .collect::<Vec<_>>();
-    let attachment_context = if !applies_new_input || request.checkpoint_input.is_some() {
-        &new_attachment_context
-    } else {
-        &working
-    };
-    all_images.extend(append_thread_attachment_context(
-        &mut model_text,
-        attachment_context,
-    ));
-
-    // Vision: when the turn carries images (request + rendered attachments), the
-    // user message becomes multimodal content (text + image_url parts) per the
-    // OpenAI-compatible schema; otherwise it stays a plain string.
-    let user_content = if all_images.is_empty() {
-        serde_json::Value::String(model_text.clone())
-    } else {
-        let mut parts = vec![serde_json::json!({ "type": "text", "text": model_text })];
-        for url in &all_images {
-            parts.push(serde_json::json!({
-                "type": "image_url",
-                "image_url": { "url": url }
-            }));
-        }
-        serde_json::Value::Array(parts)
-    };
+    let user_content = attachments::prepare_chat_attachment_user_content(
+        attachments::ChatAttachmentUserContentInput {
+            prompt: &prompt,
+            request_images: &request.images,
+            applies_new_input,
+            checkpoint_input_present: request.checkpoint_input.is_some(),
+            new_files: &new_files,
+            working: &working,
+        },
+    );
     // Built once here, then moved into `ls.messages` at the loop's start (the loop grows it).
     // `mut` because the vision policy below may swap the images out for a description (see
     // `vision::AttachmentPlan`) before the manager ever sees them.
