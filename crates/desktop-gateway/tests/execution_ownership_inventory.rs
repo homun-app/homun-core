@@ -3095,6 +3095,61 @@ fn agent_turn_recall_seed_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_turn_plan_seed_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let plan_seed = production_source(&root.join("src/gateway_agent_turn_plan_seed.rs"));
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai")
+        .split("// Tools offered to the model this run:")
+        .next()
+        .expect("agent turn plan seed setup");
+
+    for pattern in [
+        "pub(crate) struct AgentTurnPlanSeed",
+        "pub(crate) fn seed_agent_turn_plan_state(",
+        "loop_state.plan = canonical_plan_value(resume_goal, resume_plan)",
+        "loop_state.step_messages_start = loop_state.messages.len()",
+        "final_done: false",
+        "plan_nudges: 0",
+        "turn_used_tools: false",
+    ] {
+        assert!(
+            plan_seed.contains(pattern),
+            "agent turn plan seed owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "ls.plan = canonical_plan_value(resume_goal.as_deref(), &resume_plan)",
+        "let final_done = false;",
+        "let plan_nudges: u32 = 0;",
+        "let turn_used_tools = false;",
+        "ls.step_messages_start = ls.messages.len();",
+    ] {
+        assert!(
+            !stream_chat.contains(pattern),
+            "main.rs must not own agent turn plan seed state {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !plan_seed.contains(adjacent),
+            "agent turn plan seed owner must not absorb adjacent stream/loop/tail/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn chat_usage_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

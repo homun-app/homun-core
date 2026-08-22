@@ -32,6 +32,7 @@ mod gateway_agent_stream_events;
 mod gateway_agent_stream_persistence;
 mod gateway_agent_turn_identity;
 mod gateway_agent_turn_outcomes;
+mod gateway_agent_turn_plan_seed;
 mod gateway_agent_turn_recall_seed;
 mod gateway_agent_turn_route_trace;
 mod gateway_agent_turn_runner;
@@ -203,6 +204,7 @@ pub(crate) use gateway_agent_stream_drain::*;
 pub(crate) use gateway_agent_stream_events::*;
 pub(crate) use gateway_agent_stream_persistence::*;
 pub(crate) use gateway_agent_turn_identity::*;
+pub(crate) use gateway_agent_turn_plan_seed::*;
 pub(crate) use gateway_agent_turn_recall_seed::*;
 pub(crate) use gateway_agent_turn_route_trace::*;
 pub(crate) use gateway_agent_turn_runner::*;
@@ -2252,7 +2254,6 @@ async fn stream_chat_via_openai(
         // round, it's stuck (not making progress) → stop and synthesize, instead of
         // burning the whole round budget on a loop. This is what lets the budget be
         // generous: real long tasks run, loops are caught fast.
-        let final_done = false;
         // Long-horizon execution (F1): the round budget is measured from the LAST
         // verified progress, not from round 0. Whenever a canonical plan step becomes
         // `done` (verified), we move the anchor to the current round and reset the
@@ -2264,19 +2265,6 @@ async fn stream_chat_via_openai(
         // MERGES into this by id/title and can never reset a done step; F1 budget reset,
         // F2 verification, F5 next-step and the ‹‹PLAN›› marker all read THIS. Seeded from
         // the prior conversation (F4 resume). A step is `done` only after F2 verified it.
-        // P5: carried as an opaque `Value` in `LoopState` (engine-safe); seeded here from the resume.
-        ls.plan = canonical_plan_value(resume_goal.as_deref(), &resume_plan);
-        if verbose_debug() {
-            let done = resume_plan
-                .iter()
-                .filter(|s| s.get("status").and_then(|v| v.as_str()) == Some("done"))
-                .count();
-            eprintln!(
-                "[plan] turn-start: resumed {} steps ({done} done) from prior ‹‹PLAN›› marker",
-                resume_plan.len()
-            );
-        }
-
         // F2 verification gate: the running evidence (tool name → result snippet) for the
         // CURRENT plan step, fed to the verifier when the model marks the step done, then
         // cleared. A chat model can claim "done" without doing the work; the gate checks.
@@ -2289,11 +2277,9 @@ async fn stream_chat_via_openai(
         // `ls.messages`) so compaction never folds the system/user context into a summary.
         // Plan-completion enforcement: counts consecutive turns where the model STOPPED
         // (no tool call) while its plan still has open steps. Reset on any tool call.
-        let plan_nudges: u32 = 0;
         // Slice 2.5: did the model actually ACT (use a tool) this turn? Used at the no-tool
         // stop to tell a PREMATURE stop on a real task (judge it, bootstrap a plan) apart from
         // a plain conversational answer (let it end). Latches true once any tool has run.
-        let turn_used_tools = false;
         // Source URLs visited via browse_web this request, for the "Fonti" footer.
         let browse_sources: Vec<String> = Vec::new();
         // Tools offered to the model this run: the base set, plus any tools the
@@ -2316,8 +2302,15 @@ async fn stream_chat_via_openai(
         // CLI commands + output run during THIS response.
         sandbox_clear(thread_id.clone());
 
-        // F3: the first plan step's work begins after the initial context is in place.
-        ls.step_messages_start = ls.messages.len();
+        let plan_seed = seed_agent_turn_plan_state(
+            &mut ls,
+            resume_goal.as_deref(),
+            &resume_plan,
+            verbose_debug(),
+        );
+        let final_done = plan_seed.final_done;
+        let plan_nudges = plan_seed.plan_nudges;
+        let turn_used_tools = plan_seed.turn_used_tools;
 
         // F0 / model-io: detect+cache this provider's turn capabilities before the loop.
         // The thinking gate in `build_chat_payload` reads this cache.

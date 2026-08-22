@@ -103,6 +103,9 @@ AGENT_TURN_ROUTE_TRACE_RS = os.path.join(
 AGENT_TURN_RECALL_SEED_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_recall_seed.rs"
 )
+AGENT_TURN_PLAN_SEED_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_plan_seed.rs"
+)
 AGENT_TURN_TAIL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_tail.rs"
 )
@@ -1672,6 +1675,8 @@ def main() -> int:
         agent_turn_route_trace_source = handle.read()
     with open(AGENT_TURN_RECALL_SEED_RS, "r", encoding="utf-8") as handle:
         agent_turn_recall_seed_source = handle.read()
+    with open(AGENT_TURN_PLAN_SEED_RS, "r", encoding="utf-8") as handle:
+        agent_turn_plan_seed_source = handle.read()
     with open(AGENT_TURN_TAIL_RS, "r", encoding="utf-8") as handle:
         agent_turn_tail_source = handle.read()
     with open(AGENT_CHECKPOINTS_RS, "r", encoding="utf-8") as handle:
@@ -2341,6 +2346,54 @@ def main() -> int:
             agent_turn_recall_seed_source,
             snippet,
             "agent turn recall seed owner must not absorb stream, loop, tail, browser, or subagent owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_turn_plan_seed;",
+        "gateway root must declare agent turn plan seed owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_turn_plan_seed::*;",
+        "gateway root must re-export agent turn plan seed owner",
+    )
+    for snippet in [
+        "pub(crate) struct AgentTurnPlanSeed",
+        "pub(crate) fn seed_agent_turn_plan_state(",
+        "loop_state.plan = canonical_plan_value(resume_goal, resume_plan)",
+        "loop_state.step_messages_start = loop_state.messages.len()",
+        "final_done: false",
+        "plan_nudges: 0",
+        "turn_used_tools: false",
+    ]:
+        assert_contains(
+            agent_turn_plan_seed_source,
+            snippet,
+            "agent turn plan seed owner must own loop plan seed state",
+        )
+    for snippet in [
+        "ls.plan = canonical_plan_value(resume_goal.as_deref(), &resume_plan)",
+        "let final_done = false;",
+        "let plan_nudges: u32 = 0;",
+        "let turn_used_tools = false;",
+        "ls.step_messages_start = ls.messages.len();",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain agent turn plan seed state",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            agent_turn_plan_seed_source,
+            snippet,
+            "agent turn plan seed owner must not absorb stream, loop, tail, browser, or subagent owners",
         )
     for snippet in [
         "pub(crate) fn context_message_for_model(",
