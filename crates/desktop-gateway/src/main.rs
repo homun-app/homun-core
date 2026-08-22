@@ -76,6 +76,7 @@ mod gateway_chat_toolset;
 mod gateway_chat_turn_context;
 mod gateway_chat_utility_routes;
 mod gateway_chat_vision_preflight;
+mod gateway_chat_vision_recovery;
 mod gateway_composio_execution;
 mod gateway_composio_routes;
 mod gateway_connector_errors;
@@ -236,6 +237,7 @@ pub(crate) use gateway_chat_tool_perimeter::*;
 pub(crate) use gateway_chat_toolset::*;
 pub(crate) use gateway_chat_turn_context::*;
 pub(crate) use gateway_chat_vision_preflight::*;
+pub(crate) use gateway_chat_vision_recovery::*;
 pub(crate) use gateway_composio_execution::*;
 pub(crate) use gateway_composio_routes::*;
 pub(crate) use gateway_connector_errors::*;
@@ -2617,10 +2619,14 @@ async fn run_agent_rounds(
         return gateway_agent_turn_outcomes::deliver_image_rejection(tx, outcome, rejection).await;
     }
 
-    // Recover: describe the images the manager was refused, put the text where they were, run again.
-    let images = vision::collect_image_urls(&vision_seed.loop_state.messages);
-    let descriptions = vision::describe_images(&http, &readers, &images, &prompt).await;
-    vision::replace_images_with_descriptions(&mut vision_seed.loop_state.messages, &descriptions);
+    // Recover: describe the refused images, put the text where they were, run again.
+    recover_chat_vision_fallback_seed(ChatVisionRecoveryInput {
+        http: &http,
+        seed: &mut vision_seed,
+        readers: &readers,
+        prompt: &prompt,
+    })
+    .await;
 
     local_first_engine::agent_loop::run_turn(
         vision_seed.loop_state,

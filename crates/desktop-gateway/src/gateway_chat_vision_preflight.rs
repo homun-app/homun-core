@@ -2,7 +2,7 @@
 //!
 //! Owns the pre-loop decision for user-attached images: send inline, arm a
 //! fallback, delegate to the vision role, or return an early refusal. The
-//! post-loop image rejection recovery remains in `run_agent_rounds`.
+//! post-loop image rejection recovery is owned by `gateway_chat_vision_recovery`.
 
 use super::*;
 
