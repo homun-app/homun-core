@@ -2001,9 +2001,9 @@ async fn stream_chat_via_openai(
         ),
         None => None,
     };
-    // Composer interaction mode (agent = default). plan/ask/debug refine behavior;
-    // "ask" also drops the toolset below (pure conversation).
-    let mode = request.mode.as_deref().unwrap_or("agent").to_string();
+    let turn_policy =
+        resolve_chat_turn_policy(request.mode.as_deref(), request.tool_policy.as_deref());
+    let mode = turn_policy.mode.clone();
     // Model tier remains useful observability for role selection and evals; it no longer changes
     // the agent-loop control flow.
     let turn_tier = load_provider_registry().tier_for_model(&model);
@@ -2043,15 +2043,8 @@ async fn stream_chat_via_openai(
     let system = system.as_str();
     // (The 401/tool-compat/timeout fallback flags moved into GatewayModelClient::generate,
     // which now owns the per-round provider swap — ADR 0024.)
-    // Channel turns run read-only: offer only tools without side effects (search,
-    // recall, skill instructions, Composio reads). Side-effecting tools (write
-    // files, run sandbox, Composio writes) are withheld → Phase 2 routes them to
-    // approval. App chat (tool_policy unset) keeps the full toolset.
-    let read_only = request.tool_policy.as_deref() == Some("read_only");
-    // `autonomous` (set only by an Automation run whose rule is ApprovalPolicy::Autonomous):
-    // side-effecting tools EXECUTE directly instead of proposing a confirm card. This is the
-    // user's explicit per-automation opt-in; everything else still confirms.
-    let autonomous = request.tool_policy.as_deref() == Some("autonomous");
+    let read_only = turn_policy.read_only;
+    let autonomous = turn_policy.autonomous;
     // Browser toolset: the main agent ALWAYS drives the browser itself via the
     // granular micro-tools. The legacy coarse `browse_web` handoff is gone.
     // read_only (channels) still gets browser_act, but the dispatch blocks any
