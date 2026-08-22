@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (post-merge code-map presence owner).**
+> **Ultimo aggiornamento: 2026-08-22 (post-merge skill prompt catalog owner).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #288 (`825a7ef6`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#290 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #290 (`b26ce50a`) |
 
 ## Dove siamo
 
@@ -44,6 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
+- Estrazione mergeata `gateway_skill_runtime`: il filtro catalogo prompt
+  HomunCoder per workspace (`skill_prompt_catalog_for_workspace`) esce dal setup
+  inline di `stream_chat_via_openai`; `main.rs` conserva solo la decisione
+  runtime di appendere il blocco prompt installed-skills, mentre discovery skill,
+  filtro metodologia, rendering prompt skill, schema tool e loop agente restano
+  owner separati.
 - Estrazione mergeata `gateway_memory_prompt_context`: il read-model di presenza
   code-map (`project_has_code_map`) esce dal setup inline di
   `stream_chat_via_openai`; `main.rs` conserva solo la decisione runtime di
@@ -1184,8 +1190,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288: slice owner-level successive mergeate in `main`,
-  fino a `code-map presence owner`; `main` verificato e riallineato a #288.
+- #143-#283, #285-#286, #288-#290: slice owner-level successive mergeate in
+  `main`, fino a `skill prompt catalog owner`; `main` verificato e riallineato a
+  #290.
 
 PR aperte:
 
@@ -1193,7 +1200,7 @@ PR aperte:
 
 Branch corrente:
 
-- `main` pulito e riallineato a `origin/main` (`825a7ef6`).
+- `main` pulito e riallineato a `origin/main` (`b26ce50a`).
 
 ## Debito residuo
 
@@ -1226,7 +1233,7 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #288 (`825a7ef6`); prossima slice non-browser da scegliere
+main aggiornato a #290 (`b26ce50a`); prossima slice non-browser da scegliere
 dopo nuova lettura owner-level di main.rs.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
