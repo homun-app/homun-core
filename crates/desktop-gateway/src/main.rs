@@ -1739,23 +1739,11 @@ async fn stream_chat_via_openai(
     // HARD gate: the user's personal profile + RAG are NOT injected — the turn only
     // sees the conversation history with THIS contact. "personal" opts a trusted
     // contact back into today's behavior.
-    let contact_only = contact_ctx
-        .as_ref()
-        .map(|c| c.perimeter.memory_scope == "contact_only")
-        .unwrap_or(false);
-    // Finer-grained perimeter axes, independent of memory_scope. A contact opted into
-    // "personal" memory (NOT contact_only) can still have can_see_contacts/can_see_calendar
-    // = false; these are enforced HARD at dispatch below (not only in the prompt), so the
-    // address book / calendar can't be exfiltrated even when broad memory is allowed.
-    // No contact perimeter (self / in-app turn) → unrestricted.
-    let (can_see_contacts, can_see_calendar) = contact_ctx
-        .as_ref()
-        .map(|c| (c.perimeter.can_see_contacts, c.perimeter.can_see_calendar))
-        .unwrap_or((true, true));
-    let can_use_project_memory = contact_ctx
-        .as_ref()
-        .map(|context| context.can_use_project_memory)
-        .unwrap_or(true);
+    let contact_memory_perimeter = resolve_contact_memory_perimeter(contact_ctx.as_ref());
+    let contact_only = contact_memory_perimeter.contact_only;
+    let can_see_contacts = contact_memory_perimeter.can_see_contacts;
+    let can_see_calendar = contact_memory_perimeter.can_see_calendar;
+    let can_use_project_memory = contact_memory_perimeter.can_use_project_memory;
     // This is emitted as a structured stream event once the transport exists below.
     // Keep it next to prompt assembly so UI provenance and actual RAG context cannot diverge.
     let mut automatic_recall_payload = None;

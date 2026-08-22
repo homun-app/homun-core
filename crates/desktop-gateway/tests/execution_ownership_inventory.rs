@@ -3234,9 +3234,11 @@ fn chat_turn_context_has_one_gateway_owner() {
     for pattern in [
         "pub(crate) fn prepare_chat_turn_context(",
         "pub(crate) fn resolve_chat_turn_policy(",
+        "pub(crate) fn resolve_contact_memory_perimeter(",
         "struct ChatTurnContextInput",
         "struct ChatTurnContext",
         "struct ChatTurnPolicy",
+        "struct ContactMemoryPerimeter",
         "set_memory_workspace(",
         "contact_turn_context(",
         "note_user_activity(",
@@ -3255,6 +3257,10 @@ fn chat_turn_context_has_one_gateway_owner() {
         "request.tool_policy.as_deref() == Some(\"read_only\")",
         "request.tool_policy.as_deref() == Some(\"autonomous\")",
         "request.mode.as_deref().unwrap_or(\"agent\")",
+        "c.perimeter.memory_scope == \"contact_only\"",
+        "c.perimeter.can_see_contacts",
+        "c.perimeter.can_see_calendar",
+        "context.can_use_project_memory",
     ] {
         assert!(
             !main.contains(pattern),
