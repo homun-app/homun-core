@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (agent turn sensitive confirmation owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-22 (agent turn route trace owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#303 mergeate in `main`; slice sensitive confirmation in verifica su `fabio/chat-turn-sensitive-confirmations`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #303 (`ed73ac9c`); slice sensitive confirmation verificata localmente prima della PR |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#304 mergeate in `main`; slice route trace in verifica su `fabio/chat-turn-route-trace-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #304 (`956d9f73`); slice route trace verificata localmente prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_agent_turn_sensitive`: la semina pre-loop delle
+- Estrazione locale `gateway_agent_turn_route_trace`: la pubblicazione pre-loop
+  della traccia capability-route (`publish_agent_turn_route_trace`: push in
+  `LoopState.tool_trace` e delta ACT) esce dal setup inline di
+  `stream_chat_via_openai`; route selection, tool perimeter, loop agente,
+  browser e subagent restano owner separati.
+- Estrazione mergeata `gateway_agent_turn_sensitive`: la semina pre-loop delle
   conferme sensitive del turno (`seed_agent_turn_sensitive_confirmations`) esce
   dal setup inline di `stream_chat_via_openai`; `main.rs` consuma solo l'owner,
   mentre policy approval, tool execution, loop agente, browser e subagent

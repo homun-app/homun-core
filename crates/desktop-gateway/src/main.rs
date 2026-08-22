@@ -32,6 +32,7 @@ mod gateway_agent_stream_events;
 mod gateway_agent_stream_persistence;
 mod gateway_agent_turn_identity;
 mod gateway_agent_turn_outcomes;
+mod gateway_agent_turn_route_trace;
 mod gateway_agent_turn_runner;
 mod gateway_agent_turn_sensitive;
 mod gateway_agent_turn_tail;
@@ -201,6 +202,7 @@ pub(crate) use gateway_agent_stream_drain::*;
 pub(crate) use gateway_agent_stream_events::*;
 pub(crate) use gateway_agent_stream_persistence::*;
 pub(crate) use gateway_agent_turn_identity::*;
+pub(crate) use gateway_agent_turn_route_trace::*;
 pub(crate) use gateway_agent_turn_runner::*;
 pub(crate) use gateway_agent_turn_sensitive::*;
 pub(crate) use gateway_agent_turn_tail::*;
@@ -2251,16 +2253,7 @@ async fn stream_chat_via_openai(
         let memory_answer = String::new();
         // Consequential actions performed this turn (any domain) → fed to the
         // memory extractor so the "why" of each mutation is remembered.
-        if let Some(route_line) = capability_route_trace_line(&capability_route_for_runtime) {
-            ls.tool_trace.push(route_line.clone());
-            let _ = emit_stream_event(
-                &tx,
-                GenerateStreamEvent::Delta {
-                    text: format!("‹‹ACT››🧭 {route_line}‹‹/ACT››"),
-                },
-            )
-            .await;
-        }
+        publish_agent_turn_route_trace(&mut ls, &tx, &capability_route_for_runtime).await;
         // No-progress guard: if the model repeats the EXACT same tool calls round after
         // round, it's stuck (not making progress) → stop and synthesize, instead of
         // burning the whole round budget on a loop. This is what lets the budget be
