@@ -66,6 +66,7 @@ mod gateway_capability_routing;
 mod gateway_channels;
 mod gateway_chat_branches;
 mod gateway_chat_code_map_prompt;
+mod gateway_chat_connected_prompt;
 mod gateway_chat_markers;
 mod gateway_chat_memory;
 mod gateway_chat_plan_resume;
@@ -233,6 +234,7 @@ pub(crate) use gateway_brain_materialization::*;
 pub(crate) use gateway_brain_runtime::*;
 pub(crate) use gateway_browser_runtime::*;
 pub(crate) use gateway_chat_code_map_prompt::*;
+pub(crate) use gateway_chat_connected_prompt::*;
 pub(crate) use gateway_chat_plan_resume::*;
 pub(crate) use gateway_chat_streams::*;
 pub(crate) use gateway_chat_tool_perimeter::*;
@@ -597,10 +599,8 @@ use gateway_project_search_tools::{
 use gateway_prompt_instructions::{
     RuntimePromptControlInput, artifact_destination_prompt_block,
     booking_assumption_choice_instruction, browser_open_research_discovery_instruction,
-    choice_clarify_instruction, connected_service_tools_instruction,
-    contact_context_instruction_block, core_operating_instruction,
-    expired_connected_services_instruction, goal_propose_instruction,
-    runtime_prompt_control_instructions,
+    choice_clarify_instruction, contact_context_instruction_block, core_operating_instruction,
+    goal_propose_instruction, runtime_prompt_control_instructions,
 };
 pub(crate) use gateway_prompt_packets::*;
 #[cfg(test)]
@@ -1648,31 +1648,15 @@ async fn stream_chat_via_openai(
         project_root: project_root_for_thread(state, request.thread_id.as_deref()).as_deref(),
     })
     .await;
-    let mut catalog_index = connected_tool_catalog.catalog_index;
-    let composio_writes = connected_tool_catalog.composio_writes;
-    let mcp_schemas = connected_tool_catalog.mcp_schemas;
-    let inactive_services = connected_tool_catalog.inactive_services;
-    let has_composio = !catalog_index.is_empty();
-    let system = match connected_tool_catalog.filesystem_mcp_instruction {
-        Some(instruction) => format!("{system}\n\n{instruction}"),
-        None => system,
-    };
-    let system = if !has_composio {
-        system
-    } else {
-        format!("{system}\n\n{}", connected_service_tools_instruction())
-    };
-    // Connected-but-EXPIRED services: the integration EXISTS, the OAuth lapsed. Tell
-    // the model so it says "reconnect" instead of "I have no integration" (the bug
-    // that surfaced on a real "leggi le email" with an expired Gmail).
-    let system = if inactive_services.is_empty() {
-        system
-    } else {
-        format!(
-            "{system}\n\n{}",
-            expired_connected_services_instruction(&inactive_services.join(", "))
-        )
-    };
+    let connected_prompt = append_chat_connected_prompt_instructions(ChatConnectedPromptInput {
+        system,
+        catalog: connected_tool_catalog,
+    });
+    let mut catalog_index = connected_prompt.catalog_index;
+    let composio_writes = connected_prompt.composio_writes;
+    let mcp_schemas = connected_prompt.mcp_schemas;
+    let has_composio = connected_prompt.has_composio;
+    let system = connected_prompt.system;
     // Installed skills (Anthropic Agent Skills, progressive disclosure L1): pre-load
     // name+description; the model calls `use_skill(<id>)` to pull the full SKILL.md
     // when a request matches, then follows it.

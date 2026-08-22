@@ -195,6 +195,9 @@ CHAT_VISION_RECOVERY_RS = os.path.join(
 CHAT_CODE_MAP_PROMPT_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_code_map_prompt.rs"
 )
+CHAT_CONNECTED_PROMPT_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_chat_connected_prompt.rs"
+)
 CHAT_TOOL_PERIMETER_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_tool_perimeter.rs"
 )
@@ -1776,6 +1779,8 @@ def main() -> int:
         chat_vision_recovery_source = handle.read()
     with open(CHAT_CODE_MAP_PROMPT_RS, "r", encoding="utf-8") as handle:
         chat_code_map_prompt_source = handle.read()
+    with open(CHAT_CONNECTED_PROMPT_RS, "r", encoding="utf-8") as handle:
+        chat_connected_prompt_source = handle.read()
     with open(CHAT_TOOL_PERIMETER_RS, "r", encoding="utf-8") as handle:
         chat_tool_perimeter_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
@@ -4212,6 +4217,52 @@ def main() -> int:
             chat_code_map_prompt_source,
             snippet,
             "chat code-map prompt owner must not absorb adjacent memory, prompt, toolset, loop, search or browser surfaces",
+        )
+    assert_contains(
+        source,
+        "mod gateway_chat_connected_prompt;",
+        "gateway root must declare chat connected prompt owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_chat_connected_prompt::*;",
+        "gateway root must re-export chat connected prompt owner",
+    )
+    for snippet in [
+        "pub(crate) struct ChatConnectedPromptInput",
+        "pub(crate) struct ChatConnectedPrompt",
+        "pub(crate) fn append_chat_connected_prompt_instructions(",
+        "connected_service_tools_instruction()",
+        "expired_connected_services_instruction(&inactive_services.join(\", \"))",
+    ]:
+        assert_contains(
+            chat_connected_prompt_source,
+            snippet,
+            "chat connected prompt owner must compose connected service prompt guidance",
+        )
+    for snippet in [
+        "connected_service_tools_instruction()",
+        "expired_connected_services_instruction(",
+        "let inactive_services = connected_tool_catalog.inactive_services;",
+    ]:
+        assert_not_contains(
+            stream_chat_source,
+            snippet,
+            "gateway root must delegate chat connected prompt composition",
+        )
+    for snippet in [
+        "pub(crate) async fn prepare_connected_tool_catalog(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "fn connected_tool_catalog_from_sources(",
+        "pub(crate) fn connected_service_tools_instruction(",
+        "pub(crate) fn expired_connected_services_instruction(",
+        "async fn run_agent_rounds(",
+        "fn execute_capability_browser_task(",
+    ]:
+        assert_not_contains(
+            chat_connected_prompt_source,
+            snippet,
+            "chat connected prompt owner must not absorb adjacent toolset, prompt wording, loop or browser surfaces",
         )
     assert_contains(
         source,
