@@ -2045,46 +2045,16 @@ async fn stream_chat_via_openai(
     // toolkit-aware `search_composio_catalog` inside find_capability (returns a service's
     // full CRUD set together, so the model picks the right verb). The hits are still
     // converted to typed `CapabilityEntry` values before being surfaced.
-    // Attachments (persistent): ingest NEW files off-runtime, PERSIST them on the
-    // thread, then load the thread's FULL set so a file stays usable across turns
-    // (no re-attach). A manifest lists the available files so the model uses their
-    // content instead of improvising (sandbox / list_directory / download links).
-    let new_files = if !applies_new_input || request.attachments.is_empty() {
-        Vec::new()
-    } else {
-        let atts = request.attachments.clone();
-        tokio::task::spawn_blocking(move || attachments::ingest_each(&atts))
-            .await
-            .unwrap_or_default()
-    };
-    let mut working: Vec<chat_store::StoredAttachment> = Vec::new();
-    if applies_new_input && let Some(thread_id) = request.thread_id.as_deref() {
-        // Persist new files + load the whole thread set (sync DB work, no await
-        // while the lock is held).
-        if let Ok(store) = lock_store(state) {
-            for file in &new_files {
-                let _ = store.upsert_thread_attachment(
-                    thread_id,
-                    &file.display_name,
-                    &file.mime_type,
-                    file.text.as_deref(),
-                    &file.images,
-                );
-            }
-            working = store.thread_attachments(thread_id).unwrap_or_default();
-        }
-    }
-    // Guarantee THIS turn's files are present even if persistence failed / no thread.
-    for file in &new_files {
-        if !working.iter().any(|w| w.display_name == file.display_name) {
-            working.push(chat_store::StoredAttachment {
-                display_name: file.display_name.clone(),
-                mime_type: file.mime_type.clone(),
-                text: file.text.clone(),
-                images: file.images.clone(),
-            });
-        }
-    }
+    let attachments::ChatAttachmentWorkingSet { new_files, working } =
+        attachments::prepare_chat_attachment_working_set(
+            attachments::ChatAttachmentWorkingSetInput {
+                state,
+                thread_id: request.thread_id.as_deref(),
+                attachments: &request.attachments,
+                applies_new_input,
+            },
+        )
+        .await;
 
     let user_content = attachments::prepare_chat_attachment_user_content(
         attachments::ChatAttachmentUserContentInput {

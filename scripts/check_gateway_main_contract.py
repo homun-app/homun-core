@@ -357,6 +357,8 @@ def forbidden_root_snippets() -> dict[str, str]:
         "const ATTACHMENT_TEXT_BUDGET_CHARS:": "attachment prompt context budget must stay in attachments",
         "const ATTACHMENT_CONTEXT_IMAGES:": "attachment prompt image budget must stay in attachments",
         "fn append_thread_attachment_context(": "attachment prompt context assembly must stay in attachments",
+        "struct ChatAttachmentWorkingSetInput": "chat attachment working-set input must stay in attachments",
+        "fn prepare_chat_attachment_working_set(": "chat attachment ingestion and working-set assembly must stay in attachments",
         "struct ChatAttachmentUserContentInput": "chat attachment user content input must stay in attachments",
         "fn prepare_chat_attachment_user_content(": "chat attachment user content assembly must stay in attachments",
         "fn attachment_user_content(": "chat attachment multimodal user content must stay in attachments",
@@ -1822,6 +1824,8 @@ def main() -> int:
         "const ATTACHMENT_TEXT_BUDGET_CHARS:",
         "const ATTACHMENT_CONTEXT_IMAGES:",
         "pub(crate) fn append_thread_attachment_context(",
+        "pub(crate) struct ChatAttachmentWorkingSetInput",
+        "pub(crate) async fn prepare_chat_attachment_working_set(",
         "pub(crate) struct ChatAttachmentUserContentInput",
         "pub(crate) fn prepare_chat_attachment_user_content(",
         "fn attachment_user_content(",
@@ -1837,7 +1841,16 @@ def main() -> int:
         "attachments::prepare_chat_attachment_user_content(",
         "gateway root should delegate chat attachment user-content assembly",
     )
+    assert_contains(
+        source,
+        "attachments::prepare_chat_attachment_working_set(",
+        "gateway root should delegate chat attachment ingestion/persistence/working-set assembly",
+    )
     for snippet in [
+        "attachments::ingest_each(",
+        "let mut working: Vec<chat_store::StoredAttachment>",
+        "store.upsert_thread_attachment(",
+        "store.thread_attachments(",
         "let new_attachment_context =",
         "let user_content = if all_images.is_empty()",
         'serde_json::json!({ "type": "image_url"',
