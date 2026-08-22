@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (agent turn loop seed owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-22 (agent turn trace dump owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-turn-loop-seed-owner` |
-| Branch | `fabio/chat-turn-loop-seed-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#312 mergeate in `main`; slice loop seed in verifica su `fabio/chat-turn-loop-seed-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #312 (`16a92121`); slice loop seed in verifica locale prima della PR |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-turn-trace-dump-owner` |
+| Branch | `fabio/chat-turn-trace-dump-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#313 mergeate in `main`; slice trace dump in verifica su `fabio/chat-turn-trace-dump-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #313 (`d58de768`); slice trace dump in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,11 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_agent_turn_loop_seed`: l'inizializzazione
+- Estrazione locale `gateway_agent_turn_trace_dump`: la risoluzione opzionale
+  della cartella trace dump (`resolve_agent_turn_trace_dump_dir`) esce dal
+  setup inline di `stream_chat_via_openai`; eventi turn trace, stream setup,
+  loop agente, browser executor e subagent restano owner separati.
+- Estrazione mergeata `gateway_agent_turn_loop_seed`: l'inizializzazione
   pre-loop di `LoopState` (`prompt_packets`, `messages`) e dei buffer terminali
   del turno (`memory_answer`, `last_model_error`, `browse_sources`, reset
   terminale) esce dal setup inline di `stream_chat_via_openai`; recall,
@@ -1298,9 +1302,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#312: slice owner-level successive mergeate in
-  `main`, fino a `agent turn HITL resume owner`; `main` verificato e
-  riallineato a #312.
+- #143-#283, #285-#286, #288-#313: slice owner-level successive mergeate in
+  `main`, fino a `agent turn loop seed owner`; `main` verificato e riallineato
+  a #313.
 
 PR aperte:
 
@@ -1308,8 +1312,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/chat-turn-loop-seed-owner` in verifica locale da `main` #312
-  (`16a92121`).
+- `fabio/chat-turn-trace-dump-owner` in verifica locale da `main` #313
+  (`d58de768`).
 
 ## Debito residuo
 

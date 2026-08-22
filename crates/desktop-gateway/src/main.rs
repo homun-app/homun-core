@@ -44,6 +44,7 @@ mod gateway_agent_turn_runner;
 mod gateway_agent_turn_sensitive;
 mod gateway_agent_turn_tail;
 mod gateway_agent_turn_tool_seed;
+mod gateway_agent_turn_trace_dump;
 mod gateway_agent_wake;
 mod gateway_artifact_memory;
 mod gateway_artifacts;
@@ -222,6 +223,7 @@ pub(crate) use gateway_agent_turn_runner::*;
 pub(crate) use gateway_agent_turn_sensitive::*;
 pub(crate) use gateway_agent_turn_tail::*;
 pub(crate) use gateway_agent_turn_tool_seed::*;
+pub(crate) use gateway_agent_turn_trace_dump::*;
 pub(crate) use gateway_agent_wake::*;
 pub(crate) use gateway_artifacts::*;
 pub(crate) use gateway_automation_routes::*;
@@ -2334,9 +2336,7 @@ async fn stream_chat_via_openai(
         let fence_workspace_id = automation_workspace_id.clone();
         // 5.D1c.9: resolve the trace-dump dir gateway-side (armed only when HOMUN_TRACE_DUMP=1) and
         // inject it, so the engine loop appends without calling the gateway's path resolver.
-        let trace_dir = local_first_engine::trace::dump_enabled()
-            .then(gateway_logs_dir)
-            .and_then(Result::ok);
+        let trace_dir = resolve_agent_turn_trace_dump_dir();
         let outcome = run_agent_rounds(
             ls,
             &tx,
