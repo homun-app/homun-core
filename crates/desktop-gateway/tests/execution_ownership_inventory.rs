@@ -2315,6 +2315,8 @@ fn attachment_prompt_context_has_one_gateway_owner() {
     let attachments = production_source(&root.join("src/attachments.rs"));
 
     for pattern in [
+        "pub(crate) struct ChatAttachmentWorkingSetInput",
+        "pub(crate) async fn prepare_chat_attachment_working_set(",
         "const ATTACHMENT_TEXT_BUDGET_CHARS:",
         "const ATTACHMENT_CONTEXT_IMAGES:",
         "fn append_thread_attachment_context(",
@@ -2337,7 +2339,15 @@ fn attachment_prompt_context_has_one_gateway_owner() {
         main.contains("attachments::prepare_chat_attachment_user_content("),
         "main.rs should delegate chat attachment user-content assembly to attachments"
     );
+    assert!(
+        main.contains("attachments::prepare_chat_attachment_working_set("),
+        "main.rs should delegate chat attachment ingestion/persistence/working-set assembly to attachments"
+    );
     for snippet in [
+        "attachments::ingest_each(",
+        "let mut working: Vec<chat_store::StoredAttachment>",
+        "store.upsert_thread_attachment(",
+        "store.thread_attachments(",
         "let new_attachment_context =",
         "let user_content = if all_images.is_empty()",
         "serde_json::json!({ \"type\": \"image_url\"",

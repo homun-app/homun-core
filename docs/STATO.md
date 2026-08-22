@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (chat prompt layers owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-23 (chat attachment working-set owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-prompt-layers-owner` |
-| Branch | `fabio/chat-prompt-layers-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#322 mergeate in `main`; slice chat prompt layers owner in verifica su `fabio/chat-prompt-layers-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #322 (`a91d2808`); slice chat prompt layers owner in verifica locale prima della PR |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app` |
+| Branch | `fabio/chat-attachment-working-set-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#323 mergeate in `main`; slice chat attachment working-set owner in verifica locale; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #323 (`7a5db409`); slice chat attachment working-set owner in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,14 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_chat_prompt_layers`: la composizione runtime dei
+- Estrazione locale `attachments`: ingestion allegati, persistenza/ricostruzione
+  del working set per thread e garanzia dei file del turno senza thread o con
+  persistenza fallita escono da `stream_chat_via_openai`; `main.rs` delega a
+  `prepare_chat_attachment_working_set` e conserva solo il consumo di
+  `new_files`/`working` per costruire lo user-content. Vision preflight/fallback,
+  prompt packet, loop agente, memory recall, browser e routing restano owner
+  separati.
+- Estrazione mergeata `gateway_chat_prompt_layers`: la composizione runtime dei
   layer prompt gia' risolti (`append_chat_prompt_layers`: contact
   persona/privacy, installed skills, choice/booking/resume HITL e destinazioni
   artifact autorizzate) esce da `stream_chat_via_openai`; discovery skill,
@@ -192,10 +199,9 @@ Slice Runtime V2 recenti:
   restano owner separati.
 - Estrazione mergeata `attachments`: la costruzione del contenuto utente
   multimodale del turno chat (`prepare_chat_attachment_user_content`) esce dal
-  setup inline di `stream_chat_via_openai`; `main.rs` conserva ingest/persistenza
-  e delega la scelta fra working set persistito e contesto checkpoint, mentre
-  vision preflight/fallback, prompt packet, loop agente e routing restano owner
-  separati.
+  setup inline di `stream_chat_via_openai`; `main.rs` delega la scelta fra
+  working set persistito e contesto checkpoint, mentre vision preflight/fallback,
+  prompt packet, loop agente e routing restano owner separati.
 - Estrazione mergeata `gateway_prompt_instructions`: la composizione finale del
   prompt runtime-control (`runtime_prompt_control_instructions`) esce dal setup
   inline di `stream_chat_via_openai`; `main.rs` passa solo policy recall,
@@ -1346,9 +1352,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#322: slice owner-level successive mergeate in
-  `main`, fino a `chat connected prompt owner`; `main` verificato e riallineato
-  a #322.
+- #143-#283, #285-#286, #288-#323: slice owner-level successive mergeate in
+  `main`, fino a `chat prompt layers owner`; `main` verificato e riallineato
+  a #323.
 
 PR aperte:
 
@@ -1356,8 +1362,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/chat-prompt-layers-owner` in verifica locale da `main` #322
-  (`a91d2808`).
+- `fabio/chat-attachment-working-set-owner` in verifica locale da `main` #323
+  (`7a5db409`).
 
 ## Debito residuo
 
@@ -1381,7 +1387,7 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice chat prompt layers owner con gate kernel verde, PR e
+1. Chiudere la slice chat attachment working-set owner con gate kernel verde, PR e
    merge.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
@@ -1390,11 +1396,11 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #322 (`a91d2808`); slice non-browser corrente
-`fabio/chat-prompt-layers-owner` sposta la composizione runtime dei layer prompt
-gia' risolti (`append_chat_prompt_layers`) fuori da `stream_chat_via_openai`,
-senza assorbire discovery skill, wording prompt, artifact storage/routes, HITL
-state, toolset, loop agente o browser.
+main aggiornato a #323 (`7a5db409`); slice non-browser corrente
+`fabio/chat-attachment-working-set-owner` sposta ingestion/persistenza/working
+set degli allegati chat fuori da `stream_chat_via_openai`, senza assorbire
+vision preflight/fallback, prompt packet, loop agente, memory recall, routing,
+browser o subagent.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
