@@ -612,12 +612,18 @@ fn skill_prompt_instructions_have_one_gateway_owner() {
         "fn run_in_sandbox_tool_schema(",
         "fn enabled_skills_summary(",
         "fn homuncoder_skill_ids(",
+        "fn skill_prompt_catalog_for_workspace(",
     ] {
         assert!(
             skill_runtime.contains(adjacent),
             "skill prompt owner must stay with skill runtime adjacent helper {adjacent}"
         );
     }
+
+    assert!(
+        !main.contains("enabled_skills.retain(|(id, _, _)| !homuncoder.contains(id));"),
+        "main.rs must not own HomunCoder prompt skill filtering"
+    );
 }
 
 #[test]

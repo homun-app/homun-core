@@ -1278,6 +1278,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn create_skill(": "skill authoring runtime must stay in gateway_skill_runtime",
         "fn enabled_skills_summary(": "skill prompt discovery runtime must stay in gateway_skill_runtime",
         "fn homuncoder_skill_ids(": "HomunCoder skill manifest loading must stay in gateway_skill_runtime",
+        "fn skill_prompt_catalog_for_workspace(": "HomunCoder prompt skill filtering must stay in gateway_skill_runtime",
         "fn skill_prompt_instructions_block(": "skill prompt instruction rendering must stay in gateway_skill_runtime",
         "fn load_skill_body(": "skill progressive disclosure runtime must stay in gateway_skill_runtime",
         "fn load_skill_body_and_sensitive(": "skill sensitive disclosure runtime must stay in gateway_skill_runtime",
@@ -3584,8 +3585,18 @@ def main() -> int:
     )
     assert_contains(
         skill_runtime_source,
+        "pub(crate) fn skill_prompt_catalog_for_workspace(",
+        "skill runtime owner must expose workspace-scoped prompt skill filtering",
+    )
+    assert_contains(
+        skill_runtime_source,
         "pub(crate) fn skill_prompt_instructions_block(",
         "skill runtime owner must expose prompt instruction rendering",
+    )
+    assert_not_contains(
+        source,
+        "enabled_skills.retain(|(id, _, _)| !homuncoder.contains(id));",
+        "gateway root must not retain HomunCoder prompt skill filtering",
     )
     for snippet in [
         "INSTALLED SKILLS —",

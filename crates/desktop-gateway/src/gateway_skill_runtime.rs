@@ -114,6 +114,27 @@ pub(crate) fn homuncoder_skill_ids() -> HashSet<String> {
         .unwrap_or_default()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SkillPromptCatalog {
+    pub(crate) enabled_skills: Vec<(String, String, String)>,
+    pub(crate) is_project: bool,
+}
+
+pub(crate) fn skill_prompt_catalog_for_workspace(
+    mut enabled_skills: Vec<(String, String, String)>,
+    homuncoder: &HashSet<String>,
+    workspace_id: &str,
+) -> SkillPromptCatalog {
+    let is_project = workspace_id != local_first_memory::PERSONAL_WORKSPACE;
+    if !is_project {
+        enabled_skills.retain(|(id, _, _)| !homuncoder.contains(id));
+    }
+    SkillPromptCatalog {
+        enabled_skills,
+        is_project,
+    }
+}
+
 pub(crate) fn skill_prompt_instructions_block(
     enabled_skills: &[(String, String, String)],
     homuncoder: &HashSet<String>,
@@ -363,6 +384,43 @@ mod tests {
         let personal_block =
             skill_prompt_instructions_block(&skills, &homuncoder, false).expect("personal block");
         assert!(!personal_block.contains("METHODOLOGY (HomunCoder)"));
+    }
+
+    #[test]
+    fn skill_prompt_catalog_filters_homuncoder_outside_project_workspaces() {
+        let skills = vec![
+            (
+                "test-first-development".to_string(),
+                "TDD".to_string(),
+                "Write tests first".to_string(),
+            ),
+            (
+                "pdf".to_string(),
+                "PDF".to_string(),
+                "Read and create PDF files".to_string(),
+            ),
+        ];
+        let homuncoder = HashSet::from(["test-first-development".to_string()]);
+
+        let project =
+            skill_prompt_catalog_for_workspace(skills.clone(), &homuncoder, "project-alpha");
+        assert!(project.is_project);
+        assert_eq!(project.enabled_skills.len(), 2);
+
+        let personal = skill_prompt_catalog_for_workspace(
+            skills,
+            &homuncoder,
+            local_first_memory::PERSONAL_WORKSPACE,
+        );
+        assert!(!personal.is_project);
+        assert_eq!(
+            personal
+                .enabled_skills
+                .iter()
+                .map(|(id, _, _)| id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["pdf"]
+        );
     }
 
     #[test]
