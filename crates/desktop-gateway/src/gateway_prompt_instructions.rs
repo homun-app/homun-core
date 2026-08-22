@@ -4,6 +4,8 @@
 //! the gateway root makes browser-research and HITL-resume wording testable
 //! without growing `main.rs`.
 
+use crate::gateway_browser_tools::manager_browser_guidance;
+
 pub(crate) fn browser_open_research_discovery_instruction() -> &'static str {
     "For open-ended current news or broad web research where the user did NOT name \
 a specific site/URL, start with search/discovery (for example a search results or \
@@ -371,6 +373,45 @@ pub(crate) fn objective_contract_read_only_default_instruction() -> &'static str
     "OBJECTIVE CONTRACT: none recorded for this task, so execution defaults to READ-ONLY analysis. Reading, searching, browsing and analysing are available; tools that change something (writing files, sending, creating, booking, purchasing) are refused until the user asks for that change. Do the read-only work and say plainly what you would need to change, rather than attempting it."
 }
 
+pub(crate) struct RuntimePromptControlInput<'a> {
+    pub(crate) memory_recall_allowed: bool,
+    pub(crate) capability_router_instruction: Option<&'a str>,
+    pub(crate) mode: &'a str,
+    pub(crate) objective_contract: Option<&'a local_first_task_runtime::ObjectiveContractRecord>,
+}
+
+pub(crate) fn runtime_prompt_control_instructions(input: RuntimePromptControlInput<'_>) -> String {
+    let mut blocks = vec![
+        memory_recall_usage_instruction().to_string(),
+        operational_plan_instruction().to_string(),
+    ];
+    if !input.memory_recall_allowed {
+        blocks.push(memory_scope_restricted_instruction().to_string());
+    }
+    blocks.push(language_follow_user_instruction().to_string());
+    if let Some(instruction) = input.capability_router_instruction {
+        blocks.push(instruction.to_string());
+    }
+    blocks.push(freshness_verification_instruction().to_string());
+    blocks.push(execution_verification_instruction().to_string());
+    blocks.push(manager_browser_guidance().to_string());
+    match input.mode {
+        "plan" => blocks.push(plan_mode_instruction().to_string()),
+        "ask" => blocks.push(ask_mode_instruction().to_string()),
+        "debug" => blocks.push(debug_mode_instruction().to_string()),
+        _ => {}
+    }
+    blocks.push(match input.objective_contract {
+        Some(objective) => objective_contract_instruction(
+            objective.revision,
+            &format!("{:?}", objective.mode),
+            &objective.objective,
+        ),
+        None => objective_contract_read_only_default_instruction().to_string(),
+    });
+    blocks.join("\n\n")
+}
+
 pub(crate) fn operational_plan_instruction() -> &'static str {
     "OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing \
 in the SAME turn. The plan is a live projection of the canonical objective, not a separate artifact \
@@ -412,7 +453,7 @@ discovery/search from scratch."
 #[cfg(test)]
 mod tests {
     use super::{
-        ask_mode_instruction, booking_assumption_choice_instruction,
+        RuntimePromptControlInput, ask_mode_instruction, booking_assumption_choice_instruction,
         browser_open_research_discovery_instruction, choice_clarify_instruction,
         choice_resume_instruction_legacy_backup, code_map_available_instruction,
         connected_service_tools_instruction, contact_context_instruction_block,
@@ -422,7 +463,7 @@ mod tests {
         language_follow_user_instruction, memory_recall_usage_instruction,
         memory_scope_restricted_instruction, objective_contract_instruction,
         objective_contract_read_only_default_instruction, operational_plan_instruction,
-        plan_mode_instruction,
+        plan_mode_instruction, runtime_prompt_control_instructions,
     };
 
     #[test]
@@ -645,6 +686,55 @@ mod tests {
         assert!(fallback.contains("READ-ONLY analysis"));
         assert!(fallback.contains("tools that change something"));
         assert!(fallback.contains("refused until the user asks"));
+    }
+
+    #[test]
+    fn gateway_prompt_instructions_own_runtime_prompt_control_order() {
+        let contract = local_first_task_runtime::ObjectiveContractRecord {
+            user_id: "user".to_string(),
+            workspace_id: "workspace".to_string(),
+            thread_id: "thread".to_string(),
+            source_message_id: "message".to_string(),
+            objective: "Stabilize the kernel".to_string(),
+            mode: local_first_task_runtime::ObjectiveMode::Mixed,
+            scope_json: serde_json::json!({}),
+            allowed_actions_json: serde_json::json!(["read", "write"]),
+            completion_json: serde_json::json!({}),
+            status: "active".to_string(),
+            revision: 12,
+            created_at: 1,
+            updated_at: 2,
+        };
+
+        let guidance = runtime_prompt_control_instructions(RuntimePromptControlInput {
+            memory_recall_allowed: false,
+            capability_router_instruction: Some("CAPABILITY ROUTER SENTINEL"),
+            mode: "debug",
+            objective_contract: Some(&contract),
+        });
+
+        for expected in [
+            "MEMORY: you have a long-term memory",
+            "OPERATIONAL PLAN",
+            "MEMORY SCOPE FOR THIS OBJECTIVE",
+            "LANGUAGE: ALWAYS write",
+            "CAPABILITY ROUTER SENTINEL",
+            "FRESHNESS / VERIFICATION",
+            "EXECUTION / VERIFICATION",
+            "BROWSER (delegated `browse`)",
+            "DEBUG MODE",
+            "revision 12",
+            "mode=Mixed",
+            "objective=Stabilize the kernel",
+        ] {
+            assert!(guidance.contains(expected), "missing {expected}");
+        }
+        assert!(guidance.find("MEMORY:").unwrap() < guidance.find("OPERATIONAL PLAN").unwrap());
+        assert!(
+            guidance.find("CAPABILITY ROUTER SENTINEL").unwrap()
+                < guidance.find("FRESHNESS / VERIFICATION").unwrap()
+        );
+        assert!(guidance.find("DEBUG MODE").unwrap() < guidance.find("revision 12").unwrap());
     }
 
     #[test]
