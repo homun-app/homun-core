@@ -3742,6 +3742,55 @@ fn agent_turn_trace_dump_has_one_gateway_owner() {
 }
 
 #[test]
+fn chat_turn_start_trace_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let turn_trace_owner = production_source(&root.join("src/gateway_turn_trace.rs"));
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai")
+        .split("let capability_router_instruction =")
+        .next()
+        .expect("chat turn start trace setup");
+
+    for pattern in [
+        "pub(crate) struct ChatTurnStartTraceInput",
+        "pub(crate) fn record_chat_turn_start_trace(",
+        "TurnEvent::TurnStart",
+    ] {
+        assert!(
+            turn_trace_owner.contains(pattern),
+            "turn trace owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "TurnEvent::TurnStart",
+        "prompt_head: request.prompt.chars()",
+    ] {
+        assert!(
+            !stream_chat.contains(pattern),
+            "main.rs must not own chat turn start trace field mapping {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "GatewayBrowserExecutor {",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !turn_trace_owner.contains(adjacent),
+            "turn trace owner must not absorb adjacent stream/loop/tail/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn chat_usage_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

@@ -32,6 +32,26 @@ pub(crate) fn begin_turn_trace(entry: TurnTraceEntry) -> local_first_engine::tur
     turn_trace
 }
 
+pub(crate) struct ChatTurnStartTraceInput<'a> {
+    pub(crate) turn_trace: &'a local_first_engine::turn_trace::TurnTrace,
+    pub(crate) prompt: &'a str,
+    pub(crate) mode: &'a str,
+    pub(crate) model: &'a str,
+    pub(crate) tier: &'a str,
+}
+
+pub(crate) fn record_chat_turn_start_trace(input: ChatTurnStartTraceInput<'_>) {
+    input
+        .turn_trace
+        .record(local_first_engine::turn_trace::TurnEvent::TurnStart {
+            prompt_head: input.prompt.chars().take(200).collect(),
+            prompt_len: input.prompt.chars().count(),
+            mode: input.mode.to_string(),
+            model: input.model.to_string(),
+            tier: input.tier.to_string(),
+        });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,6 +96,39 @@ mod tests {
         });
 
         assert!(!dir.join("turn-trace.jsonl").exists());
+    }
+
+    #[test]
+    fn gateway_turn_trace_records_turn_start_when_setup_completes() {
+        let dir = unique_temp_dir("turn-start");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let trace = begin_turn_trace(TurnTraceEntry {
+            request_id: "turn-start-a".to_string(),
+            prompt: "ciao Roma".to_string(),
+            mode: Some("agent".to_string()),
+            model: "gpt-test".to_string(),
+            enabled: true,
+            logs_dir: Ok(dir.clone()),
+            max_bytes: 5_000_000,
+        });
+
+        record_chat_turn_start_trace(ChatTurnStartTraceInput {
+            turn_trace: &trace,
+            prompt: "ciao Roma",
+            mode: "agent",
+            model: "gpt-test",
+            tier: "frontier",
+        });
+
+        let lines = std::fs::read_to_string(dir.join("turn-trace.jsonl")).unwrap();
+        assert!(lines.contains("\"kind\":\"turn_received\""));
+        assert!(lines.contains("\"kind\":\"turn_start\""));
+        assert!(lines.contains("\"prompt_head\":\"ciao Roma\""));
+        assert!(lines.contains("\"prompt_len\":9"));
+        assert!(lines.contains("\"mode\":\"agent\""));
+        assert!(lines.contains("\"model\":\"gpt-test\""));
+        assert!(lines.contains("\"tier\":\"frontier\""));
     }
 
     fn unique_temp_dir(label: &str) -> std::path::PathBuf {

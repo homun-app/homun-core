@@ -1970,12 +1970,12 @@ async fn stream_chat_via_openai(
     let turn_tier = load_provider_registry().tier_for_model(&model);
     // Turn trace: setup COMPLETED (memory recall and prompt-build) and generation is about to begin.
     // A `turn_start` following a `turn_received` implies setup succeeded (no pre-gen hang).
-    turn_trace.record(local_first_engine::turn_trace::TurnEvent::TurnStart {
-        prompt_head: request.prompt.chars().take(200).collect(),
-        prompt_len: request.prompt.chars().count(),
-        mode: mode.clone(),
-        model: model.to_string(),
-        tier: turn_tier.as_str().to_string(),
+    record_chat_turn_start_trace(ChatTurnStartTraceInput {
+        turn_trace: &turn_trace,
+        prompt: request.prompt.as_str(),
+        mode: mode.as_str(),
+        model: model.as_str(),
+        tier: turn_tier.as_str(),
     });
     let capability_router_instruction =
         capability_router_instruction_for_decision(&capability_route);

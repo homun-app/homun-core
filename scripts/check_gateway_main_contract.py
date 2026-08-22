@@ -1171,6 +1171,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn memory_service_enabled(": "runtime environment flags must stay in gateway_runtime_flags",
         "fn verbose_debug(": "runtime environment flags must stay in gateway_runtime_flags",
         "TurnEvent::TurnReceived": "turn trace entry recording must stay in gateway_turn_trace",
+        "TurnEvent::TurnStart": "turn trace start recording must stay in gateway_turn_trace",
         "TurnTrace::new(": "turn trace creation must stay in gateway_turn_trace",
         "struct TurnTraceEntry": "turn trace entry DTO must stay in gateway_turn_trace",
         "fn begin_turn_trace(": "turn trace entry owner must stay in gateway_turn_trace",
@@ -3762,6 +3763,21 @@ def main() -> int:
         turn_trace_source,
         "TurnEvent::TurnReceived",
         "turn trace owner must record the setup-hang sentinel",
+    )
+    assert_contains(
+        turn_trace_source,
+        "pub(crate) struct ChatTurnStartTraceInput",
+        "turn trace owner must expose chat turn-start input",
+    )
+    assert_contains(
+        turn_trace_source,
+        "pub(crate) fn record_chat_turn_start_trace(",
+        "turn trace owner must expose chat turn-start recorder",
+    )
+    assert_contains(
+        turn_trace_source,
+        "TurnEvent::TurnStart",
+        "turn trace owner must record the setup-complete sentinel",
     )
     assert_contains(
         source,

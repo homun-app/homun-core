@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (chat privacy preflight input owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-23 (chat turn start trace owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/chat-privacy-preflight-input-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#324 mergeate in `main`; slice chat privacy preflight input owner in verifica locale; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #324 (`b82b4ccc`); slice chat privacy preflight input owner in verifica locale prima della PR |
+| Branch | `fabio/chat-turn-start-trace-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#325 mergeate in `main`; slice chat turn start trace owner in verifica locale; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #325 (`391ee0ae`); slice chat turn start trace owner in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,13 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_privacy_preflight`: la selezione del prompt Privacy
+- Estrazione locale `gateway_turn_trace`: la registrazione `turn_start`
+  setup-complete esce da `stream_chat_via_openai` e passa a
+  `record_chat_turn_start_trace(ChatTurnStartTraceInput)`, accanto al bootstrap
+  `turn_received`; il root conserva solo l'orchestrazione del turno, mentre
+  loop agente, budget, plan progress, tool execution e browser restano owner
+  separati.
+- Estrazione mergeata `gateway_privacy_preflight`: la selezione del prompt Privacy
   Guard per nuovo input vs replay/checkpoint (`evaluate_chat_privacy_guard_preflight`)
   esce da `stream_chat_via_openai`; il root passa il prompt originale e consuma
   solo l'outcome typed, mentre transport stream, cleanup registry, loop agente,
@@ -707,9 +713,9 @@ Slice Runtime V2 recenti:
   executor, plan progress, context compactor e model client restano owner
   separati.
 - Estrazione locale `gateway_turn_trace`: bootstrap del trace leggibile
-  `turn_received`, opt-out e fallback no-log-dir escono dal monolite
-  `main.rs`; il trace resta pura osservabilita' e non possiede loop agente,
-  budget o avanzamento piano.
+  `turn_received`, registrazione `turn_start`, opt-out e fallback no-log-dir
+  escono dal monolite `main.rs`; il trace resta pura osservabilita' e non
+  possiede loop agente, budget o avanzamento piano.
 - Estrazione locale `gateway_update_routes`: route update/redeploy webhook e
   DTO di stato escono dal monolite `main.rs`; startup, packaging e CI installer
   restano fuori owner.
@@ -1357,9 +1363,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#324: slice owner-level successive mergeate in
-  `main`, fino a `chat attachment working-set owner`; `main` verificato e
-  riallineato a #324.
+- #143-#283, #285-#286, #288-#325: slice owner-level successive mergeate in
+  `main`, fino a `chat privacy preflight input owner`; `main` verificato e
+  riallineato a #325.
 
 PR aperte:
 
@@ -1367,8 +1373,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/chat-privacy-preflight-input-owner` in verifica locale da `main` #324
-  (`b82b4ccc`).
+- `fabio/chat-turn-start-trace-owner` in verifica locale da `main` #325
+  (`391ee0ae`).
 
 ## Debito residuo
 
