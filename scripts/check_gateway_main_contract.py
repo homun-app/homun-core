@@ -94,6 +94,9 @@ AGENT_TURN_RUNNER_RS = os.path.join(
 AGENT_TURN_IDENTITY_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_identity.rs"
 )
+AGENT_TURN_SENSITIVE_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_sensitive.rs"
+)
 AGENT_TURN_TAIL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_tail.rs"
 )
@@ -1657,6 +1660,8 @@ def main() -> int:
         agent_turn_runner_source = handle.read()
     with open(AGENT_TURN_IDENTITY_RS, "r", encoding="utf-8") as handle:
         agent_turn_identity_source = handle.read()
+    with open(AGENT_TURN_SENSITIVE_RS, "r", encoding="utf-8") as handle:
+        agent_turn_sensitive_source = handle.read()
     with open(AGENT_TURN_TAIL_RS, "r", encoding="utf-8") as handle:
         agent_turn_tail_source = handle.read()
     with open(AGENT_CHECKPOINTS_RS, "r", encoding="utf-8") as handle:
@@ -2194,6 +2199,51 @@ def main() -> int:
             agent_turn_identity_source,
             snippet,
             "agent turn identity owner must not absorb stream, loop, tail, or browser owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_turn_sensitive;",
+        "gateway root must declare agent turn sensitive confirmation owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_turn_sensitive::*;",
+        "gateway root must re-export agent turn sensitive confirmation owner",
+    )
+    for snippet in [
+        "pub(crate) fn seed_agent_turn_sensitive_confirmations(",
+        "resolved_skill_confirmations(state, thread_id)",
+        "merged_sensitive(&existing, &project_sensitive)",
+        "crate::skills::SensitiveCategory::parse",
+        "cat.as_token().to_string()",
+    ]:
+        assert_contains(
+            agent_turn_sensitive_source,
+            snippet,
+            "agent turn sensitive owner must own force-confirm seed composition",
+        )
+    for snippet in [
+        "resolved_skill_confirmations(&state_owned, thread_id.as_deref())",
+        "merged_sensitive(&existing, &project_sensitive)",
+        ".active_sensitive\n                .iter()",
+        "cat.as_token().to_string()",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain agent turn sensitive confirmation seeding",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            agent_turn_sensitive_source,
+            snippet,
+            "agent turn sensitive owner must not absorb stream, loop, tail, browser, or subagent owners",
         )
     for snippet in [
         "pub(crate) fn context_message_for_model(",
