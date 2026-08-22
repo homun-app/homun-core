@@ -2842,9 +2842,12 @@ fn chat_stream_transport_has_one_gateway_owner() {
     for pattern in [
         "struct ChatStreamTransport",
         "fn open_chat_stream_transport(",
+        "fn chat_streaming_http_client(",
         "fn chat_stream_response(",
         "tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(32)",
         "tokio::sync::broadcast::channel::<String>(512)",
+        ".http1_only()",
+        ".pool_max_idle_per_host(0)",
         "StreamEntry {",
         "stream_registry().lock()",
         "Body::from_stream(futures_util::stream::unfold(",
@@ -2863,6 +2866,8 @@ fn chat_stream_transport_has_one_gateway_owner() {
         "StreamEntry {",
         "Body::from_stream(futures_util::stream::unfold(rx",
         "\"content-type\", \"application/x-ndjson\"",
+        "reqwest::Client::builder()\n        .http1_only()",
+        ".pool_max_idle_per_host(0)",
     ] {
         assert!(
             !main.contains(pattern),

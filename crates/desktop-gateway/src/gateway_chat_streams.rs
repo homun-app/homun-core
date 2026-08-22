@@ -19,6 +19,7 @@ fn chat_streams_owner_smoke() {
         "agentturn-assistant-1"
     );
     assert_eq!(broker_turn_stream_request_id("turn-1"), "broker-turn-1");
+    let _streaming_client = chat_streaming_http_client(&reqwest::Client::new());
 }
 
 /// A live chat stream, kept in a server-side registry so a client that reloads
@@ -116,6 +117,16 @@ fn chat_stream_body(receiver: tokio::sync::mpsc::Receiver<Result<Bytes, std::io:
         receiver,
         |mut receiver| async move { receiver.recv().await.map(|item| (item, receiver)) },
     ))
+}
+
+pub(crate) fn chat_streaming_http_client(default: &reqwest::Client) -> reqwest::Client {
+    // Streaming responses are sensitive to stale pooled connections and CDN HTTP/2 resets.
+    // Keep this transport policy beside the stream owner, with shared-client fallback.
+    reqwest::Client::builder()
+        .http1_only()
+        .pool_max_idle_per_host(0)
+        .build()
+        .unwrap_or_else(|_| default.clone())
 }
 
 pub(crate) fn chat_stream_response(

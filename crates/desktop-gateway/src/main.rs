@@ -2192,16 +2192,7 @@ async fn stream_chat_via_openai(
         }
     };
 
-    // Dedicated STREAMING client: HTTP/1.1 (avoids HTTP/2 RST_STREAM that CDNs in
-    // front of cloud model hosts can throw on long streams) + no idle connection
-    // reuse (a stale pooled keep-alive connection is a classic cause of the
-    // intermittent "error decoding response body" mid/early stream). Falls back to the
-    // shared pooled client if the builder fails.
-    let http = reqwest::Client::builder()
-        .http1_only()
-        .pool_max_idle_per_host(0)
-        .build()
-        .unwrap_or_else(|_| state.http.clone());
+    let http = chat_streaming_http_client(&state.http);
     let state_owned = state.clone();
     let temperature = request.temperature;
     let execution_journal = agent_journal::for_run(request.agent_run_id.as_deref());

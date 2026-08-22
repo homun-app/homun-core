@@ -54,7 +54,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | `crates/desktop-gateway/src/gateway_chat_branches.rs` | Branch del transcript e active leaf selection. |
 | `crates/desktop-gateway/src/gateway_chat_tasks.rs` | Azione transcript per creare task da messaggio. |
 | `crates/desktop-gateway/src/gateway_chat_memory.rs` | Azione esplicita save-to-memory da messaggio e relativa proiezione wiki. |
-| `crates/desktop-gateway/src/gateway_chat_streams.rs` | Trasporto stream chat, request id, registry/replay/abort, setup `mpsc`/broadcast/entry, response HTTP NDJSON e marker/eventi di output; non possiede broker, early-response policy, loop agente, browser o subagent. |
+| `crates/desktop-gateway/src/gateway_chat_streams.rs` | Trasporto stream chat, request id, registry/replay/abort, setup `mpsc`/broadcast/entry, client HTTP dedicato allo streaming, response HTTP NDJSON e marker/eventi di output; non possiede broker, early-response policy, loop agente, browser o subagent. |
 | `crates/desktop-gateway/src/gateway_chat_turn_context.rs` | Setup stateful pre-prompt del turno chat: workspace memoria del thread, contesto contact/channel, perimetro memoria contatto, real-idle activity e policy mode/tool-policy del turno (`agent` default, read-only, autonomous); non possiede prompt, stream, loop agente, browser o subagent. |
 | `crates/desktop-gateway/src/gateway_chat_markers.rs` | Rimozione marker app-only prima della consegna plain text. |
 | `crates/desktop-gateway/src/gateway_chat_utility_routes.rs` | Route utility chat per improve prompt, suggestions, autotitle, seed assistant e proactive answer; possiede helper payload/title e capture memoria della proactive answer, ma non loop agente, stream, proactivity review o recall inline. |

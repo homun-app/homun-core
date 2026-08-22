@@ -1093,6 +1093,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "struct StreamSink ": "live chat stream transport must stay in gateway_chat_streams",
         "struct ChatStreamTransport": "chat stream transport setup must stay in gateway_chat_streams",
         "fn open_chat_stream_transport(": "chat stream transport setup must stay in gateway_chat_streams",
+        "fn chat_streaming_http_client(": "chat stream HTTP client setup must stay in gateway_chat_streams",
         "fn chat_stream_response(": "chat stream HTTP response must stay in gateway_chat_streams",
         "fn chat_stream_response_with_effective_model(": "chat stream effective model response must stay in gateway_chat_streams",
         "tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(32)": "chat stream mpsc transport must stay in gateway_chat_streams",
@@ -2129,11 +2130,21 @@ def main() -> int:
     for snippet in [
         "pub(crate) fn agent_turn_stream_request_id(",
         "pub(crate) fn broker_turn_stream_request_id(",
+        "pub(crate) fn chat_streaming_http_client(",
     ]:
         assert_contains(
             chat_streams_source,
             snippet,
             "chat stream owner must expose stream request-id helpers",
+        )
+    for snippet in [
+        "reqwest::Client::builder()\n        .http1_only()",
+        ".pool_max_idle_per_host(0)",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not own chat stream HTTP client setup",
         )
     for snippet in [
         "pub(crate) fn context_message_for_model(",
