@@ -899,6 +899,65 @@ fn chat_code_map_prompt_has_one_gateway_owner() {
 }
 
 #[test]
+fn chat_connected_prompt_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let owner = production_source(&root.join("src/gateway_chat_connected_prompt.rs"));
+
+    assert!(
+        main.contains("mod gateway_chat_connected_prompt;"),
+        "gateway root must declare chat connected prompt owner"
+    );
+    assert!(
+        main.contains("pub(crate) use gateway_chat_connected_prompt::*;"),
+        "gateway root must re-export chat connected prompt owner"
+    );
+
+    for snippet in [
+        "pub(crate) struct ChatConnectedPromptInput",
+        "pub(crate) struct ChatConnectedPrompt",
+        "pub(crate) fn append_chat_connected_prompt_instructions(",
+        "connected_service_tools_instruction()",
+        "expired_connected_services_instruction(&inactive_services.join(\", \"))",
+    ] {
+        assert!(
+            owner.contains(snippet),
+            "chat connected prompt owner must contain {snippet}"
+        );
+    }
+
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai");
+    for snippet in [
+        "connected_service_tools_instruction()",
+        "expired_connected_services_instruction(",
+        "let inactive_services = connected_tool_catalog.inactive_services;",
+    ] {
+        assert!(
+            !stream_chat.contains(snippet),
+            "stream_chat_via_openai must delegate connected prompt composition {snippet}"
+        );
+    }
+
+    for adjacent in [
+        "pub(crate) async fn prepare_connected_tool_catalog(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "fn connected_tool_catalog_from_sources(",
+        "pub(crate) fn connected_service_tools_instruction(",
+        "pub(crate) fn expired_connected_services_instruction(",
+        "async fn run_agent_rounds(",
+        "fn execute_capability_browser_task(",
+    ] {
+        assert!(
+            !owner.contains(adjacent),
+            "chat connected prompt owner must not absorb adjacent toolset, prompt wording, loop or browser surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn execution_verification_prompt_instruction_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
@@ -1045,6 +1104,7 @@ fn core_operating_prompt_instruction_has_one_gateway_owner() {
 fn connected_service_prompt_instructions_have_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
+    let connected_prompt = production_source(&root.join("src/gateway_chat_connected_prompt.rs"));
     let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
 
     for pattern in [
@@ -1076,12 +1136,16 @@ fn connected_service_prompt_instructions_have_one_gateway_owner() {
     }
 
     assert!(
-        main.contains("let has_composio = !catalog_index.is_empty();"),
-        "main.rs still owns the runtime decision to append connected-service guidance"
+        connected_prompt.contains("let has_composio = !catalog_index.is_empty();"),
+        "chat connected prompt owner must own the runtime decision to append connected-service guidance"
     );
     assert!(
-        main.contains("catalog.inactive"),
-        "main.rs still owns the runtime inactive-service list"
+        connected_prompt.contains("inactive_services"),
+        "chat connected prompt owner must own the runtime inactive-service list"
+    );
+    assert!(
+        !main.contains("let inactive_services = connected_tool_catalog.inactive_services;"),
+        "main.rs must delegate the runtime inactive-service list"
     );
 }
 

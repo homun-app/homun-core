@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (chat code-map prompt owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-22 (chat connected prompt owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-code-map-prompt-owner` |
-| Branch | `fabio/chat-code-map-prompt-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#320 mergeate in `main`; slice chat code-map prompt owner in verifica su `fabio/chat-code-map-prompt-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #320 (`d92e3d67`); slice chat code-map prompt owner in verifica locale prima della PR |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-connected-prompt-owner` |
+| Branch | `fabio/chat-connected-prompt-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#321 mergeate in `main`; slice chat connected prompt owner in verifica su `fabio/chat-connected-prompt-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #321 (`88ff8f63`); slice chat connected prompt owner in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,17 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_chat_vision_recovery`: la mutation post-loop del
+- Estrazione locale `gateway_chat_connected_prompt`: la composizione runtime
+  della guidance connected-service/MCP (`append_chat_connected_prompt_instructions`:
+  filesystem MCP, connected tools e servizi scaduti) esce da
+  `stream_chat_via_openai`; catalog discovery, toolset, wording prompt, loop
+  agente e browser restano owner separati.
+- Estrazione mergeata `gateway_chat_code_map_prompt`: la composizione runtime
+  della guidance code-map (`append_chat_code_map_prompt_instruction`:
+  `has_code_map` e append instruction) esce da `stream_chat_via_openai`;
+  read-model code-map, wording prompt, toolset, query code graph, browser e loop
+  agente restano owner separati.
+- Estrazione mergeata `gateway_chat_vision_recovery`: la mutation post-loop del
   seed fallback vision (`recover_chat_vision_fallback_seed`: raccolta immagini,
   descrizione via ruolo vision e sostituzione nel replay seed) esce da
   `run_agent_rounds`; il retry `run_turn`, la preflight vision, la delivery
@@ -252,10 +262,10 @@ Slice Runtime V2 recenti:
   separati.
 - Estrazione mergeata `gateway_prompt_instructions`: i contratti prompt statici
   per code-map disponibile (`CODE MAP`) escono dal setup inline di
-  `stream_chat_via_openai`; la slice corrente sposta anche la composizione runtime
-  `has_code_map` + append guidance in `gateway_chat_code_map_prompt`, mentre
-  read-model code-map, code graph runtime, tool schema e loop agente restano
-  owner separati.
+  `stream_chat_via_openai`; la composizione runtime `has_code_map` + append
+  guidance ora vive in `gateway_chat_code_map_prompt`, mentre read-model
+  code-map, code graph runtime, tool schema e loop agente restano owner
+  separati.
 - Estrazione mergeata `gateway_prompt_instructions`: i contratti prompt statici
   per lingua utente (`LANGUAGE`) escono dal setup inline di
   `stream_chat_via_openai`; `main.rs` conserva solo la composizione, mentre
@@ -1330,9 +1340,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#320: slice owner-level successive mergeate in
-  `main`, fino a `chat vision recovery owner`; `main` verificato e riallineato a
-  #320.
+- #143-#283, #285-#286, #288-#321: slice owner-level successive mergeate in
+  `main`, fino a `chat code-map prompt owner`; `main` verificato e riallineato a
+  #321.
 
 PR aperte:
 
@@ -1340,8 +1350,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/chat-code-map-prompt-owner` in verifica locale da `main` #320
-  (`d92e3d67`).
+- `fabio/chat-connected-prompt-owner` in verifica locale da `main` #321
+  (`88ff8f63`).
 
 ## Debito residuo
 
@@ -1365,7 +1375,7 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice chat code-map prompt owner con gate kernel verde, PR e
+1. Chiudere la slice chat connected prompt owner con gate kernel verde, PR e
    merge.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
@@ -1374,11 +1384,11 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #320 (`d92e3d67`); slice non-browser corrente
-`fabio/chat-code-map-prompt-owner` sposta la composizione runtime della guidance
-code-map (`append_chat_code_map_prompt_instruction`) fuori da
-`stream_chat_via_openai`, senza assorbire read-model code-map, wording prompt,
-toolset, query code graph, browser o loop agente.
+main aggiornato a #321 (`88ff8f63`); slice non-browser corrente
+`fabio/chat-connected-prompt-owner` sposta la composizione runtime della guidance
+connected-service/MCP (`append_chat_connected_prompt_instructions`) fuori da
+`stream_chat_via_openai`, senza assorbire catalog discovery, toolset, wording
+prompt, loop agente o browser.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
