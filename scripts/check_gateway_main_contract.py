@@ -121,6 +121,9 @@ AGENT_TURN_CONFIG_RS = os.path.join(
 AGENT_TURN_HITL_RESUME_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_hitl_resume.rs"
 )
+AGENT_TURN_LOOP_SEED_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_loop_seed.rs"
+)
 AGENT_TURN_TAIL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_tail.rs"
 )
@@ -1702,6 +1705,8 @@ def main() -> int:
         agent_turn_config_source = handle.read()
     with open(AGENT_TURN_HITL_RESUME_RS, "r", encoding="utf-8") as handle:
         agent_turn_hitl_resume_source = handle.read()
+    with open(AGENT_TURN_LOOP_SEED_RS, "r", encoding="utf-8") as handle:
+        agent_turn_loop_seed_source = handle.read()
     with open(AGENT_TURN_TAIL_RS, "r", encoding="utf-8") as handle:
         agent_turn_tail_source = handle.read()
     with open(AGENT_CHECKPOINTS_RS, "r", encoding="utf-8") as handle:
@@ -2638,6 +2643,63 @@ def main() -> int:
             agent_turn_hitl_resume_source,
             snippet,
             "agent turn HITL resume owner must not absorb stream, loop, tail, browser, or subagent owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_turn_loop_seed;",
+        "gateway root must declare agent turn loop seed owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_turn_loop_seed::*;",
+        "gateway root must re-export agent turn loop seed owner",
+    )
+    for snippet in [
+        "pub(crate) struct AgentTurnLoopSeed",
+        "pub(crate) fn seed_agent_turn_loop_state(",
+        "pub(crate) fn reset_agent_turn_terminal_buffer(",
+        "local_first_engine::LoopState::new()",
+        "loop_state.prompt_packets = prompt_packets",
+        "loop_state.messages = messages",
+        "last_model_error: None",
+        "memory_answer: String::new()",
+        "browse_sources: Vec::new()",
+        "sandbox_clear(thread_id)",
+    ]:
+        assert_contains(
+            agent_turn_loop_seed_source,
+            snippet,
+            "agent turn loop seed owner must own initial loop state and terminal buffers",
+        )
+    stream_chat_before_recall_seed = source.split("async fn stream_chat_via_openai(", 1)[1].split(
+        "seed_agent_turn_recall(", 1
+    )[0]
+    for snippet in [
+        "let mut ls = local_first_engine::LoopState::new();",
+        "ls.prompt_packets = prompt_packets;",
+        "ls.messages = messages;",
+        "let last_model_error: Option<String> = None;",
+        "let memory_answer = String::new();",
+        "let browse_sources: Vec<String> = Vec::new();",
+        "sandbox_clear(thread_id.clone());",
+    ]:
+        assert_not_contains(
+            stream_chat_before_recall_seed,
+            snippet,
+            "gateway root must not retain inline agent turn loop seed state",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "GatewayBrowserExecutor {",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            agent_turn_loop_seed_source,
+            snippet,
+            "agent turn loop seed owner must not absorb stream, loop, tail, browser, or subagent owners",
         )
     for snippet in [
         "pub(crate) fn context_message_for_model(",
