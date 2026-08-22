@@ -30,6 +30,7 @@ mod gateway_agent_checkpoints;
 mod gateway_agent_stream_drain;
 mod gateway_agent_stream_events;
 mod gateway_agent_stream_persistence;
+mod gateway_agent_turn_identity;
 mod gateway_agent_turn_outcomes;
 mod gateway_agent_turn_runner;
 mod gateway_agent_turn_tail;
@@ -198,6 +199,7 @@ pub(crate) use gateway_agent_checkpoints::*;
 pub(crate) use gateway_agent_stream_drain::*;
 pub(crate) use gateway_agent_stream_events::*;
 pub(crate) use gateway_agent_stream_persistence::*;
+pub(crate) use gateway_agent_turn_identity::*;
 pub(crate) use gateway_agent_turn_runner::*;
 pub(crate) use gateway_agent_turn_tail::*;
 pub(crate) use gateway_agent_wake::*;
@@ -2195,14 +2197,12 @@ async fn stream_chat_via_openai(
     let http = chat_streaming_http_client(&state.http);
     let state_owned = state.clone();
     let temperature = request.temperature;
-    let execution_journal = agent_journal::for_run(request.agent_run_id.as_deref());
-    let effect_run_id = request.agent_run_id.clone();
-    let effect_turn_id = request.agent_run_id.as_ref().and_then(|_| {
-        request
-            .request_id
-            .strip_prefix("broker-")
-            .map(str::to_string)
-    });
+    let execution_identity =
+        resolve_agent_turn_execution_identity(&request.request_id, request.agent_run_id.as_deref());
+    let execution_journal = execution_identity.execution_journal;
+    let effect_run_id = execution_identity.effect_run_id;
+    let effect_turn_id = execution_identity.effect_turn_id;
+    let canonical_broker_turn = execution_identity.canonical_broker_turn;
     // Thread this chat belongs to: lets browser work reuse a persistent
     // per-thread browser session (search → then book on the same tab).
     let thread_id = request.thread_id.clone();
@@ -2422,7 +2422,6 @@ async fn stream_chat_via_openai(
         let fence_turn_id = request.request_id.clone();
         let fence_user_id = automation_user_id.clone();
         let fence_workspace_id = automation_workspace_id.clone();
-        let canonical_broker_turn = effect_turn_id.is_some();
         // 5.D1c.9: resolve the trace-dump dir gateway-side (armed only when HOMUN_TRACE_DUMP=1) and
         // inject it, so the engine loop appends without calling the gateway's path resolver.
         let trace_dir = local_first_engine::trace::dump_enabled()

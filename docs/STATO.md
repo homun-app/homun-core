@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (chat turn tail input owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-22 (agent turn identity owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#301 mergeate in `main`; #302 in verifica su `fabio/chat-turn-tail-input-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #301 (`f4f6fb99`); #302 verificata localmente prima del merge |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#302 mergeate in `main`; #303 in verifica su `fabio/chat-turn-identity-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #302 (`f33f0e01`); #303 verificata localmente prima del merge |
 
 ## Dove siamo
 
@@ -44,7 +44,13 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_agent_turn_tail`: la preparazione degli input della
+- Estrazione locale `gateway_agent_turn_identity`: l'identita' esecuzione del
+  turno agente (`resolve_agent_turn_execution_identity`: journal, `effect_run_id`,
+  `effect_turn_id` broker e flag canonical broker) esce dal setup inline di
+  `stream_chat_via_openai`; `main.rs` consuma solo la proiezione identitaria,
+  mentre stream setup, loop agente, tail, browser e subagent restano owner
+  separati.
+- Estrazione mergeata `gateway_agent_turn_tail`: la preparazione degli input della
   coda post-loop (`prepare_agent_turn_tail_context`: user/workspace fence,
   messaggio utente per memory learn e assistant precedente) esce dal setup
   inline di `stream_chat_via_openai`; `main.rs` consuma solo il contesto
