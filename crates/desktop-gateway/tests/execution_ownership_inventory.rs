@@ -4251,6 +4251,65 @@ fn chat_vision_preflight_has_one_gateway_owner() {
 }
 
 #[test]
+fn chat_vision_recovery_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let vision_recovery = production_source(&root.join("src/gateway_chat_vision_recovery.rs"));
+
+    assert!(
+        main.contains("mod gateway_chat_vision_recovery;"),
+        "gateway root must declare chat vision recovery owner"
+    );
+    assert!(
+        main.contains("pub(crate) use gateway_chat_vision_recovery::*;"),
+        "gateway root must re-export chat vision recovery owner"
+    );
+
+    for pattern in [
+        "pub(crate) struct ChatVisionRecoveryInput",
+        "pub(crate) async fn recover_chat_vision_fallback_seed(",
+        "vision::collect_image_urls(",
+        "vision::describe_images(",
+        "vision::replace_images_with_descriptions(",
+    ] {
+        assert!(
+            vision_recovery.contains(pattern),
+            "chat vision recovery owner must contain {pattern}"
+        );
+    }
+
+    let run_agent_rounds = main
+        .split("async fn run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds");
+    for pattern in [
+        "vision::collect_image_urls(",
+        "vision::describe_images(",
+        "vision::replace_images_with_descriptions(",
+    ] {
+        assert!(
+            !run_agent_rounds.contains(pattern),
+            "run_agent_rounds must delegate chat vision recovery primitive {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn prepare_chat_vision_preflight(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+        "local_first_engine::agent_loop::run_turn(",
+    ] {
+        assert!(
+            !vision_recovery.contains(adjacent),
+            "chat vision recovery owner must not absorb adjacent stream/loop/preflight/toolset/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn chat_tool_perimeter_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

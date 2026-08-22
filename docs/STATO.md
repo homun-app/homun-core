@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (agent turn image rejection delivery in verifica).**
+> **Ultimo aggiornamento: 2026-08-22 (chat vision recovery owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/agent-turn-image-rejection-delivery` |
-| Branch | `fabio/agent-turn-image-rejection-delivery` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#318 mergeate in `main`; slice image rejection delivery in verifica su `fabio/agent-turn-image-rejection-delivery`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #318 (`4bbec44a`); slice image rejection delivery in verifica locale prima della PR |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-vision-recovery-owner` |
+| Branch | `fabio/chat-vision-recovery-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#319 mergeate in `main`; slice chat vision recovery owner in verifica su `fabio/chat-vision-recovery-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #319 (`39309d15`); slice chat vision recovery owner in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_agent_turn_outcomes`: la consegna terminale della
+- Estrazione locale `gateway_chat_vision_recovery`: la mutation post-loop del
+  seed fallback vision (`recover_chat_vision_fallback_seed`: raccolta immagini,
+  descrizione via ruolo vision e sostituzione nel replay seed) esce da
+  `run_agent_rounds`; il retry `run_turn`, la preflight vision, la delivery
+  image rejection, browser e subagent restano owner separati.
+- Estrazione mergeata `gateway_agent_turn_outcomes`: la consegna terminale della
   image rejection (`deliver_image_rejection`: evento `Done` e outcome
   completato) esce dai rami duplicati di `run_agent_rounds`; recovery post-loop,
   loop agente, stream chat/fanout e browser execution restano owner separati.
@@ -1324,9 +1329,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#318: slice owner-level successive mergeate in
-  `main`, fino a `agent turn core seam factories`; `main` verificato e
-  riallineato a #318.
+- #143-#283, #285-#286, #288-#319: slice owner-level successive mergeate in
+  `main`, fino a `agent turn image rejection delivery`; `main` verificato e
+  riallineato a #319.
 
 PR aperte:
 
@@ -1334,8 +1339,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/agent-turn-image-rejection-delivery` in verifica locale da `main` #318
-  (`4bbec44a`).
+- `fabio/chat-vision-recovery-owner` in verifica locale da `main` #319
+  (`39309d15`).
 
 ## Debito residuo
 
@@ -1359,7 +1364,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice image rejection delivery con gate kernel verde, PR e merge.
+1. Chiudere la slice chat vision recovery owner con gate kernel verde, PR e
+   merge.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -1367,10 +1373,10 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #318 (`4bbec44a`); slice non-browser corrente
-`fabio/agent-turn-image-rejection-delivery` sposta la consegna terminale
-dell'image rejection (`Done` + outcome completato) fuori dai rami duplicati di
-`run_agent_rounds`.
+main aggiornato a #319 (`39309d15`); slice non-browser corrente
+`fabio/chat-vision-recovery-owner` sposta la mutation post-loop del seed fallback
+vision (`recover_chat_vision_fallback_seed`) fuori da `run_agent_rounds`, senza
+assorbire il retry `run_turn`.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

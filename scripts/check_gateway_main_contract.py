@@ -189,6 +189,9 @@ CHAT_PLAN_RESUME_RS = os.path.join(
 CHAT_VISION_PREFLIGHT_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_vision_preflight.rs"
 )
+CHAT_VISION_RECOVERY_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_chat_vision_recovery.rs"
+)
 CHAT_TOOL_PERIMETER_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_tool_perimeter.rs"
 )
@@ -1766,6 +1769,8 @@ def main() -> int:
         chat_plan_resume_source = handle.read()
     with open(CHAT_VISION_PREFLIGHT_RS, "r", encoding="utf-8") as handle:
         chat_vision_preflight_source = handle.read()
+    with open(CHAT_VISION_RECOVERY_RS, "r", encoding="utf-8") as handle:
+        chat_vision_recovery_source = handle.read()
     with open(CHAT_TOOL_PERIMETER_RS, "r", encoding="utf-8") as handle:
         chat_tool_perimeter_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
@@ -4107,6 +4112,53 @@ def main() -> int:
             chat_vision_preflight_source,
             snippet,
             "chat vision preflight owner must not absorb stream, loop, toolset, plan, browser, subagent or recovery owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_chat_vision_recovery;",
+        "gateway root must declare chat vision recovery owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_chat_vision_recovery::*;",
+        "gateway root must re-export chat vision recovery owner",
+    )
+    for snippet in [
+        "pub(crate) struct ChatVisionRecoveryInput",
+        "pub(crate) async fn recover_chat_vision_fallback_seed(",
+        "vision::collect_image_urls(",
+        "vision::describe_images(",
+        "vision::replace_images_with_descriptions(",
+    ]:
+        assert_contains(
+            chat_vision_recovery_source,
+            snippet,
+            "chat vision recovery owner must own fallback seed image description",
+        )
+    run_agent_rounds_source = source.split("async fn run_agent_rounds(", 1)[1]
+    for snippet in [
+        "vision::collect_image_urls(",
+        "vision::describe_images(",
+        "vision::replace_images_with_descriptions(",
+    ]:
+        assert_not_contains(
+            run_agent_rounds_source,
+            snippet,
+            "gateway root must delegate chat vision recovery primitives",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn prepare_chat_vision_preflight(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+        "local_first_engine::agent_loop::run_turn(",
+    ]:
+        assert_not_contains(
+            chat_vision_recovery_source,
+            snippet,
+            "chat vision recovery owner must not absorb adjacent stream, loop, preflight, toolset, browser or subagent surfaces",
         )
     assert_contains(
         source,
