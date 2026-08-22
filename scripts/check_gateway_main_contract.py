@@ -124,6 +124,9 @@ AGENT_TURN_HITL_RESUME_RS = os.path.join(
 AGENT_TURN_LOOP_SEED_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_loop_seed.rs"
 )
+AGENT_TURN_TRACE_DUMP_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_trace_dump.rs"
+)
 AGENT_TURN_TAIL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_tail.rs"
 )
@@ -1707,6 +1710,8 @@ def main() -> int:
         agent_turn_hitl_resume_source = handle.read()
     with open(AGENT_TURN_LOOP_SEED_RS, "r", encoding="utf-8") as handle:
         agent_turn_loop_seed_source = handle.read()
+    with open(AGENT_TURN_TRACE_DUMP_RS, "r", encoding="utf-8") as handle:
+        agent_turn_trace_dump_source = handle.read()
     with open(AGENT_TURN_TAIL_RS, "r", encoding="utf-8") as handle:
         agent_turn_tail_source = handle.read()
     with open(AGENT_CHECKPOINTS_RS, "r", encoding="utf-8") as handle:
@@ -2700,6 +2705,52 @@ def main() -> int:
             agent_turn_loop_seed_source,
             snippet,
             "agent turn loop seed owner must not absorb stream, loop, tail, browser, or subagent owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_turn_trace_dump;",
+        "gateway root must declare agent turn trace dump owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_turn_trace_dump::*;",
+        "gateway root must re-export agent turn trace dump owner",
+    )
+    for snippet in [
+        "pub(crate) fn resolve_agent_turn_trace_dump_dir(",
+        "local_first_engine::trace::dump_enabled()",
+        ".then(gateway_logs_dir)",
+        ".and_then(Result::ok)",
+    ]:
+        assert_contains(
+            agent_turn_trace_dump_source,
+            snippet,
+            "agent turn trace dump owner must own trace dump directory resolution",
+        )
+    stream_chat_before_run_loop = source.split("async fn stream_chat_via_openai(", 1)[1].split(
+        "let outcome = run_agent_rounds(", 1
+    )[0]
+    for snippet in [
+        "local_first_engine::trace::dump_enabled()\n            .then(gateway_logs_dir)",
+        ".then(gateway_logs_dir)\n            .and_then(Result::ok)",
+    ]:
+        assert_not_contains(
+            stream_chat_before_run_loop,
+            snippet,
+            "gateway root must not retain inline agent turn trace dump dir resolution",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "GatewayBrowserExecutor {",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            agent_turn_trace_dump_source,
+            snippet,
+            "agent turn trace dump owner must not absorb stream, loop, tail, browser, or subagent owners",
         )
     for snippet in [
         "pub(crate) fn context_message_for_model(",

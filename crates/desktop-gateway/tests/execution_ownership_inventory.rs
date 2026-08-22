@@ -3467,6 +3467,56 @@ fn agent_turn_loop_seed_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_turn_trace_dump_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let trace_dump_owner = production_source(&root.join("src/gateway_agent_turn_trace_dump.rs"));
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai")
+        .split("let outcome = run_agent_rounds(")
+        .next()
+        .expect("agent turn trace dump setup");
+
+    for pattern in [
+        "pub(crate) fn resolve_agent_turn_trace_dump_dir(",
+        "local_first_engine::trace::dump_enabled()",
+        ".then(gateway_logs_dir)",
+        ".and_then(Result::ok)",
+    ] {
+        assert!(
+            trace_dump_owner.contains(pattern),
+            "agent turn trace dump owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "local_first_engine::trace::dump_enabled()\n            .then(gateway_logs_dir)",
+        ".then(gateway_logs_dir)\n            .and_then(Result::ok)",
+    ] {
+        assert!(
+            !stream_chat.contains(pattern),
+            "main.rs must not own agent turn trace dump dir resolution {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "GatewayBrowserExecutor {",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !trace_dump_owner.contains(adjacent),
+            "agent turn trace dump owner must not absorb adjacent stream/loop/tail/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn chat_usage_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
