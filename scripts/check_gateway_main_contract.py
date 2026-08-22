@@ -3225,8 +3225,10 @@ def main() -> int:
     )
     for snippet in [
         "pub(crate) fn prepare_chat_turn_context(",
+        "pub(crate) fn resolve_chat_turn_policy(",
         "pub(crate) struct ChatTurnContextInput",
         "pub(crate) struct ChatTurnContext",
+        "pub(crate) struct ChatTurnPolicy",
         "set_memory_workspace(",
         "contact_turn_context(",
         "note_user_activity(",
@@ -3241,6 +3243,9 @@ def main() -> int:
         'set_memory_workspace("");',
         "let (contact_ctx, channel_owner) = contact_turn_context(",
         "note_user_activity();",
+        'request.tool_policy.as_deref() == Some("read_only")',
+        'request.tool_policy.as_deref() == Some("autonomous")',
+        'request.mode.as_deref().unwrap_or("agent")',
     ]:
         assert_not_contains(
             source,
