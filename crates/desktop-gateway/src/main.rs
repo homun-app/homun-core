@@ -2460,7 +2460,7 @@ async fn run_agent_rounds(
         effect_turn_id.as_deref(),
         effect_run_id.as_deref(),
     );
-    let model_client = crate::model_client::GatewayModelClient::new(
+    let model_client = crate::model_client::gateway_model_client(
         &http,
         tx,
         state_owned.usage_recorder.as_ref(),
@@ -2474,7 +2474,7 @@ async fn run_agent_rounds(
         effect_run_id.clone(),
     );
     let effect_contract = load_turn_effect_contract(&state_owned, effect_turn_id.as_deref());
-    let capability_executor = GatewayCapabilityExecutor::new(GatewayCapabilityExecutorInput {
+    let capability_executor = gateway_capability_executor(GatewayCapabilityExecutorInput {
         state: &state_owned,
         tx,
         thread_id: thread_id.as_deref(),

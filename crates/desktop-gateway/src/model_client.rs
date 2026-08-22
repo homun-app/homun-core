@@ -53,19 +53,17 @@ pub(crate) struct GatewayModelClient<'a> {
     pub steering: Option<GatewaySteeringContext<'a>>,
 }
 
-impl<'a> GatewayModelClient<'a> {
-    pub(crate) fn new(
-        http: &'a reqwest::Client,
-        tx: &'a StreamSink,
-        usage: &'a dyn UsageRecorder,
-        steering: Option<GatewaySteeringContext<'a>>,
-    ) -> Self {
-        Self {
-            http,
-            tx,
-            usage,
-            steering,
-        }
+pub(crate) fn gateway_model_client<'a>(
+    http: &'a reqwest::Client,
+    tx: &'a StreamSink,
+    usage: &'a dyn UsageRecorder,
+    steering: Option<GatewaySteeringContext<'a>>,
+) -> GatewayModelClient<'a> {
+    GatewayModelClient {
+        http,
+        tx,
+        usage,
+        steering,
     }
 }
 

@@ -3596,8 +3596,7 @@ fn model_steering_context_has_one_gateway_owner() {
 
     for pattern in [
         "pub(crate) struct GatewayModelClient",
-        "impl<'a> GatewayModelClient",
-        "pub(crate) fn new(",
+        "pub(crate) fn gateway_model_client<'a>(",
         "pub(crate) struct GatewaySteeringContext",
         "pub(crate) fn gateway_steering_context",
         "effect_run_id.unwrap_or(turn_id)",
@@ -3623,6 +3622,10 @@ fn model_steering_context_has_one_gateway_owner() {
     assert!(
         !run_agent_rounds.contains("crate::model_client::GatewayModelClient {"),
         "run_agent_rounds must not construct GatewayModelClient inline"
+    );
+    assert!(
+        !run_agent_rounds.contains("crate::model_client::GatewayModelClient::new("),
+        "run_agent_rounds must not call GatewayModelClient constructor directly"
     );
 
     for adjacent in [
@@ -3798,8 +3801,7 @@ fn capability_executor_constructor_has_one_gateway_owner() {
     for pattern in [
         "pub(crate) struct GatewayCapabilityExecutorInput",
         "pub(crate) struct GatewayCapabilityExecutor",
-        "impl<'a> GatewayCapabilityExecutor<'a>",
-        "pub(crate) fn new(input: GatewayCapabilityExecutorInput<'a>) -> Self",
+        "pub(crate) fn gateway_capability_executor<'a>(",
     ] {
         assert!(
             tool_execution.contains(pattern),
@@ -3810,6 +3812,10 @@ fn capability_executor_constructor_has_one_gateway_owner() {
     assert!(
         !run_agent_rounds.contains("let capability_executor = GatewayCapabilityExecutor {"),
         "run_agent_rounds must not construct GatewayCapabilityExecutor inline"
+    );
+    assert!(
+        !run_agent_rounds.contains("GatewayCapabilityExecutor::new("),
+        "run_agent_rounds must not call GatewayCapabilityExecutor constructor directly"
     );
 
     for adjacent in [

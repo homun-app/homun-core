@@ -5387,32 +5387,32 @@ pub(crate) struct GatewayCapabilityExecutor<'a> {
     execution_contract: Option<&'a local_first_execution_protocol::ValidatedExecutionContract>,
 }
 
-impl<'a> GatewayCapabilityExecutor<'a> {
-    pub(crate) fn new(input: GatewayCapabilityExecutorInput<'a>) -> Self {
-        Self {
-            state: input.state,
-            tx: input.tx,
-            thread_id: input.thread_id,
-            read_only: input.read_only,
-            contact_only: input.contact_only,
-            can_see_contacts: input.can_see_contacts,
-            can_see_calendar: input.can_see_calendar,
-            can_use_project_memory: input.can_use_project_memory,
-            memory_recall_allowed: input.memory_recall_allowed,
-            vault_value_requested: input.vault_value_requested,
-            autonomous: input.autonomous,
-            composio_writes: input.composio_writes,
-            catalog_index: input.catalog_index,
-            capability_corpus: input.capability_corpus,
-            automation_user_id: input.automation_user_id,
-            automation_workspace_id: input.automation_workspace_id,
-            prompt: input.prompt,
-            channel_owner: input.channel_owner,
-            turn_trace: input.turn_trace,
-            turn_id: input.turn_id,
-            run_id: input.run_id,
-            execution_contract: input.execution_contract,
-        }
+pub(crate) fn gateway_capability_executor<'a>(
+    input: GatewayCapabilityExecutorInput<'a>,
+) -> GatewayCapabilityExecutor<'a> {
+    GatewayCapabilityExecutor {
+        state: input.state,
+        tx: input.tx,
+        thread_id: input.thread_id,
+        read_only: input.read_only,
+        contact_only: input.contact_only,
+        can_see_contacts: input.can_see_contacts,
+        can_see_calendar: input.can_see_calendar,
+        can_use_project_memory: input.can_use_project_memory,
+        memory_recall_allowed: input.memory_recall_allowed,
+        vault_value_requested: input.vault_value_requested,
+        autonomous: input.autonomous,
+        composio_writes: input.composio_writes,
+        catalog_index: input.catalog_index,
+        capability_corpus: input.capability_corpus,
+        automation_user_id: input.automation_user_id,
+        automation_workspace_id: input.automation_workspace_id,
+        prompt: input.prompt,
+        channel_owner: input.channel_owner,
+        turn_trace: input.turn_trace,
+        turn_id: input.turn_id,
+        run_id: input.run_id,
+        execution_contract: input.execution_contract,
     }
 }
 
