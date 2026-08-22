@@ -958,6 +958,71 @@ fn chat_connected_prompt_has_one_gateway_owner() {
 }
 
 #[test]
+fn chat_prompt_layers_have_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let owner = production_source(&root.join("src/gateway_chat_prompt_layers.rs"));
+
+    assert!(
+        main.contains("mod gateway_chat_prompt_layers;"),
+        "main.rs must declare chat prompt layers owner"
+    );
+    assert!(
+        main.contains("pub(crate) use gateway_chat_prompt_layers::*;"),
+        "main.rs must re-export chat prompt layers owner"
+    );
+
+    for snippet in [
+        "pub(crate) struct ChatPromptLayersInput",
+        "pub(crate) fn append_chat_prompt_layers(",
+        "contact_context_instruction_block(",
+        "skill_prompt_instructions_block(",
+        "choice_clarify_instruction()",
+        "booking_assumption_choice_instruction()",
+        "artifact_destination_prompt_block(",
+    ] {
+        assert!(
+            owner.contains(snippet),
+            "chat prompt layers owner must compose runtime prompt layer {snippet}"
+        );
+    }
+
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai")
+        .split("// ADR 0024 inc 5")
+        .next()
+        .expect("stream_chat_via_openai end");
+    for snippet in [
+        "if let Some(cx) = &contact_ctx",
+        "skill_prompt_instructions_block(&enabled_skills",
+        "choice_clarify_instruction()",
+        "format!(\"{system}\\n{booking_choices}\")",
+        "artifact_destination_prompt_block(&artifact_destinations)",
+    ] {
+        assert!(
+            !stream_chat.contains(snippet),
+            "stream_chat_via_openai must delegate prompt layer composition {snippet}"
+        );
+    }
+
+    for adjacent in [
+        "pub(crate) fn skill_prompt_catalog_for_workspace(",
+        "pub(crate) fn contact_context_instruction_block(",
+        "pub(crate) fn artifact_destination_prompt_block(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "async fn run_agent_rounds(",
+        "fn execute_capability_browser_task(",
+    ] {
+        assert!(
+            !owner.contains(adjacent),
+            "chat prompt layers owner must not absorb adjacent owner surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn execution_verification_prompt_instruction_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
@@ -4084,6 +4149,7 @@ fn chat_turn_context_has_one_gateway_owner() {
 fn contact_context_prompt_instructions_have_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
+    let prompt_layers = production_source(&root.join("src/gateway_chat_prompt_layers.rs"));
     let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
 
     assert!(
@@ -4092,8 +4158,12 @@ fn contact_context_prompt_instructions_have_one_gateway_owner() {
     );
 
     assert!(
-        main.contains("if let Some(cx) = &contact_ctx"),
-        "main.rs may retain the runtime decision to prepend contact context"
+        prompt_layers.contains("if let Some(cx) = input.contact"),
+        "chat prompt layers owner must own the runtime decision to prepend contact context"
+    );
+    assert!(
+        !main.contains("if let Some(cx) = &contact_ctx"),
+        "main.rs must delegate the runtime decision to prepend contact context"
     );
 
     for pattern in [

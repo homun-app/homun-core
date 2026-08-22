@@ -70,6 +70,7 @@ mod gateway_chat_connected_prompt;
 mod gateway_chat_markers;
 mod gateway_chat_memory;
 mod gateway_chat_plan_resume;
+mod gateway_chat_prompt_layers;
 mod gateway_chat_streams;
 mod gateway_chat_tasks;
 mod gateway_chat_threads;
@@ -236,6 +237,7 @@ pub(crate) use gateway_browser_runtime::*;
 pub(crate) use gateway_chat_code_map_prompt::*;
 pub(crate) use gateway_chat_connected_prompt::*;
 pub(crate) use gateway_chat_plan_resume::*;
+pub(crate) use gateway_chat_prompt_layers::*;
 pub(crate) use gateway_chat_streams::*;
 pub(crate) use gateway_chat_tool_perimeter::*;
 pub(crate) use gateway_chat_toolset::*;
@@ -597,10 +599,8 @@ use gateway_project_search_tools::{
     query_git_history, query_git_history_tool_schema,
 };
 use gateway_prompt_instructions::{
-    RuntimePromptControlInput, artifact_destination_prompt_block,
-    booking_assumption_choice_instruction, browser_open_research_discovery_instruction,
-    choice_clarify_instruction, contact_context_instruction_block, core_operating_instruction,
-    goal_propose_instruction, runtime_prompt_control_instructions,
+    RuntimePromptControlInput, browser_open_research_discovery_instruction,
+    core_operating_instruction, goal_propose_instruction, runtime_prompt_control_instructions,
 };
 pub(crate) use gateway_prompt_packets::*;
 #[cfg(test)]
@@ -1623,7 +1623,6 @@ async fn stream_chat_via_openai(
     let effective_context = chat_model_prompt.effective_context;
     let prompt = chat_model_prompt.prompt;
     let browser_discovery = browser_open_research_discovery_instruction();
-    let booking_choices = booking_assumption_choice_instruction();
     // ResumeBinding: consume the per-turn stash set by semantic short-circuit (not
     // prompt-heuristic on ‹‹CHOICES›› in prior assistant text).
     let hitl_choice_resume = take_hitl_resume_turn_context(state, request.thread_id.as_deref());
@@ -1676,42 +1675,18 @@ async fn stream_chat_via_openai(
     let enabled_skills = skill_prompt_catalog.enabled_skills;
     let is_project = skill_prompt_catalog.is_project;
     let has_skills = !enabled_skills.is_empty();
-    // The "Homun apprentice" persona (proactive/curious/onboarding on a dedicated
-    // "homun" thread) is RETIRED: proactivity now lives solely in the Proattività
-    // plugin (supervisor → cards). No per-thread persona prompt anymore.
-    // Channel-contact persona + privacy perimeter. Prepended (like the Homun block,
-    // which is mutually exclusive: homun is never a channel_ thread) so the contact
-    // rules dominate the generic orchestrator voice.
-    let system = if let Some(cx) = &contact_ctx {
-        let block = contact_context_instruction_block(
-            &cx.name,
-            &cx.tone_of_voice,
-            &cx.persona_instructions,
-            &cx.relationships,
-            cx.perimeter.can_see_contacts,
-            cx.perimeter.can_see_calendar,
-        );
-        format!("{block}\n\n{system}")
-    } else {
-        system
-    };
-    let system = match skill_prompt_instructions_block(&enabled_skills, &homuncoder, is_project) {
-        Some(block) => format!("{system}\n\n{block}"),
-        None => system,
-    };
-    let system = format!("{system}\n\n{}", choice_clarify_instruction());
-    let system = format!("{system}\n{booking_choices}");
-    let system = match choice_resume_slot {
-        Some(resume) => format!("{system}\n\n{resume}"),
-        None => system,
-    };
     // Authorized write destinations: when present, the model can deliver
     // generated files to user-granted folders via `save_artifact`.
     let artifact_destinations = load_artifact_destinations();
-    let system = match artifact_destination_prompt_block(&artifact_destinations) {
-        Some(block) => format!("{system}\n\n{block}"),
-        None => system,
-    };
+    let system = append_chat_prompt_layers(ChatPromptLayersInput {
+        system,
+        contact: contact_ctx.as_ref(),
+        enabled_skills: &enabled_skills,
+        homuncoder: &homuncoder,
+        is_project,
+        choice_resume_slot,
+        artifact_destinations: &artifact_destinations,
+    });
     // Layer boundary: everything added below through the end of recall assembly
     // is workspace/thread knowledge, not a core instruction. Keep the provider
     // prompt text-compatible while exposing the real content boundary to the

@@ -198,6 +198,9 @@ CHAT_CODE_MAP_PROMPT_RS = os.path.join(
 CHAT_CONNECTED_PROMPT_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_connected_prompt.rs"
 )
+CHAT_PROMPT_LAYERS_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_chat_prompt_layers.rs"
+)
 CHAT_TOOL_PERIMETER_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_tool_perimeter.rs"
 )
@@ -1781,6 +1784,8 @@ def main() -> int:
         chat_code_map_prompt_source = handle.read()
     with open(CHAT_CONNECTED_PROMPT_RS, "r", encoding="utf-8") as handle:
         chat_connected_prompt_source = handle.read()
+    with open(CHAT_PROMPT_LAYERS_RS, "r", encoding="utf-8") as handle:
+        chat_prompt_layers_source = handle.read()
     with open(CHAT_TOOL_PERIMETER_RS, "r", encoding="utf-8") as handle:
         chat_tool_perimeter_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
@@ -4263,6 +4268,55 @@ def main() -> int:
             chat_connected_prompt_source,
             snippet,
             "chat connected prompt owner must not absorb adjacent toolset, prompt wording, loop or browser surfaces",
+        )
+    assert_contains(
+        source,
+        "mod gateway_chat_prompt_layers;",
+        "gateway root must declare chat prompt layers owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_chat_prompt_layers::*;",
+        "gateway root must re-export chat prompt layers owner",
+    )
+    for snippet in [
+        "pub(crate) struct ChatPromptLayersInput",
+        "pub(crate) fn append_chat_prompt_layers(",
+        "contact_context_instruction_block(",
+        "skill_prompt_instructions_block(",
+        "choice_clarify_instruction()",
+        "booking_assumption_choice_instruction()",
+        "artifact_destination_prompt_block(",
+    ]:
+        assert_contains(
+            chat_prompt_layers_source,
+            snippet,
+            "chat prompt layers owner must compose runtime prompt layers",
+        )
+    for snippet in [
+        "if let Some(cx) = &contact_ctx",
+        "skill_prompt_instructions_block(&enabled_skills",
+        "choice_clarify_instruction()",
+        "format!(\"{system}\\n{booking_choices}\")",
+        "artifact_destination_prompt_block(&artifact_destinations)",
+    ]:
+        assert_not_contains(
+            stream_chat_source,
+            snippet,
+            "gateway root must delegate chat prompt layer composition",
+        )
+    for snippet in [
+        "pub(crate) fn skill_prompt_catalog_for_workspace(",
+        "pub(crate) fn contact_context_instruction_block(",
+        "pub(crate) fn artifact_destination_prompt_block(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "async fn run_agent_rounds(",
+        "fn execute_capability_browser_task(",
+    ]:
+        assert_not_contains(
+            chat_prompt_layers_source,
+            snippet,
+            "chat prompt layers owner must not absorb adjacent skill, prompt, toolset, loop or browser surfaces",
         )
     assert_contains(
         source,
