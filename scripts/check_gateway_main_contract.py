@@ -115,6 +115,9 @@ AGENT_TURN_RECOVERY_SEED_RS = os.path.join(
 AGENT_TURN_MODEL_SEED_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_model_seed.rs"
 )
+AGENT_TURN_CONFIG_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_config.rs"
+)
 AGENT_TURN_TAIL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_tail.rs"
 )
@@ -1692,6 +1695,8 @@ def main() -> int:
         agent_turn_recovery_seed_source = handle.read()
     with open(AGENT_TURN_MODEL_SEED_RS, "r", encoding="utf-8") as handle:
         agent_turn_model_seed_source = handle.read()
+    with open(AGENT_TURN_CONFIG_RS, "r", encoding="utf-8") as handle:
+        agent_turn_config_source = handle.read()
     with open(AGENT_TURN_TAIL_RS, "r", encoding="utf-8") as handle:
         agent_turn_tail_source = handle.read()
     with open(AGENT_CHECKPOINTS_RS, "r", encoding="utf-8") as handle:
@@ -2537,6 +2542,53 @@ def main() -> int:
             agent_turn_model_seed_source,
             snippet,
             "agent turn model seed owner must not absorb stream, loop, tail, browser, or subagent owners",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_turn_config;",
+        "gateway root must declare agent turn config owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_turn_config::*;",
+        "gateway root must re-export agent turn config owner",
+    )
+    for snippet in [
+        "pub(crate) struct AgentTurnConfigInput",
+        "pub(crate) fn resolve_agent_turn_config(",
+        "local_first_engine::TurnConfig {",
+        "hard_round_ceiling: hard_round_ceiling()",
+        "forced_tool: input.forced_tool",
+        "resolved_hitl: input.resolved_hitl",
+    ]:
+        assert_contains(
+            agent_turn_config_source,
+            snippet,
+            "agent turn config owner must own turn-constant loop config resolution",
+        )
+    for snippet in [
+        "let cfg = local_first_engine::TurnConfig {",
+        "hard_round_ceiling: hard_round_ceiling(),",
+        "reconcile_on_delivery: plan_reconcile_on_delivery_enabled(),",
+        "resolved_hitl: hitl_choice_resume.as_ref().map(|ctx| {",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain inline agent turn config construction",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "GatewayBrowserExecutor {",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            agent_turn_config_source,
+            snippet,
+            "agent turn config owner must not absorb stream, loop, tail, browser, or subagent owners",
         )
     for snippet in [
         "pub(crate) fn context_message_for_model(",
