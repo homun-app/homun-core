@@ -3301,6 +3301,60 @@ fn agent_turn_model_seed_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_turn_config_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let config_owner = production_source(&root.join("src/gateway_agent_turn_config.rs"));
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai")
+        .split("let tail_state = state_owned.clone();")
+        .next()
+        .expect("agent turn config setup");
+
+    for pattern in [
+        "pub(crate) struct AgentTurnConfigInput",
+        "pub(crate) fn resolve_agent_turn_config(",
+        "local_first_engine::TurnConfig {",
+        "hard_round_ceiling: hard_round_ceiling()",
+        "forced_tool: input.forced_tool",
+        "resolved_hitl: input.resolved_hitl",
+    ] {
+        assert!(
+            config_owner.contains(pattern),
+            "agent turn config owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "let cfg = local_first_engine::TurnConfig {",
+        "hard_round_ceiling: hard_round_ceiling(),",
+        "reconcile_on_delivery: plan_reconcile_on_delivery_enabled(),",
+        "resolved_hitl: hitl_choice_resume.as_ref().map(|ctx| {",
+    ] {
+        assert!(
+            !stream_chat.contains(pattern),
+            "main.rs must not own agent turn config construction {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "GatewayBrowserExecutor {",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !config_owner.contains(adjacent),
+            "agent turn config owner must not absorb adjacent stream/loop/tail/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn chat_usage_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

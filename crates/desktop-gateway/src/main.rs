@@ -30,6 +30,7 @@ mod gateway_agent_checkpoints;
 mod gateway_agent_stream_drain;
 mod gateway_agent_stream_events;
 mod gateway_agent_stream_persistence;
+mod gateway_agent_turn_config;
 mod gateway_agent_turn_identity;
 mod gateway_agent_turn_model_seed;
 mod gateway_agent_turn_outcomes;
@@ -206,6 +207,7 @@ pub(crate) use gateway_agent_checkpoints::*;
 pub(crate) use gateway_agent_stream_drain::*;
 pub(crate) use gateway_agent_stream_events::*;
 pub(crate) use gateway_agent_stream_persistence::*;
+pub(crate) use gateway_agent_turn_config::*;
 pub(crate) use gateway_agent_turn_identity::*;
 pub(crate) use gateway_agent_turn_model_seed::*;
 pub(crate) use gateway_agent_turn_plan_seed::*;
@@ -2316,33 +2318,10 @@ async fn stream_chat_via_openai(
             recovery_checkpoint,
             request.checkpoint_input.is_some(),
         );
-        // 5.D1c.1: resolve the loop's turn-constant config ONCE (env-stable for the turn) so the moved
-        // loop never reads env. Behavior-preserving — same values the inline getters returned.
-        let cfg = local_first_engine::TurnConfig {
-            hard_round_ceiling: hard_round_ceiling(),
-            max_rounds: chat_max_rounds(),
-            browser_max_rounds: chat_browser_max_rounds(),
-            browser_nav_cap: chat_browser_nav_cap(),
-            // The MANAGER budget, not the shared one: its absolute wall clock must outlive the
-            // `browse` sub-turns it delegates (see `manager_browser_max_elapsed_ms`), otherwise a
-            // multi-phase task — search → choose → book, one browse per phase — is cut mid-flight
-            // while every single delegation succeeded.
-            browser_budget: chat_manager_browser_budget(),
-            // Fase 1.1: the model's real context window (catalog `context_window`, resolved above)
-            // drives token-budget auto-compaction. `None` → fail-open (no budget compaction).
-            context_window: model_context_window,
-            reconcile_on_delivery: plan_reconcile_on_delivery_enabled(),
-            autoadvance_from_evidence: plan_autoadvance_from_evidence_enabled(),
-            step_verification: step_verification_enabled(),
-            verbose: verbose_debug(),
-            // S2 T5: resolved above from (routing_binding, Forcing::Specific, turn-index).
-            forced_tool: forced_tool.clone(),
-            // E2: this is the manager (chat) turn, NOT the browse sub-turn. Its browser tool set
-            // (`browser_registry_cached_tools`) deliberately excludes `browser_done` — reaching this
-            // turn's dispatcher is a hallucination — so the terminal must stay disarmed here.
-            browser_subturn: false,
-            resolved_hitl: hitl_choice_resume.as_ref().map(|ctx| {
-                local_first_engine::hitl::ResolvedHitlGuard {
+        let resolved_hitl =
+            hitl_choice_resume
+                .as_ref()
+                .map(|ctx| local_first_engine::hitl::ResolvedHitlGuard {
                     envelope: local_first_engine::hitl::HitlEnvelope {
                         kind: match ctx.wait.kind {
                             hitl_resume::HitlWaitKind::Choice => {
@@ -2357,9 +2336,12 @@ async fn stream_chat_via_openai(
                         source_marker: "durable_resume".to_string(),
                     },
                     resolution: ctx.resolution.clone(),
-                }
-            }),
-        };
+                });
+        let cfg = resolve_agent_turn_config(AgentTurnConfigInput {
+            context_window: model_context_window,
+            forced_tool: forced_tool.clone(),
+            resolved_hitl,
+        });
         // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern, so it
         // runs HERE after the engine turn returns. Snapshot what it needs before the turn consumes the
         // owned values (AppState is a cheap Arc clone; the strings are small).

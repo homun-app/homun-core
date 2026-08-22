@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (agent turn model seed owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-22 (agent turn config owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#309 mergeate in `main`; slice model seed in verifica su `fabio/chat-turn-model-seed-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #309 (`8d7f99d5`); slice model seed in verifica locale prima della PR |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-turn-config-owner` |
+| Branch | `fabio/chat-turn-config-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#310 mergeate in `main`; slice config in verifica su `fabio/chat-turn-config-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #310 (`dae7cdae`); slice config in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_agent_turn_model_seed`: la semina pre-loop del
+- Estrazione locale `gateway_agent_turn_config`: la config turn-costante del
+  loop agente (`resolve_agent_turn_config`: budget round, context-window,
+  forced tool, HITL resume gia' risolto e flag engine) esce dal setup inline di
+  `stream_chat_via_openai`; routing, HITL resolution, loop agente, browser
+  executor e subagent restano owner separati.
+- Estrazione mergeata `gateway_agent_turn_model_seed`: la semina pre-loop del
   provider modello (`seed_agent_turn_model_provider`: warm capability provider e
   `LoopState.provider`) esce dal setup inline di `stream_chat_via_openai`;
   model routing, provider binding construction, model client, loop agente,
@@ -1282,9 +1287,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#309: slice owner-level successive mergeate in
-  `main`, fino a `agent turn recovery seed owner`; `main` verificato e
-  riallineato a #309.
+- #143-#283, #285-#286, #288-#310: slice owner-level successive mergeate in
+  `main`, fino a `agent turn model seed owner`; `main` verificato e
+  riallineato a #310.
 
 PR aperte:
 
@@ -1292,7 +1297,7 @@ PR aperte:
 
 Branch corrente:
 
-- `main` pulito e riallineato a `origin/main` (`8d7f99d5`).
+- `fabio/chat-turn-config-owner` in verifica locale da `main` #310 (`dae7cdae`).
 
 ## Debito residuo
 
@@ -1316,8 +1321,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Scegliere la prossima slice non-browser solo dopo nuova lettura owner-level
-   di `main.rs`.
+1. Chiudere la slice non-browser `gateway_agent_turn_config` con gate kernel
+   verde, PR e merge.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -1325,8 +1330,9 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #309 (`8d7f99d5`); prossima slice non-browser da scegliere
-dopo nuova lettura owner-level di main.rs.
+main aggiornato a #310 (`dae7cdae`); slice non-browser corrente
+`fabio/chat-turn-config-owner` estrae `gateway_agent_turn_config` dal setup
+inline di `stream_chat_via_openai`.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
