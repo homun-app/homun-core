@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (agent turn trace dump owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-22 (agent turn tail snapshot owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-turn-trace-dump-owner` |
-| Branch | `fabio/chat-turn-trace-dump-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#313 mergeate in `main`; slice trace dump in verifica su `fabio/chat-turn-trace-dump-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #313 (`d58de768`); slice trace dump in verifica locale prima della PR |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-turn-tail-snapshot-owner` |
+| Branch | `fabio/chat-turn-tail-snapshot-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#314 mergeate in `main`; slice tail snapshot in verifica su `fabio/chat-turn-tail-snapshot-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #314 (`750d6978`); slice tail snapshot in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_agent_turn_trace_dump`: la risoluzione opzionale
+- Estrazione locale `gateway_agent_turn_tail`: lo snapshot dei valori necessari
+  alla coda post-loop (`snapshot_agent_turn_tail`: state, thread id, fence ids,
+  user message, assistant precedente e turn id) esce dal setup inline di
+  `stream_chat_via_openai`; effetti tail, stream setup, loop agente, browser
+  executor e subagent restano owner separati.
+- Estrazione mergeata `gateway_agent_turn_trace_dump`: la risoluzione opzionale
   della cartella trace dump (`resolve_agent_turn_trace_dump_dir`) esce dal
   setup inline di `stream_chat_via_openai`; eventi turn trace, stream setup,
   loop agente, browser executor e subagent restano owner separati.
@@ -1302,9 +1307,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#313: slice owner-level successive mergeate in
-  `main`, fino a `agent turn loop seed owner`; `main` verificato e riallineato
-  a #313.
+- #143-#283, #285-#286, #288-#314: slice owner-level successive mergeate in
+  `main`, fino a `agent turn trace dump owner`; `main` verificato e riallineato
+  a #314.
 
 PR aperte:
 
@@ -1312,8 +1317,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/chat-turn-trace-dump-owner` in verifica locale da `main` #313
-  (`d58de768`).
+- `fabio/chat-turn-tail-snapshot-owner` in verifica locale da `main` #314
+  (`750d6978`).
 
 ## Debito residuo
 
@@ -1337,7 +1342,7 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice non-browser `gateway_agent_turn_hitl_resume` con gate
+1. Chiudere la slice non-browser `gateway_agent_turn_tail` snapshot con gate
    kernel verde, PR e merge.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
@@ -1346,9 +1351,9 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #311 (`6968624f`); slice non-browser corrente
-`fabio/chat-turn-hitl-resume-owner` estrae `gateway_agent_turn_hitl_resume` dal
-setup inline di `stream_chat_via_openai`.
+main aggiornato a #314 (`750d6978`); slice non-browser corrente
+`fabio/chat-turn-tail-snapshot-owner` sposta lo snapshot tail post-loop da
+`stream_chat_via_openai` a `gateway_agent_turn_tail`.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

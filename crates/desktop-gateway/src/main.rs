@@ -2322,18 +2322,15 @@ async fn stream_chat_via_openai(
             forced_tool: forced_tool.clone(),
             resolved_hitl,
         });
-        // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern, so it
-        // runs HERE after the engine turn returns. Snapshot what it needs before the turn consumes the
-        // owned values (AppState is a cheap Arc clone; the strings are small).
-        let tail_state = state_owned.clone();
-        let tail_user = memory_user_message.clone();
-        let tail_thread = thread_id.clone();
-        let tail_turn_id = request.request_id.clone();
-        // Snapshots for the end-of-turn steering fence below: the originals are moved into
-        // `run_agent_rounds` (and `tail_turn_id` into the memory-learn spawn).
-        let fence_turn_id = request.request_id.clone();
-        let fence_user_id = automation_user_id.clone();
-        let fence_workspace_id = automation_workspace_id.clone();
+        let tail_snapshot = snapshot_agent_turn_tail(AgentTurnTailSnapshotInput {
+            state: &state_owned,
+            thread_id: thread_id.as_deref(),
+            request_id: &request.request_id,
+            user_id: &automation_user_id,
+            workspace_id: &automation_workspace_id,
+            user_message: &memory_user_message,
+            previous_assistant: memory_prev_assistant.as_deref(),
+        });
         // 5.D1c.9: resolve the trace-dump dir gateway-side (armed only when HOMUN_TRACE_DUMP=1) and
         // inject it, so the engine loop appends without calling the gateway's path resolver.
         let trace_dir = resolve_agent_turn_trace_dump_dir();
@@ -2377,19 +2374,19 @@ async fn stream_chat_via_openai(
         )
         .await;
         complete_agent_turn_tail(AgentTurnTailInput {
-            state: tail_state,
+            state: tail_snapshot.state,
             tx: &tx,
             outcome,
             canonical_broker_turn,
-            thread_id: tail_thread,
-            fence_turn_id,
-            fence_user_id,
-            fence_workspace_id,
+            thread_id: tail_snapshot.thread_id,
+            fence_turn_id: tail_snapshot.fence_turn_id,
+            fence_user_id: tail_snapshot.fence_user_id,
+            fence_workspace_id: tail_snapshot.fence_workspace_id,
             applies_new_input,
             read_only,
-            user_message: tail_user,
-            previous_assistant: memory_prev_assistant,
-            tail_turn_id,
+            user_message: tail_snapshot.user_message,
+            previous_assistant: tail_snapshot.previous_assistant,
+            tail_turn_id: tail_snapshot.tail_turn_id,
             resume_id: resume_id.clone(),
             turn_trace: &turn_trace,
         })
