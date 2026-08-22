@@ -2891,6 +2891,57 @@ fn chat_stream_transport_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_turn_execution_identity_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let identity = production_source(&root.join("src/gateway_agent_turn_identity.rs"));
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai")
+        .split("// Thread this chat belongs to:")
+        .next()
+        .expect("agent turn identity setup");
+
+    for pattern in [
+        "pub(crate) struct AgentTurnExecutionIdentity",
+        "pub(crate) fn resolve_agent_turn_execution_identity(",
+        "agent_journal::for_run(agent_run_id)",
+        "request_id.strip_prefix(\"broker-\")",
+        "canonical_broker_turn",
+    ] {
+        assert!(
+            identity.contains(pattern),
+            "agent turn identity owner must contain {pattern}"
+        );
+    }
+
+    for pattern in [
+        "agent_journal::for_run(request.agent_run_id.as_deref())",
+        "let effect_run_id = request.agent_run_id.clone();",
+        ".strip_prefix(\"broker-\")",
+        "let canonical_broker_turn = effect_turn_id.is_some();",
+    ] {
+        assert!(
+            !stream_chat.contains(pattern) && !main.contains(pattern),
+            "main.rs must not own agent turn execution identity {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "GatewayBrowserExecutor {",
+    ] {
+        assert!(
+            !identity.contains(adjacent),
+            "agent turn identity owner must not absorb adjacent stream/loop/tail/browser surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn chat_usage_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

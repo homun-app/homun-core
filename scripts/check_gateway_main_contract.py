@@ -91,6 +91,9 @@ AGENT_STREAM_DRAIN_RS = os.path.join(
 AGENT_TURN_RUNNER_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_runner.rs"
 )
+AGENT_TURN_IDENTITY_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_identity.rs"
+)
 AGENT_TURN_TAIL_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_agent_turn_tail.rs"
 )
@@ -1652,6 +1655,8 @@ def main() -> int:
         agent_stream_drain_source = handle.read()
     with open(AGENT_TURN_RUNNER_RS, "r", encoding="utf-8") as handle:
         agent_turn_runner_source = handle.read()
+    with open(AGENT_TURN_IDENTITY_RS, "r", encoding="utf-8") as handle:
+        agent_turn_identity_source = handle.read()
     with open(AGENT_TURN_TAIL_RS, "r", encoding="utf-8") as handle:
         agent_turn_tail_source = handle.read()
     with open(AGENT_CHECKPOINTS_RS, "r", encoding="utf-8") as handle:
@@ -2145,6 +2150,50 @@ def main() -> int:
             source,
             snippet,
             "gateway root must not own chat stream HTTP client setup",
+        )
+    assert_contains(
+        source,
+        "mod gateway_agent_turn_identity;",
+        "gateway root must declare agent turn identity owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_agent_turn_identity::*;",
+        "gateway root must re-export agent turn identity owner",
+    )
+    for snippet in [
+        "pub(crate) struct AgentTurnExecutionIdentity",
+        "pub(crate) fn resolve_agent_turn_execution_identity(",
+        "agent_journal::for_run(agent_run_id)",
+        "request_id.strip_prefix(\"broker-\")",
+        "canonical_broker_turn",
+    ]:
+        assert_contains(
+            agent_turn_identity_source,
+            snippet,
+            "agent turn identity owner must own execution identity derivation",
+        )
+    for snippet in [
+        "agent_journal::for_run(request.agent_run_id.as_deref())",
+        "let effect_run_id = request.agent_run_id.clone();",
+        ".strip_prefix(\"broker-\")",
+        "let canonical_broker_turn = effect_turn_id.is_some();",
+    ]:
+        assert_not_contains(
+            source,
+            snippet,
+            "gateway root must not retain agent turn execution identity derivation",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn complete_agent_turn_tail(",
+        "GatewayBrowserExecutor {",
+    ]:
+        assert_not_contains(
+            agent_turn_identity_source,
+            snippet,
+            "agent turn identity owner must not absorb stream, loop, tail, or browser owners",
         )
     for snippet in [
         "pub(crate) fn context_message_for_model(",
