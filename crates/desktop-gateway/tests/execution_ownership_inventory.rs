@@ -1007,6 +1007,40 @@ fn artifact_destination_prompt_instruction_has_one_gateway_owner() {
 }
 
 #[test]
+fn goal_propose_prompt_instruction_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
+
+    let pattern = "fn goal_propose_instruction(";
+    assert!(
+        prompt_instructions.contains(pattern),
+        "project goal-propose prompt rendering must live in gateway_prompt_instructions"
+    );
+    assert!(
+        !main.contains(pattern),
+        "main.rs must not retain goal-propose prompt instruction surface {pattern}"
+    );
+
+    for snippet in [
+        "If you ARTICULATE or PROPOSE the OBJECTIVE",
+        "‹‹GOAL_PROPOSE››",
+        "1-3 SHORT objectives looking FORWARD",
+        "Use it ONLY for real project objectives",
+    ] {
+        assert!(
+            !main.contains(snippet),
+            "main.rs must not retain goal-propose prompt contract text {snippet}"
+        );
+    }
+
+    assert!(
+        main.contains("ws.as_str() != PERSONAL_WORKSPACE"),
+        "main.rs still owns the runtime workspace decision to append goal-propose guidance"
+    );
+}
+
+#[test]
 fn objective_contract_prompt_instructions_have_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
