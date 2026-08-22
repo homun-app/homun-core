@@ -1341,10 +1341,8 @@ pub(crate) struct GatewayTurnCompletionJudge {
     state: AppState,
 }
 
-impl GatewayTurnCompletionJudge {
-    pub(crate) fn new(state: AppState) -> Self {
-        Self { state }
-    }
+pub(crate) fn gateway_turn_completion_judge(state: AppState) -> GatewayTurnCompletionJudge {
+    GatewayTurnCompletionJudge { state }
 }
 
 impl local_first_engine::TurnCompletionJudge for GatewayTurnCompletionJudge {
@@ -1630,10 +1628,11 @@ pub(crate) struct GatewayContextCompactor {
     thread_id: Option<String>,
 }
 
-impl GatewayContextCompactor {
-    pub(crate) fn new(state: AppState, thread_id: Option<String>) -> Self {
-        Self { state, thread_id }
-    }
+pub(crate) fn gateway_context_compactor(
+    state: AppState,
+    thread_id: Option<String>,
+) -> GatewayContextCompactor {
+    GatewayContextCompactor { state, thread_id }
 }
 
 impl local_first_engine::ContextCompactor for GatewayContextCompactor {

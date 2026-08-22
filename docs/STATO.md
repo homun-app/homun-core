@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-22 (chat vision fallback snapshot owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-22 (agent turn non-browser seams in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -11,10 +11,10 @@
 | Campo | Valore |
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
-| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/chat-vision-fallback-snapshot-owner` |
-| Branch | `fabio/chat-vision-fallback-snapshot-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#315 mergeate in `main`; slice vision fallback snapshot in verifica su `fabio/chat-vision-fallback-snapshot-owner`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #315 (`24d5552d`); slice vision fallback snapshot in verifica locale prima della PR |
+| Worktree corrente | `/Users/fabio/Projects/Homun/app/.worktrees/agent-turn-nonbrowser-seams` |
+| Branch | `fabio/agent-turn-nonbrowser-seams` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#316 mergeate in `main`; slice non-browser seams in verifica su `fabio/agent-turn-nonbrowser-seams`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #316 (`67d1687d`); slice non-browser seams in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_chat_vision_preflight`: lo snapshot del seed di
+- Estrazione locale non-browser seam factory: la costruzione dei port engine
+  `GatewayPlanProgress`, `GatewayContextCompactor`, `GatewayTurnPolicy` e
+  `GatewayTurnCompletionJudge` esce dai costruttori diretti in
+  `run_agent_rounds` e passa ai factory dei rispettivi owner; i vecchi
+  costruttori `new` non usati sono rimossi.
+- Estrazione mergeata `gateway_chat_vision_preflight`: lo snapshot del seed di
   replay per fallback vision (`snapshot_chat_vision_fallback_seed`) esce dal
   blocco inline di `run_agent_rounds`; la recovery post-loop, stream transport,
   toolset, loop agente, browser executor e subagent restano owner separati.
@@ -685,9 +690,9 @@ Slice Runtime V2 recenti:
   tool schema, stall budget, prompt packet e dispatch tool restano owner
   separati.
 - Estrazione locale `gateway_runtime_plan_state`: costruzione del port engine
-  `GatewayPlanProgress` passa da struct literal in `run_agent_rounds` a
-  `GatewayPlanProgress::new`, mantenendo il loop agente come sola composition
-  del turno.
+  `GatewayPlanProgress` passa dal costruttore diretto in `run_agent_rounds` al
+  factory `gateway_plan_progress`, mantenendo il loop agente come sola
+  composition del turno.
 - Estrazione locale `audit_runtime_plan_state`: `scripts/audit_turn_consistency.py`
   legge `runtime_plans` e segnala piani open/runnable che sopravvivono a task
   terminali; non ripara righe e non diventa owner runtime, ma rende visibile la
@@ -721,9 +726,9 @@ Slice Runtime V2 recenti:
   alle policy di compaction visibili al modello; `GatewayTurnPolicy`,
   `GatewayTurnCompletionJudge` e il loop agente restano owner separati.
 - Estrazione locale `gateway_context_compactor`: costruzione del port engine
-  `GatewayContextCompactor` passa da struct literal in `run_agent_rounds` a
-  `GatewayContextCompactor::new`, mantenendo state/thread binding nell'owner
-  model routing.
+  `GatewayContextCompactor` passa dal costruttore diretto in `run_agent_rounds`
+  al factory `gateway_context_compactor`, mantenendo state/thread binding
+  nell'owner model routing.
 - Estrazione mergeata `gateway_turn_policy`: adapter port `GatewayTurnPolicy`
   esce dal monolite `main.rs` e vive nell'owner `gateway_capability_routing`,
   accanto alla decisione `CapabilityRouteDecision` e al blocco workflow
@@ -1311,9 +1316,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#315: slice owner-level successive mergeate in
-  `main`, fino a `agent turn tail snapshot owner`; `main` verificato e
-  riallineato a #315.
+- #143-#283, #285-#286, #288-#316: slice owner-level successive mergeate in
+  `main`, fino a `chat vision fallback snapshot owner`; `main` verificato e
+  riallineato a #316.
 
 PR aperte:
 
@@ -1321,8 +1326,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/chat-vision-fallback-snapshot-owner` in verifica locale da `main` #315
-  (`24d5552d`).
+- `fabio/agent-turn-nonbrowser-seams` in verifica locale da `main` #316
+  (`67d1687d`).
 
 ## Debito residuo
 
@@ -1346,8 +1351,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice non-browser `gateway_chat_vision_preflight` fallback
-   snapshot con gate kernel verde, PR e merge.
+1. Chiudere la slice non-browser seam factory dei port engine con gate kernel
+   verde, PR e merge.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -1355,9 +1360,9 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #315 (`24d5552d`); slice non-browser corrente
-`fabio/chat-vision-fallback-snapshot-owner` sposta lo snapshot del seed vision
-fallback da `run_agent_rounds` a `gateway_chat_vision_preflight`.
+main aggiornato a #316 (`67d1687d`); slice non-browser corrente
+`fabio/agent-turn-nonbrowser-seams` sposta i factory dei port engine non-browser
+fuori da `run_agent_rounds` e rimuove i costruttori legacy non usati.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

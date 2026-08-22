@@ -996,12 +996,10 @@ pub(crate) struct GatewayTurnPolicy {
     workflow_tool_calls: std::sync::atomic::AtomicUsize,
 }
 
-impl GatewayTurnPolicy {
-    pub(crate) fn new(route: CapabilityRouteDecision) -> Self {
-        Self {
-            route,
-            workflow_tool_calls: std::sync::atomic::AtomicUsize::new(0),
-        }
+pub(crate) fn gateway_turn_policy(route: CapabilityRouteDecision) -> GatewayTurnPolicy {
+    GatewayTurnPolicy {
+        route,
+        workflow_tool_calls: std::sync::atomic::AtomicUsize::new(0),
     }
 }
 

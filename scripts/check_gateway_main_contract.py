@@ -3225,6 +3225,16 @@ def main() -> int:
         "capability routing owner must expose turn policy port",
     )
     assert_contains(
+        capability_routing_source,
+        "pub(crate) fn gateway_turn_policy(",
+        "capability routing owner must expose turn policy factory",
+    )
+    assert_not_contains(
+        source,
+        "GatewayTurnPolicy::new(",
+        "gateway root must not construct GatewayTurnPolicy directly",
+    )
+    assert_contains(
         source,
         "mod gateway_project_search_tools;",
         "gateway root must declare project search tools owner",
@@ -3357,13 +3367,18 @@ def main() -> int:
     )
     assert_contains(
         model_routing_source,
-        "impl GatewayContextCompactor {\n    pub(crate) fn new(",
-        "model routing owner must expose context compactor constructor impl",
+        "pub(crate) fn gateway_context_compactor(",
+        "model routing owner must expose context compactor factory",
     )
     assert_not_contains(
         source,
         "let compactor = GatewayContextCompactor {\n        state: state_owned.clone(),\n        thread_id: thread_id.clone(),\n    };",
         "gateway root must not construct GatewayContextCompactor inline",
+    )
+    assert_not_contains(
+        source,
+        "GatewayContextCompactor::new(",
+        "gateway root must not construct GatewayContextCompactor directly",
     )
     assert_not_contains(
         source,
@@ -3379,6 +3394,16 @@ def main() -> int:
         model_routing_source,
         "pub(crate) struct GatewayTurnCompletionJudge",
         "model routing owner must expose turn completion judge port",
+    )
+    assert_contains(
+        model_routing_source,
+        "pub(crate) fn gateway_turn_completion_judge(",
+        "model routing owner must expose turn completion judge factory",
+    )
+    assert_not_contains(
+        source,
+        "GatewayTurnCompletionJudge::new(",
+        "gateway root must not construct GatewayTurnCompletionJudge directly",
     )
     assert_contains(
         model_routing_source,
@@ -4377,18 +4402,18 @@ def main() -> int:
     )
     assert_contains(
         runtime_plan_state_source,
-        "impl GatewayPlanProgress",
-        "runtime plan state owner must expose engine plan progress constructor",
-    )
-    assert_contains(
-        runtime_plan_state_source,
-        "pub(crate) fn new(",
-        "runtime plan state owner must construct engine plan progress port",
+        "pub(crate) fn gateway_plan_progress(",
+        "runtime plan state owner must expose engine plan progress factory",
     )
     assert_not_contains(
         source,
         "let plan_progress = GatewayPlanProgress {\n        state: state_owned.clone(),\n    };",
         "gateway root must not construct GatewayPlanProgress inline",
+    )
+    assert_not_contains(
+        source,
+        "GatewayPlanProgress::new(",
+        "gateway root must not construct GatewayPlanProgress directly",
     )
     assert_contains(
         thread_episodes_source,
