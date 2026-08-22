@@ -31,6 +31,7 @@ mod gateway_agent_stream_drain;
 mod gateway_agent_stream_events;
 mod gateway_agent_stream_persistence;
 mod gateway_agent_turn_identity;
+mod gateway_agent_turn_model_seed;
 mod gateway_agent_turn_outcomes;
 mod gateway_agent_turn_plan_seed;
 mod gateway_agent_turn_recall_seed;
@@ -206,6 +207,7 @@ pub(crate) use gateway_agent_stream_drain::*;
 pub(crate) use gateway_agent_stream_events::*;
 pub(crate) use gateway_agent_stream_persistence::*;
 pub(crate) use gateway_agent_turn_identity::*;
+pub(crate) use gateway_agent_turn_model_seed::*;
 pub(crate) use gateway_agent_turn_plan_seed::*;
 pub(crate) use gateway_agent_turn_recall_seed::*;
 pub(crate) use gateway_agent_turn_recovery_seed::*;
@@ -2308,16 +2310,7 @@ async fn stream_chat_via_openai(
         let plan_nudges = plan_seed.plan_nudges;
         let turn_used_tools = plan_seed.turn_used_tools;
 
-        // F0 / model-io: detect+cache this provider's turn capabilities before the loop.
-        // The thinking gate in `build_chat_payload` reads this cache.
-        warm_turn_provider_capabilities(&http, &base_url, &model).await;
-
-        // The concrete model seam (ADR 0024): borrows the turn's client + sink for the loop.
-        // The outer ceiling is the BROWSER budget; the EFFECTIVE budget is dynamic
-        // (the normal 5 rounds until a browser tool is actually used, then the
-        // larger browser budget). This keeps non-browser turns identical to today.
-        // ADR 0026: provider binding travels with LoopState (per-round swap), not as separate args.
-        ls.provider = crate::model_client::gateway_provider_binding(model, base_url, api_key);
+        seed_agent_turn_model_provider(&mut ls, &http, model, base_url, api_key).await;
         seed_agent_turn_recovery_checkpoint(
             &mut ls,
             recovery_checkpoint,
