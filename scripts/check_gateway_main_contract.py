@@ -4819,6 +4819,11 @@ def main() -> int:
         "pub(crate) turn_policy: &'a ChatTurnPolicy,",
         "tool execution owner must receive typed ChatTurnPolicy for capability executor",
     )
+    assert_contains(
+        tool_execution_source,
+        "pub(crate) contact_memory_perimeter: ContactMemoryPerimeter,",
+        "tool execution owner must receive typed ContactMemoryPerimeter for capability executor",
+    )
     capability_executor_input_source = tool_execution_source.split(
         "pub(crate) struct GatewayCapabilityExecutorInput", 1
     )[1].split("/// The gateway's `CapabilityExecutor`", 1)[0]
@@ -4832,6 +4837,17 @@ def main() -> int:
         "pub(crate) autonomous: bool,",
         "capability executor input must not receive scalar autonomous",
     )
+    for snippet in [
+        "pub(crate) contact_only: bool,",
+        "pub(crate) can_see_contacts: bool,",
+        "pub(crate) can_see_calendar: bool,",
+        "pub(crate) can_use_project_memory: bool,",
+    ]:
+        assert_not_contains(
+            capability_executor_input_source,
+            snippet,
+            "capability executor input must not receive scalar contact perimeter",
+        )
     assert_contains(
         tool_execution_source,
         "pub(crate) fn gateway_capability_executor<'a>(",
@@ -4860,14 +4876,23 @@ def main() -> int:
         "turn_policy,",
         "gateway root must pass typed ChatTurnPolicy into capability executor",
     )
+    assert_contains(
+        run_agent_rounds_source,
+        "contact_memory_perimeter,",
+        "gateway root must pass typed ContactMemoryPerimeter into capability executor",
+    )
     for snippet in [
         "read_only: turn_policy.read_only,",
         "autonomous: turn_policy.autonomous,",
+        "contact_only: contact_memory_perimeter.contact_only,",
+        "can_see_contacts: contact_memory_perimeter.can_see_contacts,",
+        "can_see_calendar: contact_memory_perimeter.can_see_calendar,",
+        "can_use_project_memory: contact_memory_perimeter.can_use_project_memory,",
     ]:
         assert_not_contains(
             run_agent_rounds_source,
             snippet,
-            "gateway root must not pass scalar chat turn policy into capability executor",
+            "gateway root must not pass scalar turn context into capability executor",
         )
     assert_contains(
         composio_routes_source,
