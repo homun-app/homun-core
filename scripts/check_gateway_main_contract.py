@@ -4999,6 +4999,21 @@ def main() -> int:
         "prompt instruction owner must expose chat runtime prompt assembly",
     )
     assert_contains(
+        prompt_instructions_source,
+        "pub(crate) struct ChatCoreOperatingPromptInput",
+        "prompt instruction owner must expose chat core operating prompt input",
+    )
+    assert_contains(
+        prompt_instructions_source,
+        "pub(crate) fn prepare_chat_core_operating_prompt(",
+        "prompt instruction owner must expose chat core operating prompt assembly",
+    )
+    assert_contains(
+        source,
+        "prepare_chat_core_operating_prompt(ChatCoreOperatingPromptInput",
+        "gateway root must delegate chat core operating prompt assembly",
+    )
+    assert_contains(
         source,
         "prepare_chat_runtime_prompt(ChatRuntimePromptInput",
         "gateway root must delegate runtime prompt control assembly",
@@ -5013,6 +5028,17 @@ def main() -> int:
     if objective_context_calls != 1:
         raise AssertionError(
             "gateway root must prepare the chat objective execution context once"
+        )
+    for snippet in [
+        "now_block()",
+        'std::env::var("HOME")',
+        "response_language_instruction(&effective_user_language())",
+        "core_operating_instruction(&now, &home, browser_discovery, &language_instruction)",
+    ]:
+        assert_not_contains(
+            stream_body,
+            snippet,
+            "gateway root must not retain chat core operating prompt bootstrap",
         )
     assert_not_contains(
         stream_body,

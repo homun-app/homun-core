@@ -1140,6 +1140,13 @@ fn core_operating_prompt_instruction_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
     let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
+    let stream_body = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream chat function")
+        .split("async fn run_agent_rounds(")
+        .next()
+        .expect("stream chat function end");
 
     let pattern = "fn core_operating_instruction(";
     assert!(
@@ -1166,16 +1173,39 @@ fn core_operating_prompt_instruction_has_one_gateway_owner() {
     }
 
     assert!(
-        main.contains("now_block()"),
-        "main.rs still owns the runtime date/time value"
+        prompt_instructions.contains("pub(crate) struct ChatCoreOperatingPromptInput"),
+        "prompt instruction owner must expose chat core operating prompt input"
     );
     assert!(
-        main.contains("effective_user_language()"),
-        "main.rs still owns the runtime language selection"
+        prompt_instructions.contains("pub(crate) fn prepare_chat_core_operating_prompt("),
+        "prompt instruction owner must expose chat core operating prompt assembly"
     );
+    assert!(
+        stream_body.contains("prepare_chat_core_operating_prompt(ChatCoreOperatingPromptInput"),
+        "gateway root must delegate chat core operating prompt assembly"
+    );
+    for snippet in [
+        "now_block()",
+        "std::env::var(\"HOME\")",
+        "response_language_instruction(&effective_user_language())",
+        "core_operating_instruction(&now, &home, browser_discovery, &language_instruction)",
+    ] {
+        assert!(
+            !stream_body.contains(snippet),
+            "main.rs must not retain core operating prompt bootstrap {snippet}"
+        );
+    }
     assert!(
         prompt_instructions.contains("fn browser_open_research_discovery_instruction("),
         "core operating prompt owner must stay with prompt instruction helpers"
+    );
+    assert!(
+        prompt_instructions.contains("now_block()"),
+        "prompt instruction owner must resolve the runtime date/time value"
+    );
+    assert!(
+        prompt_instructions.contains("effective_user_language()"),
+        "prompt instruction owner must resolve the runtime language selection"
     );
 }
 
