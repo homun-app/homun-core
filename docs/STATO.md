@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (typed turn-policy slices mergeate fino a #352; nuovo slice memory recall perimeter in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter slices mergeate fino a #354; nuovo slice chat tool policy context in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#352 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #352 (`a87a9b68`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#354 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #354 (`b093ff11`) |
 
 ## Dove siamo
 
@@ -45,11 +45,15 @@ Piano completato:
 Slice Runtime V2 recenti:
 
 - Estrazione locale `gateway_tool_execution`: `GatewayCapabilityExecutor` e
+  `ChatToolCtx` trasportano anche `&ChatTurnPolicy` typed invece di conservare
+  copie scalari `read_only`/`autonomous`; dispatch chat, approval policy e
+  wrapper capability derivano i flag solo localmente dalla policy del turno.
+- Estrazione mergeata `gateway_tool_execution`: `GatewayCapabilityExecutor` e
   `ChatToolCtx` trasportano `ContactMemoryPerimeter` typed invece di ricreare
   copie scalari `contact_only`/`can_see_contacts`/`can_see_calendar`/
   `can_use_project_memory`; dispatch `recall_memory`, discovery capability e
   guardie connector derivano i flag solo localmente dal perimetro.
-- Estrazione locale `gateway_memory_sources`/`gateway_chat_workspace_prompt_context`/
+- Estrazione mergeata `gateway_memory_sources`/`gateway_chat_workspace_prompt_context`/
   `gateway_tool_execution`:
   la decisione `memory_perimeter_allows_recall` riceve `&ContactMemoryPerimeter`
   invece di tre flag scalari `contact_only`/`can_see_contacts`/
@@ -91,10 +95,10 @@ Slice Runtime V2 recenti:
   scalari concorrenti al capability executor, mentre tool dispatch, browser
   executor e loop agente restano owner separati.
 - Estrazione mergeata `gateway_tool_execution`: `GatewayCapabilityExecutorInput`
-  riceve `&ChatTurnPolicy` e il factory deriva internamente `read_only` e
-  `autonomous`; `run_agent_rounds` non passa piu' due flag scalari concorrenti
-  al capability executor, mentre contact perimeter, browser executor e loop
-  agente restano owner separati.
+  riceve `&ChatTurnPolicy`; `run_agent_rounds` non passa piu' due flag scalari
+  concorrenti al capability executor e il contesto tool chat mantiene la policy
+  typed fino ai punti di decisione, mentre contact perimeter, browser executor e
+  loop agente restano owner separati.
 - Estrazione mergeata `gateway_agent_turn_tail`: `AgentTurnTailInput` riceve
   `&ChatTurnPolicy` e deriva `read_only` internamente per memory learn e project
   graph refresh post-loop; `stream_chat_via_openai` non passa piu' un booleano

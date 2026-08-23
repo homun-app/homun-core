@@ -4363,6 +4363,10 @@ fn capability_executor_constructor_has_one_gateway_owner() {
         chat_tool_ctx.contains("pub(crate) contact_memory_perimeter: &'a ContactMemoryPerimeter,"),
         "chat tool context must carry typed ContactMemoryPerimeter"
     );
+    assert!(
+        chat_tool_ctx.contains("pub(crate) turn_policy: &'a ChatTurnPolicy,"),
+        "chat tool context must carry typed ChatTurnPolicy"
+    );
     let gateway_capability_executor = tool_execution
         .split("pub(crate) struct GatewayCapabilityExecutor")
         .nth(1)
@@ -4374,6 +4378,25 @@ fn capability_executor_constructor_has_one_gateway_owner() {
         gateway_capability_executor.contains("contact_memory_perimeter: ContactMemoryPerimeter,"),
         "gateway capability executor must carry typed ContactMemoryPerimeter"
     );
+    assert!(
+        gateway_capability_executor.contains("turn_policy: &'a ChatTurnPolicy,"),
+        "gateway capability executor must carry typed ChatTurnPolicy"
+    );
+    for pattern in [
+        "pub(crate) read_only: bool,",
+        "pub(crate) autonomous: bool,",
+        "read_only: bool,",
+        "autonomous: bool,",
+    ] {
+        assert!(
+            !chat_tool_ctx.contains(pattern),
+            "chat tool context must not carry scalar turn policy {pattern}"
+        );
+        assert!(
+            !gateway_capability_executor.contains(pattern),
+            "gateway capability executor must not carry scalar turn policy {pattern}"
+        );
+    }
     for pattern in [
         "pub(crate) contact_only: bool,",
         "pub(crate) can_see_contacts: bool,",

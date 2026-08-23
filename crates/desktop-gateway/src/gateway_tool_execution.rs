@@ -447,10 +447,9 @@ pub(crate) struct ChatToolCtx<'a> {
     pub(crate) state: &'a AppState,
     pub(crate) tx: &'a StreamSink,
     pub(crate) thread_id: Option<&'a str>,
-    pub(crate) read_only: bool,
+    pub(crate) turn_policy: &'a ChatTurnPolicy,
     pub(crate) contact_memory_perimeter: &'a ContactMemoryPerimeter,
     pub(crate) vault_value_requested: bool,
-    pub(crate) autonomous: bool,
     pub(crate) composio_writes: &'a std::collections::BTreeSet<String>,
     pub(crate) catalog_index: &'a [(String, String, serde_json::Value)],
     pub(crate) capability_corpus: &'a [CapabilityEntry],
@@ -2840,7 +2839,7 @@ pub(crate) async fn execute_chat_tool(
     // seam headed for ADR 0025, which keeps mutating `ctx` directly for now.)
     let mut effects = local_first_engine::ToolEffects::default();
     let mut effect_status = EffectDispatchStatus::Verified;
-    let result = if ctx.read_only
+    let result = if ctx.turn_policy.read_only
         && matches!(
             name,
             "run_in_sandbox"
@@ -4521,7 +4520,7 @@ an uncertain date.",
                 &intent,
                 COMPOSIO_DISCOVERY_RESULTS,
             ) {
-                if ctx.read_only && !composio_tool_is_read(&entry.key) {
+                if ctx.turn_policy.read_only && !composio_tool_is_read(&entry.key) {
                     withheld += 1;
                     continue;
                 }
@@ -4748,7 +4747,7 @@ loaded with use_skill):\n{}",
             },
         )
         .await;
-        // Gating mirrors edit_file/write_file: the OS fence is unconditional, `ctx.read_only`
+        // Gating mirrors edit_file/write_file: the OS fence is unconditional, `ctx.turn_policy.read_only`
         // channel turns already refused this above (allowlist), and confinement to the project
         // root happens inside `apply_patch_in_project` via `jail_in_root` — no path escapes.
         // A missing project folder surfaces as the `Err(msg)` arm (no_project_folder_msg).
@@ -5078,7 +5077,7 @@ Do not reveal other contacts, people or relationships of the user."
 this contact. Answer only with what's in this chat; do not reveal personal data \
 of the user or third parties."
             .to_string()
-    } else if ctx.read_only && !name.is_empty() && ctx.composio_writes.contains(name) {
+    } else if ctx.turn_policy.read_only && !name.is_empty() && ctx.composio_writes.contains(name) {
         // Channel (read-only) turn: never run a write tool, never even
         // surface a confirm card (no UI on the channel). Phase 2 routes
         // these to the in-app approval center.
@@ -5127,7 +5126,7 @@ require your confirmation in the app. Propose it and stop."
             // sandbox arg is the resolved app-level policy (naming-only in `assess_tool_safety`
             // — it does not change the Ask/Auto verdict, but keeps the label honest).
             let approval = effective_approval(
-                ctx.autonomous,
+                ctx.turn_policy.autonomous,
                 resolved_approval_policy(ctx.state, ctx.thread_id),
             );
             let needs_confirm = matches!(
@@ -5243,7 +5242,7 @@ Connectors → MCP; do NOT claim it's done.",
         // always-allow list; the approval axis is RESOLVED, autonomous forced to `Never`.
         // At the default `on-request` this equals the legacy verdict.
         let approval = effective_approval(
-            ctx.autonomous,
+            ctx.turn_policy.autonomous,
             resolved_approval_policy(ctx.state, ctx.thread_id),
         );
         let needs_confirm = matches!(
@@ -5405,11 +5404,10 @@ pub(crate) struct GatewayCapabilityExecutor<'a> {
     state: &'a AppState,
     tx: &'a StreamSink,
     thread_id: Option<&'a str>,
-    read_only: bool,
+    turn_policy: &'a ChatTurnPolicy,
     contact_memory_perimeter: ContactMemoryPerimeter,
     memory_recall_allowed: bool,
     vault_value_requested: bool,
-    autonomous: bool,
     composio_writes: &'a std::collections::BTreeSet<String>,
     catalog_index: &'a [(String, String, serde_json::Value)],
     capability_corpus: &'a [CapabilityEntry],
@@ -5430,11 +5428,10 @@ pub(crate) fn gateway_capability_executor<'a>(
         state: input.state,
         tx: input.tx,
         thread_id: input.thread_id,
-        read_only: input.turn_policy.read_only,
+        turn_policy: input.turn_policy,
         contact_memory_perimeter: input.contact_memory_perimeter,
         memory_recall_allowed: input.memory_recall_allowed,
         vault_value_requested: input.vault_value_requested,
-        autonomous: input.turn_policy.autonomous,
         composio_writes: input.composio_writes,
         catalog_index: input.catalog_index,
         capability_corpus: input.capability_corpus,
@@ -5851,7 +5848,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 tx: self.tx,
                 thread_id: self.thread_id,
                 prompt: self.prompt,
-                read_only: self.read_only
+                read_only: self.turn_policy.read_only
                     || !objective_policy.allows(semantic_decision::EffectClass::ExternalWrite),
                 channel_owner: self.channel_owner,
                 agent_run_id: self.run_id.map(str::to_string),
@@ -5931,10 +5928,9 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             state: self.state,
             tx: self.tx,
             thread_id: self.thread_id,
-            read_only: self.read_only,
+            turn_policy: self.turn_policy,
             contact_memory_perimeter: &self.contact_memory_perimeter,
             vault_value_requested: self.vault_value_requested,
-            autonomous: self.autonomous,
             composio_writes: self.composio_writes,
             catalog_index: self.catalog_index,
             capability_corpus: self.capability_corpus,
