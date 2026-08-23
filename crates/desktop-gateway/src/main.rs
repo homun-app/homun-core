@@ -1639,9 +1639,7 @@ async fn stream_chat_via_openai(
     let homuncoder = skill_prompt_catalog.homuncoder;
     let is_project = skill_prompt_catalog.is_project;
     let has_skills = !enabled_skills.is_empty();
-    // Authorized write destinations: when present, the model can deliver
-    // generated files to user-granted folders via `save_artifact`.
-    let artifact_destinations = load_artifact_destinations();
+    let artifact_destinations = prepare_chat_artifact_destinations();
     let system = append_chat_prompt_layers(ChatPromptLayersInput {
         system,
         contact: contact_ctx.as_ref(),

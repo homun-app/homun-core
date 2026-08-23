@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (skill prompt catalog owner in sviluppo).**
+> **Ultimo aggiornamento: 2026-08-23 (chat artifact destinations owner in sviluppo).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/skill-prompt-catalog-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#330 mergeate in `main`; slice skill prompt catalog owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #330 (`4a1c8a2d`); slice skill prompt catalog owner in verifica locale prima della PR |
+| Branch | `fabio/chat-prompt-layer-artifacts-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#331 mergeate in `main`; slice chat artifact destinations owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #331 (`fa5dda9c`); slice chat artifact destinations owner in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_skill_runtime`: il caricamento per-turno del
+- Estrazione locale `gateway_artifacts`: il lookup delle destinazioni artifact
+  usate dal turno chat (`prepare_chat_artifact_destinations`) passa all'owner
+  artifact; `main.rs` consuma solo lo snapshot typed e lo passa a prompt layers
+  e toolset `save_artifact`, mentre storage/routes artifact, rendering prompt,
+  tool schema, loop agente e browser restano owner separati.
+- Estrazione mergeata `gateway_skill_runtime`: il caricamento per-turno del
   catalogo prompt skill (`prepare_skill_prompt_catalog`: manifest HomunCoder,
   skill abilitate e filtro project/personal workspace) esce da
   `stream_chat_via_openai`; `main.rs` consuma solo `enabled_skills`,
