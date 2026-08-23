@@ -605,8 +605,9 @@ use gateway_project_search_tools::{
     query_git_history, query_git_history_tool_schema,
 };
 use gateway_prompt_instructions::{
-    ChatRuntimePromptInput, browser_open_research_discovery_instruction,
-    core_operating_instruction, prepare_chat_runtime_prompt,
+    ChatCoreOperatingPromptInput, ChatRuntimePromptInput,
+    browser_open_research_discovery_instruction, prepare_chat_core_operating_prompt,
+    prepare_chat_runtime_prompt,
 };
 pub(crate) use gateway_prompt_packets::*;
 #[cfg(test)]
@@ -1608,10 +1609,8 @@ async fn stream_chat_via_openai(
         hitl_resume::hitl_resume_harness_slot(&ctx.wait, &ctx.resolution, browser_still_live)
     });
 
-    let now = now_block();
-    let home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());
-    let language_instruction = response_language_instruction(&effective_user_language());
-    let system = core_operating_instruction(&now, &home, browser_discovery, &language_instruction);
+    let system =
+        prepare_chat_core_operating_prompt(ChatCoreOperatingPromptInput { browser_discovery });
     let system =
         append_chat_code_map_prompt_instruction(ChatCodeMapPromptInput { state, system }).await;
     // Connected-service and MCP tools share one discovery/write-set owner. The

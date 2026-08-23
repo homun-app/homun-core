@@ -5,7 +5,9 @@
 //! without growing `main.rs`.
 
 use crate::{
-    gateway_artifacts::ArtifactDestination, gateway_browser_tools::manager_browser_guidance,
+    gateway_artifacts::ArtifactDestination,
+    gateway_browser_tools::manager_browser_guidance,
+    gateway_user_preferences::{effective_user_language, now_block, response_language_instruction},
 };
 
 pub(crate) fn browser_open_research_discovery_instruction() -> &'static str {
@@ -16,6 +18,19 @@ match the user's language and the browser locale when choosing discovery pages; 
 using a search/news URL, include locale parameters such as hl=it and gl=IT when \
 appropriate instead of defaulting to an unrelated market. \
 Do not jump directly to one outlet unless the user explicitly named it."
+}
+
+pub(crate) struct ChatCoreOperatingPromptInput<'a> {
+    pub(crate) browser_discovery: &'a str,
+}
+
+pub(crate) fn prepare_chat_core_operating_prompt(
+    input: ChatCoreOperatingPromptInput<'_>,
+) -> String {
+    let now = now_block();
+    let home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());
+    let language_instruction = response_language_instruction(&effective_user_language());
+    core_operating_instruction(&now, &home, input.browser_discovery, &language_instruction)
 }
 
 pub(crate) fn booking_assumption_choice_instruction() -> &'static str {
@@ -485,18 +500,19 @@ discovery/search from scratch."
 #[cfg(test)]
 mod tests {
     use super::{
-        ChatRuntimePromptInput, RuntimePromptControlInput, artifact_destination_prompt_block,
-        ask_mode_instruction, booking_assumption_choice_instruction,
-        browser_open_research_discovery_instruction, choice_clarify_instruction,
-        choice_resume_instruction_legacy_backup, code_map_available_instruction,
-        connected_service_tools_instruction, contact_context_instruction_block,
-        core_operating_instruction, debug_mode_instruction, destination_folders_instruction,
-        execution_verification_instruction, expired_connected_services_instruction,
-        freshness_verification_instruction, goal_propose_instruction,
-        language_follow_user_instruction, memory_recall_usage_instruction,
-        memory_scope_restricted_instruction, objective_contract_instruction,
-        objective_contract_read_only_default_instruction, operational_plan_instruction,
-        plan_mode_instruction, prepare_chat_runtime_prompt, runtime_prompt_control_instructions,
+        ChatCoreOperatingPromptInput, ChatRuntimePromptInput, RuntimePromptControlInput,
+        artifact_destination_prompt_block, ask_mode_instruction,
+        booking_assumption_choice_instruction, browser_open_research_discovery_instruction,
+        choice_clarify_instruction, choice_resume_instruction_legacy_backup,
+        code_map_available_instruction, connected_service_tools_instruction,
+        contact_context_instruction_block, core_operating_instruction, debug_mode_instruction,
+        destination_folders_instruction, execution_verification_instruction,
+        expired_connected_services_instruction, freshness_verification_instruction,
+        goal_propose_instruction, language_follow_user_instruction,
+        memory_recall_usage_instruction, memory_scope_restricted_instruction,
+        objective_contract_instruction, objective_contract_read_only_default_instruction,
+        operational_plan_instruction, plan_mode_instruction, prepare_chat_core_operating_prompt,
+        prepare_chat_runtime_prompt, runtime_prompt_control_instructions,
     };
 
     #[test]
@@ -549,6 +565,20 @@ mod tests {
         assert!(guidance.contains("AUTOMATIONS: for RECURRING or REACTIVE requests"));
         assert!(guidance.contains("RESPONSE FORMATTING"));
         assert!(guidance.contains("Rispondi in italiano."));
+    }
+
+    #[test]
+    fn gateway_prompt_instructions_prepare_chat_core_operating_prompt() {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());
+        let guidance = prepare_chat_core_operating_prompt(ChatCoreOperatingPromptInput {
+            browser_discovery: "BROWSER DISCOVERY SENTINEL.",
+        });
+
+        assert!(guidance.contains("ORCHESTRATOR"));
+        assert!(guidance.contains("Right now today is"));
+        assert!(guidance.contains("BROWSER DISCOVERY SENTINEL."));
+        assert!(guidance.contains(&format!("{home}/Projects")));
+        assert!(guidance.contains("Clear and well-structured"));
     }
 
     #[test]

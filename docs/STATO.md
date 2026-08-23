@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (chat privacy locality owner in sviluppo).**
+> **Ultimo aggiornamento: 2026-08-23 (chat core prompt owner in sviluppo).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/chat-privacy-locality-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#335 mergeate in `main`; slice chat privacy locality owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #335 (`db83b8f1`); slice chat privacy locality owner in verifica locale prima della PR |
+| Branch | `fabio/chat-core-prompt-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#336 mergeate in `main`; slice chat core prompt owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #336 (`aa9878c0`); slice chat core prompt owner in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,14 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_privacy_preflight`: la risoluzione della localita'
+- Estrazione locale `gateway_prompt_instructions`: il bootstrap del core
+  operating prompt chat (`prepare_chat_core_operating_prompt`: data/ora runtime,
+  home utente, lingua effettiva e discovery browser gia' risolta) esce da
+  `stream_chat_via_openai`; il root passa solo il browser discovery snippet e
+  conserva l'ordine dei layer prompt, mentre code-map, connected services,
+  workspace prompt, runtime prompt, packet composition, loop agente e browser
+  restano owner separati.
+- Estrazione mergeata `gateway_privacy_preflight`: la risoluzione della localita'
   orchestrator per Privacy Guard (`chat_privacy_orchestrator_is_local`: endpoint
   locale e modello non `:cloud`) esce da `stream_chat_via_openai`; il root passa
   solo `base_url` e `model`, mentre failure policy, prompt privacy, transport
