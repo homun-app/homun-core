@@ -17,7 +17,7 @@ pub(crate) struct AgentTurnTailInput<'a> {
     pub(crate) fence_user_id: UserId,
     pub(crate) fence_workspace_id: WorkspaceId,
     pub(crate) applies_new_input: bool,
-    pub(crate) read_only: bool,
+    pub(crate) turn_policy: &'a ChatTurnPolicy,
     pub(crate) user_message: String,
     pub(crate) previous_assistant: Option<String>,
     pub(crate) tail_turn_id: String,
@@ -98,7 +98,7 @@ pub(crate) async fn complete_agent_turn_tail(input: AgentTurnTailInput<'_>) {
         fence_user_id,
         fence_workspace_id,
         applies_new_input,
-        read_only,
+        turn_policy,
         user_message,
         previous_assistant,
         tail_turn_id,
@@ -123,7 +123,7 @@ pub(crate) async fn complete_agent_turn_tail(input: AgentTurnTailInput<'_>) {
 
     record_agent_turn_end_trace(turn_trace, &outcome);
 
-    if applies_new_input && !outcome.memory_answer.trim().is_empty() && !read_only {
+    if applies_new_input && !outcome.memory_answer.trim().is_empty() && !turn_policy.read_only {
         let learn_state = state.clone();
         let learn_answer = outcome.memory_answer.clone();
         let learn_thread = thread_id.clone();
@@ -145,7 +145,7 @@ pub(crate) async fn complete_agent_turn_tail(input: AgentTurnTailInput<'_>) {
         });
     }
 
-    if !read_only
+    if !turn_policy.read_only
         && let Some(workspace) = thread_id
             .as_deref()
             .and_then(|tid| {

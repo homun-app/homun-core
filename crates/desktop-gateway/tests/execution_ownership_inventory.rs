@@ -4332,6 +4332,7 @@ fn agent_turn_tail_has_one_gateway_owner() {
     for pattern in [
         "pub(crate) async fn complete_agent_turn_tail(",
         "struct AgentTurnTailInput",
+        "turn_policy: &'a ChatTurnPolicy,",
         "struct AgentTurnTailContext",
         "struct AgentTurnTailSnapshot",
         "pub(crate) fn prepare_agent_turn_tail_context(",
@@ -4369,6 +4370,26 @@ fn agent_turn_tail_has_one_gateway_owner() {
             "main.rs must not retain agent turn tail surface {pattern}"
         );
     }
+
+    assert!(
+        !turn_tail.contains("pub(crate) read_only: bool,"),
+        "agent turn tail input must receive typed ChatTurnPolicy, not a scalar read_only copy"
+    );
+    let tail_call = main
+        .split("complete_agent_turn_tail(AgentTurnTailInput {")
+        .nth(1)
+        .expect("agent turn tail call")
+        .split("})")
+        .next()
+        .expect("agent turn tail input block");
+    assert!(
+        tail_call.contains("turn_policy: &turn_policy,"),
+        "main.rs must pass the typed chat turn policy into the tail owner"
+    );
+    assert!(
+        !tail_call.contains("read_only: turn_policy.read_only,"),
+        "main.rs must not pass a scalar read_only copy into the tail owner"
+    );
 
     for adjacent in [
         "async fn stream_chat_via_openai(",

@@ -4103,6 +4103,7 @@ def main() -> int:
     for snippet in [
         "pub(crate) async fn complete_agent_turn_tail(",
         "pub(crate) struct AgentTurnTailInput",
+        "turn_policy: &'a ChatTurnPolicy,",
         "pub(crate) struct AgentTurnTailContext",
         "pub(crate) struct AgentTurnTailSnapshot",
         "pub(crate) fn prepare_agent_turn_tail_context(",
@@ -4139,6 +4140,24 @@ def main() -> int:
             snippet,
             "gateway root must not retain agent turn tail side effects",
         )
+    assert_not_contains(
+        agent_turn_tail_source,
+        "pub(crate) read_only: bool,",
+        "agent turn tail input must receive typed ChatTurnPolicy, not a scalar read_only copy",
+    )
+    tail_call = source.split("complete_agent_turn_tail(AgentTurnTailInput {", 1)[1].split(
+        "})", 1
+    )[0]
+    assert_contains(
+        tail_call,
+        "turn_policy: &turn_policy,",
+        "gateway root must pass typed ChatTurnPolicy into agent turn tail owner",
+    )
+    assert_not_contains(
+        tail_call,
+        "read_only: turn_policy.read_only,",
+        "gateway root must not pass scalar read_only into agent turn tail owner",
+    )
     for snippet in [
         "async fn stream_chat_via_openai(",
         "async fn run_agent_rounds(",

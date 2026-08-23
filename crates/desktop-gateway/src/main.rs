@@ -2013,7 +2013,7 @@ async fn stream_chat_via_openai(
             fence_user_id: tail_snapshot.fence_user_id,
             fence_workspace_id: tail_snapshot.fence_workspace_id,
             applies_new_input,
-            read_only: turn_policy.read_only,
+            turn_policy: &turn_policy,
             user_message: tail_snapshot.user_message,
             previous_assistant: tail_snapshot.previous_assistant,
             tail_turn_id: tail_snapshot.tail_turn_id,

@@ -44,6 +44,11 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
+- Estrazione locale `gateway_agent_turn_tail`: `AgentTurnTailInput` riceve
+  `&ChatTurnPolicy` e deriva `read_only` internamente per memory learn e project
+  graph refresh post-loop; `stream_chat_via_openai` non passa piu' un booleano
+  tail separato, mentre HITL projection, stream outcome, browser e loop agente
+  restano owner separati.
 - Estrazione locale `gateway_chat_toolset`: `ChatToolsetInput` riceve
   `&ChatTurnPolicy` e deriva internamente `read_only`, evitando un secondo
   contratto scalare tra setup turno e tool assembly; prompt/tool pruning,
