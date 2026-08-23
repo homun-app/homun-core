@@ -4724,6 +4724,7 @@ fn chat_toolset_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
     let toolset = production_source(&root.join("src/gateway_chat_toolset.rs"));
+    let capability_registry = production_source(&root.join("src/gateway_capability_registry.rs"));
 
     for pattern in [
         "pub(crate) async fn prepare_connected_tool_catalog(",
@@ -4772,6 +4773,29 @@ fn chat_toolset_has_one_gateway_owner() {
     assert!(
         !toolset.contains("pub(crate) contact_only: bool,"),
         "chat toolset input must receive typed ContactMemoryPerimeter, not a scalar contact_only copy"
+    );
+    assert!(
+        capability_registry.contains("pub(crate) turn_policy: &'a ChatTurnPolicy,"),
+        "capability corpus materialization input must receive typed ChatTurnPolicy"
+    );
+    assert!(
+        !capability_registry.contains("pub(crate) read_only: bool,"),
+        "capability corpus materialization input must not receive a scalar read_only copy"
+    );
+    let corpus_call = toolset
+        .split("let capability_corpus = materialize_capability_corpus(CapabilityCorpusMaterializationInput {")
+        .nth(1)
+        .expect("capability corpus materialization call")
+        .split("});")
+        .next()
+        .expect("capability corpus input block");
+    assert!(
+        corpus_call.contains("turn_policy: input.turn_policy,"),
+        "chat toolset must pass typed ChatTurnPolicy into capability corpus materialization"
+    );
+    assert!(
+        !corpus_call.contains("read_only,"),
+        "chat toolset must not pass scalar read_only into capability corpus materialization"
     );
     let toolset_call = main
         .split("let chat_toolset = prepare_chat_toolset(ChatToolsetInput {")

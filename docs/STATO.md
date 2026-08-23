@@ -44,6 +44,11 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
+- Estrazione locale `gateway_capability_registry`: `CapabilityCorpusMaterializationInput`
+  riceve `&ChatTurnPolicy` e deriva internamente il filtro read-only delle
+  capability mutating; `gateway_chat_toolset` non passa piu' un `read_only`
+  scalare al registry, mentre toolset base, routing/pruning, dispatch tool,
+  browser e loop agente restano owner separati.
 - Estrazione mergeata `gateway_agent_turn_tool_seed`: `seed_agent_turn_tool_schemas`
   riceve `&ChatTurnPolicy` e deriva internamente il clear dei tool in ask mode;
   `stream_chat_via_openai` non passa piu' il `mode` scalare al seed tool schema,

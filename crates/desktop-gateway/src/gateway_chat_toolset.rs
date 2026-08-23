@@ -262,7 +262,7 @@ pub(crate) async fn prepare_chat_toolset(input: ChatToolsetInput<'_>) -> ChatToo
     );
     let capability_corpus = materialize_capability_corpus(CapabilityCorpusMaterializationInput {
         deferred_tools,
-        read_only,
+        turn_policy: input.turn_policy,
         objective_effect_policy: input.objective_effect_policy,
         composio_writes: input.composio_writes,
         mcp_schemas: input.mcp_schemas,
