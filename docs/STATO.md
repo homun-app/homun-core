@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (chat contact perimeter projection in sviluppo).**
+> **Ultimo aggiornamento: 2026-08-23 (chat turn-start trace tier owner in sviluppo).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/chat-contact-perimeter-projection` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#337 mergeate in `main`; slice chat contact perimeter projection in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #337 (`9df9f742`); slice chat contact perimeter projection in verifica locale prima della PR |
+| Branch | `fabio/chat-turn-start-trace-tier-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#338 mergeate in `main`; slice chat turn-start trace tier owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #338 (`52285cc8`); slice chat turn-start trace tier owner in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_chat_turn_context`: il perimetro memoria contatto
+- Estrazione locale `gateway_turn_trace`: la risoluzione osservazionale del
+  model tier per `turn_start` (`load_provider_registry().tier_for_model`) passa
+  al trace owner; `stream_chat_via_openai` registra setup-complete passando solo
+  prompt/mode/model, mentre model routing, loop agente, budget, plan progress,
+  tool execution e browser restano owner separati.
+- Estrazione mergeata `gateway_chat_turn_context`: il perimetro memoria contatto
   resta una proiezione typed (`ContactMemoryPerimeter`) dal setup del turno fino
   a workspace prompt e loop/capability executor; `stream_chat_via_openai` non
   spacchetta piu' `contact_only`/`can_see_*` in contratti scalari concorrenti,
@@ -118,9 +123,9 @@ Slice Runtime V2 recenti:
 - Estrazione mergeata `gateway_turn_trace`: la registrazione `turn_start`
   setup-complete esce da `stream_chat_via_openai` e passa a
   `record_chat_turn_start_trace(ChatTurnStartTraceInput)`, accanto al bootstrap
-  `turn_received`; il root conserva solo l'orchestrazione del turno, mentre
-  loop agente, budget, plan progress, tool execution e browser restano owner
-  separati.
+  `turn_received`; il trace owner possiede anche il tier osservazionale del
+  modello, mentre il root conserva solo l'orchestrazione del turno e loop
+  agente, budget, plan progress, tool execution e browser restano owner separati.
 - Estrazione mergeata `gateway_privacy_preflight`: la selezione del prompt Privacy
   Guard per nuovo input vs replay/checkpoint (`evaluate_chat_privacy_guard_preflight`)
   esce da `stream_chat_via_openai`; il root passa il prompt originale e consuma

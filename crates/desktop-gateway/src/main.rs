@@ -1703,9 +1703,6 @@ async fn stream_chat_via_openai(
     let turn_policy =
         resolve_chat_turn_policy(request.mode.as_deref(), request.tool_policy.as_deref());
     let mode = turn_policy.mode.clone();
-    // Model tier remains useful observability for role selection and evals; it no longer changes
-    // the agent-loop control flow.
-    let turn_tier = load_provider_registry().tier_for_model(&model);
     // Turn trace: setup COMPLETED (memory recall and prompt-build) and generation is about to begin.
     // A `turn_start` following a `turn_received` implies setup succeeded (no pre-gen hang).
     record_chat_turn_start_trace(ChatTurnStartTraceInput {
@@ -1713,7 +1710,6 @@ async fn stream_chat_via_openai(
         prompt: request.prompt.as_str(),
         mode: mode.as_str(),
         model: model.as_str(),
-        tier: turn_tier.as_str(),
     });
     let capability_router_instruction =
         capability_router_instruction_for_decision(&capability_route);

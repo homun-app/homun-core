@@ -3941,6 +3941,7 @@ fn chat_turn_start_trace_has_one_gateway_owner() {
         "gateway_logs_dir()",
         "turn_trace_max_bytes()",
         "TurnEvent::TurnStart",
+        "tier_for_model(input.model)",
     ] {
         assert!(
             turn_trace_owner.contains(pattern),
@@ -3955,6 +3956,9 @@ fn chat_turn_start_trace_has_one_gateway_owner() {
         "turn_trace_max_bytes()",
         "TurnEvent::TurnStart",
         "prompt_head: request.prompt.chars()",
+        "load_provider_registry().tier_for_model(&model)",
+        "let turn_tier =",
+        "tier: turn_tier.as_str()",
     ] {
         assert!(
             !stream_chat.contains(pattern),
