@@ -4293,12 +4293,41 @@ fn capability_executor_constructor_has_one_gateway_owner() {
 
     for pattern in [
         "pub(crate) struct GatewayCapabilityExecutorInput",
+        "pub(crate) turn_policy: &'a ChatTurnPolicy,",
         "pub(crate) struct GatewayCapabilityExecutor",
         "pub(crate) fn gateway_capability_executor<'a>(",
     ] {
         assert!(
             tool_execution.contains(pattern),
             "tool execution owner must contain capability executor constructor surface {pattern}"
+        );
+    }
+    let capability_executor_input = tool_execution
+        .split("pub(crate) struct GatewayCapabilityExecutorInput")
+        .nth(1)
+        .expect("GatewayCapabilityExecutorInput")
+        .split("/// The gateway's `CapabilityExecutor`")
+        .next()
+        .expect("GatewayCapabilityExecutorInput block");
+    assert!(
+        !capability_executor_input.contains("pub(crate) read_only: bool,"),
+        "capability executor input must receive typed ChatTurnPolicy, not scalar read_only"
+    );
+    assert!(
+        !capability_executor_input.contains("pub(crate) autonomous: bool,"),
+        "capability executor input must receive typed ChatTurnPolicy, not scalar autonomous"
+    );
+    assert!(
+        run_agent_rounds.contains("turn_policy,"),
+        "run_agent_rounds must pass the typed chat turn policy into capability executor"
+    );
+    for pattern in [
+        "read_only: turn_policy.read_only,",
+        "autonomous: turn_policy.autonomous,",
+    ] {
+        assert!(
+            !run_agent_rounds.contains(pattern),
+            "run_agent_rounds must not pass scalar chat turn policy into capability executor {pattern}"
         );
     }
 
