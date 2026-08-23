@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_prompt_instructions`: `ChatRuntimePromptInput`
+- Estrazione locale `gateway_turn_trace`: `ChatTurnStartTraceInput` riceve
+  `&ChatTurnPolicy` e deriva internamente il `mode` dell'evento `turn_start`;
+  `stream_chat_via_openai` non passa piu' un `mode` scalare al trace start,
+  mentre bootstrap trace, model tier osservazionale, loop agente e plan progress
+  restano owner separati.
+- Estrazione mergeata `gateway_prompt_instructions`: `ChatRuntimePromptInput`
   riceve `&ChatTurnPolicy` e deriva internamente il `mode` per le istruzioni
   plan/ask/debug; `stream_chat_via_openai` non passa piu' un `mode` scalare al
   prompt runtime, mentre runtime prompt control puro, prompt packets e loop

@@ -73,7 +73,7 @@ fn begin_chat_turn_trace_with_config(
 pub(crate) struct ChatTurnStartTraceInput<'a> {
     pub(crate) turn_trace: &'a local_first_engine::turn_trace::TurnTrace,
     pub(crate) prompt: &'a str,
-    pub(crate) mode: &'a str,
+    pub(crate) turn_policy: &'a ChatTurnPolicy,
     pub(crate) model: &'a str,
 }
 
@@ -86,7 +86,7 @@ pub(crate) fn record_chat_turn_start_trace(input: ChatTurnStartTraceInput<'_>) {
         .record(local_first_engine::turn_trace::TurnEvent::TurnStart {
             prompt_head: input.prompt.chars().take(200).collect(),
             prompt_len: input.prompt.chars().count(),
-            mode: input.mode.to_string(),
+            mode: input.turn_policy.mode.to_string(),
             model: input.model.to_string(),
             tier: tier.to_string(),
         });
@@ -182,7 +182,11 @@ mod tests {
         record_chat_turn_start_trace(ChatTurnStartTraceInput {
             turn_trace: &trace,
             prompt: "ciao Roma",
-            mode: "agent",
+            turn_policy: &ChatTurnPolicy {
+                mode: "agent".to_string(),
+                read_only: false,
+                autonomous: false,
+            },
             model: "gpt-test",
         });
 
