@@ -4724,8 +4724,18 @@ def main() -> int:
         "prompt instruction owner must expose runtime prompt control assembly",
     )
     assert_contains(
+        prompt_instructions_source,
+        "pub(crate) struct ChatRuntimePromptInput",
+        "prompt instruction owner must expose chat runtime prompt input",
+    )
+    assert_contains(
+        prompt_instructions_source,
+        "pub(crate) fn prepare_chat_runtime_prompt(",
+        "prompt instruction owner must expose chat runtime prompt assembly",
+    )
+    assert_contains(
         source,
-        "runtime_prompt_control_instructions(RuntimePromptControlInput",
+        "prepare_chat_runtime_prompt(ChatRuntimePromptInput",
         "gateway root must delegate runtime prompt control assembly",
     )
     stream_body = (
@@ -4738,6 +4748,18 @@ def main() -> int:
     ):
         raise AssertionError(
             "gateway root must load the active objective contract once and pass it to prompt owners"
+        )
+    runtime_prompt_setup = stream_body.split("let capability_router_instruction =", 1)[1].split(
+        "let (system, prompt_packets) =", 1
+    )[0]
+    for snippet in [
+        'let system = format!(\n        "{}\\n\\n{}"',
+        ".strip_prefix(&prompt_core)",
+    ]:
+        assert_not_contains(
+            runtime_prompt_setup,
+            snippet,
+            "gateway root must not retain runtime prompt wrapper glue",
         )
     for snippet in [
         'format!("{system}\\n\\n{}", memory_recall_usage_instruction())',

@@ -599,8 +599,8 @@ use gateway_project_search_tools::{
     query_git_history, query_git_history_tool_schema,
 };
 use gateway_prompt_instructions::{
-    RuntimePromptControlInput, browser_open_research_discovery_instruction,
-    core_operating_instruction, goal_propose_instruction, runtime_prompt_control_instructions,
+    ChatRuntimePromptInput, browser_open_research_discovery_instruction,
+    core_operating_instruction, goal_propose_instruction, prepare_chat_runtime_prompt,
 };
 pub(crate) use gateway_prompt_packets::*;
 #[cfg(test)]
@@ -1979,21 +1979,12 @@ async fn stream_chat_via_openai(
     });
     let capability_router_instruction =
         capability_router_instruction_for_decision(&capability_route);
-    let system = format!(
-        "{}\n\n{}",
-        prompt_core,
-        runtime_prompt_control_instructions(RuntimePromptControlInput {
-            memory_recall_allowed,
-            capability_router_instruction: capability_router_instruction.as_deref(),
-            mode: mode.as_str(),
-            objective_contract: active_objective_contract.as_ref(),
-        })
-    );
-    let prompt_runtime = system
-        .strip_prefix(&prompt_core)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    let prompt_runtime = prepare_chat_runtime_prompt(ChatRuntimePromptInput {
+        memory_recall_allowed,
+        capability_router_instruction: capability_router_instruction.as_deref(),
+        mode: mode.as_str(),
+        objective_contract: active_objective_contract.as_ref(),
+    });
     let (system, prompt_packets) = compose_gateway_prompt_packets(
         state,
         request.thread_id.as_deref(),

@@ -4282,6 +4282,8 @@ fn runtime_prompt_control_instructions_have_one_gateway_owner() {
     for pattern in [
         "pub(crate) struct RuntimePromptControlInput",
         "pub(crate) fn runtime_prompt_control_instructions(",
+        "pub(crate) struct ChatRuntimePromptInput",
+        "pub(crate) fn prepare_chat_runtime_prompt(",
         "memory_recall_usage_instruction()",
         "operational_plan_instruction()",
         "memory_scope_restricted_instruction()",
@@ -4300,9 +4302,25 @@ fn runtime_prompt_control_instructions_have_one_gateway_owner() {
         .nth(1)
         .expect("stream_chat_via_openai body");
     assert!(
-        stream.contains("runtime_prompt_control_instructions(RuntimePromptControlInput"),
+        stream.contains("prepare_chat_runtime_prompt(ChatRuntimePromptInput"),
         "main.rs must delegate runtime prompt control assembly"
     );
+    let runtime_prompt_setup = stream
+        .split("let capability_router_instruction =")
+        .nth(1)
+        .expect("runtime prompt setup")
+        .split("let (system, prompt_packets) =")
+        .next()
+        .expect("prompt packet setup");
+    for pattern in [
+        "let system = format!(\n        \"{}\\n\\n{}\"",
+        ".strip_prefix(&prompt_core)",
+    ] {
+        assert!(
+            !runtime_prompt_setup.contains(pattern),
+            "main.rs must not own runtime prompt wrapper glue {pattern}"
+        );
+    }
     assert_eq!(
         stream
             .matches("objective_contract_for_execution(state, request.thread_id.as_deref())")
