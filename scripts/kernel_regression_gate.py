@@ -110,6 +110,20 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ],
         ),
         Step(
+            "gateway process bootstrap owner",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "local-first-desktop-gateway",
+                "--test",
+                "execution_ownership_inventory",
+                "gateway_process_bootstrap_has_one_gateway_owner",
+                "--",
+                "--nocapture",
+            ],
+        ),
+        Step(
             "gateway turn recovery",
             [
                 "cargo",

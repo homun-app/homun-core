@@ -204,6 +204,9 @@ CHAT_PROMPT_LAYERS_RS = os.path.join(
 CHAT_WORKSPACE_PROMPT_CONTEXT_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_workspace_prompt_context.rs"
 )
+PROCESS_BOOTSTRAP_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_process_bootstrap.rs"
+)
 CHAT_TOOL_PERIMETER_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_tool_perimeter.rs"
 )
@@ -1794,6 +1797,8 @@ def main() -> int:
         chat_prompt_layers_source = handle.read()
     with open(CHAT_WORKSPACE_PROMPT_CONTEXT_RS, "r", encoding="utf-8") as handle:
         chat_workspace_prompt_context_source = handle.read()
+    with open(PROCESS_BOOTSTRAP_RS, "r", encoding="utf-8") as handle:
+        process_bootstrap_source = handle.read()
     with open(CHAT_TOOL_PERIMETER_RS, "r", encoding="utf-8") as handle:
         chat_tool_perimeter_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
@@ -3752,9 +3757,15 @@ def main() -> int:
         "#[cfg(test)]\nmod gateway_main_tests;",
         "gateway root must declare extracted main test owner",
     )
+    assert_contains(
+        source,
+        "mod gateway_process_bootstrap;",
+        "gateway root must declare process bootstrap owner",
+    )
     assert_not_contains(source, "\nmod tests {", "gateway root tests must stay in gateway_main_tests")
 
     required_owner_calls = [
+        "gateway_process_bootstrap::install_gateway_process_bootstrap();",
         "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
         "gateway_turn_recovery::recover_gateway_chat_turns_at_startup(&state).await;",
         "gateway_background_startup::start_gateway_background_services(state.clone());",
@@ -3765,6 +3776,45 @@ def main() -> int:
 
     for snippet, message in forbidden_main_startup_snippets().items():
         assert_not_contains(main_body, snippet, message)
+
+    for snippet in [
+        "pub(crate) fn install_gateway_process_bootstrap()",
+        "tracing_subscriber::fmt()",
+        "panic_log::install(",
+        "libc::umask(",
+        "gateway_legacy_data::migrate_legacy_data_dir();",
+    ]:
+        assert_contains(
+            process_bootstrap_source,
+            snippet,
+            "process bootstrap owner must expose process setup surface",
+        )
+    for snippet in [
+        "tracing_subscriber::fmt()",
+        "panic_log::install(",
+        "libc::umask(",
+        "gateway_legacy_data::migrate_legacy_data_dir();",
+    ]:
+        assert_not_contains(
+            main_body.split("let recovered_stores", 1)[0],
+            snippet,
+            "async fn main must not retain process bootstrap setup",
+        )
+    for snippet in [
+        "pub(crate) struct AppState",
+        "gateway_store_integrity::ensure_gateway_store_integrity()",
+        "gateway_db_unify::unify_legacy_databases_at_startup()",
+        "gateway_routes::build_gateway_router(",
+        "gateway_background_startup::start_gateway_background_services(",
+        "TcpListener::bind(",
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+    ]:
+        assert_not_contains(
+            process_bootstrap_source,
+            snippet,
+            "process bootstrap owner must not absorb adjacent startup/runtime surface",
+        )
 
     for snippet, message in forbidden_root_snippets().items():
         assert_not_contains(source, snippet, message)
@@ -4915,6 +4965,7 @@ def main() -> int:
     assert_ordered(
         main_body,
         [
+            "gateway_process_bootstrap::install_gateway_process_bootstrap();",
             "gateway_file_security::harden_data_at_rest(&dir);",
             "gateway_boot_maintenance::run_gateway_boot_maintenance(&state);",
             "gateway_turn_recovery::recover_gateway_chat_turns_at_startup(&state).await;",

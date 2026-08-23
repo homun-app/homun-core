@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (chat workspace prompt context owner in sviluppo).**
+> **Ultimo aggiornamento: 2026-08-23 (gateway process bootstrap owner in sviluppo).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/chat-workspace-prompt-context-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#328 mergeate in `main`; slice chat workspace prompt context owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #328 (`b01bd33c`); slice chat workspace prompt context owner in verifica locale prima della PR |
+| Branch | `fabio/gateway-process-bootstrap-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#329 mergeate in `main`; slice gateway process bootstrap owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #329 (`3b30b8c7`); slice gateway process bootstrap owner in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_chat_workspace_prompt_context`: il contesto
+- Estrazione locale `gateway_process_bootstrap`: il bootstrap di processo
+  (`install_gateway_process_bootstrap`: tracing subscriber, panic log, umask
+  owner-only e migrazione data dir legacy) esce da `async fn main`; `main.rs`
+  conserva store integrity, AppState, memory service, boot/recovery/background,
+  router e listener come composition root separati.
+- Estrazione mergeata `gateway_chat_workspace_prompt_context`: il contesto
   workspace/thread del prompt chat (`prepare_chat_workspace_prompt_context`:
   contact-only history, perimeter denied recall, briefing, thread episode,
   goal-propose affordance, RAG prompt-specifico e anti-rewrite code context)

@@ -20,6 +20,7 @@ class KernelRegressionGateTests(unittest.TestCase):
         self.assertIn("task runtime finalizing fence", labels)
         self.assertIn("task runtime enqueue", labels)
         self.assertIn("gateway steering cleanup", labels)
+        self.assertIn("gateway process bootstrap owner", labels)
         self.assertIn("gateway chat workspace prompt context owner", labels)
         self.assertIn("desktop unit tests", labels)
         self.assertIn("desktop ui contract", labels)

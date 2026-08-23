@@ -30,6 +30,7 @@ HOMUN_RUN_KERNEL_LIVE_SMOKE=1 python3 scripts/kernel_regression_gate.py
 | --- | --- |
 | `crates/desktop-gateway/src/main.rs` | Composition root: costruzione `AppState`, ordine di startup, delega route/background, e codice condiviso non ancora estratto. Non deve riassorbire surface gia' estratte. |
 | `crates/desktop-gateway/src/attachments.rs` | Ingestion allegati composer, persistenza/ricostruzione del working set per thread, contesto prompt bounded per attachment persistiti e costruzione user-content multimodale text/image_url per il turno chat; non possiede loop chat, memory recall, prompt packet, vision fallback/preflight o routing agente. |
+| `crates/desktop-gateway/src/gateway_process_bootstrap.rs` | Bootstrap process-wide prima dell'apertura store: tracing subscriber, panic log, umask owner-only e migrazione data dir legacy; non possiede AppState, store integrity, DB unify, router/listener, boot/recovery/background o runtime chat. |
 | `crates/desktop-gateway/src/gateway_routes.rs` | Assemblaggio Axum: route protette, route pubbliche, WS, fallback statico e CORS. |
 | `crates/desktop-gateway/src/gateway_boot_maintenance.rs` | Manutenzione sincrona di boot dopo apertura store e prima di recovery/worker, inclusi seed default skills, hash/copy del bundle e manifest HomunCoder. |
 | `crates/desktop-gateway/src/gateway_turn_recovery.rs` | Recovery durable dei turni chat, projection startup, process generation e stato delivery iniziale. |
