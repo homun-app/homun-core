@@ -4424,6 +4424,8 @@ fn chat_turn_context_has_one_gateway_owner() {
         "let can_see_contacts = contact_memory_perimeter.can_see_contacts;",
         "let can_see_calendar = contact_memory_perimeter.can_see_calendar;",
         "let can_use_project_memory = contact_memory_perimeter.can_use_project_memory;",
+        "let read_only = turn_policy.read_only;",
+        "let autonomous = turn_policy.autonomous;",
         "contact_only: bool,",
         "can_see_contacts: bool,",
         "can_see_calendar: bool,",
@@ -4432,6 +4434,21 @@ fn chat_turn_context_has_one_gateway_owner() {
         assert!(
             !main.contains(pattern),
             "main.rs must not retain chat turn context setup {pattern}"
+        );
+    }
+
+    let run_agent_rounds = main
+        .split("async fn run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds");
+    assert!(
+        run_agent_rounds.contains("turn_policy: &ChatTurnPolicy,"),
+        "run_agent_rounds must receive the typed chat turn policy"
+    );
+    for pattern in ["read_only: bool,", "autonomous: bool,"] {
+        assert!(
+            !run_agent_rounds.contains(pattern),
+            "run_agent_rounds must not split chat turn policy back into scalar flag {pattern}"
         );
     }
 

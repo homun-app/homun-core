@@ -1729,8 +1729,6 @@ async fn stream_chat_via_openai(
     let system = system.as_str();
     // (The 401/tool-compat/timeout fallback flags moved into GatewayModelClient::generate,
     // which now owns the per-round provider swap — ADR 0024.)
-    let read_only = turn_policy.read_only;
-    let autonomous = turn_policy.autonomous;
     // Browser toolset: the main agent ALWAYS drives the browser itself via the
     // granular micro-tools. The legacy coarse `browse_web` handoff is gone.
     // read_only (channels) still gets browser_act, but the dispatch blocks any
@@ -1746,7 +1744,7 @@ async fn stream_chat_via_openai(
     let chat_toolset = prepare_chat_toolset(ChatToolsetInput {
         state,
         prompt: &request.prompt,
-        read_only,
+        read_only: turn_policy.read_only,
         contact_only: contact_memory_perimeter.contact_only,
         memory_recall_allowed,
         has_skills,
@@ -1978,8 +1976,7 @@ async fn stream_chat_via_openai(
             temperature,
             prompt,
             thread_id,
-            read_only,
-            autonomous,
+            &turn_policy,
             channel_owner,
             contact_memory_perimeter,
             memory_recall_allowed,
@@ -2016,7 +2013,7 @@ async fn stream_chat_via_openai(
             fence_user_id: tail_snapshot.fence_user_id,
             fence_workspace_id: tail_snapshot.fence_workspace_id,
             applies_new_input,
-            read_only,
+            read_only: turn_policy.read_only,
             user_message: tail_snapshot.user_message,
             previous_assistant: tail_snapshot.previous_assistant,
             tail_turn_id: tail_snapshot.tail_turn_id,
@@ -2044,8 +2041,7 @@ async fn run_agent_rounds(
     temperature: f64,
     prompt: String,
     thread_id: Option<String>,
-    read_only: bool,
-    autonomous: bool,
+    turn_policy: &ChatTurnPolicy,
     channel_owner: bool,
     contact_memory_perimeter: ContactMemoryPerimeter,
     memory_recall_allowed: bool,
@@ -2108,14 +2104,14 @@ async fn run_agent_rounds(
         state: &state_owned,
         tx,
         thread_id: thread_id.as_deref(),
-        read_only,
+        read_only: turn_policy.read_only,
         contact_only: contact_memory_perimeter.contact_only,
         can_see_contacts: contact_memory_perimeter.can_see_contacts,
         can_see_calendar: contact_memory_perimeter.can_see_calendar,
         can_use_project_memory: contact_memory_perimeter.can_use_project_memory,
         memory_recall_allowed,
         vault_value_requested,
-        autonomous,
+        autonomous: turn_policy.autonomous,
         composio_writes: &composio_writes,
         catalog_index: &catalog_index,
         capability_corpus: &capability_corpus,
@@ -2146,7 +2142,7 @@ async fn run_agent_rounds(
         tx,
         thread_id: thread_id.as_deref(),
         prompt: &prompt,
-        read_only,
+        read_only: turn_policy.read_only,
         channel_owner,
         // C2: the manager turn's own registered journal — same handle `run_turn` below receives via
         // `&execution_journal`, so protocol metrics from a manager-level browser call land in the same
@@ -2164,7 +2160,7 @@ async fn run_agent_rounds(
     };
     let plan_progress = gateway_plan_progress(state_owned.clone());
     let compactor = gateway_context_compactor(state_owned.clone(), thread_id.clone());
-    let turn_policy = gateway_turn_policy(capability_route_for_runtime);
+    let engine_turn_policy = gateway_turn_policy(capability_route_for_runtime);
     let completion_judge = gateway_turn_completion_judge(state_owned.clone());
 
     // Vision fallback (`AttachmentPlan::InlineWithFallback`): this turn's images ride the manager's
@@ -2199,7 +2195,7 @@ async fn run_agent_rounds(
         &plan_progress,
         &completion_judge,
         &compactor,
-        &turn_policy,
+        &engine_turn_policy,
         &execution_journal,
         tx,
         temperature,
@@ -2266,7 +2262,7 @@ async fn run_agent_rounds(
         &plan_progress,
         &completion_judge,
         &compactor,
-        &turn_policy,
+        &engine_turn_policy,
         &execution_journal,
         tx,
         temperature,
