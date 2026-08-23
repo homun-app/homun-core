@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_turn_trace`: `ChatTurnStartTraceInput` riceve
+- Estrazione locale `gateway_agent_turn_tool_seed`: `seed_agent_turn_tool_schemas`
+  riceve `&ChatTurnPolicy` e deriva internamente il clear dei tool in ask mode;
+  `stream_chat_via_openai` non passa piu' il `mode` scalare al seed tool schema,
+  mentre toolset assembly, perimetro contatti, tool execution, browser e
+  subagent restano owner separati.
+- Estrazione mergeata `gateway_turn_trace`: `ChatTurnStartTraceInput` riceve
   `&ChatTurnPolicy` e deriva internamente il `mode` dell'evento `turn_start`;
   `stream_chat_via_openai` non passa piu' un `mode` scalare al trace start,
   mentre bootstrap trace, model tier osservazionale, loop agente e plan progress

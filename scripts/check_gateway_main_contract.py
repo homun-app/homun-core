@@ -2498,8 +2498,9 @@ def main() -> int:
     )
     for snippet in [
         "pub(crate) fn seed_agent_turn_tool_schemas(",
+        "turn_policy: &ChatTurnPolicy,",
         "loop_state.tool_schemas = base_tools",
-        "if mode == \"ask\"",
+        "if turn_policy.mode == \"ask\"",
         "loop_state.tool_schemas.clear()",
         "apply_chat_tool_perimeter(ChatToolPerimeterInput",
         "tool_schemas: &mut loop_state.tool_schemas",
@@ -2519,6 +2520,21 @@ def main() -> int:
             snippet,
             "gateway root must not retain agent turn tool schema seeding",
         )
+    assert_contains(
+        source,
+        "seed_agent_turn_tool_schemas(&mut ls, base_tools, &turn_policy,",
+        "gateway root must pass typed ChatTurnPolicy into agent turn tool seed owner",
+    )
+    assert_not_contains(
+        source,
+        "seed_agent_turn_tool_schemas(&mut ls, base_tools, &mode,",
+        "gateway root must not pass scalar mode into agent turn tool seed owner",
+    )
+    assert_not_contains(
+        source,
+        "let mode = turn_policy.mode.clone();",
+        "gateway root must not retain a scalar mode clone after typed policy handoff",
+    )
     for snippet in [
         "async fn stream_chat_via_openai(",
         "async fn run_agent_rounds(",
