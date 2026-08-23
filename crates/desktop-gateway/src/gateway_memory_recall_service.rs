@@ -1,4 +1,11 @@
 // In-process memory recall service wiring and facade projection.
+use crate::gateway_memory_prompt_context::{
+    artifact_provenance_context_for_query, workflow_status_context_for_query,
+};
+use crate::gateway_memory_turn_context::{
+    project_brief_block, project_objective_block, recent_work_block,
+};
+use crate::gateway_recall_context::gather_open_loops;
 use crate::*;
 
 /// Impl in-process di [`MemoryRecallService`] che **delega** alle funzioni

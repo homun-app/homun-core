@@ -80,6 +80,7 @@ mod gateway_chat_turn_context;
 mod gateway_chat_utility_routes;
 mod gateway_chat_vision_preflight;
 mod gateway_chat_vision_recovery;
+mod gateway_chat_workspace_prompt_context;
 mod gateway_composio_execution;
 mod gateway_composio_routes;
 mod gateway_connector_errors;
@@ -244,6 +245,7 @@ pub(crate) use gateway_chat_toolset::*;
 pub(crate) use gateway_chat_turn_context::*;
 pub(crate) use gateway_chat_vision_preflight::*;
 pub(crate) use gateway_chat_vision_recovery::*;
+pub(crate) use gateway_chat_workspace_prompt_context::*;
 pub(crate) use gateway_composio_execution::*;
 pub(crate) use gateway_composio_routes::*;
 pub(crate) use gateway_connector_errors::*;
@@ -278,9 +280,9 @@ use gateway_memory_dedup::{
 };
 pub(crate) use gateway_memory_learning::{consolidate_scope, learn_via_service_or_inline};
 pub(crate) use gateway_memory_prompt_context::decisions_for_path;
+#[cfg(test)]
 use gateway_memory_prompt_context::{
-    artifact_provenance_context_for_query, relevant_code_components_for_prompt,
-    workflow_status_context_for_query,
+    artifact_provenance_context_for_query, workflow_status_context_for_query,
 };
 #[cfg(test)]
 use gateway_memory_query_embeddings::memory_recall_timing_trace_line;
@@ -522,7 +524,9 @@ pub(crate) use gateway_memory_publications::{
 };
 #[cfg(test)]
 use gateway_memory_recall_service::InProcessMemoryRecallService;
-use gateway_memory_recall_service::{install_memory_service_if_enabled, recall_pack_on_facade};
+use gateway_memory_recall_service::install_memory_service_if_enabled;
+#[cfg(test)]
+use gateway_memory_recall_service::recall_pack_on_facade;
 #[cfg(test)]
 pub(crate) use gateway_memory_sources::{
     MemorySourceOverrideInput, MemorySourceUpsertRequest, ValidatedMemorySourceInput,
@@ -539,9 +543,10 @@ use gateway_memory_tools::{
     forget_memory, forget_memory_tool_schema, memory_decide, recall_memory_tool_schema,
     record_decision, record_decision_tool_schema,
 };
+use gateway_memory_turn_context::objective_block_for_workspace;
+#[cfg(test)]
 use gateway_memory_turn_context::{
-    memory_scope_for_turn, objective_block_for_workspace, project_brief_block,
-    project_objective_block, recent_work_block, scope_from_active_workspace,
+    project_brief_block, project_objective_block, recent_work_block, scope_from_active_workspace,
 };
 use gateway_memory_wiki::{
     active_open_loop_record, rebuild_decisions_wiki, rebuild_profile_wiki, rebuild_project_brief,
@@ -600,15 +605,18 @@ use gateway_project_search_tools::{
 };
 use gateway_prompt_instructions::{
     ChatRuntimePromptInput, browser_open_research_discovery_instruction,
-    core_operating_instruction, goal_propose_instruction, prepare_chat_runtime_prompt,
+    core_operating_instruction, prepare_chat_runtime_prompt,
 };
 pub(crate) use gateway_prompt_packets::*;
 #[cfg(test)]
 pub(crate) use gateway_recall_context::format_recall_entry;
+#[cfg(test)]
 use gateway_recall_context::{
-    gather_open_loops, memory_access_status_instruction, memory_read_effects_from_recall_payload,
-    merge_automatic_recall_payload, recall_stream_payload_from_hits,
-    recall_stream_payload_from_pack, sanitize_dedup_key, seed_loop_memory_reads,
+    gather_open_loops, memory_access_status_instruction, merge_automatic_recall_payload,
+    recall_stream_payload_from_hits, recall_stream_payload_from_pack,
+};
+use gateway_recall_context::{
+    memory_read_effects_from_recall_payload, sanitize_dedup_key, seed_loop_memory_reads,
 };
 pub(crate) use gateway_runtime_plan_state::*;
 pub(crate) use gateway_skill_runtime::*;
@@ -1717,209 +1725,25 @@ async fn stream_chat_via_openai(
     let can_see_contacts = contact_memory_perimeter.can_see_contacts;
     let can_see_calendar = contact_memory_perimeter.can_see_calendar;
     let can_use_project_memory = contact_memory_perimeter.can_use_project_memory;
-    // This is emitted as a structured stream event once the transport exists below.
-    // Keep it next to prompt assembly so UI provenance and actual RAG context cannot diverge.
-    let mut automatic_recall_payload = None;
-    let system = if contact_only {
-        let cx = contact_ctx
-            .as_ref()
-            .expect("contact_only implies contact_ctx");
-        let episodes = {
-            let facade = memory_facade(state);
-            let user = gateway_memory_user_id();
-            episode_texts_by_handles(facade, &user, &cx.handles)
-        };
-        match contact_history_prompt_block(&episodes) {
-            Some(block) => format!("{system}\n\n{block}"),
-            None => system,
-        }
-    } else if !memory_perimeter_allows_recall(
-        contact_only,
-        can_see_contacts,
-        can_use_project_memory,
-        is_project,
-    ) {
-        let scope = scope_from_active_workspace();
-        automatic_recall_payload = Some(local_first_subagents::RecallStreamPayload {
-            query: request.prompt.clone(),
-            hits: Vec::new(),
-            scope: match scope {
-                MemoryScope::Personal => "personal".to_string(),
-                MemoryScope::Project(_) | MemoryScope::Thread { .. } => "project".to_string(),
-            },
-            status: "denied".to_string(),
-        });
-        system
-    } else {
-        // Always-on memory profile (M1): inject what we durably know about the user
-        // (personal scope) and the active project, so the chat is continuous instead
-        // of starting cold every turn. Sensitive items are excluded here by design.
-        //
-        // ADR 0022 — Tappa 1: di default l'assemblaggio del briefing è
-        // incapsulato in `MemoryRecallService::brief` (che delega alle stesse
-        // funzioni, nello stesso ordine). Opt-out
-        // `HOMUN_MEMORY_SERVICE=0`/`off`/`false` → path inline.
-        let system = if let Some(service) = state.memory_service.as_ref() {
-            let scope = memory_scope_for_turn(request.thread_id.as_deref());
-            let pack = service.brief(&scope, &request.prompt);
-            if !pack.linked_hits.is_empty() {
-                merge_automatic_recall_payload(
-                    &mut automatic_recall_payload,
-                    recall_stream_payload_from_hits(&request.prompt, &scope, &pack.linked_hits),
-                );
-            }
-            // ordered_blocks() = [profile, objective, brief, recent_work] — stesso
-            // ordine dell'assemblaggio inline qui sotto. Mantiene la parità.
-            let mut system = system;
-            for block in pack.ordered_blocks().into_iter().flatten() {
-                system = format!("{system}\n\n{block}");
-            }
-            system
-        } else {
-            let (memory_personal, memory_project) =
-                gather_profile_memory_for_intent_with_provenance(state, &memory_intent);
-            let memory_open_loops = if memory_injection.include_cross_thread {
-                gather_open_loops(state, 6)
-            } else {
-                Vec::new()
-            };
-            let formatted_profile = format_memory_block_with_provenance(
-                &memory_open_loops,
-                &memory_personal,
-                &memory_project,
-                CHAT_MEMORY_BUDGET_CHARS,
-            );
-            if !formatted_profile.linked_hits.is_empty() {
-                let scope = scope_from_active_workspace();
-                merge_automatic_recall_payload(
-                    &mut automatic_recall_payload,
-                    recall_stream_payload_from_hits(
-                        &request.prompt,
-                        &scope,
-                        &formatted_profile.linked_hits,
-                    ),
-                );
-            }
-            let system = match formatted_profile.block {
-                Some(block) => format!("{system}\n\n{block}"),
-                None => system,
-            };
-            // Project OBJECTIVE (always-on, FIRST): the north star + focus directive, so the
-            // assistant keeps every implementation aligned and flags drift.
-            let system = match project_objective_block(state) {
-                Some(block) => format!("{system}\n\n{block}"),
-                None => system,
-            };
-            // Project BRIEF (always-on): recent state, so "where this project is" is present
-            // every turn — not just when the prompt happens to match.
-            let system = match project_brief_block(state) {
-                Some(block) => format!("{system}\n\n{block}"),
-                None => system,
-            };
-            // Recent work (always-on): the last commits, so a new conversation resumes the
-            // thread of what was just being done instead of starting cold.
-
-            match recent_work_block(state) {
-                Some(block) => format!("{system}\n\n{block}"),
-                None => system,
-            }
-        };
-        let thread_memory = request
-            .thread_id
-            .as_deref()
-            .filter(|_| memory_injection.include_current_thread)
-            .and_then(|thread_id| current_thread_episode_block(state, thread_id));
-        let system = match thread_memory {
-            Some(block) => format!("{system}\n\n{block}"),
-            None => system,
-        };
-        // Goal-propose affordance (projects only): when the model articulates the project's
-        // objective, it emits a marker → the UI shows a "Salva come obiettivo" card. This is
-        // content-contextual via a MODEL-emitted affordance (not keyword parsing).
-        let system = {
-            let ws = gateway_memory_workspace_id();
-            if ws.as_str() != PERSONAL_WORKSPACE && ws.as_str() != THREADS_WORKSPACE {
-                format!("{system}\n\n{}", goal_propose_instruction())
-            } else {
-                system
-            }
-        };
-        // RAG: inject memory relevant to THIS prompt (decisions/facts), so the model
-        // answers from what was already decided instead of saying it has nothing.
-        // ADR 0022 — Tappa 1/4: via service quando il flag è ON; anche nel path OFF
-        // usa le fn del crate (embed_query + recall_search_on_facade) con capability
-        // client al volo — così `relevant_memory_for_prompt` non è più duplicata.
-        let system = if memory_injection.include_cross_thread && applies_new_input {
-            if let Some(service) = state.memory_service.as_ref() {
-                let scope = memory_scope_for_turn(request.thread_id.as_deref());
-                let pack = service.recall(&request.prompt, &scope).await;
-                merge_automatic_recall_payload(
-                    &mut automatic_recall_payload,
-                    recall_stream_payload_from_pack(&pack),
-                );
-                let status = memory_access_status_instruction(pack.status);
-                let system = match pack.block {
-                    Some(block) => format!("{system}\n\n{block}"),
-                    None => system,
-                };
-                format!("{system}\n\n{status}")
-            } else {
-                // Path OFF: stessa orchestrazione del crate, capability client al volo.
-                let user = gateway_memory_user_id();
-                let workspace = gateway_memory_workspace_id();
-                let embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient> =
-                    gateway_embedding_client(state.http.clone());
-                let query_vec =
-                    local_first_memory::embed_query(embedding.as_ref(), &request.prompt).await;
-                let block = {
-                    let facade = memory_facade(state);
-                    let graph_context: Option<&local_first_memory::GraphContextHook<'_>> =
-                        Some(&|facade, user, workspace, q| {
-                            if let Some(workflow) =
-                                workflow_status_context_for_query(facade, user, workspace, q)
-                            {
-                                return Some(workflow);
-                            }
-                            artifact_provenance_context_for_query(facade, user, workspace, q)
-                        });
-                    recall_pack_on_facade(
-                        facade,
-                        &user,
-                        &workspace,
-                        &request.prompt,
-                        &query_vec,
-                        graph_context,
-                    )
-                };
-                merge_automatic_recall_payload(
-                    &mut automatic_recall_payload,
-                    recall_stream_payload_from_pack(&block),
-                );
-                let status = memory_access_status_instruction(block.status);
-                let system = match block.block {
-                    Some(block) => format!("{system}\n\n{block}"),
-                    None => system,
-                };
-                format!("{system}\n\n{status}")
-            }
-        } else {
-            system
-        };
-        // Anti-rewrite anchor: existing code components matching the request, so the
-        // model extends/reuses instead of re-implementing (no-regression by default).
-        let facade = memory_facade(state);
-        let user = gateway_memory_user_id();
-        let workspace = gateway_memory_workspace_id();
-        match relevant_code_components_for_prompt(facade, &user, &workspace, &request.prompt) {
-            Some(block) => format!("{system}\n\n{block}"),
-            None => system,
-        }
-    };
-    let prompt_workspace = system
-        .strip_prefix(&prompt_core)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    let workspace_prompt_context =
+        prepare_chat_workspace_prompt_context(ChatWorkspacePromptContextInput {
+            state,
+            system,
+            prompt_core: &prompt_core,
+            prompt: &request.prompt,
+            thread_id: request.thread_id.as_deref(),
+            contact: contact_ctx.as_ref(),
+            contact_only,
+            can_see_contacts,
+            can_use_project_memory,
+            is_project,
+            memory_intent: &memory_intent,
+            memory_injection,
+            applies_new_input,
+        })
+        .await;
+    let prompt_workspace = workspace_prompt_context.prompt_workspace;
+    let automatic_recall_payload = workspace_prompt_context.automatic_recall_payload;
     let workflow_routing_plan = resolve_chat_workflow_routing_plan(ChatWorkflowRoutingPlanInput {
         state,
         thread_id: request.thread_id.as_deref(),
