@@ -16,7 +16,7 @@ use crate::gateway_identity::{
 };
 use crate::gateway_memory_dedup::cosine;
 use crate::gateway_paths::gateway_capability_database_path;
-use crate::{AppState, GatewayError, lock_capability_registry};
+use crate::{AppState, ChatTurnPolicy, GatewayError, lock_capability_registry};
 use local_first_capabilities::{
     ActionClass, CachedCapabilityTool, CapabilityConnectionConfig, CapabilityProviderConfig,
     CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, PolicyContext,
@@ -388,7 +388,7 @@ pub(crate) fn connector_capability_entry(
 
 pub(crate) struct CapabilityCorpusMaterializationInput<'a> {
     pub(crate) deferred_tools: Vec<serde_json::Value>,
-    pub(crate) read_only: bool,
+    pub(crate) turn_policy: &'a ChatTurnPolicy,
     pub(crate) objective_effect_policy: &'a crate::semantic_decision::ObjectiveEffectPolicy,
     pub(crate) composio_writes: &'a std::collections::BTreeSet<String>,
     pub(crate) mcp_schemas: &'a [serde_json::Value],
@@ -408,7 +408,7 @@ pub(crate) fn materialize_capability_corpus(
             corpus.push(entry);
         }
     }
-    if !input.read_only && input.objective_effect_policy.allows_mutation() {
+    if !input.turn_policy.read_only && input.objective_effect_policy.allows_mutation() {
         corpus.extend(
             crate::native_workflow_capability_entries()
                 .into_iter()
@@ -923,6 +923,11 @@ mod tests {
         let policy = crate::semantic_decision::ObjectiveEffectPolicy::from_allowed_effects([
             crate::semantic_decision::EffectClass::Read,
         ]);
+        let turn_policy = ChatTurnPolicy {
+            mode: "ask".to_string(),
+            read_only: true,
+            autonomous: false,
+        };
         let composio_writes = std::collections::BTreeSet::new();
         let enabled_skills = vec![(
             "skill:pdf".to_string(),
@@ -934,7 +939,7 @@ mod tests {
                 schema("run_report", "Run a read-only report."),
                 schema("make_deck", "Create a deck."),
             ],
-            read_only: true,
+            turn_policy: &turn_policy,
             objective_effect_policy: &policy,
             composio_writes: &composio_writes,
             mcp_schemas: &[schema("mcp__filesystem__read_file", "Read a file.")],
@@ -957,12 +962,22 @@ mod tests {
             crate::semantic_decision::EffectClass::FilesystemWrite,
             crate::semantic_decision::EffectClass::ArtifactCreation,
         ]);
+        let read_only_turn_policy = ChatTurnPolicy {
+            mode: "agent".to_string(),
+            read_only: true,
+            autonomous: false,
+        };
+        let writable_turn_policy = ChatTurnPolicy {
+            mode: "agent".to_string(),
+            read_only: false,
+            autonomous: false,
+        };
         let composio_writes = std::collections::BTreeSet::new();
 
         let read_only_corpus =
             materialize_capability_corpus(CapabilityCorpusMaterializationInput {
                 deferred_tools: Vec::new(),
-                read_only: true,
+                turn_policy: &read_only_turn_policy,
                 objective_effect_policy: &write_policy,
                 composio_writes: &composio_writes,
                 mcp_schemas: &[],
@@ -971,7 +986,7 @@ mod tests {
         let read_policy_corpus =
             materialize_capability_corpus(CapabilityCorpusMaterializationInput {
                 deferred_tools: Vec::new(),
-                read_only: false,
+                turn_policy: &writable_turn_policy,
                 objective_effect_policy: &read_policy,
                 composio_writes: &composio_writes,
                 mcp_schemas: &[],
@@ -980,7 +995,7 @@ mod tests {
         let write_policy_corpus =
             materialize_capability_corpus(CapabilityCorpusMaterializationInput {
                 deferred_tools: Vec::new(),
-                read_only: false,
+                turn_policy: &writable_turn_policy,
                 objective_effect_policy: &write_policy,
                 composio_writes: &composio_writes,
                 mcp_schemas: &[],

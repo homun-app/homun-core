@@ -66,6 +66,9 @@ MODEL_ROUTING_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gatew
 CAPABILITY_ROUTING_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_capability_routing.rs"
 )
+CAPABILITY_REGISTRY_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_capability_registry.rs"
+)
 TASK_EXECUTOR_CONFIG_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_task_executor_config.rs"
 )
@@ -1071,7 +1074,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn capability_discovery_trace_line(": "capability registry tracing must stay in gateway_capability_registry",
         "fn suggest_capabilities_tool_schema(": "capability suggestion schemas must stay in gateway_capability_registry",
         "let mut capability_corpus: Vec<CapabilityEntry>": "capability corpus materialization must stay in gateway_capability_registry",
-        "for schema in deferred_tools {": "deferred tool corpus projection must stay in gateway_capability_registry",
+        "for schema in input.deferred_tools {": "deferred tool corpus projection must stay in gateway_capability_registry",
         "struct CapabilityConnectionResponse": "capability snapshot DTOs must stay in gateway_capability_registry",
         "struct CapabilityToolResponse": "capability snapshot DTOs must stay in gateway_capability_registry",
         "struct CapabilityPolicyResponse": "capability snapshot DTOs must stay in gateway_capability_registry",
@@ -1693,6 +1696,8 @@ def main() -> int:
         model_routing_source = handle.read()
     with open(CAPABILITY_ROUTING_RS, "r", encoding="utf-8") as handle:
         capability_routing_source = handle.read()
+    with open(CAPABILITY_REGISTRY_RS, "r", encoding="utf-8") as handle:
+        capability_registry_source = handle.read()
     with open(TASK_EXECUTOR_CONFIG_RS, "r", encoding="utf-8") as handle:
         task_executor_config_source = handle.read()
     with open(TASK_INPUTS_RS, "r", encoding="utf-8") as handle:
@@ -4321,6 +4326,30 @@ def main() -> int:
         chat_toolset_source,
         "pub(crate) contact_only: bool,",
         "chat toolset input must receive typed ContactMemoryPerimeter, not a scalar contact_only copy",
+    )
+    assert_contains(
+        capability_registry_source,
+        "pub(crate) turn_policy: &'a ChatTurnPolicy,",
+        "capability corpus materialization input must receive typed ChatTurnPolicy",
+    )
+    assert_not_contains(
+        capability_registry_source,
+        "pub(crate) read_only: bool,",
+        "capability corpus materialization input must not receive a scalar read_only copy",
+    )
+    corpus_call = chat_toolset_source.split(
+        "let capability_corpus = materialize_capability_corpus(CapabilityCorpusMaterializationInput {",
+        1,
+    )[1].split("});", 1)[0]
+    assert_contains(
+        corpus_call,
+        "turn_policy: input.turn_policy,",
+        "chat toolset must pass typed ChatTurnPolicy into capability corpus materialization",
+    )
+    assert_not_contains(
+        corpus_call,
+        "read_only,",
+        "chat toolset must not pass scalar read_only into capability corpus materialization",
     )
     toolset_call = source.split(
         "let chat_toolset = prepare_chat_toolset(ChatToolsetInput {", 1
