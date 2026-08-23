@@ -4317,6 +4317,7 @@ fn capability_executor_constructor_has_one_gateway_owner() {
         "pub(crate) struct GatewayCapabilityExecutorInput",
         "pub(crate) turn_policy: &'a ChatTurnPolicy,",
         "pub(crate) contact_memory_perimeter: ContactMemoryPerimeter,",
+        "pub(crate) contact_memory_perimeter: &'a ContactMemoryPerimeter,",
         "pub(crate) struct GatewayCapabilityExecutor",
         "pub(crate) fn gateway_capability_executor<'a>(",
     ] {
@@ -4349,6 +4350,47 @@ fn capability_executor_constructor_has_one_gateway_owner() {
         assert!(
             !capability_executor_input.contains(pattern),
             "capability executor input must receive typed ContactMemoryPerimeter, not scalar perimeter {pattern}"
+        );
+    }
+    let chat_tool_ctx = tool_execution
+        .split("pub(crate) struct ChatToolCtx")
+        .nth(1)
+        .expect("ChatToolCtx")
+        .split("/// Emit an approval confirmation card")
+        .next()
+        .expect("ChatToolCtx block");
+    assert!(
+        chat_tool_ctx.contains("pub(crate) contact_memory_perimeter: &'a ContactMemoryPerimeter,"),
+        "chat tool context must carry typed ContactMemoryPerimeter"
+    );
+    let gateway_capability_executor = tool_execution
+        .split("pub(crate) struct GatewayCapabilityExecutor")
+        .nth(1)
+        .expect("GatewayCapabilityExecutor")
+        .split("pub(crate) fn gateway_capability_executor<'a>(")
+        .next()
+        .expect("GatewayCapabilityExecutor block");
+    assert!(
+        gateway_capability_executor.contains("contact_memory_perimeter: ContactMemoryPerimeter,"),
+        "gateway capability executor must carry typed ContactMemoryPerimeter"
+    );
+    for pattern in [
+        "pub(crate) contact_only: bool,",
+        "pub(crate) can_see_contacts: bool,",
+        "pub(crate) can_see_calendar: bool,",
+        "pub(crate) can_use_project_memory: bool,",
+        "contact_only: bool,",
+        "can_see_contacts: bool,",
+        "can_see_calendar: bool,",
+        "can_use_project_memory: bool,",
+    ] {
+        assert!(
+            !chat_tool_ctx.contains(pattern),
+            "chat tool context must not carry scalar contact perimeter {pattern}"
+        );
+        assert!(
+            !gateway_capability_executor.contains(pattern),
+            "gateway capability executor must not carry scalar contact perimeter {pattern}"
         );
     }
     assert!(
