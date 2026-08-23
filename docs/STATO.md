@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (chat skill catalog has-skills in sviluppo).**
+> **Ultimo aggiornamento: 2026-08-23 (typed turn-policy slices mergeate fino a #349).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/chat-skill-catalog-has-skills` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#339 mergeate in `main`; slice chat skill catalog has-skills in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #339 (`ef20fa14`); slice chat skill catalog has-skills in verifica locale prima della PR |
+| Branch | `main` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#349 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #349 (`22c52d34`) |
 
 ## Dove siamo
 
@@ -44,7 +44,7 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_agent_turn_tool_seed`: `seed_agent_turn_tool_schemas`
+- Estrazione mergeata `gateway_agent_turn_tool_seed`: `seed_agent_turn_tool_schemas`
   riceve `&ChatTurnPolicy` e deriva internamente il clear dei tool in ask mode;
   `stream_chat_via_openai` non passa piu' il `mode` scalare al seed tool schema,
   mentre toolset assembly, perimetro contatti, tool execution, browser e
