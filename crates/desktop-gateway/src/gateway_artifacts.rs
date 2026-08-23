@@ -301,6 +301,10 @@ pub(crate) fn load_artifact_destinations() -> Vec<ArtifactDestination> {
         .unwrap_or_default()
 }
 
+pub(crate) fn prepare_chat_artifact_destinations() -> Vec<ArtifactDestination> {
+    load_artifact_destinations()
+}
+
 pub(crate) fn write_artifact_destinations(list: &[ArtifactDestination]) -> Result<(), String> {
     let path = artifact_destinations_path().ok_or_else(|| "data dir unavailable".to_string())?;
     let json = serde_json::to_string_pretty(list).map_err(|e| e.to_string())?;

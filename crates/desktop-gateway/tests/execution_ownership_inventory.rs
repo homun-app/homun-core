@@ -1233,6 +1233,7 @@ fn artifact_destination_prompt_instruction_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
     let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
+    let artifacts = production_source(&root.join("src/gateway_artifacts.rs"));
 
     let pattern = "fn destination_folders_instruction(";
     let block_pattern = "fn artifact_destination_prompt_block(";
@@ -1265,8 +1266,16 @@ fn artifact_destination_prompt_instruction_has_one_gateway_owner() {
     }
 
     assert!(
-        main.contains("load_artifact_destinations()"),
-        "main.rs still owns the runtime decision to append destination guidance"
+        artifacts.contains("pub(crate) fn prepare_chat_artifact_destinations("),
+        "artifact owner must expose chat-scoped artifact destination lookup"
+    );
+    assert!(
+        artifacts.contains("load_artifact_destinations()"),
+        "artifact owner must retain raw artifact destination loading"
+    );
+    assert!(
+        !main.contains("load_artifact_destinations()"),
+        "main.rs must delegate raw artifact destination lookup to gateway_artifacts"
     );
 }
 

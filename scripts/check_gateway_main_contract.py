@@ -14,6 +14,9 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAIN_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "main.rs")
+GATEWAY_ARTIFACTS_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_artifacts.rs"
+)
 CHAT_STREAMS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_streams.rs"
 )
@@ -1650,6 +1653,8 @@ def assert_ordered(source: str, snippets: list[str], message: str) -> None:
 def main() -> int:
     with open(MAIN_RS, "r", encoding="utf-8") as handle:
         source = handle.read()
+    with open(GATEWAY_ARTIFACTS_RS, "r", encoding="utf-8") as handle:
+        artifact_source = handle.read()
     with open(CHAT_STREAMS_RS, "r", encoding="utf-8") as handle:
         chat_streams_source = handle.read()
     with open(MEMORY_LEARN_RS, "r", encoding="utf-8") as handle:
@@ -3710,6 +3715,16 @@ def main() -> int:
         )
     assert_contains(source, "mod gateway_artifact_memory;", "gateway root must declare artifact memory owner")
     assert_contains(source, "mod gateway_artifacts;", "gateway root must declare artifact file owner")
+    assert_contains(
+        artifact_source,
+        "pub(crate) fn prepare_chat_artifact_destinations(",
+        "artifact owner must expose chat-scoped artifact destination lookup",
+    )
+    assert_not_contains(
+        source,
+        "load_artifact_destinations()",
+        "gateway root must delegate raw artifact destination lookup",
+    )
     assert_contains(source, "mod gateway_memory_wiki;", "gateway root must declare memory wiki owner")
     assert_contains(source, "mod gateway_template_catalog;", "gateway root must declare template catalog owner")
     assert_contains(source, "mod gateway_project_files;", "gateway root must declare project files owner")
