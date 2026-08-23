@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (chat turn trace entry owner in sviluppo).**
+> **Ultimo aggiornamento: 2026-08-23 (chat privacy locality owner in sviluppo).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/chat-turn-trace-entry-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#334 mergeate in `main`; slice chat turn trace entry owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #334 (`61aeca63`); slice chat turn trace entry owner in verifica locale prima della PR |
+| Branch | `fabio/chat-privacy-locality-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#335 mergeate in `main`; slice chat privacy locality owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #335 (`db83b8f1`); slice chat privacy locality owner in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_turn_trace`: il bootstrap iniziale del trace chat
+- Estrazione locale `gateway_privacy_preflight`: la risoluzione della localita'
+  orchestrator per Privacy Guard (`chat_privacy_orchestrator_is_local`: endpoint
+  locale e modello non `:cloud`) esce da `stream_chat_via_openai`; il root passa
+  solo `base_url` e `model`, mentre failure policy, prompt privacy, transport
+  stream, loop agente, checkpoint e browser restano owner separati.
+- Estrazione mergeata `gateway_turn_trace`: il bootstrap iniziale del trace chat
   (`begin_chat_turn_trace`: input turno, opt-out `HOMUN_TURN_TRACE`, log dir e
   byte budget) esce da `stream_chat_via_openai`; `main.rs` passa solo request id,
   prompt, mode e model, mentre trace events, loop agente, budget, plan progress,
