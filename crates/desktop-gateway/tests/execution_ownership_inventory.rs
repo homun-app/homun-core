@@ -625,11 +625,15 @@ fn skill_prompt_instructions_have_one_gateway_owner() {
     let main = production_source(&root.join("src/main.rs"));
     let skill_runtime = production_source(&root.join("src/gateway_skill_runtime.rs"));
 
-    let pattern = "fn skill_prompt_instructions_block(";
-    assert!(
-        skill_runtime.contains(pattern),
-        "skill runtime owner must contain {pattern}"
-    );
+    for pattern in [
+        "pub(crate) async fn prepare_skill_prompt_catalog(",
+        "fn skill_prompt_instructions_block(",
+    ] {
+        assert!(
+            skill_runtime.contains(pattern),
+            "skill runtime owner must contain {pattern}"
+        );
+    }
 
     for snippet in ["INSTALLED SKILLS —", "METHODOLOGY (HomunCoder)"] {
         assert!(
@@ -655,6 +659,16 @@ fn skill_prompt_instructions_have_one_gateway_owner() {
         !main.contains("enabled_skills.retain(|(id, _, _)| !homuncoder.contains(id));"),
         "main.rs must not own HomunCoder prompt skill filtering"
     );
+    for snippet in [
+        "tokio::task::spawn_blocking(homuncoder_skill_ids)",
+        "tokio::task::spawn_blocking(enabled_skills_summary)",
+        "skill_prompt_catalog_for_workspace(",
+    ] {
+        assert!(
+            !main.contains(snippet),
+            "main.rs must delegate prompt skill catalog loading to gateway_skill_runtime: {snippet}"
+        );
+    }
 }
 
 #[test]

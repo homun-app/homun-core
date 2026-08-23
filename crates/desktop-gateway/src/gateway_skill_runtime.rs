@@ -117,6 +117,7 @@ pub(crate) fn homuncoder_skill_ids() -> HashSet<String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SkillPromptCatalog {
     pub(crate) enabled_skills: Vec<(String, String, String)>,
+    pub(crate) homuncoder: HashSet<String>,
     pub(crate) is_project: bool,
 }
 
@@ -131,8 +132,19 @@ pub(crate) fn skill_prompt_catalog_for_workspace(
     }
     SkillPromptCatalog {
         enabled_skills,
+        homuncoder: homuncoder.clone(),
         is_project,
     }
+}
+
+pub(crate) async fn prepare_skill_prompt_catalog(workspace_id: &str) -> SkillPromptCatalog {
+    let homuncoder = tokio::task::spawn_blocking(homuncoder_skill_ids)
+        .await
+        .unwrap_or_default();
+    let enabled_skills = tokio::task::spawn_blocking(enabled_skills_summary)
+        .await
+        .unwrap_or_default();
+    skill_prompt_catalog_for_workspace(enabled_skills, &homuncoder, workspace_id)
 }
 
 pub(crate) fn skill_prompt_instructions_block(
