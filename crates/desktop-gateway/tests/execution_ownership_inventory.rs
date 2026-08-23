@@ -4294,6 +4294,7 @@ fn capability_executor_constructor_has_one_gateway_owner() {
     for pattern in [
         "pub(crate) struct GatewayCapabilityExecutorInput",
         "pub(crate) turn_policy: &'a ChatTurnPolicy,",
+        "pub(crate) contact_memory_perimeter: ContactMemoryPerimeter,",
         "pub(crate) struct GatewayCapabilityExecutor",
         "pub(crate) fn gateway_capability_executor<'a>(",
     ] {
@@ -4317,17 +4318,36 @@ fn capability_executor_constructor_has_one_gateway_owner() {
         !capability_executor_input.contains("pub(crate) autonomous: bool,"),
         "capability executor input must receive typed ChatTurnPolicy, not scalar autonomous"
     );
+    for pattern in [
+        "pub(crate) contact_only: bool,",
+        "pub(crate) can_see_contacts: bool,",
+        "pub(crate) can_see_calendar: bool,",
+        "pub(crate) can_use_project_memory: bool,",
+    ] {
+        assert!(
+            !capability_executor_input.contains(pattern),
+            "capability executor input must receive typed ContactMemoryPerimeter, not scalar perimeter {pattern}"
+        );
+    }
     assert!(
         run_agent_rounds.contains("turn_policy,"),
         "run_agent_rounds must pass the typed chat turn policy into capability executor"
     );
+    assert!(
+        run_agent_rounds.contains("contact_memory_perimeter,"),
+        "run_agent_rounds must pass the typed contact memory perimeter into capability executor"
+    );
     for pattern in [
         "read_only: turn_policy.read_only,",
         "autonomous: turn_policy.autonomous,",
+        "contact_only: contact_memory_perimeter.contact_only,",
+        "can_see_contacts: contact_memory_perimeter.can_see_contacts,",
+        "can_see_calendar: contact_memory_perimeter.can_see_calendar,",
+        "can_use_project_memory: contact_memory_perimeter.can_use_project_memory,",
     ] {
         assert!(
             !run_agent_rounds.contains(pattern),
-            "run_agent_rounds must not pass scalar chat turn policy into capability executor {pattern}"
+            "run_agent_rounds must not pass scalar turn context into capability executor {pattern}"
         );
     }
 

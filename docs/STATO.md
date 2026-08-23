@@ -45,6 +45,11 @@ Piano completato:
 Slice Runtime V2 recenti:
 
 - Estrazione locale `gateway_tool_execution`: `GatewayCapabilityExecutorInput`
+  riceve anche `ContactMemoryPerimeter` typed e il factory deriva internamente
+  `contact_only`/`can_see_*`; `run_agent_rounds` non passa piu' quattro flag
+  scalari concorrenti al capability executor, mentre tool dispatch, browser
+  executor e loop agente restano owner separati.
+- Estrazione mergeata `gateway_tool_execution`: `GatewayCapabilityExecutorInput`
   riceve `&ChatTurnPolicy` e il factory deriva internamente `read_only` e
   `autonomous`; `run_agent_rounds` non passa piu' due flag scalari concorrenti
   al capability executor, mentre contact perimeter, browser executor e loop
