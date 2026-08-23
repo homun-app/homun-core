@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (chat artifact destinations owner in sviluppo).**
+> **Ultimo aggiornamento: 2026-08-23 (chat objective execution context owner in sviluppo).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/chat-prompt-layer-artifacts-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#331 mergeate in `main`; slice chat artifact destinations owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #331 (`fa5dda9c`); slice chat artifact destinations owner in verifica locale prima della PR |
+| Branch | `fabio/chat-objective-execution-context` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#332 mergeate in `main`; slice chat objective execution context owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #332 (`dfc30d28`); slice chat objective execution context owner in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,15 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_artifacts`: il lookup delle destinazioni artifact
+- Estrazione locale `gateway_tool_execution`/`gateway_memory_briefing`: il
+  contesto objective execution del turno chat
+  (`prepare_chat_objective_execution_context`: active objective contract,
+  semantic contract, objective effect policy, catalogo connesso gia' filtrato e
+  memory-intent context typed) esce da `stream_chat_via_openai`; `main.rs`
+  consuma solo la proiezione e la passa a runtime prompt, workspace prompt,
+  toolset e loop agente, mentre prompt wording, memory briefing, toolset
+  assembly, loop agente e browser restano owner separati.
+- Estrazione mergeata `gateway_artifacts`: il lookup delle destinazioni artifact
   usate dal turno chat (`prepare_chat_artifact_destinations`) passa all'owner
   artifact; `main.rs` consuma solo lo snapshot typed e lo passa a prompt layers
   e toolset `save_artifact`, mentre storage/routes artifact, rendering prompt,

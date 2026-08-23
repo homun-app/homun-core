@@ -42,6 +42,50 @@ fn browse_subagent_prompt_documents_autocomplete_semantic_default() {
 }
 
 #[test]
+fn chat_objective_execution_context_prunes_connected_catalog_and_projects_memory_defaults() {
+    let state = AppState::for_tests();
+    let composio_writes = std::collections::BTreeSet::new();
+    let context = prepare_chat_objective_execution_context(ChatObjectiveExecutionContextInput {
+        state: &state,
+        thread_id: None,
+        catalog_index: vec![
+            (
+                "read_file".to_string(),
+                "Read file".to_string(),
+                serde_json::json!({}),
+            ),
+            (
+                "write_file".to_string(),
+                "Write file".to_string(),
+                serde_json::json!({}),
+            ),
+        ],
+        composio_writes: &composio_writes,
+    });
+
+    let names = context
+        .catalog_index
+        .iter()
+        .map(|(name, _, _)| name.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(names, vec!["read_file"]);
+    assert!(
+        context
+            .objective_effect_policy
+            .allows(semantic_decision::EffectClass::Read)
+    );
+    assert!(
+        !context
+            .objective_effect_policy
+            .allows(semantic_decision::EffectClass::FilesystemWrite)
+    );
+    assert!(context.memory_intent.use_current_thread);
+    assert!(!context.memory_recall_allowed);
+    assert!(context.memory_injection.include_current_thread);
+}
+
+#[test]
 fn browse_timeout_preserves_grounded_snapshot_as_partial_result() {
     let snapshot = format!(
         "{}\n{}",
@@ -5563,6 +5607,49 @@ pub(crate) fn prune_tools_for_objective_policy(
             .unwrap_or_default();
         !objective_blocks_tool(policy, name, composio_writes)
     });
+}
+
+pub(crate) struct ChatObjectiveExecutionContextInput<'a> {
+    pub(crate) state: &'a AppState,
+    pub(crate) thread_id: Option<&'a str>,
+    pub(crate) catalog_index: Vec<(String, String, serde_json::Value)>,
+    pub(crate) composio_writes: &'a std::collections::BTreeSet<String>,
+}
+
+pub(crate) struct ChatObjectiveExecutionContext {
+    pub(crate) active_objective_contract: Option<local_first_task_runtime::ObjectiveContractRecord>,
+    pub(crate) semantic_contract: Option<semantic_decision::ValidatedSemanticDecision>,
+    pub(crate) objective_effect_policy: semantic_decision::ObjectiveEffectPolicy,
+    pub(crate) memory_intent: semantic_decision::MemoryIntent,
+    pub(crate) memory_recall_allowed: bool,
+    pub(crate) memory_injection: MemoryInjectionPolicy,
+    pub(crate) catalog_index: Vec<(String, String, serde_json::Value)>,
+}
+
+pub(crate) fn prepare_chat_objective_execution_context(
+    input: ChatObjectiveExecutionContextInput<'_>,
+) -> ChatObjectiveExecutionContext {
+    let active_objective_contract = objective_contract_for_execution(input.state, input.thread_id);
+    let semantic_contract = active_objective_contract
+        .as_ref()
+        .and_then(semantic_decision::semantic_decision_from_contract);
+    let objective_effect_policy =
+        semantic_decision::ObjectiveEffectPolicy::from_contract(active_objective_contract.as_ref());
+    let mut catalog_index = input.catalog_index;
+    catalog_index.retain(|(name, _, _)| {
+        !objective_blocks_tool(&objective_effect_policy, name, input.composio_writes)
+    });
+    let memory_context = memory_intent_context_for_semantic_contract(semantic_contract.as_ref());
+
+    ChatObjectiveExecutionContext {
+        active_objective_contract,
+        semantic_contract,
+        objective_effect_policy,
+        memory_intent: memory_context.memory_intent,
+        memory_recall_allowed: memory_context.memory_recall_allowed,
+        memory_injection: memory_context.memory_injection,
+        catalog_index,
+    }
 }
 
 pub(crate) fn objective_effect_policy_for_execution(
