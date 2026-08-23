@@ -235,6 +235,7 @@ MEMORY_REUSE_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_reuse.rs"
 )
 MEMORY_CLIENTS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_memory_clients.rs")
+MEMORY_SOURCES_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_memory_sources.rs")
 MEMORY_UI_ROUTES_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_ui_routes.rs"
 )
@@ -1842,6 +1843,8 @@ def main() -> int:
         memory_reuse_source = handle.read()
     with open(MEMORY_CLIENTS_RS, "r", encoding="utf-8") as handle:
         memory_clients_source = handle.read()
+    with open(MEMORY_SOURCES_RS, "r", encoding="utf-8") as handle:
+        memory_sources_source = handle.read()
     with open(MEMORY_UI_ROUTES_RS, "r", encoding="utf-8") as handle:
         memory_ui_routes_source = handle.read()
     with open(PAYMENT_APPROVAL_RS, "r", encoding="utf-8") as handle:
@@ -4753,6 +4756,44 @@ def main() -> int:
             chat_workspace_prompt_context_source,
             snippet,
             "chat workspace prompt context owner must compose memory and workspace prompt context",
+        )
+    assert_contains(
+        memory_sources_source,
+        "pub(crate) fn memory_perimeter_allows_recall(",
+        "memory sources owner must expose the recall perimeter decision",
+    )
+    assert_contains(
+        memory_sources_source,
+        "contact_memory_perimeter: &ContactMemoryPerimeter",
+        "memory recall perimeter decision must receive typed ContactMemoryPerimeter",
+    )
+    for snippet in [
+        "contact_only: bool",
+        "can_see_contacts: bool",
+        "can_use_project_memory: bool",
+    ]:
+        assert_not_contains(
+            memory_sources_source,
+            snippet,
+            "memory recall perimeter decision must not receive scalar perimeter fields",
+        )
+    recall_perimeter_call = chat_workspace_prompt_context_source.split(
+        "memory_perimeter_allows_recall(", 1
+    )[1].split(")", 1)[0]
+    assert_contains(
+        recall_perimeter_call,
+        "input.contact_memory_perimeter,",
+        "workspace prompt must pass typed ContactMemoryPerimeter into memory recall perimeter",
+    )
+    for snippet in [
+        ".contact_only",
+        ".can_see_contacts",
+        ".can_use_project_memory",
+    ]:
+        assert_not_contains(
+            recall_perimeter_call,
+            snippet,
+            "workspace prompt must not pass scalar perimeter fields into memory recall perimeter",
         )
     assert_contains(
         stream_chat_source,

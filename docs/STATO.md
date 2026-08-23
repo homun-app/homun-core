@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (typed turn-policy slices mergeate fino a #351; nuovo slice toolset iniziale in corso).**
+> **Ultimo aggiornamento: 2026-08-23 (typed turn-policy slices mergeate fino a #352; nuovo slice memory recall perimeter in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#351 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #351 (`dd8596f8`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#352 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #352 (`a87a9b68`) |
 
 ## Dove siamo
 
@@ -44,7 +44,14 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_chat_toolset`: la costruzione dei manager tool
+- Estrazione locale `gateway_memory_sources`/`gateway_chat_workspace_prompt_context`/
+  `gateway_tool_execution`:
+  la decisione `memory_perimeter_allows_recall` riceve `&ContactMemoryPerimeter`
+  invece di tre flag scalari `contact_only`/`can_see_contacts`/
+  `can_use_project_memory`; workspace prompt e dispatch `recall_memory` passano
+  il perimetro typed al memory-source owner e restano responsabili solo dei
+  rispettivi layer prompt/tool.
+- Estrazione mergeata `gateway_chat_toolset`: la costruzione dei manager tool
   iniziali riceve `&ChatTurnPolicy` e `&ContactMemoryPerimeter` invece di copie
   scalari `read_only`/`contact_only`; il toolset conserva una sola proiezione
   typed per base schema, pruning e corpus capability, mentre le definizioni

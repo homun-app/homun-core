@@ -5089,6 +5089,7 @@ fn chat_workspace_prompt_context_has_one_gateway_owner() {
     let main = production_source(&root.join("src/main.rs"));
     let workspace_prompt =
         production_source(&root.join("src/gateway_chat_workspace_prompt_context.rs"));
+    let memory_sources = production_source(&root.join("src/gateway_memory_sources.rs"));
 
     for pattern in [
         "pub(crate) struct ChatWorkspacePromptContextInput",
@@ -5104,6 +5105,45 @@ fn chat_workspace_prompt_context_has_one_gateway_owner() {
         assert!(
             workspace_prompt.contains(pattern),
             "chat workspace prompt context owner must contain {pattern}"
+        );
+    }
+    assert!(
+        memory_sources.contains("pub(crate) fn memory_perimeter_allows_recall("),
+        "memory sources owner must expose the recall perimeter decision"
+    );
+    assert!(
+        memory_sources.contains("contact_memory_perimeter: &ContactMemoryPerimeter"),
+        "memory recall perimeter decision must receive typed ContactMemoryPerimeter"
+    );
+    for scalar in [
+        "contact_only: bool",
+        "can_see_contacts: bool",
+        "can_use_project_memory: bool",
+    ] {
+        assert!(
+            !memory_sources.contains(scalar),
+            "memory recall perimeter decision must not receive scalar perimeter field {scalar}"
+        );
+    }
+    let recall_perimeter_call = workspace_prompt
+        .split("memory_perimeter_allows_recall(")
+        .nth(1)
+        .expect("memory perimeter recall call")
+        .split(")")
+        .next()
+        .expect("memory perimeter recall input block");
+    assert!(
+        recall_perimeter_call.contains("input.contact_memory_perimeter,"),
+        "workspace prompt must pass typed ContactMemoryPerimeter into memory recall perimeter"
+    );
+    for scalar in [
+        ".contact_only",
+        ".can_see_contacts",
+        ".can_use_project_memory",
+    ] {
+        assert!(
+            !recall_perimeter_call.contains(scalar),
+            "workspace prompt must not pass scalar perimeter field {scalar} into memory recall perimeter"
         );
     }
 

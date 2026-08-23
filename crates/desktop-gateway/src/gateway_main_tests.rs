@@ -17205,20 +17205,32 @@ fn cached_briefing_is_rejected_when_grant_is_revoked_after_lookup() {
 
 #[test]
 fn contact_memory_deny_cannot_use_linked_sources() {
+    let perimeter =
+        |contact_only, can_see_contacts, can_use_project_memory| super::ContactMemoryPerimeter {
+            contact_only,
+            can_see_contacts,
+            can_see_calendar: true,
+            can_use_project_memory,
+        };
     assert!(!super::memory_perimeter_allows_recall(
-        false, true, false, true
+        &perimeter(false, true, false),
+        true
     ));
     assert!(!super::memory_perimeter_allows_recall(
-        true, true, true, true
+        &perimeter(true, true, true),
+        true
     ));
     assert!(!super::memory_perimeter_allows_recall(
-        false, false, true, true
+        &perimeter(false, false, true),
+        true
     ));
     assert!(super::memory_perimeter_allows_recall(
-        false, true, true, true
+        &perimeter(false, true, true),
+        true
     ));
     assert!(super::memory_perimeter_allows_recall(
-        false, true, false, false
+        &perimeter(false, true, false),
+        false
     ));
 }
 
