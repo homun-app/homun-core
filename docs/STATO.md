@@ -44,12 +44,17 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_agent_turn_tail`: `AgentTurnTailInput` riceve
+- Estrazione locale `gateway_tool_execution`: `GatewayCapabilityExecutorInput`
+  riceve `&ChatTurnPolicy` e il factory deriva internamente `read_only` e
+  `autonomous`; `run_agent_rounds` non passa piu' due flag scalari concorrenti
+  al capability executor, mentre contact perimeter, browser executor e loop
+  agente restano owner separati.
+- Estrazione mergeata `gateway_agent_turn_tail`: `AgentTurnTailInput` riceve
   `&ChatTurnPolicy` e deriva `read_only` internamente per memory learn e project
   graph refresh post-loop; `stream_chat_via_openai` non passa piu' un booleano
   tail separato, mentre HITL projection, stream outcome, browser e loop agente
   restano owner separati.
-- Estrazione locale `gateway_chat_toolset`: `ChatToolsetInput` riceve
+- Estrazione mergeata `gateway_chat_toolset`: `ChatToolsetInput` riceve
   `&ChatTurnPolicy` e deriva internamente `read_only`, evitando un secondo
   contratto scalare tra setup turno e tool assembly; prompt/tool pruning,
   capability corpus, dispatch tool, browser executor e loop agente restano
@@ -59,7 +64,7 @@ Slice Runtime V2 recenti:
   `stream_chat_via_openai` non crea piu' contratti concorrenti
   `read_only`/`autonomous`, mentre la policy engine route-aware resta owner
   separato in `gateway_capability_routing`.
-- Estrazione locale `gateway_skill_runtime`: `SkillPromptCatalog` espone anche
+- Estrazione mergeata `gateway_skill_runtime`: `SkillPromptCatalog` espone anche
   `has_skills`, derivato dopo il filtro workspace/HomunCoder; il root non
   ricalcola piu' `!enabled_skills.is_empty()` e consuma una proiezione skill
   completa per prompt layers e toolset, mentre route skill, seed default,

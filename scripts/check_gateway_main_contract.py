@@ -4816,6 +4816,24 @@ def main() -> int:
     )
     assert_contains(
         tool_execution_source,
+        "pub(crate) turn_policy: &'a ChatTurnPolicy,",
+        "tool execution owner must receive typed ChatTurnPolicy for capability executor",
+    )
+    capability_executor_input_source = tool_execution_source.split(
+        "pub(crate) struct GatewayCapabilityExecutorInput", 1
+    )[1].split("/// The gateway's `CapabilityExecutor`", 1)[0]
+    assert_not_contains(
+        capability_executor_input_source,
+        "pub(crate) read_only: bool,",
+        "capability executor input must not receive scalar read_only",
+    )
+    assert_not_contains(
+        capability_executor_input_source,
+        "pub(crate) autonomous: bool,",
+        "capability executor input must not receive scalar autonomous",
+    )
+    assert_contains(
+        tool_execution_source,
         "pub(crate) fn gateway_capability_executor<'a>(",
         "tool execution owner must expose gateway capability executor factory",
     )
@@ -4834,6 +4852,23 @@ def main() -> int:
         "GatewayCapabilityExecutor::new(",
         "gateway root must not call GatewayCapabilityExecutor constructor directly",
     )
+    run_agent_rounds_source = source.split("async fn run_agent_rounds(", 1)[1].split(
+        "// The browser tool chokepoint", 1
+    )[0]
+    assert_contains(
+        run_agent_rounds_source,
+        "turn_policy,",
+        "gateway root must pass typed ChatTurnPolicy into capability executor",
+    )
+    for snippet in [
+        "read_only: turn_policy.read_only,",
+        "autonomous: turn_policy.autonomous,",
+    ]:
+        assert_not_contains(
+            run_agent_rounds_source,
+            snippet,
+            "gateway root must not pass scalar chat turn policy into capability executor",
+        )
     assert_contains(
         composio_routes_source,
         "pub(crate) async fn connect_composio(",
