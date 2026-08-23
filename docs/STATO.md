@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (chat objective execution context owner in sviluppo).**
+> **Ultimo aggiornamento: 2026-08-23 (chat initial messages owner in sviluppo).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/chat-objective-execution-context` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#332 mergeate in `main`; slice chat objective execution context owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #332 (`dfc30d28`); slice chat objective execution context owner in verifica locale prima della PR |
+| Branch | `fabio/chat-initial-messages-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#333 mergeate in `main`; slice chat initial messages owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #333 (`e2b9a043`); slice chat initial messages owner in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,14 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_tool_execution`/`gateway_memory_briefing`: il
+- Estrazione locale `gateway_agent_turn_loop_seed`: la costruzione dei messaggi
+  iniziali del turno agente (`prepare_agent_turn_initial_messages`: ruolo
+  `system` e ruolo `user` con user-content gia' risolto dagli attachment)
+  esce da `stream_chat_via_openai`; `main.rs` conserva solo il consumo del
+  vettore iniziale, mentre prompt packet, attachment user-content, recall,
+  plan/tool/model/recovery seed, browser executor, loop agente e subagent
+  restano owner separati.
+- Estrazione mergeata `gateway_tool_execution`/`gateway_memory_briefing`: il
   contesto objective execution del turno chat
   (`prepare_chat_objective_execution_context`: active objective contract,
   semantic contract, objective effect policy, catalogo connesso gia' filtrato e

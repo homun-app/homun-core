@@ -1805,13 +1805,10 @@ async fn stream_chat_via_openai(
             working: &working,
         },
     );
-    // Built once here, then moved into `ls.messages` at the loop's start (the loop grows it).
+    // Built once, then moved into `ls.messages` at the loop's start (the loop grows it).
     // `mut` because the vision policy below may swap the images out for a description (see
     // `vision::AttachmentPlan`) before the manager ever sees them.
-    let mut messages = vec![
-        serde_json::json!({ "role": "system", "content": system }),
-        serde_json::json!({ "role": "user", "content": user_content }),
-    ];
+    let mut messages = prepare_agent_turn_initial_messages(system, user_content);
 
     let transport =
         open_chat_stream_transport(request.request_id.clone(), request.thread_id.clone());
