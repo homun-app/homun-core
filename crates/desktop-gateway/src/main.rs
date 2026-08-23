@@ -143,6 +143,7 @@ mod gateway_proactive_execution;
 mod gateway_proactive_threads;
 mod gateway_proactivity;
 mod gateway_proactivity_routes;
+mod gateway_process_bootstrap;
 mod gateway_process_events;
 mod gateway_project_access;
 mod gateway_project_files;
@@ -1433,39 +1434,7 @@ struct ErrorBody {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize structured logging. RUST_LOG controls verbosity per module:
-    //   RUST_LOG=warn                       → only warnings/errors (default-ish)
-    //   RUST_LOG=homun_desktop_gateway=info → gateway info+ (broker/turn/chat lifecycle)
-    //   RUST_LOG=homun_desktop_gateway=debug → verbose (per-event broker logging)
-    //   RUST_LOG=trace                      → everything (noisy, includes deps)
-    // Default when RUST_LOG is unset: warn (so existing eprintln! noise is reduced
-    // and the user sees real problems). Existing eprintln!/println! calls still
-    // print (they bypass tracing) but the structured tracing events are filterable.
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-        )
-        .with_target(false)
-        .try_init();
-    // P0 observability: leave a trail for every panic, even when the shell
-    // isn't capturing stdio. Fall back to the OS temp dir if HOME is unusable.
-    panic_log::install(gateway_logs_dir().unwrap_or_else(|_| std::env::temp_dir()));
-
-    // SECURITY (data at rest): make everything this process writes owner-only.
-    // The personal stores (memory.sqlite, desktop-gateway.sqlite, the WhatsApp
-    // session, …) are PLAINTEXT SQLite — 0644 would expose the user's memory,
-    // contacts and messages to any other local user. umask 0077 makes new files
-    // born 0600, including the SQLite WAL/SHM that SQLite creates at runtime.
-    #[cfg(unix)]
-    // SAFETY: libc::umask has no preconditions; called once before any file is created.
-    unsafe {
-        libc::umask(0o077 as libc::mode_t);
-    }
-
-    // Move any pre-rename data dir to the new ~/.homun location before anything
-    // opens it (the SQLite stores are created immediately below).
-    gateway_legacy_data::migrate_legacy_data_dir();
+    gateway_process_bootstrap::install_gateway_process_bootstrap();
 
     // P0 resilience: verify every personal store BEFORE anything opens it; a
     // corrupt file is quarantined (never deleted) and the fresh open below

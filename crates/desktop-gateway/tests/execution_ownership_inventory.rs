@@ -2893,6 +2893,65 @@ fn startup_background_writers_follow_process_fencing() {
 }
 
 #[test]
+fn gateway_process_bootstrap_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let process_bootstrap = production_source(&root.join("src/gateway_process_bootstrap.rs"));
+
+    for pattern in [
+        "pub(crate) fn install_gateway_process_bootstrap()",
+        "tracing_subscriber::fmt()",
+        "panic_log::install(",
+        "libc::umask(",
+        "gateway_legacy_data::migrate_legacy_data_dir();",
+    ] {
+        assert!(
+            process_bootstrap.contains(pattern),
+            "gateway process bootstrap owner must contain {pattern}"
+        );
+    }
+
+    let main_fn = main
+        .split("async fn main()")
+        .nth(1)
+        .expect("main function")
+        .split("let recovered_stores")
+        .next()
+        .expect("store integrity boundary");
+    assert!(
+        main_fn.contains("gateway_process_bootstrap::install_gateway_process_bootstrap();"),
+        "main.rs must delegate process bootstrap before opening stores"
+    );
+    for pattern in [
+        "tracing_subscriber::fmt()",
+        "panic_log::install(",
+        "libc::umask(",
+        "gateway_legacy_data::migrate_legacy_data_dir();",
+    ] {
+        assert!(
+            !main_fn.contains(pattern),
+            "main.rs must not retain process bootstrap surface {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "pub(crate) struct AppState",
+        "gateway_store_integrity::ensure_gateway_store_integrity()",
+        "gateway_db_unify::unify_legacy_databases_at_startup()",
+        "gateway_routes::build_gateway_router(",
+        "gateway_background_startup::start_gateway_background_services(",
+        "TcpListener::bind(",
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+    ] {
+        assert!(
+            !process_bootstrap.contains(adjacent),
+            "gateway process bootstrap owner must not absorb adjacent startup/runtime surface {adjacent}"
+        );
+    }
+}
+
+#[test]
 fn agent_wake_mapping_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
