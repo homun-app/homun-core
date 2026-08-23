@@ -428,6 +428,22 @@ pub(crate) fn runtime_prompt_control_instructions(input: RuntimePromptControlInp
     blocks.join("\n\n")
 }
 
+pub(crate) struct ChatRuntimePromptInput<'a> {
+    pub(crate) memory_recall_allowed: bool,
+    pub(crate) capability_router_instruction: Option<&'a str>,
+    pub(crate) mode: &'a str,
+    pub(crate) objective_contract: Option<&'a local_first_task_runtime::ObjectiveContractRecord>,
+}
+
+pub(crate) fn prepare_chat_runtime_prompt(input: ChatRuntimePromptInput<'_>) -> String {
+    runtime_prompt_control_instructions(RuntimePromptControlInput {
+        memory_recall_allowed: input.memory_recall_allowed,
+        capability_router_instruction: input.capability_router_instruction,
+        mode: input.mode,
+        objective_contract: input.objective_contract,
+    })
+}
+
 pub(crate) fn operational_plan_instruction() -> &'static str {
     "OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing \
 in the SAME turn. The plan is a live projection of the canonical objective, not a separate artifact \
@@ -469,17 +485,18 @@ discovery/search from scratch."
 #[cfg(test)]
 mod tests {
     use super::{
-        RuntimePromptControlInput, artifact_destination_prompt_block, ask_mode_instruction,
-        booking_assumption_choice_instruction, browser_open_research_discovery_instruction,
-        choice_clarify_instruction, choice_resume_instruction_legacy_backup,
-        code_map_available_instruction, connected_service_tools_instruction,
-        contact_context_instruction_block, core_operating_instruction, debug_mode_instruction,
-        destination_folders_instruction, execution_verification_instruction,
-        expired_connected_services_instruction, freshness_verification_instruction,
-        goal_propose_instruction, language_follow_user_instruction,
-        memory_recall_usage_instruction, memory_scope_restricted_instruction,
-        objective_contract_instruction, objective_contract_read_only_default_instruction,
-        operational_plan_instruction, plan_mode_instruction, runtime_prompt_control_instructions,
+        ChatRuntimePromptInput, RuntimePromptControlInput, artifact_destination_prompt_block,
+        ask_mode_instruction, booking_assumption_choice_instruction,
+        browser_open_research_discovery_instruction, choice_clarify_instruction,
+        choice_resume_instruction_legacy_backup, code_map_available_instruction,
+        connected_service_tools_instruction, contact_context_instruction_block,
+        core_operating_instruction, debug_mode_instruction, destination_folders_instruction,
+        execution_verification_instruction, expired_connected_services_instruction,
+        freshness_verification_instruction, goal_propose_instruction,
+        language_follow_user_instruction, memory_recall_usage_instruction,
+        memory_scope_restricted_instruction, objective_contract_instruction,
+        objective_contract_read_only_default_instruction, operational_plan_instruction,
+        plan_mode_instruction, prepare_chat_runtime_prompt, runtime_prompt_control_instructions,
     };
 
     #[test]
@@ -772,6 +789,22 @@ mod tests {
                 < guidance.find("FRESHNESS / VERIFICATION").unwrap()
         );
         assert!(guidance.find("DEBUG MODE").unwrap() < guidance.find("revision 12").unwrap());
+    }
+
+    #[test]
+    fn gateway_prompt_instructions_prepare_chat_runtime_prompt() {
+        let guidance = prepare_chat_runtime_prompt(ChatRuntimePromptInput {
+            memory_recall_allowed: true,
+            capability_router_instruction: Some("ROUTE SENTINEL"),
+            mode: "ask",
+            objective_contract: None,
+        });
+
+        assert!(guidance.contains("MEMORY: you have a long-term memory"));
+        assert!(!guidance.contains("MEMORY SCOPE FOR THIS OBJECTIVE"));
+        assert!(guidance.contains("ROUTE SENTINEL"));
+        assert!(guidance.contains("ASK MODE"));
+        assert!(guidance.contains("OBJECTIVE CONTRACT: none recorded"));
     }
 
     #[test]
