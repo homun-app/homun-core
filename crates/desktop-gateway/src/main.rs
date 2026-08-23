@@ -1744,7 +1744,7 @@ async fn stream_chat_via_openai(
     let chat_toolset = prepare_chat_toolset(ChatToolsetInput {
         state,
         prompt: &request.prompt,
-        read_only: turn_policy.read_only,
+        turn_policy: &turn_policy,
         contact_only: contact_memory_perimeter.contact_only,
         memory_recall_allowed,
         has_skills,

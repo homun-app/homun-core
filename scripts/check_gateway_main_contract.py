@@ -4249,6 +4249,7 @@ def main() -> int:
         "fn filesystem_mcp_connected(",
         "pub(crate) async fn prepare_chat_toolset(",
         "pub(crate) struct ChatToolsetInput",
+        "turn_policy: &'a ChatTurnPolicy,",
         "pub(crate) struct ChatToolset",
         "initial_manager_tool_schemas_for_test(",
         "tool_stays_live_this_turn(",
@@ -4260,6 +4261,24 @@ def main() -> int:
             snippet,
             "chat toolset owner must own per-turn manager tool assembly",
         )
+    assert_not_contains(
+        chat_toolset_source,
+        "pub(crate) read_only: bool,",
+        "chat toolset input must receive typed ChatTurnPolicy, not a scalar read_only copy",
+    )
+    toolset_call = source.split(
+        "let chat_toolset = prepare_chat_toolset(ChatToolsetInput {", 1
+    )[1].split("})", 1)[0]
+    assert_contains(
+        toolset_call,
+        "turn_policy: &turn_policy,",
+        "gateway root must pass typed ChatTurnPolicy into chat toolset owner",
+    )
+    assert_not_contains(
+        toolset_call,
+        "read_only: turn_policy.read_only,",
+        "gateway root must not pass scalar read_only into chat toolset owner",
+    )
     for snippet in [
         "let mut base_tools = initial_manager_tool_schemas_for_test(",
         "base_tools.into_iter().partition(|schema|",
