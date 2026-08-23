@@ -26,7 +26,7 @@ pub(crate) struct ChatToolsetInput<'a> {
     pub(crate) state: &'a AppState,
     pub(crate) prompt: &'a str,
     pub(crate) turn_policy: &'a ChatTurnPolicy,
-    pub(crate) contact_only: bool,
+    pub(crate) contact_memory_perimeter: ContactMemoryPerimeter,
     pub(crate) memory_recall_allowed: bool,
     pub(crate) has_skills: bool,
     pub(crate) artifact_destinations: &'a [ArtifactDestination],
@@ -119,7 +119,10 @@ fn filesystem_mcp_connected(schemas: &[serde_json::Value]) -> bool {
 
 pub(crate) async fn prepare_chat_toolset(input: ChatToolsetInput<'_>) -> ChatToolset {
     let read_only = input.turn_policy.read_only;
-    let mut base_tools = initial_manager_tool_schemas_for_test(read_only, input.contact_only);
+    let mut base_tools = initial_manager_tool_schemas_for_test(
+        read_only,
+        input.contact_memory_perimeter.contact_only,
+    );
     if input.memory_recall_allowed {
         base_tools.push(recall_memory_tool_schema());
     }

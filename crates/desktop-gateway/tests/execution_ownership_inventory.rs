@@ -4704,6 +4704,7 @@ fn chat_toolset_has_one_gateway_owner() {
         "pub(crate) async fn prepare_chat_toolset(",
         "struct ChatToolsetInput",
         "turn_policy: &'a ChatTurnPolicy,",
+        "contact_memory_perimeter: ContactMemoryPerimeter,",
         "struct ChatToolset",
         "initial_manager_tool_schemas_for_test(",
         "tool_stays_live_this_turn(",
@@ -4737,6 +4738,10 @@ fn chat_toolset_has_one_gateway_owner() {
         !toolset.contains("pub(crate) read_only: bool,"),
         "chat toolset input must receive typed ChatTurnPolicy, not a scalar read_only copy"
     );
+    assert!(
+        !toolset.contains("pub(crate) contact_only: bool,"),
+        "chat toolset input must receive typed ContactMemoryPerimeter, not a scalar contact_only copy"
+    );
     let toolset_call = main
         .split("let chat_toolset = prepare_chat_toolset(ChatToolsetInput {")
         .nth(1)
@@ -4749,8 +4754,16 @@ fn chat_toolset_has_one_gateway_owner() {
         "main.rs must pass the typed chat turn policy into the toolset owner"
     );
     assert!(
+        toolset_call.contains("contact_memory_perimeter,"),
+        "main.rs must pass the typed contact memory perimeter into the toolset owner"
+    );
+    assert!(
         !toolset_call.contains("read_only: turn_policy.read_only,"),
         "main.rs must not pass a scalar read_only copy into the toolset owner"
+    );
+    assert!(
+        !toolset_call.contains("contact_only: contact_memory_perimeter.contact_only,"),
+        "main.rs must not pass a scalar contact_only copy into the toolset owner"
     );
 
     for adjacent in [
