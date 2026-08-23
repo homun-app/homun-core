@@ -3263,11 +3263,50 @@ def main() -> int:
         "pub(crate) fn gateway_turn_policy(",
         "capability routing owner must expose turn policy factory",
     )
+    assert_contains(
+        capability_routing_source,
+        "pub(crate) struct ChatWorkflowRoutingPlanInput",
+        "capability routing owner must expose chat workflow routing plan input",
+    )
+    assert_contains(
+        capability_routing_source,
+        "pub(crate) struct ChatWorkflowRoutingPlan",
+        "capability routing owner must expose chat workflow routing plan output",
+    )
+    assert_contains(
+        capability_routing_source,
+        "pub(crate) fn resolve_chat_workflow_routing_plan(",
+        "capability routing owner must expose chat workflow routing plan resolver",
+    )
     assert_not_contains(
         source,
         "GatewayTurnPolicy::new(",
         "gateway root must not construct GatewayTurnPolicy directly",
     )
+    stream_chat_body = (
+        source.split("async fn stream_chat_via_openai(", 1)[1]
+        .split("async fn run_agent_rounds(", 1)[0]
+    )
+    workflow_routing_setup = stream_chat_body.split("let prompt_workspace =", 1)[1].split(
+        "let turn_policy =", 1
+    )[0]
+    assert_contains(
+        workflow_routing_setup,
+        "resolve_chat_workflow_routing_plan(ChatWorkflowRoutingPlanInput",
+        "gateway root must delegate workflow routing plan assembly",
+    )
+    for snippet in [
+        "active_routing_binding(state, request.thread_id.as_deref())",
+        "route_capability_with_binding(semantic_contract.as_ref(), routing_binding.as_ref())",
+        "workflow_route_from_capability(&capability_route)",
+        ".and_then(resolve_workflow_routing)",
+        "thread_user_message_count_fail_open(state, request.thread_id.as_deref())",
+    ]:
+        assert_not_contains(
+            workflow_routing_setup,
+            snippet,
+            "gateway root must not assemble workflow routing plan inline",
+        )
     assert_contains(
         source,
         "mod gateway_project_search_tools;",

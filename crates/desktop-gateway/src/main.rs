@@ -1920,48 +1920,18 @@ async fn stream_chat_via_openai(
         .unwrap_or_default()
         .trim()
         .to_string();
-    // An active thread-scoped RoutingBinding records an exact route the user already selected.
-    // It remains authoritative over the model-owned semantic decision; absent or malformed
-    // bindings fall back to that structured decision, never to prompt keyword routing.
-    let routing_binding: Option<RoutingBinding> =
-        active_routing_binding(state, request.thread_id.as_deref());
-    let capability_route =
-        route_capability_with_binding(semantic_contract.as_ref(), routing_binding.as_ref());
-    let workflow_route = workflow_route_from_capability(&capability_route);
-    // S2 T4/T5: resolve the binding's WorkflowRouting ONCE — when it survived plan-precedence
-    // AND still resolves to a registered routing — so the hard-prune's `deny_tools` (T4) and the
-    // forced `tool_choice` gate (T5) both read off the SAME resolution.
-    let resolved_workflow_routing = routing_binding
-        .as_ref()
-        .filter(|_| matches!(workflow_route, WorkflowRouteDecision::Workflow { .. }))
-        .and_then(resolve_workflow_routing);
-    // S2 T4: carry its `deny_tools` to the prune call sites below — hard-prune removes
-    // skill:*/run_command/shell/the-sibling-make_* explicitly, not just by omission.
-    let workflow_deny_tools: Vec<String> = resolved_workflow_routing
-        .as_ref()
-        .map(|routing| routing.deny_tools.clone())
-        .unwrap_or_default();
-    // S2 T5: force `tool_choice` to the routed tool — belt-and-suspenders on top of the hard-
-    // prune above — but ONLY once the intake exchange is done. On the workflow's FIRST turn
-    // (right after "Use template") the model must stay free to ask clarifying questions
-    // ("auto"); forcing immediately would railroad an empty/guessed brief into the tool call.
-    // Turn-index heuristic: the thread already carries >=2 user messages (the seed "Use
-    // template" prompt + at least one intake reply) by the time generation runs here — the
-    // broker inserts the CURRENT turn's user message atomically at enqueue, before the worker
-    // ever calls in (see `enqueue_chat_turn_core`), so a plain count already includes it.
-    // Final-review fix (I3): only compute the user-message count when a binding actually
-    // resolved — `thread_user_message_count_fail_open` loads the WHOLE thread message history
-    // + takes a store lock, and `forced_tool_for_turn` returns `None` unconditionally when
-    // `routing` is `None` anyway, so an ordinary turn (no binding) previously paid for that
-    // load and threw the result away. Gating here skips the messages() load entirely for the
-    // overwhelming majority of turns; behavior is identical when a binding IS present.
-    let forced_tool: Option<String> = match resolved_workflow_routing.as_ref() {
-        Some(routing) => forced_tool_for_turn(
-            Some(routing),
-            thread_user_message_count_fail_open(state, request.thread_id.as_deref()),
-        ),
-        None => None,
-    };
+    let workflow_routing_plan = resolve_chat_workflow_routing_plan(ChatWorkflowRoutingPlanInput {
+        state,
+        thread_id: request.thread_id.as_deref(),
+        semantic_contract: semantic_contract.as_ref(),
+    });
+    let ChatWorkflowRoutingPlan {
+        capability_route,
+        workflow_route,
+        workflow_deny_tools,
+        forced_tool,
+        ..
+    } = workflow_routing_plan;
     let turn_policy =
         resolve_chat_turn_policy(request.mode.as_deref(), request.tool_policy.as_deref());
     let mode = turn_policy.mode.clone();
