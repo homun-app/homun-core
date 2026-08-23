@@ -263,15 +263,15 @@ pub(crate) use gateway_memory_bench::{
 };
 #[cfg(test)]
 use gateway_memory_briefing::{
-    BriefingMemoryItem, MemoryInjectionPolicy, format_memory_block,
-    gather_profile_memory_for_prompt, gather_profile_memory_with_options,
-    gather_profile_memory_with_provenance,
+    BriefingMemoryItem, format_memory_block, gather_profile_memory_for_prompt,
+    gather_profile_memory_with_options, gather_profile_memory_with_provenance,
+    memory_intent_allows_recall,
 };
 use gateway_memory_briefing::{
-    CHAT_MEMORY_BUDGET_CHARS, format_memory_block_with_provenance,
+    CHAT_MEMORY_BUDGET_CHARS, MemoryInjectionPolicy, format_memory_block_with_provenance,
     gather_profile_memory_for_intent_with_provenance, memory_briefing_source_fingerprint,
-    memory_injection_policy, memory_intent_allows_recall, memory_intent_for_execution,
-    revalidated_cached_briefing,
+    memory_injection_policy, memory_intent_context_for_semantic_contract,
+    memory_intent_for_execution, revalidated_cached_briefing,
 };
 #[cfg(test)]
 use gateway_memory_dedup::normalize_for_dedup;
@@ -1628,7 +1628,7 @@ async fn stream_chat_via_openai(
         system,
         catalog: connected_tool_catalog,
     });
-    let mut catalog_index = connected_prompt.catalog_index;
+    let catalog_index = connected_prompt.catalog_index;
     let composio_writes = connected_prompt.composio_writes;
     let mcp_schemas = connected_prompt.mcp_schemas;
     let has_composio = connected_prompt.has_composio;
@@ -1654,22 +1654,22 @@ async fn stream_chat_via_openai(
     // prompt text-compatible while exposing the real content boundary to the
     // Prompt Inspector and independent budgets.
     let prompt_core = system.clone();
-    let active_objective_contract =
-        objective_contract_for_execution(state, request.thread_id.as_deref());
-    let semantic_contract = active_objective_contract
-        .as_ref()
-        .and_then(semantic_decision::semantic_decision_from_contract);
-    let objective_effect_policy =
-        semantic_decision::ObjectiveEffectPolicy::from_contract(active_objective_contract.as_ref());
-    catalog_index.retain(|(name, _, _)| {
-        !objective_blocks_tool(&objective_effect_policy, name, &composio_writes)
-    });
-    let memory_intent = semantic_contract
-        .as_ref()
-        .map(|semantic| semantic.decision.memory_intent.clone())
-        .unwrap_or_else(semantic_decision::MemoryIntent::safe_default);
-    let memory_recall_allowed = memory_intent_allows_recall(&memory_intent);
-    let memory_injection = memory_injection_policy(&memory_intent);
+    let objective_execution_context =
+        prepare_chat_objective_execution_context(ChatObjectiveExecutionContextInput {
+            state,
+            thread_id: request.thread_id.as_deref(),
+            catalog_index,
+            composio_writes: &composio_writes,
+        });
+    let ChatObjectiveExecutionContext {
+        active_objective_contract,
+        semantic_contract,
+        objective_effect_policy,
+        memory_intent,
+        memory_recall_allowed,
+        memory_injection,
+        catalog_index,
+    } = objective_execution_context;
     // Memory scope. Perimeter "contact_only" (the default for channel contacts) is a
     // HARD gate: the user's personal profile + RAG are NOT injected — the turn only
     // sees the conversation history with THIS contact. "personal" opts a trusted

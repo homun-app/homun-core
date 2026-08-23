@@ -28,6 +28,9 @@ RECALL_CONTEXT_RS = os.path.join(
 MEMORY_PROMPT_CONTEXT_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_memory_prompt_context.rs"
 )
+MEMORY_BRIEFING_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_memory_briefing.rs"
+)
 TEXT_SAFETY_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_text_safety.rs")
 BROWSER_TOOLS_RS = os.path.join(ROOT, "crates", "desktop-gateway", "src", "gateway_browser_tools.rs")
 TOOL_EXECUTION_RS = os.path.join(
@@ -611,6 +614,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn format_memory_block_with_provenance(": "memory briefing block formatting must stay in gateway_memory_briefing",
         "fn format_memory_block(": "memory briefing test formatter must stay in gateway_memory_briefing",
         "fn memory_intent_for_execution(": "memory briefing execution intent resolution must stay in gateway_memory_briefing",
+        "fn memory_intent_context_for_semantic_contract(": "memory briefing execution context projection must stay in gateway_memory_briefing",
         "struct MemoryInjectionPolicy": "memory briefing injection policy type must stay in gateway_memory_briefing",
         "fn memory_injection_policy(": "memory briefing injection policy must stay in gateway_memory_briefing",
         "fn memory_intent_allows_recall(": "memory briefing recall policy must stay in gateway_memory_briefing",
@@ -1763,6 +1767,8 @@ def main() -> int:
         prompt_packets_source = handle.read()
     with open(PROMPT_INSTRUCTIONS_RS, "r", encoding="utf-8") as handle:
         prompt_instructions_source = handle.read()
+    with open(MEMORY_BRIEFING_RS, "r", encoding="utf-8") as handle:
+        memory_briefing_source = handle.read()
     with open(BRAIN_RUNTIME_RS, "r", encoding="utf-8") as handle:
         brain_runtime_source = handle.read()
     with open(BRAIN_MATERIALIZATION_RS, "r", encoding="utf-8") as handle:
@@ -3303,6 +3309,43 @@ def main() -> int:
         source.split("async fn stream_chat_via_openai(", 1)[1]
         .split("async fn run_agent_rounds(", 1)[0]
     )
+    objective_execution_setup = stream_chat_body.split("let prompt_core =", 1)[1].split(
+        "let contact_memory_perimeter =", 1
+    )[0]
+    for snippet in [
+        "pub(crate) struct ChatObjectiveExecutionContextInput",
+        "pub(crate) struct ChatObjectiveExecutionContext",
+        "pub(crate) fn prepare_chat_objective_execution_context(",
+    ]:
+        assert_contains(
+            tool_execution_source,
+            snippet,
+            "tool execution owner must expose chat objective execution context",
+        )
+    assert_contains(
+        memory_briefing_source,
+        "pub(crate) fn memory_intent_context_for_semantic_contract(",
+        "memory briefing owner must expose typed memory intent context projection",
+    )
+    assert_contains(
+        objective_execution_setup,
+        "prepare_chat_objective_execution_context(ChatObjectiveExecutionContextInput",
+        "gateway root must delegate chat objective execution context assembly",
+    )
+    for snippet in [
+        "objective_contract_for_execution(state, request.thread_id.as_deref())",
+        "semantic_decision::ObjectiveEffectPolicy::from_contract(",
+        "catalog_index.retain(|(name, _, _)|",
+        "objective_blocks_tool(&objective_effect_policy",
+        ".unwrap_or_else(semantic_decision::MemoryIntent::safe_default)",
+        "memory_intent_allows_recall(&memory_intent)",
+        "memory_injection_policy(&memory_intent)",
+    ]:
+        assert_not_contains(
+            objective_execution_setup,
+            snippet,
+            "gateway root must not assemble chat objective execution context inline",
+        )
     workflow_routing_setup = stream_chat_body.split("let prompt_workspace =", 1)[1].split(
         "let turn_policy =", 1
     )[0]
@@ -4916,13 +4959,18 @@ def main() -> int:
         source.split("async fn stream_chat_via_openai(", 1)[1]
         .split("async fn run_agent_rounds(", 1)[0]
     )
-    if (
-        stream_body.count("objective_contract_for_execution(state, request.thread_id.as_deref())")
-        != 1
-    ):
+    objective_context_calls = stream_body.count(
+        "prepare_chat_objective_execution_context(ChatObjectiveExecutionContextInput"
+    )
+    if objective_context_calls != 1:
         raise AssertionError(
-            "gateway root must load the active objective contract once and pass it to prompt owners"
+            "gateway root must prepare the chat objective execution context once"
         )
+    assert_not_contains(
+        stream_body,
+        "objective_contract_for_execution(state, request.thread_id.as_deref())",
+        "gateway root must not load the active objective contract inline",
+    )
     runtime_prompt_setup = stream_body.split("let capability_router_instruction =", 1)[1].split(
         "let (system, prompt_packets) =", 1
     )[0]

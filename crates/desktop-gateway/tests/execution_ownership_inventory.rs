@@ -1352,9 +1352,60 @@ fn objective_contract_prompt_instructions_have_one_gateway_owner() {
     }
 
     assert!(
-        main.contains("objective_contract_for_execution("),
-        "main.rs still owns the runtime decision to append objective contract guidance"
+        main.contains("objective_contract: active_objective_contract.as_ref()"),
+        "main.rs must pass the projected objective contract to runtime prompt control"
     );
+}
+
+#[test]
+fn chat_objective_execution_context_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let tool_execution = production_source(&root.join("src/gateway_tool_execution.rs"));
+    let memory_briefing = production_source(&root.join("src/gateway_memory_briefing.rs"));
+    let setup = main
+        .split("let prompt_core =")
+        .nth(1)
+        .expect("prompt core setup")
+        .split("let contact_memory_perimeter =")
+        .next()
+        .expect("objective execution setup");
+
+    for pattern in [
+        "pub(crate) struct ChatObjectiveExecutionContextInput",
+        "pub(crate) struct ChatObjectiveExecutionContext",
+        "pub(crate) fn prepare_chat_objective_execution_context(",
+    ] {
+        assert!(
+            tool_execution.contains(pattern),
+            "tool execution owner must contain chat objective execution context surface {pattern}"
+        );
+    }
+    assert!(
+        memory_briefing.contains("pub(crate) fn memory_intent_context_for_semantic_contract("),
+        "memory briefing owner must expose typed memory intent context projection"
+    );
+    assert!(
+        setup.contains(
+            "prepare_chat_objective_execution_context(ChatObjectiveExecutionContextInput"
+        ),
+        "main.rs must delegate chat objective execution context assembly"
+    );
+
+    for pattern in [
+        "objective_contract_for_execution(state, request.thread_id.as_deref())",
+        "semantic_decision::ObjectiveEffectPolicy::from_contract(",
+        "catalog_index.retain(|(name, _, _)|",
+        "objective_blocks_tool(&objective_effect_policy",
+        ".unwrap_or_else(semantic_decision::MemoryIntent::safe_default)",
+        "memory_intent_allows_recall(&memory_intent)",
+        "memory_injection_policy(&memory_intent)",
+    ] {
+        assert!(
+            !setup.contains(pattern),
+            "main.rs must not assemble chat objective execution context inline {pattern}"
+        );
+    }
 }
 
 #[test]
@@ -4457,10 +4508,17 @@ fn runtime_prompt_control_instructions_have_one_gateway_owner() {
     }
     assert_eq!(
         stream
-            .matches("objective_contract_for_execution(state, request.thread_id.as_deref())")
+            .matches("prepare_chat_objective_execution_context(ChatObjectiveExecutionContextInput")
             .count(),
         1,
-        "stream setup must load the active objective contract once and pass it to prompt owners"
+        "stream setup must prepare the chat objective execution context once"
+    );
+    assert_eq!(
+        stream
+            .matches("objective_contract_for_execution(state, request.thread_id.as_deref())")
+            .count(),
+        0,
+        "stream setup must not load the active objective contract inline"
     );
 
     for pattern in [

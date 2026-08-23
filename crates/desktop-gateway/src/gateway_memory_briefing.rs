@@ -371,10 +371,30 @@ pub(crate) fn memory_intent_for_execution(
         .unwrap_or_else(semantic_decision::MemoryIntent::safe_default)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MemoryIntentExecutionContext {
+    pub(crate) memory_intent: semantic_decision::MemoryIntent,
+    pub(crate) memory_recall_allowed: bool,
+    pub(crate) memory_injection: MemoryInjectionPolicy,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct MemoryInjectionPolicy {
     pub(crate) include_current_thread: bool,
     pub(crate) include_cross_thread: bool,
+}
+
+pub(crate) fn memory_intent_context_for_semantic_contract(
+    semantic_contract: Option<&semantic_decision::ValidatedSemanticDecision>,
+) -> MemoryIntentExecutionContext {
+    let memory_intent = semantic_contract
+        .map(|semantic| semantic.decision.memory_intent.clone())
+        .unwrap_or_else(semantic_decision::MemoryIntent::safe_default);
+    MemoryIntentExecutionContext {
+        memory_recall_allowed: memory_intent_allows_recall(&memory_intent),
+        memory_injection: memory_injection_policy(&memory_intent),
+        memory_intent,
+    }
 }
 
 pub(crate) fn memory_injection_policy(
