@@ -4964,6 +4964,11 @@ def main() -> int:
         "pub(crate) contact_memory_perimeter: ContactMemoryPerimeter,",
         "tool execution owner must receive typed ContactMemoryPerimeter for capability executor",
     )
+    assert_contains(
+        tool_execution_source,
+        "pub(crate) contact_memory_perimeter: &'a ContactMemoryPerimeter,",
+        "chat tool context must receive typed ContactMemoryPerimeter",
+    )
     capability_executor_input_source = tool_execution_source.split(
         "pub(crate) struct GatewayCapabilityExecutorInput", 1
     )[1].split("/// The gateway's `CapabilityExecutor`", 1)[0]
@@ -4987,6 +4992,42 @@ def main() -> int:
             capability_executor_input_source,
             snippet,
             "capability executor input must not receive scalar contact perimeter",
+        )
+    chat_tool_ctx_source = tool_execution_source.split(
+        "pub(crate) struct ChatToolCtx", 1
+    )[1].split("/// Emit an approval confirmation card", 1)[0]
+    assert_contains(
+        chat_tool_ctx_source,
+        "pub(crate) contact_memory_perimeter: &'a ContactMemoryPerimeter,",
+        "chat tool context must carry typed ContactMemoryPerimeter",
+    )
+    gateway_capability_executor_source = tool_execution_source.split(
+        "pub(crate) struct GatewayCapabilityExecutor", 1
+    )[1].split("pub(crate) fn gateway_capability_executor<'a>(", 1)[0]
+    assert_contains(
+        gateway_capability_executor_source,
+        "contact_memory_perimeter: ContactMemoryPerimeter,",
+        "gateway capability executor must carry typed ContactMemoryPerimeter",
+    )
+    for snippet in [
+        "pub(crate) contact_only: bool,",
+        "pub(crate) can_see_contacts: bool,",
+        "pub(crate) can_see_calendar: bool,",
+        "pub(crate) can_use_project_memory: bool,",
+        "contact_only: bool,",
+        "can_see_contacts: bool,",
+        "can_see_calendar: bool,",
+        "can_use_project_memory: bool,",
+    ]:
+        assert_not_contains(
+            chat_tool_ctx_source,
+            snippet,
+            "chat tool context must not carry scalar contact perimeter",
+        )
+        assert_not_contains(
+            gateway_capability_executor_source,
+            snippet,
+            "gateway capability executor must not carry scalar contact perimeter",
         )
     assert_contains(
         tool_execution_source,

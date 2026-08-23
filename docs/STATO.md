@@ -44,6 +44,11 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
+- Estrazione locale `gateway_tool_execution`: `GatewayCapabilityExecutor` e
+  `ChatToolCtx` trasportano `ContactMemoryPerimeter` typed invece di ricreare
+  copie scalari `contact_only`/`can_see_contacts`/`can_see_calendar`/
+  `can_use_project_memory`; dispatch `recall_memory`, discovery capability e
+  guardie connector derivano i flag solo localmente dal perimetro.
 - Estrazione locale `gateway_memory_sources`/`gateway_chat_workspace_prompt_context`/
   `gateway_tool_execution`:
   la decisione `memory_perimeter_allows_recall` riceve `&ContactMemoryPerimeter`

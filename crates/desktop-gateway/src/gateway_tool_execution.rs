@@ -448,10 +448,7 @@ pub(crate) struct ChatToolCtx<'a> {
     pub(crate) tx: &'a StreamSink,
     pub(crate) thread_id: Option<&'a str>,
     pub(crate) read_only: bool,
-    pub(crate) contact_only: bool,
-    pub(crate) can_see_contacts: bool,
-    pub(crate) can_see_calendar: bool,
-    pub(crate) can_use_project_memory: bool,
+    pub(crate) contact_memory_perimeter: &'a ContactMemoryPerimeter,
     pub(crate) vault_value_requested: bool,
     pub(crate) autonomous: bool,
     pub(crate) composio_writes: &'a std::collections::BTreeSet<String>,
@@ -4054,13 +4051,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
         // book — perimeter-blind recall has no way to strip other people out, so
         // fail-closed is to block it entirely.
         let in_project = gateway_memory_workspace_id().as_str() != PERSONAL_WORKSPACE;
-        let contact_memory_perimeter = ContactMemoryPerimeter {
-            contact_only: ctx.contact_only,
-            can_see_contacts: ctx.can_see_contacts,
-            can_see_calendar: ctx.can_see_calendar,
-            can_use_project_memory: ctx.can_use_project_memory,
-        };
-        if !memory_perimeter_allows_recall(&contact_memory_perimeter, in_project) {
+        if !memory_perimeter_allows_recall(ctx.contact_memory_perimeter, in_project) {
             "Personal memory not accessible in a conversation with this \
 contact: use only the messages from this chat. Do NOT reveal personal data of the user or third parties."
                 .to_string()
@@ -4522,8 +4513,9 @@ an uncertain date.",
         // read-only mode. Without this the empty result told the model to "rephrase" — but the filters
         // are on tool IDENTITY, not on the wording, so rephrasing could never work and the model kept
         // re-querying with synonyms.
+        let contact_memory_perimeter = ctx.contact_memory_perimeter;
         let mut withheld = 0usize;
-        if !ctx.catalog_index.is_empty() && !ctx.contact_only {
+        if !ctx.catalog_index.is_empty() && !contact_memory_perimeter.contact_only {
             for entry in search_connector_capability_entries(
                 ctx.catalog_index,
                 &intent,
@@ -4535,11 +4527,11 @@ an uncertain date.",
                 }
                 // PERIMETER: don't even surface calendar/contacts tools when the
                 // matching axis is off (the dispatch refuses them anyway).
-                if !ctx.can_see_calendar && tool_touches_calendar(&entry.key) {
+                if !contact_memory_perimeter.can_see_calendar && tool_touches_calendar(&entry.key) {
                     withheld += 1;
                     continue;
                 }
-                if !ctx.can_see_contacts && tool_touches_contacts(&entry.key) {
+                if !contact_memory_perimeter.can_see_contacts && tool_touches_contacts(&entry.key) {
                     withheld += 1;
                     continue;
                 }
@@ -5056,7 +5048,10 @@ connect the suggested connectors (skill/MCP/Composio). Do NOT say you have alrea
         tokio::task::spawn_blocking(move || cancel_scheduled_task(&st, &task_id))
             .await
             .unwrap_or_else(|e| format!("Error: {e}"))
-    } else if !ctx.can_see_calendar && !name.is_empty() && tool_touches_calendar(name) {
+    } else if !ctx.contact_memory_perimeter.can_see_calendar
+        && !name.is_empty()
+        && tool_touches_calendar(name)
+    {
         // PERIMETER (anti-exfiltration): the can_see_calendar axis is enforced
         // HARD here, independent of memory_scope — a "personal"-scope contact that
         // is NOT contact_only still can't pull the user's calendar. All builtins
@@ -5064,14 +5059,17 @@ connect the suggested connectors (skill/MCP/Composio). Do NOT say you have alrea
         "The user's calendar is not accessible in this conversation. \
 Do not reveal commitments, appointments or events."
             .to_string()
-    } else if !ctx.can_see_contacts && !name.is_empty() && tool_touches_contacts(name) {
+    } else if !ctx.contact_memory_perimeter.can_see_contacts
+        && !name.is_empty()
+        && tool_touches_contacts(name)
+    {
         // PERIMETER (anti-exfiltration): the can_see_contacts axis, enforced HARD
         // here too — block the user's address book (Google Contacts / People etc.)
         // even on a non-contact_only turn.
         "The user's address book is not accessible in this conversation. \
 Do not reveal other contacts, people or relationships of the user."
             .to_string()
-    } else if ctx.contact_only && !name.is_empty() {
+    } else if ctx.contact_memory_perimeter.contact_only && !name.is_empty() {
         // PERIMETER (anti-exfiltration): a `contact_only` turn must not reach the
         // user's connected services. All builtins are matched in earlier arms, so
         // any tool reaching here is a connected Composio/MCP tool — refuse it so a
@@ -5408,10 +5406,7 @@ pub(crate) struct GatewayCapabilityExecutor<'a> {
     tx: &'a StreamSink,
     thread_id: Option<&'a str>,
     read_only: bool,
-    contact_only: bool,
-    can_see_contacts: bool,
-    can_see_calendar: bool,
-    can_use_project_memory: bool,
+    contact_memory_perimeter: ContactMemoryPerimeter,
     memory_recall_allowed: bool,
     vault_value_requested: bool,
     autonomous: bool,
@@ -5436,10 +5431,7 @@ pub(crate) fn gateway_capability_executor<'a>(
         tx: input.tx,
         thread_id: input.thread_id,
         read_only: input.turn_policy.read_only,
-        contact_only: input.contact_memory_perimeter.contact_only,
-        can_see_contacts: input.contact_memory_perimeter.can_see_contacts,
-        can_see_calendar: input.contact_memory_perimeter.can_see_calendar,
-        can_use_project_memory: input.contact_memory_perimeter.can_use_project_memory,
+        contact_memory_perimeter: input.contact_memory_perimeter,
         memory_recall_allowed: input.memory_recall_allowed,
         vault_value_requested: input.vault_value_requested,
         autonomous: input.turn_policy.autonomous,
@@ -5940,10 +5932,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             tx: self.tx,
             thread_id: self.thread_id,
             read_only: self.read_only,
-            contact_only: self.contact_only,
-            can_see_contacts: self.can_see_contacts,
-            can_see_calendar: self.can_see_calendar,
-            can_use_project_memory: self.can_use_project_memory,
+            contact_memory_perimeter: &self.contact_memory_perimeter,
             vault_value_requested: self.vault_value_requested,
             autonomous: self.autonomous,
             composio_writes: self.composio_writes,
