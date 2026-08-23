@@ -3566,8 +3566,9 @@ fn agent_turn_tool_seed_has_one_gateway_owner() {
 
     for pattern in [
         "pub(crate) fn seed_agent_turn_tool_schemas(",
+        "turn_policy: &ChatTurnPolicy,",
         "loop_state.tool_schemas = base_tools",
-        "if mode == \"ask\"",
+        "if turn_policy.mode == \"ask\"",
         "loop_state.tool_schemas.clear()",
         "apply_chat_tool_perimeter(ChatToolPerimeterInput",
         "tool_schemas: &mut loop_state.tool_schemas",
@@ -3590,6 +3591,18 @@ fn agent_turn_tool_seed_has_one_gateway_owner() {
             "main.rs must not own agent turn tool schema seeding {pattern}"
         );
     }
+    assert!(
+        stream_chat.contains("seed_agent_turn_tool_schemas(&mut ls, base_tools, &turn_policy,"),
+        "main.rs must pass typed ChatTurnPolicy into agent turn tool seed owner"
+    );
+    assert!(
+        !stream_chat.contains("seed_agent_turn_tool_schemas(&mut ls, base_tools, &mode,"),
+        "main.rs must not pass scalar mode into agent turn tool seed owner"
+    );
+    assert!(
+        !stream_chat.contains("let mode = turn_policy.mode.clone();"),
+        "main.rs must not retain a scalar mode clone after typed policy handoff"
+    );
 
     for adjacent in [
         "async fn stream_chat_via_openai(",

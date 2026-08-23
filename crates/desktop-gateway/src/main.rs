@@ -1702,7 +1702,6 @@ async fn stream_chat_via_openai(
     } = workflow_routing_plan;
     let turn_policy =
         resolve_chat_turn_policy(request.mode.as_deref(), request.tool_policy.as_deref());
-    let mode = turn_policy.mode.clone();
     // Turn trace: setup COMPLETED (memory recall and prompt-build) and generation is about to begin.
     // A `turn_start` following a `turn_received` implies setup succeeded (no pre-gen hang).
     record_chat_turn_start_trace(ChatTurnStartTraceInput {
@@ -1924,7 +1923,7 @@ async fn stream_chat_via_openai(
         // a plain conversational answer (let it end). Latches true once any tool has run.
         // Tools offered to the model this run: the base set, plus any tools the
         // model discovers via `find_connected_tools` (injected on demand).
-        seed_agent_turn_tool_schemas(&mut ls, base_tools, &mode, contact_ctx.as_ref());
+        seed_agent_turn_tool_schemas(&mut ls, base_tools, &turn_policy, contact_ctx.as_ref());
         // Turn-local browser state now lives in the browser subsystem: the loop-visible fields
         // (browser_used / pending_browser_image / browser_tool_call_ids) travel in `LoopState`
         // (slice 5a), and the browser-private state (sidecar session, last snapshot, current tab /

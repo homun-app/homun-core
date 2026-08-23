@@ -9,11 +9,11 @@ use super::*;
 pub(crate) fn seed_agent_turn_tool_schemas(
     loop_state: &mut local_first_engine::LoopState,
     base_tools: Vec<serde_json::Value>,
-    mode: &str,
+    turn_policy: &ChatTurnPolicy,
     contact: Option<&ContactTurnContext>,
 ) {
     loop_state.tool_schemas = base_tools;
-    if mode == "ask" {
+    if turn_policy.mode == "ask" {
         loop_state.tool_schemas.clear();
     }
     apply_chat_tool_perimeter(ChatToolPerimeterInput {
