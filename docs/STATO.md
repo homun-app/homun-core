@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_chat_turn_context`: `ChatTurnPolicy` ora resta la
+- Estrazione locale `gateway_chat_toolset`: `ChatToolsetInput` riceve
+  `&ChatTurnPolicy` e deriva internamente `read_only`, evitando un secondo
+  contratto scalare tra setup turno e tool assembly; prompt/tool pruning,
+  capability corpus, dispatch tool, browser executor e loop agente restano
+  owner separati.
+- Estrazione mergeata `gateway_chat_turn_context`: `ChatTurnPolicy` ora resta la
   proiezione tipizzata dal setup del turno fino a toolset, loop agente e tail;
   `stream_chat_via_openai` non crea piu' contratti concorrenti
   `read_only`/`autonomous`, mentre la policy engine route-aware resta owner

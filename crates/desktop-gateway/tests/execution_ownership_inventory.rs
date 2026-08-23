@@ -4633,6 +4633,7 @@ fn chat_toolset_has_one_gateway_owner() {
         "fn filesystem_mcp_connected(",
         "pub(crate) async fn prepare_chat_toolset(",
         "struct ChatToolsetInput",
+        "turn_policy: &'a ChatTurnPolicy,",
         "struct ChatToolset",
         "initial_manager_tool_schemas_for_test(",
         "tool_stays_live_this_turn(",
@@ -4661,6 +4662,26 @@ fn chat_toolset_has_one_gateway_owner() {
             "main.rs must not retain chat toolset assembly {pattern}"
         );
     }
+
+    assert!(
+        !toolset.contains("pub(crate) read_only: bool,"),
+        "chat toolset input must receive typed ChatTurnPolicy, not a scalar read_only copy"
+    );
+    let toolset_call = main
+        .split("let chat_toolset = prepare_chat_toolset(ChatToolsetInput {")
+        .nth(1)
+        .expect("chat toolset call")
+        .split("})")
+        .next()
+        .expect("chat toolset input block");
+    assert!(
+        toolset_call.contains("turn_policy: &turn_policy,"),
+        "main.rs must pass the typed chat turn policy into the toolset owner"
+    );
+    assert!(
+        !toolset_call.contains("read_only: turn_policy.read_only,"),
+        "main.rs must not pass a scalar read_only copy into the toolset owner"
+    );
 
     for adjacent in [
         "async fn stream_chat_via_openai(",

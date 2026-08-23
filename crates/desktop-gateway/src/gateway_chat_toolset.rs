@@ -25,7 +25,7 @@ pub(crate) struct ConnectedToolCatalog {
 pub(crate) struct ChatToolsetInput<'a> {
     pub(crate) state: &'a AppState,
     pub(crate) prompt: &'a str,
-    pub(crate) read_only: bool,
+    pub(crate) turn_policy: &'a ChatTurnPolicy,
     pub(crate) contact_only: bool,
     pub(crate) memory_recall_allowed: bool,
     pub(crate) has_skills: bool,
@@ -118,7 +118,8 @@ fn filesystem_mcp_connected(schemas: &[serde_json::Value]) -> bool {
 }
 
 pub(crate) async fn prepare_chat_toolset(input: ChatToolsetInput<'_>) -> ChatToolset {
-    let mut base_tools = initial_manager_tool_schemas_for_test(input.read_only, input.contact_only);
+    let read_only = input.turn_policy.read_only;
+    let mut base_tools = initial_manager_tool_schemas_for_test(read_only, input.contact_only);
     if input.memory_recall_allowed {
         base_tools.push(recall_memory_tool_schema());
     }
@@ -129,7 +130,7 @@ pub(crate) async fn prepare_chat_toolset(input: ChatToolsetInput<'_>) -> ChatToo
         suggest_capabilities_tool_schema(),
         resolve_datetime_tool_schema(),
     ]);
-    if !input.read_only {
+    if !read_only {
         if host_computer_gateway::manager_ready() {
             base_tools.push(use_computer_tool_schema());
         }
@@ -168,7 +169,7 @@ pub(crate) async fn prepare_chat_toolset(input: ChatToolsetInput<'_>) -> ChatToo
     if input.has_skills {
         base_tools.push(use_skill_tool_schema());
     }
-    if !input.artifact_destinations.is_empty() && !input.read_only {
+    if !input.artifact_destinations.is_empty() && !read_only {
         base_tools.push(save_artifact_tool_schema(input.artifact_destinations));
     }
     prune_tools_for_objective_policy(
@@ -258,7 +259,7 @@ pub(crate) async fn prepare_chat_toolset(input: ChatToolsetInput<'_>) -> ChatToo
     );
     let capability_corpus = materialize_capability_corpus(CapabilityCorpusMaterializationInput {
         deferred_tools,
-        read_only: input.read_only,
+        read_only,
         objective_effect_policy: input.objective_effect_policy,
         composio_writes: input.composio_writes,
         mcp_schemas: input.mcp_schemas,
