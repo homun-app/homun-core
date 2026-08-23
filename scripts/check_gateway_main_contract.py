@@ -1344,6 +1344,7 @@ def forbidden_root_snippets() -> dict[str, str]:
         "fn enabled_skills_summary(": "skill prompt discovery runtime must stay in gateway_skill_runtime",
         "fn homuncoder_skill_ids(": "HomunCoder skill manifest loading must stay in gateway_skill_runtime",
         "fn skill_prompt_catalog_for_workspace(": "HomunCoder prompt skill filtering must stay in gateway_skill_runtime",
+        "fn prepare_skill_prompt_catalog(": "per-turn prompt skill catalog loading must stay in gateway_skill_runtime",
         "fn skill_prompt_instructions_block(": "skill prompt instruction rendering must stay in gateway_skill_runtime",
         "fn load_skill_body(": "skill progressive disclosure runtime must stay in gateway_skill_runtime",
         "fn load_skill_body_and_sensitive(": "skill sensitive disclosure runtime must stay in gateway_skill_runtime",
@@ -4740,6 +4741,11 @@ def main() -> int:
     )
     assert_contains(
         skill_runtime_source,
+        "pub(crate) async fn prepare_skill_prompt_catalog(",
+        "skill runtime owner must expose per-turn prompt skill catalog loading",
+    )
+    assert_contains(
+        skill_runtime_source,
         "pub(crate) fn skill_prompt_instructions_block(",
         "skill runtime owner must expose prompt instruction rendering",
     )
@@ -4751,11 +4757,14 @@ def main() -> int:
     for snippet in [
         "INSTALLED SKILLS —",
         "METHODOLOGY (HomunCoder)",
+        "tokio::task::spawn_blocking(homuncoder_skill_ids)",
+        "tokio::task::spawn_blocking(enabled_skills_summary)",
+        "skill_prompt_catalog_for_workspace(",
     ]:
         assert_not_contains(
             source,
             snippet,
-            "gateway root must not retain skill prompt instruction copy",
+            "gateway root must not retain skill prompt catalog loading or instruction copy",
         )
     assert_contains(source, "mod gateway_state_access;", "gateway root must declare state access owner")
     assert_contains(

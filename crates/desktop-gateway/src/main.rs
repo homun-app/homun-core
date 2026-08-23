@@ -1633,23 +1633,10 @@ async fn stream_chat_via_openai(
     let mcp_schemas = connected_prompt.mcp_schemas;
     let has_composio = connected_prompt.has_composio;
     let system = connected_prompt.system;
-    // Installed skills (Anthropic Agent Skills, progressive disclosure L1): pre-load
-    // name+description; the model calls `use_skill(<id>)` to pull the full SKILL.md
-    // when a request matches, then follows it.
-    let homuncoder = tokio::task::spawn_blocking(homuncoder_skill_ids)
-        .await
-        .unwrap_or_default();
-    let enabled_skills = tokio::task::spawn_blocking(enabled_skills_summary)
-        .await
-        .unwrap_or_default();
-    // HomunCoder mode: the methodology skills surface only in PROJECT chats, so personal
-    // chats aren't flooded with ~30 dev-discipline skills.
-    let skill_prompt_catalog = skill_prompt_catalog_for_workspace(
-        enabled_skills,
-        &homuncoder,
-        gateway_memory_workspace_id().as_str(),
-    );
+    let skill_prompt_catalog =
+        prepare_skill_prompt_catalog(gateway_memory_workspace_id().as_str()).await;
     let enabled_skills = skill_prompt_catalog.enabled_skills;
+    let homuncoder = skill_prompt_catalog.homuncoder;
     let is_project = skill_prompt_catalog.is_project;
     let has_skills = !enabled_skills.is_empty();
     // Authorized write destinations: when present, the model can deliver
