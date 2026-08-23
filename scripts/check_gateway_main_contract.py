@@ -5156,6 +5156,11 @@ def main() -> int:
     )
     assert_contains(
         prompt_instructions_source,
+        "pub(crate) turn_policy: &'a ChatTurnPolicy,",
+        "prompt instruction owner must receive typed ChatTurnPolicy for chat runtime prompt",
+    )
+    assert_contains(
+        prompt_instructions_source,
         "pub(crate) fn prepare_chat_runtime_prompt(",
         "prompt instruction owner must expose chat runtime prompt assembly",
     )
@@ -5218,6 +5223,16 @@ def main() -> int:
             snippet,
             "gateway root must not retain runtime prompt wrapper glue",
         )
+    assert_contains(
+        runtime_prompt_setup,
+        "turn_policy: &turn_policy,",
+        "gateway root must pass typed ChatTurnPolicy into chat runtime prompt owner",
+    )
+    assert_not_contains(
+        runtime_prompt_setup,
+        "mode: mode.as_str(),",
+        "gateway root must not pass scalar mode into chat runtime prompt owner",
+    )
     for snippet in [
         'format!("{system}\\n\\n{}", memory_recall_usage_instruction())',
         'format!("{system}\\n\\n{}", operational_plan_instruction())',

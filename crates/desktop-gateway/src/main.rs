@@ -1716,7 +1716,7 @@ async fn stream_chat_via_openai(
     let prompt_runtime = prepare_chat_runtime_prompt(ChatRuntimePromptInput {
         memory_recall_allowed,
         capability_router_instruction: capability_router_instruction.as_deref(),
-        mode: mode.as_str(),
+        turn_policy: &turn_policy,
         objective_contract: active_objective_contract.as_ref(),
     });
     let (system, prompt_packets) = compose_gateway_prompt_packets(
