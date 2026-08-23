@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_chat_toolset`: `ChatToolsetInput` riceve anche
+- Estrazione locale `gateway_prompt_instructions`: `ChatRuntimePromptInput`
+  riceve `&ChatTurnPolicy` e deriva internamente il `mode` per le istruzioni
+  plan/ask/debug; `stream_chat_via_openai` non passa piu' un `mode` scalare al
+  prompt runtime, mentre runtime prompt control puro, prompt packets e loop
+  agente restano owner separati.
+- Estrazione mergeata `gateway_chat_toolset`: `ChatToolsetInput` riceve anche
   `ContactMemoryPerimeter` typed e deriva internamente `contact_only`;
   `stream_chat_via_openai` non passa piu' un flag scalare al toolset, mentre
   capability executor, browser executor e loop agente restano owner separati.

@@ -4618,6 +4618,7 @@ fn runtime_prompt_control_instructions_have_one_gateway_owner() {
         "pub(crate) struct RuntimePromptControlInput",
         "pub(crate) fn runtime_prompt_control_instructions(",
         "pub(crate) struct ChatRuntimePromptInput",
+        "pub(crate) turn_policy: &'a ChatTurnPolicy,",
         "pub(crate) fn prepare_chat_runtime_prompt(",
         "memory_recall_usage_instruction()",
         "operational_plan_instruction()",
@@ -4656,6 +4657,14 @@ fn runtime_prompt_control_instructions_have_one_gateway_owner() {
             "main.rs must not own runtime prompt wrapper glue {pattern}"
         );
     }
+    assert!(
+        runtime_prompt_setup.contains("turn_policy: &turn_policy,"),
+        "main.rs must pass typed ChatTurnPolicy into runtime prompt owner"
+    );
+    assert!(
+        !runtime_prompt_setup.contains("mode: mode.as_str(),"),
+        "main.rs must not pass scalar mode into runtime prompt owner"
+    );
     assert_eq!(
         stream
             .matches("prepare_chat_objective_execution_context(ChatObjectiveExecutionContextInput")

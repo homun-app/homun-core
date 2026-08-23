@@ -5,6 +5,7 @@
 //! without growing `main.rs`.
 
 use crate::{
+    ChatTurnPolicy,
     gateway_artifacts::ArtifactDestination,
     gateway_browser_tools::manager_browser_guidance,
     gateway_user_preferences::{effective_user_language, now_block, response_language_instruction},
@@ -446,7 +447,7 @@ pub(crate) fn runtime_prompt_control_instructions(input: RuntimePromptControlInp
 pub(crate) struct ChatRuntimePromptInput<'a> {
     pub(crate) memory_recall_allowed: bool,
     pub(crate) capability_router_instruction: Option<&'a str>,
-    pub(crate) mode: &'a str,
+    pub(crate) turn_policy: &'a ChatTurnPolicy,
     pub(crate) objective_contract: Option<&'a local_first_task_runtime::ObjectiveContractRecord>,
 }
 
@@ -454,7 +455,7 @@ pub(crate) fn prepare_chat_runtime_prompt(input: ChatRuntimePromptInput<'_>) -> 
     runtime_prompt_control_instructions(RuntimePromptControlInput {
         memory_recall_allowed: input.memory_recall_allowed,
         capability_router_instruction: input.capability_router_instruction,
-        mode: input.mode,
+        mode: input.turn_policy.mode.as_str(),
         objective_contract: input.objective_contract,
     })
 }
@@ -499,6 +500,8 @@ discovery/search from scratch."
 
 #[cfg(test)]
 mod tests {
+    use crate::ChatTurnPolicy;
+
     use super::{
         ChatCoreOperatingPromptInput, ChatRuntimePromptInput, RuntimePromptControlInput,
         artifact_destination_prompt_block, ask_mode_instruction,
@@ -823,10 +826,15 @@ mod tests {
 
     #[test]
     fn gateway_prompt_instructions_prepare_chat_runtime_prompt() {
+        let turn_policy = ChatTurnPolicy {
+            mode: "ask".to_string(),
+            read_only: false,
+            autonomous: false,
+        };
         let guidance = prepare_chat_runtime_prompt(ChatRuntimePromptInput {
             memory_recall_allowed: true,
             capability_router_instruction: Some("ROUTE SENTINEL"),
-            mode: "ask",
+            turn_policy: &turn_policy,
             objective_contract: None,
         });
 
