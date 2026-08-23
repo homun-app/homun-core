@@ -4874,6 +4874,11 @@ def main() -> int:
     )
     assert_contains(
         skill_runtime_source,
+        "pub(crate) has_skills: bool",
+        "skill runtime owner must expose whether the prompt catalog has enabled skills",
+    )
+    assert_contains(
+        skill_runtime_source,
         "pub(crate) async fn prepare_skill_prompt_catalog(",
         "skill runtime owner must expose per-turn prompt skill catalog loading",
     )
@@ -4893,6 +4898,7 @@ def main() -> int:
         "tokio::task::spawn_blocking(homuncoder_skill_ids)",
         "tokio::task::spawn_blocking(enabled_skills_summary)",
         "skill_prompt_catalog_for_workspace(",
+        "let has_skills = !enabled_skills.is_empty();",
     ]:
         assert_not_contains(
             source,

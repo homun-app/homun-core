@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (chat turn-start trace tier owner in sviluppo).**
+> **Ultimo aggiornamento: 2026-08-23 (chat skill catalog has-skills in sviluppo).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/chat-turn-start-trace-tier-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#338 mergeate in `main`; slice chat turn-start trace tier owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #338 (`52285cc8`); slice chat turn-start trace tier owner in verifica locale prima della PR |
+| Branch | `fabio/chat-skill-catalog-has-skills` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#339 mergeate in `main`; slice chat skill catalog has-skills in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #339 (`ef20fa14`); slice chat skill catalog has-skills in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_turn_trace`: la risoluzione osservazionale del
+- Estrazione locale `gateway_skill_runtime`: `SkillPromptCatalog` espone anche
+  `has_skills`, derivato dopo il filtro workspace/HomunCoder; il root non
+  ricalcola piu' `!enabled_skills.is_empty()` e consuma una proiezione skill
+  completa per prompt layers e toolset, mentre route skill, seed default,
+  dispatch tool, routing capability e browser restano owner separati.
+- Estrazione mergeata `gateway_turn_trace`: la risoluzione osservazionale del
   model tier per `turn_start` (`load_provider_registry().tier_for_model`) passa
   al trace owner; `stream_chat_via_openai` registra setup-complete passando solo
   prompt/mode/model, mentre model routing, loop agente, budget, plan progress,
@@ -96,8 +101,9 @@ Slice Runtime V2 recenti:
   catalogo prompt skill (`prepare_skill_prompt_catalog`: manifest HomunCoder,
   skill abilitate e filtro project/personal workspace) esce da
   `stream_chat_via_openai`; `main.rs` consuma solo `enabled_skills`,
-  `homuncoder`, `is_project` e `has_skills`, mentre route skill, seed default,
-  prompt layer, toolset, dispatch tool e browser restano owner separati.
+  `homuncoder`, `is_project` e il flag owner-derived `has_skills`, mentre route
+  skill, seed default, prompt layer, toolset, dispatch tool e browser restano
+  owner separati.
 - Estrazione mergeata `gateway_process_bootstrap`: il bootstrap di processo
   (`install_gateway_process_bootstrap`: tracing subscriber, panic log, umask
   owner-only e migrazione data dir legacy) esce da `async fn main`; `main.rs`

@@ -119,6 +119,7 @@ pub(crate) struct SkillPromptCatalog {
     pub(crate) enabled_skills: Vec<(String, String, String)>,
     pub(crate) homuncoder: HashSet<String>,
     pub(crate) is_project: bool,
+    pub(crate) has_skills: bool,
 }
 
 pub(crate) fn skill_prompt_catalog_for_workspace(
@@ -130,10 +131,12 @@ pub(crate) fn skill_prompt_catalog_for_workspace(
     if !is_project {
         enabled_skills.retain(|(id, _, _)| !homuncoder.contains(id));
     }
+    let has_skills = !enabled_skills.is_empty();
     SkillPromptCatalog {
         enabled_skills,
         homuncoder: homuncoder.clone(),
         is_project,
+        has_skills,
     }
 }
 
@@ -417,6 +420,7 @@ mod tests {
         let project =
             skill_prompt_catalog_for_workspace(skills.clone(), &homuncoder, "project-alpha");
         assert!(project.is_project);
+        assert!(project.has_skills);
         assert_eq!(project.enabled_skills.len(), 2);
 
         let personal = skill_prompt_catalog_for_workspace(
@@ -425,6 +429,7 @@ mod tests {
             local_first_memory::PERSONAL_WORKSPACE,
         );
         assert!(!personal.is_project);
+        assert!(personal.has_skills);
         assert_eq!(
             personal
                 .enabled_skills

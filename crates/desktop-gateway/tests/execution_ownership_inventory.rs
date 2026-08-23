@@ -627,6 +627,8 @@ fn skill_prompt_instructions_have_one_gateway_owner() {
 
     for pattern in [
         "pub(crate) async fn prepare_skill_prompt_catalog(",
+        "pub(crate) struct SkillPromptCatalog",
+        "pub(crate) has_skills: bool",
         "fn skill_prompt_instructions_block(",
     ] {
         assert!(
@@ -663,6 +665,7 @@ fn skill_prompt_instructions_have_one_gateway_owner() {
         "tokio::task::spawn_blocking(homuncoder_skill_ids)",
         "tokio::task::spawn_blocking(enabled_skills_summary)",
         "skill_prompt_catalog_for_workspace(",
+        "let has_skills = !enabled_skills.is_empty();",
     ] {
         assert!(
             !main.contains(snippet),
