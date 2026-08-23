@@ -1812,7 +1812,6 @@ async fn stream_chat_via_openai(
     let resume_id = transport.resume_id;
     let tx = transport.sink;
     let rx = transport.receiver;
-    let orchestrator_is_local = provider_endpoint_is_local(&base_url) && !model_id_is_cloud(&model);
     if let PrivacyGuardPreflightOutcome::EarlyResponse(response) =
         evaluate_chat_privacy_guard_preflight(ChatPrivacyGuardPreflightInput {
             http: &state.http,
@@ -1820,7 +1819,8 @@ async fn stream_chat_via_openai(
             request_id: &request.request_id,
             prompt: request.prompt.as_str(),
             applies_new_input,
-            orchestrator_is_local,
+            base_url: &base_url,
+            model: &model,
         })
         .await
     {

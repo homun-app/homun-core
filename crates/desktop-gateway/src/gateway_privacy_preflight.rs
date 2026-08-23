@@ -21,7 +21,8 @@ pub(crate) struct ChatPrivacyGuardPreflightInput<'a> {
     pub(crate) request_id: &'a str,
     pub(crate) prompt: &'a str,
     pub(crate) applies_new_input: bool,
-    pub(crate) orchestrator_is_local: bool,
+    pub(crate) base_url: &'a str,
+    pub(crate) model: &'a str,
 }
 
 pub(crate) enum PrivacyGuardPreflightOutcome {
@@ -32,6 +33,11 @@ pub(crate) enum PrivacyGuardPreflightOutcome {
 pub(crate) struct PrivacyGuardEarlyResponse {
     pub(crate) event: GenerateStreamEvent,
     pub(crate) effective_model: &'static str,
+}
+
+pub(crate) fn chat_privacy_orchestrator_is_local(base_url: &str, model: &str) -> bool {
+    gateway_model_routing::provider_endpoint_is_local(base_url)
+        && !gateway_model_routing::model_id_is_cloud(model)
 }
 
 pub(crate) async fn evaluate_privacy_guard_preflight(
@@ -115,7 +121,7 @@ pub(crate) async fn evaluate_chat_privacy_guard_preflight(
         request_id: input.request_id,
         prompt: privacy_prompt,
         applies_new_input: input.applies_new_input,
-        orchestrator_is_local: input.orchestrator_is_local,
+        orchestrator_is_local: chat_privacy_orchestrator_is_local(input.base_url, input.model),
     })
     .await
 }
@@ -157,6 +163,22 @@ fn privacy_guard_intercept_response(
 mod tests {
     use super::*;
 
+    #[test]
+    fn chat_privacy_orchestrator_locality_requires_local_endpoint_and_non_cloud_model() {
+        assert!(chat_privacy_orchestrator_is_local(
+            "http://127.0.0.1:11434/v1",
+            "llama3.2"
+        ));
+        assert!(!chat_privacy_orchestrator_is_local(
+            "https://api.openai.com/v1",
+            "gpt-5"
+        ));
+        assert!(!chat_privacy_orchestrator_is_local(
+            "http://localhost:11434/v1",
+            "gpt-oss:cloud"
+        ));
+    }
+
     #[tokio::test]
     async fn chat_privacy_preflight_ignores_prompt_when_no_new_input_applies() {
         let store = privacy_guard::PendingVaultProposalStore::default();
@@ -166,7 +188,8 @@ mod tests {
             request_id: "req_1",
             prompt: "ricordati che la targa della mia auto e' FM470BN",
             applies_new_input: false,
-            orchestrator_is_local: true,
+            base_url: "http://127.0.0.1:11434/v1",
+            model: "llama3.2",
         })
         .await;
 

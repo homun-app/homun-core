@@ -4032,8 +4032,11 @@ def main() -> int:
     )
     for snippet in [
         "pub(crate) struct ChatPrivacyGuardPreflightInput",
+        "pub(crate) fn chat_privacy_orchestrator_is_local(",
         "pub(crate) async fn evaluate_chat_privacy_guard_preflight(",
         "pub(crate) async fn evaluate_privacy_guard_preflight(",
+        "gateway_model_routing::provider_endpoint_is_local(",
+        "gateway_model_routing::model_id_is_cloud(",
         "PrivacyGuardPreflightOutcome::EarlyResponse",
         'code: "privacy_guard_unavailable".to_string(),',
         "privacy_guard::build_privacy_guard_intercept(",
@@ -4050,6 +4053,8 @@ def main() -> int:
         "privacy_guard::failure_policy(",
         "privacy_guard::build_privacy_guard_intercept(",
         'code: "privacy_guard_unavailable".to_string(),',
+        "let orchestrator_is_local = provider_endpoint_is_local(&base_url) && !model_id_is_cloud(&model);",
+        "provider_endpoint_is_local(&base_url) && !model_id_is_cloud(&model)",
     ]:
         assert_not_contains(
             source,
