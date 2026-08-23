@@ -4413,6 +4413,14 @@ fn chat_turn_context_has_one_gateway_owner() {
         "c.perimeter.can_see_contacts",
         "c.perimeter.can_see_calendar",
         "context.can_use_project_memory",
+        "let contact_only = contact_memory_perimeter.contact_only;",
+        "let can_see_contacts = contact_memory_perimeter.can_see_contacts;",
+        "let can_see_calendar = contact_memory_perimeter.can_see_calendar;",
+        "let can_use_project_memory = contact_memory_perimeter.can_use_project_memory;",
+        "contact_only: bool,",
+        "can_see_contacts: bool,",
+        "can_see_calendar: bool,",
+        "can_use_project_memory: bool,",
     ] {
         assert!(
             !main.contains(pattern),
@@ -4880,6 +4888,7 @@ fn chat_workspace_prompt_context_has_one_gateway_owner() {
         "pub(crate) struct ChatWorkspacePromptContextInput",
         "pub(crate) struct ChatWorkspacePromptContext",
         "pub(crate) async fn prepare_chat_workspace_prompt_context(",
+        "contact_memory_perimeter: &'a ContactMemoryPerimeter",
         "contact_history_prompt_block(",
         "memory_perimeter_allows_recall(",
         "goal_propose_instruction()",

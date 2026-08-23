@@ -5,6 +5,7 @@
 //! service, prompt wording, toolset and agent loop remain separate owners.
 
 use crate::gateway_channels::ContactTurnContext;
+use crate::gateway_chat_turn_context::ContactMemoryPerimeter;
 use crate::gateway_contacts::{contact_history_prompt_block, episode_texts_by_handles};
 use crate::gateway_identity::{gateway_memory_user_id, gateway_memory_workspace_id};
 use crate::gateway_memory_briefing::{
@@ -39,9 +40,7 @@ pub(crate) struct ChatWorkspacePromptContextInput<'a> {
     pub(crate) prompt: &'a str,
     pub(crate) thread_id: Option<&'a str>,
     pub(crate) contact: Option<&'a ContactTurnContext>,
-    pub(crate) contact_only: bool,
-    pub(crate) can_see_contacts: bool,
-    pub(crate) can_use_project_memory: bool,
+    pub(crate) contact_memory_perimeter: &'a ContactMemoryPerimeter,
     pub(crate) is_project: bool,
     pub(crate) memory_intent: &'a semantic_decision::MemoryIntent,
     pub(crate) memory_injection: MemoryInjectionPolicy,
@@ -68,7 +67,7 @@ pub(crate) async fn prepare_chat_workspace_prompt_context(
     input: ChatWorkspacePromptContextInput<'_>,
 ) -> ChatWorkspacePromptContext {
     let mut automatic_recall_payload = None;
-    let system = if input.contact_only {
+    let system = if input.contact_memory_perimeter.contact_only {
         let cx = input.contact.expect("contact_only implies contact context");
         let episodes = {
             let facade = memory_facade(input.state);
@@ -80,9 +79,9 @@ pub(crate) async fn prepare_chat_workspace_prompt_context(
             None => input.system,
         }
     } else if !memory_perimeter_allows_recall(
-        input.contact_only,
-        input.can_see_contacts,
-        input.can_use_project_memory,
+        input.contact_memory_perimeter.contact_only,
+        input.contact_memory_perimeter.can_see_contacts,
+        input.contact_memory_perimeter.can_use_project_memory,
         input.is_project,
     ) {
         let scope = scope_from_active_workspace();
