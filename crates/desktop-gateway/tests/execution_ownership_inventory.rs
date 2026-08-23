@@ -1261,6 +1261,8 @@ fn goal_propose_prompt_instruction_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
     let prompt_instructions = production_source(&root.join("src/gateway_prompt_instructions.rs"));
+    let workspace_prompt =
+        production_source(&root.join("src/gateway_chat_workspace_prompt_context.rs"));
 
     let pattern = "fn goal_propose_instruction(";
     assert!(
@@ -1285,8 +1287,12 @@ fn goal_propose_prompt_instruction_has_one_gateway_owner() {
     }
 
     assert!(
-        main.contains("ws.as_str() != PERSONAL_WORKSPACE"),
+        !main.contains("ws.as_str() != PERSONAL_WORKSPACE"),
         "main.rs still owns the runtime workspace decision to append goal-propose guidance"
+    );
+    assert!(
+        workspace_prompt.contains("ws.as_str() != PERSONAL_WORKSPACE"),
+        "chat workspace prompt context owner must decide when to append goal-propose guidance"
     );
 }
 
@@ -4286,6 +4292,8 @@ fn contact_history_prompt_block_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
     let contacts = production_source(&root.join("src/gateway_contacts.rs"));
+    let workspace_prompt =
+        production_source(&root.join("src/gateway_chat_workspace_prompt_context.rs"));
 
     assert!(
         contacts.contains("pub(crate) fn contact_history_prompt_block("),
@@ -4308,8 +4316,12 @@ fn contact_history_prompt_block_has_one_gateway_owner() {
     }
 
     assert!(
-        main.contains("episode_texts_by_handles("),
+        !main.contains("episode_texts_by_handles("),
         "main.rs still owns the runtime decision to fetch contact-only history"
+    );
+    assert!(
+        workspace_prompt.contains("episode_texts_by_handles("),
+        "chat workspace prompt context owner must fetch contact-only history"
     );
 }
 
@@ -4665,6 +4677,69 @@ fn chat_tool_perimeter_has_one_gateway_owner() {
         assert!(
             !tool_perimeter.contains(adjacent),
             "chat tool perimeter owner must not absorb adjacent stream/loop/toolset/vision/plan/browser/subagent surface {adjacent}"
+        );
+    }
+}
+
+#[test]
+fn chat_workspace_prompt_context_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let workspace_prompt =
+        production_source(&root.join("src/gateway_chat_workspace_prompt_context.rs"));
+
+    for pattern in [
+        "pub(crate) struct ChatWorkspacePromptContextInput",
+        "pub(crate) struct ChatWorkspacePromptContext",
+        "pub(crate) async fn prepare_chat_workspace_prompt_context(",
+        "contact_history_prompt_block(",
+        "memory_perimeter_allows_recall(",
+        "goal_propose_instruction()",
+        "recall_pack_on_facade(",
+        "relevant_code_components_for_prompt(",
+    ] {
+        assert!(
+            workspace_prompt.contains(pattern),
+            "chat workspace prompt context owner must contain {pattern}"
+        );
+    }
+
+    let stream_chat = main
+        .split("async fn stream_chat_via_openai(")
+        .nth(1)
+        .expect("stream_chat_via_openai")
+        .split("let workflow_routing_plan =")
+        .next()
+        .expect("workflow routing boundary");
+    assert!(
+        stream_chat.contains("prepare_chat_workspace_prompt_context("),
+        "gateway root must delegate chat workspace prompt context assembly"
+    );
+    for pattern in [
+        "let mut automatic_recall_payload = None;",
+        "contact_history_prompt_block(&episodes)",
+        "goal_propose_instruction()",
+        "recall_pack_on_facade(",
+        "relevant_code_components_for_prompt(",
+        ".strip_prefix(&prompt_core)",
+    ] {
+        assert!(
+            !stream_chat.contains(pattern),
+            "main.rs must not retain chat workspace prompt context assembly {pattern}"
+        );
+    }
+
+    for adjacent in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "pub(crate) fn prepare_chat_plan_resume(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ] {
+        assert!(
+            !workspace_prompt.contains(adjacent),
+            "chat workspace prompt context owner must not absorb adjacent stream/loop/toolset/plan/browser/subagent surface {adjacent}"
         );
     }
 }

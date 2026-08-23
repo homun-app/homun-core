@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (chat workflow routing plan owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-23 (chat workspace prompt context owner in sviluppo).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/chat-workflow-routing-plan-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#327 mergeate in `main`; slice chat workflow routing plan owner in verifica locale; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #327 (`eababaf8`); slice chat workflow routing plan owner in verifica locale prima della PR |
+| Branch | `fabio/chat-workspace-prompt-context-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#328 mergeate in `main`; slice chat workspace prompt context owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #328 (`b01bd33c`); slice chat workspace prompt context owner in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,14 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_capability_routing`: il piano per-turno del routing
+- Estrazione locale `gateway_chat_workspace_prompt_context`: il contesto
+  workspace/thread del prompt chat (`prepare_chat_workspace_prompt_context`:
+  contact-only history, perimeter denied recall, briefing, thread episode,
+  goal-propose affordance, RAG prompt-specifico e anti-rewrite code context)
+  esce da `stream_chat_via_openai`; `main.rs` consuma solo workspace prompt e
+  recall payload typed, mentre memory store/service, prompt packet, toolset,
+  loop agente, plan resume e browser restano owner separati.
+- Estrazione mergeata `gateway_capability_routing`: il piano per-turno del routing
   workflow (`resolve_chat_workflow_routing_plan`: binding thread-scoped,
   capability route, workflow route, deny-tools e forced tool) esce dal root;
   `main.rs` consuma solo l'outcome typed, mentre toolset, pruning, tool

@@ -201,6 +201,9 @@ CHAT_CONNECTED_PROMPT_RS = os.path.join(
 CHAT_PROMPT_LAYERS_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_prompt_layers.rs"
 )
+CHAT_WORKSPACE_PROMPT_CONTEXT_RS = os.path.join(
+    ROOT, "crates", "desktop-gateway", "src", "gateway_chat_workspace_prompt_context.rs"
+)
 CHAT_TOOL_PERIMETER_RS = os.path.join(
     ROOT, "crates", "desktop-gateway", "src", "gateway_chat_tool_perimeter.rs"
 )
@@ -1789,6 +1792,8 @@ def main() -> int:
         chat_connected_prompt_source = handle.read()
     with open(CHAT_PROMPT_LAYERS_RS, "r", encoding="utf-8") as handle:
         chat_prompt_layers_source = handle.read()
+    with open(CHAT_WORKSPACE_PROMPT_CONTEXT_RS, "r", encoding="utf-8") as handle:
+        chat_workspace_prompt_context_source = handle.read()
     with open(CHAT_TOOL_PERIMETER_RS, "r", encoding="utf-8") as handle:
         chat_tool_perimeter_source = handle.read()
     with open(ACTION_CONFIRMATIONS_RS, "r", encoding="utf-8") as handle:
@@ -4388,6 +4393,62 @@ def main() -> int:
             chat_prompt_layers_source,
             snippet,
             "chat prompt layers owner must not absorb adjacent skill, prompt, toolset, loop or browser surfaces",
+        )
+    assert_contains(
+        source,
+        "mod gateway_chat_workspace_prompt_context;",
+        "gateway root must declare chat workspace prompt context owner",
+    )
+    assert_contains(
+        source,
+        "pub(crate) use gateway_chat_workspace_prompt_context::*;",
+        "gateway root must re-export chat workspace prompt context owner",
+    )
+    for snippet in [
+        "pub(crate) struct ChatWorkspacePromptContextInput",
+        "pub(crate) struct ChatWorkspacePromptContext",
+        "pub(crate) async fn prepare_chat_workspace_prompt_context(",
+        "contact_history_prompt_block(",
+        "memory_perimeter_allows_recall(",
+        "goal_propose_instruction()",
+        "recall_pack_on_facade(",
+        "relevant_code_components_for_prompt(",
+    ]:
+        assert_contains(
+            chat_workspace_prompt_context_source,
+            snippet,
+            "chat workspace prompt context owner must compose memory and workspace prompt context",
+        )
+    assert_contains(
+        stream_chat_source,
+        "prepare_chat_workspace_prompt_context(ChatWorkspacePromptContextInput",
+        "gateway root must delegate chat workspace prompt context assembly",
+    )
+    for snippet in [
+        "let mut automatic_recall_payload = None;",
+        "contact_history_prompt_block(&episodes)",
+        "goal_propose_instruction()",
+        "recall_pack_on_facade(",
+        "relevant_code_components_for_prompt(",
+        ".strip_prefix(&prompt_core)",
+    ]:
+        assert_not_contains(
+            stream_chat_source,
+            snippet,
+            "gateway root must not retain chat workspace prompt context assembly",
+        )
+    for snippet in [
+        "async fn stream_chat_via_openai(",
+        "async fn run_agent_rounds(",
+        "pub(crate) async fn prepare_chat_toolset(",
+        "pub(crate) fn prepare_chat_plan_resume(",
+        "fn execute_capability_browser_task(",
+        "fn execute_subagent_task(",
+    ]:
+        assert_not_contains(
+            chat_workspace_prompt_context_source,
+            snippet,
+            "chat workspace prompt context owner must not absorb adjacent stream, loop, toolset, plan, browser or subagent owners",
         )
     assert_contains(
         source,
