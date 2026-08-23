@@ -2717,8 +2717,11 @@ def main() -> int:
     )
     for snippet in [
         "pub(crate) struct AgentTurnLoopSeed",
+        "pub(crate) fn prepare_agent_turn_initial_messages(",
         "pub(crate) fn seed_agent_turn_loop_state(",
         "pub(crate) fn reset_agent_turn_terminal_buffer(",
+        "serde_json::json!({ \"role\": \"system\", \"content\": system })",
+        "serde_json::json!({ \"role\": \"user\", \"content\": user_content })",
         "local_first_engine::LoopState::new()",
         "loop_state.prompt_packets = prompt_packets",
         "loop_state.messages = messages",
@@ -2743,6 +2746,7 @@ def main() -> int:
         "let memory_answer = String::new();",
         "let browse_sources: Vec<String> = Vec::new();",
         "sandbox_clear(thread_id.clone());",
+        'let mut messages = vec![\n        serde_json::json!({ "role": "system", "content": system }),\n        serde_json::json!({ "role": "user", "content": user_content }),\n    ];',
     ]:
         assert_not_contains(
             stream_chat_before_recall_seed,
