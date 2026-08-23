@@ -3953,6 +3953,11 @@ def main() -> int:
     )
     assert_contains(
         turn_trace_source,
+        "pub(crate) turn_policy: &'a ChatTurnPolicy,",
+        "turn trace owner must receive typed ChatTurnPolicy for chat turn-start",
+    )
+    assert_contains(
+        turn_trace_source,
         "pub(crate) fn record_chat_turn_start_trace(",
         "turn trace owner must expose chat turn-start recorder",
     )
@@ -3993,6 +3998,16 @@ def main() -> int:
             snippet,
             "gateway root must not resolve chat turn-start trace tier inline",
         )
+    assert_contains(
+        stream_chat_start_trace,
+        "turn_policy: &turn_policy,",
+        "gateway root must pass typed ChatTurnPolicy into chat turn-start trace owner",
+    )
+    assert_not_contains(
+        stream_chat_start_trace,
+        "mode: mode.as_str(),",
+        "gateway root must not pass scalar mode into chat turn-start trace owner",
+    )
     assert_contains(
         source,
         "mod gateway_agent_checkpoints;",

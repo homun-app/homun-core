@@ -1708,7 +1708,7 @@ async fn stream_chat_via_openai(
     record_chat_turn_start_trace(ChatTurnStartTraceInput {
         turn_trace: &turn_trace,
         prompt: request.prompt.as_str(),
-        mode: mode.as_str(),
+        turn_policy: &turn_policy,
         model: model.as_str(),
     });
     let capability_router_instruction =

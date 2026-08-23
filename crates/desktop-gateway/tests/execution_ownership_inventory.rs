@@ -3937,6 +3937,7 @@ fn chat_turn_start_trace_has_one_gateway_owner() {
 
     for pattern in [
         "pub(crate) struct ChatTurnStartTraceInput",
+        "pub(crate) turn_policy: &'a ChatTurnPolicy,",
         "pub(crate) struct ChatTurnTraceInput",
         "pub(crate) fn begin_chat_turn_trace(",
         "pub(crate) fn record_chat_turn_start_trace(",
@@ -3968,6 +3969,14 @@ fn chat_turn_start_trace_has_one_gateway_owner() {
             "main.rs must not own chat turn start trace field mapping {pattern}"
         );
     }
+    assert!(
+        stream_chat.contains("turn_policy: &turn_policy,"),
+        "main.rs must pass typed ChatTurnPolicy into turn start trace owner"
+    );
+    assert!(
+        !stream_chat.contains("mode: mode.as_str(),"),
+        "main.rs must not pass scalar mode into turn start trace owner"
+    );
 
     for adjacent in [
         "async fn stream_chat_via_openai(",
