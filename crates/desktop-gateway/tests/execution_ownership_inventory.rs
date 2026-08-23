@@ -4797,6 +4797,29 @@ fn chat_toolset_has_one_gateway_owner() {
         !corpus_call.contains("read_only,"),
         "chat toolset must not pass scalar read_only into capability corpus materialization"
     );
+    let initial_manager_call = toolset
+        .split("initial_manager_tool_schemas_for_test(")
+        .nth(1)
+        .expect("initial manager tool schema call")
+        .split(");")
+        .next()
+        .expect("initial manager tool schema input block");
+    assert!(
+        initial_manager_call.contains("input.turn_policy,"),
+        "chat toolset must pass typed ChatTurnPolicy into initial manager tool schemas"
+    );
+    assert!(
+        initial_manager_call.contains("&input.contact_memory_perimeter"),
+        "chat toolset must pass typed ContactMemoryPerimeter into initial manager tool schemas"
+    );
+    assert!(
+        !initial_manager_call.contains("read_only,"),
+        "chat toolset must not pass a scalar read_only copy into initial manager tool schemas"
+    );
+    assert!(
+        !initial_manager_call.contains("contact_only"),
+        "chat toolset must not pass a scalar contact_only copy into initial manager tool schemas"
+    );
     let toolset_call = main
         .split("let chat_toolset = prepare_chat_toolset(ChatToolsetInput {")
         .nth(1)

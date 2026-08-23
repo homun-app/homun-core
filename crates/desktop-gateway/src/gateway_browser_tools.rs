@@ -4,7 +4,7 @@
 //! browser action outcome hints, payment-safe bundle normalization, stale-ref
 //! recovery messaging, and related manager/browser guidance.
 
-use super::{browser_safety, skill_security};
+use super::{ChatTurnPolicy, ContactMemoryPerimeter, browser_safety, skill_security};
 use std::env;
 
 #[test]
@@ -448,8 +448,8 @@ pub(crate) fn parse_browser_done_payload(
 }
 
 pub(crate) fn initial_manager_tool_schemas_for_test(
-    _read_only: bool,
-    _contact_only: bool,
+    _turn_policy: &ChatTurnPolicy,
+    _contact_memory_perimeter: &ContactMemoryPerimeter,
 ) -> Vec<serde_json::Value> {
     vec![browse_tool_schema()]
 }
