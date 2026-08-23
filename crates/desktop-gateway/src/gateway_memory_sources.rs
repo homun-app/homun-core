@@ -24,8 +24,8 @@ use local_first_memory::{
 };
 
 use crate::{
-    AppState, GatewayError, THREADS_WORKSPACE, WorkspaceRecord, WorkspacesFile,
-    canonical_memory_workspace_id, gateway_memory_user_id, gateway_workspaces_path,
+    AppState, ContactMemoryPerimeter, GatewayError, THREADS_WORKSPACE, WorkspaceRecord,
+    WorkspacesFile, canonical_memory_workspace_id, gateway_memory_user_id, gateway_workspaces_path,
     load_workspaces_file, memory_facade, now_epoch_secs, truncate_chars,
 };
 
@@ -115,12 +115,12 @@ pub(crate) fn memory_sources_enabled() -> bool {
 }
 
 pub(crate) fn memory_perimeter_allows_recall(
-    contact_only: bool,
-    can_see_contacts: bool,
-    can_use_project_memory: bool,
+    contact_memory_perimeter: &ContactMemoryPerimeter,
     in_project: bool,
 ) -> bool {
-    !contact_only && can_see_contacts && (!in_project || can_use_project_memory)
+    !contact_memory_perimeter.contact_only
+        && contact_memory_perimeter.can_see_contacts
+        && (!in_project || contact_memory_perimeter.can_use_project_memory)
 }
 
 fn parse_memory_collection(value: &str) -> Result<MemoryCollectionKey, &'static str> {

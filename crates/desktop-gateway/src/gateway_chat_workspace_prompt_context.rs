@@ -78,12 +78,7 @@ pub(crate) async fn prepare_chat_workspace_prompt_context(
             Some(block) => format!("{}\n\n{block}", input.system),
             None => input.system,
         }
-    } else if !memory_perimeter_allows_recall(
-        input.contact_memory_perimeter.contact_only,
-        input.contact_memory_perimeter.can_see_contacts,
-        input.contact_memory_perimeter.can_use_project_memory,
-        input.is_project,
-    ) {
+    } else if !memory_perimeter_allows_recall(input.contact_memory_perimeter, input.is_project) {
         let scope = scope_from_active_workspace();
         automatic_recall_payload = Some(local_first_subagents::RecallStreamPayload {
             query: input.prompt.to_string(),

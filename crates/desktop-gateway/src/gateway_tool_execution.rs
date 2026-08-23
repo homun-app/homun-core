@@ -4054,12 +4054,13 @@ available tools (for data from the web use the browser: browser_navigate on the 
         // book — perimeter-blind recall has no way to strip other people out, so
         // fail-closed is to block it entirely.
         let in_project = gateway_memory_workspace_id().as_str() != PERSONAL_WORKSPACE;
-        if !memory_perimeter_allows_recall(
-            ctx.contact_only,
-            ctx.can_see_contacts,
-            ctx.can_use_project_memory,
-            in_project,
-        ) {
+        let contact_memory_perimeter = ContactMemoryPerimeter {
+            contact_only: ctx.contact_only,
+            can_see_contacts: ctx.can_see_contacts,
+            can_see_calendar: ctx.can_see_calendar,
+            can_use_project_memory: ctx.can_use_project_memory,
+        };
+        if !memory_perimeter_allows_recall(&contact_memory_perimeter, in_project) {
             "Personal memory not accessible in a conversation with this \
 contact: use only the messages from this chat. Do NOT reveal personal data of the user or third parties."
                 .to_string()
