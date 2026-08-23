@@ -44,6 +44,11 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
+- Estrazione locale `gateway_chat_turn_context`: `ChatTurnPolicy` ora resta la
+  proiezione tipizzata dal setup del turno fino a toolset, loop agente e tail;
+  `stream_chat_via_openai` non crea piu' contratti concorrenti
+  `read_only`/`autonomous`, mentre la policy engine route-aware resta owner
+  separato in `gateway_capability_routing`.
 - Estrazione locale `gateway_skill_runtime`: `SkillPromptCatalog` espone anche
   `has_skills`, derivato dopo il filtro workspace/HomunCoder; il root non
   ricalcola piu' `!enabled_skills.is_empty()` e consuma una proiezione skill
@@ -266,9 +271,9 @@ Slice Runtime V2 recenti:
   tool, browser e loop agente restano owner separati.
 - Estrazione mergeata `gateway_chat_turn_context`: la risoluzione della policy
   per-turno (`resolve_chat_turn_policy`) esce dal setup inline di
-  `stream_chat_via_openai`; `main.rs` conserva solo il consumo di `mode`,
-  `read_only` e `autonomous`, mentre toolset, prompt packet, loop agente,
-  browser e automazioni restano owner separati.
+  `stream_chat_via_openai`; `main.rs` consuma la policy typed fino a toolset,
+  loop agente e tail, mentre prompt packet, browser e automazioni restano owner
+  separati.
 - Estrazione mergeata `gateway_prompt_instructions`: il rendering del blocco
   prompt per destinazioni artefatto autorizzate (`artifact_destination_prompt_block`)
   esce dal setup inline di `stream_chat_via_openai`; `main.rs` conserva solo il

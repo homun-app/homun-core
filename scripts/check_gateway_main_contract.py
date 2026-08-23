@@ -4194,6 +4194,8 @@ def main() -> int:
         "let can_see_contacts = contact_memory_perimeter.can_see_contacts;",
         "let can_see_calendar = contact_memory_perimeter.can_see_calendar;",
         "let can_use_project_memory = contact_memory_perimeter.can_use_project_memory;",
+        "let read_only = turn_policy.read_only;",
+        "let autonomous = turn_policy.autonomous;",
         "contact_only: bool,",
         "can_see_contacts: bool,",
         "can_see_calendar: bool,",
@@ -4203,6 +4205,18 @@ def main() -> int:
             source,
             snippet,
             "gateway root must not retain chat turn context setup",
+        )
+    run_agent_rounds_source = source.split("async fn run_agent_rounds(", 1)[1]
+    assert_contains(
+        run_agent_rounds_source,
+        "turn_policy: &ChatTurnPolicy,",
+        "run_agent_rounds must receive the typed chat turn policy",
+    )
+    for snippet in ["read_only: bool,", "autonomous: bool,"]:
+        assert_not_contains(
+            run_agent_rounds_source,
+            snippet,
+            "run_agent_rounds must not split chat turn policy back into scalar flags",
         )
     for snippet in [
         "async fn stream_chat_via_openai(",
