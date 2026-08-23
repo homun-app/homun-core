@@ -1745,7 +1745,7 @@ async fn stream_chat_via_openai(
         state,
         prompt: &request.prompt,
         turn_policy: &turn_policy,
-        contact_only: contact_memory_perimeter.contact_only,
+        contact_memory_perimeter,
         memory_recall_allowed,
         has_skills,
         artifact_destinations: &artifact_destinations,

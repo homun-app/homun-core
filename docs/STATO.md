@@ -44,7 +44,11 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_tool_execution`: `GatewayCapabilityExecutorInput`
+- Estrazione locale `gateway_chat_toolset`: `ChatToolsetInput` riceve anche
+  `ContactMemoryPerimeter` typed e deriva internamente `contact_only`;
+  `stream_chat_via_openai` non passa piu' un flag scalare al toolset, mentre
+  capability executor, browser executor e loop agente restano owner separati.
+- Estrazione mergeata `gateway_tool_execution`: `GatewayCapabilityExecutorInput`
   riceve anche `ContactMemoryPerimeter` typed e il factory deriva internamente
   `contact_only`/`can_see_*`; `run_agent_rounds` non passa piu' quattro flag
   scalari concorrenti al capability executor, mentre tool dispatch, browser
