@@ -1671,10 +1671,6 @@ async fn stream_chat_via_openai(
     // sees the conversation history with THIS contact. "personal" opts a trusted
     // contact back into today's behavior.
     let contact_memory_perimeter = resolve_contact_memory_perimeter(contact_ctx.as_ref());
-    let contact_only = contact_memory_perimeter.contact_only;
-    let can_see_contacts = contact_memory_perimeter.can_see_contacts;
-    let can_see_calendar = contact_memory_perimeter.can_see_calendar;
-    let can_use_project_memory = contact_memory_perimeter.can_use_project_memory;
     let workspace_prompt_context =
         prepare_chat_workspace_prompt_context(ChatWorkspacePromptContextInput {
             state,
@@ -1683,9 +1679,7 @@ async fn stream_chat_via_openai(
             prompt: &request.prompt,
             thread_id: request.thread_id.as_deref(),
             contact: contact_ctx.as_ref(),
-            contact_only,
-            can_see_contacts,
-            can_use_project_memory,
+            contact_memory_perimeter: &contact_memory_perimeter,
             is_project,
             memory_intent: &memory_intent,
             memory_injection,
@@ -1757,7 +1751,7 @@ async fn stream_chat_via_openai(
         state,
         prompt: &request.prompt,
         read_only,
-        contact_only,
+        contact_only: contact_memory_perimeter.contact_only,
         memory_recall_allowed,
         has_skills,
         artifact_destinations: &artifact_destinations,
@@ -1991,10 +1985,7 @@ async fn stream_chat_via_openai(
             read_only,
             autonomous,
             channel_owner,
-            contact_only,
-            can_see_contacts,
-            can_see_calendar,
-            can_use_project_memory,
+            contact_memory_perimeter,
             memory_recall_allowed,
             memory_intent.vault_value_requested,
             memory_user_message,
@@ -2060,10 +2051,7 @@ async fn run_agent_rounds(
     read_only: bool,
     autonomous: bool,
     channel_owner: bool,
-    contact_only: bool,
-    can_see_contacts: bool,
-    can_see_calendar: bool,
-    can_use_project_memory: bool,
+    contact_memory_perimeter: ContactMemoryPerimeter,
     memory_recall_allowed: bool,
     vault_value_requested: bool,
     memory_user_message: String,
@@ -2125,10 +2113,10 @@ async fn run_agent_rounds(
         tx,
         thread_id: thread_id.as_deref(),
         read_only,
-        contact_only,
-        can_see_contacts,
-        can_see_calendar,
-        can_use_project_memory,
+        contact_only: contact_memory_perimeter.contact_only,
+        can_see_contacts: contact_memory_perimeter.can_see_contacts,
+        can_see_calendar: contact_memory_perimeter.can_see_calendar,
+        can_use_project_memory: contact_memory_perimeter.can_use_project_memory,
         memory_recall_allowed,
         vault_value_requested,
         autonomous,

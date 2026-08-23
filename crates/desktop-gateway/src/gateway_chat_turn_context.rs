@@ -25,6 +25,7 @@ pub(crate) struct ChatTurnPolicy {
     pub(crate) autonomous: bool,
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct ContactMemoryPerimeter {
     pub(crate) contact_only: bool,
     pub(crate) can_see_contacts: bool,

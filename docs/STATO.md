@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (chat core prompt owner in sviluppo).**
+> **Ultimo aggiornamento: 2026-08-23 (chat contact perimeter projection in sviluppo).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/chat-core-prompt-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#336 mergeate in `main`; slice chat core prompt owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #336 (`aa9878c0`); slice chat core prompt owner in verifica locale prima della PR |
+| Branch | `fabio/chat-contact-perimeter-projection` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#337 mergeate in `main`; slice chat contact perimeter projection in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #337 (`9df9f742`); slice chat contact perimeter projection in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,13 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_prompt_instructions`: il bootstrap del core
+- Estrazione locale `gateway_chat_turn_context`: il perimetro memoria contatto
+  resta una proiezione typed (`ContactMemoryPerimeter`) dal setup del turno fino
+  a workspace prompt e loop/capability executor; `stream_chat_via_openai` non
+  spacchetta piu' `contact_only`/`can_see_*` in contratti scalari concorrenti,
+  mentre prompt memoria, toolset, dispatch tool, browser e loop agente restano
+  owner separati.
+- Estrazione mergeata `gateway_prompt_instructions`: il bootstrap del core
   operating prompt chat (`prepare_chat_core_operating_prompt`: data/ora runtime,
   home utente, lingua effettiva e discovery browser gia' risolta) esce da
   `stream_chat_via_openai`; il root passa solo il browser discovery snippet e
@@ -244,10 +250,9 @@ Slice Runtime V2 recenti:
   agente restano owner separati.
 - Estrazione mergeata `gateway_chat_turn_context`: la proiezione del perimetro
   memoria contatto (`resolve_contact_memory_perimeter`) esce dal setup inline di
-  `stream_chat_via_openai`; `main.rs` consuma solo `contact_only`,
-  `can_see_contacts`, `can_see_calendar` e `can_use_project_memory`, mentre
-  prompt memoria, tool perimeter, dispatch tool, browser e loop agente restano
-  owner separati.
+  `stream_chat_via_openai`; `main.rs` consuma solo la proiezione typed
+  `ContactMemoryPerimeter`, mentre prompt memoria, tool perimeter, dispatch
+  tool, browser e loop agente restano owner separati.
 - Estrazione mergeata `gateway_chat_turn_context`: la risoluzione della policy
   per-turno (`resolve_chat_turn_policy`) esce dal setup inline di
   `stream_chat_via_openai`; `main.rs` conserva solo il consumo di `mode`,
