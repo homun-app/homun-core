@@ -3888,7 +3888,19 @@ fn browse_round_budget_never_exceeds_cap() {
 
 #[test]
 fn built_in_browse_is_loaded_without_find_capability() {
-    let base_tools = super::initial_manager_tool_schemas_for_test(false, false);
+    let turn_policy = super::ChatTurnPolicy {
+        mode: "agent".to_string(),
+        read_only: false,
+        autonomous: false,
+    };
+    let contact_memory_perimeter = super::ContactMemoryPerimeter {
+        contact_only: false,
+        can_see_contacts: true,
+        can_see_calendar: true,
+        can_use_project_memory: true,
+    };
+    let base_tools =
+        super::initial_manager_tool_schemas_for_test(&turn_policy, &contact_memory_perimeter);
     let names = base_tools
         .iter()
         .filter_map(|schema| {

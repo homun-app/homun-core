@@ -4351,6 +4351,29 @@ def main() -> int:
         "read_only,",
         "chat toolset must not pass scalar read_only into capability corpus materialization",
     )
+    initial_manager_call = chat_toolset_source.split(
+        "initial_manager_tool_schemas_for_test(", 1
+    )[1].split(");", 1)[0]
+    assert_contains(
+        initial_manager_call,
+        "input.turn_policy,",
+        "chat toolset must pass typed ChatTurnPolicy into initial manager tool schemas",
+    )
+    assert_contains(
+        initial_manager_call,
+        "&input.contact_memory_perimeter",
+        "chat toolset must pass typed ContactMemoryPerimeter into initial manager tool schemas",
+    )
+    assert_not_contains(
+        initial_manager_call,
+        "read_only,",
+        "chat toolset must not pass a scalar read_only copy into initial manager tool schemas",
+    )
+    assert_not_contains(
+        initial_manager_call,
+        "contact_only",
+        "chat toolset must not pass a scalar contact_only copy into initial manager tool schemas",
+    )
     toolset_call = source.split(
         "let chat_toolset = prepare_chat_toolset(ChatToolsetInput {", 1
     )[1].split("})", 1)[0]
