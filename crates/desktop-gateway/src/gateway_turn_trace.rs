@@ -1,6 +1,7 @@
 //! Gateway turn-trace entry owner.
 
 use super::*;
+use crate::gateway_model_routing::load_provider_registry;
 
 pub(crate) struct TurnTraceEntry {
     pub(crate) request_id: String,
@@ -74,10 +75,12 @@ pub(crate) struct ChatTurnStartTraceInput<'a> {
     pub(crate) prompt: &'a str,
     pub(crate) mode: &'a str,
     pub(crate) model: &'a str,
-    pub(crate) tier: &'a str,
 }
 
 pub(crate) fn record_chat_turn_start_trace(input: ChatTurnStartTraceInput<'_>) {
+    let tier = load_provider_registry()
+        .tier_for_model(input.model)
+        .as_str();
     input
         .turn_trace
         .record(local_first_engine::turn_trace::TurnEvent::TurnStart {
@@ -85,7 +88,7 @@ pub(crate) fn record_chat_turn_start_trace(input: ChatTurnStartTraceInput<'_>) {
             prompt_len: input.prompt.chars().count(),
             mode: input.mode.to_string(),
             model: input.model.to_string(),
-            tier: input.tier.to_string(),
+            tier: tier.to_string(),
         });
 }
 
@@ -181,7 +184,6 @@ mod tests {
             prompt: "ciao Roma",
             mode: "agent",
             model: "gpt-test",
-            tier: "frontier",
         });
 
         let lines = std::fs::read_to_string(dir.join("turn-trace.jsonl")).unwrap();
@@ -191,7 +193,7 @@ mod tests {
         assert!(lines.contains("\"prompt_len\":9"));
         assert!(lines.contains("\"mode\":\"agent\""));
         assert!(lines.contains("\"model\":\"gpt-test\""));
-        assert!(lines.contains("\"tier\":\"frontier\""));
+        assert!(lines.contains("\"tier\":\""));
     }
 
     fn unique_temp_dir(label: &str) -> std::path::PathBuf {

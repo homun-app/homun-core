@@ -3961,6 +3961,11 @@ def main() -> int:
         "TurnEvent::TurnStart",
         "turn trace owner must record the setup-complete sentinel",
     )
+    assert_contains(
+        turn_trace_source,
+        "tier_for_model(input.model)",
+        "turn trace owner must resolve model tier for turn_start observability",
+    )
     stream_chat_before_context = source.split("async fn stream_chat_via_openai(", 1)[1].split(
         "let chat_turn_context = prepare_chat_turn_context(", 1
     )[0]
@@ -3974,6 +3979,19 @@ def main() -> int:
             stream_chat_before_context,
             snippet,
             "gateway root must not assemble chat turn trace bootstrap inline",
+        )
+    stream_chat_start_trace = source.split("async fn stream_chat_via_openai(", 1)[1].split(
+        "let capability_router_instruction =", 1
+    )[0]
+    for snippet in [
+        "load_provider_registry().tier_for_model(&model)",
+        "let turn_tier =",
+        "tier: turn_tier.as_str()",
+    ]:
+        assert_not_contains(
+            stream_chat_start_trace,
+            snippet,
+            "gateway root must not resolve chat turn-start trace tier inline",
         )
     assert_contains(
         source,
