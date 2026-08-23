@@ -1634,7 +1634,7 @@ async fn stream_chat_via_openai(
     let enabled_skills = skill_prompt_catalog.enabled_skills;
     let homuncoder = skill_prompt_catalog.homuncoder;
     let is_project = skill_prompt_catalog.is_project;
-    let has_skills = !enabled_skills.is_empty();
+    let has_skills = skill_prompt_catalog.has_skills;
     let artifact_destinations = prepare_chat_artifact_destinations();
     let system = append_chat_prompt_layers(ChatPromptLayersInput {
         system,
