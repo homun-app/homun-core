@@ -3996,6 +3996,46 @@ fn model_provider_capability_warm_has_one_gateway_owner() {
 }
 
 #[test]
+fn workflow_routing_plan_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let capability_routing = production_source(&root.join("src/gateway_capability_routing.rs"));
+    let stream_setup = main
+        .split("let prompt_workspace =")
+        .nth(1)
+        .expect("prompt workspace setup")
+        .split("let turn_policy =")
+        .next()
+        .expect("turn policy setup");
+
+    for pattern in [
+        "pub(crate) struct ChatWorkflowRoutingPlanInput",
+        "pub(crate) struct ChatWorkflowRoutingPlan",
+        "pub(crate) fn resolve_chat_workflow_routing_plan(",
+        "route_capability_with_binding(input.semantic_contract,",
+        "thread_user_message_count_fail_open(input.state, input.thread_id)",
+    ] {
+        assert!(
+            capability_routing.contains(pattern),
+            "capability routing owner must contain workflow routing plan surface {pattern}"
+        );
+    }
+
+    for pattern in [
+        "active_routing_binding(state, request.thread_id.as_deref())",
+        "route_capability_with_binding(semantic_contract.as_ref(), routing_binding.as_ref())",
+        "workflow_route_from_capability(&capability_route)",
+        ".and_then(resolve_workflow_routing)",
+        "thread_user_message_count_fail_open(state, request.thread_id.as_deref())",
+    ] {
+        assert!(
+            !stream_setup.contains(pattern),
+            "main.rs must not assemble workflow routing plan inline {pattern}"
+        );
+    }
+}
+
+#[test]
 fn tool_effect_contract_lookup_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

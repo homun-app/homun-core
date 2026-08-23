@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (chat runtime prompt owner in verifica).**
+> **Ultimo aggiornamento: 2026-08-23 (chat workflow routing plan owner in verifica).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/chat-runtime-prompt-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#326 mergeate in `main`; slice chat runtime prompt owner in verifica locale; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #326 (`44cd7e55`); slice chat runtime prompt owner in verifica locale prima della PR |
+| Branch | `fabio/chat-workflow-routing-plan-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#327 mergeate in `main`; slice chat workflow routing plan owner in verifica locale; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #327 (`eababaf8`); slice chat workflow routing plan owner in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_prompt_instructions`: il wrapper typed del prompt
+- Estrazione locale `gateway_capability_routing`: il piano per-turno del routing
+  workflow (`resolve_chat_workflow_routing_plan`: binding thread-scoped,
+  capability route, workflow route, deny-tools e forced tool) esce dal root;
+  `main.rs` consuma solo l'outcome typed, mentre toolset, pruning, tool
+  execution, model client, loop agente e browser restano owner separati.
+- Estrazione mergeata `gateway_prompt_instructions`: il wrapper typed del prompt
   runtime-control del turno chat (`prepare_chat_runtime_prompt`) esce dal root;
   `main.rs` passa solo policy recall, istruzione capability-route, mode e
   objective contract, mentre prompt packet, capability routing, store objective,
@@ -1368,9 +1373,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#326: slice owner-level successive mergeate in
-  `main`, fino a `chat turn start trace owner`; `main` verificato e riallineato
-  a #326.
+- #143-#283, #285-#286, #288-#327: slice owner-level successive mergeate in
+  `main`, fino a `chat runtime prompt owner`; `main` verificato e riallineato a
+  #327.
 
 PR aperte:
 
@@ -1378,8 +1383,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/chat-runtime-prompt-owner` in verifica locale da `main` #326
-  (`44cd7e55`).
+- `fabio/chat-workflow-routing-plan-owner` in verifica locale da `main` #327
+  (`eababaf8`).
 
 ## Debito residuo
 

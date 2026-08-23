@@ -858,6 +858,49 @@ pub(crate) fn thread_user_message_count_fail_open(
         .unwrap_or(0)
 }
 
+pub(crate) struct ChatWorkflowRoutingPlanInput<'a> {
+    pub(crate) state: &'a AppState,
+    pub(crate) thread_id: Option<&'a str>,
+    pub(crate) semantic_contract: Option<&'a semantic_decision::ValidatedSemanticDecision>,
+}
+
+pub(crate) struct ChatWorkflowRoutingPlan {
+    pub(crate) capability_route: CapabilityRouteDecision,
+    pub(crate) workflow_route: WorkflowRouteDecision,
+    pub(crate) workflow_deny_tools: Vec<String>,
+    pub(crate) forced_tool: Option<String>,
+}
+
+pub(crate) fn resolve_chat_workflow_routing_plan(
+    input: ChatWorkflowRoutingPlanInput<'_>,
+) -> ChatWorkflowRoutingPlan {
+    let routing_binding = active_routing_binding(input.state, input.thread_id);
+    let capability_route =
+        route_capability_with_binding(input.semantic_contract, routing_binding.as_ref());
+    let workflow_route = workflow_route_from_capability(&capability_route);
+    let resolved_workflow_routing = routing_binding
+        .as_ref()
+        .filter(|_| matches!(workflow_route, WorkflowRouteDecision::Workflow { .. }))
+        .and_then(resolve_workflow_routing);
+    let workflow_deny_tools = resolved_workflow_routing
+        .as_ref()
+        .map(|routing| routing.deny_tools.clone())
+        .unwrap_or_default();
+    let forced_tool = resolved_workflow_routing.as_ref().and_then(|routing| {
+        forced_tool_for_turn(
+            Some(routing),
+            thread_user_message_count_fail_open(input.state, input.thread_id),
+        )
+    });
+
+    ChatWorkflowRoutingPlan {
+        capability_route,
+        workflow_route,
+        workflow_deny_tools,
+        forced_tool,
+    }
+}
+
 pub(crate) fn capability_router_instruction_for_decision(
     decision: &CapabilityRouteDecision,
 ) -> Option<String> {
