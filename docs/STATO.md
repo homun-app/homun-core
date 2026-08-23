@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-23 (chat initial messages owner in sviluppo).**
+> **Ultimo aggiornamento: 2026-08-23 (chat turn trace entry owner in sviluppo).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/chat-initial-messages-owner` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#333 mergeate in `main`; slice chat initial messages owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #333 (`e2b9a043`); slice chat initial messages owner in verifica locale prima della PR |
+| Branch | `fabio/chat-turn-trace-entry-owner` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#334 mergeate in `main`; slice chat turn trace entry owner in sviluppo; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #334 (`61aeca63`); slice chat turn trace entry owner in verifica locale prima della PR |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_agent_turn_loop_seed`: la costruzione dei messaggi
+- Estrazione locale `gateway_turn_trace`: il bootstrap iniziale del trace chat
+  (`begin_chat_turn_trace`: input turno, opt-out `HOMUN_TURN_TRACE`, log dir e
+  byte budget) esce da `stream_chat_via_openai`; `main.rs` passa solo request id,
+  prompt, mode e model, mentre trace events, loop agente, budget, plan progress,
+  tool execution e browser restano owner separati.
+- Estrazione mergeata `gateway_agent_turn_loop_seed`: la costruzione dei messaggi
   iniziali del turno agente (`prepare_agent_turn_initial_messages`: ruolo
   `system` e ruolo `user` con user-content gia' risolto dagli attachment)
   esce da `stream_chat_via_openai`; `main.rs` conserva solo il consumo del

@@ -3899,7 +3899,12 @@ fn chat_turn_start_trace_has_one_gateway_owner() {
 
     for pattern in [
         "pub(crate) struct ChatTurnStartTraceInput",
+        "pub(crate) struct ChatTurnTraceInput",
+        "pub(crate) fn begin_chat_turn_trace(",
         "pub(crate) fn record_chat_turn_start_trace(",
+        "turn_trace_enabled()",
+        "gateway_logs_dir()",
+        "turn_trace_max_bytes()",
         "TurnEvent::TurnStart",
     ] {
         assert!(
@@ -3909,6 +3914,10 @@ fn chat_turn_start_trace_has_one_gateway_owner() {
     }
 
     for pattern in [
+        "TurnTraceEntry {",
+        "turn_trace_enabled()",
+        "gateway_logs_dir()",
+        "turn_trace_max_bytes()",
         "TurnEvent::TurnStart",
         "prompt_head: request.prompt.chars()",
     ] {
