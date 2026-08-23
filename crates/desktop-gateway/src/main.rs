@@ -1570,14 +1570,11 @@ async fn stream_chat_via_openai(
     // The `turn_received` event is the FIRST thing recorded; if no `turn_start` follows, the turn
     // stalled before generation (a setup-hang would otherwise be invisible). Cheap Arc/None handle;
     // no-op when disabled. It's a pure sink — it records what the turn does, never steers it.
-    let turn_trace = begin_turn_trace(TurnTraceEntry {
-        request_id: request.request_id.clone(),
-        prompt: request.prompt.clone(),
-        mode: request.mode.clone(),
-        model: model.clone(),
-        enabled: turn_trace_enabled(),
-        logs_dir: gateway_logs_dir(),
-        max_bytes: turn_trace_max_bytes(),
+    let turn_trace = begin_chat_turn_trace(ChatTurnTraceInput {
+        request_id: &request.request_id,
+        prompt: &request.prompt,
+        mode: request.mode.as_deref(),
+        model: &model,
     });
     let chat_turn_context = prepare_chat_turn_context(ChatTurnContextInput {
         state,

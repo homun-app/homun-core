@@ -1,5 +1,7 @@
 //! Gateway turn-trace entry owner.
 
+use super::*;
+
 pub(crate) struct TurnTraceEntry {
     pub(crate) request_id: String,
     pub(crate) prompt: String,
@@ -30,6 +32,41 @@ pub(crate) fn begin_turn_trace(entry: TurnTraceEntry) -> local_first_engine::tur
         model: entry.model,
     });
     turn_trace
+}
+
+pub(crate) struct ChatTurnTraceInput<'a> {
+    pub(crate) request_id: &'a str,
+    pub(crate) prompt: &'a str,
+    pub(crate) mode: Option<&'a str>,
+    pub(crate) model: &'a str,
+}
+
+pub(crate) fn begin_chat_turn_trace(
+    input: ChatTurnTraceInput<'_>,
+) -> local_first_engine::turn_trace::TurnTrace {
+    begin_chat_turn_trace_with_config(
+        input,
+        turn_trace_enabled(),
+        gateway_logs_dir(),
+        turn_trace_max_bytes(),
+    )
+}
+
+fn begin_chat_turn_trace_with_config(
+    input: ChatTurnTraceInput<'_>,
+    enabled: bool,
+    logs_dir: Result<std::path::PathBuf, std::io::Error>,
+    max_bytes: u64,
+) -> local_first_engine::turn_trace::TurnTrace {
+    begin_turn_trace(TurnTraceEntry {
+        request_id: input.request_id.to_string(),
+        prompt: input.prompt.to_string(),
+        mode: input.mode.map(str::to_string),
+        model: input.model.to_string(),
+        enabled,
+        logs_dir,
+        max_bytes,
+    })
 }
 
 pub(crate) struct ChatTurnStartTraceInput<'a> {
@@ -76,6 +113,32 @@ mod tests {
         assert!(line.contains("\"turn_id\":\"turn-a\""));
         assert!(line.contains("\"prompt_head\":\"ciao Milano\""));
         assert!(line.contains("\"prompt_len\":11"));
+        assert!(line.contains("\"mode\":\"agent\""));
+        assert!(line.contains("\"model\":\"gpt-test\""));
+    }
+
+    #[test]
+    fn chat_turn_trace_bootstrap_records_turn_received() {
+        let dir = unique_temp_dir("chat-bootstrap");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let _trace = begin_chat_turn_trace_with_config(
+            ChatTurnTraceInput {
+                request_id: "chat-turn-a",
+                prompt: "trova report",
+                mode: Some("agent"),
+                model: "gpt-test",
+            },
+            true,
+            Ok(dir.clone()),
+            5_000_000,
+        );
+
+        let line = std::fs::read_to_string(dir.join("turn-trace.jsonl")).unwrap();
+        assert!(line.contains("\"kind\":\"turn_received\""));
+        assert!(line.contains("\"turn_id\":\"chat-turn-a\""));
+        assert!(line.contains("\"prompt_head\":\"trova report\""));
+        assert!(line.contains("\"prompt_len\":12"));
         assert!(line.contains("\"mode\":\"agent\""));
         assert!(line.contains("\"model\":\"gpt-test\""));
     }

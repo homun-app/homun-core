@@ -3918,6 +3918,31 @@ def main() -> int:
     )
     assert_contains(
         turn_trace_source,
+        "pub(crate) struct ChatTurnTraceInput",
+        "turn trace owner must expose chat trace bootstrap input",
+    )
+    assert_contains(
+        turn_trace_source,
+        "pub(crate) fn begin_chat_turn_trace(",
+        "turn trace owner must expose chat trace bootstrap",
+    )
+    assert_contains(
+        turn_trace_source,
+        "turn_trace_enabled()",
+        "turn trace owner must own trace opt-out resolution",
+    )
+    assert_contains(
+        turn_trace_source,
+        "gateway_logs_dir()",
+        "turn trace owner must own trace log-dir resolution",
+    )
+    assert_contains(
+        turn_trace_source,
+        "turn_trace_max_bytes()",
+        "turn trace owner must own trace byte budget resolution",
+    )
+    assert_contains(
+        turn_trace_source,
         "TurnEvent::TurnReceived",
         "turn trace owner must record the setup-hang sentinel",
     )
@@ -3936,6 +3961,20 @@ def main() -> int:
         "TurnEvent::TurnStart",
         "turn trace owner must record the setup-complete sentinel",
     )
+    stream_chat_before_context = source.split("async fn stream_chat_via_openai(", 1)[1].split(
+        "let chat_turn_context = prepare_chat_turn_context(", 1
+    )[0]
+    for snippet in [
+        "TurnTraceEntry {",
+        "turn_trace_enabled()",
+        "gateway_logs_dir()",
+        "turn_trace_max_bytes()",
+    ]:
+        assert_not_contains(
+            stream_chat_before_context,
+            snippet,
+            "gateway root must not assemble chat turn trace bootstrap inline",
+        )
     assert_contains(
         source,
         "mod gateway_agent_checkpoints;",
