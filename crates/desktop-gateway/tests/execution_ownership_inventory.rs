@@ -4317,7 +4317,9 @@ fn capability_executor_constructor_has_one_gateway_owner() {
         "pub(crate) struct GatewayCapabilityExecutorInput",
         "pub(crate) turn_policy: &'a ChatTurnPolicy,",
         "pub(crate) contact_memory_perimeter: ContactMemoryPerimeter,",
+        "pub(crate) memory_intent: semantic_decision::MemoryIntent,",
         "pub(crate) contact_memory_perimeter: &'a ContactMemoryPerimeter,",
+        "pub(crate) memory_intent: &'a semantic_decision::MemoryIntent,",
         "pub(crate) struct GatewayCapabilityExecutor",
         "pub(crate) fn gateway_capability_executor<'a>(",
     ] {
@@ -4367,6 +4369,10 @@ fn capability_executor_constructor_has_one_gateway_owner() {
         chat_tool_ctx.contains("pub(crate) turn_policy: &'a ChatTurnPolicy,"),
         "chat tool context must carry typed ChatTurnPolicy"
     );
+    assert!(
+        chat_tool_ctx.contains("pub(crate) memory_intent: &'a semantic_decision::MemoryIntent,"),
+        "chat tool context must carry typed MemoryIntent"
+    );
     let gateway_capability_executor = tool_execution
         .split("pub(crate) struct GatewayCapabilityExecutor")
         .nth(1)
@@ -4382,6 +4388,29 @@ fn capability_executor_constructor_has_one_gateway_owner() {
         gateway_capability_executor.contains("turn_policy: &'a ChatTurnPolicy,"),
         "gateway capability executor must carry typed ChatTurnPolicy"
     );
+    assert!(
+        gateway_capability_executor.contains("memory_intent: semantic_decision::MemoryIntent,"),
+        "gateway capability executor must carry typed MemoryIntent"
+    );
+    for pattern in [
+        "pub(crate) memory_recall_allowed: bool,",
+        "pub(crate) vault_value_requested: bool,",
+        "memory_recall_allowed: bool,",
+        "vault_value_requested: bool,",
+    ] {
+        assert!(
+            !capability_executor_input.contains(pattern),
+            "capability executor input must not receive scalar memory intent {pattern}"
+        );
+        assert!(
+            !chat_tool_ctx.contains(pattern),
+            "chat tool context must not carry scalar memory intent {pattern}"
+        );
+        assert!(
+            !gateway_capability_executor.contains(pattern),
+            "gateway capability executor must not carry scalar memory intent {pattern}"
+        );
+    }
     for pattern in [
         "pub(crate) read_only: bool,",
         "pub(crate) autonomous: bool,",

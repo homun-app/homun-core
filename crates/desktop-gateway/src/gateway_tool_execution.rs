@@ -449,7 +449,7 @@ pub(crate) struct ChatToolCtx<'a> {
     pub(crate) thread_id: Option<&'a str>,
     pub(crate) turn_policy: &'a ChatTurnPolicy,
     pub(crate) contact_memory_perimeter: &'a ContactMemoryPerimeter,
-    pub(crate) vault_value_requested: bool,
+    pub(crate) memory_intent: &'a semantic_decision::MemoryIntent,
     pub(crate) composio_writes: &'a std::collections::BTreeSet<String>,
     pub(crate) catalog_index: &'a [(String, String, serde_json::Value)],
     pub(crate) capability_corpus: &'a [CapabilityEntry],
@@ -4064,7 +4064,7 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
             // recalling + badge). Sostituisce il delta `‹‹ACT››🧠`.
             let st = ctx.state.clone();
             let recall_query = query.clone();
-            let vault_value_requested = ctx.vault_value_requested;
+            let vault_value_requested = ctx.memory_intent.vault_value_requested;
             let outcome = tokio::task::spawn_blocking(move || {
                 recall_memory(&st, &recall_query, vault_value_requested)
             })
@@ -5375,8 +5375,7 @@ pub(crate) struct GatewayCapabilityExecutorInput<'a> {
     pub(crate) thread_id: Option<&'a str>,
     pub(crate) turn_policy: &'a ChatTurnPolicy,
     pub(crate) contact_memory_perimeter: ContactMemoryPerimeter,
-    pub(crate) memory_recall_allowed: bool,
-    pub(crate) vault_value_requested: bool,
+    pub(crate) memory_intent: semantic_decision::MemoryIntent,
     pub(crate) composio_writes: &'a std::collections::BTreeSet<String>,
     pub(crate) catalog_index: &'a [(String, String, serde_json::Value)],
     pub(crate) capability_corpus: &'a [CapabilityEntry],
@@ -5406,8 +5405,7 @@ pub(crate) struct GatewayCapabilityExecutor<'a> {
     thread_id: Option<&'a str>,
     turn_policy: &'a ChatTurnPolicy,
     contact_memory_perimeter: ContactMemoryPerimeter,
-    memory_recall_allowed: bool,
-    vault_value_requested: bool,
+    memory_intent: semantic_decision::MemoryIntent,
     composio_writes: &'a std::collections::BTreeSet<String>,
     catalog_index: &'a [(String, String, serde_json::Value)],
     capability_corpus: &'a [CapabilityEntry],
@@ -5430,8 +5428,7 @@ pub(crate) fn gateway_capability_executor<'a>(
         thread_id: input.thread_id,
         turn_policy: input.turn_policy,
         contact_memory_perimeter: input.contact_memory_perimeter,
-        memory_recall_allowed: input.memory_recall_allowed,
-        vault_value_requested: input.vault_value_requested,
+        memory_intent: input.memory_intent,
         composio_writes: input.composio_writes,
         catalog_index: input.catalog_index,
         capability_corpus: input.capability_corpus,
@@ -5681,7 +5678,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 effects: Default::default(),
             });
         }
-        if name == "recall_memory" && !self.memory_recall_allowed {
+        if name == "recall_memory" && !memory_intent_allows_recall(&self.memory_intent) {
             return Ok(local_first_engine::ToolOutcome {
                 result: "Long-term memory recall is not authorized for this objective. Use only current-thread context and current-turn tool evidence."
                     .to_string(),
@@ -5930,7 +5927,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             thread_id: self.thread_id,
             turn_policy: self.turn_policy,
             contact_memory_perimeter: &self.contact_memory_perimeter,
-            vault_value_requested: self.vault_value_requested,
+            memory_intent: &self.memory_intent,
             composio_writes: self.composio_writes,
             catalog_index: self.catalog_index,
             capability_corpus: self.capability_corpus,
