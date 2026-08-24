@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode runtime-view-model mergeati fino a #379; slice locale status cleanup post-#379 in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode runtime-view-model mergeati fino a #380; slice locale doc composer-mode owner cleanup in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/status-after-composer-mode-presenter` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#379 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #379 (`53b64201`) |
+| Branch | `fabio/docs-composer-mode-owner-cleanup` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#380 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #380 (`e62e8b6a`) |
 
 ## Dove siamo
 
@@ -42,6 +42,11 @@ protocollo anti-regressione vive in
 Piano completato:
 [`superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md`](superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md).
 
+- Slice locale doc composer-mode owner cleanup in corso: `chat-lifecycle` e
+  `anti-regression-protocol` non devono piu' citare il vecchio owner rimosso
+  `composerMode.{mjs,ts}` o `composerMode.test.mjs`; la modalita' composer resta
+  owner del presenter (`runtimeViewModel.composerMode`) e di
+  `routeComposerSubmission`.
 - Slice UI composer-mode presenter contract mergeata #379: `kernelProjectionPresenter`
   possiede anche il fallback `composerMode` per lo streaming locale prima che la
   projection kernel sia caricata; `routeComposerSubmission` consuma solo il
@@ -1617,9 +1622,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#379: slice owner-level successive mergeate in
-  `main`, fino a `composer-mode presenter contract`; `main` verificato e
-  riallineato a #379.
+- #143-#283, #285-#286, #288-#380: slice owner-level successive mergeate in
+  `main`, fino a `status after composer-mode presenter`; `main` verificato e
+  riallineato a #380.
 
 PR aperte:
 
@@ -1627,8 +1632,8 @@ PR aperte:
 
 Branch corrente:
 
-- Slice locale attiva: `fabio/status-after-composer-mode-presenter`, base `main`
-  #379 (`53b64201`).
+- Slice locale attiva: `fabio/docs-composer-mode-owner-cleanup`, base `main`
+  #380 (`e62e8b6a`).
 
 ## Debito residuo
 
@@ -1661,8 +1666,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice `fabio/status-after-composer-mode-presenter` con test doc
-   e PR; non toccare browser/activity in questa fase.
+1. Chiudere la slice `fabio/docs-composer-mode-owner-cleanup` con test doc,
+   UI contract e PR; non toccare browser/activity in questa fase.
 2. Passata finale non-browser su `main` pulito: cercare fallback UI/runtime
    ancora paralleli solo se hanno owner canonico e Kill List esplicita.
 3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
@@ -1672,11 +1677,11 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #379 (`53b64201`); slice locale attiva:
-`fabio/status-after-composer-mode-presenter`. Prossimo passo: chiudere la slice
-di status cleanup post-#379, poi cercare eventuali fallback UI/runtime
-non-browser ancora paralleli solo con owner canonico e Kill List esplicita;
-browser/activity restano fuori scope.
+main aggiornato a #380 (`e62e8b6a`); slice locale attiva:
+`fabio/docs-composer-mode-owner-cleanup`. Prossimo passo: chiudere la slice che
+riallinea i documenti Runtime V2 al presenter-owned `composerMode`, poi cercare
+eventuali fallback UI/runtime non-browser ancora paralleli solo con owner
+canonico e Kill List esplicita; browser/activity restano fuori scope.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

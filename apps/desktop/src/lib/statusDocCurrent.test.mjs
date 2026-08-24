@@ -24,15 +24,18 @@ test("status doc records a concrete current main baseline without stale slice br
 test("status doc records the merged runtime view model turn contract", () => {
   assert.match(statusDoc, /#377/);
   assert.match(statusDoc, /#379/);
-  assert.match(statusDoc, /main` aggiornato a #379 \(`53b64201`\)/);
+  assert.match(statusDoc, /#380/);
+  assert.match(statusDoc, /main` aggiornato a #380 \(`e62e8b6a`\)/);
   assert.doesNotMatch(statusDoc, /slice runtimeViewModel turn status in corso/);
   assert.doesNotMatch(statusDoc, /fabio\/ui-runtime-view-model-turn-contract/);
 });
 
 test("status doc records the merged composer-mode presenter cleanup slice", () => {
   assert.match(statusDoc, /Slice UI composer-mode presenter contract mergeata #379/);
-  assert.match(statusDoc, /fabio\/status-after-composer-mode-presenter/);
+  assert.match(statusDoc, /fabio\/docs-composer-mode-owner-cleanup/);
+  assert.match(statusDoc, /doc composer-mode owner cleanup in corso/);
   assert.doesNotMatch(statusDoc, /Slice locale UI composer-mode presenter contract in corso/);
   assert.doesNotMatch(statusDoc, /fabio\/ui-composer-mode-presenter-contract/);
+  assert.doesNotMatch(statusDoc, /fabio\/status-after-composer-mode-presenter/);
   assert.match(statusDoc, /routeComposerSubmission` non deve piu' derivare localmente il composer mode/);
 });
