@@ -2,8 +2,8 @@
 //!
 //! Owns the stateful setup that must happen before prompt assembly: binding the
 //! memory workspace to the target thread, deriving channel/contact context,
-//! resolving contact memory perimeter flags, and recording real user activity
-//! for in-app or owner-authored channel turns. It does not own prompt
+//! resolving channel/contact memory perimeter flags, and recording real user
+//! activity for in-app or owner-authored channel turns. It does not own prompt
 //! construction, the stream transport, the agent loop, or browser/subagent
 //! execution.
 
@@ -18,7 +18,7 @@ pub(crate) struct ChatTurnContextInput<'a> {
 
 pub(crate) struct ChatTurnContext {
     pub(crate) contact: Option<ContactTurnContext>,
-    pub(crate) channel_owner: bool,
+    pub(crate) chat_channel: ChatChannelContext,
     pub(crate) turn_policy: ChatTurnPolicy,
     pub(crate) contact_memory_perimeter: ContactMemoryPerimeter,
 }
@@ -27,6 +27,11 @@ pub(crate) struct ChatTurnPolicy {
     pub(crate) mode: String,
     pub(crate) read_only: bool,
     pub(crate) autonomous: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ChatChannelContext {
+    pub(crate) owner: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -54,14 +59,17 @@ pub(crate) fn prepare_chat_turn_context(input: ChatTurnContextInput<'_>) -> Chat
         );
     }
 
-    note_real_user_activity(input.thread_id, channel_owner);
+    let chat_channel = ChatChannelContext {
+        owner: channel_owner,
+    };
+    note_real_user_activity(input.thread_id, chat_channel.owner);
 
     let turn_policy = resolve_chat_turn_policy(input.mode, input.tool_policy);
     let contact_memory_perimeter = resolve_contact_memory_perimeter(contact.as_ref());
 
     ChatTurnContext {
         contact,
-        channel_owner,
+        chat_channel,
         turn_policy,
         contact_memory_perimeter,
     }

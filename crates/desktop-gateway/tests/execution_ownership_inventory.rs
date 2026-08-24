@@ -4339,6 +4339,7 @@ fn capability_executor_constructor_has_one_gateway_owner() {
         "pub(crate) turn_policy: &'a ChatTurnPolicy,",
         "pub(crate) contact_memory_perimeter: ContactMemoryPerimeter,",
         "pub(crate) memory_intent: semantic_decision::MemoryIntent,",
+        "pub(crate) chat_channel: ChatChannelContext,",
         "pub(crate) contact_memory_perimeter: &'a ContactMemoryPerimeter,",
         "pub(crate) memory_intent: &'a semantic_decision::MemoryIntent,",
         "pub(crate) struct GatewayCapabilityExecutor",
@@ -4413,6 +4414,10 @@ fn capability_executor_constructor_has_one_gateway_owner() {
         gateway_capability_executor.contains("memory_intent: semantic_decision::MemoryIntent,"),
         "gateway capability executor must carry typed MemoryIntent"
     );
+    assert!(
+        gateway_capability_executor.contains("chat_channel: ChatChannelContext,"),
+        "gateway capability executor must carry typed ChatChannelContext"
+    );
     for pattern in [
         "pub(crate) memory_recall_allowed: bool,",
         "pub(crate) vault_value_requested: bool,",
@@ -4447,6 +4452,16 @@ fn capability_executor_constructor_has_one_gateway_owner() {
             "gateway capability executor must not carry scalar turn policy {pattern}"
         );
     }
+    for pattern in ["pub(crate) channel_owner: bool,", "channel_owner: bool,"] {
+        assert!(
+            !capability_executor_input.contains(pattern),
+            "capability executor input must receive typed ChatChannelContext, not scalar channel ownership {pattern}"
+        );
+        assert!(
+            !gateway_capability_executor.contains(pattern),
+            "gateway capability executor must carry typed ChatChannelContext, not scalar channel ownership {pattern}"
+        );
+    }
     for pattern in [
         "pub(crate) contact_only: bool,",
         "pub(crate) can_see_contacts: bool,",
@@ -4474,6 +4489,10 @@ fn capability_executor_constructor_has_one_gateway_owner() {
         run_agent_rounds.contains("contact_memory_perimeter,"),
         "run_agent_rounds must pass the typed contact memory perimeter into capability executor"
     );
+    assert!(
+        run_agent_rounds.contains("chat_channel,"),
+        "run_agent_rounds must pass the typed chat channel context into capability executor"
+    );
     for pattern in [
         "read_only: turn_policy.read_only,",
         "autonomous: turn_policy.autonomous,",
@@ -4481,6 +4500,7 @@ fn capability_executor_constructor_has_one_gateway_owner() {
         "can_see_contacts: contact_memory_perimeter.can_see_contacts,",
         "can_see_calendar: contact_memory_perimeter.can_see_calendar,",
         "can_use_project_memory: contact_memory_perimeter.can_use_project_memory,",
+        "channel_owner: bool,",
     ] {
         assert!(
             !run_agent_rounds.contains(pattern),
@@ -4604,6 +4624,7 @@ fn chat_turn_context_has_one_gateway_owner() {
         "struct ChatTurnContextInput",
         "struct ChatTurnContext",
         "struct ChatTurnPolicy",
+        "struct ChatChannelContext",
         "struct ContactMemoryPerimeter",
         "set_memory_workspace(",
         "contact_turn_context(",
@@ -4645,6 +4666,10 @@ fn chat_turn_context_has_one_gateway_owner() {
             .contains("pub(crate) contact_memory_perimeter: ContactMemoryPerimeter,"),
         "chat turn context must return typed ContactMemoryPerimeter"
     );
+    assert!(
+        chat_turn_context_output.contains("pub(crate) chat_channel: ChatChannelContext,"),
+        "chat turn context must return typed ChatChannelContext"
+    );
 
     for pattern in [
         "set_memory_workspace(&ws);",
@@ -4685,7 +4710,15 @@ fn chat_turn_context_has_one_gateway_owner() {
         run_agent_rounds.contains("turn_policy: &ChatTurnPolicy,"),
         "run_agent_rounds must receive the typed chat turn policy"
     );
-    for pattern in ["read_only: bool,", "autonomous: bool,"] {
+    assert!(
+        run_agent_rounds.contains("chat_channel: ChatChannelContext,"),
+        "run_agent_rounds must receive the typed chat channel context"
+    );
+    for pattern in [
+        "read_only: bool,",
+        "autonomous: bool,",
+        "channel_owner: bool,",
+    ] {
         assert!(
             !run_agent_rounds.contains(pattern),
             "run_agent_rounds must not split chat turn policy back into scalar flag {pattern}"

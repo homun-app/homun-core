@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent slices mergeate fino a #359; nuovo slice chat turn context typed output in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent slices mergeate fino a #360; nuovo slice ChatChannelContext in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#359 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #359 (`3f394df5`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#360 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #360 (`e9986ef6`) |
 
 ## Dove siamo
 
@@ -44,6 +44,11 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
+- Slice corrente `gateway_chat_turn_context`/`gateway_tool_execution`:
+  `channel_owner` viene incapsulato in `ChatChannelContext` typed dal setup del
+  turno fino al capability executor; il root non passa piu' un booleano scalare
+  al loop/capability owner, mentre il browser resta esplicitamente fuori da
+  questo refactor e consuma solo il bordo `chat_channel.owner`.
 - Estrazione locale `gateway_chat_turn_context`: `prepare_chat_turn_context`
   riceve i raw `mode`/`tool_policy` del turno e restituisce anche
   `ChatTurnPolicy` e `ContactMemoryPerimeter` typed; `stream_chat_via_openai`
