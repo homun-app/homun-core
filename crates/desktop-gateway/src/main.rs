@@ -265,13 +265,13 @@ pub(crate) use gateway_memory_bench::{
 use gateway_memory_briefing::{
     BriefingMemoryItem, format_memory_block, gather_profile_memory_for_prompt,
     gather_profile_memory_with_options, gather_profile_memory_with_provenance,
-    memory_intent_allows_recall,
 };
 use gateway_memory_briefing::{
     CHAT_MEMORY_BUDGET_CHARS, MemoryInjectionPolicy, format_memory_block_with_provenance,
     gather_profile_memory_for_intent_with_provenance, memory_briefing_source_fingerprint,
-    memory_injection_policy, memory_intent_context_for_semantic_contract,
-    memory_intent_for_execution, revalidated_cached_briefing,
+    memory_injection_policy, memory_intent_allows_recall,
+    memory_intent_context_for_semantic_contract, memory_intent_for_execution,
+    revalidated_cached_briefing,
 };
 #[cfg(test)]
 use gateway_memory_dedup::normalize_for_dedup;
@@ -1978,8 +1978,7 @@ async fn stream_chat_via_openai(
             &turn_policy,
             channel_owner,
             contact_memory_perimeter,
-            memory_recall_allowed,
-            memory_intent.vault_value_requested,
+            memory_intent,
             memory_user_message,
             memory_answer,
             last_model_error,
@@ -2043,8 +2042,7 @@ async fn run_agent_rounds(
     turn_policy: &ChatTurnPolicy,
     channel_owner: bool,
     contact_memory_perimeter: ContactMemoryPerimeter,
-    memory_recall_allowed: bool,
-    vault_value_requested: bool,
+    memory_intent: semantic_decision::MemoryIntent,
     memory_user_message: String,
     memory_answer: String,
     last_model_error: Option<String>,
@@ -2105,8 +2103,7 @@ async fn run_agent_rounds(
         thread_id: thread_id.as_deref(),
         turn_policy,
         contact_memory_perimeter,
-        memory_recall_allowed,
-        vault_value_requested,
+        memory_intent,
         composio_writes: &composio_writes,
         catalog_index: &catalog_index,
         capability_corpus: &capability_corpus,

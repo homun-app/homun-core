@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter slices mergeate fino a #354; nuovo slice chat tool policy context in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter slices mergeate fino a #355; nuovo slice capability memory intent in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#354 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #354 (`b093ff11`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#355 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #355 (`3d07f410`) |
 
 ## Dove siamo
 
@@ -45,6 +45,10 @@ Piano completato:
 Slice Runtime V2 recenti:
 
 - Estrazione locale `gateway_tool_execution`: `GatewayCapabilityExecutor` e
+  `ChatToolCtx` trasportano `MemoryIntent` typed invece di ricevere/conservare
+  copie scalari `memory_recall_allowed`/`vault_value_requested`; disponibilita'
+  `recall_memory` e reveal Vault derivano la decisione dal memory intent.
+- Estrazione mergeata `gateway_tool_execution`: `GatewayCapabilityExecutor` e
   `ChatToolCtx` trasportano anche `&ChatTurnPolicy` typed invece di conservare
   copie scalari `read_only`/`autonomous`; dispatch chat, approval policy e
   wrapper capability derivano i flag solo localmente dalla policy del turno.

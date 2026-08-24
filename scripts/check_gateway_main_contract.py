@@ -4966,6 +4966,11 @@ def main() -> int:
     )
     assert_contains(
         tool_execution_source,
+        "pub(crate) memory_intent: semantic_decision::MemoryIntent,",
+        "tool execution owner must receive typed MemoryIntent for capability executor",
+    )
+    assert_contains(
+        tool_execution_source,
         "pub(crate) contact_memory_perimeter: &'a ContactMemoryPerimeter,",
         "chat tool context must receive typed ContactMemoryPerimeter",
     )
@@ -5006,6 +5011,11 @@ def main() -> int:
         "pub(crate) turn_policy: &'a ChatTurnPolicy,",
         "chat tool context must carry typed ChatTurnPolicy",
     )
+    assert_contains(
+        chat_tool_ctx_source,
+        "pub(crate) memory_intent: &'a semantic_decision::MemoryIntent,",
+        "chat tool context must carry typed MemoryIntent",
+    )
     gateway_capability_executor_source = tool_execution_source.split(
         "pub(crate) struct GatewayCapabilityExecutor", 1
     )[1].split("pub(crate) fn gateway_capability_executor<'a>(", 1)[0]
@@ -5019,6 +5029,32 @@ def main() -> int:
         "turn_policy: &'a ChatTurnPolicy,",
         "gateway capability executor must carry typed ChatTurnPolicy",
     )
+    assert_contains(
+        gateway_capability_executor_source,
+        "memory_intent: semantic_decision::MemoryIntent,",
+        "gateway capability executor must carry typed MemoryIntent",
+    )
+    for snippet in [
+        "pub(crate) memory_recall_allowed: bool,",
+        "pub(crate) vault_value_requested: bool,",
+        "memory_recall_allowed: bool,",
+        "vault_value_requested: bool,",
+    ]:
+        assert_not_contains(
+            capability_executor_input_source,
+            snippet,
+            "capability executor input must not receive scalar memory intent",
+        )
+        assert_not_contains(
+            chat_tool_ctx_source,
+            snippet,
+            "chat tool context must not carry scalar memory intent",
+        )
+        assert_not_contains(
+            gateway_capability_executor_source,
+            snippet,
+            "gateway capability executor must not carry scalar memory intent",
+        )
     for snippet in [
         "pub(crate) read_only: bool,",
         "pub(crate) autonomous: bool,",
