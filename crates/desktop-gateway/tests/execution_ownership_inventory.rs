@@ -4694,6 +4694,7 @@ fn agent_turn_tail_has_one_gateway_owner() {
         "struct AgentTurnTailInput",
         "turn_policy: &'a ChatTurnPolicy,",
         "execution_identity: &'a AgentTurnExecutionIdentity,",
+        "struct AgentTurnActorScope",
         "struct AgentTurnTailContext",
         "struct AgentTurnTailSnapshot",
         "pub(crate) fn prepare_agent_turn_tail_context(",
@@ -4763,6 +4764,50 @@ fn agent_turn_tail_has_one_gateway_owner() {
         !turn_tail.contains("pub(crate) canonical_broker_turn: bool,"),
         "agent turn tail input must receive typed AgentTurnExecutionIdentity, not a scalar canonical_broker_turn copy"
     );
+    assert!(
+        turn_tail.contains("pub(crate) actor_scope: AgentTurnActorScope,"),
+        "agent turn tail context must expose the typed actor scope"
+    );
+    let run_agent_rounds = main
+        .split("async fn run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds function")
+        .split(") -> local_first_engine::TurnOutcome")
+        .next()
+        .expect("run_agent_rounds signature");
+    let run_agent_rounds_call = main
+        .split("let outcome = run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds call")
+        .split(")\n        .await;")
+        .next()
+        .expect("run_agent_rounds call block");
+    assert!(
+        run_agent_rounds.contains("actor_scope: AgentTurnActorScope,"),
+        "run_agent_rounds must receive typed AgentTurnActorScope"
+    );
+    assert!(
+        run_agent_rounds_call.contains("actor_scope,"),
+        "stream_chat_via_openai must pass typed AgentTurnActorScope into run_agent_rounds"
+    );
+    for pattern in [
+        "automation_user_id: UserId,",
+        "automation_workspace_id: WorkspaceId,",
+    ] {
+        assert!(
+            !run_agent_rounds.contains(pattern),
+            "run_agent_rounds must not split AgentTurnActorScope into scalar parameters {pattern}"
+        );
+    }
+    for pattern in [
+        "\n            automation_user_id,",
+        "\n            automation_workspace_id,",
+    ] {
+        assert!(
+            !run_agent_rounds_call.contains(pattern),
+            "stream_chat_via_openai must not pass scalar actor scope into run_agent_rounds {pattern}"
+        );
+    }
 
     for adjacent in [
         "async fn stream_chat_via_openai(",
