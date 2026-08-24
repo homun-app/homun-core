@@ -1867,8 +1867,7 @@ async fn stream_chat_via_openai(
         &effective_context,
         applies_new_input,
     );
-    let automation_user_id = tail_context.user_id;
-    let automation_workspace_id = tail_context.workspace_id;
+    let actor_scope = tail_context.actor_scope;
     let memory_user_message = tail_context.user_message;
     let memory_prev_assistant = tail_context.previous_assistant;
     let chat_plan_resume = prepare_chat_plan_resume(ChatPlanResumeInput {
@@ -1969,8 +1968,8 @@ async fn stream_chat_via_openai(
             state: &state_owned,
             thread_id: thread_id.as_deref(),
             request_id: &request.request_id,
-            user_id: &automation_user_id,
-            workspace_id: &automation_workspace_id,
+            user_id: &actor_scope.user_id,
+            workspace_id: &actor_scope.workspace_id,
             user_message: &memory_user_message,
             previous_assistant: memory_prev_assistant.as_deref(),
         });
@@ -1995,8 +1994,7 @@ async fn stream_chat_via_openai(
             catalog_index,
             capability_corpus,
             capability_route_for_runtime,
-            automation_user_id,
-            automation_workspace_id,
+            actor_scope,
             cfg,
             trace_dir,
             &execution_identity,
@@ -2052,8 +2050,7 @@ async fn run_agent_rounds(
     catalog_index: Vec<(String, String, serde_json::Value)>,
     capability_corpus: Vec<CapabilityEntry>,
     capability_route_for_runtime: CapabilityRouteDecision,
-    automation_user_id: UserId,
-    automation_workspace_id: WorkspaceId,
+    actor_scope: AgentTurnActorScope,
     cfg: local_first_engine::TurnConfig,
     // 5.D1c.9: the armed trace-dump dir (gateway-resolved `~/.homun/logs`), or None when the dump is
     // disarmed / the dir won't resolve. The engine appends here instead of calling `gateway_logs_dir`.
@@ -2080,8 +2077,8 @@ async fn run_agent_rounds(
     // per call from the engine.
     let steering_context = crate::model_client::gateway_steering_context(
         &state_owned,
-        automation_user_id.as_str(),
-        automation_workspace_id.as_str(),
+        actor_scope.user_id.as_str(),
+        actor_scope.workspace_id.as_str(),
         thread_id.as_deref(),
         execution_identity.effect_turn_id.as_deref(),
         execution_identity.effect_run_id.as_deref(),
@@ -2093,8 +2090,8 @@ async fn run_agent_rounds(
         steering_context,
     );
     let usage_context = chat_response_usage_context(
-        automation_user_id.as_str(),
-        automation_workspace_id.as_str(),
+        actor_scope.user_id.as_str(),
+        actor_scope.workspace_id.as_str(),
         thread_id.clone(),
         execution_identity.effect_turn_id.clone(),
         execution_identity.effect_run_id.clone(),
@@ -2111,8 +2108,8 @@ async fn run_agent_rounds(
         composio_writes: &composio_writes,
         catalog_index: &catalog_index,
         capability_corpus: &capability_corpus,
-        automation_user_id: &automation_user_id,
-        automation_workspace_id: &automation_workspace_id,
+        automation_user_id: &actor_scope.user_id,
+        automation_workspace_id: &actor_scope.workspace_id,
         // ADR 0025: turn-constants for a recursive `browse(goal)` sub-turn (used only when the manager
         // calls the `browse` tool; inert otherwise).
         prompt: &prompt,

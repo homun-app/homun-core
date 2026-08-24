@@ -4290,6 +4290,7 @@ def main() -> int:
         "pub(crate) struct AgentTurnTailInput",
         "turn_policy: &'a ChatTurnPolicy,",
         "execution_identity: &'a AgentTurnExecutionIdentity,",
+        "pub(crate) struct AgentTurnActorScope",
         "pub(crate) struct AgentTurnTailContext",
         "pub(crate) struct AgentTurnTailSnapshot",
         "pub(crate) fn prepare_agent_turn_tail_context(",
@@ -4359,6 +4360,45 @@ def main() -> int:
         "pub(crate) canonical_broker_turn: bool,",
         "agent turn tail input must receive typed AgentTurnExecutionIdentity, not a scalar canonical_broker_turn copy",
     )
+    assert_contains(
+        agent_turn_tail_source,
+        "pub(crate) actor_scope: AgentTurnActorScope,",
+        "agent turn tail context must expose typed actor scope",
+    )
+    run_agent_rounds = source.split("async fn run_agent_rounds(", 1)[1].split(
+        ") -> local_first_engine::TurnOutcome", 1
+    )[0]
+    run_agent_rounds_call = source.split("let outcome = run_agent_rounds(", 1)[1].split(
+        ")\n        .await;", 1
+    )[0]
+    assert_contains(
+        run_agent_rounds,
+        "actor_scope: AgentTurnActorScope,",
+        "run_agent_rounds must receive typed AgentTurnActorScope",
+    )
+    assert_contains(
+        run_agent_rounds_call,
+        "actor_scope,",
+        "gateway root must pass typed AgentTurnActorScope into run_agent_rounds",
+    )
+    for snippet in [
+        "automation_user_id: UserId,",
+        "automation_workspace_id: WorkspaceId,",
+    ]:
+        assert_not_contains(
+            run_agent_rounds,
+            snippet,
+            "run_agent_rounds must not split AgentTurnActorScope into scalar parameters",
+        )
+    for snippet in [
+        "\n            automation_user_id,",
+        "\n            automation_workspace_id,",
+    ]:
+        assert_not_contains(
+            run_agent_rounds_call,
+            snippet,
+            "gateway root must not pass scalar actor scope into run_agent_rounds",
+        )
     for snippet in [
         "async fn stream_chat_via_openai(",
         "async fn run_agent_rounds(",

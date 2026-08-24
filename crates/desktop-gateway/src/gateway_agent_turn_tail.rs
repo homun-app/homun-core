@@ -25,9 +25,13 @@ pub(crate) struct AgentTurnTailInput<'a> {
     pub(crate) turn_trace: &'a local_first_engine::turn_trace::TurnTrace,
 }
 
-pub(crate) struct AgentTurnTailContext {
+pub(crate) struct AgentTurnActorScope {
     pub(crate) user_id: UserId,
     pub(crate) workspace_id: WorkspaceId,
+}
+
+pub(crate) struct AgentTurnTailContext {
+    pub(crate) actor_scope: AgentTurnActorScope,
     pub(crate) user_message: String,
     pub(crate) previous_assistant: Option<String>,
 }
@@ -61,8 +65,10 @@ pub(crate) fn prepare_agent_turn_tail_context(
     applies_new_input: bool,
 ) -> AgentTurnTailContext {
     AgentTurnTailContext {
-        user_id: gateway_user_id(),
-        workspace_id: tail_workspace_id_for_thread(state, thread_id),
+        actor_scope: AgentTurnActorScope {
+            user_id: gateway_user_id(),
+            workspace_id: tail_workspace_id_for_thread(state, thread_id),
+        },
         user_message: if applies_new_input {
             prompt.to_string()
         } else {
