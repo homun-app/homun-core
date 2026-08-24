@@ -510,7 +510,6 @@ export function ChatView({
   const chatTurnState = useChatTurnStatus({
     runtimeViewModel,
     streamStatus,
-    projectedActiveTurn,
     conversationActivityCount: conversationActivity.length,
     translate: t,
   });

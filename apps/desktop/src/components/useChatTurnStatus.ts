@@ -7,17 +7,9 @@ import type { KernelProjectionPresenterView } from "../lib/chat-runtime/kernelPr
 import type { ChatStreamStatus } from "./AssistantThinkingState";
 import { useChatActiveTurnElapsed } from "./useChatActiveTurnElapsed";
 
-interface ProjectedActiveTurn {
-  turn_id?: string | null;
-  updated_at?: number | null;
-  attempt?: number | null;
-  blocked_reason?: string | null;
-}
-
 interface UseChatTurnStatusOptions {
   runtimeViewModel: KernelProjectionPresenterView;
   streamStatus: ChatStreamStatus | null;
-  projectedActiveTurn: ProjectedActiveTurn | null;
   conversationActivityCount: number;
   translate: (key: string, options?: Record<string, unknown>) => string;
 }
@@ -25,15 +17,15 @@ interface UseChatTurnStatusOptions {
 export function useChatTurnStatus({
   runtimeViewModel,
   streamStatus,
-  projectedActiveTurn,
   conversationActivityCount,
   translate,
 }: UseChatTurnStatusOptions): ChatTurnState | null {
-  const activeTurnKey = projectedActiveTurn?.turn_id ?? streamStatus?.requestId ?? null;
+  const activeTurn = runtimeViewModel.activeTurn;
+  const activeTurnKey = activeTurn?.turn_id ?? streamStatus?.requestId ?? null;
   const activeTurnElapsedSeconds = useChatActiveTurnElapsed({
     activeTurnKey,
     hasActiveTurn: runtimeViewModel.turnUiState.hasActiveTurn,
-    projectedUpdatedAt: projectedActiveTurn?.updated_at,
+    projectedUpdatedAt: activeTurn?.updated_at,
   });
 
   return useMemo(() => deriveChatTurnStatus({
@@ -44,14 +36,15 @@ export function useChatTurnStatus({
       stillWorking: translate("chat.stillWorking"),
     },
     elapsedSeconds: activeTurnElapsedSeconds,
-    attempt: projectedActiveTurn?.attempt,
+    attempt: activeTurn?.attempt,
     activityCount: conversationActivityCount,
-    activeTurnBlockedReason: projectedActiveTurn?.blocked_reason,
+    activeTurnBlockedReason: activeTurn?.blocked_reason,
   }), [
+    activeTurn?.attempt,
+    activeTurn?.blocked_reason,
     activeTurnElapsedSeconds,
     conversationActivityCount,
-    projectedActiveTurn?.attempt,
-    projectedActiveTurn?.blocked_reason,
+    runtimeViewModel.activeTurn,
     runtimeViewModel.turnUiState,
     streamStatus?.detail,
     streamStatus?.title,

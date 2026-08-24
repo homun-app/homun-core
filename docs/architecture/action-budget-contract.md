@@ -60,9 +60,11 @@ turno attivo.
 Il pill del turno attivo del composer passa da
 `apps/desktop/src/lib/chat-runtime/chatTurnStatus.mjs`, con
 `apps/desktop/src/components/useChatTurnStatus.ts` come owner UI del timer
-elapsed e delle etichette tradotte: `ChatView` fornisce solo projection,
-stream copy e contatori, senza decidere in proprio se il turno e' in attesa
-utente o ancora al lavoro.
+elapsed e delle etichette tradotte. Anche questo hook consuma
+`runtimeViewModel.activeTurn` invece di ricevere un `projectedActiveTurn`
+parallelo da `ChatView`: `ChatView` fornisce solo runtime view model, stream
+copy e contatori, senza decidere in proprio se il turno e' in attesa utente,
+ancora al lavoro, o quale blocked reason mostrare.
 
 ## Regole di refactor
 
