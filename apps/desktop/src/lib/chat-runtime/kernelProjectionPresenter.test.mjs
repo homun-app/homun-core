@@ -165,6 +165,21 @@ test("runtime_view_model_keeps_marker_tail_display_only_before_projection_load",
   assert.equal(view.turnUiState.workInProgress, false);
 });
 
+test("runtime_view_model_owns_local_streaming_composer_mode_before_projection_load", () => {
+  const view = projectKernelThreadView({
+    projectionLoaded: false,
+    projection: null,
+    isStreaming: true,
+    liveActivitySteps: [],
+    livePlanMarkdown: null,
+    streamOwnerTurnId: "turn-local",
+  });
+
+  assert.equal(view.turnUiState.hasActiveTurn, true);
+  assert.equal(view.turnUiState.workInProgress, true);
+  assert.equal(view.composerMode, "steer_active_turn");
+});
+
 test("missing_kernel_projection_does_not_fallback_to_marker_plan_or_activity", () => {
   const view = projectKernelThreadView({
     projectionLoaded: false,

@@ -94,6 +94,15 @@ function activeTurn(projection) {
   };
 }
 
+function composerMode(projection, turnUiState) {
+  const kernelMode = projection?.actions?.composer_mode ?? null;
+  if (kernelMode) return kernelMode;
+  if (turnUiState.turnAwaitingUser) return "reply_to_user_wait";
+  if (turnUiState.terminalTurnAtRest || !turnUiState.hasActiveTurn) return "new_turn";
+  if (turnUiState.workInProgress) return "steer_active_turn";
+  return "new_turn";
+}
+
 export function projectKernelThreadView(input) {
   const projection = input.projectionLoaded ? input.projection : null;
   const activeTurnId = projection?.turn?.active_turn_id ?? null;
@@ -117,6 +126,15 @@ export function projectKernelThreadView(input) {
     input.isStreaming
       || (activeTurnId && !turnAwaitingUser && !TERMINAL_STATUSES.has(turnStatus)),
   );
+  const turnUiState = {
+    status: turnStatus,
+    isStreaming: Boolean(input.isStreaming),
+    hasActiveTurn,
+    workInProgress,
+    canStop: Boolean(projection?.actions?.can_stop),
+    terminalTurnAtRest,
+    turnAwaitingUser,
+  };
 
   const conversationPlan = projectionPlan(input, projection, streamMatchesProjection);
 
@@ -125,16 +143,8 @@ export function projectKernelThreadView(input) {
     conversationActivity: projectionActivity(input, projection, streamMatchesProjection),
     workspacePlanSteps: workspacePlanSteps(projection, conversationPlan),
     workspacePlanGoal: workspacePlanGoal(projection, conversationPlan),
-    turnUiState: {
-      status: turnStatus,
-      isStreaming: Boolean(input.isStreaming),
-      hasActiveTurn,
-      workInProgress,
-      canStop: Boolean(projection?.actions?.can_stop),
-      terminalTurnAtRest,
-      turnAwaitingUser,
-    },
-    composerMode: projection?.actions?.composer_mode ?? "new_turn",
+    turnUiState,
+    composerMode: composerMode(projection, turnUiState),
     activeTurn: activeTurn(projection),
     attentionItems: items,
     browserStatus: browserStatus(projection),

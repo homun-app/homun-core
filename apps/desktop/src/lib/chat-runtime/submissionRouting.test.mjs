@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { routeComposerSubmission } from "./submissionRouting.mjs";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 function atRest(overrides = {}) {
   return {
@@ -29,13 +31,19 @@ test("submission routing consumes presenter turn state instead of raw projection
         workInProgress: true,
       },
       composerMode: "steer_active_turn",
-      projectionLoaded: false,
     }),
   );
 
   assert.equal(result.mode, "steering");
   assert.equal(result.forceNewTurn, false);
   assert.equal(result.routesToSteering, true);
+});
+
+test("submission routing does not own a fallback composer-mode derivation", () => {
+  const source = readFileSync(fileURLToPath(new URL("./submissionRouting.mjs", import.meta.url)), "utf8");
+
+  assert.doesNotMatch(source, /deriveComposerMode/);
+  assert.doesNotMatch(source, /projectionLoaded/);
 });
 
 test("active model work routes composer input as steering", () => {
@@ -48,6 +56,7 @@ test("active model work routes composer input as steering", () => {
         hasActiveTurn: true,
         workInProgress: true,
       },
+      composerMode: "steer_active_turn",
     }),
   );
   assert.equal(streaming.mode, "steering");
@@ -177,6 +186,7 @@ test("explicit HITL Free resolution overrides the steering gate on active work",
         hasActiveTurn: true,
         workInProgress: true,
       },
+      composerMode: "steer_active_turn",
       explicitForceNewTurn: true,
     }),
   );
