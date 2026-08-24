@@ -4309,6 +4309,7 @@ def main() -> int:
         "pub(crate) struct ChatToolsetInput",
         "turn_policy: &'a ChatTurnPolicy,",
         "contact_memory_perimeter: ContactMemoryPerimeter,",
+        "memory_intent: &'a semantic_decision::MemoryIntent,",
         "pub(crate) struct ChatToolset",
         "initial_manager_tool_schemas_for_test(",
         "tool_stays_live_this_turn(",
@@ -4329,6 +4330,11 @@ def main() -> int:
         chat_toolset_source,
         "pub(crate) contact_only: bool,",
         "chat toolset input must receive typed ContactMemoryPerimeter, not a scalar contact_only copy",
+    )
+    assert_not_contains(
+        chat_toolset_source,
+        "pub(crate) memory_recall_allowed: bool,",
+        "chat toolset input must receive typed MemoryIntent, not a scalar memory_recall_allowed copy",
     )
     assert_contains(
         capability_registry_source,
@@ -4394,6 +4400,16 @@ def main() -> int:
         toolset_call,
         "read_only: turn_policy.read_only,",
         "gateway root must not pass scalar read_only into chat toolset owner",
+    )
+    assert_contains(
+        toolset_call,
+        "memory_intent: &memory_intent,",
+        "gateway root must pass typed MemoryIntent into chat toolset owner",
+    )
+    assert_not_contains(
+        toolset_call,
+        "memory_recall_allowed,",
+        "gateway root must not pass scalar memory_recall_allowed into chat toolset owner",
     )
     assert_not_contains(
         toolset_call,

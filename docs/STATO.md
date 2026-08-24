@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter slices mergeate fino a #355; nuovo slice capability memory intent in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent slices mergeate fino a #356; nuovo slice toolset memory intent in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#355 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #355 (`3d07f410`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#356 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #356 (`ce0329b5`) |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_tool_execution`: `GatewayCapabilityExecutor` e
+- Estrazione locale `gateway_chat_toolset`: `ChatToolsetInput` trasporta
+  `&MemoryIntent` typed e deriva internamente la disponibilita' del tool
+  `recall_memory`; `stream_chat_via_openai` non passa piu' un flag scalare
+  `memory_recall_allowed` al toolset, mentre prompt runtime, memory briefing,
+  capability executor, browser executor e loop agente restano owner separati.
+- Estrazione mergeata `gateway_tool_execution`: `GatewayCapabilityExecutor` e
   `ChatToolCtx` trasportano `MemoryIntent` typed invece di ricevere/conservare
   copie scalari `memory_recall_allowed`/`vault_value_requested`; disponibilita'
   `recall_memory` e reveal Vault derivano la decisione dal memory intent.

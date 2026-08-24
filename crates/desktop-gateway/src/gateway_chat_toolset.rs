@@ -27,7 +27,7 @@ pub(crate) struct ChatToolsetInput<'a> {
     pub(crate) prompt: &'a str,
     pub(crate) turn_policy: &'a ChatTurnPolicy,
     pub(crate) contact_memory_perimeter: ContactMemoryPerimeter,
-    pub(crate) memory_recall_allowed: bool,
+    pub(crate) memory_intent: &'a semantic_decision::MemoryIntent,
     pub(crate) has_skills: bool,
     pub(crate) artifact_destinations: &'a [ArtifactDestination],
     pub(crate) objective_effect_policy: &'a semantic_decision::ObjectiveEffectPolicy,
@@ -121,7 +121,7 @@ pub(crate) async fn prepare_chat_toolset(input: ChatToolsetInput<'_>) -> ChatToo
     let read_only = input.turn_policy.read_only;
     let mut base_tools =
         initial_manager_tool_schemas_for_test(input.turn_policy, &input.contact_memory_perimeter);
-    if input.memory_recall_allowed {
+    if memory_intent_allows_recall(input.memory_intent) {
         base_tools.push(recall_memory_tool_schema());
     }
     base_tools.extend([
