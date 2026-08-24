@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent slices mergeate fino a #357; nuovo slice runtime prompt memory intent in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent slices mergeate fino a #358; nuovo slice memory intent context cleanup in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#357 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #357 (`d46fd6ad`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#358 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #358 (`04a9ba46`) |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Estrazione locale `gateway_prompt_instructions`: `ChatRuntimePromptInput`
+- Cleanup locale `gateway_memory_briefing`: `MemoryIntentExecutionContext`
+  conserva solo `MemoryIntent` typed e `MemoryInjectionPolicy`, rimuovendo la
+  copia scalare morta `memory_recall_allowed`; toolset, prompt runtime e
+  capability executor derivano la disponibilita' recall dal typed intent nei
+  rispettivi owner.
+- Estrazione mergeata `gateway_prompt_instructions`: `ChatRuntimePromptInput`
   trasporta `&MemoryIntent` typed e deriva internamente la disponibilita' del
   blocco memoria/recall nel runtime prompt; `stream_chat_via_openai` non passa
   piu' un flag scalare `memory_recall_allowed` al prompt runtime, mentre memory
@@ -466,9 +471,9 @@ Slice Runtime V2 recenti:
 - Estrazione mergeata `gateway_prompt_instructions`: il contratto prompt statico
   memoria/recall/Vault (`MEMORY`, `RECALL-BEFORE-ASKING`,
   `SENSITIVE VAULT`, scope restricted senza `recall_memory`) esce dal setup
-  inline di `stream_chat_via_openai`; `main.rs` conserva solo la composizione e
-  la scelta `memory_recall_allowed`, mentre recall service, prompt packet,
-  toolset e loop agente restano owner separati.
+  inline di `stream_chat_via_openai`; `main.rs` conserva solo la composizione,
+  mentre recall service, prompt packet, toolset e loop agente restano owner
+  separati e derivano la disponibilita' memoria dal typed intent.
 - Estrazione mergeata `gateway_skill_runtime`: il rendering del blocco prompt
   `INSTALLED SKILLS` / metodologia HomunCoder esce dal setup inline di
   `stream_chat_via_openai` e vive accanto a discovery, progressive disclosure

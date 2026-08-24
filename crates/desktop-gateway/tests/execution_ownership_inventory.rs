@@ -1418,6 +1418,27 @@ fn chat_objective_execution_context_has_one_gateway_owner() {
         memory_briefing.contains("pub(crate) fn memory_intent_context_for_semantic_contract("),
         "memory briefing owner must expose typed memory intent context projection"
     );
+    let memory_intent_execution_context = memory_briefing
+        .split("pub(crate) struct MemoryIntentExecutionContext")
+        .nth(1)
+        .expect("MemoryIntentExecutionContext")
+        .split("pub(crate) struct MemoryInjectionPolicy")
+        .next()
+        .expect("MemoryIntentExecutionContext block");
+    assert!(
+        memory_intent_execution_context
+            .contains("pub(crate) memory_intent: semantic_decision::MemoryIntent,"),
+        "memory intent execution context must carry typed MemoryIntent"
+    );
+    assert!(
+        memory_intent_execution_context
+            .contains("pub(crate) memory_injection: MemoryInjectionPolicy,"),
+        "memory intent execution context must carry typed memory injection policy"
+    );
+    assert!(
+        !memory_intent_execution_context.contains("memory_recall_allowed"),
+        "memory intent execution context must not duplicate typed MemoryIntent as scalar recall policy"
+    );
     assert!(
         setup.contains(
             "prepare_chat_objective_execution_context(ChatObjectiveExecutionContextInput"
