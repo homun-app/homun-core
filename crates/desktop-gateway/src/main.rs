@@ -1857,10 +1857,6 @@ async fn stream_chat_via_openai(
     let temperature = request.temperature;
     let execution_identity =
         resolve_agent_turn_execution_identity(&request.request_id, request.agent_run_id.as_deref());
-    let execution_journal = execution_identity.execution_journal;
-    let effect_run_id = execution_identity.effect_run_id;
-    let effect_turn_id = execution_identity.effect_turn_id;
-    let canonical_broker_turn = execution_identity.canonical_broker_turn;
     // Thread this chat belongs to: lets browser work reuse a persistent
     // per-thread browser session (search → then book on the same tab).
     let thread_id = request.thread_id.clone();
@@ -1985,9 +1981,7 @@ async fn stream_chat_via_openai(
             browse_sources,
             cfg,
             trace_dir,
-            execution_journal,
-            effect_turn_id,
-            effect_run_id,
+            &execution_identity,
             &turn_trace,
             vision_fallback_armed,
         )
@@ -1996,7 +1990,7 @@ async fn stream_chat_via_openai(
             state: tail_snapshot.state,
             tx: &tx,
             outcome,
-            canonical_broker_turn,
+            canonical_broker_turn: execution_identity.canonical_broker_turn,
             thread_id: tail_snapshot.thread_id,
             fence_turn_id: tail_snapshot.fence_turn_id,
             fence_user_id: tail_snapshot.fence_user_id,
@@ -2049,9 +2043,7 @@ async fn run_agent_rounds(
     // 5.D1c.9: the armed trace-dump dir (gateway-resolved `~/.homun/logs`), or None when the dump is
     // disarmed / the dir won't resolve. The engine appends here instead of calling `gateway_logs_dir`.
     trace_dir: Option<std::path::PathBuf>,
-    execution_journal: agent_journal::GatewayJournal,
-    effect_turn_id: Option<String>,
-    effect_run_id: Option<String>,
+    execution_identity: &AgentTurnExecutionIdentity,
     // Readable per-turn observability sink (ported): passed into the capability executor (Plan event)
     // and into `run_turn` (the in-loop events). No-op when disabled. See `engine::turn_trace`.
     turn_trace: &local_first_engine::turn_trace::TurnTrace,
@@ -2069,8 +2061,8 @@ async fn run_agent_rounds(
         automation_user_id.as_str(),
         automation_workspace_id.as_str(),
         thread_id.as_deref(),
-        effect_turn_id.as_deref(),
-        effect_run_id.as_deref(),
+        execution_identity.effect_turn_id.as_deref(),
+        execution_identity.effect_run_id.as_deref(),
     );
     let model_client = crate::model_client::gateway_model_client(
         &http,
@@ -2082,10 +2074,11 @@ async fn run_agent_rounds(
         automation_user_id.as_str(),
         automation_workspace_id.as_str(),
         thread_id.clone(),
-        effect_turn_id.clone(),
-        effect_run_id.clone(),
+        execution_identity.effect_turn_id.clone(),
+        execution_identity.effect_run_id.clone(),
     );
-    let effect_contract = load_turn_effect_contract(&state_owned, effect_turn_id.as_deref());
+    let effect_contract =
+        load_turn_effect_contract(&state_owned, execution_identity.effect_turn_id.as_deref());
     let capability_executor = gateway_capability_executor(GatewayCapabilityExecutorInput {
         state: &state_owned,
         tx,
@@ -2103,8 +2096,8 @@ async fn run_agent_rounds(
         prompt: &prompt,
         chat_channel,
         turn_trace,
-        turn_id: effect_turn_id.as_deref(),
-        run_id: effect_run_id.as_deref(),
+        turn_id: execution_identity.effect_turn_id.as_deref(),
+        run_id: execution_identity.effect_run_id.as_deref(),
         execution_contract: effect_contract.as_ref(),
     });
     // The browser tool chokepoint (ADR 0025 seam): OWNS the browser subsystem's private state (session +
@@ -2128,10 +2121,10 @@ async fn run_agent_rounds(
         // C2: the manager turn's own registered journal — same handle `run_turn` below receives via
         // `&execution_journal`, so protocol metrics from a manager-level browser call land in the same
         // run as everything else this turn records.
-        journal: execution_journal.clone(),
+        journal: execution_identity.execution_journal.clone(),
         execution_contract: effect_contract.clone(),
-        effect_run_id: effect_run_id.clone(),
-        turn_id: effect_turn_id.clone(),
+        effect_run_id: execution_identity.effect_run_id.clone(),
+        turn_id: execution_identity.effect_turn_id.clone(),
         step_memory: None,
         auto_screenshot: false,
         screenshot_on_stall: false,
@@ -2177,7 +2170,7 @@ async fn run_agent_rounds(
         &completion_judge,
         &compactor,
         &engine_turn_policy,
-        &execution_journal,
+        &execution_identity.execution_journal,
         tx,
         temperature,
         thread_id.as_deref(),
@@ -2244,7 +2237,7 @@ async fn run_agent_rounds(
         &completion_judge,
         &compactor,
         &engine_turn_policy,
-        &execution_journal,
+        &execution_identity.execution_journal,
         tx,
         temperature,
         thread_id.as_deref(),
