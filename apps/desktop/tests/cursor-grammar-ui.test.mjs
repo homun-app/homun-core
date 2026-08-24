@@ -1029,6 +1029,9 @@ test("App delegates task queue snapshot projection to taskQueueProjection", () =
   assert.match(taskQueueController, /from "\.\/taskQueueProjection";/);
   assert.match(taskQueueController, /coreBridge\.taskQueue/);
   assert.match(taskQueueProjection, /export function projectTaskQueueSnapshot/);
+  assert.doesNotMatch(taskQueueController, /from "\.\.\/data\/mockData"/);
+  assert.doesNotMatch(taskQueueController, /fallbackTasks/);
+  assert.doesNotMatch(taskQueueProjection, /fallbackTasks/);
 });
 
 test("App delegates thread snapshot selection to threadSnapshotProjection", () => {

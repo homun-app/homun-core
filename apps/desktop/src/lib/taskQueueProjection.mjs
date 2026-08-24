@@ -1,6 +1,5 @@
 export function projectTaskQueueSnapshot({
   snapshot,
-  fallbackTasks,
   mapTask,
   mapApproval,
   mapUncertainEffect,
@@ -16,7 +15,7 @@ export function projectTaskQueueSnapshot({
   );
 
   return {
-    taskItems: nextTasks.length ? nextTasks : fallbackTasks,
+    taskItems: nextTasks,
     approvelItems: snapshot.waiting_approvals.length
       ? snapshot.waiting_approvals.map(mapApproval)
       : [],
