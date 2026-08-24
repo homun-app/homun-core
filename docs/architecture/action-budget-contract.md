@@ -69,7 +69,10 @@ Anche la route di submission del composer (`routeComposerSubmission`) consuma
 `runtimeViewModel.turnUiState` e `runtimeViewModel.composerMode`: il fallback
 pre-projection usa il lifecycle gia' proiettato dal presenter e non ricalcola
 terminalita'/liveness da `projectedActiveTurn` e `projectedTurnStatus` passati
-separatamente da `ChatView`.
+separatamente da `ChatView`. Il vecchio twin
+`apps/desktop/src/lib/chat-runtime/lifecycle.{mjs,ts}` e' rimosso: non deve
+restare un secondo owner locale per `hasActiveTurn`, `workInProgress`,
+`turnAwaitingUser` o `terminalTurnAtRest`.
 
 ## Regole di refactor
 

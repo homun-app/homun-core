@@ -1,6 +1,6 @@
 # Chat Lifecycle And Rendering Contracts
 
-Verificato 2026-08-03 contro il branch `fabio/chat-lifecycle-consolidation`.
+Verificato 2026-08-24 contro il branch `fabio/ui-retire-legacy-turn-lifecycle`.
 
 Questa pagina descrive solo contratti gia' presenti nel codice. Se un nuovo
 fix modifica chat, turni, steering, reasoning o browser/activity overlay, deve
@@ -13,7 +13,7 @@ aggiornare uno degli owner qui sotto e il relativo test.
 | Classificazione durable del turno | `crates/task-runtime/src/turn_lifecycle.rs` | `cargo test -p local-first-task-runtime turn_lifecycle` |
 | Query del turno attivo chat | `crates/task-runtime/src/broker.rs`, `crates/task-runtime/src/store.rs` | `cargo test -p local-first-task-runtime active_chat_turn` |
 | Cleanup steering terminale | `crates/task-runtime/src/store.rs::close_unsettled_turn_steering`, `crates/desktop-gateway/src/main.rs::finalize_turn_steering` | `cargo test -p local-first-task-runtime finalization_fence_blocks_every_unapplied_steering_state`; `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway steering` |
-| Lifecycle UI del turno | `apps/desktop/src/lib/chat-runtime/lifecycle.ts` | `cd apps/desktop && npm run test:cursor-grammar` |
+| Lifecycle UI del turno | `apps/desktop/src/lib/chat-runtime/kernelProjectionPresenter.ts` via `runtimeViewModel.turnUiState` | `cd apps/desktop && node --test src/lib/chat-runtime/kernelProjectionPresenter.test.mjs src/lib/chat-runtime/runtimeLifecycleRetirement.test.mjs` |
 | Modalita' composer | `apps/desktop/src/lib/chat-runtime/composerMode.ts` | `cd apps/desktop && npm run test:cursor-grammar` |
 | Steering visibile in chat | `apps/desktop/src/lib/chat-runtime/steering.ts`, `apps/desktop/src/lib/chatSteeringState.ts` | `cd apps/desktop && npm run test:cursor-grammar` |
 | Testo assistente visibile | `apps/desktop/src/lib/chat-rendering/visibleContent.ts` e compat `apps/desktop/src/lib/chatVisibleContent.ts` | `cd apps/desktop && npm run test:cursor-grammar` |
@@ -66,14 +66,17 @@ da un `active_turn_id` precedente.
 proiezioni durable, stream locale, HITL, steering e messaggi persistiti, poi
 delegare a funzioni pure:
 
-- `deriveTurnLifecycle` decide `hasActiveTurn`, `workInProgress`,
-  `turnAwaitingUser`, `canStop`, `terminalTurnAtRest`.
+- `projectKernelThreadView` decide `turnUiState.hasActiveTurn`,
+  `workInProgress`, `turnAwaitingUser`, `canStop`, `terminalTurnAtRest` e
+  produce il `runtimeViewModel` consumato dagli hook UI.
 - `deriveComposerMode` decide `new_turn`, `steering`, `waiting_user_reply` o
-  `disabled`.
+  `disabled` solo come fallback pre-projection; dopo il load della projection la
+  modalita' composer arriva da `runtimeViewModel.composerMode`.
 - `deriveChatSteeringState` decide cosa resta visibile come pending/stale.
 
 Regola: se una nuova condizione cambia "thinking", stop button, composer o
-steering, prima si aggiunge una fixture nel modulo puro, poi si cabla la UI.
+steering, prima si aggiunge una fixture nel presenter/runtime view model, poi si
+cabla la UI.
 
 ## Visible Content
 
