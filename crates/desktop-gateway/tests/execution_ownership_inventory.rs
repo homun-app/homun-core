@@ -3529,6 +3529,17 @@ fn agent_turn_plan_seed_has_one_gateway_owner() {
         .split("// Tools offered to the model this run:")
         .next()
         .expect("agent turn plan seed setup");
+    let run_agent_rounds = main
+        .split("async fn run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds");
+    let run_agent_rounds_call = main
+        .split("let outcome = run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds call")
+        .split(".await;")
+        .next()
+        .expect("run_agent_rounds call block");
 
     for pattern in [
         "pub(crate) struct AgentTurnPlanSeed",
@@ -3550,11 +3561,45 @@ fn agent_turn_plan_seed_has_one_gateway_owner() {
         "let final_done = false;",
         "let plan_nudges: u32 = 0;",
         "let turn_used_tools = false;",
+        "let final_done = plan_seed.final_done;",
+        "let plan_nudges = plan_seed.plan_nudges;",
+        "let turn_used_tools = plan_seed.turn_used_tools;",
         "ls.step_messages_start = ls.messages.len();",
     ] {
         assert!(
             !stream_chat.contains(pattern),
             "main.rs must not own agent turn plan seed state {pattern}"
+        );
+    }
+    assert!(
+        run_agent_rounds.contains("plan_seed: AgentTurnPlanSeed,"),
+        "run_agent_rounds must receive typed AgentTurnPlanSeed"
+    );
+    assert!(
+        run_agent_rounds_call.contains("plan_seed,"),
+        "stream_chat_via_openai must pass typed AgentTurnPlanSeed into run_agent_rounds"
+    );
+    for pattern in [
+        "final_done: bool,",
+        "plan_nudges: u32,",
+        "turn_used_tools: bool,",
+        "final_done,",
+        "plan_nudges,",
+        "turn_used_tools,",
+    ] {
+        assert!(
+            !run_agent_rounds_call.contains(pattern),
+            "stream_chat_via_openai must not pass scalar plan seed state into run_agent_rounds {pattern}"
+        );
+    }
+    for pattern in [
+        "final_done: bool,",
+        "plan_nudges: u32,",
+        "turn_used_tools: bool,",
+    ] {
+        assert!(
+            !run_agent_rounds.contains(pattern),
+            "run_agent_rounds must not split AgentTurnPlanSeed into scalar parameters {pattern}"
         );
     }
 
