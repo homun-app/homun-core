@@ -2777,6 +2777,43 @@ def main() -> int:
             snippet,
             "agent turn config owner must not absorb stream, loop, tail, browser, or subagent owners",
         )
+    run_agent_rounds = source.split("async fn run_agent_rounds(", 1)[1].split(
+        ") -> local_first_engine::TurnOutcome", 1
+    )[0]
+    run_agent_rounds_call = source.split("let outcome = run_agent_rounds(", 1)[1].split(
+        ")\n        .await;", 1
+    )[0]
+    for snippet in [
+        "pub(crate) struct AgentTurnConfigRuntimeScope",
+        "pub(crate) turn_config: local_first_engine::TurnConfig,",
+        ") -> AgentTurnConfigRuntimeScope",
+        "turn_config: local_first_engine::TurnConfig {",
+    ]:
+        assert_contains(
+            agent_turn_config_source,
+            snippet,
+            "agent turn config owner must expose typed runtime config scope",
+        )
+    assert_contains(
+        run_agent_rounds,
+        "config_runtime_scope: AgentTurnConfigRuntimeScope,",
+        "run_agent_rounds must receive typed AgentTurnConfigRuntimeScope",
+    )
+    assert_contains(
+        run_agent_rounds_call,
+        "config_runtime_scope,",
+        "gateway root must pass typed AgentTurnConfigRuntimeScope into run_agent_rounds",
+    )
+    assert_not_contains(
+        run_agent_rounds,
+        "cfg: local_first_engine::TurnConfig,",
+        "run_agent_rounds must not receive scalar TurnConfig outside the config scope",
+    )
+    assert_not_contains(
+        run_agent_rounds_call,
+        "\n            cfg,",
+        "gateway root must not pass scalar TurnConfig into run_agent_rounds",
+    )
     assert_contains(
         source,
         "mod gateway_agent_turn_hitl_resume;",

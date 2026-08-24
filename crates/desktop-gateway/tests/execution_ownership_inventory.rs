@@ -3903,6 +3903,57 @@ fn agent_turn_config_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_turn_config_runtime_scope_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let config_owner = production_source(&root.join("src/gateway_agent_turn_config.rs"));
+
+    for pattern in [
+        "pub(crate) struct AgentTurnConfigRuntimeScope",
+        "pub(crate) turn_config: local_first_engine::TurnConfig,",
+        ") -> AgentTurnConfigRuntimeScope",
+        "turn_config: local_first_engine::TurnConfig {",
+    ] {
+        assert!(
+            config_owner.contains(pattern),
+            "agent turn config owner must expose typed runtime config scope {pattern}"
+        );
+    }
+
+    let run_agent_rounds = main
+        .split("async fn run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds function")
+        .split(") -> local_first_engine::TurnOutcome")
+        .next()
+        .expect("run_agent_rounds signature");
+    let run_agent_rounds_call = main
+        .split("let outcome = run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds call")
+        .split(")\n        .await;")
+        .next()
+        .expect("run_agent_rounds call block");
+
+    assert!(
+        run_agent_rounds.contains("config_runtime_scope: AgentTurnConfigRuntimeScope,"),
+        "run_agent_rounds must receive typed AgentTurnConfigRuntimeScope"
+    );
+    assert!(
+        run_agent_rounds_call.contains("config_runtime_scope,"),
+        "stream_chat_via_openai must pass typed AgentTurnConfigRuntimeScope into run_agent_rounds"
+    );
+    assert!(
+        !run_agent_rounds.contains("cfg: local_first_engine::TurnConfig,"),
+        "run_agent_rounds must not receive scalar TurnConfig outside the config scope"
+    );
+    assert!(
+        !run_agent_rounds_call.contains("\n            cfg,"),
+        "stream_chat_via_openai must not pass scalar TurnConfig into run_agent_rounds"
+    );
+}
+
+#[test]
 fn agent_turn_hitl_resume_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

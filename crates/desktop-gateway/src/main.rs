@@ -1964,7 +1964,7 @@ async fn stream_chat_via_openai(
             request.checkpoint_input.is_some(),
         );
         let resolved_hitl = resolved_hitl_guard_for_turn(hitl_choice_resume.as_ref());
-        let cfg = resolve_agent_turn_config(AgentTurnConfigInput {
+        let config_runtime_scope = resolve_agent_turn_config(AgentTurnConfigInput {
             context_window: model_context_window,
             forced_tool: forced_tool.clone(),
             resolved_hitl,
@@ -2001,7 +2001,7 @@ async fn stream_chat_via_openai(
             plan_seed,
             tool_runtime_scope,
             actor_scope,
-            cfg,
+            config_runtime_scope,
             trace_runtime_scope,
             &execution_identity,
             vision_fallback_armed,
@@ -2053,7 +2053,7 @@ async fn run_agent_rounds(
     plan_seed: AgentTurnPlanSeed,
     tool_runtime_scope: AgentTurnToolRuntimeScope,
     actor_scope: AgentTurnActorScope,
-    cfg: local_first_engine::TurnConfig,
+    config_runtime_scope: AgentTurnConfigRuntimeScope,
     trace_runtime_scope: AgentTurnTraceRuntimeScope<'_>,
     execution_identity: &AgentTurnExecutionIdentity,
     // The turn is sending images to a model on a guess (`AttachmentPlan::InlineWithFallback`), and a
@@ -2077,6 +2077,7 @@ async fn run_agent_rounds(
         trace_dir,
         turn_trace,
     } = trace_runtime_scope;
+    let AgentTurnConfigRuntimeScope { turn_config: cfg } = config_runtime_scope;
 
     // Build the seams `engine::run_turn` runs against — thin gateway adapters over AppState/transport/
     // stores, constructed ONCE per turn from this turn's context (ADR 0024/0026). model_client borrows
