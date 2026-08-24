@@ -81,7 +81,7 @@ fn chat_objective_execution_context_prunes_connected_catalog_and_projects_memory
             .allows(semantic_decision::EffectClass::FilesystemWrite)
     );
     assert!(context.memory_intent.use_current_thread);
-    assert!(!context.memory_recall_allowed);
+    assert!(!memory_intent_allows_recall(&context.memory_intent));
     assert!(context.memory_injection.include_current_thread);
 }
 
@@ -5604,7 +5604,6 @@ pub(crate) struct ChatObjectiveExecutionContext {
     pub(crate) semantic_contract: Option<semantic_decision::ValidatedSemanticDecision>,
     pub(crate) objective_effect_policy: semantic_decision::ObjectiveEffectPolicy,
     pub(crate) memory_intent: semantic_decision::MemoryIntent,
-    pub(crate) memory_recall_allowed: bool,
     pub(crate) memory_injection: MemoryInjectionPolicy,
     pub(crate) catalog_index: Vec<(String, String, serde_json::Value)>,
 }
@@ -5629,7 +5628,6 @@ pub(crate) fn prepare_chat_objective_execution_context(
         semantic_contract,
         objective_effect_policy,
         memory_intent: memory_context.memory_intent,
-        memory_recall_allowed: memory_context.memory_recall_allowed,
         memory_injection: memory_context.memory_injection,
         catalog_index,
     }

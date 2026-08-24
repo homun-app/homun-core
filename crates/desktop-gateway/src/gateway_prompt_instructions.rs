@@ -8,7 +8,9 @@ use crate::{
     ChatTurnPolicy,
     gateway_artifacts::ArtifactDestination,
     gateway_browser_tools::manager_browser_guidance,
+    gateway_memory_briefing::memory_intent_allows_recall,
     gateway_user_preferences::{effective_user_language, now_block, response_language_instruction},
+    semantic_decision,
 };
 
 pub(crate) fn browser_open_research_discovery_instruction() -> &'static str {
@@ -445,7 +447,7 @@ pub(crate) fn runtime_prompt_control_instructions(input: RuntimePromptControlInp
 }
 
 pub(crate) struct ChatRuntimePromptInput<'a> {
-    pub(crate) memory_recall_allowed: bool,
+    pub(crate) memory_intent: &'a semantic_decision::MemoryIntent,
     pub(crate) capability_router_instruction: Option<&'a str>,
     pub(crate) turn_policy: &'a ChatTurnPolicy,
     pub(crate) objective_contract: Option<&'a local_first_task_runtime::ObjectiveContractRecord>,
@@ -453,7 +455,7 @@ pub(crate) struct ChatRuntimePromptInput<'a> {
 
 pub(crate) fn prepare_chat_runtime_prompt(input: ChatRuntimePromptInput<'_>) -> String {
     runtime_prompt_control_instructions(RuntimePromptControlInput {
-        memory_recall_allowed: input.memory_recall_allowed,
+        memory_recall_allowed: memory_intent_allows_recall(input.memory_intent),
         capability_router_instruction: input.capability_router_instruction,
         mode: input.turn_policy.mode.as_str(),
         objective_contract: input.objective_contract,
@@ -500,7 +502,7 @@ discovery/search from scratch."
 
 #[cfg(test)]
 mod tests {
-    use crate::ChatTurnPolicy;
+    use crate::{ChatTurnPolicy, semantic_decision};
 
     use super::{
         ChatCoreOperatingPromptInput, ChatRuntimePromptInput, RuntimePromptControlInput,
@@ -831,8 +833,10 @@ mod tests {
             read_only: false,
             autonomous: false,
         };
+        let mut memory_intent = semantic_decision::MemoryIntent::safe_default();
+        memory_intent.search_personal = true;
         let guidance = prepare_chat_runtime_prompt(ChatRuntimePromptInput {
-            memory_recall_allowed: true,
+            memory_intent: &memory_intent,
             capability_router_instruction: Some("ROUTE SENTINEL"),
             turn_policy: &turn_policy,
             objective_contract: None,

@@ -4735,6 +4735,7 @@ fn runtime_prompt_control_instructions_have_one_gateway_owner() {
         "pub(crate) fn runtime_prompt_control_instructions(",
         "pub(crate) struct ChatRuntimePromptInput",
         "pub(crate) turn_policy: &'a ChatTurnPolicy,",
+        "pub(crate) memory_intent: &'a semantic_decision::MemoryIntent,",
         "pub(crate) fn prepare_chat_runtime_prompt(",
         "memory_recall_usage_instruction()",
         "operational_plan_instruction()",
@@ -4756,6 +4757,42 @@ fn runtime_prompt_control_instructions_have_one_gateway_owner() {
     assert!(
         stream.contains("prepare_chat_runtime_prompt(ChatRuntimePromptInput"),
         "main.rs must delegate runtime prompt control assembly"
+    );
+    let chat_runtime_prompt_input = prompt_instructions
+        .split("pub(crate) struct ChatRuntimePromptInput")
+        .nth(1)
+        .expect("ChatRuntimePromptInput block")
+        .split("pub(crate) fn prepare_chat_runtime_prompt")
+        .next()
+        .expect("ChatRuntimePromptInput fields");
+    assert!(
+        chat_runtime_prompt_input
+            .contains("pub(crate) memory_intent: &'a semantic_decision::MemoryIntent,"),
+        "chat runtime prompt input must receive typed MemoryIntent"
+    );
+    assert!(
+        !chat_runtime_prompt_input.contains("pub(crate) memory_recall_allowed: bool,"),
+        "chat runtime prompt input must not receive scalar memory_recall_allowed"
+    );
+    assert!(
+        prompt_instructions
+            .contains("memory_recall_allowed: memory_intent_allows_recall(input.memory_intent),"),
+        "chat runtime prompt owner must derive memory recall availability from typed MemoryIntent"
+    );
+    let runtime_prompt_call = stream
+        .split("prepare_chat_runtime_prompt(ChatRuntimePromptInput {")
+        .nth(1)
+        .expect("runtime prompt call")
+        .split("})")
+        .next()
+        .expect("runtime prompt input block");
+    assert!(
+        runtime_prompt_call.contains("memory_intent: &memory_intent,"),
+        "main.rs must pass typed MemoryIntent into runtime prompt owner"
+    );
+    assert!(
+        !runtime_prompt_call.contains("memory_recall_allowed,"),
+        "main.rs must not pass scalar memory_recall_allowed into runtime prompt owner"
     );
     let runtime_prompt_setup = stream
         .split("let capability_router_instruction =")
