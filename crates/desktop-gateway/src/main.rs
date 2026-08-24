@@ -1880,14 +1880,25 @@ async fn stream_chat_via_openai(
     let capability_route_for_runtime = capability_route.clone();
     let abort_resume_id = resume_id.clone();
     let engine_task = tokio::spawn(async move {
-        let loop_seed = seed_agent_turn_loop_state(prompt_packets, messages);
-        let mut ls = loop_seed.loop_state;
-        seed_agent_turn_recall(&mut ls, &tx, applies_new_input, automatic_recall_payload).await;
-        seed_agent_turn_sensitive_confirmations(&state_owned, thread_id.as_deref(), &mut ls);
-        let last_model_error = loop_seed.last_model_error;
-        let memory_answer = loop_seed.memory_answer;
-        let browse_sources = loop_seed.browse_sources;
-        publish_agent_turn_route_trace(&mut ls, &tx, &capability_route_for_runtime).await;
+        let mut loop_seed = seed_agent_turn_loop_state(prompt_packets, messages);
+        seed_agent_turn_recall(
+            &mut loop_seed.loop_state,
+            &tx,
+            applies_new_input,
+            automatic_recall_payload,
+        )
+        .await;
+        seed_agent_turn_sensitive_confirmations(
+            &state_owned,
+            thread_id.as_deref(),
+            &mut loop_seed.loop_state,
+        );
+        publish_agent_turn_route_trace(
+            &mut loop_seed.loop_state,
+            &tx,
+            &capability_route_for_runtime,
+        )
+        .await;
         // No-progress guard: if the model repeats the EXACT same tool calls round after
         // round, it's stuck (not making progress) → stop and synthesize, instead of
         // burning the whole round budget on a loop. This is what lets the budget be
@@ -1920,7 +1931,12 @@ async fn stream_chat_via_openai(
         // a plain conversational answer (let it end). Latches true once any tool has run.
         // Tools offered to the model this run: the base set, plus any tools the
         // model discovers via `find_connected_tools` (injected on demand).
-        seed_agent_turn_tool_schemas(&mut ls, base_tools, &turn_policy, contact_ctx.as_ref());
+        seed_agent_turn_tool_schemas(
+            &mut loop_seed.loop_state,
+            base_tools,
+            &turn_policy,
+            contact_ctx.as_ref(),
+        );
         // Turn-local browser state now lives in the browser subsystem: the loop-visible fields
         // (browser_used / pending_browser_image / browser_tool_call_ids) travel in `LoopState`
         // (slice 5a), and the browser-private state (sidecar session, last snapshot, current tab /
@@ -1930,11 +1946,16 @@ async fn stream_chat_via_openai(
         // CLI commands + output run during THIS response.
         reset_agent_turn_terminal_buffer(thread_id.clone());
 
-        let plan_seed = seed_agent_turn_plan_state(&mut ls, &chat_plan_resume, verbose_debug());
+        let plan_seed = seed_agent_turn_plan_state(
+            &mut loop_seed.loop_state,
+            &chat_plan_resume,
+            verbose_debug(),
+        );
 
-        seed_agent_turn_model_provider(&mut ls, &http, model, base_url, api_key).await;
+        seed_agent_turn_model_provider(&mut loop_seed.loop_state, &http, model, base_url, api_key)
+            .await;
         seed_agent_turn_recovery_checkpoint(
-            &mut ls,
+            &mut loop_seed.loop_state,
             recovery_checkpoint,
             request.checkpoint_input.is_some(),
         );
@@ -1957,7 +1978,7 @@ async fn stream_chat_via_openai(
         // inject it, so the engine loop appends without calling the gateway's path resolver.
         let trace_dir = resolve_agent_turn_trace_dump_dir();
         let outcome = run_agent_rounds(
-            ls,
+            loop_seed,
             &tx,
             http,
             state_owned,
@@ -1969,8 +1990,6 @@ async fn stream_chat_via_openai(
             contact_memory_perimeter,
             memory_intent,
             memory_user_message,
-            memory_answer,
-            last_model_error,
             plan_seed,
             composio_writes,
             catalog_index,
@@ -1978,7 +1997,6 @@ async fn stream_chat_via_openai(
             capability_route_for_runtime,
             automation_user_id,
             automation_workspace_id,
-            browse_sources,
             cfg,
             trace_dir,
             &execution_identity,
@@ -2017,7 +2035,7 @@ async fn stream_chat_via_openai(
 // signature (the captured turn state) is what becomes engine::run_turn's interface at 5.D1c.
 #[allow(clippy::too_many_arguments)]
 async fn run_agent_rounds(
-    ls: local_first_engine::LoopState,
+    loop_seed: AgentTurnLoopSeed,
     tx: &StreamSink,
     http: reqwest::Client,
     state_owned: AppState,
@@ -2029,8 +2047,6 @@ async fn run_agent_rounds(
     contact_memory_perimeter: ContactMemoryPerimeter,
     memory_intent: semantic_decision::MemoryIntent,
     memory_user_message: String,
-    memory_answer: String,
-    last_model_error: Option<String>,
     plan_seed: AgentTurnPlanSeed,
     composio_writes: std::collections::BTreeSet<String>,
     catalog_index: Vec<(String, String, serde_json::Value)>,
@@ -2038,7 +2054,6 @@ async fn run_agent_rounds(
     capability_route_for_runtime: CapabilityRouteDecision,
     automation_user_id: UserId,
     automation_workspace_id: WorkspaceId,
-    browse_sources: Vec<String>,
     cfg: local_first_engine::TurnConfig,
     // 5.D1c.9: the armed trace-dump dir (gateway-resolved `~/.homun/logs`), or None when the dump is
     // disarmed / the dir won't resolve. The engine appends here instead of calling `gateway_logs_dir`.
@@ -2052,6 +2067,13 @@ async fn run_agent_rounds(
     // the policy is decided ONCE, in `vision::plan_attachments`, and this is its consequence.
     vision_fallback_armed: bool,
 ) -> local_first_engine::TurnOutcome {
+    let AgentTurnLoopSeed {
+        loop_state: ls,
+        memory_answer,
+        last_model_error,
+        browse_sources,
+    } = loop_seed;
+
     // Build the seams `engine::run_turn` runs against — thin gateway adapters over AppState/transport/
     // stores, constructed ONCE per turn from this turn's context (ADR 0024/0026). model_client borrows
     // http+tx locally; the tool chokepoints hold the turn-constant read-only context and get `&mut ls`

@@ -2622,12 +2622,12 @@ def main() -> int:
         )
     assert_contains(
         source,
-        "seed_agent_turn_tool_schemas(&mut ls, base_tools, &turn_policy,",
+        "seed_agent_turn_tool_schemas(\n            &mut loop_seed.loop_state,\n            base_tools,\n            &turn_policy,",
         "gateway root must pass typed ChatTurnPolicy into agent turn tool seed owner",
     )
     assert_not_contains(
         source,
-        "seed_agent_turn_tool_schemas(&mut ls, base_tools, &mode,",
+        "seed_agent_turn_tool_schemas(&mut loop_seed.loop_state, base_tools, &mode,",
         "gateway root must not pass scalar mode into agent turn tool seed owner",
     )
     assert_not_contains(
@@ -2854,6 +2854,10 @@ def main() -> int:
     stream_chat_before_recall_seed = source.split("async fn stream_chat_via_openai(", 1)[1].split(
         "seed_agent_turn_recall(", 1
     )[0]
+    run_agent_rounds_source = source.split("async fn run_agent_rounds(", 1)[1]
+    run_agent_rounds_call = source.split("let outcome = run_agent_rounds(", 1)[1].split(
+        ")", 1
+    )[0]
     for snippet in [
         "let mut ls = local_first_engine::LoopState::new();",
         "ls.prompt_packets = prompt_packets;",
@@ -2868,6 +2872,38 @@ def main() -> int:
             stream_chat_before_recall_seed,
             snippet,
             "gateway root must not retain inline agent turn loop seed state",
+        )
+    assert_contains(
+        run_agent_rounds_source,
+        "loop_seed: AgentTurnLoopSeed,",
+        "run_agent_rounds must receive typed AgentTurnLoopSeed",
+    )
+    assert_contains(
+        run_agent_rounds_call,
+        "loop_seed,",
+        "stream_chat_via_openai must pass typed AgentTurnLoopSeed into run_agent_rounds",
+    )
+    for snippet in [
+        "ls: local_first_engine::LoopState,",
+        "memory_answer: String,",
+        "last_model_error: Option<String>,",
+        "browse_sources: Vec<String>,",
+    ]:
+        assert_not_contains(
+            run_agent_rounds_source,
+            snippet,
+            "run_agent_rounds must not split AgentTurnLoopSeed into scalar parameters",
+        )
+    for snippet in [
+        "\n            ls,",
+        "\n            memory_answer,",
+        "\n            last_model_error,",
+        "\n            browse_sources,",
+    ]:
+        assert_not_contains(
+            run_agent_rounds_call,
+            snippet,
+            "gateway root must not pass scalar loop seed state into run_agent_rounds",
         )
     for snippet in [
         "async fn stream_chat_via_openai(",

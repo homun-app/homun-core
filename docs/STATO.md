@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity slices mergeate fino a #364; nuovo slice AgentTurnExecutionIdentity verso tail in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail slices mergeate fino a #365; nuovo slice AgentTurnLoopSeed verso run_agent_rounds in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#364 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #364 (`ba12e2b2`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#365 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #365 (`ab2f7258`) |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Slice corrente `gateway_agent_turn_tail`: `AgentTurnTailInput` riceve
+- Slice corrente `gateway_agent_turn_loop_seed`: `AgentTurnLoopSeed` resta
+  typed dalla creazione pre-loop fino a `run_agent_rounds`; il root non passa
+  piu' `LoopState`, `memory_answer`, `last_model_error` e `browse_sources` come
+  parametri concorrenti del loop, mentre il bordo engine continua a ricevere i
+  campi scalari solo dentro `run_agent_rounds`.
+- Estrazione mergeata `gateway_agent_turn_tail`: `AgentTurnTailInput` riceve
   `&AgentTurnExecutionIdentity` e deriva `canonical_broker_turn` internamente
   per la legacy HITL projection post-loop; `stream_chat_via_openai` non passa
   piu' un booleano broker separato alla coda, mentre outcome publication,
