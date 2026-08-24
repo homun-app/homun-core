@@ -2297,11 +2297,48 @@ def main() -> int:
         "let effect_run_id = request.agent_run_id.clone();",
         ".strip_prefix(\"broker-\")",
         "let canonical_broker_turn = effect_turn_id.is_some();",
+        "let execution_journal = execution_identity.execution_journal;",
+        "let effect_run_id = execution_identity.effect_run_id;",
+        "let effect_turn_id = execution_identity.effect_turn_id;",
     ]:
         assert_not_contains(
             source,
             snippet,
             "gateway root must not retain agent turn execution identity derivation",
+        )
+    run_agent_rounds_source = source.split("async fn run_agent_rounds(", 1)[1]
+    run_agent_rounds_call = source.split("let outcome = run_agent_rounds(", 1)[1].split(
+        ".await;", 1
+    )[0]
+    assert_contains(
+        run_agent_rounds_source,
+        "execution_identity: &AgentTurnExecutionIdentity,",
+        "run_agent_rounds must receive typed AgentTurnExecutionIdentity",
+    )
+    assert_contains(
+        run_agent_rounds_call,
+        "&execution_identity,",
+        "stream_chat_via_openai must pass typed AgentTurnExecutionIdentity into run_agent_rounds",
+    )
+    for snippet in [
+        "execution_journal: agent_journal::GatewayJournal,",
+        "effect_turn_id: Option<String>,",
+        "effect_run_id: Option<String>,",
+    ]:
+        assert_not_contains(
+            run_agent_rounds_source,
+            snippet,
+            "run_agent_rounds must not split AgentTurnExecutionIdentity into scalar parameters",
+        )
+    for snippet in [
+        "\n            execution_journal,",
+        "\n            effect_turn_id,",
+        "\n            effect_run_id,",
+    ]:
+        assert_not_contains(
+            run_agent_rounds_call,
+            snippet,
+            "gateway root must not pass scalar execution identity state into run_agent_rounds",
         )
     for snippet in [
         "async fn stream_chat_via_openai(",

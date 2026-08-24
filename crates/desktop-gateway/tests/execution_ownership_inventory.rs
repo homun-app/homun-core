@@ -3325,6 +3325,17 @@ fn agent_turn_execution_identity_has_one_gateway_owner() {
         .split("// Thread this chat belongs to:")
         .next()
         .expect("agent turn identity setup");
+    let run_agent_rounds = main
+        .split("async fn run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds");
+    let run_agent_rounds_call = main
+        .split("let outcome = run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds call")
+        .split(".await;")
+        .next()
+        .expect("run_agent_rounds call block");
 
     for pattern in [
         "pub(crate) struct AgentTurnExecutionIdentity",
@@ -3344,10 +3355,41 @@ fn agent_turn_execution_identity_has_one_gateway_owner() {
         "let effect_run_id = request.agent_run_id.clone();",
         ".strip_prefix(\"broker-\")",
         "let canonical_broker_turn = effect_turn_id.is_some();",
+        "let execution_journal = execution_identity.execution_journal;",
+        "let effect_run_id = execution_identity.effect_run_id;",
+        "let effect_turn_id = execution_identity.effect_turn_id;",
     ] {
         assert!(
             !stream_chat.contains(pattern) && !main.contains(pattern),
             "main.rs must not own agent turn execution identity {pattern}"
+        );
+    }
+    assert!(
+        run_agent_rounds.contains("execution_identity: &AgentTurnExecutionIdentity,"),
+        "run_agent_rounds must receive typed AgentTurnExecutionIdentity"
+    );
+    assert!(
+        run_agent_rounds_call.contains("&execution_identity,"),
+        "stream_chat_via_openai must pass typed AgentTurnExecutionIdentity into run_agent_rounds"
+    );
+    for pattern in [
+        "execution_journal: agent_journal::GatewayJournal,",
+        "effect_turn_id: Option<String>,",
+        "effect_run_id: Option<String>,",
+    ] {
+        assert!(
+            !run_agent_rounds.contains(pattern),
+            "run_agent_rounds must not split AgentTurnExecutionIdentity into scalar parameters {pattern}"
+        );
+    }
+    for pattern in [
+        "\n            execution_journal,",
+        "\n            effect_turn_id,",
+        "\n            effect_run_id,",
+    ] {
+        assert!(
+            !run_agent_rounds_call.contains(pattern),
+            "stream_chat_via_openai must not pass scalar execution identity state into run_agent_rounds {pattern}"
         );
     }
 
