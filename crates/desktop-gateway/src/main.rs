@@ -1580,9 +1580,15 @@ async fn stream_chat_via_openai(
     let chat_turn_context = prepare_chat_turn_context(ChatTurnContextInput {
         state,
         thread_id: request.thread_id.as_deref(),
+        mode: request.mode.as_deref(),
+        tool_policy: request.tool_policy.as_deref(),
     });
-    let contact_ctx = chat_turn_context.contact;
-    let channel_owner = chat_turn_context.channel_owner;
+    let ChatTurnContext {
+        contact: contact_ctx,
+        channel_owner,
+        turn_policy,
+        contact_memory_perimeter,
+    } = chat_turn_context;
     // Budget the prompt against the model's REAL context window (catalog `context_window`,
     // auto-filled from `/api/show`, F0.3d) instead of a flat 32k default — so a 128k model
     // keeps its long history and a small local model is clamped to what it can actually read.
@@ -1670,7 +1676,6 @@ async fn stream_chat_via_openai(
     // HARD gate: the user's personal profile + RAG are NOT injected — the turn only
     // sees the conversation history with THIS contact. "personal" opts a trusted
     // contact back into today's behavior.
-    let contact_memory_perimeter = resolve_contact_memory_perimeter(contact_ctx.as_ref());
     let workspace_prompt_context =
         prepare_chat_workspace_prompt_context(ChatWorkspacePromptContextInput {
             state,
@@ -1700,8 +1705,6 @@ async fn stream_chat_via_openai(
         forced_tool,
         ..
     } = workflow_routing_plan;
-    let turn_policy =
-        resolve_chat_turn_policy(request.mode.as_deref(), request.tool_policy.as_deref());
     // Turn trace: setup COMPLETED (memory recall and prompt-build) and generation is about to begin.
     // A `turn_start` following a `turn_received` implies setup succeeded (no pre-gen hang).
     record_chat_turn_start_trace(ChatTurnStartTraceInput {

@@ -12,11 +12,15 @@ use super::*;
 pub(crate) struct ChatTurnContextInput<'a> {
     pub(crate) state: &'a AppState,
     pub(crate) thread_id: Option<&'a str>,
+    pub(crate) mode: Option<&'a str>,
+    pub(crate) tool_policy: Option<&'a str>,
 }
 
 pub(crate) struct ChatTurnContext {
     pub(crate) contact: Option<ContactTurnContext>,
     pub(crate) channel_owner: bool,
+    pub(crate) turn_policy: ChatTurnPolicy,
+    pub(crate) contact_memory_perimeter: ContactMemoryPerimeter,
 }
 
 pub(crate) struct ChatTurnPolicy {
@@ -52,9 +56,14 @@ pub(crate) fn prepare_chat_turn_context(input: ChatTurnContextInput<'_>) -> Chat
 
     note_real_user_activity(input.thread_id, channel_owner);
 
+    let turn_policy = resolve_chat_turn_policy(input.mode, input.tool_policy);
+    let contact_memory_perimeter = resolve_contact_memory_perimeter(contact.as_ref());
+
     ChatTurnContext {
         contact,
         channel_owner,
+        turn_policy,
+        contact_memory_perimeter,
     }
 }
 

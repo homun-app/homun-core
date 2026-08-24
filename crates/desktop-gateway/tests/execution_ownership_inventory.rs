@@ -4614,6 +4614,37 @@ fn chat_turn_context_has_one_gateway_owner() {
             "chat turn context owner must contain {pattern}"
         );
     }
+    let chat_turn_context_input = turn_context
+        .split("pub(crate) struct ChatTurnContextInput")
+        .nth(1)
+        .expect("ChatTurnContextInput")
+        .split("pub(crate) struct ChatTurnContext")
+        .next()
+        .expect("ChatTurnContextInput block");
+    assert!(
+        chat_turn_context_input.contains("pub(crate) mode: Option<&'a str>,"),
+        "chat turn context input must receive the raw composer mode"
+    );
+    assert!(
+        chat_turn_context_input.contains("pub(crate) tool_policy: Option<&'a str>,"),
+        "chat turn context input must receive the raw tool policy"
+    );
+    let chat_turn_context_output = turn_context
+        .split("pub(crate) struct ChatTurnContext {")
+        .nth(1)
+        .expect("ChatTurnContext")
+        .split("pub(crate) struct ChatTurnPolicy")
+        .next()
+        .expect("ChatTurnContext block");
+    assert!(
+        chat_turn_context_output.contains("pub(crate) turn_policy: ChatTurnPolicy,"),
+        "chat turn context must return typed ChatTurnPolicy"
+    );
+    assert!(
+        chat_turn_context_output
+            .contains("pub(crate) contact_memory_perimeter: ContactMemoryPerimeter,"),
+        "chat turn context must return typed ContactMemoryPerimeter"
+    );
 
     for pattern in [
         "set_memory_workspace(&ws);",
@@ -4637,6 +4668,8 @@ fn chat_turn_context_has_one_gateway_owner() {
         "can_see_contacts: bool,",
         "can_see_calendar: bool,",
         "can_use_project_memory: bool,",
+        "resolve_chat_turn_policy(",
+        "resolve_contact_memory_perimeter(",
     ] {
         assert!(
             !main.contains(pattern),
