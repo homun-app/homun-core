@@ -5001,6 +5001,11 @@ def main() -> int:
         "pub(crate) contact_memory_perimeter: &'a ContactMemoryPerimeter,",
         "chat tool context must carry typed ContactMemoryPerimeter",
     )
+    assert_contains(
+        chat_tool_ctx_source,
+        "pub(crate) turn_policy: &'a ChatTurnPolicy,",
+        "chat tool context must carry typed ChatTurnPolicy",
+    )
     gateway_capability_executor_source = tool_execution_source.split(
         "pub(crate) struct GatewayCapabilityExecutor", 1
     )[1].split("pub(crate) fn gateway_capability_executor<'a>(", 1)[0]
@@ -5009,6 +5014,27 @@ def main() -> int:
         "contact_memory_perimeter: ContactMemoryPerimeter,",
         "gateway capability executor must carry typed ContactMemoryPerimeter",
     )
+    assert_contains(
+        gateway_capability_executor_source,
+        "turn_policy: &'a ChatTurnPolicy,",
+        "gateway capability executor must carry typed ChatTurnPolicy",
+    )
+    for snippet in [
+        "pub(crate) read_only: bool,",
+        "pub(crate) autonomous: bool,",
+        "read_only: bool,",
+        "autonomous: bool,",
+    ]:
+        assert_not_contains(
+            chat_tool_ctx_source,
+            snippet,
+            "chat tool context must not carry scalar turn policy",
+        )
+        assert_not_contains(
+            gateway_capability_executor_source,
+            snippet,
+            "gateway capability executor must not carry scalar turn policy",
+        )
     for snippet in [
         "pub(crate) contact_only: bool,",
         "pub(crate) can_see_contacts: bool,",
