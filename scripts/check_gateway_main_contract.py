@@ -3355,6 +3355,24 @@ def main() -> int:
         "pub(crate) fn memory_intent_context_for_semantic_contract(",
         "memory briefing owner must expose typed memory intent context projection",
     )
+    memory_intent_execution_context = memory_briefing_source.split(
+        "pub(crate) struct MemoryIntentExecutionContext", 1
+    )[1].split("pub(crate) struct MemoryInjectionPolicy", 1)[0]
+    assert_contains(
+        memory_intent_execution_context,
+        "pub(crate) memory_intent: semantic_decision::MemoryIntent,",
+        "memory intent execution context must carry typed MemoryIntent",
+    )
+    assert_contains(
+        memory_intent_execution_context,
+        "pub(crate) memory_injection: MemoryInjectionPolicy,",
+        "memory intent execution context must carry typed memory injection policy",
+    )
+    assert_not_contains(
+        memory_intent_execution_context,
+        "memory_recall_allowed",
+        "memory intent execution context must not duplicate typed MemoryIntent as scalar recall policy",
+    )
     assert_contains(
         objective_execution_setup,
         "prepare_chat_objective_execution_context(ChatObjectiveExecutionContextInput",

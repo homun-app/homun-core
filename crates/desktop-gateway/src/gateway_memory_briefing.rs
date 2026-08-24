@@ -374,7 +374,6 @@ pub(crate) fn memory_intent_for_execution(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MemoryIntentExecutionContext {
     pub(crate) memory_intent: semantic_decision::MemoryIntent,
-    pub(crate) memory_recall_allowed: bool,
     pub(crate) memory_injection: MemoryInjectionPolicy,
 }
 
@@ -391,7 +390,6 @@ pub(crate) fn memory_intent_context_for_semantic_contract(
         .map(|semantic| semantic.decision.memory_intent.clone())
         .unwrap_or_else(semantic_decision::MemoryIntent::safe_default);
     MemoryIntentExecutionContext {
-        memory_recall_allowed: memory_intent_allows_recall(&memory_intent),
         memory_injection: memory_injection_policy(&memory_intent),
         memory_intent,
     }
