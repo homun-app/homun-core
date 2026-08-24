@@ -25,7 +25,9 @@ test("status doc records the merged runtime view model turn contract", () => {
   assert.match(statusDoc, /#377/);
   assert.match(statusDoc, /#379/);
   assert.match(statusDoc, /#381/);
-  assert.match(statusDoc, /main` aggiornato a #381 \(`a44fcbda`\)/);
+  assert.match(statusDoc, /#383/);
+  assert.match(statusDoc, /#384/);
+  assert.match(statusDoc, /main` aggiornato a #384 \(`5808fe3e`\)/);
   assert.doesNotMatch(statusDoc, /slice runtimeViewModel turn status in corso/);
   assert.doesNotMatch(statusDoc, /fabio\/ui-runtime-view-model-turn-contract/);
 });
@@ -40,4 +42,13 @@ test("status doc records the merged composer-mode presenter cleanup slice", () =
   assert.doesNotMatch(statusDoc, /fabio\/ui-composer-mode-presenter-contract/);
   assert.doesNotMatch(statusDoc, /fabio\/status-after-composer-mode-presenter/);
   assert.match(statusDoc, /routeComposerSubmission` non deve piu' derivare localmente il composer mode/);
+});
+
+test("status doc records the merged selected task and task queue cleanup slices", () => {
+  assert.match(statusDoc, /Slice retired selected task projection mergeata #383/);
+  assert.match(statusDoc, /Slice task queue canonical empty mergeata #384/);
+  assert.match(statusDoc, /selectedTaskProjection\.\{mjs,ts\}/);
+  assert.match(statusDoc, /taskQueueProjection` non deve piu' ricevere `fallbackTasks`/);
+  assert.doesNotMatch(statusDoc, /fabio\/remove-retired-selected-task-projection/);
+  assert.doesNotMatch(statusDoc, /fabio\/task-queue-canonical-empty/);
 });

@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode runtime-view-model mergeati fino a #381).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue runtime-view-model mergeati fino a #384).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#381 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #381 (`a44fcbda`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#384 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #384 (`5808fe3e`) |
 
 ## Dove siamo
 
@@ -47,6 +47,13 @@ Piano completato:
   `composerMode.{mjs,ts}` o `composerMode.test.mjs`; la modalita' composer resta
   owner del presenter (`runtimeViewModel.composerMode`) e di
   `routeComposerSubmission`.
+- Slice task queue canonical empty mergeata #384: `useTaskQueueController` non
+  inizializza piu' task/approval da `mockData` e `taskQueueProjection` conserva
+  le lane canoniche vuote del kernel come vuote; `fallbackTasks` non deve
+  tornare come seconda sorgente di busy state.
+- Slice retired selected task projection mergeata #383: rimossi
+  `selectedTaskProjection.{mjs,ts}` e il test dedicato; `App` resta vincolata a
+  non reimportare lo stato selected-task ritirato.
 - Slice UI composer-mode presenter contract mergeata #379: `kernelProjectionPresenter`
   possiede anche il fallback `composerMode` per lo streaming locale prima che la
   projection kernel sia caricata; `routeComposerSubmission` consuma solo il
@@ -1622,9 +1629,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#381: slice owner-level successive mergeate in
-  `main`, fino a `composer-mode owner cleanup`; `main` verificato e
-  riallineato a #381.
+- #143-#283, #285-#286, #288-#384: slice owner-level successive mergeate in
+  `main`, fino a `task queue canonical empty`; `main` verificato e riallineato a
+  #384.
 
 PR aperte:
 
@@ -1632,7 +1639,7 @@ PR aperte:
 
 Baseline corrente:
 
-- `main` a #381 (`a44fcbda`); nessuna slice non-browser attiva su `main`.
+- `main` a #384 (`5808fe3e`); nessuna slice non-browser attiva su `main`.
 
 ## Debito residuo
 
@@ -1658,6 +1665,12 @@ Baseline corrente:
 - `routeComposerSubmission` non deve piu' derivare localmente il composer mode
   da `turnUiState`/`projectionLoaded`; la modalita' arriva dal presenter via
   `runtimeViewModel.composerMode`.
+- `apps/desktop/src/lib/selectedTaskProjection.{mjs,ts}` e il relativo test
+  sono stati rimossi; la selected-task projection non deve tornare come stato UI
+  parallelo.
+- `taskQueueProjection` non deve piu' ricevere `fallbackTasks` e
+  `useTaskQueueController` non deve piu' importare `mockData` per inizializzare
+  task/approval: la task queue UI segue solo lo snapshot canonico del kernel.
 - Continuare la rimozione dei fallback `legacy*` solo con fixture owner-level e
   gate kernel verde.
 - `main.rs` e `ChatView.tsx` restano grandi, ma non vanno tagliati senza owner
@@ -1674,7 +1687,7 @@ Baseline corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #381 (`a44fcbda`). Prossimo passo: passata finale non-browser
+main aggiornato a #384 (`5808fe3e`). Prossimo passo: passata finale non-browser
 su eventuali fallback UI/runtime ancora paralleli solo con owner canonico e Kill
 List esplicita; browser/activity restano fuori scope.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
