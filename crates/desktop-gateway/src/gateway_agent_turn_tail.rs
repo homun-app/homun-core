@@ -11,7 +11,7 @@ pub(crate) struct AgentTurnTailInput<'a> {
     pub(crate) state: AppState,
     pub(crate) tx: &'a StreamSink,
     pub(crate) outcome: local_first_engine::TurnOutcome,
-    pub(crate) canonical_broker_turn: bool,
+    pub(crate) execution_identity: &'a AgentTurnExecutionIdentity,
     pub(crate) thread_id: Option<String>,
     pub(crate) fence_turn_id: String,
     pub(crate) fence_user_id: UserId,
@@ -92,7 +92,7 @@ pub(crate) async fn complete_agent_turn_tail(input: AgentTurnTailInput<'_>) {
         state,
         tx,
         outcome,
-        canonical_broker_turn,
+        execution_identity,
         thread_id,
         fence_turn_id,
         fence_user_id,
@@ -106,7 +106,7 @@ pub(crate) async fn complete_agent_turn_tail(input: AgentTurnTailInput<'_>) {
         turn_trace,
     } = input;
 
-    if !canonical_broker_turn
+    if !execution_identity.canonical_broker_turn
         && let (Some(thread_id), Some(assistant_message_id)) = (
             thread_id.as_deref(),
             tx.entry

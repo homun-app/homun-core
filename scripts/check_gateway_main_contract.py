@@ -4253,6 +4253,7 @@ def main() -> int:
         "pub(crate) async fn complete_agent_turn_tail(",
         "pub(crate) struct AgentTurnTailInput",
         "turn_policy: &'a ChatTurnPolicy,",
+        "execution_identity: &'a AgentTurnExecutionIdentity,",
         "pub(crate) struct AgentTurnTailContext",
         "pub(crate) struct AgentTurnTailSnapshot",
         "pub(crate) fn prepare_agent_turn_tail_context(",
@@ -4306,6 +4307,21 @@ def main() -> int:
         tail_call,
         "read_only: turn_policy.read_only,",
         "gateway root must not pass scalar read_only into agent turn tail owner",
+    )
+    assert_contains(
+        tail_call,
+        "execution_identity: &execution_identity,",
+        "gateway root must pass typed AgentTurnExecutionIdentity into agent turn tail owner",
+    )
+    assert_not_contains(
+        tail_call,
+        "canonical_broker_turn: execution_identity.canonical_broker_turn,",
+        "gateway root must not pass scalar canonical_broker_turn into agent turn tail owner",
+    )
+    assert_not_contains(
+        agent_turn_tail_source,
+        "pub(crate) canonical_broker_turn: bool,",
+        "agent turn tail input must receive typed AgentTurnExecutionIdentity, not a scalar canonical_broker_turn copy",
     )
     for snippet in [
         "async fn stream_chat_via_openai(",
