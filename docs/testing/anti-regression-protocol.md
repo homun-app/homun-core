@@ -64,8 +64,8 @@ npm run build
 
 | Regressione | Fixture/owner |
 | --- | --- |
-| Thinking visibile a turno terminale | `chat-runtime/lifecycle.test.mjs` |
-| Waiting-user mostrato come lavoro modello | `chat-runtime/lifecycle.test.mjs` |
+| Thinking visibile a turno terminale | `chat-runtime/kernelProjectionPresenter.test.mjs`, `chat-runtime/runtimeLifecycleRetirement.test.mjs` |
+| Waiting-user mostrato come lavoro modello | `chat-runtime/kernelProjectionPresenter.test.mjs`, `chat-runtime/runtimeLifecycleRetirement.test.mjs` |
 | Composer che apre steering quando serve un nuovo turno | `chat-runtime/composerMode.test.mjs` |
 | Steering promosso o stale visibile/bloccante a riposo | `chatSteeringState` test via `npm run test:cursor-grammar` |
 | `finalizing` trattato come turno attivo | `turn_lifecycle.rs`, `active_chat_turn` e `finalizing` tests |
