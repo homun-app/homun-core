@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context slices mergeate fino a #361; nuovo slice AgentTurnPlanSeed in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed slices mergeate fino a #362; nuovo slice ChatPlanResume verso AgentTurnPlanSeed in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#361 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #361 (`e68cff62`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#362 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #362 (`851c7e0e`) |
 
 ## Dove siamo
 
@@ -44,7 +44,11 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Slice corrente `gateway_agent_turn_plan_seed`: `AgentTurnPlanSeed` resta
+- Slice corrente `gateway_chat_plan_resume`/`gateway_agent_turn_plan_seed`:
+  `ChatPlanResume` resta typed dal resume/stall owner fino al seed piano del
+  loop; il root non spacchetta piu' `resume_plan`/`resume_goal` come contratti
+  scalari concorrenti prima di inizializzare `LoopState.plan`.
+- Estrazione mergeata `gateway_agent_turn_plan_seed`: `AgentTurnPlanSeed` resta
   typed dalla semina piano pre-loop fino a `run_agent_rounds`; il root non
   spacchetta piu' `final_done`/`plan_nudges`/`turn_used_tools` come parametri
   concorrenti del loop, mentre `agent_loop::run_turn` continua a ricevere i

@@ -2459,7 +2459,10 @@ def main() -> int:
     for snippet in [
         "pub(crate) struct AgentTurnPlanSeed",
         "pub(crate) fn seed_agent_turn_plan_state(",
-        "loop_state.plan = canonical_plan_value(resume_goal, resume_plan)",
+        "chat_plan_resume: &ChatPlanResume",
+        "canonical_plan_value(",
+        "chat_plan_resume.goal.as_deref()",
+        "&chat_plan_resume.plan",
         "loop_state.step_messages_start = loop_state.messages.len()",
         "final_done: false",
         "plan_nudges: 0",
@@ -2478,12 +2481,28 @@ def main() -> int:
         "let final_done = plan_seed.final_done;",
         "let plan_nudges = plan_seed.plan_nudges;",
         "let turn_used_tools = plan_seed.turn_used_tools;",
+        "let resume_plan = chat_plan_resume.plan;",
+        "let resume_goal = chat_plan_resume.goal;",
         "ls.step_messages_start = ls.messages.len();",
     ]:
         assert_not_contains(
             source,
             snippet,
             "gateway root must not retain agent turn plan seed state",
+        )
+    plan_seed_call = source.split("let plan_seed = seed_agent_turn_plan_state(", 1)[1].split(
+        ");", 1
+    )[0]
+    assert_contains(
+        plan_seed_call,
+        "&chat_plan_resume,",
+        "stream_chat_via_openai must pass typed ChatPlanResume into the plan seed owner",
+    )
+    for snippet in ["resume_goal.as_deref()", "&resume_plan"]:
+        assert_not_contains(
+            plan_seed_call,
+            snippet,
+            "gateway root must not pass scalar plan resume state into the plan seed owner",
         )
     run_agent_rounds_source = source.split("async fn run_agent_rounds(", 1)[1]
     run_agent_rounds_call = source.split("let outcome = run_agent_rounds(", 1)[1].split(
