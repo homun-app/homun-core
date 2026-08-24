@@ -25,7 +25,8 @@ import {
 } from "../lib/chatViewMessages";
 import { writeResumeMarker, clearResumeMarker } from "../lib/chatResumeMarkers";
 import { effectiveModelFromGateway } from "../lib/composerTurnContract";
-import { normalizeChatEventParts, type ActiveTurnProjection } from "../lib/chatEventParts";
+import { normalizeChatEventParts } from "../lib/chatEventParts";
+import type { KernelProjectionPresenterView } from "../lib/chat-runtime/kernelProjectionPresenter";
 import { projectChatStreamEvent } from "./chatStreamEventProjection";
 import type { ChatStreamStatus } from "./AssistantThinkingState";
 import type { ReplyContext } from "./ChatViewTypes";
@@ -61,7 +62,7 @@ export interface UseChatTurnSubmissionParams {
   streamingAssistantId: string | null;
   threadMessages: ChatMessage[];
   replyContext: ReplyContext | null;
-  composerMode: string;
+  runtimeViewModel: KernelProjectionPresenterView;
   setPromptSubmitting: Dispatch<SetStateAction<boolean>>;
   setPromptError: Dispatch<SetStateAction<string | null>>;
   setStreamingAssistantId: Dispatch<SetStateAction<string | null>>;
@@ -113,8 +114,6 @@ export interface UseChatTurnSubmissionParams {
   applyComputerSessionSnapshot: (snapshot: CoreComputerSessionSnapshot) => void;
   clearProjectedActiveTurn: () => void;
   bumpActivityNonce: () => void;
-  projectedActiveTurn: ActiveTurnProjection | null;
-  projectedTurnStatus: string | null;
   projectionLoaded: boolean;
 
   // From useChatInspectorWorkspace
@@ -148,7 +147,7 @@ export function useChatTurnSubmission({
   bumpIslandRefreshNonce,
   seed, sessionId, translate: t,
   promptSubmitting, streamingAssistantId, threadMessages, replyContext,
-  composerMode,
+  runtimeViewModel,
   setPromptSubmitting, setPromptError, setStreamingAssistantId, setStreamStatus,
   setLiveActivitySteps, setLivePlanMarkdown, setOptimisticMessages,
   setAutoContinueMessageId, setReplyContext,
@@ -163,7 +162,7 @@ export function useChatTurnSubmission({
   markStreamHasVisibleText, setActiveStreamingCancel, clearActiveStreamingCancel,
   clearStreamCancelled, hasActiveStreamingCancel, cancelActiveStreaming,
   applyComputerSessionSnapshot, clearProjectedActiveTurn, bumpActivityNonce,
-  projectedActiveTurn, projectedTurnStatus, projectionLoaded,
+  projectionLoaded,
   hideInspector,
   applyPendingSteeringChange, refreshPendingSteering,
   refreshBranches,
@@ -172,6 +171,7 @@ export function useChatTurnSubmission({
 }: UseChatTurnSubmissionParams) {
   const [composerSeed, setComposerSeed] = useState<ComposerSeed | null>(null);
   const [usageSuggestedModel, setUsageSuggestedModel] = useState<UsageSuggestedModel | null>(null);
+  const projectedActiveTurn = runtimeViewModel.activeTurn;
 
   // External seed (e.g. a proactivity card engaged from the dashboard) → prefill
   // the composer. Keyed by nonce so re-engaging the same card re-applies.
@@ -530,8 +530,10 @@ export function useChatTurnSubmission({
     });
     const model = options?.model;
     const submissionRoute = routeComposerSubmission({
-      promptSubmitting, streamingAssistantId, projectedActiveTurn, projectedTurnStatus,
-      projectionLoaded, composerMode,
+      promptSubmitting,
+      turnUiState: runtimeViewModel.turnUiState,
+      projectionLoaded,
+      composerMode: runtimeViewModel.composerMode,
       explicitForceNewTurn: options?.forceNewTurn,
     });
     const forceNewTurn = submissionRoute.forceNewTurn;

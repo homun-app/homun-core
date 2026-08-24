@@ -1,5 +1,4 @@
 import { deriveComposerMode } from "./composerMode.mjs";
-import { deriveTurnLifecycle } from "./lifecycle.mjs";
 
 function composerModeFromKernel(mode) {
   switch (mode) {
@@ -18,13 +17,14 @@ function composerModeFromKernel(mode) {
 // ChatView composer submission route: the composed lifecycle + composer-mode
 // decision that selects steering for the active turn versus starting a new turn.
 export function routeComposerSubmission(input) {
-  const lifecycle = deriveTurnLifecycle({
-    promptSubmitting: Boolean(input.promptSubmitting),
-    streamingAssistantId: input.streamingAssistantId ?? null,
-    projectedActiveTurn: input.projectedActiveTurn ?? null,
-    projectedTurnStatus: input.projectedTurnStatus ?? null,
-    projectionLoaded: Boolean(input.projectionLoaded),
-  });
+  const turnUiState = input.turnUiState ?? {};
+  const lifecycle = {
+    isStreaming: Boolean(turnUiState.isStreaming),
+    turnAwaitingUser: Boolean(turnUiState.turnAwaitingUser),
+    terminalTurnAtRest: Boolean(turnUiState.terminalTurnAtRest),
+    hasActiveTurn: Boolean(turnUiState.hasActiveTurn),
+    workInProgress: Boolean(turnUiState.workInProgress),
+  };
   const kernelComposer = input.projectionLoaded
     ? composerModeFromKernel(input.composerMode)
     : null;
@@ -32,7 +32,7 @@ export function routeComposerSubmission(input) {
     ? { mode: "disabled", disabled: true, forceNewTurn: false }
     : kernelComposer ?? deriveComposerMode({
         promptSubmitting: false,
-        streamingAssistantId: input.streamingAssistantId ?? null,
+        streamingAssistantId: lifecycle.isStreaming ? "streaming" : null,
         turnAwaitingUser: lifecycle.turnAwaitingUser,
         terminalTurnAtRest: lifecycle.terminalTurnAtRest,
         hasActiveTurn: lifecycle.hasActiveTurn,
