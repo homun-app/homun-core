@@ -79,6 +79,21 @@ function capabilityRuntime(projection) {
   };
 }
 
+function activeTurn(projection) {
+  const activeTurnId = projection?.turn?.active_turn_id ?? null;
+  if (!projection || !activeTurnId) return null;
+  return {
+    turn_id: activeTurnId,
+    last_event_seq: projection.turn.last_event_seq,
+    status: projection.turn.status,
+    attempt: 1,
+    max_attempts: 1,
+    not_before: null,
+    blocked_reason: projection.turn.failure_text,
+    updated_at: projection.turn.updated_at,
+  };
+}
+
 export function projectKernelThreadView(input) {
   const projection = input.projectionLoaded ? input.projection : null;
   const activeTurnId = projection?.turn?.active_turn_id ?? null;
@@ -119,6 +134,7 @@ export function projectKernelThreadView(input) {
       turnAwaitingUser,
     },
     composerMode: projection?.actions?.composer_mode ?? "new_turn",
+    activeTurn: activeTurn(projection),
     attentionItems: items,
     browserStatus: browserStatus(projection),
     capabilityRuntime: capabilityRuntime(projection),

@@ -2,6 +2,7 @@
 // @ts-expect-error JavaScript sibling intentionally has no declaration file.
 import * as implementation from "./kernelProjectionPresenter.mjs";
 import type { KernelThreadProjection } from "../chatApi";
+import type { ActiveTurnProjection } from "../chatEventParts";
 import type { PlanStep } from "./planSteps";
 
 export interface KernelProjectionPresenterInput {
@@ -27,6 +28,7 @@ export interface KernelProjectionPresenterView {
     turnAwaitingUser: boolean;
   };
   composerMode: string;
+  activeTurn: ActiveTurnProjection | null;
   attentionItems: Array<
     | {
         kind: "approval";

@@ -97,6 +97,37 @@ test("runtime_view_model_uses_projection_not_marker_tail_after_projection_load",
   assert.equal(view.turnUiState.workInProgress, false);
 });
 
+test("active_turn_projection_belongs_to_kernel_presenter", () => {
+  const view = projectKernelThreadView({
+    projectionLoaded: true,
+    projection: projection({
+      turn: {
+        active_turn_id: "turn-active",
+        status: "running",
+        last_event_seq: 7,
+        terminal_reason: null,
+        failure_text: "waiting_for_provider",
+        updated_at: 1723360100,
+      },
+    }),
+    isStreaming: false,
+    liveActivitySteps: [],
+    livePlanMarkdown: null,
+    streamOwnerTurnId: null,
+  });
+
+  assert.deepEqual(view.activeTurn, {
+    turn_id: "turn-active",
+    last_event_seq: 7,
+    status: "running",
+    attempt: 1,
+    max_attempts: 1,
+    not_before: null,
+    blocked_reason: "waiting_for_provider",
+    updated_at: 1723360100,
+  });
+});
+
 test("runtime_view_model_keeps_marker_tail_display_only_before_projection_load", () => {
   const view = projectKernelThreadView({
     projectionLoaded: false,

@@ -49,12 +49,14 @@ UI mostra lo stato prodotto.
 
 ## Owner UI del piano
 
-La UI non possiede budget o avanzamento del piano. Il presenter
+La UI non possiede budget, liveness o avanzamento del piano. Il presenter
 `apps/desktop/src/lib/chat-runtime/kernelProjectionPresenter.mjs` e' l'owner
-del read model per goal e passi del workspace; la normalizzazione/parsing
-riutilizzabile vive in `apps/desktop/src/lib/chat-runtime/planSteps.mjs`.
+del read model per goal, passi del workspace e turno attivo; la
+normalizzazione/parsing riutilizzabile vive in
+`apps/desktop/src/lib/chat-runtime/planSteps.mjs`.
 `useChatActivityProjection` fa fetch/replay della `KernelThreadProjection` e
-passa il risultato del presenter, senza ricostruire `PlanStep[]` o goal.
+passa il risultato del presenter, senza ricostruire `PlanStep[]`, goal o
+turno attivo.
 Il pill del turno attivo del composer passa da
 `apps/desktop/src/lib/chat-runtime/chatTurnStatus.mjs`, con
 `apps/desktop/src/components/useChatTurnStatus.ts` come owner UI del timer

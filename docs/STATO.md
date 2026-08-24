@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime slices mergeate fino a #369; nuovo slice AgentTurnConfigRuntimeScope verso run_agent_rounds in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime slices mergeate fino a #370; nuovo slice UI active-turn presenter owner in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#369 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #369 (`bdd6ab22`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#370 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #370 (`98ee1493`) |
 
 ## Dove siamo
 
@@ -42,7 +42,12 @@ protocollo anti-regressione vive in
 Piano completato:
 [`superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md`](superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md).
 
-- Slice corrente `gateway_agent_turn_config`: `AgentTurnConfigRuntimeScope`
+- Slice corrente UI work-state: `kernelProjectionPresenter` espone anche
+  `activeTurn` come read model del turno attivo; `useChatActivityProjection`
+  non ricostruisce piu' localmente `active_turn_id`/status/blocked reason dal
+  raw projection, riducendo una seconda fonte di liveness per status pill,
+  replay e timer.
+- Estrazione mergeata `gateway_agent_turn_config`: `AgentTurnConfigRuntimeScope`
   porta in `run_agent_rounds` la configurazione/budget runtime del turno come
   scope unico (`TurnConfig` risolta una volta dal config owner); il root non
   passa piu' un `TurnConfig` scalare al loop, mentre risoluzione budget,

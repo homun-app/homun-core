@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   fetchKernelThreadProjection,
   type KernelThreadProjection,
@@ -10,7 +10,6 @@ import {
 } from "../lib/turnReplayState";
 import {
   replayStatusFromProjection,
-  type ActiveTurnProjection,
 } from "../lib/chatEventParts";
 import {
   projectKernelThreadView,
@@ -73,23 +72,6 @@ function emptyKernelProjection(threadId: string): KernelThreadProjection {
   };
 }
 
-function activeTurnFromKernelProjection(
-  projection: KernelThreadProjection | null,
-): ActiveTurnProjection | null {
-  const activeTurnId = projection?.turn.active_turn_id ?? null;
-  if (!projection || !activeTurnId) return null;
-  return {
-    turn_id: activeTurnId,
-    last_event_seq: projection.turn.last_event_seq,
-    status: projection.turn.status,
-    attempt: 1,
-    max_attempts: 1,
-    not_before: null,
-    blocked_reason: projection.turn.failure_text,
-    updated_at: projection.turn.updated_at,
-  };
-}
-
 function browserFailureMessage(failureReason: string | null, translate: (key: string) => string) {
   return failureReason === "wall_clock"
     ? translate("chat.browserBudget.wallClock")
@@ -117,10 +99,6 @@ export function useChatActivityProjection({
   const [kernelProjection, setKernelProjection] = useState<KernelThreadProjection | null>(null);
   const [projectionLoaded, setProjectionLoaded] = useState(false);
 
-  const projectedActiveTurn = useMemo(
-    () => activeTurnFromKernelProjection(kernelProjection),
-    [kernelProjection],
-  );
   const projectedTurnStatus = kernelProjection?.turn.status ?? null;
   const projectedSubagents: SubagentInfo[] = kernelProjection?.subagents ?? [];
 
@@ -133,6 +111,7 @@ export function useChatActivityProjection({
     streamOwnerTurnId: streamOwnerTurnRef.current,
   });
   const runtimeViewModel: KernelProjectionPresenterView = projectedView;
+  const projectedActiveTurn = projectedView.activeTurn;
 
   const conversationPlan = projectedView.conversationPlan;
   const conversationActivity = projectedView.conversationActivity;
@@ -200,7 +179,14 @@ export function useChatActivityProjection({
       .then((projection) => {
         if (cancelled) return;
         setKernelProjection(projection);
-        const activeTurn = activeTurnFromKernelProjection(projection);
+        const activeTurn = projectKernelThreadView({
+          projection,
+          isStreaming: false,
+          livePlanMarkdown: null,
+          projectionLoaded: true,
+          liveActivitySteps: [],
+          streamOwnerTurnId: streamOwnerTurnRef.current,
+        }).activeTurn;
         if (activeTurn) {
           activeTurnIdRef.current = activeTurn.turn_id;
           const currentReplay = turnReplayRef.current;
