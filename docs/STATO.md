@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission runtime-view-model piu' cleanup legacy lifecycle mergeati fino a #376; slice runtimeViewModel turn status in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission runtime-view-model piu' cleanup legacy lifecycle mergeati fino a #377; main pulito, prossima slice non-browser da selezionare).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#376 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #376 (`b736c0b8`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#377 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #377 (`3ada3a6f`) |
 
 ## Dove siamo
 
@@ -42,7 +42,7 @@ protocollo anti-regressione vive in
 Piano completato:
 [`superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md`](superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md).
 
-- Slice locale runtimeViewModel turn contract: `kernelProjectionPresenter`
+- Slice runtimeViewModel turn contract mergeata #377: `kernelProjectionPresenter`
   espone anche `runtimeViewModel.turnUiState.status`; `ChatView`,
   `useChatBrowserActivityLifecycle` e `useChatActivityProjection` non esportano
   piu' `projectedActiveTurn`/`projectedTurnStatus` come contratti paralleli.
@@ -1611,9 +1611,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#376: slice owner-level successive mergeate in
-  `main`, fino a `status after lifecycle cleanup`; `main` verificato e
-  riallineato a #376.
+- #143-#283, #285-#286, #288-#377: slice owner-level successive mergeate in
+  `main`, fino a `runtimeViewModel turn contract`; `main` verificato e
+  riallineato a #377.
 
 PR aperte:
 
@@ -1621,8 +1621,7 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/ui-runtime-view-model-turn-contract` in verifica locale da `main` #376
-  (`b736c0b8`).
+- Nessuna slice locale attiva; worktree su `main` #377 (`3ada3a6f`).
 
 ## Debito residuo
 
@@ -1652,8 +1651,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice runtimeViewModel turn contract con gate desktop/kernel
-   verde, PR e merge.
+1. Scansione finale owner duplicati UI/runtime non-browser con Kill List
+   esplicita; non toccare browser/activity in questa fase.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -1661,10 +1660,10 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #376 (`b736c0b8`); slice non-browser corrente
-`fabio/ui-runtime-view-model-turn-contract` elimina i contratti UI paralleli
-`projectedActiveTurn`/`projectedTurnStatus` dai return/props e fa consumare
-active turn/status da `runtimeViewModel`.
+main aggiornato a #377 (`3ada3a6f`); nessuna slice locale attiva. Prossimo
+passo: selezionare una piccola slice non-browser dalla scansione finale dei
+duplicati UI/runtime, con Kill List esplicita; browser/activity restano fuori
+scope.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

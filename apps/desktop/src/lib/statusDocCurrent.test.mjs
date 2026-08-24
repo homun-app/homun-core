@@ -20,3 +20,10 @@ test("status doc records a concrete current main baseline without stale slice br
   );
   assert.doesNotMatch(statusDoc, /fabio\/status-after-ui-lifecycle-retirement/);
 });
+
+test("status doc records the merged runtime view model turn contract", () => {
+  assert.match(statusDoc, /#377/);
+  assert.match(statusDoc, /main` aggiornato a #377 \(`3ada3a6f`\)/);
+  assert.doesNotMatch(statusDoc, /slice runtimeViewModel turn status in corso/);
+  assert.doesNotMatch(statusDoc, /fabio\/ui-runtime-view-model-turn-contract/);
+});
