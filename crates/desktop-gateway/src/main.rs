@@ -1662,9 +1662,9 @@ async fn stream_chat_via_openai(
         semantic_contract,
         objective_effect_policy,
         memory_intent,
-        memory_recall_allowed,
         memory_injection,
         catalog_index,
+        ..
     } = objective_execution_context;
     // Memory scope. Perimeter "contact_only" (the default for channel contacts) is a
     // HARD gate: the user's personal profile + RAG are NOT injected — the turn only
@@ -1713,7 +1713,7 @@ async fn stream_chat_via_openai(
     let capability_router_instruction =
         capability_router_instruction_for_decision(&capability_route);
     let prompt_runtime = prepare_chat_runtime_prompt(ChatRuntimePromptInput {
-        memory_recall_allowed,
+        memory_intent: &memory_intent,
         capability_router_instruction: capability_router_instruction.as_deref(),
         turn_policy: &turn_policy,
         objective_contract: active_objective_contract.as_ref(),

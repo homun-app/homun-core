@@ -5404,6 +5404,11 @@ def main() -> int:
     )
     assert_contains(
         prompt_instructions_source,
+        "pub(crate) memory_intent: &'a semantic_decision::MemoryIntent,",
+        "prompt instruction owner must receive typed MemoryIntent for chat runtime prompt",
+    )
+    assert_contains(
+        prompt_instructions_source,
         "pub(crate) fn prepare_chat_runtime_prompt(",
         "prompt instruction owner must expose chat runtime prompt assembly",
     )
@@ -5426,6 +5431,37 @@ def main() -> int:
         source,
         "prepare_chat_runtime_prompt(ChatRuntimePromptInput",
         "gateway root must delegate runtime prompt control assembly",
+    )
+    chat_runtime_prompt_input = prompt_instructions_source.split(
+        "pub(crate) struct ChatRuntimePromptInput", 1
+    )[1].split("pub(crate) fn prepare_chat_runtime_prompt", 1)[0]
+    assert_contains(
+        chat_runtime_prompt_input,
+        "pub(crate) memory_intent: &'a semantic_decision::MemoryIntent,",
+        "chat runtime prompt input must receive typed MemoryIntent",
+    )
+    assert_not_contains(
+        chat_runtime_prompt_input,
+        "pub(crate) memory_recall_allowed: bool,",
+        "chat runtime prompt input must not receive scalar memory_recall_allowed",
+    )
+    assert_contains(
+        prompt_instructions_source,
+        "memory_recall_allowed: memory_intent_allows_recall(input.memory_intent),",
+        "chat runtime prompt owner must derive memory recall availability from typed MemoryIntent",
+    )
+    runtime_prompt_call = source.split(
+        "prepare_chat_runtime_prompt(ChatRuntimePromptInput {", 1
+    )[1].split("})", 1)[0]
+    assert_contains(
+        runtime_prompt_call,
+        "memory_intent: &memory_intent,",
+        "gateway root must pass typed MemoryIntent into runtime prompt owner",
+    )
+    assert_not_contains(
+        runtime_prompt_call,
+        "memory_recall_allowed,",
+        "gateway root must not pass scalar memory_recall_allowed into runtime prompt owner",
     )
     stream_body = (
         source.split("async fn stream_chat_via_openai(", 1)[1]
