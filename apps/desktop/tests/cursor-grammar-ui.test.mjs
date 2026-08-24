@@ -1127,6 +1127,9 @@ test("App delegates thread attention ownership to useThreadAttentionController",
 
 test("App delegates chat read-model lifecycle to useChatReadModelController", () => {
   assert.match(app, /from "\.\/lib\/useChatReadModelController";/);
+  assert.doesNotMatch(app, /from "\.\/data\/mockData";/);
+  assert.doesNotMatch(app, /messageCount:\s*chatMessages\.length/);
+  assert.doesNotMatch(app, /\[defaultChatThread\.threadId\]:\s*chatMessages/);
   assert.doesNotMatch(app, /coreBridge\.selectChatThread/);
   assert.doesNotMatch(app, /coreBridge\.chatThreads/);
   assert.doesNotMatch(app, /coreBridge\.chatMessages/);

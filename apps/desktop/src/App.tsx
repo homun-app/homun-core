@@ -5,7 +5,6 @@ import { Shell } from "./components/Shell";
 import { ChatSearchModal } from "./components/Sidebar";
 import { LoginGate } from "./components/LoginGate";
 import { AppWorkspace } from "./components/AppWorkspace";
-import { chatMessages } from "./data/mockData";
 import { useSetting } from "./lib/settingsStore";
 import { currentTimestampSeconds } from "./lib/appCoreMappers";
 import { projectBusyThreadIds } from "./lib/busyThreadProjection";
@@ -46,7 +45,7 @@ const defaultChatThread: ChatThread = {
   computerSessionId: "computer_active_prompt",
   taskId: "task_prompt_session",
   updatedAt: currentTimestampSeconds(),
-  messageCount: chatMessages.length,
+  messageCount: 0,
 };
 
 const PERSONAL_WORKSPACE_ID = "local-workspace";
@@ -77,9 +76,7 @@ function AuthenticatedApp() {
   );
   const [threadMessages, setThreadMessages] = useState<
     Record<string, ChatMessage[]>
-  >({
-    [defaultChatThread.threadId]: chatMessages,
-  });
+  >({});
   const [pendingTemplateAutoSubmit, setPendingTemplateAutoSubmit] =
     useState<PendingTemplateAutoSubmit | null>(null);
   // Bumped on a `thread.updated` for the open thread → ChatView re-fetches its island

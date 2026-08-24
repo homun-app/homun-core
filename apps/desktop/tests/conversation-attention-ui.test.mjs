@@ -12,6 +12,11 @@ test("Tasks is not a top-level route or navigation destination", () => {
   assert.doesNotMatch(app, /<TasksView|setActiveView\(["']tasks["']\)/);
 });
 
+test("mock data does not seed the canonical chat transcript", () => {
+  assert.doesNotMatch(nav, /export const chatMessages/);
+  assert.doesNotMatch(nav, /I'm ready\. Write to me\./);
+});
+
 test("pending effect resolution lives in the owning conversation", () => {
   assert.match(effectPanel, /function InlineUncertainEffectPanel/);
   assert.match(app, /uncertainEffects={activeUncertainEffects}/);
