@@ -6,8 +6,6 @@ import {
   projectTaskQueueSnapshot,
 } from "./taskQueueProjection.mjs";
 
-const fallbackTasks = [{ id: "fallback", title: "Fallback" }];
-
 const task = (id) => ({ id, title: `Task ${id}` });
 const approval = (id) => ({ id, title: `Approval ${id}` });
 const uncertainEffect = (id) => ({ receipt_id: id, summary: `Effect ${id}` });
@@ -31,7 +29,6 @@ test("projectTaskQueueSnapshot combines task lanes and maps approvals and effect
         waiting_approvals: [approval("approval")],
         uncertain_effects: [uncertainEffect("effect")],
       },
-      fallbackTasks,
       mapTask,
       mapApproval,
       mapUncertainEffect,
@@ -51,7 +48,7 @@ test("projectTaskQueueSnapshot combines task lanes and maps approvals and effect
   );
 });
 
-test("projectTaskQueueSnapshot falls back to mock tasks for empty task lanes", () => {
+test("projectTaskQueueSnapshot preserves empty canonical task lanes", () => {
   assert.deepEqual(
     projectTaskQueueSnapshot({
       snapshot: {
@@ -62,13 +59,12 @@ test("projectTaskQueueSnapshot falls back to mock tasks for empty task lanes", (
         waiting_approvals: [],
         uncertain_effects: [],
       },
-      fallbackTasks,
       mapTask,
       mapApproval,
       mapUncertainEffect,
     }),
     {
-      taskItems: fallbackTasks,
+      taskItems: [],
       approvelItems: [],
       uncertainEffectItems: [],
     },

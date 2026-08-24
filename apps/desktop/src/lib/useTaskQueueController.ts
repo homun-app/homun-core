@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { approvals, tasks } from "../data/mockData";
 import type {
   CoreTaskQueueSnapshot,
   CoreUncertainEffectOutcome,
@@ -27,8 +26,8 @@ export function useTaskQueueController({
   activeThreadId: string;
   refreshChatReadModels: (preferredThreadId?: string) => Promise<void>;
 }) {
-  const [taskItems, setTaskItems] = useState<TaskItem[]>(tasks);
-  const [approvalItems, setApprovelItems] = useState<ApprovelItem[]>(approvals);
+  const [taskItems, setTaskItems] = useState<TaskItem[]>([]);
+  const [approvalItems, setApprovelItems] = useState<ApprovelItem[]>([]);
   const [uncertainEffectItems, setUncertainEffectItems] = useState<
     UncertainEffectItem[]
   >([]);
@@ -44,7 +43,6 @@ export function useTaskQueueController({
   const applyTaskQueueSnapshot = useCallback((snapshot: CoreTaskQueueSnapshot) => {
     const projection = projectTaskQueueSnapshot({
       snapshot,
-      fallbackTasks: tasks,
       mapTask: mapCoreTask,
       mapApproval: mapCoreApprovel,
       mapUncertainEffect: mapCoreUncertainEffect,

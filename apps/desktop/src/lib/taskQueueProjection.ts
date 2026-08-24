@@ -17,7 +17,6 @@ export type EffectResolutionError = {
 export const projectTaskQueueSnapshot =
   implementation.projectTaskQueueSnapshot as (input: {
     snapshot: CoreTaskQueueSnapshot;
-    fallbackTasks: TaskItem[];
     mapTask: (item: CoreTaskItem) => TaskItem;
     mapApproval: (item: CoreApprovelItem) => ApprovelItem;
     mapUncertainEffect: (item: CoreUncertainEffect) => UncertainEffectItem;
