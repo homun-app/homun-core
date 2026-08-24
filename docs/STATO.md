@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed slices mergeate fino a #366; nuovo slice AgentTurnActorScope verso run_agent_rounds in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope slices mergeate fino a #367; nuovo slice AgentTurnToolRuntimeScope verso run_agent_rounds in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#366 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #366 (`e38ba793`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#367 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #367 (`7d492a99`) |
 
 ## Dove siamo
 
@@ -42,9 +42,13 @@ protocollo anti-regressione vive in
 Piano completato:
 [`superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md`](superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md).
 
-Slice Runtime V2 recenti:
-
-- Slice corrente `gateway_agent_turn_tail`: `AgentTurnActorScope` resta typed
+- Slice corrente `gateway_chat_toolset`: `AgentTurnToolRuntimeScope` porta in
+  `run_agent_rounds` la proiezione runtime di tool/capability del turno
+  (`composio_writes`, `catalog_index`, `capability_corpus` e
+  `capability_route`) come contratto unico; il root non passa piu' quattro
+  parametri concorrenti al loop, mentre toolset assembly, capability routing,
+  dispatch tool e browser executor restano owner separati.
+- Estrazione mergeata `gateway_agent_turn_tail`: `AgentTurnActorScope` resta typed
   dal tail-context pre-loop fino a `run_agent_rounds`; il root non passa piu'
   `automation_user_id` e `automation_workspace_id` come parametri concorrenti
   del loop, mentre tail snapshot, usage context, model steering e capability

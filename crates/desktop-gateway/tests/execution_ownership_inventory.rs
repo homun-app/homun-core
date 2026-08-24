@@ -4824,6 +4824,71 @@ fn agent_turn_tail_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_turn_tool_runtime_scope_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let toolset = production_source(&root.join("src/gateway_chat_toolset.rs"));
+
+    for pattern in [
+        "pub(crate) struct AgentTurnToolRuntimeScope",
+        "pub(crate) composio_writes: std::collections::BTreeSet<String>,",
+        "pub(crate) catalog_index: Vec<(String, String, serde_json::Value)>,",
+        "pub(crate) capability_corpus: Vec<CapabilityEntry>,",
+        "pub(crate) capability_route: CapabilityRouteDecision,",
+    ] {
+        assert!(
+            toolset.contains(pattern),
+            "chat toolset owner must expose typed agent turn tool runtime scope {pattern}"
+        );
+    }
+
+    let run_agent_rounds = main
+        .split("async fn run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds function")
+        .split(") -> local_first_engine::TurnOutcome")
+        .next()
+        .expect("run_agent_rounds signature");
+    let run_agent_rounds_call = main
+        .split("let outcome = run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds call")
+        .split(")\n        .await;")
+        .next()
+        .expect("run_agent_rounds call block");
+    assert!(
+        run_agent_rounds.contains("tool_runtime_scope: AgentTurnToolRuntimeScope,"),
+        "run_agent_rounds must receive typed AgentTurnToolRuntimeScope"
+    );
+    assert!(
+        run_agent_rounds_call.contains("tool_runtime_scope,"),
+        "stream_chat_via_openai must pass typed AgentTurnToolRuntimeScope into run_agent_rounds"
+    );
+    for pattern in [
+        "composio_writes: std::collections::BTreeSet<String>,",
+        "catalog_index: Vec<(String, String, serde_json::Value)>,",
+        "capability_corpus: Vec<CapabilityEntry>,",
+        "capability_route_for_runtime: CapabilityRouteDecision,",
+    ] {
+        assert!(
+            !run_agent_rounds.contains(pattern),
+            "run_agent_rounds must not split AgentTurnToolRuntimeScope into scalar parameters {pattern}"
+        );
+    }
+    for pattern in [
+        "\n            composio_writes,",
+        "\n            catalog_index,",
+        "\n            capability_corpus,",
+        "\n            capability_route_for_runtime,",
+    ] {
+        assert!(
+            !run_agent_rounds_call.contains(pattern),
+            "stream_chat_via_openai must not pass scalar tool runtime state into run_agent_rounds {pattern}"
+        );
+    }
+}
+
+#[test]
 fn chat_turn_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));
