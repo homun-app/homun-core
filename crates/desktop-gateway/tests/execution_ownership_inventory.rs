@@ -4648,6 +4648,7 @@ fn agent_turn_tail_has_one_gateway_owner() {
         "pub(crate) async fn complete_agent_turn_tail(",
         "struct AgentTurnTailInput",
         "turn_policy: &'a ChatTurnPolicy,",
+        "execution_identity: &'a AgentTurnExecutionIdentity,",
         "struct AgentTurnTailContext",
         "struct AgentTurnTailSnapshot",
         "pub(crate) fn prepare_agent_turn_tail_context(",
@@ -4704,6 +4705,18 @@ fn agent_turn_tail_has_one_gateway_owner() {
     assert!(
         !tail_call.contains("read_only: turn_policy.read_only,"),
         "main.rs must not pass a scalar read_only copy into the tail owner"
+    );
+    assert!(
+        tail_call.contains("execution_identity: &execution_identity,"),
+        "main.rs must pass the typed AgentTurnExecutionIdentity into the tail owner"
+    );
+    assert!(
+        !tail_call.contains("canonical_broker_turn: execution_identity.canonical_broker_turn,"),
+        "main.rs must not pass scalar canonical_broker_turn into the tail owner"
+    );
+    assert!(
+        !turn_tail.contains("pub(crate) canonical_broker_turn: bool,"),
+        "agent turn tail input must receive typed AgentTurnExecutionIdentity, not a scalar canonical_broker_turn copy"
     );
 
     for adjacent in [

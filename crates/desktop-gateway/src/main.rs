@@ -1990,7 +1990,7 @@ async fn stream_chat_via_openai(
             state: tail_snapshot.state,
             tx: &tx,
             outcome,
-            canonical_broker_turn: execution_identity.canonical_broker_turn,
+            execution_identity: &execution_identity,
             thread_id: tail_snapshot.thread_id,
             fence_turn_id: tail_snapshot.fence_turn_id,
             fence_user_id: tail_snapshot.fence_user_id,
