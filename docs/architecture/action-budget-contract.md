@@ -23,7 +23,7 @@ UI mostra lo stato prodotto.
 
 | Budget | Owner attuale | Stato canonico | UI |
 | --- | --- | --- | --- |
-| Round per turno | `crates/engine/src/config.rs::TurnConfig`, `agent_loop.rs` | `TurnOutcome.stop`, eventi journal | mostra terminal/sospeso dalla projection |
+| Round per turno | `crates/desktop-gateway/src/gateway_agent_turn_config.rs`, `crates/engine/src/config.rs::TurnConfig`, `agent_loop.rs` | `TurnOutcome.stop`, eventi journal | mostra terminal/sospeso dalla projection |
 | Istruzione operativa del piano | `crates/desktop-gateway/src/gateway_prompt_instructions.rs` | prompt contract per `update_plan`, `step_advance`, goal e ripresa piani in corso | non interpreta la wording; mostra il piano proiettato |
 | Progresso dentro uno step | `LoopState.progress_anchor_round` e `ToolEffects.reset_stall_guards` | `PlanStepAdvanced`, `runtime_plans` | renderizza step proiettati |
 | Stall cross-turn del piano | `crates/desktop-gateway/src/gateway_plan_stall.rs` | `runtime_plans.stall_turns`, `last_resume_done` | non calcola il budget |
@@ -81,7 +81,8 @@ utente o ancora al lavoro.
    aggiungendo ogni volta una voce al gate `check_gateway_main_contract.py`.
    Completato: `gateway_plan_stall`, `gateway_tool_budget`,
    `gateway_capability_registry`, `gateway_tool_timeouts`,
-   `gateway_action_confirmations`, `gateway_mcp_chat_tools`,
+   `gateway_action_confirmations`, `gateway_agent_turn_config`,
+   `gateway_mcp_chat_tools`,
    `gateway_mcp_runtime`, `gateway_mcp_connections`,
    `gateway_mcp_execution`, `gateway_write_tool_allowlist`,
    `gateway_thread_files`, `gateway_transcription`, `gateway_usage_routes` e
