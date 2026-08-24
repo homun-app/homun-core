@@ -2475,12 +2475,48 @@ def main() -> int:
         "let final_done = false;",
         "let plan_nudges: u32 = 0;",
         "let turn_used_tools = false;",
+        "let final_done = plan_seed.final_done;",
+        "let plan_nudges = plan_seed.plan_nudges;",
+        "let turn_used_tools = plan_seed.turn_used_tools;",
         "ls.step_messages_start = ls.messages.len();",
     ]:
         assert_not_contains(
             source,
             snippet,
             "gateway root must not retain agent turn plan seed state",
+        )
+    run_agent_rounds_source = source.split("async fn run_agent_rounds(", 1)[1]
+    run_agent_rounds_call = source.split("let outcome = run_agent_rounds(", 1)[1].split(
+        ".await;", 1
+    )[0]
+    assert_contains(
+        run_agent_rounds_source,
+        "plan_seed: AgentTurnPlanSeed,",
+        "run_agent_rounds must receive typed AgentTurnPlanSeed",
+    )
+    assert_contains(
+        run_agent_rounds_call,
+        "plan_seed,",
+        "stream_chat_via_openai must pass typed AgentTurnPlanSeed into run_agent_rounds",
+    )
+    for snippet in [
+        "final_done: bool,",
+        "plan_nudges: u32,",
+        "turn_used_tools: bool,",
+        "final_done,",
+        "plan_nudges,",
+        "turn_used_tools,",
+    ]:
+        assert_not_contains(
+            run_agent_rounds_call,
+            snippet,
+            "gateway root must not pass scalar plan seed state into run_agent_rounds",
+        )
+    for snippet in ["final_done: bool,", "plan_nudges: u32,", "turn_used_tools: bool,"]:
+        assert_not_contains(
+            run_agent_rounds_source,
+            snippet,
+            "run_agent_rounds must not split AgentTurnPlanSeed into scalar parameters",
         )
     for snippet in [
         "async fn stream_chat_via_openai(",

@@ -1942,9 +1942,6 @@ async fn stream_chat_via_openai(
             &resume_plan,
             verbose_debug(),
         );
-        let final_done = plan_seed.final_done;
-        let plan_nudges = plan_seed.plan_nudges;
-        let turn_used_tools = plan_seed.turn_used_tools;
 
         seed_agent_turn_model_provider(&mut ls, &http, model, base_url, api_key).await;
         seed_agent_turn_recovery_checkpoint(
@@ -1985,9 +1982,7 @@ async fn stream_chat_via_openai(
             memory_user_message,
             memory_answer,
             last_model_error,
-            final_done,
-            plan_nudges,
-            turn_used_tools,
+            plan_seed,
             composio_writes,
             catalog_index,
             capability_corpus,
@@ -2049,9 +2044,7 @@ async fn run_agent_rounds(
     memory_user_message: String,
     memory_answer: String,
     last_model_error: Option<String>,
-    final_done: bool,
-    plan_nudges: u32,
-    turn_used_tools: bool,
+    plan_seed: AgentTurnPlanSeed,
     composio_writes: std::collections::BTreeSet<String>,
     catalog_index: Vec<(String, String, serde_json::Value)>,
     capability_corpus: Vec<CapabilityEntry>,
@@ -2200,9 +2193,9 @@ async fn run_agent_rounds(
         memory_user_message,
         memory_answer,
         last_model_error,
-        final_done,
-        plan_nudges,
-        turn_used_tools,
+        plan_seed.final_done,
+        plan_seed.plan_nudges,
+        plan_seed.turn_used_tools,
         browse_sources,
         trace_dir,
         turn_trace,
@@ -2267,9 +2260,9 @@ async fn run_agent_rounds(
         vision_seed.user_message,
         vision_seed.memory_answer,
         vision_seed.last_model_error,
-        final_done,
-        plan_nudges,
-        turn_used_tools,
+        plan_seed.final_done,
+        plan_seed.plan_nudges,
+        plan_seed.turn_used_tools,
         vision_seed.browse_sources,
         vision_seed.trace_dir,
         turn_trace,
