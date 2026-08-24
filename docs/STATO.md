@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent slices mergeate fino a #358; nuovo slice memory intent context cleanup in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent slices mergeate fino a #359; nuovo slice chat turn context typed output in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#358 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #358 (`04a9ba46`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#359 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #359 (`3f394df5`) |
 
 ## Dove siamo
 
@@ -44,7 +44,12 @@ Piano completato:
 
 Slice Runtime V2 recenti:
 
-- Cleanup locale `gateway_memory_briefing`: `MemoryIntentExecutionContext`
+- Estrazione locale `gateway_chat_turn_context`: `prepare_chat_turn_context`
+  riceve i raw `mode`/`tool_policy` del turno e restituisce anche
+  `ChatTurnPolicy` e `ContactMemoryPerimeter` typed; `stream_chat_via_openai`
+  non richiama piu' resolver separati di policy/perimetro dopo il setup
+  workspace/contact/activity.
+- Cleanup mergeato `gateway_memory_briefing`: `MemoryIntentExecutionContext`
   conserva solo `MemoryIntent` typed e `MemoryInjectionPolicy`, rimuovendo la
   copia scalare morta `memory_recall_allowed`; toolset, prompt runtime e
   capability executor derivano la disponibilita' recall dal typed intent nei

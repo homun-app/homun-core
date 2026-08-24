@@ -4254,6 +4254,32 @@ def main() -> int:
             snippet,
             "chat turn context owner must own pre-prompt workspace/contact/activity setup",
         )
+    chat_turn_context_input = chat_turn_context_source.split(
+        "pub(crate) struct ChatTurnContextInput", 1
+    )[1].split("pub(crate) struct ChatTurnContext", 1)[0]
+    assert_contains(
+        chat_turn_context_input,
+        "pub(crate) mode: Option<&'a str>,",
+        "chat turn context input must receive the raw composer mode",
+    )
+    assert_contains(
+        chat_turn_context_input,
+        "pub(crate) tool_policy: Option<&'a str>,",
+        "chat turn context input must receive the raw tool policy",
+    )
+    chat_turn_context_output = chat_turn_context_source.split(
+        "pub(crate) struct ChatTurnContext {", 1
+    )[1].split("pub(crate) struct ChatTurnPolicy", 1)[0]
+    assert_contains(
+        chat_turn_context_output,
+        "pub(crate) turn_policy: ChatTurnPolicy,",
+        "chat turn context must return typed ChatTurnPolicy",
+    )
+    assert_contains(
+        chat_turn_context_output,
+        "pub(crate) contact_memory_perimeter: ContactMemoryPerimeter,",
+        "chat turn context must return typed ContactMemoryPerimeter",
+    )
     for snippet in [
         "set_memory_workspace(&ws);",
         'set_memory_workspace("");',
@@ -4276,6 +4302,8 @@ def main() -> int:
         "can_see_contacts: bool,",
         "can_see_calendar: bool,",
         "can_use_project_memory: bool,",
+        "resolve_chat_turn_policy(",
+        "resolve_contact_memory_perimeter(",
     ]:
         assert_not_contains(
             source,
