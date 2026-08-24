@@ -3544,7 +3544,10 @@ fn agent_turn_plan_seed_has_one_gateway_owner() {
     for pattern in [
         "pub(crate) struct AgentTurnPlanSeed",
         "pub(crate) fn seed_agent_turn_plan_state(",
-        "loop_state.plan = canonical_plan_value(resume_goal, resume_plan)",
+        "chat_plan_resume: &ChatPlanResume",
+        "canonical_plan_value(",
+        "chat_plan_resume.goal.as_deref()",
+        "&chat_plan_resume.plan",
         "loop_state.step_messages_start = loop_state.messages.len()",
         "final_done: false",
         "plan_nudges: 0",
@@ -3564,11 +3567,30 @@ fn agent_turn_plan_seed_has_one_gateway_owner() {
         "let final_done = plan_seed.final_done;",
         "let plan_nudges = plan_seed.plan_nudges;",
         "let turn_used_tools = plan_seed.turn_used_tools;",
+        "let resume_plan = chat_plan_resume.plan;",
+        "let resume_goal = chat_plan_resume.goal;",
         "ls.step_messages_start = ls.messages.len();",
     ] {
         assert!(
             !stream_chat.contains(pattern),
             "main.rs must not own agent turn plan seed state {pattern}"
+        );
+    }
+    let plan_seed_call = main
+        .split("let plan_seed = seed_agent_turn_plan_state(")
+        .nth(1)
+        .expect("agent turn plan seed call")
+        .split(");")
+        .next()
+        .expect("agent turn plan seed call block");
+    assert!(
+        plan_seed_call.contains("&chat_plan_resume,"),
+        "stream_chat_via_openai must pass typed ChatPlanResume into the plan seed owner"
+    );
+    for pattern in ["resume_goal.as_deref()", "&resume_plan"] {
+        assert!(
+            !plan_seed_call.contains(pattern),
+            "stream_chat_via_openai must not pass scalar plan resume state into the plan seed owner {pattern}"
         );
     }
     assert!(

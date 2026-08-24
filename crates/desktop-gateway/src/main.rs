@@ -1881,8 +1881,6 @@ async fn stream_chat_via_openai(
         effective_context: &effective_context,
         applies_new_input,
     });
-    let resume_plan = chat_plan_resume.plan;
-    let resume_goal = chat_plan_resume.goal;
     let capability_route_for_runtime = capability_route.clone();
     let abort_resume_id = resume_id.clone();
     let engine_task = tokio::spawn(async move {
@@ -1936,12 +1934,7 @@ async fn stream_chat_via_openai(
         // CLI commands + output run during THIS response.
         reset_agent_turn_terminal_buffer(thread_id.clone());
 
-        let plan_seed = seed_agent_turn_plan_state(
-            &mut ls,
-            resume_goal.as_deref(),
-            &resume_plan,
-            verbose_debug(),
-        );
+        let plan_seed = seed_agent_turn_plan_state(&mut ls, &chat_plan_resume, verbose_debug());
 
         seed_agent_turn_model_provider(&mut ls, &http, model, base_url, api_key).await;
         seed_agent_turn_recovery_checkpoint(

@@ -15,19 +15,20 @@ pub(crate) struct AgentTurnPlanSeed {
 
 pub(crate) fn seed_agent_turn_plan_state(
     loop_state: &mut local_first_engine::LoopState,
-    resume_goal: Option<&str>,
-    resume_plan: &[serde_json::Value],
+    chat_plan_resume: &ChatPlanResume,
     verbose: bool,
 ) -> AgentTurnPlanSeed {
-    loop_state.plan = canonical_plan_value(resume_goal, resume_plan);
+    loop_state.plan =
+        canonical_plan_value(chat_plan_resume.goal.as_deref(), &chat_plan_resume.plan);
     if verbose {
-        let done = resume_plan
+        let done = chat_plan_resume
+            .plan
             .iter()
             .filter(|s| s.get("status").and_then(|v| v.as_str()) == Some("done"))
             .count();
         eprintln!(
             "[plan] turn-start: resumed {} steps ({done} done) from prior ‹‹PLAN›› marker",
-            resume_plan.len()
+            chat_plan_resume.plan.len()
         );
     }
 
