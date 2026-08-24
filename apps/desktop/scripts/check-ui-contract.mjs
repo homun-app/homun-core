@@ -1085,7 +1085,8 @@ assertContains("src/components/ChatEmptyHero.tsx", "selectGreetingKey", "New cha
 assertContains("src/components/ChatEmptyHero.tsx", "chat-hero-headline", "New chat must render the primary greeting separately");
 assertContains("src/components/ChatEmptyHero.tsx", "chat-hero-prompt", "New chat must render the rotating prompt as secondary typography");
 assertContains("src/styles.css", ".chat-hero-welcome", "New chat must give the welcome block its own spacing hierarchy");
-assertContains("src/data/mockData.ts", 'id: "m1_ready"', "The bootstrap greeting must be recognized as a removable placeholder");
+assertNotContains("src/data/mockData.ts", 'id: "m1_ready"', "Mock data must not seed the canonical chat transcript");
+assertNotContains("src/data/mockData.ts", "I'm ready. Write to me.", "Mock data must not carry the retired bootstrap assistant message");
 assertContains("src/components/ChatUsageOverview.tsx", "<UsageCalendar", "New chat must render the real activity calendar");
 assertContains("src/components/ChatUsageOverview.tsx", "coreBridge.usageDaily", "New chat must load real daily usage");
 assertContains("src/components/ChatUsageOverview.tsx", "dominant_provider", "New chat must render provider-qualified routes");

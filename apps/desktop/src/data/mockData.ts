@@ -26,7 +26,6 @@ import type {
   ApprovelItem,
   AutomationProposal,
   BrainRunDetail,
-  ChatMessage,
   ComputerSession,
   ConnectionItem,
   LearningInsight,
@@ -48,16 +47,6 @@ export const navItems: NavItem[] = [
   // "Pianificato" (coda dei run) è confluito in Automazioni: la regola è la cosa
   // di prima classe; i run si vedono nei thread. Manteniamo l'icona-calendario.
   { id: "automations", label: "nav.automations", icon: CalendarClock },
-];
-
-export const chatMessages: ChatMessage[] = [
-  {
-    id: "m1_ready",
-    role: "assistant",
-    text: "I'm ready. Write to me.",
-    timestamp: "ora",
-    metadata: "Local model",
-  },
 ];
 
 export const computerSession: ComputerSession = {
