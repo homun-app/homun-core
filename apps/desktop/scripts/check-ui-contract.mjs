@@ -1604,6 +1604,9 @@ assertContains("src/components/useChatActivityProjection.ts", "projectedView.bro
 assertNotContains("src/components/useChatActivityProjection.ts", "browser_budget_exceeded", "browser budget marker text must not be parsed in the renderer");
 assertContains("src/components/ChatView.tsx", "runtimeViewModel", "ChatView must consume the kernel runtime view model");
 assertContains("src/components/ChatView.tsx", "runtimeViewModel.turnUiState", "ChatView lifecycle must come from the runtime view model");
+assertContains("src/lib/chat-runtime/kernelProjectionPresenter.mjs", "activeTurn: activeTurn(projection)", "kernel presenter must own active-turn read model projection");
+assertContains("src/components/useChatActivityProjection.ts", "projectedView.activeTurn", "chat activity hook must consume the presenter-owned active turn");
+assertNotContains("src/components/useChatActivityProjection.ts", "function activeTurnFromKernelProjection", "chat activity hook must not own a parallel active-turn projector");
 assertContains("src/components/useChatTurnSubmission.ts", "composerMode", "composer submission must receive kernel composer mode");
 assertContains("src/lib/chat-runtime/submissionRouting.mjs", "composerModeFromKernel", "submission routing must normalize kernel composer modes");
 assertNotContains("src/components/ChatView.tsx", "../lib/markers", "ChatView must not import marker parsing");
