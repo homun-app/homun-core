@@ -128,6 +128,28 @@ test("active_turn_projection_belongs_to_kernel_presenter", () => {
   });
 });
 
+test("runtime_view_model_exposes_turn_status_for_ui_consumers", () => {
+  const view = projectKernelThreadView({
+    projectionLoaded: true,
+    projection: projection({
+      turn: {
+        active_turn_id: null,
+        status: "completed",
+        last_event_seq: 9,
+        terminal_reason: "canonical_completed",
+        failure_text: null,
+        updated_at: 1723360200,
+      },
+    }),
+    isStreaming: false,
+    liveActivitySteps: [],
+    livePlanMarkdown: null,
+    streamOwnerTurnId: null,
+  });
+
+  assert.equal(view.turnUiState.status, "completed");
+});
+
 test("runtime_view_model_keeps_marker_tail_display_only_before_projection_load", () => {
   const view = projectKernelThreadView({
     projectionLoaded: false,

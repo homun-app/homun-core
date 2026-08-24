@@ -29,8 +29,6 @@ test("submission routing consumes presenter turn state instead of raw projection
         workInProgress: true,
       },
       composerMode: "steer_active_turn",
-      projectedActiveTurn: null,
-      projectedTurnStatus: "completed",
       projectionLoaded: false,
     }),
   );

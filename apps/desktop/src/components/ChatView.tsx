@@ -300,9 +300,7 @@ export function ChatView({
     markProjectedTurnStatus,
     pauseComputer,
     previewDataUrl,
-    projectedActiveTurn,
     projectedSubagents,
-    projectedTurnStatus,
     projectionLoaded,
     resumeComputer,
     runtimeViewModel,
@@ -330,6 +328,7 @@ export function ChatView({
   const planStepPulseId = usePlanStepPulse();
 
   // ── Turn lifecycle derivation ──────────────────────────────────────────
+  const turnStatus = runtimeViewModel.turnUiState.status;
   const {
     isStreaming,
     turnAwaitingUser,
@@ -356,7 +355,7 @@ export function ChatView({
     approvals,
     computerSessionId,
     terminalTurnAtRest,
-    activeTurnId: projectedActiveTurn?.turn_id ?? null,
+    activeTurnId: runtimeViewModel.activeTurn?.turn_id ?? null,
   });
 
   // Durable wait (approval/CHOICES hold) must not keep a live "writing" owner.
@@ -572,7 +571,7 @@ export function ChatView({
         ...projectedSubagents.map((subagent) => `${subagent.name}:${subagent.status}`),
       ],
       streaming: workInProgress,
-      executionStatus: turnAwaitingUser ? "waiting_user" : projectedTurnStatus,
+      executionStatus: turnAwaitingUser ? "waiting_user" : turnStatus,
       browser: deriveBrowserStatus(computerLiveStatus, previewDataUrl, computerControlError),
       artifacts: islandArtifacts.map((source) => ({
         id: `${source.artifactThread ?? thread.threadId}:${source.artifactName ?? source.name}`,
@@ -585,7 +584,7 @@ export function ChatView({
       projectedSubagents,
       workInProgress,
       turnAwaitingUser,
-      projectedTurnStatus,
+      turnStatus,
       computerLiveStatus,
       previewDataUrl,
       computerControlError,
@@ -595,7 +594,7 @@ export function ChatView({
     ],
   );
   const activeAssistantMessageId = streamingAssistantId ?? (
-    !isStreaming && projectedActiveTurn
+    !isStreaming && runtimeViewModel.activeTurn
       ? [...threadMessages].reverse().find((message) => message.role === "assistant")?.id ?? null
       : null
   );

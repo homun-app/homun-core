@@ -99,7 +99,6 @@ export function useChatActivityProjection({
   const [kernelProjection, setKernelProjection] = useState<KernelThreadProjection | null>(null);
   const [projectionLoaded, setProjectionLoaded] = useState(false);
 
-  const projectedTurnStatus = kernelProjection?.turn.status ?? null;
   const projectedSubagents: SubagentInfo[] = kernelProjection?.subagents ?? [];
 
   const projectedView = projectKernelThreadView({
@@ -111,7 +110,6 @@ export function useChatActivityProjection({
     streamOwnerTurnId: streamOwnerTurnRef.current,
   });
   const runtimeViewModel: KernelProjectionPresenterView = projectedView;
-  const projectedActiveTurn = projectedView.activeTurn;
 
   const conversationPlan = projectedView.conversationPlan;
   const conversationActivity = projectedView.conversationActivity;
@@ -220,9 +218,7 @@ export function useChatActivityProjection({
     conversationActivity,
     conversationPlan,
     markProjectedTurnStatus,
-    projectedActiveTurn,
     projectedSubagents,
-    projectedTurnStatus,
     projectionLoaded,
     runtimeViewModel,
     workspacePlanGoal,

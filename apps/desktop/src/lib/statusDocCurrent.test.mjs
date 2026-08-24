@@ -9,7 +9,14 @@ const statusDoc = readFileSync(resolve(here, "../../../../docs/STATO.md"), "utf8
 
 test("status doc records the merged legacy lifecycle cleanup", () => {
   assert.match(statusDoc, /#375/);
-  assert.match(statusDoc, /main` aggiornato a #375 \(`d654a4a0`\)/);
   assert.doesNotMatch(statusDoc, /cleanup legacy UI lifecycle in corso/);
   assert.doesNotMatch(statusDoc, /Chiudere la cleanup legacy UI lifecycle/);
+});
+
+test("status doc records a concrete current main baseline without stale slice branch", () => {
+  assert.match(
+    statusDoc,
+    /\| HEAD codice verificato \| `main` aggiornato a #[0-9]+ \(`[0-9a-f]{8}`\) \|/,
+  );
+  assert.doesNotMatch(statusDoc, /fabio\/status-after-ui-lifecycle-retirement/);
 });

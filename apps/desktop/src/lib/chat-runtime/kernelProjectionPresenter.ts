@@ -20,6 +20,7 @@ export interface KernelProjectionPresenterView {
   workspacePlanSteps: PlanStep[];
   workspacePlanGoal: string | null;
   turnUiState: {
+    status: string;
     isStreaming: boolean;
     hasActiveTurn: boolean;
     workInProgress: boolean;

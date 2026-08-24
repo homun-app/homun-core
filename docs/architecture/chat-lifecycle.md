@@ -1,6 +1,6 @@
 # Chat Lifecycle And Rendering Contracts
 
-Verificato 2026-08-24 contro il branch `fabio/ui-retire-legacy-turn-lifecycle`.
+Verificato 2026-08-24 contro il branch `fabio/ui-runtime-view-model-turn-contract`.
 
 Questa pagina descrive solo contratti gia' presenti nel codice. Se un nuovo
 fix modifica chat, turni, steering, reasoning o browser/activity overlay, deve
@@ -68,7 +68,11 @@ delegare a funzioni pure:
 
 - `projectKernelThreadView` decide `turnUiState.hasActiveTurn`,
   `workInProgress`, `turnAwaitingUser`, `canStop`, `terminalTurnAtRest` e
-  produce il `runtimeViewModel` consumato dagli hook UI.
+  `status`, e produce il `runtimeViewModel` consumato dagli hook UI.
+- `ChatView` non riceve piu' `projectedActiveTurn` o `projectedTurnStatus` come
+  contratti separati da `useChatActivityProjection`/browser activity lifecycle:
+  active turn e status arrivano da `runtimeViewModel.activeTurn` e
+  `runtimeViewModel.turnUiState.status`.
 - `deriveComposerMode` decide `new_turn`, `steering`, `waiting_user_reply` o
   `disabled` solo come fallback pre-projection; dopo il load della projection la
   modalita' composer arriva da `runtimeViewModel.composerMode`.
