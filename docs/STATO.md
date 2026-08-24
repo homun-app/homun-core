@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission runtime-view-model mergeati fino a #374; cleanup legacy UI lifecycle in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission runtime-view-model piu' cleanup legacy lifecycle mergeati fino a #375; scansione finale duplicati UI/runtime non-browser in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#374 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #374 (`0d2690cb`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#375 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #375 (`d654a4a0`) |
 
 ## Dove siamo
 
@@ -42,7 +42,7 @@ protocollo anti-regressione vive in
 Piano completato:
 [`superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md`](superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md).
 
-- Slice locale cleanup UI lifecycle: il vecchio owner desktop
+- Slice UI lifecycle cleanup mergeata #375: il vecchio owner desktop
   `apps/desktop/src/lib/chat-runtime/lifecycle.{mjs,ts}` e' stato rimosso dopo
   #374; `kernelProjectionPresenter`/`runtimeViewModel.turnUiState` restano la
   sola fonte UI per liveness, terminalita' e stato attesa utente.
@@ -1607,9 +1607,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#374: slice owner-level successive mergeate in
-  `main`, fino a `ui submission runtime-view-model`; `main` verificato e
-  riallineato a #374.
+- #143-#283, #285-#286, #288-#375: slice owner-level successive mergeate in
+  `main`, fino a `legacy UI lifecycle cleanup`; `main` verificato e
+  riallineato a #375.
 
 PR aperte:
 
@@ -1617,8 +1617,8 @@ PR aperte:
 
 Branch corrente:
 
-- `fabio/ui-retire-legacy-turn-lifecycle` in verifica locale da `main` #374
-  (`0d2690cb`).
+- `fabio/status-after-ui-lifecycle-retirement` in verifica locale da `main` #375
+  (`d654a4a0`).
 
 ## Debito residuo
 
@@ -1645,8 +1645,8 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la cleanup legacy UI lifecycle con gate desktop/kernel verde, PR e
-   merge.
+1. Scansione finale owner duplicati UI/runtime non-browser con Kill List
+   esplicita; non toccare browser/activity in questa fase.
 2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
@@ -1654,11 +1654,10 @@ Branch corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #374 (`0d2690cb`); slice non-browser corrente
-`fabio/ui-retire-legacy-turn-lifecycle` rimuove il vecchio owner desktop
-`apps/desktop/src/lib/chat-runtime/lifecycle.{mjs,ts}` dopo che
-`kernelProjectionPresenter`/`runtimeViewModel.turnUiState` sono diventati la
-fonte unica di liveness/terminalita'/attesa utente.
+main aggiornato a #375 (`d654a4a0`); slice non-browser corrente
+`fabio/status-after-ui-lifecycle-retirement` riallinea STATO post #375 e prepara
+la scansione finale duplicati UI/runtime non-browser, lasciando browser/activity
+fuori scope.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
