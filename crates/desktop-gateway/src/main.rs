@@ -1745,7 +1745,7 @@ async fn stream_chat_via_openai(
         prompt: &request.prompt,
         turn_policy: &turn_policy,
         contact_memory_perimeter,
-        memory_recall_allowed,
+        memory_intent: &memory_intent,
         has_skills,
         artifact_destinations: &artifact_destinations,
         objective_effect_policy: &objective_effect_policy,

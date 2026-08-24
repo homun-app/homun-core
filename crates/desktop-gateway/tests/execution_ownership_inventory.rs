@@ -4831,6 +4831,7 @@ fn chat_toolset_has_one_gateway_owner() {
         "struct ChatToolsetInput",
         "turn_policy: &'a ChatTurnPolicy,",
         "contact_memory_perimeter: ContactMemoryPerimeter,",
+        "memory_intent: &'a semantic_decision::MemoryIntent,",
         "struct ChatToolset",
         "initial_manager_tool_schemas_for_test(",
         "tool_stays_live_this_turn(",
@@ -4867,6 +4868,10 @@ fn chat_toolset_has_one_gateway_owner() {
     assert!(
         !toolset.contains("pub(crate) contact_only: bool,"),
         "chat toolset input must receive typed ContactMemoryPerimeter, not a scalar contact_only copy"
+    );
+    assert!(
+        !toolset.contains("pub(crate) memory_recall_allowed: bool,"),
+        "chat toolset input must receive typed MemoryIntent, not a scalar memory_recall_allowed copy"
     );
     assert!(
         capability_registry.contains("pub(crate) turn_policy: &'a ChatTurnPolicy,"),
@@ -4932,6 +4937,14 @@ fn chat_toolset_has_one_gateway_owner() {
     assert!(
         !toolset_call.contains("read_only: turn_policy.read_only,"),
         "main.rs must not pass a scalar read_only copy into the toolset owner"
+    );
+    assert!(
+        toolset_call.contains("memory_intent: &memory_intent,"),
+        "main.rs must pass the typed memory intent into the toolset owner"
+    );
+    assert!(
+        !toolset_call.contains("memory_recall_allowed,"),
+        "main.rs must not pass a scalar memory_recall_allowed copy into the toolset owner"
     );
     assert!(
         !toolset_call.contains("contact_only: contact_memory_perimeter.contact_only,"),
