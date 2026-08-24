@@ -1,6 +1,6 @@
 # Chat Lifecycle And Rendering Contracts
 
-Verificato 2026-08-24 contro il branch `fabio/ui-runtime-view-model-turn-contract`.
+Verificato 2026-08-24 contro `main` aggiornato a #380.
 
 Questa pagina descrive solo contratti gia' presenti nel codice. Se un nuovo
 fix modifica chat, turni, steering, reasoning o browser/activity overlay, deve
@@ -14,7 +14,7 @@ aggiornare uno degli owner qui sotto e il relativo test.
 | Query del turno attivo chat | `crates/task-runtime/src/broker.rs`, `crates/task-runtime/src/store.rs` | `cargo test -p local-first-task-runtime active_chat_turn` |
 | Cleanup steering terminale | `crates/task-runtime/src/store.rs::close_unsettled_turn_steering`, `crates/desktop-gateway/src/main.rs::finalize_turn_steering` | `cargo test -p local-first-task-runtime finalization_fence_blocks_every_unapplied_steering_state`; `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway steering` |
 | Lifecycle UI del turno | `apps/desktop/src/lib/chat-runtime/kernelProjectionPresenter.ts` via `runtimeViewModel.turnUiState` | `cd apps/desktop && node --test src/lib/chat-runtime/kernelProjectionPresenter.test.mjs src/lib/chat-runtime/runtimeLifecycleRetirement.test.mjs` |
-| Modalita' composer | `apps/desktop/src/lib/chat-runtime/composerMode.ts` | `cd apps/desktop && npm run test:cursor-grammar` |
+| Modalita' composer | `apps/desktop/src/lib/chat-runtime/kernelProjectionPresenter.ts` via `runtimeViewModel.composerMode`; `apps/desktop/src/lib/chat-runtime/submissionRouting.ts` consuma il valore del presenter | `cd apps/desktop && node --test src/lib/chat-runtime/kernelProjectionPresenter.test.mjs src/lib/chat-runtime/submissionRouting.test.mjs` |
 | Steering visibile in chat | `apps/desktop/src/lib/chat-runtime/steering.ts`, `apps/desktop/src/lib/chatSteeringState.ts` | `cd apps/desktop && npm run test:cursor-grammar` |
 | Testo assistente visibile | `apps/desktop/src/lib/chat-rendering/visibleContent.ts` e compat `apps/desktop/src/lib/chatVisibleContent.ts` | `cd apps/desktop && npm run test:cursor-grammar` |
 | Layout messaggi/chat overlay | `apps/desktop/src/styles/chat.css`, `apps/desktop/src/styles/workspace-island.css` | `cd apps/desktop && npm run test:ui-contract`; `npm run build` |
@@ -73,9 +73,10 @@ delegare a funzioni pure:
   contratti separati da `useChatActivityProjection`/browser activity lifecycle:
   active turn e status arrivano da `runtimeViewModel.activeTurn` e
   `runtimeViewModel.turnUiState.status`.
-- `deriveComposerMode` decide `new_turn`, `steering`, `waiting_user_reply` o
-  `disabled` solo come fallback pre-projection; dopo il load della projection la
-  modalita' composer arriva da `runtimeViewModel.composerMode`.
+- `projectKernelThreadView` espone anche `runtimeViewModel.composerMode`: il
+  fallback pre-projection resta nel presenter e `routeComposerSubmission`
+  consuma solo quel valore normalizzato, senza ricostruire localmente lifecycle o
+  stato projection.
 - `deriveChatSteeringState` decide cosa resta visibile come pending/stale.
 
 Regola: se una nuova condizione cambia "thinking", stop button, composer o
