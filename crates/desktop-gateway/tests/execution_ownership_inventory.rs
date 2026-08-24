@@ -3722,11 +3722,14 @@ fn agent_turn_tool_seed_has_one_gateway_owner() {
         );
     }
     assert!(
-        stream_chat.contains("seed_agent_turn_tool_schemas(&mut ls, base_tools, &turn_policy,"),
+        stream_chat.contains(
+            "seed_agent_turn_tool_schemas(\n            &mut loop_seed.loop_state,\n            base_tools,\n            &turn_policy,"
+        ),
         "main.rs must pass typed ChatTurnPolicy into agent turn tool seed owner"
     );
     assert!(
-        !stream_chat.contains("seed_agent_turn_tool_schemas(&mut ls, base_tools, &mode,"),
+        !stream_chat
+            .contains("seed_agent_turn_tool_schemas(&mut loop_seed.loop_state, base_tools, &mode,"),
         "main.rs must not pass scalar mode into agent turn tool seed owner"
     );
     assert!(
@@ -3962,6 +3965,17 @@ fn agent_turn_loop_seed_has_one_gateway_owner() {
         .split("seed_agent_turn_recall(")
         .next()
         .expect("agent turn loop seed setup");
+    let run_agent_rounds = main
+        .split("async fn run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds");
+    let run_agent_rounds_call = main
+        .split("let outcome = run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds call")
+        .split(")")
+        .next()
+        .expect("run_agent_rounds call block");
 
     for pattern in [
         "pub(crate) struct AgentTurnLoopSeed",
@@ -3997,6 +4011,37 @@ fn agent_turn_loop_seed_has_one_gateway_owner() {
         assert!(
             !stream_chat.contains(pattern),
             "main.rs must not own agent turn loop seed state {pattern}"
+        );
+    }
+
+    assert!(
+        run_agent_rounds.contains("loop_seed: AgentTurnLoopSeed,"),
+        "run_agent_rounds must receive typed AgentTurnLoopSeed"
+    );
+    assert!(
+        run_agent_rounds_call.contains("loop_seed,"),
+        "stream_chat_via_openai must pass typed AgentTurnLoopSeed into run_agent_rounds"
+    );
+    for pattern in [
+        "ls: local_first_engine::LoopState,",
+        "memory_answer: String,",
+        "last_model_error: Option<String>,",
+        "browse_sources: Vec<String>,",
+    ] {
+        assert!(
+            !run_agent_rounds.contains(pattern),
+            "run_agent_rounds must not split AgentTurnLoopSeed into scalar parameters {pattern}"
+        );
+    }
+    for pattern in [
+        "\n            ls,",
+        "\n            memory_answer,",
+        "\n            last_model_error,",
+        "\n            browse_sources,",
+    ] {
+        assert!(
+            !run_agent_rounds_call.contains(pattern),
+            "stream_chat_via_openai must not pass scalar loop seed state into run_agent_rounds {pattern}"
         );
     }
 
