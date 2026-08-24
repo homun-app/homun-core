@@ -1070,6 +1070,9 @@ test("App delegates capability state to useCapabilityController", () => {
   assert.match(capabilityController, /export function useCapabilityController/);
   assert.match(capabilityController, /coreBridge\.capabilities/);
   assert.match(capabilityController, /mapCoreCapabilitySnapshot/);
+  assert.doesNotMatch(capabilityController, /from "\.\.\/data\/mockData"/);
+  assert.doesNotMatch(capabilityController, /useState<ConnectionItem\[\]>\(connections\)/);
+  assert.doesNotMatch(capabilityController, /nextConnections\.length\s*\?\s*nextConnections\s*:\s*connections/);
 });
 
 test("App delegates shell setup and plugin state to focused controllers", () => {

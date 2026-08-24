@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
-import { connections } from "../data/mockData";
 import type { ConnectionItem } from "../types";
 import { coreBridge } from "./coreBridge";
 import { mapCoreCapabilitySnapshot } from "./appCoreMappers";
 
 export function useCapabilityController(): { connectionItems: ConnectionItem[] } {
   const [connectionItems, setConnectionItems] =
-    useState<ConnectionItem[]>(connections);
+    useState<ConnectionItem[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -17,9 +16,7 @@ export function useCapabilityController(): { connectionItems: ConnectionItem[] }
           await coreBridge.capabilities(),
         );
         if (!cancelled) {
-          setConnectionItems(
-            nextConnections.length ? nextConnections : connections,
-          );
+          setConnectionItems(nextConnections);
         }
       } catch (error) {
         console.warn("capability_snapshot unavailable", error);

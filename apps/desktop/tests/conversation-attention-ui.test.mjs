@@ -17,6 +17,10 @@ test("mock data does not seed the canonical chat transcript", () => {
   assert.doesNotMatch(nav, /I'm ready\. Write to me\./);
 });
 
+test("mock data does not seed canonical capability connections", () => {
+  assert.doesNotMatch(nav, /export const connections/);
+});
+
 test("pending effect resolution lives in the owning conversation", () => {
   assert.match(effectPanel, /function InlineUncertainEffectPanel/);
   assert.match(app, /uncertainEffects={activeUncertainEffects}/);
