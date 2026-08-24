@@ -171,7 +171,7 @@ export function useChatTurnSubmission({
 }: UseChatTurnSubmissionParams) {
   const [composerSeed, setComposerSeed] = useState<ComposerSeed | null>(null);
   const [usageSuggestedModel, setUsageSuggestedModel] = useState<UsageSuggestedModel | null>(null);
-  const projectedActiveTurn = runtimeViewModel.activeTurn;
+  const activeTurn = runtimeViewModel.activeTurn;
 
   // External seed (e.g. a proactivity card engaged from the dashboard) → prefill
   // the composer. Keyed by nonce so re-engaging the same card re-applies.
@@ -460,7 +460,7 @@ export function useChatTurnSubmission({
       cancelActiveStreaming();
       return;
     }
-    const turnId = projectedActiveTurn?.turn_id ?? activeTurnIdRef.current;
+    const turnId = activeTurn?.turn_id ?? activeTurnIdRef.current;
     if (!turnId) return;
     try {
       await cancelTurn(turnId);

@@ -126,6 +126,7 @@ export function projectKernelThreadView(input) {
     workspacePlanSteps: workspacePlanSteps(projection, conversationPlan),
     workspacePlanGoal: workspacePlanGoal(projection, conversationPlan),
     turnUiState: {
+      status: turnStatus,
       isStreaming: Boolean(input.isStreaming),
       hasActiveTurn,
       workInProgress,
