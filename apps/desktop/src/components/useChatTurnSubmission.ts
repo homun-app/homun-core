@@ -114,7 +114,6 @@ export interface UseChatTurnSubmissionParams {
   applyComputerSessionSnapshot: (snapshot: CoreComputerSessionSnapshot) => void;
   clearProjectedActiveTurn: () => void;
   bumpActivityNonce: () => void;
-  projectionLoaded: boolean;
 
   // From useChatInspectorWorkspace
   hideInspector: () => void;
@@ -162,7 +161,6 @@ export function useChatTurnSubmission({
   markStreamHasVisibleText, setActiveStreamingCancel, clearActiveStreamingCancel,
   clearStreamCancelled, hasActiveStreamingCancel, cancelActiveStreaming,
   applyComputerSessionSnapshot, clearProjectedActiveTurn, bumpActivityNonce,
-  projectionLoaded,
   hideInspector,
   applyPendingSteeringChange, refreshPendingSteering,
   refreshBranches,
@@ -532,7 +530,6 @@ export function useChatTurnSubmission({
     const submissionRoute = routeComposerSubmission({
       promptSubmitting,
       turnUiState: runtimeViewModel.turnUiState,
-      projectionLoaded,
       composerMode: runtimeViewModel.composerMode,
       explicitForceNewTurn: options?.forceNewTurn,
     });

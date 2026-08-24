@@ -1620,6 +1620,13 @@ assertNotContains("src/components/useChatTurnSubmission.ts", "projectedActiveTur
 assertNotContains("src/components/useChatTurnSubmission.ts", "projectedTurnStatus", "submission routing must not consume a parallel turn-status contract");
 assertContains("src/components/useChatTurnSubmission.ts", "composerMode", "composer submission must receive kernel composer mode");
 assertContains("src/lib/chat-runtime/submissionRouting.mjs", "composerModeFromKernel", "submission routing must normalize kernel composer modes");
+assertContains("src/lib/chat-runtime/kernelProjectionPresenter.mjs", "composerMode(projection, turnUiState)", "kernel presenter must own fallback composer mode projection");
+assertNotContains("src/lib/chat-runtime/submissionRouting.mjs", "deriveComposerMode", "submission routing must not own a fallback composer-mode derivation");
+assertNotContains("src/lib/chat-runtime/submissionRouting.mjs", "projectionLoaded", "submission routing must not branch on projection load state");
+assertNotContains("src/lib/chat-runtime/submissionRouting.ts", "composerMode?:", "composer submission route must require presenter-owned composer mode");
+assertNotContains("src/lib/chat-runtime/submissionRouting.ts", "projectionLoaded", "composer submission route must not accept projection load state");
+assertMissing("src/lib/chat-runtime/composerMode.mjs", "retired local composer-mode fallback must stay removed");
+assertMissing("src/lib/chat-runtime/composerMode.ts", "retired local composer-mode TS wrapper must stay removed");
 assertNotContains("src/components/ChatView.tsx", "../lib/markers", "ChatView must not import marker parsing");
 assertNotContains("src/components/ChatView.tsx", "latestPlanMarkdown", "ChatView must not read plan marker text directly");
 assertNotContains("src/components/ChatView.tsx", "browser_budget_exceeded", "ChatView must not parse browser budget marker text");

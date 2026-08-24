@@ -2,14 +2,14 @@
 // @ts-expect-error JavaScript sibling intentionally has no declaration file.
 import * as implementation from "./submissionRouting.mjs";
 
-import type { ComposerMode } from "./composerMode";
 import type { KernelProjectionPresenterView } from "./kernelProjectionPresenter";
+
+export type ComposerMode = "new_turn" | "steering" | "waiting_user_reply" | "disabled";
 
 export interface SubmissionRoutingInput {
   promptSubmitting: boolean;
   turnUiState: KernelProjectionPresenterView["turnUiState"];
-  projectionLoaded: boolean;
-  composerMode?: string | null;
+  composerMode: string;
   /** HITL Free resolutions (Choice/Clarify) must never become mid-turn steering. */
   explicitForceNewTurn?: boolean;
 }

@@ -23,7 +23,13 @@ test("status doc records a concrete current main baseline without stale slice br
 
 test("status doc records the merged runtime view model turn contract", () => {
   assert.match(statusDoc, /#377/);
-  assert.match(statusDoc, /main` aggiornato a #377 \(`3ada3a6f`\)/);
+  assert.match(statusDoc, /main` aggiornato a #378 \(`9195d440`\)/);
   assert.doesNotMatch(statusDoc, /slice runtimeViewModel turn status in corso/);
   assert.doesNotMatch(statusDoc, /fabio\/ui-runtime-view-model-turn-contract/);
+});
+
+test("status doc records the active composer-mode presenter cleanup slice", () => {
+  assert.match(statusDoc, /fabio\/ui-composer-mode-presenter-contract/);
+  assert.match(statusDoc, /composer-mode presenter contract/);
+  assert.match(statusDoc, /routeComposerSubmission` non deve piu' derivare localmente il composer mode/);
 });
