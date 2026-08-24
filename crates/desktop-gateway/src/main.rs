@@ -1981,6 +1981,10 @@ async fn stream_chat_via_openai(
         // 5.D1c.9: resolve the trace-dump dir gateway-side (armed only when HOMUN_TRACE_DUMP=1) and
         // inject it, so the engine loop appends without calling the gateway's path resolver.
         let trace_dir = resolve_agent_turn_trace_dump_dir();
+        let trace_runtime_scope = AgentTurnTraceRuntimeScope {
+            trace_dir,
+            turn_trace: &turn_trace,
+        };
         let outcome = run_agent_rounds(
             loop_seed,
             &tx,
@@ -1998,9 +2002,8 @@ async fn stream_chat_via_openai(
             tool_runtime_scope,
             actor_scope,
             cfg,
-            trace_dir,
+            trace_runtime_scope,
             &execution_identity,
-            &turn_trace,
             vision_fallback_armed,
         )
         .await;
@@ -2051,13 +2054,8 @@ async fn run_agent_rounds(
     tool_runtime_scope: AgentTurnToolRuntimeScope,
     actor_scope: AgentTurnActorScope,
     cfg: local_first_engine::TurnConfig,
-    // 5.D1c.9: the armed trace-dump dir (gateway-resolved `~/.homun/logs`), or None when the dump is
-    // disarmed / the dir won't resolve. The engine appends here instead of calling `gateway_logs_dir`.
-    trace_dir: Option<std::path::PathBuf>,
+    trace_runtime_scope: AgentTurnTraceRuntimeScope<'_>,
     execution_identity: &AgentTurnExecutionIdentity,
-    // Readable per-turn observability sink (ported): passed into the capability executor (Plan event)
-    // and into `run_turn` (the in-loop events). No-op when disabled. See `engine::turn_trace`.
-    turn_trace: &local_first_engine::turn_trace::TurnTrace,
     // The turn is sending images to a model on a guess (`AttachmentPlan::InlineWithFallback`), and a
     // vision model exists to describe them if the provider refuses. Passed rather than re-derived here:
     // the policy is decided ONCE, in `vision::plan_attachments`, and this is its consequence.
@@ -2075,6 +2073,10 @@ async fn run_agent_rounds(
         capability_corpus,
         capability_route,
     } = tool_runtime_scope;
+    let AgentTurnTraceRuntimeScope {
+        trace_dir,
+        turn_trace,
+    } = trace_runtime_scope;
 
     // Build the seams `engine::run_turn` runs against — thin gateway adapters over AppState/transport/
     // stores, constructed ONCE per turn from this turn's context (ADR 0024/0026). model_client borrows

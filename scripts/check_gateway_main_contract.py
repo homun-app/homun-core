@@ -4462,6 +4462,41 @@ def main() -> int:
             snippet,
             "gateway root must not pass scalar tool runtime state into run_agent_rounds",
         )
+    for snippet in [
+        "pub(crate) struct AgentTurnTraceRuntimeScope<'a>",
+        "pub(crate) trace_dir: Option<std::path::PathBuf>,",
+        "pub(crate) turn_trace: &'a local_first_engine::turn_trace::TurnTrace,",
+    ]:
+        assert_contains(
+            turn_trace_source,
+            snippet,
+            "turn trace owner must expose typed agent turn trace runtime scope",
+        )
+    assert_contains(
+        run_agent_rounds,
+        "trace_runtime_scope: AgentTurnTraceRuntimeScope<'_>,",
+        "run_agent_rounds must receive typed AgentTurnTraceRuntimeScope",
+    )
+    assert_contains(
+        run_agent_rounds_call,
+        "trace_runtime_scope,",
+        "gateway root must pass typed AgentTurnTraceRuntimeScope into run_agent_rounds",
+    )
+    for snippet in [
+        "trace_dir: Option<std::path::PathBuf>,",
+        "turn_trace: &local_first_engine::turn_trace::TurnTrace,",
+    ]:
+        assert_not_contains(
+            run_agent_rounds,
+            snippet,
+            "run_agent_rounds must not split AgentTurnTraceRuntimeScope into scalar parameters",
+        )
+    for snippet in ["\n            trace_dir,", "\n            &turn_trace,"]:
+        assert_not_contains(
+            run_agent_rounds_call,
+            snippet,
+            "gateway root must not pass scalar trace runtime state into run_agent_rounds",
+        )
     assert_contains(
         source,
         "mod gateway_chat_turn_context;",
