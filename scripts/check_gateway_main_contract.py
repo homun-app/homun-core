@@ -4411,6 +4411,57 @@ def main() -> int:
             snippet,
             "agent turn tail owner must not absorb stream, loop, browser, or subagent owners",
         )
+
+    for snippet in [
+        "pub(crate) struct AgentTurnToolRuntimeScope",
+        "pub(crate) composio_writes: std::collections::BTreeSet<String>,",
+        "pub(crate) catalog_index: Vec<(String, String, serde_json::Value)>,",
+        "pub(crate) capability_corpus: Vec<CapabilityEntry>,",
+        "pub(crate) capability_route: CapabilityRouteDecision,",
+    ]:
+        assert_contains(
+            chat_toolset_source,
+            snippet,
+            "chat toolset owner must expose typed agent turn tool runtime scope",
+        )
+    run_agent_rounds = source.split("async fn run_agent_rounds(", 1)[1].split(
+        ") -> local_first_engine::TurnOutcome", 1
+    )[0]
+    run_agent_rounds_call = source.split("let outcome = run_agent_rounds(", 1)[1].split(
+        ")\n        .await;", 1
+    )[0]
+    assert_contains(
+        run_agent_rounds,
+        "tool_runtime_scope: AgentTurnToolRuntimeScope,",
+        "run_agent_rounds must receive typed AgentTurnToolRuntimeScope",
+    )
+    assert_contains(
+        run_agent_rounds_call,
+        "tool_runtime_scope,",
+        "gateway root must pass typed AgentTurnToolRuntimeScope into run_agent_rounds",
+    )
+    for snippet in [
+        "composio_writes: std::collections::BTreeSet<String>,",
+        "catalog_index: Vec<(String, String, serde_json::Value)>,",
+        "capability_corpus: Vec<CapabilityEntry>,",
+        "capability_route_for_runtime: CapabilityRouteDecision,",
+    ]:
+        assert_not_contains(
+            run_agent_rounds,
+            snippet,
+            "run_agent_rounds must not split AgentTurnToolRuntimeScope into scalar parameters",
+        )
+    for snippet in [
+        "\n            composio_writes,",
+        "\n            catalog_index,",
+        "\n            capability_corpus,",
+        "\n            capability_route_for_runtime,",
+    ]:
+        assert_not_contains(
+            run_agent_rounds_call,
+            snippet,
+            "gateway root must not pass scalar tool runtime state into run_agent_rounds",
+        )
     assert_contains(
         source,
         "mod gateway_chat_turn_context;",

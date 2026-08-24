@@ -48,6 +48,13 @@ pub(crate) struct ChatToolset {
     pub(crate) capability_corpus: Vec<CapabilityEntry>,
 }
 
+pub(crate) struct AgentTurnToolRuntimeScope {
+    pub(crate) composio_writes: std::collections::BTreeSet<String>,
+    pub(crate) catalog_index: Vec<(String, String, serde_json::Value)>,
+    pub(crate) capability_corpus: Vec<CapabilityEntry>,
+    pub(crate) capability_route: CapabilityRouteDecision,
+}
+
 pub(crate) async fn prepare_connected_tool_catalog(
     input: ConnectedToolCatalogInput<'_>,
 ) -> ConnectedToolCatalog {

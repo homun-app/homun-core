@@ -1876,7 +1876,12 @@ async fn stream_chat_via_openai(
         effective_context: &effective_context,
         applies_new_input,
     });
-    let capability_route_for_runtime = capability_route.clone();
+    let tool_runtime_scope = AgentTurnToolRuntimeScope {
+        composio_writes,
+        catalog_index,
+        capability_corpus,
+        capability_route: capability_route.clone(),
+    };
     let abort_resume_id = resume_id.clone();
     let engine_task = tokio::spawn(async move {
         let mut loop_seed = seed_agent_turn_loop_state(prompt_packets, messages);
@@ -1895,7 +1900,7 @@ async fn stream_chat_via_openai(
         publish_agent_turn_route_trace(
             &mut loop_seed.loop_state,
             &tx,
-            &capability_route_for_runtime,
+            &tool_runtime_scope.capability_route,
         )
         .await;
         // No-progress guard: if the model repeats the EXACT same tool calls round after
@@ -1990,10 +1995,7 @@ async fn stream_chat_via_openai(
             memory_intent,
             memory_user_message,
             plan_seed,
-            composio_writes,
-            catalog_index,
-            capability_corpus,
-            capability_route_for_runtime,
+            tool_runtime_scope,
             actor_scope,
             cfg,
             trace_dir,
@@ -2046,10 +2048,7 @@ async fn run_agent_rounds(
     memory_intent: semantic_decision::MemoryIntent,
     memory_user_message: String,
     plan_seed: AgentTurnPlanSeed,
-    composio_writes: std::collections::BTreeSet<String>,
-    catalog_index: Vec<(String, String, serde_json::Value)>,
-    capability_corpus: Vec<CapabilityEntry>,
-    capability_route_for_runtime: CapabilityRouteDecision,
+    tool_runtime_scope: AgentTurnToolRuntimeScope,
     actor_scope: AgentTurnActorScope,
     cfg: local_first_engine::TurnConfig,
     // 5.D1c.9: the armed trace-dump dir (gateway-resolved `~/.homun/logs`), or None when the dump is
@@ -2070,6 +2069,12 @@ async fn run_agent_rounds(
         last_model_error,
         browse_sources,
     } = loop_seed;
+    let AgentTurnToolRuntimeScope {
+        composio_writes,
+        catalog_index,
+        capability_corpus,
+        capability_route,
+    } = tool_runtime_scope;
 
     // Build the seams `engine::run_turn` runs against — thin gateway adapters over AppState/transport/
     // stores, constructed ONCE per turn from this turn's context (ADR 0024/0026). model_client borrows
@@ -2153,7 +2158,7 @@ async fn run_agent_rounds(
     };
     let plan_progress = gateway_plan_progress(state_owned.clone());
     let compactor = gateway_context_compactor(state_owned.clone(), thread_id.clone());
-    let engine_turn_policy = gateway_turn_policy(capability_route_for_runtime);
+    let engine_turn_policy = gateway_turn_policy(capability_route);
     let completion_judge = gateway_turn_completion_judge(state_owned.clone());
 
     // Vision fallback (`AttachmentPlan::InlineWithFallback`): this turn's images ride the manager's
