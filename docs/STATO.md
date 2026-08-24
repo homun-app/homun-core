@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission runtime-view-model piu' cleanup legacy lifecycle mergeati fino a #378; slice locale non-browser composer-mode presenter contract in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode runtime-view-model mergeati fino a #379; slice locale status cleanup post-#379 in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/ui-composer-mode-presenter-contract` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#378 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #378 (`9195d440`) |
+| Branch | `fabio/status-after-composer-mode-presenter` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#379 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #379 (`53b64201`) |
 
 ## Dove siamo
 
@@ -42,11 +42,11 @@ protocollo anti-regressione vive in
 Piano completato:
 [`superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md`](superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md).
 
-- Slice locale UI composer-mode presenter contract in corso: `kernelProjectionPresenter`
+- Slice UI composer-mode presenter contract mergeata #379: `kernelProjectionPresenter`
   possiede anche il fallback `composerMode` per lo streaming locale prima che la
   projection kernel sia caricata; `routeComposerSubmission` consuma solo il
   `runtimeViewModel.composerMode` normalizzato e non branchia piu' su
-  `projectionLoaded`. Kill List: rimuovere `composerMode.{mjs,ts}` e il test
+  `projectionLoaded`. Kill List completata: rimossi `composerMode.{mjs,ts}` e il test
   legacy dedicato al fallback locale.
 - Slice runtimeViewModel turn contract mergeata #377: `kernelProjectionPresenter`
   espone anche `runtimeViewModel.turnUiState.status`; `ChatView`,
@@ -1617,9 +1617,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#378: slice owner-level successive mergeate in
-  `main`, fino a `runtimeViewModel turn contract`; `main` verificato e
-  riallineato a #378.
+- #143-#283, #285-#286, #288-#379: slice owner-level successive mergeate in
+  `main`, fino a `composer-mode presenter contract`; `main` verificato e
+  riallineato a #379.
 
 PR aperte:
 
@@ -1627,8 +1627,8 @@ PR aperte:
 
 Branch corrente:
 
-- Slice locale attiva: `fabio/ui-composer-mode-presenter-contract`, base `main`
-  #378 (`9195d440`).
+- Slice locale attiva: `fabio/status-after-composer-mode-presenter`, base `main`
+  #379 (`53b64201`).
 
 ## Debito residuo
 
@@ -1661,19 +1661,22 @@ Branch corrente:
 
 ## Prossimo lavoro
 
-1. Chiudere la slice `fabio/ui-composer-mode-presenter-contract` con gate UI,
-   desktop build e PR; non toccare browser/activity in questa fase.
-2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
+1. Chiudere la slice `fabio/status-after-composer-mode-presenter` con test doc
+   e PR; non toccare browser/activity in questa fase.
+2. Passata finale non-browser su `main` pulito: cercare fallback UI/runtime
+   ancora paralleli solo se hanno owner canonico e Kill List esplicita.
+3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
 ## Prompt di ripartenza
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #378 (`9195d440`); slice locale attiva:
-`fabio/ui-composer-mode-presenter-contract`. Prossimo passo: chiudere la slice
-non-browser che sposta il fallback composer-mode nel presenter e rimuove
-`composerMode.{mjs,ts}`; browser/activity restano fuori scope.
+main aggiornato a #379 (`53b64201`); slice locale attiva:
+`fabio/status-after-composer-mode-presenter`. Prossimo passo: chiudere la slice
+di status cleanup post-#379, poi cercare eventuali fallback UI/runtime
+non-browser ancora paralleli solo con owner canonico e Kill List esplicita;
+browser/activity restano fuori scope.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
