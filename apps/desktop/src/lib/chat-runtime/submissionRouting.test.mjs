@@ -6,16 +6,51 @@ function atRest(overrides = {}) {
   return {
     promptSubmitting: false,
     streamingAssistantId: null,
-    projectedActiveTurn: null,
-    projectedTurnStatus: null,
-    projectionLoaded: false,
+    turnUiState: {
+      isStreaming: false,
+      turnAwaitingUser: false,
+      terminalTurnAtRest: false,
+      hasActiveTurn: false,
+      workInProgress: false,
+    },
+    composerMode: "new_turn",
     ...overrides,
   };
 }
 
+test("submission routing consumes presenter turn state instead of raw projection status", () => {
+  const result = routeComposerSubmission(
+    atRest({
+      turnUiState: {
+        isStreaming: false,
+        turnAwaitingUser: false,
+        terminalTurnAtRest: false,
+        hasActiveTurn: true,
+        workInProgress: true,
+      },
+      composerMode: "steer_active_turn",
+      projectedActiveTurn: null,
+      projectedTurnStatus: "completed",
+      projectionLoaded: false,
+    }),
+  );
+
+  assert.equal(result.mode, "steering");
+  assert.equal(result.forceNewTurn, false);
+  assert.equal(result.routesToSteering, true);
+});
+
 test("active model work routes composer input as steering", () => {
   const streaming = routeComposerSubmission(
-    atRest({ streamingAssistantId: "assistant-1" }),
+    atRest({
+      turnUiState: {
+        isStreaming: true,
+        turnAwaitingUser: false,
+        terminalTurnAtRest: false,
+        hasActiveTurn: true,
+        workInProgress: true,
+      },
+    }),
   );
   assert.equal(streaming.mode, "steering");
   assert.equal(streaming.forceNewTurn, false);
@@ -23,8 +58,14 @@ test("active model work routes composer input as steering", () => {
 
   const projected = routeComposerSubmission(
     atRest({
-      projectionLoaded: true,
-      projectedActiveTurn: { turn_id: "turn-1", status: "running" },
+      turnUiState: {
+        isStreaming: false,
+        turnAwaitingUser: false,
+        terminalTurnAtRest: false,
+        hasActiveTurn: true,
+        workInProgress: true,
+      },
+      composerMode: "steer_active_turn",
     }),
   );
   assert.equal(projected.routesToSteering, true);
@@ -33,7 +74,16 @@ test("active model work routes composer input as steering", () => {
 
 test("terminal turn at rest starts a new turn instead of steering", () => {
   const result = routeComposerSubmission(
-    atRest({ projectionLoaded: true, projectedTurnStatus: "completed" }),
+    atRest({
+      turnUiState: {
+        isStreaming: false,
+        turnAwaitingUser: false,
+        terminalTurnAtRest: true,
+        hasActiveTurn: false,
+        workInProgress: false,
+      },
+      composerMode: "new_turn",
+    }),
   );
   assert.equal(result.mode, "new_turn");
   assert.equal(result.forceNewTurn, true);
@@ -43,9 +93,14 @@ test("terminal turn at rest starts a new turn instead of steering", () => {
 test("waiting user reply never becomes mid-turn steering", () => {
   const result = routeComposerSubmission(
     atRest({
-      projectionLoaded: true,
-      projectedActiveTurn: { turn_id: "turn-1", status: "waiting_user_approval" },
-      projectedTurnStatus: "waiting_user_approval",
+      turnUiState: {
+        isStreaming: false,
+        turnAwaitingUser: true,
+        terminalTurnAtRest: false,
+        hasActiveTurn: true,
+        workInProgress: false,
+      },
+      composerMode: "reply_to_user_wait",
     }),
   );
   assert.equal(result.mode, "waiting_user_reply");
@@ -56,8 +111,13 @@ test("waiting user reply never becomes mid-turn steering", () => {
 test("kernel composer_mode routes active turns without local status inference", () => {
   const result = routeComposerSubmission(
     atRest({
-      projectionLoaded: true,
-      projectedActiveTurn: { turn_id: "turn-1", status: "running" },
+      turnUiState: {
+        isStreaming: false,
+        turnAwaitingUser: false,
+        terminalTurnAtRest: false,
+        hasActiveTurn: true,
+        workInProgress: true,
+      },
       composerMode: "steer_active_turn",
     }),
   );
@@ -69,8 +129,13 @@ test("kernel composer_mode routes active turns without local status inference", 
 test("kernel composer_mode routes user waits as new-turn replies", () => {
   const result = routeComposerSubmission(
     atRest({
-      projectionLoaded: true,
-      projectedActiveTurn: { turn_id: "turn-1", status: "waiting_user" },
+      turnUiState: {
+        isStreaming: false,
+        turnAwaitingUser: true,
+        terminalTurnAtRest: false,
+        hasActiveTurn: true,
+        workInProgress: false,
+      },
       composerMode: "reply_to_user_wait",
     }),
   );
@@ -89,8 +154,14 @@ test("open HITL wait marker at the chat tail is display-only for submission rout
 test("loaded projection quarantines legacy HITL marker routing", () => {
   const result = routeComposerSubmission(
     atRest({
-      projectionLoaded: true,
-      projectedTurnStatus: "completed",
+      turnUiState: {
+        isStreaming: false,
+        turnAwaitingUser: false,
+        terminalTurnAtRest: true,
+        hasActiveTurn: false,
+        workInProgress: false,
+      },
+      composerMode: "new_turn",
     }),
   );
   assert.equal(result.mode, "new_turn");
@@ -100,7 +171,16 @@ test("loaded projection quarantines legacy HITL marker routing", () => {
 
 test("explicit HITL Free resolution overrides the steering gate on active work", () => {
   const result = routeComposerSubmission(
-    atRest({ streamingAssistantId: "assistant-1", explicitForceNewTurn: true }),
+    atRest({
+      turnUiState: {
+        isStreaming: true,
+        turnAwaitingUser: false,
+        terminalTurnAtRest: false,
+        hasActiveTurn: true,
+        workInProgress: true,
+      },
+      explicitForceNewTurn: true,
+    }),
   );
   assert.equal(result.workInProgress, true);
   assert.equal(result.forceNewTurn, true);

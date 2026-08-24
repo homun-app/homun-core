@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime slices mergeate fino a #370; UI active-turn presenter #371 in gate remoto; nuovo slice UI turn-status presenter active-turn in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status slices mergeate fino a #373; nuovo slice UI submission runtime-view-model in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#370 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #370 (`98ee1493`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#373 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #373 (`513dc444`) |
 
 ## Dove siamo
 
@@ -42,11 +42,17 @@ protocollo anti-regressione vive in
 Piano completato:
 [`superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md`](superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md).
 
-- Slice corrente UI turn-status: `useChatTurnStatus` consuma il turno attivo
+- Slice corrente UI submission route: `useChatTurnSubmission` riceve
+  `runtimeViewModel` e `routeComposerSubmission` consuma
+  `runtimeViewModel.turnUiState`/`composerMode`; `ChatView` non passa piu'
+  `composerMode`, `projectedActiveTurn` e `projectedTurnStatus` come contratti
+  separati per decidere se il composer deve steerare il turno o aprirne uno
+  nuovo.
+- Slice UI turn-status mergeata #373: `useChatTurnStatus` consuma il turno attivo
   da `runtimeViewModel.activeTurn`, non da un prop `projectedActiveTurn`
   parallelo passato da `ChatView`; il timer, attempt e blocked reason del
   composer restano quindi agganciati allo stesso read model del presenter.
-- Slice UI work-state in gate remoto #371: `kernelProjectionPresenter` espone anche
+- Slice UI work-state mergeata #371: `kernelProjectionPresenter` espone anche
   `activeTurn` come read model del turno attivo; `useChatActivityProjection`
   non ricostruisce piu' localmente `active_turn_id`/status/blocked reason dal
   raw projection, riducendo una seconda fonte di liveness per status pill,

@@ -65,6 +65,11 @@ elapsed e delle etichette tradotte. Anche questo hook consuma
 parallelo da `ChatView`: `ChatView` fornisce solo runtime view model, stream
 copy e contatori, senza decidere in proprio se il turno e' in attesa utente,
 ancora al lavoro, o quale blocked reason mostrare.
+Anche la route di submission del composer (`routeComposerSubmission`) consuma
+`runtimeViewModel.turnUiState` e `runtimeViewModel.composerMode`: il fallback
+pre-projection usa il lifecycle gia' proiettato dal presenter e non ricalcola
+terminalita'/liveness da `projectedActiveTurn` e `projectedTurnStatus` passati
+separatamente da `ChatView`.
 
 ## Regole di refactor
 

@@ -3,13 +3,11 @@
 import * as implementation from "./submissionRouting.mjs";
 
 import type { ComposerMode } from "./composerMode";
-import type { ActiveTurnProjectionLike } from "./lifecycle";
+import type { KernelProjectionPresenterView } from "./kernelProjectionPresenter";
 
 export interface SubmissionRoutingInput {
   promptSubmitting: boolean;
-  streamingAssistantId: string | null;
-  projectedActiveTurn: ActiveTurnProjectionLike | null;
-  projectedTurnStatus: string | null;
+  turnUiState: KernelProjectionPresenterView["turnUiState"];
   projectionLoaded: boolean;
   composerMode?: string | null;
   /** HITL Free resolutions (Choice/Clarify) must never become mid-turn steering. */
