@@ -990,10 +990,22 @@ test("App delegates proactivity chat seeding to proactivityChatSeed", () => {
   assert.match(proactivityChatSeed, /export function buildProactivityChatSeed/);
 });
 
-test("App does not retain retired selected task projection state", () => {
+test("App does not retain retired selected task projection state", async () => {
   assert.doesNotMatch(app, /from "\.\/lib\/selectedTaskProjection";/);
   assert.doesNotMatch(app, /selectedTaskId/);
   assert.doesNotMatch(app, /selectedTask/);
+  await assert.rejects(
+    readFile(new URL("../src/lib/selectedTaskProjection.mjs", import.meta.url), "utf8"),
+    { code: "ENOENT" },
+  );
+  await assert.rejects(
+    readFile(new URL("../src/lib/selectedTaskProjection.ts", import.meta.url), "utf8"),
+    { code: "ENOENT" },
+  );
+  await assert.rejects(
+    readFile(new URL("../src/lib/selectedTaskProjection.test.mjs", import.meta.url), "utf8"),
+    { code: "ENOENT" },
+  );
 });
 
 test("App does not retain retired memory dashboard state", () => {
