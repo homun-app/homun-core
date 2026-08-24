@@ -1585,7 +1585,7 @@ async fn stream_chat_via_openai(
     });
     let ChatTurnContext {
         contact: contact_ctx,
-        channel_owner,
+        chat_channel,
         turn_policy,
         contact_memory_perimeter,
     } = chat_turn_context;
@@ -1979,7 +1979,7 @@ async fn stream_chat_via_openai(
             prompt,
             thread_id,
             &turn_policy,
-            channel_owner,
+            chat_channel,
             contact_memory_perimeter,
             memory_intent,
             memory_user_message,
@@ -2043,7 +2043,7 @@ async fn run_agent_rounds(
     prompt: String,
     thread_id: Option<String>,
     turn_policy: &ChatTurnPolicy,
-    channel_owner: bool,
+    chat_channel: ChatChannelContext,
     contact_memory_perimeter: ContactMemoryPerimeter,
     memory_intent: semantic_decision::MemoryIntent,
     memory_user_message: String,
@@ -2115,7 +2115,7 @@ async fn run_agent_rounds(
         // ADR 0025: turn-constants for a recursive `browse(goal)` sub-turn (used only when the manager
         // calls the `browse` tool; inert otherwise).
         prompt: &prompt,
-        channel_owner,
+        chat_channel,
         turn_trace,
         turn_id: effect_turn_id.as_deref(),
         run_id: effect_run_id.as_deref(),
@@ -2138,7 +2138,7 @@ async fn run_agent_rounds(
         thread_id: thread_id.as_deref(),
         prompt: &prompt,
         read_only: turn_policy.read_only,
-        channel_owner,
+        channel_owner: chat_channel.owner,
         // C2: the manager turn's own registered journal — same handle `run_turn` below receives via
         // `&execution_journal`, so protocol metrics from a manager-level browser call land in the same
         // run as everything else this turn records.

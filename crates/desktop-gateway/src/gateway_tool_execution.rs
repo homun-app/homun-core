@@ -5385,7 +5385,7 @@ pub(crate) struct GatewayCapabilityExecutorInput<'a> {
     // executor's ctx wants them). Held here so the manager's `browse` interception can build a
     // `GatewayBrowseExecutor` without threading them through the whole ChatToolCtx.
     pub(crate) prompt: &'a str,
-    pub(crate) channel_owner: bool,
+    pub(crate) chat_channel: ChatChannelContext,
     // Readable per-turn observability sink (ported); passed into each per-call ChatToolCtx so the plan
     // arm can record the Plan event. No-op when disabled. See `engine::turn_trace`.
     pub(crate) turn_trace: &'a local_first_engine::turn_trace::TurnTrace,
@@ -5412,7 +5412,7 @@ pub(crate) struct GatewayCapabilityExecutor<'a> {
     automation_user_id: &'a UserId,
     automation_workspace_id: &'a WorkspaceId,
     prompt: &'a str,
-    channel_owner: bool,
+    chat_channel: ChatChannelContext,
     turn_trace: &'a local_first_engine::turn_trace::TurnTrace,
     turn_id: Option<&'a str>,
     run_id: Option<&'a str>,
@@ -5435,7 +5435,7 @@ pub(crate) fn gateway_capability_executor<'a>(
         automation_user_id: input.automation_user_id,
         automation_workspace_id: input.automation_workspace_id,
         prompt: input.prompt,
-        channel_owner: input.channel_owner,
+        chat_channel: input.chat_channel,
         turn_trace: input.turn_trace,
         turn_id: input.turn_id,
         run_id: input.run_id,
@@ -5845,7 +5845,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 prompt: self.prompt,
                 read_only: self.turn_policy.read_only
                     || !objective_policy.allows(semantic_decision::EffectClass::ExternalWrite),
-                channel_owner: self.channel_owner,
+                channel_owner: self.chat_channel.owner,
                 agent_run_id: self.run_id.map(str::to_string),
                 execution_contract: self.execution_contract.cloned(),
             };

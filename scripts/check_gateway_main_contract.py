@@ -4244,6 +4244,7 @@ def main() -> int:
         "pub(crate) struct ChatTurnContextInput",
         "pub(crate) struct ChatTurnContext",
         "pub(crate) struct ChatTurnPolicy",
+        "pub(crate) struct ChatChannelContext",
         "pub(crate) struct ContactMemoryPerimeter",
         "set_memory_workspace(",
         "contact_turn_context(",
@@ -4279,6 +4280,11 @@ def main() -> int:
         chat_turn_context_output,
         "pub(crate) contact_memory_perimeter: ContactMemoryPerimeter,",
         "chat turn context must return typed ContactMemoryPerimeter",
+    )
+    assert_contains(
+        chat_turn_context_output,
+        "pub(crate) chat_channel: ChatChannelContext,",
+        "chat turn context must return typed ChatChannelContext",
     )
     for snippet in [
         "set_memory_workspace(&ws);",
@@ -4316,7 +4322,12 @@ def main() -> int:
         "turn_policy: &ChatTurnPolicy,",
         "run_agent_rounds must receive the typed chat turn policy",
     )
-    for snippet in ["read_only: bool,", "autonomous: bool,"]:
+    assert_contains(
+        run_agent_rounds_source,
+        "chat_channel: ChatChannelContext,",
+        "run_agent_rounds must receive the typed chat channel context",
+    )
+    for snippet in ["read_only: bool,", "autonomous: bool,", "channel_owner: bool,"]:
         assert_not_contains(
             run_agent_rounds_source,
             snippet,
@@ -5033,6 +5044,11 @@ def main() -> int:
     )
     assert_contains(
         tool_execution_source,
+        "pub(crate) chat_channel: ChatChannelContext,",
+        "tool execution owner must receive typed ChatChannelContext for capability executor",
+    )
+    assert_contains(
+        tool_execution_source,
         "pub(crate) contact_memory_perimeter: &'a ContactMemoryPerimeter,",
         "chat tool context must receive typed ContactMemoryPerimeter",
     )
@@ -5096,6 +5112,11 @@ def main() -> int:
         "memory_intent: semantic_decision::MemoryIntent,",
         "gateway capability executor must carry typed MemoryIntent",
     )
+    assert_contains(
+        gateway_capability_executor_source,
+        "chat_channel: ChatChannelContext,",
+        "gateway capability executor must carry typed ChatChannelContext",
+    )
     for snippet in [
         "pub(crate) memory_recall_allowed: bool,",
         "pub(crate) vault_value_requested: bool,",
@@ -5132,6 +5153,17 @@ def main() -> int:
             gateway_capability_executor_source,
             snippet,
             "gateway capability executor must not carry scalar turn policy",
+        )
+    for snippet in ["pub(crate) channel_owner: bool,", "channel_owner: bool,"]:
+        assert_not_contains(
+            capability_executor_input_source,
+            snippet,
+            "capability executor input must receive typed ChatChannelContext, not scalar channel ownership",
+        )
+        assert_not_contains(
+            gateway_capability_executor_source,
+            snippet,
+            "gateway capability executor must carry typed ChatChannelContext, not scalar channel ownership",
         )
     for snippet in [
         "pub(crate) contact_only: bool,",
@@ -5186,6 +5218,11 @@ def main() -> int:
         "contact_memory_perimeter,",
         "gateway root must pass typed ContactMemoryPerimeter into capability executor",
     )
+    assert_contains(
+        run_agent_rounds_source,
+        "chat_channel,",
+        "gateway root must pass typed ChatChannelContext into capability executor",
+    )
     for snippet in [
         "read_only: turn_policy.read_only,",
         "autonomous: turn_policy.autonomous,",
@@ -5193,6 +5230,7 @@ def main() -> int:
         "can_see_contacts: contact_memory_perimeter.can_see_contacts,",
         "can_see_calendar: contact_memory_perimeter.can_see_calendar,",
         "can_use_project_memory: contact_memory_perimeter.can_use_project_memory,",
+        "channel_owner: bool,",
     ]:
         assert_not_contains(
             run_agent_rounds_source,
