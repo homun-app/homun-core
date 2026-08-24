@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope slices mergeate fino a #367; nuovo slice AgentTurnToolRuntimeScope verso run_agent_rounds in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime slices mergeate fino a #368; nuovo slice AgentTurnTraceRuntimeScope verso run_agent_rounds in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#367 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #367 (`7d492a99`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#368 mergeate in `main`; #117 browser draft separata; #284 chiusa non mergeata dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #368 (`e7b36d11`) |
 
 ## Dove siamo
 
@@ -42,7 +42,13 @@ protocollo anti-regressione vive in
 Piano completato:
 [`superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md`](superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md).
 
-- Slice corrente `gateway_chat_toolset`: `AgentTurnToolRuntimeScope` porta in
+- Slice corrente `gateway_turn_trace`: `AgentTurnTraceRuntimeScope` porta in
+  `run_agent_rounds` la proiezione runtime di osservabilita' del turno
+  (`trace_dir` e `turn_trace`) come contratto unico; il root non passa piu' la
+  directory dump e il sink trace come parametri concorrenti del loop, mentre
+  trace bootstrap, trace dump, loop engine, capability executor e browser
+  restano owner separati.
+- Estrazione mergeata `gateway_chat_toolset`: `AgentTurnToolRuntimeScope` porta in
   `run_agent_rounds` la proiezione runtime di tool/capability del turno
   (`composio_writes`, `catalog_index`, `capability_corpus` e
   `capability_route`) come contratto unico; il root non passa piu' quattro

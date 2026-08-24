@@ -4889,6 +4889,62 @@ fn agent_turn_tool_runtime_scope_has_one_gateway_owner() {
 }
 
 #[test]
+fn agent_turn_trace_runtime_scope_has_one_gateway_owner() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let main = production_source(&root.join("src/main.rs"));
+    let turn_trace = production_source(&root.join("src/gateway_turn_trace.rs"));
+
+    for pattern in [
+        "pub(crate) struct AgentTurnTraceRuntimeScope<'a>",
+        "pub(crate) trace_dir: Option<std::path::PathBuf>,",
+        "pub(crate) turn_trace: &'a local_first_engine::turn_trace::TurnTrace,",
+    ] {
+        assert!(
+            turn_trace.contains(pattern),
+            "turn trace owner must expose typed agent turn trace runtime scope {pattern}"
+        );
+    }
+
+    let run_agent_rounds = main
+        .split("async fn run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds function")
+        .split(") -> local_first_engine::TurnOutcome")
+        .next()
+        .expect("run_agent_rounds signature");
+    let run_agent_rounds_call = main
+        .split("let outcome = run_agent_rounds(")
+        .nth(1)
+        .expect("run_agent_rounds call")
+        .split(")\n        .await;")
+        .next()
+        .expect("run_agent_rounds call block");
+    assert!(
+        run_agent_rounds.contains("trace_runtime_scope: AgentTurnTraceRuntimeScope<'_>,"),
+        "run_agent_rounds must receive typed AgentTurnTraceRuntimeScope"
+    );
+    assert!(
+        run_agent_rounds_call.contains("trace_runtime_scope,"),
+        "stream_chat_via_openai must pass typed AgentTurnTraceRuntimeScope into run_agent_rounds"
+    );
+    for pattern in [
+        "trace_dir: Option<std::path::PathBuf>,",
+        "turn_trace: &local_first_engine::turn_trace::TurnTrace,",
+    ] {
+        assert!(
+            !run_agent_rounds.contains(pattern),
+            "run_agent_rounds must not split AgentTurnTraceRuntimeScope into scalar parameters {pattern}"
+        );
+    }
+    for pattern in ["\n            trace_dir,", "\n            &turn_trace,"] {
+        assert!(
+            !run_agent_rounds_call.contains(pattern),
+            "stream_chat_via_openai must not pass scalar trace runtime state into run_agent_rounds {pattern}"
+        );
+    }
+}
+
+#[test]
 fn chat_turn_context_has_one_gateway_owner() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let main = production_source(&root.join("src/main.rs"));

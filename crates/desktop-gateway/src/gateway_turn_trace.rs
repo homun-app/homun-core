@@ -13,6 +13,11 @@ pub(crate) struct TurnTraceEntry {
     pub(crate) max_bytes: u64,
 }
 
+pub(crate) struct AgentTurnTraceRuntimeScope<'a> {
+    pub(crate) trace_dir: Option<std::path::PathBuf>,
+    pub(crate) turn_trace: &'a local_first_engine::turn_trace::TurnTrace,
+}
+
 pub(crate) fn begin_turn_trace(entry: TurnTraceEntry) -> local_first_engine::turn_trace::TurnTrace {
     let turn_trace = if entry.enabled {
         match entry.logs_dir {
