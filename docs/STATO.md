@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime slices mergeate fino a #370; nuovo slice UI active-turn presenter owner in corso).**
+> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime slices mergeate fino a #370; UI active-turn presenter #371 in gate remoto; nuovo slice UI turn-status presenter active-turn in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -42,7 +42,11 @@ protocollo anti-regressione vive in
 Piano completato:
 [`superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md`](superpowers/plans/2026-08-11-homun-unified-kernel-ui-plugin-convergence.md).
 
-- Slice corrente UI work-state: `kernelProjectionPresenter` espone anche
+- Slice corrente UI turn-status: `useChatTurnStatus` consuma il turno attivo
+  da `runtimeViewModel.activeTurn`, non da un prop `projectedActiveTurn`
+  parallelo passato da `ChatView`; il timer, attempt e blocked reason del
+  composer restano quindi agganciati allo stesso read model del presenter.
+- Slice UI work-state in gate remoto #371: `kernelProjectionPresenter` espone anche
   `activeTurn` come read model del turno attivo; `useChatActivityProjection`
   non ricostruisce piu' localmente `active_turn_id`/status/blocked reason dal
   raw projection, riducendo una seconda fonte di liveness per status pill,
