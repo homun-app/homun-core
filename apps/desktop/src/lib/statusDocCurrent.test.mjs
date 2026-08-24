@@ -24,16 +24,18 @@ test("status doc records a concrete current main baseline without stale slice br
 test("status doc records the merged runtime view model turn contract", () => {
   assert.match(statusDoc, /#377/);
   assert.match(statusDoc, /#379/);
-  assert.match(statusDoc, /#380/);
-  assert.match(statusDoc, /main` aggiornato a #380 \(`e62e8b6a`\)/);
+  assert.match(statusDoc, /#381/);
+  assert.match(statusDoc, /main` aggiornato a #381 \(`a44fcbda`\)/);
   assert.doesNotMatch(statusDoc, /slice runtimeViewModel turn status in corso/);
   assert.doesNotMatch(statusDoc, /fabio\/ui-runtime-view-model-turn-contract/);
 });
 
 test("status doc records the merged composer-mode presenter cleanup slice", () => {
   assert.match(statusDoc, /Slice UI composer-mode presenter contract mergeata #379/);
-  assert.match(statusDoc, /fabio\/docs-composer-mode-owner-cleanup/);
-  assert.match(statusDoc, /doc composer-mode owner cleanup in corso/);
+  assert.match(statusDoc, /Slice doc composer-mode owner cleanup mergeata #381/);
+  assert.match(statusDoc, /\| Branch \| `main` \|/);
+  assert.doesNotMatch(statusDoc, /fabio\/docs-composer-mode-owner-cleanup/);
+  assert.doesNotMatch(statusDoc, /doc composer-mode owner cleanup in corso/);
   assert.doesNotMatch(statusDoc, /Slice locale UI composer-mode presenter contract in corso/);
   assert.doesNotMatch(statusDoc, /fabio\/ui-composer-mode-presenter-contract/);
   assert.doesNotMatch(statusDoc, /fabio\/status-after-composer-mode-presenter/);
