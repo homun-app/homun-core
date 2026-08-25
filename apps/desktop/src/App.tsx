@@ -39,7 +39,7 @@ import type {
 const defaultChatThread: ChatThread = {
   threadId: "thread_active_prompt",
   title: "New task",
-  subtitle: "Local session ready",
+  subtitle: "",
   status: "active",
   pinned: false,
   computerSessionId: "computer_active_prompt",

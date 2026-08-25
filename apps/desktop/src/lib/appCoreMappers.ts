@@ -229,7 +229,7 @@ export function updateThreadPreview(
     ...thread,
     title: isPlaceholderTitle && userTitle ? userTitle : thread.title,
     messageCount: messages.length,
-    subtitle: lastMessage?.text.slice(0, 72) || "Local chat ready",
+    subtitle: lastMessage?.text.slice(0, 72) || "",
     updatedAt: hasNewAssistantActivity ? lastMessage.timestamp : thread.updatedAt,
   };
 }

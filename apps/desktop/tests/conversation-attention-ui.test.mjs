@@ -92,6 +92,11 @@ test("app core mappers does not export starter messages", () => {
   assert.doesNotMatch(appCoreMappers, /export function starterMessages/);
 });
 
+test("thread preview fallbacks do not advertise local readiness", () => {
+  assert.doesNotMatch(app, /Local session ready/);
+  assert.doesNotMatch(appCoreMappers, /Local chat ready/);
+});
+
 test("pending effect resolution lives in the owning conversation", () => {
   assert.match(effectPanel, /function InlineUncertainEffectPanel/);
   assert.match(app, /uncertainEffects={activeUncertainEffects}/);
