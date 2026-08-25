@@ -42,29 +42,10 @@ let localThreads: CoreChatThread[] = [
     computer_session_id: "computer_active_prompt",
     task_id: "task_prompt_session",
     updated_at: currentTimestampSeconds(),
-    message_count: 1,
+    message_count: 0,
   },
 ];
-const localMessages = new Map<string, CoreChatMessage[]>([
-  [
-    activeThreadId,
-    [
-      {
-        id: "electron_ready",
-        role: "assistant",
-        text: "I'm ready. Just write to me — I reply locally.",
-        timestamp: currentTimestampSeconds(),
-        metadata: "Local model",
-        metrics: null,
-        feedback: null,
-        saved_memory_ref: null,
-        linked_task_id: null,
-        linked_automation_ref: null,
-        attachments: [],
-      },
-    ],
-  ],
-]);
+const localMessages = new Map<string, CoreChatMessage[]>();
 
 export const chatApi = {
   // `workspace` targets a SPECIFIC project/base instead of the active one. A
@@ -450,25 +431,11 @@ function createLocalChatThread() {
     computer_session_id: `computer_${threadId}`,
     task_id: `task_${threadId}`,
     updated_at: currentTimestampSeconds(),
-    message_count: 1,
+    message_count: 0,
   };
   activeThreadId = threadId;
   localThreads = [thread, ...localThreads];
-  localMessages.set(threadId, [
-    {
-      id: `${threadId}_ready`,
-      role: "assistant",
-      text: "I'm ready. Just write to me — I reply locally.",
-      timestamp: currentTimestampSeconds(),
-      metadata: "Local model",
-      metrics: null,
-      feedback: null,
-      saved_memory_ref: null,
-      linked_task_id: null,
-      linked_automation_ref: null,
-      attachments: [],
-    },
-  ]);
+  localMessages.set(threadId, []);
   return thread;
 }
 
@@ -658,7 +625,7 @@ function recentChatContext(threadId: string, limit: number) {
 function rawRecentChatContext(threadId: string, limit: number) {
   return (localMessages.get(threadId) ?? [])
     .filter(isConversationMessage)
-    .filter((message) => message.id !== "electron_ready" && message.text.trim())
+    .filter((message) => message.text.trim())
     .slice(-limit)
     .map((message) => ({
       role: message.role,
