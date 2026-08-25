@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-25 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript/capability/mock-runtime/mock-data-split runtime-view-model mergeati fino a #392; baseline stato riallineato a #400; preview fallback UI mergeata #395; initial thread loader starter fallback mergeata #397; read-model starter helper mergeata #399; local chat ready seed mergeata #400).**
+> **Ultimo aggiornamento: 2026-08-25 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript/capability/mock-runtime/mock-data-split runtime-view-model mergeati fino a #392; baseline stato riallineato a #401; preview fallback UI mergeata #395; initial thread loader starter fallback mergeata #397; read-model starter helper mergeata #399; local chat ready seed mergeata #400; empty hero subtitle mergeata #401; thread preview readiness copy in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#400 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #400 (`56c7a4de`) |
+| Branch | `fabio/remove-thread-preview-ready-copy` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#401 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #401 (`06753160`) |
 
 ## Dove siamo
 
@@ -82,6 +82,15 @@ Piano completato:
   conserva la modalita' offline/dev, ma non crea piu' `electron_ready`, non
   semina messaggi assistant canned e inizializza i thread locali con
   `message_count: 0`.
+- Slice empty hero subtitle mergeata #401: i cataloghi i18n non esportano piu'
+  `chat.emptyHeroSub`; l'empty hero usa solo il greeting del presenter e resta
+  protetto da `chatGreeting.test.mjs`, `statusDocCurrent.test.mjs`, typecheck,
+  `npm test` e matrice release/installer verde.
+- Slice thread preview readiness copy in corso: il placeholder thread iniziale
+  e `updateThreadPreview` non devono piu' mostrare copy statiche di readiness
+  (`Local session ready`, `Local chat ready`) quando il transcript e' vuoto; la
+  sidebar deve restare vuota finche' il read model canonico o un messaggio reale
+  non fornisce preview.
 - Slice task queue canonical empty mergeata #384: `useTaskQueueController` non
   inizializza piu' task/approval da `mockData` e `taskQueueProjection` conserva
   le lane canoniche vuote del kernel come vuote; `fallbackTasks` non deve
@@ -1664,18 +1673,20 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#400: slice owner-level successive mergeate in
+- #143-#283, #285-#286, #288-#401: slice owner-level successive mergeate in
   `main`, fino a `mock data owner split` e relativo riallineamento di stato;
-  `main` verificato e riallineato a #400.
+  `main` verificato e riallineato a #401.
 
 PR aperte:
 
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
+- Slice thread preview readiness copy in corso:
+  `fabio/remove-thread-preview-ready-copy`.
 
 Baseline corrente:
 
-- `main` a #400 (`56c7a4de`); prossima slice non-browser da scegliere su owner
-  canonico e Kill List esplicita.
+- `main` a #401 (`06753160`); slice thread preview readiness copy in corso su
+  owner UI `App`/`appCoreMappers` con Kill List esplicita.
 
 ## Debito residuo
 
@@ -1739,6 +1750,10 @@ Baseline corrente:
 - I cataloghi i18n non devono reintrodurre `chat.emptyHeroSub`: il fixed subtitle
   dell'empty hero e' stato ritirato e la UI deve usare i greeting selezionati dal
   presenter, non copy statico che promette risposte locali.
+- `defaultChatThread` e `updateThreadPreview` non devono reintrodurre subtitle
+  statiche di readiness locale (`Local session ready`, `Local chat ready`) per
+  transcript vuote: la preview sidebar deve arrivare da messaggi/read model reali
+  oppure restare vuota.
 - Continuare la rimozione dei fallback `legacy*` solo con fixture owner-level e
   gate kernel verde.
 - `main.rs` e `ChatView.tsx` restano grandi, ma non vanno tagliati senza owner
@@ -1755,10 +1770,12 @@ Baseline corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #400 (`56c7a4de`).
-Prossimo passo: passata finale non-browser su eventuali fallback UI/runtime
-ancora paralleli solo con owner canonico e Kill List esplicita; browser/activity
-restano fuori scope.
+main aggiornato a #401 (`06753160`), branch
+`fabio/remove-thread-preview-ready-copy` in corso.
+Prossimo passo: chiudere la slice thread preview readiness copy, poi riprendere
+la passata finale non-browser su eventuali fallback UI/runtime ancora paralleli
+solo con owner canonico e Kill List esplicita; browser/activity restano fuori
+scope.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
