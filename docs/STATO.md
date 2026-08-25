@@ -57,6 +57,11 @@ Piano completato:
   `connections` quando il gateway restituisce uno snapshot vuoto e `mockData`
   non deve piu' esportare `connections`; la pagina Settings > Connections segue
   solo il read model capability canonico del gateway.
+- Cleanup unused mock runtime exports: `mockData` non esporta piu'
+  `computerSession`, `tasks`, `approvals`, `runtimeHealth`, `memorySummary`,
+  `drawerTasks` o `drawerProjects`; i read model runtime devono arrivare dai
+  rispettivi owner gateway/controller, mentre `mockData` resta limitato a nav,
+  settings e superfici demo ancora importate.
 - Slice task queue canonical empty mergeata #384: `useTaskQueueController` non
   inizializza piu' task/approval da `mockData` e `taskQueueProjection` conserva
   le lane canoniche vuote del kernel come vuote; `fallbackTasks` non deve
@@ -1689,6 +1694,10 @@ Baseline corrente:
   `connections`; `mockData` non deve piu' esportare `connections`: la pagina
   Settings > Connections segue solo lo snapshot capability canonico del gateway,
   anche quando e' vuoto.
+- `mockData` non deve tornare a esportare seed runtime ritirati
+  (`computerSession`, `tasks`, `approvals`, `runtimeHealth`, `memorySummary`,
+  `drawerTasks`, `drawerProjects`); se una superficie ha un owner canonico, deve
+  consumare il read model gateway/controller o restare vuota.
 - Continuare la rimozione dei fallback `legacy*` solo con fixture owner-level e
   gate kernel verde.
 - `main.rs` e `ChatView.tsx` restano grandi, ma non vanno tagliati senza owner

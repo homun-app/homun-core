@@ -21,6 +21,16 @@ test("mock data does not seed canonical capability connections", () => {
   assert.doesNotMatch(nav, /export const connections/);
 });
 
+test("mock data does not retain retired runtime read-model seeds", () => {
+  assert.doesNotMatch(nav, /export const computerSession/);
+  assert.doesNotMatch(nav, /export const tasks/);
+  assert.doesNotMatch(nav, /export const approvals/);
+  assert.doesNotMatch(nav, /export const runtimeHealth/);
+  assert.doesNotMatch(nav, /export const memorySummary/);
+  assert.doesNotMatch(nav, /export const drawerTasks/);
+  assert.doesNotMatch(nav, /export const drawerProjects/);
+});
+
 test("pending effect resolution lives in the owning conversation", () => {
   assert.match(effectPanel, /function InlineUncertainEffectPanel/);
   assert.match(app, /uncertainEffects={activeUncertainEffects}/);
