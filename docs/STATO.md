@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-25 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript/capability/mock-runtime/mock-data-split runtime-view-model mergeati fino a #392; baseline stato riallineato a #393).**
+> **Ultimo aggiornamento: 2026-08-25 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript/capability/mock-runtime/mock-data-split runtime-view-model mergeati fino a #392; baseline stato riallineato a #394; preview fallback UI in PR #395).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#393 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #393 (`061c3ffa`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#394 mergeate in `main`; #117 browser draft separata; #395 preview fallback aperta; #284 e #372 chiuse non mergeate dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #394 (`f05f37e3`) |
 
 ## Dove siamo
 
@@ -66,6 +66,10 @@ Piano completato:
   `navigationConfig.ts`, le superfici demo Learning/Brain in
   `demoWorkspaceData.ts` e nessun controller runtime deve importare un owner
   mock ambiguo.
+- Slice preview thread fallback in PR #395: `useChatThreadCreation` non crea piu'
+  thread sintetici `thread_preview_*` quando la creazione fallisce; il fallback
+  locale residuo resta confinato nell'owner `chatApi`, da rimuovere in una slice
+  separata quando il contratto preview/local sara' chiaro.
 - Slice task queue canonical empty mergeata #384: `useTaskQueueController` non
   inizializza piu' task/approval da `mockData` e `taskQueueProjection` conserva
   le lane canoniche vuote del kernel come vuote; `fallbackTasks` non deve
@@ -1648,17 +1652,19 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#393: slice owner-level successive mergeate in
+- #143-#283, #285-#286, #288-#394: slice owner-level successive mergeate in
   `main`, fino a `mock data owner split` e relativo riallineamento di stato;
-  `main` verificato e riallineato a #393.
+  `main` verificato e riallineato a #394.
 
 PR aperte:
 
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
+- #395 `Remove preview fallback from chat thread creation`, slice non-browser
+  aperta.
 
 Baseline corrente:
 
-- `main` a #393 (`061c3ffa`); nessuna slice non-browser attiva su `main`.
+- `main` a #394 (`f05f37e3`); #395 e' la slice non-browser attiva.
 
 ## Debito residuo
 
@@ -1705,6 +1711,9 @@ Baseline corrente:
 - `apps/desktop/src/data/mockData.ts` non deve essere ricreato: nav/settings
   restano in `navigationConfig.ts`, mentre le fixture demo senza owner runtime
   stanno in `demoWorkspaceData.ts`.
+- `useChatThreadCreation` non deve tornare a creare thread sintetici
+  `thread_preview_*` o a importare `starterMessages`: la UI non deve possedere
+  fallback locale di creazione thread oltre all'owner `chatApi`.
 - Continuare la rimozione dei fallback `legacy*` solo con fixture owner-level e
   gate kernel verde.
 - `main.rs` e `ChatView.tsx` restano grandi, ma non vanno tagliati senza owner
@@ -1721,9 +1730,10 @@ Baseline corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #393 (`061c3ffa`). Prossimo passo: passata finale non-browser
-su eventuali fallback UI/runtime ancora paralleli solo con owner canonico e Kill
-List esplicita; browser/activity restano fuori scope.
+main aggiornato a #394 (`f05f37e3`), PR #395 preview fallback UI aperta.
+Prossimo passo: chiudere #395, poi passata finale non-browser su eventuali
+fallback UI/runtime ancora paralleli solo con owner canonico e Kill List
+esplicita; browser/activity restano fuori scope.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
