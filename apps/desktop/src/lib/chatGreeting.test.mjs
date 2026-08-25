@@ -60,3 +60,10 @@ test("locales do not retain the retired fixed empty hero subtitle", () => {
     assert.equal(catalog.chat.emptyHeroSub, undefined, `${locale}.chat.emptyHeroSub`);
   }
 });
+
+test("locales do not retain the retired local session readiness label", () => {
+  for (const locale of ["en", "it", "es", "fr", "de"]) {
+    const catalog = JSON.parse(readFileSync(join(here, `../i18n/locales/${locale}.json`), "utf8"));
+    assert.equal(catalog.chat.localSessionReady, undefined, `${locale}.chat.localSessionReady`);
+  }
+});

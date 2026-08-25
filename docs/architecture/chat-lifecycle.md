@@ -1,6 +1,6 @@
 # Chat Lifecycle And Rendering Contracts
 
-Verificato 2026-08-25 contro `main` aggiornato a #401.
+Verificato 2026-08-25 contro `main` aggiornato a #402.
 
 Questa pagina descrive solo contratti gia' presenti nel codice. Se un nuovo
 fix modifica chat, turni, steering, reasoning o browser/activity overlay, deve
