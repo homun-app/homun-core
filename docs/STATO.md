@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-25 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript/capability runtime-view-model mergeati fino a #388).**
+> **Ultimo aggiornamento: 2026-08-25 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript/capability/mock-runtime runtime-view-model mergeati fino a #390).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#388 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #388 (`660d1731`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#390 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #390 (`9e242469`) |
 
 ## Dove siamo
 
@@ -1644,9 +1644,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#388: slice owner-level successive mergeate in
-  `main`, fino a `capability mock fallback`; `main` verificato e riallineato a
-  #388.
+- #143-#283, #285-#286, #288-#390: slice owner-level successive mergeate in
+  `main`, fino a `unused mock runtime exports`; `main` verificato e
+  riallineato a #390.
 
 PR aperte:
 
@@ -1654,7 +1654,7 @@ PR aperte:
 
 Baseline corrente:
 
-- `main` a #388 (`660d1731`); nessuna slice non-browser attiva su `main`.
+- `main` a #390 (`9e242469`); nessuna slice non-browser attiva su `main`.
 
 ## Debito residuo
 
@@ -1714,7 +1714,7 @@ Baseline corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #388 (`660d1731`). Prossimo passo: passata finale non-browser
+main aggiornato a #390 (`9e242469`). Prossimo passo: passata finale non-browser
 su eventuali fallback UI/runtime ancora paralleli solo con owner canonico e Kill
 List esplicita; browser/activity restano fuori scope.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
