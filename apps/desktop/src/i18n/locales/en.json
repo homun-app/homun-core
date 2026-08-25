@@ -859,7 +859,6 @@
     "resume": "Resume",
     "pause": "Pause",
     "takeControl": "Take control",
-    "emptyHeroSub": "I'm ready. Just write to me: I reply locally.",
     "removeQuote": "Remove quote",
     "requestForAssistant": "Request for the assistant",
     "attachedImages": "Attached images",
