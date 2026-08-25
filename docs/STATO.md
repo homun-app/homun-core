@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-25 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript/capability/mock-runtime/mock-data-split runtime-view-model mergeati fino a #392; baseline stato riallineato a #395; preview fallback UI mergeata #395; initial thread loader starter fallback in PR #397).**
+> **Ultimo aggiornamento: 2026-08-25 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript/capability/mock-runtime/mock-data-split runtime-view-model mergeati fino a #392; baseline stato riallineato a #397; preview fallback UI mergeata #395; initial thread loader starter fallback mergeata #397).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#395 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #395 (`472fe090`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#397 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #397 (`c40d4c21`) |
 
 ## Dove siamo
 
@@ -70,7 +70,7 @@ Piano completato:
   thread sintetici `thread_preview_*` quando la creazione fallisce; il fallback
   locale residuo resta confinato nell'owner `chatApi`, da rimuovere in una slice
   separata quando il contratto preview/local sara' chiaro.
-- Slice initial thread loader starter fallback in PR #397: `useInitialChatThreadsLoader`
+- Slice initial thread loader starter fallback mergeata #397: `useInitialChatThreadsLoader`
   non importa piu' `starterMessages` e non semina messaggi locali quando
   `chatMessages` non risponde; il loader iniziale resta consumatore del read
   model gateway/chatApi e non owner del transcript.
@@ -1656,18 +1656,17 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#395: slice owner-level successive mergeate in
+- #143-#283, #285-#286, #288-#397: slice owner-level successive mergeate in
   `main`, fino a `mock data owner split` e relativo riallineamento di stato;
-  `main` verificato e riallineato a #395.
+  `main` verificato e riallineato a #397.
 
 PR aperte:
 
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
-- #397 `Remove initial thread starter fallback`, slice non-browser aperta.
 
 Baseline corrente:
 
-- `main` a #395 (`472fe090`); prossima slice non-browser da scegliere su owner
+- `main` a #397 (`c40d4c21`); prossima slice non-browser da scegliere su owner
   canonico e Kill List esplicita.
 
 ## Debito residuo
@@ -1737,7 +1736,7 @@ Baseline corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #395 (`472fe090`).
+main aggiornato a #397 (`c40d4c21`).
 Prossimo passo: passata finale non-browser su eventuali fallback UI/runtime
 ancora paralleli solo con owner canonico e Kill List esplicita; browser/activity
 restano fuori scope.
