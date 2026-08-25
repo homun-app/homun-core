@@ -62,6 +62,11 @@ Piano completato:
   `drawerTasks` o `drawerProjects`; i read model runtime devono arrivare dai
   rispettivi owner gateway/controller, mentre `mockData` resta limitato a nav,
   settings e superfici demo ancora importate.
+- Slice mock data owner split: il file misto
+  `apps/desktop/src/data/mockData.ts` e' stato rimosso; nav/settings vivono in
+  `navigationConfig.ts`, le superfici demo Learning/Brain in
+  `demoWorkspaceData.ts` e nessun controller runtime deve importare un owner
+  mock ambiguo.
 - Slice task queue canonical empty mergeata #384: `useTaskQueueController` non
   inizializza piu' task/approval da `mockData` e `taskQueueProjection` conserva
   le lane canoniche vuote del kernel come vuote; `fallbackTasks` non deve
@@ -1698,6 +1703,9 @@ Baseline corrente:
   (`computerSession`, `tasks`, `approvals`, `runtimeHealth`, `memorySummary`,
   `drawerTasks`, `drawerProjects`); se una superficie ha un owner canonico, deve
   consumare il read model gateway/controller o restare vuota.
+- `apps/desktop/src/data/mockData.ts` non deve essere ricreato: nav/settings
+  restano in `navigationConfig.ts`, mentre le fixture demo senza owner runtime
+  stanno in `demoWorkspaceData.ts`.
 - Continuare la rimozione dei fallback `legacy*` solo con fixture owner-level e
   gate kernel verde.
 - `main.rs` e `ChatView.tsx` restano grandi, ma non vanno tagliati senza owner

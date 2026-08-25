@@ -123,7 +123,7 @@ assertContains("src/components/OnboardingWizard.tsx", 't("onboarding.checkAgain"
 assertContains("src/lib/accent.ts", 'export const DEFAULT_THEME: ThemeName = "dark";', "fresh installs must default to the dark surface theme");
 assertContains("src/lib/accent.ts", 'export const DEFAULT_ACCENT = "#157a6e";', "fresh installs must keep the Homun teal accent");
 assertContains("src/types.ts", '  | "usage"', "Settings must expose a Usage section");
-assertContains("src/data/mockData.ts", 'id: "usage"', "Settings drawer must list Usage");
+assertContains("src/data/navigationConfig.ts", 'id: "usage"', "Settings drawer must list Usage");
 assertContains("src/components/SettingsView.tsx", "<UsageSettingsPane />", "Settings must render Usage");
 assertNotContains("src/components/SettingsView.tsx", "AdaptiveFloorBlock", "Settings must not expose the retired adaptive-floor experiment");
 assertNotContains("src/lib/coreBridge.ts", "adaptive_floor", "Desktop runtime settings must not expose the retired adaptive-floor field");
@@ -1085,8 +1085,11 @@ assertContains("src/components/ChatEmptyHero.tsx", "selectGreetingKey", "New cha
 assertContains("src/components/ChatEmptyHero.tsx", "chat-hero-headline", "New chat must render the primary greeting separately");
 assertContains("src/components/ChatEmptyHero.tsx", "chat-hero-prompt", "New chat must render the rotating prompt as secondary typography");
 assertContains("src/styles.css", ".chat-hero-welcome", "New chat must give the welcome block its own spacing hierarchy");
-assertNotContains("src/data/mockData.ts", 'id: "m1_ready"', "Mock data must not seed the canonical chat transcript");
-assertNotContains("src/data/mockData.ts", "I'm ready. Write to me.", "Mock data must not carry the retired bootstrap assistant message");
+assertMissing("src/data/mockData.ts", "mixed mock data owner must stay removed");
+assertNotContains("src/data/navigationConfig.ts", 'id: "m1_ready"', "Navigation config must not seed the canonical chat transcript");
+assertNotContains("src/data/demoWorkspaceData.ts", 'id: "m1_ready"', "Demo workspace data must not seed the canonical chat transcript");
+assertNotContains("src/data/navigationConfig.ts", "I'm ready. Write to me.", "Navigation config must not carry the retired bootstrap assistant message");
+assertNotContains("src/data/demoWorkspaceData.ts", "I'm ready. Write to me.", "Demo workspace data must not carry the retired bootstrap assistant message");
 assertContains("src/components/ChatUsageOverview.tsx", "<UsageCalendar", "New chat must render the real activity calendar");
 assertContains("src/components/ChatUsageOverview.tsx", "coreBridge.usageDaily", "New chat must load real daily usage");
 assertContains("src/components/ChatUsageOverview.tsx", "dominant_provider", "New chat must render provider-qualified routes");
@@ -1365,8 +1368,8 @@ assertRepoContains("crates/desktop-gateway/src/gateway_routes.rs", "patch(vault_
 assertContains("src/components/SettingsView.tsx", "t(\"settings.vaultEncrypted\")", "Vault status badge must use translations");
 assertContains("src/i18n/locales/it.json", "\"vaultEncrypted\": \"Cifrato\"", "Italian locale must translate the Vault encrypted badge");
 assertContains("src/i18n/locales/en.json", "\"vaultEncrypted\": \"Encrypted\"", "English locale must translate the Vault encrypted badge");
-assertContains("src/data/mockData.ts", "label: \"settings.vault\"", "Settings sidebar Vault label must use i18n");
-assertContains("src/data/mockData.ts", "label: \"settings.computer.title\"", "Settings sidebar Computer label must use i18n");
+assertContains("src/data/navigationConfig.ts", "label: \"settings.vault\"", "Settings sidebar Vault label must use i18n");
+assertContains("src/data/navigationConfig.ts", "label: \"settings.computer.title\"", "Settings sidebar Computer label must use i18n");
 assertContains("src/lib/coreBridge.ts", "secret_value?: string", "Vault bridge must expose optional raw secret material only for the encrypted accept path");
 assertContains("src/components/ChatComputerPanel.tsx", "const browserRunning = Boolean(live?.active && live?.novnc_url)", "live computer browser state must distinguish running activity from idle availability");
 assertContains("src/components/ChatComputerPanel.tsx", "view_only=1&viewer=csp-external-v1", "chat computer must invalidate the CSP-blocked inline viewer cached by older desktop releases");
@@ -1556,8 +1559,8 @@ assertContains("src/components/ChatMessageMarkerParser.ts", "PAYMENT_APPROVAL_RE
 assertContains("src/components/MessagePaymentApprovalCard.tsx", "coreBridge.vaultPaymentApprovalApprove", "Payment Approval Card must verify PIN/CVV through the bridge");
 assertContains("src/components/AssistantMessageBody.tsx", "messageId={messageId}", "Payment Approval Card must receive the source message id for transcript rewrite");
 assertContains("src/lib/coreBridge.ts", "message_id: ctx.messageId", "Payment approvals must include source message id when available");
-assertContains("src/data/mockData.ts", "id: \"vault\"", "Vault must be a separate Settings section");
-assertContains("src/data/mockData.ts", "id: \"sandbox\"", "Sandbox must be a separate Settings section");
+assertContains("src/data/navigationConfig.ts", "id: \"vault\"", "Vault must be a separate Settings section");
+assertContains("src/data/navigationConfig.ts", "id: \"sandbox\"", "Sandbox must be a separate Settings section");
 assertContains("src/components/SettingsView.tsx", "<SandboxSettingsView />", "Settings must render the dedicated Sandbox pane");
 assertContains("src/lib/coreBridge.ts", "/policy`", "coreBridge must POST per-workspace sandbox/approval overrides");
 assertContains("src/components/SettingsView.tsx", "coreBridge.vaultPinSetup", "Vault Settings must configure the local PIN through the bridge");
@@ -1566,7 +1569,8 @@ assertContains("src/components/MessageVaultProposeCard.tsx", "Save to Vault", "V
 assertContains("src/components/MemoryView.tsx", "coreBridge.memoryDashboard", "desktop memory page must own the gateway memory dashboard read model");
 assertContains("src/lib/useCapabilityController.ts", "mapCoreCapabilitySnapshot", "desktop connections page must map the gateway capability read model");
 assertNotContains("src/lib/useCapabilityController.ts", "../data/mockData", "desktop connections page must not fall back to static mock connections");
-assertNotContains("src/data/mockData.ts", "export const connections", "mockData must not seed gateway capability connections");
+assertNotContains("src/data/navigationConfig.ts", "export const connections", "Navigation config must not seed gateway capability connections");
+assertNotContains("src/data/demoWorkspaceData.ts", "export const connections", "Demo workspace data must not seed gateway capability connections");
 assertContains("src/lib/chatApi.ts", "/api/chat/threads", "chat threads must load from the local Rust gateway first");
 assertContains("src/lib/chatApi.ts", "hydrateThreadSnapshot", "chat API must keep a local cache synchronized with gateway thread snapshots");
 assertContains("src/lib/chatApi.ts", "localThreads", "chat threads must keep an Electron-safe fallback cache");

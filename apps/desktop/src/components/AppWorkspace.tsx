@@ -6,7 +6,7 @@ import {
   automationProposals,
   brainRun,
   learningInsights,
-} from "../data/mockData";
+} from "../data/demoWorkspaceData";
 import {
   contextBudgetCompressionRatio,
   contextBudgetSummary,
