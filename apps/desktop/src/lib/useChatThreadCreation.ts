@@ -11,7 +11,6 @@ import {
   mapCoreChatMessage,
   mapCoreChatThread,
   pendingChatAttachmentFromInput,
-  starterMessages,
   summarizeThreadTitle,
 } from "./appCoreMappers";
 import { buildProactivityChatSeed } from "./proactivityChatSeed";
@@ -31,7 +30,6 @@ export interface PendingTemplateAutoSubmit {
 }
 
 export function useChatThreadCreation({
-  defaultThread,
   personalWorkspaceId,
   setChatThreads,
   setThreadMessages,
@@ -40,7 +38,6 @@ export function useChatThreadCreation({
   setThreadMessagesFromBackend,
   setPendingTemplateAutoSubmit,
 }: {
-  defaultThread: ChatThread;
   personalWorkspaceId: string;
   setChatThreads: Dispatch<SetStateAction<ChatThread[]>>;
   setThreadMessages: Dispatch<SetStateAction<Record<string, ChatMessage[]>>>;
@@ -80,22 +77,6 @@ export function useChatThreadCreation({
       setActiveThreadId(created.threadId);
       setActiveView("chat");
     } catch (error) {
-      const fallback: ChatThread = {
-        ...defaultThread,
-        threadId: `thread_preview_${Date.now()}`,
-        computerSessionId: "computer_active_prompt",
-        taskId: "task_prompt_session",
-        subtitle: "Electron with local gateway in extraction",
-        updatedAt: "ora",
-        messageCount: 1,
-      };
-      setChatThreads((current) => [fallback, ...current]);
-      setThreadMessages((current) => ({
-        ...current,
-        [fallback.threadId]: starterMessages(fallback),
-      }));
-      setActiveThreadId(fallback.threadId);
-      setActiveView("chat");
       console.warn("create_chat_thread unavailable", error);
     }
   }

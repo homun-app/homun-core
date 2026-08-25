@@ -228,7 +228,6 @@ function AuthenticatedApp() {
     handleOpenSuggestion,
     handleStartTemplateWorkflow,
   } = useChatThreadCreation({
-    defaultThread: defaultChatThread,
     personalWorkspaceId: PERSONAL_WORKSPACE_ID,
     setChatThreads,
     setThreadMessages,

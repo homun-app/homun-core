@@ -21,6 +21,7 @@ const mockData = await readOptionalText(mockDataUrl);
 const navigationConfig = await readOptionalText(new URL("../src/data/navigationConfig.ts", import.meta.url));
 const demoWorkspaceData = await readOptionalText(new URL("../src/data/demoWorkspaceData.ts", import.meta.url));
 const sidebar = await readFile(new URL("../src/components/SidebarFilters.tsx", import.meta.url), "utf8");
+const chatThreadCreation = await readFile(new URL("../src/lib/useChatThreadCreation.ts", import.meta.url), "utf8");
 
 test("Tasks is not a top-level route or navigation destination", () => {
   assert.doesNotMatch(navigationConfig, /id:\s*["']tasks["'],\s*label:\s*["']nav\.tasks["']/);
@@ -68,6 +69,12 @@ test("demo workspace data does not own static shell navigation or settings", () 
   assert.doesNotMatch(demoWorkspaceData, /export const navItems/);
   assert.doesNotMatch(demoWorkspaceData, /export const settingsSections/);
   assert.doesNotMatch(demoWorkspaceData, /export const settingsGroupLabels/);
+});
+
+test("chat thread creation hook does not own preview thread fallback state", () => {
+  assert.doesNotMatch(chatThreadCreation, /starterMessages/);
+  assert.doesNotMatch(chatThreadCreation, /thread_preview_/);
+  assert.doesNotMatch(chatThreadCreation, /messageCount:\s*1/);
 });
 
 test("pending effect resolution lives in the owning conversation", () => {
