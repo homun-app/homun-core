@@ -1,4 +1,4 @@
-import { navItems as staticNavItems } from "../data/mockData";
+import { navItems as staticNavItems } from "../data/navigationConfig";
 import { pluginRegistry, type PluginHost } from "../plugins/registry";
 import { composePluginNavItems, enabledRegistryPlugins } from "./appPluginNavigation";
 import type { PluginState } from "./coreBridge";

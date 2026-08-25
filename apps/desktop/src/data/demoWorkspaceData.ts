@@ -1,43 +1,4 @@
-import {
-  Blocks,
-  Brain,
-  CalendarClock,
-  ChartNoAxesCombined,
-  Cpu,
-  FileText,
-  KeyRound,
-  MessageSquare,
-  Monitor,
-  MonitorPlay,
-  Palette,
-  Plug,
-  Shield,
-  ShieldCheck,
-  SlidersHorizontal,
-  Sparkles,
-  User,
-  Users,
-} from "lucide-react";
-import type {
-  AutomationProposal,
-  BrainRunDetail,
-  LearningInsight,
-  NavItem,
-  SettingsSectionId,
-} from "../types";
-
-// Static core nav. Plugin/addon entries (es. "Proattività") sono aggiunti a runtime
-// dal registro in App.tsx in base allo stato abilitato (ADR 0011 §10-A): staccare
-// l'addon ne fa sparire la voce di nav.
-export const navItems: NavItem[] = [
-  { id: "chat", label: "chat.newTask", icon: MessageSquare },
-  // Memory lives ONLY in Settings → Memory (rendered there as <MemoryView embedded />).
-  // The top-level nav entry (ADR 0022 Piano UI A4) was removed: it duplicated the exact
-  // same MemoryView already reachable from Settings.
-  // "Pianificato" (coda dei run) è confluito in Automazioni: la regola è la cosa
-  // di prima classe; i run si vedono nei thread. Manteniamo l'icona-calendario.
-  { id: "automations", label: "nav.automations", icon: CalendarClock },
-];
+import type { AutomationProposal, BrainRunDetail, LearningInsight } from "../types";
 
 export const brainRun: BrainRunDetail = {
   requestId: "req_acme_morning",
@@ -187,32 +148,3 @@ export const automationProposals: AutomationProposal[] = [
     status: "ready",
   },
 ];
-
-export const settingsSections: Array<{
-  id: SettingsSectionId;
-  label: string;
-  icon: typeof Monitor;
-  group: "account" | "capabilities";
-}> = [
-  { id: "account", label: "settings.account", icon: User, group: "account" },
-  { id: "general", label: "settings.general", icon: SlidersHorizontal, group: "account" },
-  { id: "appearance", label: "settings.appearance", icon: Palette, group: "account" },
-  { id: "runtime", label: "settings.runtime", icon: Cpu, group: "account" },
-  { id: "usage", label: "settings.usage.title", icon: ChartNoAxesCombined, group: "account" },
-  { id: "privacy", label: "settings.privacy", icon: KeyRound, group: "account" },
-  { id: "sandbox", label: "settings.sandbox", icon: Shield, group: "account" },
-  { id: "vault", label: "settings.vault", icon: ShieldCheck, group: "account" },
-  { id: "memory", label: "nav.memory", icon: Brain, group: "account" },
-  { id: "artifacts", label: "settings.artifacts", icon: FileText, group: "account" },
-  { id: "contacts", label: "nav.contacts", icon: Users, group: "account" },
-  { id: "channels", label: "settings.channels", icon: MessageSquare, group: "capabilities" },
-  { id: "connections", label: "settings.connectors", icon: Plug, group: "capabilities" },
-  { id: "skills", label: "settings.skills", icon: Sparkles, group: "capabilities" },
-  { id: "addon", label: "settings.addon", icon: Blocks, group: "capabilities" },
-  { id: "computer", label: "settings.computer.title", icon: MonitorPlay, group: "capabilities" },
-];
-
-export const settingsGroupLabels: Record<"account" | "capabilities", string> = {
-  account: "settings.account",
-  capabilities: "settings.capabilities",
-};

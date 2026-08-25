@@ -73,3 +73,11 @@ test("status doc records the merged unused mock runtime export cleanup slice", (
   assert.match(statusDoc, /computerSession`, `tasks`, `approvals`, `runtimeHealth`, `memorySummary`/);
   assert.doesNotMatch(statusDoc, /fabio\/remove-unused-mock-runtime-exports/);
 });
+
+test("status doc records the mock data owner split cleanup contract", () => {
+  assert.match(statusDoc, /Slice mock data owner split/);
+  assert.match(statusDoc, /apps\/desktop\/src\/data\/mockData\.ts` e' stato rimosso/);
+  assert.match(statusDoc, /navigationConfig\.ts/);
+  assert.match(statusDoc, /demoWorkspaceData\.ts/);
+  assert.match(statusDoc, /mockData\.ts` non deve essere ricreato/);
+});

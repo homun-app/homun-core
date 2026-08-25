@@ -38,7 +38,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useTranslation } from "react-i18next";
-import { settingsGroupLabels, settingsSections } from "../data/mockData";
+import { settingsGroupLabels, settingsSections } from "../data/navigationConfig";
 import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
 import type { ThreadAttentionStatus } from "../lib/threadAttentionState";
 import { useSetting } from "../lib/settingsStore";
