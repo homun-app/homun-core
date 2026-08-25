@@ -36,7 +36,7 @@ let localThreads: CoreChatThread[] = [
   {
     thread_id: activeThreadId,
     title: "New task",
-    subtitle: "Local chat",
+    subtitle: "",
     status: "active",
     pinned: false,
     computer_session_id: "computer_active_prompt",
@@ -425,7 +425,7 @@ function createLocalChatThread() {
   const thread: CoreChatThread = {
     thread_id: threadId,
     title: "New task",
-    subtitle: "Local chat",
+    subtitle: "",
     status: "active",
     pinned: false,
     computer_session_id: `computer_${threadId}`,
@@ -602,11 +602,12 @@ function updateThreadAfterMessages(
       thread.title === "New task" && userPrompt?.trim()
         ? compactTitle(userPrompt)
         : thread.title;
+    const lastMessage = localMessages.get(threadId)?.at(-1);
     return {
       ...thread,
       title,
-      subtitle: "Local model",
-      updated_at: localMessages.get(threadId)?.at(-1)?.timestamp ?? thread.updated_at,
+      subtitle: lastMessage?.text.slice(0, 72) || "",
+      updated_at: lastMessage?.timestamp ?? thread.updated_at,
       message_count: messageCount,
     };
   });

@@ -27,7 +27,7 @@ test("status doc records the merged runtime view model turn contract", () => {
   assert.match(statusDoc, /#381/);
   assert.match(statusDoc, /#383/);
   assert.match(statusDoc, /#384/);
-  assert.match(statusDoc, /main` aggiornato a #402 \(`912f69b3`\)/);
+  assert.match(statusDoc, /main` aggiornato a #403 \(`693ce410`\)/);
   assert.doesNotMatch(statusDoc, /slice runtimeViewModel turn status in corso/);
   assert.doesNotMatch(statusDoc, /fabio\/ui-runtime-view-model-turn-contract/);
 });
@@ -35,7 +35,7 @@ test("status doc records the merged runtime view model turn contract", () => {
 test("status doc records the merged composer-mode presenter cleanup slice", () => {
   assert.match(statusDoc, /Slice UI composer-mode presenter contract mergeata #379/);
   assert.match(statusDoc, /Slice doc composer-mode owner cleanup mergeata #381/);
-  assert.match(statusDoc, /\| Branch \| `fabio\/remove-retired-local-session-ready-key` \|/);
+  assert.match(statusDoc, /\| Branch \| `fabio\/remove-chatapi-static-local-subtitles` \|/);
   assert.doesNotMatch(statusDoc, /fabio\/docs-composer-mode-owner-cleanup/);
   assert.doesNotMatch(statusDoc, /doc composer-mode owner cleanup in corso/);
   assert.doesNotMatch(statusDoc, /Slice locale UI composer-mode presenter contract in corso/);
@@ -55,28 +55,28 @@ test("status doc records the merged selected task and task queue cleanup slices"
 
 test("status doc records the merged mock transcript cleanup slice", () => {
   assert.match(statusDoc, /Slice App mock transcript seed mergeata #386/);
-  assert.match(statusDoc, /main` aggiornato a #402 \(`912f69b3`\)/);
+  assert.match(statusDoc, /main` aggiornato a #403 \(`693ce410`\)/);
   assert.match(statusDoc, /mockData` non deve piu' esportare `chatMessages`/);
   assert.doesNotMatch(statusDoc, /fabio\/remove-app-mock-transcript-seed/);
 });
 
 test("status doc records the merged capability fallback cleanup slice", () => {
   assert.match(statusDoc, /Slice capability mock fallback mergeata #388/);
-  assert.match(statusDoc, /main` aggiornato a #402 \(`912f69b3`\)/);
+  assert.match(statusDoc, /main` aggiornato a #403 \(`693ce410`\)/);
   assert.match(statusDoc, /mockData` non deve piu' esportare `connections`/);
   assert.doesNotMatch(statusDoc, /fabio\/remove-capability-mock-fallback/);
 });
 
 test("status doc records the merged unused mock runtime export cleanup slice", () => {
   assert.match(statusDoc, /Cleanup unused mock runtime exports/);
-  assert.match(statusDoc, /main` aggiornato a #402 \(`912f69b3`\)/);
+  assert.match(statusDoc, /main` aggiornato a #403 \(`693ce410`\)/);
   assert.match(statusDoc, /computerSession`, `tasks`, `approvals`, `runtimeHealth`, `memorySummary`/);
   assert.doesNotMatch(statusDoc, /fabio\/remove-unused-mock-runtime-exports/);
 });
 
 test("status doc records the mock data owner split cleanup contract", () => {
   assert.match(statusDoc, /Slice mock data owner split/);
-  assert.match(statusDoc, /main` aggiornato a #402 \(`912f69b3`\)/);
+  assert.match(statusDoc, /main` aggiornato a #403 \(`693ce410`\)/);
   assert.match(statusDoc, /apps\/desktop\/src\/data\/mockData\.ts` e' stato rimosso/);
   assert.match(statusDoc, /navigationConfig\.ts/);
   assert.match(statusDoc, /demoWorkspaceData\.ts/);
@@ -127,7 +127,15 @@ test("status doc records the thread preview readiness copy cleanup contract", ()
 });
 
 test("status doc records the retired local session readiness i18n key contract", () => {
-  assert.match(statusDoc, /Slice localSessionReady i18n key in corso/);
+  assert.match(statusDoc, /Slice localSessionReady i18n key mergeata #403/);
   assert.match(statusDoc, /chat\.localSessionReady/);
   assert.match(statusDoc, /copy morta di readiness locale/);
+});
+
+test("status doc records the chatApi static local subtitle cleanup contract", () => {
+  assert.match(statusDoc, /Slice chatApi static local subtitles in corso/);
+  assert.match(statusDoc, /chatApi` resta confinato come modalita' offline\/dev/);
+  assert.match(statusDoc, /Local chat/);
+  assert.match(statusDoc, /Local model/);
+  assert.match(statusDoc, /preview deriva dall'ultimo messaggio/);
 });
