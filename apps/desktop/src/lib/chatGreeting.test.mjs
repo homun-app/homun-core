@@ -53,3 +53,10 @@ test("every locale exposes separate greeting headline and prompt text", () => {
     }
   }
 });
+
+test("locales do not retain the retired fixed empty hero subtitle", () => {
+  for (const locale of ["en", "it", "es", "fr", "de"]) {
+    const catalog = JSON.parse(readFileSync(join(here, `../i18n/locales/${locale}.json`), "utf8"));
+    assert.equal(catalog.chat.emptyHeroSub, undefined, `${locale}.chat.emptyHeroSub`);
+  }
+});
