@@ -159,11 +159,6 @@ export function pendingChatAttachmentFromInput(attachment: ChatAttachmentInput):
   };
 }
 
-export function starterMessages(_thread: ChatThread): ChatMessage[] {
-  // Empty: the chat empty-state hero welcomes the user now, so no canned greeting is seeded.
-  return [];
-}
-
 export function summarizeThreadTitle(text: string): string {
   const normalized = text.replace(/[^\p{L}\p{N}\s'-]/gu, " ").split(/\s+/).filter(Boolean);
   const stop = new Set([

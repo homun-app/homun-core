@@ -23,6 +23,8 @@ const demoWorkspaceData = await readOptionalText(new URL("../src/data/demoWorksp
 const sidebar = await readFile(new URL("../src/components/SidebarFilters.tsx", import.meta.url), "utf8");
 const chatThreadCreation = await readFile(new URL("../src/lib/useChatThreadCreation.ts", import.meta.url), "utf8");
 const initialChatThreadsLoader = await readFile(new URL("../src/lib/useInitialChatThreadsLoader.ts", import.meta.url), "utf8");
+const chatReadModelController = await readFile(new URL("../src/lib/useChatReadModelController.ts", import.meta.url), "utf8");
+const appCoreMappers = await readFile(new URL("../src/lib/appCoreMappers.ts", import.meta.url), "utf8");
 
 test("Tasks is not a top-level route or navigation destination", () => {
   assert.doesNotMatch(navigationConfig, /id:\s*["']tasks["'],\s*label:\s*["']nav\.tasks["']/);
@@ -80,6 +82,14 @@ test("chat thread creation hook does not own preview thread fallback state", () 
 
 test("initial chat thread loader does not seed starter messages as a read-model fallback", () => {
   assert.doesNotMatch(initialChatThreadsLoader, /starterMessages/);
+});
+
+test("chat read model controller does not seed starter messages as a read-model fallback", () => {
+  assert.doesNotMatch(chatReadModelController, /starterMessages/);
+});
+
+test("app core mappers does not export starter messages", () => {
+  assert.doesNotMatch(appCoreMappers, /export function starterMessages/);
 });
 
 test("pending effect resolution lives in the owning conversation", () => {

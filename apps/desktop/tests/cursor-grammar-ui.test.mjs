@@ -903,7 +903,6 @@ test("App delegates core-to-ui mapping helpers to appCoreMappers", () => {
     "mapCoreThreadAttention",
     "mapCoreChatMessage",
     "pendingChatAttachmentFromInput",
-    "starterMessages",
     "summarizeThreadTitle",
     "updateThreadPreview",
     "currentTimestampSeconds",
