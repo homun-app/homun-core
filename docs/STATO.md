@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-25 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript/capability/mock-runtime/mock-data-split runtime-view-model mergeati fino a #392; baseline stato riallineato a #398; preview fallback UI mergeata #395; initial thread loader starter fallback mergeata #397).**
+> **Ultimo aggiornamento: 2026-08-25 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript/capability/mock-runtime/mock-data-split runtime-view-model mergeati fino a #392; baseline stato riallineato a #399; preview fallback UI mergeata #395; initial thread loader starter fallback mergeata #397; read-model starter helper mergeata #399).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#398 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #398 (`7e0d6318`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#399 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #399 (`f8e2a84a`) |
 
 ## Dove siamo
 
@@ -74,6 +74,10 @@ Piano completato:
   non importa piu' `starterMessages` e non semina messaggi locali quando
   `chatMessages` non risponde; il loader iniziale resta consumatore del read
   model gateway/chatApi e non owner del transcript.
+- Slice read-model starter helper mergeata #399: `useChatReadModelController`
+  non importa piu' `starterMessages`, `appCoreMappers` non lo esporta piu' e il
+  transcript attivo resta vuoto finche' `threadMessages` non contiene messaggi
+  canonici.
 - Slice task queue canonical empty mergeata #384: `useTaskQueueController` non
   inizializza piu' task/approval da `mockData` e `taskQueueProjection` conserva
   le lane canoniche vuote del kernel come vuote; `fallbackTasks` non deve
@@ -1656,9 +1660,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#398: slice owner-level successive mergeate in
+- #143-#283, #285-#286, #288-#399: slice owner-level successive mergeate in
   `main`, fino a `mock data owner split` e relativo riallineamento di stato;
-  `main` verificato e riallineato a #398.
+  `main` verificato e riallineato a #399.
 
 PR aperte:
 
@@ -1666,7 +1670,7 @@ PR aperte:
 
 Baseline corrente:
 
-- `main` a #398 (`7e0d6318`); prossima slice non-browser da scegliere su owner
+- `main` a #399 (`f8e2a84a`); prossima slice non-browser da scegliere su owner
   canonico e Kill List esplicita.
 
 ## Debito residuo
@@ -1724,6 +1728,10 @@ Baseline corrente:
   `appCoreMappers` non deve esportarlo: il transcript attivo deve arrivare da
   `threadMessages` oppure restare vuoto finche' il read model canonico non
   restituisce messaggi.
+- `chatApi` puo' conservare il fallback local-only quando il gateway non
+  risponde, ma non deve seminare messaggi assistant canned o `message_count: 1`:
+  i thread locali devono partire con transcript vuota come il read model
+  canonico.
 - Continuare la rimozione dei fallback `legacy*` solo con fixture owner-level e
   gate kernel verde.
 - `main.rs` e `ChatView.tsx` restano grandi, ma non vanno tagliati senza owner
@@ -1740,7 +1748,7 @@ Baseline corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #398 (`7e0d6318`).
+main aggiornato a #399 (`f8e2a84a`).
 Prossimo passo: passata finale non-browser su eventuali fallback UI/runtime
 ancora paralleli solo con owner canonico e Kill List esplicita; browser/activity
 restano fuori scope.

@@ -14,3 +14,9 @@ test("desktop chat API exposes only kernel projection for runtime activity", () 
   assert.doesNotMatch(source, /fetchThreadActivity/);
   assert.doesNotMatch(source, /\/api\/chat\/threads\/\$\{encodeURIComponent\(threadId\)\}\/activity/);
 });
+
+test("local chat fallback starts with an empty transcript", () => {
+  assert.doesNotMatch(source, /electron_ready/);
+  assert.doesNotMatch(source, /I'm ready\. Just write to me/);
+  assert.doesNotMatch(source, /message_count:\s*1/);
+});

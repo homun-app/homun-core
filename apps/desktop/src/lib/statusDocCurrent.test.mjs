@@ -27,7 +27,7 @@ test("status doc records the merged runtime view model turn contract", () => {
   assert.match(statusDoc, /#381/);
   assert.match(statusDoc, /#383/);
   assert.match(statusDoc, /#384/);
-  assert.match(statusDoc, /main` aggiornato a #398 \(`7e0d6318`\)/);
+  assert.match(statusDoc, /main` aggiornato a #399 \(`f8e2a84a`\)/);
   assert.doesNotMatch(statusDoc, /slice runtimeViewModel turn status in corso/);
   assert.doesNotMatch(statusDoc, /fabio\/ui-runtime-view-model-turn-contract/);
 });
@@ -55,28 +55,28 @@ test("status doc records the merged selected task and task queue cleanup slices"
 
 test("status doc records the merged mock transcript cleanup slice", () => {
   assert.match(statusDoc, /Slice App mock transcript seed mergeata #386/);
-  assert.match(statusDoc, /main` aggiornato a #398 \(`7e0d6318`\)/);
+  assert.match(statusDoc, /main` aggiornato a #399 \(`f8e2a84a`\)/);
   assert.match(statusDoc, /mockData` non deve piu' esportare `chatMessages`/);
   assert.doesNotMatch(statusDoc, /fabio\/remove-app-mock-transcript-seed/);
 });
 
 test("status doc records the merged capability fallback cleanup slice", () => {
   assert.match(statusDoc, /Slice capability mock fallback mergeata #388/);
-  assert.match(statusDoc, /main` aggiornato a #398 \(`7e0d6318`\)/);
+  assert.match(statusDoc, /main` aggiornato a #399 \(`f8e2a84a`\)/);
   assert.match(statusDoc, /mockData` non deve piu' esportare `connections`/);
   assert.doesNotMatch(statusDoc, /fabio\/remove-capability-mock-fallback/);
 });
 
 test("status doc records the merged unused mock runtime export cleanup slice", () => {
   assert.match(statusDoc, /Cleanup unused mock runtime exports/);
-  assert.match(statusDoc, /main` aggiornato a #398 \(`7e0d6318`\)/);
+  assert.match(statusDoc, /main` aggiornato a #399 \(`f8e2a84a`\)/);
   assert.match(statusDoc, /computerSession`, `tasks`, `approvals`, `runtimeHealth`, `memorySummary`/);
   assert.doesNotMatch(statusDoc, /fabio\/remove-unused-mock-runtime-exports/);
 });
 
 test("status doc records the mock data owner split cleanup contract", () => {
   assert.match(statusDoc, /Slice mock data owner split/);
-  assert.match(statusDoc, /main` aggiornato a #398 \(`7e0d6318`\)/);
+  assert.match(statusDoc, /main` aggiornato a #399 \(`f8e2a84a`\)/);
   assert.match(statusDoc, /apps\/desktop\/src\/data\/mockData\.ts` e' stato rimosso/);
   assert.match(statusDoc, /navigationConfig\.ts/);
   assert.match(statusDoc, /demoWorkspaceData\.ts/);
@@ -98,7 +98,14 @@ test("status doc records the merged initial thread loader fallback cleanup slice
 });
 
 test("status doc records the read-model starter helper cleanup contract", () => {
+  assert.match(statusDoc, /Slice read-model starter helper mergeata #399/);
   assert.match(statusDoc, /useChatReadModelController` non deve importare `starterMessages`/);
   assert.match(statusDoc, /appCoreMappers` non deve esportarlo/);
   assert.match(statusDoc, /threadMessages` oppure restare vuoto/);
+});
+
+test("status doc records the local chat fallback empty transcript contract", () => {
+  assert.match(statusDoc, /chatApi` puo' conservare il fallback local-only/);
+  assert.match(statusDoc, /non deve seminare messaggi assistant canned o `message_count: 1`/);
+  assert.match(statusDoc, /thread locali devono partire con transcript vuota/);
 });
