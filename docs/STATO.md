@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-24 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript runtime-view-model mergeati fino a #386).**
+> **Ultimo aggiornamento: 2026-08-25 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript/capability runtime-view-model mergeati fino a #388).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -13,8 +13,8 @@
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
 | Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#386 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #386 (`83e405b8`) |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#388 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #388 (`660d1731`) |
 
 ## Dove siamo
 
@@ -52,6 +52,11 @@ Piano completato:
   `messageCount` parte da zero e `mockData` non deve piu' esportare
   `chatMessages`; la transcript iniziale resta vuota finche' il read model
   canonico del gateway non la popola.
+- Slice capability mock fallback mergeata #388: `useCapabilityController` non
+  inizializza piu' le connessioni da `mockData`, non ripiega piu' su
+  `connections` quando il gateway restituisce uno snapshot vuoto e `mockData`
+  non deve piu' esportare `connections`; la pagina Settings > Connections segue
+  solo il read model capability canonico del gateway.
 - Slice task queue canonical empty mergeata #384: `useTaskQueueController` non
   inizializza piu' task/approval da `mockData` e `taskQueueProjection` conserva
   le lane canoniche vuote del kernel come vuote; `fallbackTasks` non deve
@@ -1634,9 +1639,9 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#386: slice owner-level successive mergeate in
-  `main`, fino a `App mock transcript seed`; `main` verificato e riallineato a
-  #386.
+- #143-#283, #285-#286, #288-#388: slice owner-level successive mergeate in
+  `main`, fino a `capability mock fallback`; `main` verificato e riallineato a
+  #388.
 
 PR aperte:
 
@@ -1644,7 +1649,7 @@ PR aperte:
 
 Baseline corrente:
 
-- `main` a #386 (`83e405b8`); nessuna slice non-browser attiva su `main`.
+- `main` a #388 (`660d1731`); nessuna slice non-browser attiva su `main`.
 
 ## Debito residuo
 
@@ -1680,6 +1685,10 @@ Baseline corrente:
   `mockData` non deve piu' esportare `chatMessages`: il thread iniziale mostra
   l'empty hero finche' il read model canonico del gateway non restituisce
   messaggi reali.
+- `useCapabilityController` non deve piu' importare `mockData` o ripiegare su
+  `connections`; `mockData` non deve piu' esportare `connections`: la pagina
+  Settings > Connections segue solo lo snapshot capability canonico del gateway,
+  anche quando e' vuoto.
 - Continuare la rimozione dei fallback `legacy*` solo con fixture owner-level e
   gate kernel verde.
 - `main.rs` e `ChatView.tsx` restano grandi, ma non vanno tagliati senza owner
@@ -1696,7 +1705,7 @@ Baseline corrente:
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #386 (`83e405b8`). Prossimo passo: passata finale non-browser
+main aggiornato a #388 (`660d1731`). Prossimo passo: passata finale non-browser
 su eventuali fallback UI/runtime ancora paralleli solo con owner canonico e Kill
 List esplicita; browser/activity restano fuori scope.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
