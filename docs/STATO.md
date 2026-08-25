@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-25 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript/capability/mock-runtime/mock-data-split runtime-view-model mergeati fino a #392; baseline stato riallineato a #402; preview fallback UI mergeata #395; initial thread loader starter fallback mergeata #397; read-model starter helper mergeata #399; local chat ready seed mergeata #400; empty hero subtitle mergeata #401; thread preview readiness copy mergeata #402; localSessionReady i18n key in corso).**
+> **Ultimo aggiornamento: 2026-08-25 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript/capability/mock-runtime/mock-data-split runtime-view-model mergeati fino a #392; baseline stato riallineato a #403; preview fallback UI mergeata #395; initial thread loader starter fallback mergeata #397; read-model starter helper mergeata #399; local chat ready seed mergeata #400; empty hero subtitle mergeata #401; thread preview readiness copy mergeata #402; localSessionReady i18n key mergeata #403; chatApi static local subtitles in corso).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/remove-retired-local-session-ready-key` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#402 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #402 (`912f69b3`) |
+| Branch | `fabio/remove-chatapi-static-local-subtitles` |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#403 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
+| HEAD codice verificato | `main` aggiornato a #403 (`693ce410`) |
 
 ## Dove siamo
 
@@ -91,9 +91,13 @@ Piano completato:
   (`Local session ready`, `Local chat ready`) quando il transcript e' vuoto; la
   sidebar deve restare vuota finche' il read model canonico o un messaggio reale
   non fornisce preview.
-- Slice localSessionReady i18n key in corso: dopo #402 la key
-  `chat.localSessionReady` non ha piu' consumer UI; i cataloghi non devono
+- Slice localSessionReady i18n key mergeata #403: dopo #402 la key
+  `chat.localSessionReady` non aveva piu' consumer UI; i cataloghi non devono
   conservarla come copy morta di readiness locale.
+- Slice chatApi static local subtitles in corso: il fallback local-only di
+  `chatApi` resta confinato come modalita' offline/dev, ma non deve esporre
+  subtitle statiche `Local chat` o `Local model`; i thread locali partono con
+  subtitle vuota e, dopo messaggi reali, la preview deriva dall'ultimo messaggio.
 - Slice task queue canonical empty mergeata #384: `useTaskQueueController` non
   inizializza piu' task/approval da `mockData` e `taskQueueProjection` conserva
   le lane canoniche vuote del kernel come vuote; `fallbackTasks` non deve
@@ -1676,20 +1680,20 @@ PR mergeate:
   `https://github.com/homun-app/homun-core/pull/141`.
 - #142 `Extract gateway memory publications owner`:
   `https://github.com/homun-app/homun-core/pull/142`.
-- #143-#283, #285-#286, #288-#402: slice owner-level successive mergeate in
+- #143-#283, #285-#286, #288-#403: slice owner-level successive mergeate in
   `main`, fino a `mock data owner split` e relativo riallineamento di stato;
-  `main` verificato e riallineato a #402.
+  `main` verificato e riallineato a #403.
 
 PR aperte:
 
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
-- Slice localSessionReady i18n key in corso:
-  `fabio/remove-retired-local-session-ready-key`.
+- Slice chatApi static local subtitles in corso:
+  `fabio/remove-chatapi-static-local-subtitles`.
 
 Baseline corrente:
 
-- `main` a #402 (`912f69b3`); slice localSessionReady i18n key in corso su
-  owner i18n/cataloghi con Kill List esplicita.
+- `main` a #403 (`693ce410`); slice chatApi static local subtitles in corso su
+  owner fallback locale/chatApi con Kill List esplicita.
 
 ## Debito residuo
 
@@ -1760,6 +1764,10 @@ Baseline corrente:
 - I cataloghi i18n non devono reintrodurre `chat.localSessionReady`: la key e'
   stata ritirata dopo la rimozione dei consumer UI e non deve restare come copy
   morta di readiness locale.
+- `chatApi` non deve reintrodurre subtitle statiche `Local chat` o
+  `Local model`: il fallback locale puo' esistere solo come modalita'
+  offline/dev, con preview vuota all'avvio e derivata dall'ultimo messaggio reale
+  dopo l'interazione.
 - Continuare la rimozione dei fallback `legacy*` solo con fixture owner-level e
   gate kernel verde.
 - `main.rs` e `ChatView.tsx` restano grandi, ma non vanno tagliati senza owner
@@ -1767,20 +1775,21 @@ Baseline corrente:
 
 ## Prossimo lavoro
 
-1. Passata finale non-browser su `main` pulito: cercare fallback UI/runtime
+1. Chiudere la slice `chatApi` static local subtitles con test, PR, CI e merge.
+2. Passata finale non-browser su `main` pulito: cercare fallback UI/runtime
    ancora paralleli solo se hanno owner canonico e Kill List esplicita.
-2. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
+3. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
    goal/plan/progress e treni Milano-Roma read-only.
 
 ## Prompt di ripartenza
 
 ```text
 Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #402 (`912f69b3`), branch
-`fabio/remove-retired-local-session-ready-key` in corso.
-Prossimo passo: chiudere la slice localSessionReady i18n key, poi riprendere la
-passata finale non-browser su eventuali fallback UI/runtime ancora paralleli solo
-con owner canonico e Kill List esplicita; browser/activity restano fuori scope.
+main aggiornato a #403 (`693ce410`), branch
+`fabio/remove-chatapi-static-local-subtitles` in corso.
+Prossimo passo: chiudere la slice chatApi static local subtitles, poi riprendere
+la passata finale non-browser su eventuali fallback UI/runtime ancora paralleli
+solo con owner canonico e Kill List esplicita; browser/activity restano fuori scope.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

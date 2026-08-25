@@ -20,3 +20,8 @@ test("local chat fallback starts with an empty transcript", () => {
   assert.doesNotMatch(source, /I'm ready\. Just write to me/);
   assert.doesNotMatch(source, /message_count:\s*1/);
 });
+
+test("local chat fallback does not advertise static local subtitles", () => {
+  assert.doesNotMatch(source, /subtitle:\s*"Local chat"/);
+  assert.doesNotMatch(source, /subtitle:\s*"Local model"/);
+});
