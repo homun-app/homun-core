@@ -3,7 +3,6 @@ import { coreBridge } from "./coreBridge";
 import {
   mapCoreChatMessage,
   mapCoreChatThread,
-  starterMessages,
   updateThreadPreview,
 } from "./appCoreMappers";
 import {
@@ -43,8 +42,7 @@ export function useChatReadModelController({
   applyThreadAttentionRows: (rows: CoreThreadAttention[]) => void;
   markSelectedThreadSeen: (threadId: string) => void;
 }) {
-  const activeMessages =
-    threadMessages[activeThread.threadId] ?? starterMessages(activeThread);
+  const activeMessages = threadMessages[activeThread.threadId] ?? [];
 
   function setThreadMessagesFromBackend(
     threadId: string,
