@@ -1,7 +1,7 @@
 import { useEffect, type Dispatch, type SetStateAction } from "react";
 import type { CoreThreadAttention } from "./coreBridge";
 import { coreBridge } from "./coreBridge";
-import { mapCoreChatMessage, mapCoreChatThread, starterMessages } from "./appCoreMappers";
+import { mapCoreChatMessage, mapCoreChatThread } from "./appCoreMappers";
 import { selectInitialThreadFromSnapshot } from "./initialThreadSelection";
 import type { ChatMessage, ChatThread } from "../types";
 
@@ -39,7 +39,7 @@ export function useInitialChatThreadsLoader({
           snapshotActiveThreadId: snapshot.active_thread_id,
           defaultThread,
         });
-        let selectedMessages = starterMessages(selectedThread);
+        let selectedMessages: ChatMessage[] = [];
         let attention: CoreThreadAttention[] = [];
         try {
           const [messages, attentionRows] = await Promise.all([

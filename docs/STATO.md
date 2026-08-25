@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-25 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript/capability/mock-runtime/mock-data-split runtime-view-model mergeati fino a #392; baseline stato riallineato a #395; preview fallback UI mergeata #395).**
+> **Ultimo aggiornamento: 2026-08-25 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript/capability/mock-runtime/mock-data-split runtime-view-model mergeati fino a #392; baseline stato riallineato a #395; preview fallback UI mergeata #395; initial thread loader starter fallback in PR #397).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -70,6 +70,10 @@ Piano completato:
   thread sintetici `thread_preview_*` quando la creazione fallisce; il fallback
   locale residuo resta confinato nell'owner `chatApi`, da rimuovere in una slice
   separata quando il contratto preview/local sara' chiaro.
+- Slice initial thread loader starter fallback in PR #397: `useInitialChatThreadsLoader`
+  non importa piu' `starterMessages` e non semina messaggi locali quando
+  `chatMessages` non risponde; il loader iniziale resta consumatore del read
+  model gateway/chatApi e non owner del transcript.
 - Slice task queue canonical empty mergeata #384: `useTaskQueueController` non
   inizializza piu' task/approval da `mockData` e `taskQueueProjection` conserva
   le lane canoniche vuote del kernel come vuote; `fallbackTasks` non deve
@@ -1659,6 +1663,7 @@ PR mergeate:
 PR aperte:
 
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
+- #397 `Remove initial thread starter fallback`, slice non-browser aperta.
 
 Baseline corrente:
 
@@ -1713,6 +1718,9 @@ Baseline corrente:
 - `useChatThreadCreation` non deve tornare a creare thread sintetici
   `thread_preview_*` o a importare `starterMessages`: la UI non deve possedere
   fallback locale di creazione thread oltre all'owner `chatApi`.
+- `useInitialChatThreadsLoader` non deve importare `starterMessages` o seminare
+  fallback locali del transcript: all'avvio deve applicare i messaggi restituiti
+  dal read model oppure lasciare il transcript vuoto.
 - Continuare la rimozione dei fallback `legacy*` solo con fixture owner-level e
   gate kernel verde.
 - `main.rs` e `ChatView.tsx` restano grandi, ma non vanno tagliati senza owner

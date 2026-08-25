@@ -22,6 +22,7 @@ const navigationConfig = await readOptionalText(new URL("../src/data/navigationC
 const demoWorkspaceData = await readOptionalText(new URL("../src/data/demoWorkspaceData.ts", import.meta.url));
 const sidebar = await readFile(new URL("../src/components/SidebarFilters.tsx", import.meta.url), "utf8");
 const chatThreadCreation = await readFile(new URL("../src/lib/useChatThreadCreation.ts", import.meta.url), "utf8");
+const initialChatThreadsLoader = await readFile(new URL("../src/lib/useInitialChatThreadsLoader.ts", import.meta.url), "utf8");
 
 test("Tasks is not a top-level route or navigation destination", () => {
   assert.doesNotMatch(navigationConfig, /id:\s*["']tasks["'],\s*label:\s*["']nav\.tasks["']/);
@@ -75,6 +76,10 @@ test("chat thread creation hook does not own preview thread fallback state", () 
   assert.doesNotMatch(chatThreadCreation, /starterMessages/);
   assert.doesNotMatch(chatThreadCreation, /thread_preview_/);
   assert.doesNotMatch(chatThreadCreation, /messageCount:\s*1/);
+});
+
+test("initial chat thread loader does not seed starter messages as a read-model fallback", () => {
+  assert.doesNotMatch(initialChatThreadsLoader, /starterMessages/);
 });
 
 test("pending effect resolution lives in the owning conversation", () => {

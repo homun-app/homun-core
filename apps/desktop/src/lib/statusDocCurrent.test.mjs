@@ -90,3 +90,8 @@ test("status doc records the merged preview thread fallback cleanup slice", () =
   assert.match(statusDoc, /starterMessages/);
   assert.doesNotMatch(statusDoc, /#395 preview fallback aperta/);
 });
+
+test("status doc records the open initial thread loader fallback cleanup slice", () => {
+  assert.match(statusDoc, /#397 `Remove initial thread starter fallback`/);
+  assert.match(statusDoc, /useInitialChatThreadsLoader` non deve importare `starterMessages`/);
+});
