@@ -1565,6 +1565,8 @@ assertContains("src/components/MessageVaultProposeCard.tsx", "coreBridge.vaultPr
 assertContains("src/components/MessageVaultProposeCard.tsx", "Save to Vault", "Vault proposal card must offer an explicit save action");
 assertContains("src/components/MemoryView.tsx", "coreBridge.memoryDashboard", "desktop memory page must own the gateway memory dashboard read model");
 assertContains("src/lib/useCapabilityController.ts", "mapCoreCapabilitySnapshot", "desktop connections page must map the gateway capability read model");
+assertNotContains("src/lib/useCapabilityController.ts", "../data/mockData", "desktop connections page must not fall back to static mock connections");
+assertNotContains("src/data/mockData.ts", "export const connections", "mockData must not seed gateway capability connections");
 assertContains("src/lib/chatApi.ts", "/api/chat/threads", "chat threads must load from the local Rust gateway first");
 assertContains("src/lib/chatApi.ts", "hydrateThreadSnapshot", "chat API must keep a local cache synchronized with gateway thread snapshots");
 assertContains("src/lib/chatApi.ts", "localThreads", "chat threads must keep an Electron-safe fallback cache");

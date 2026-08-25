@@ -27,7 +27,6 @@ import type {
   AutomationProposal,
   BrainRunDetail,
   ComputerSession,
-  ConnectionItem,
   LearningInsight,
   MemorySummary,
   NavItem,
@@ -319,72 +318,6 @@ export const automationProposals: AutomationProposal[] = [
     autonomyLevel: 1,
     risk: "low",
     status: "ready",
-  },
-];
-
-export const connections: ConnectionItem[] = [
-  {
-    id: "browser",
-    name: "My browser",
-    type: "native",
-    status: "connected",
-    description: "Local actions with Playwright/CDP and approval gates.",
-  },
-  {
-    id: "github",
-    name: "GitHub MCP",
-    type: "mcp",
-    status: "available",
-    description: "Repositories, issues and pull requests via local MCP.",
-  },
-  {
-    id: "calendar",
-    name: "Calendar",
-    type: "managed",
-    status: "disabled",
-    description: "Optional managed provider, requires cloud opt-in.",
-  },
-  {
-    id: "wiki",
-    name: "Obsidian Wiki",
-    type: "skill",
-    status: "connected",
-    description: "Readable and correctable memory in Markdown.",
-  },
-  {
-    id: "gmail",
-    name: "Gmail",
-    type: "managed",
-    status: "disabled",
-    description: "Email reading and drafts via opt-in provider.",
-  },
-  {
-    id: "drive",
-    name: "Google Drive",
-    type: "managed",
-    status: "disabled",
-    description: "Cloud files only with explicit privacy boundaries.",
-  },
-  {
-    id: "calendar-local",
-    name: "Local calendar",
-    type: "native",
-    status: "available",
-    description: "On-device events and availability.",
-  },
-  {
-    id: "browser-skill",
-    name: "browser-booking",
-    type: "skill",
-    status: "available",
-    description: "Reusable workflow for forms and bookings.",
-  },
-  {
-    id: "memory-skill",
-    name: "memory-briefing",
-    type: "skill",
-    status: "connected",
-    description: "Local synthesis from memory and wiki.",
   },
 ];
 
