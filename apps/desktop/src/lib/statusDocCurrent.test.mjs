@@ -27,7 +27,7 @@ test("status doc records the merged runtime view model turn contract", () => {
   assert.match(statusDoc, /#381/);
   assert.match(statusDoc, /#383/);
   assert.match(statusDoc, /#384/);
-  assert.match(statusDoc, /main` aggiornato a #386 \(`83e405b8`\)/);
+  assert.match(statusDoc, /main` aggiornato a #388 \(`660d1731`\)/);
   assert.doesNotMatch(statusDoc, /slice runtimeViewModel turn status in corso/);
   assert.doesNotMatch(statusDoc, /fabio\/ui-runtime-view-model-turn-contract/);
 });
@@ -55,7 +55,14 @@ test("status doc records the merged selected task and task queue cleanup slices"
 
 test("status doc records the merged mock transcript cleanup slice", () => {
   assert.match(statusDoc, /Slice App mock transcript seed mergeata #386/);
-  assert.match(statusDoc, /main` aggiornato a #386 \(`83e405b8`\)/);
+  assert.match(statusDoc, /main` aggiornato a #388 \(`660d1731`\)/);
   assert.match(statusDoc, /mockData` non deve piu' esportare `chatMessages`/);
   assert.doesNotMatch(statusDoc, /fabio\/remove-app-mock-transcript-seed/);
+});
+
+test("status doc records the merged capability fallback cleanup slice", () => {
+  assert.match(statusDoc, /Slice capability mock fallback mergeata #388/);
+  assert.match(statusDoc, /main` aggiornato a #388 \(`660d1731`\)/);
+  assert.match(statusDoc, /mockData` non deve piu' esportare `connections`/);
+  assert.doesNotMatch(statusDoc, /fabio\/remove-capability-mock-fallback/);
 });
