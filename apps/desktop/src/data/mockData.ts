@@ -1,14 +1,10 @@
 import {
   Blocks,
-  Bot,
   Brain,
   CalendarClock,
   ChartNoAxesCombined,
-  CheckCircle2,
   Cpu,
   FileText,
-  GalleryVerticalEnd,
-  Globe2,
   KeyRound,
   MessageSquare,
   Monitor,
@@ -23,16 +19,11 @@ import {
   Users,
 } from "lucide-react";
 import type {
-  ApprovelItem,
   AutomationProposal,
   BrainRunDetail,
-  ComputerSession,
   LearningInsight,
-  MemorySummary,
   NavItem,
-  RuntimeHealth,
   SettingsSectionId,
-  TaskItem,
 } from "../types";
 
 // Static core nav. Plugin/addon entries (es. "Proattività") sono aggiunti a runtime
@@ -47,57 +38,6 @@ export const navItems: NavItem[] = [
   // di prima classe; i run si vedono nei thread. Manteniamo l'icona-calendario.
   { id: "automations", label: "nav.automations", icon: CalendarClock },
 ];
-
-export const computerSession: ComputerSession = {
-  id: "computer_active_prompt",
-  title: "Local computer",
-  subtitle: "Local session ready for prompt, shell and controlled browser",
-  status: "running",
-  activeSurface: "logs",
-  elapsed: "0s",
-  progressCurrent: 0,
-  progressTotal: 3,
-  previewTitle: "Local session",
-  previewDetail: "Waiting for user prompt.",
-  terminalExcerpt: [],
-  surfaces: [
-    {
-      id: "browser",
-      label: "Browser",
-      status: "idle",
-      detail: "Ready for controlled browser tasks",
-    },
-    {
-      id: "shell",
-      label: "Terminal",
-      status: "idle",
-      detail: "Ready for local checks",
-    },
-    {
-      id: "files",
-      label: "File",
-      status: "idle",
-      detail: "No artifacts yet",
-    },
-    {
-      id: "logs",
-      label: "Log",
-      status: "running",
-      detail: "Redacted prompt events",
-    },
-  ],
-  timeline: [
-    {
-      id: "ready",
-      surface: "logs",
-      title: "Local session ready",
-      detail: "Waiting for user prompt",
-      status: "done",
-      timestamp: "ora",
-    },
-  ],
-  artifacts: [],
-};
 
 export const brainRun: BrainRunDetail = {
   requestId: "req_acme_morning",
@@ -149,79 +89,6 @@ export const brainRun: BrainRunDetail = {
       status: "queued",
       detail: "Durable subagent task",
     },
-  ],
-};
-
-export const tasks: TaskItem[] = [
-  {
-    id: "task_prompt_session",
-    title: "Active local prompt",
-    kind: "local_prompt",
-    status: "running",
-    priority: "high",
-    resource: "shell_process",
-    risk: "low",
-    updated: "1 min ago",
-  },
-  {
-    id: "task_acme_summary",
-    title: "Acme operational summary",
-    kind: "subagent.ReviewAgent",
-    status: "waiting_user_approval",
-    priority: "normal",
-    resource: "llm_inference",
-    risk: "medium",
-    updated: "3 min ago",
-    blockedReason: "Confirmation needed before sending the summary to the team channel.",
-  },
-  {
-    id: "task_memory_index",
-    title: "Update project memory index",
-    kind: "memory_indexing",
-    status: "queued",
-    priority: "background",
-    resource: "memory_indexing",
-    risk: "low",
-    updated: "8 min ago",
-  },
-  {
-    id: "task_provider_health",
-    title: "Inference provider health check",
-    kind: "process.health",
-    status: "completed",
-    priority: "low",
-    resource: "background_maintenance",
-    risk: "low",
-    updated: "12 min ago",
-  },
-];
-
-export const approvals: ApprovelItem[] = [
-  {
-    id: "approval_acme",
-    taskId: "task_prompt_session",
-    title: "Send summary to Acme",
-    reason: "write_with_confirmation action toward messaging connector.",
-    action: "connector.write_with_confirmation",
-    boundary: "team_messaging",
-    risk: "medium",
-    requestedBy: "ReviewAgent",
-  },
-];
-
-export const runtimeHealth: RuntimeHealth[] = [
-  { label: "Model", status: "ready", detail: "Inference provider configured" },
-  { label: "Browser", status: "running", detail: "Assistant profile active" },
-  { label: "Task Runtime", status: "running", detail: "3 tasks queued" },
-];
-
-export const memorySummary: MemorySummary = {
-  confirmed: 184,
-  candidates: 12,
-  domains: [
-    { label: "work", count: 122 },
-    { label: "personal", count: 38 },
-    { label: "browser", count: 24 },
   ],
 };
 
@@ -349,15 +216,3 @@ export const settingsGroupLabels: Record<"account" | "capabilities", string> = {
   account: "settings.account",
   capabilities: "settings.capabilities",
 };
-
-export const drawerTasks = [
-  { id: "task_prompt_session", label: "Local prompt", active: true },
-  { id: "task_acme_summary", label: "Acme operational summary", active: false },
-  { id: "task_memory_index", label: "Project memory index", active: false },
-];
-
-export const drawerProjects = [
-  "homun",
-  "Acme workspace",
-  "Travel search",
-];
