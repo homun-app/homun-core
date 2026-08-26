@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const statusDoc = readFileSync(resolve(here, "../../../../docs/STATO.md"), "utf8");
-const rcBaselinePattern = /base `main` aggiornata a #405 \(`b76fe0d2`\), commit RC #406 `560845f9` verificato localmente e in CI/;
+const rcBaselinePattern = /base `main` aggiornata a #405 \(`b76fe0d2`\), PR #406 verificata localmente e in CI/;
 
 test("status doc records the merged legacy lifecycle cleanup", () => {
   assert.match(statusDoc, /#375/);
@@ -17,7 +17,7 @@ test("status doc records the merged legacy lifecycle cleanup", () => {
 test("status doc records a concrete current main baseline without stale slice branch", () => {
   assert.match(
     statusDoc,
-    /\| HEAD codice verificato \| base `main` aggiornata a #[0-9]+ \(`[0-9a-f]{8}`\), commit RC #[0-9]+ `[0-9a-f]{8}` verificato localmente e in CI \|/,
+    /\| HEAD codice verificato \| base `main` aggiornata a #[0-9]+ \(`[0-9a-f]{8}`\), PR #[0-9]+ verificata localmente e in CI \|/,
   );
   assert.doesNotMatch(statusDoc, /fabio\/status-after-ui-lifecycle-retirement/);
 });
@@ -37,7 +37,7 @@ test("status doc records the merged runtime view model turn contract", () => {
 test("status doc records the merged composer-mode presenter cleanup slice", () => {
   assert.match(statusDoc, /Slice UI composer-mode presenter contract mergeata #379/);
   assert.match(statusDoc, /Slice doc composer-mode owner cleanup mergeata #381/);
-  assert.match(statusDoc, /\| Branch \| `fabio\/rc-readiness-2026-08-26` candidato RC; da mergeare in `main` dopo PR #406 verde \|/);
+  assert.match(statusDoc, /\| Branch \| `fabio\/rc-readiness-2026-08-26` candidato RC; `main` dopo merge #406 \|/);
   assert.doesNotMatch(statusDoc, /fabio\/docs-composer-mode-owner-cleanup/);
   assert.doesNotMatch(statusDoc, /doc composer-mode owner cleanup in corso/);
   assert.doesNotMatch(statusDoc, /Slice locale UI composer-mode presenter contract in corso/);
@@ -151,7 +151,7 @@ test("status doc records the post chatApi non-browser audit boundary", () => {
 
 test("status doc records the RC readiness branch and live smoke evidence", () => {
   assert.match(statusDoc, /fabio\/rc-readiness-2026-08-26/);
-  assert.match(statusDoc, /#406 RC readiness aperta e verde/);
+  assert.match(statusDoc, /#406 RC readiness validata in PR/);
   assert.match(statusDoc, /CI e\s+build installer verdi/);
   assert.match(statusDoc, /preflight temporale reale/);
   assert.match(statusDoc, /plan_update` prima dell'apertura\s+browser/);
@@ -159,4 +159,5 @@ test("status doc records the RC readiness branch and live smoke evidence", () =>
   assert.match(statusDoc, /python3 scripts\/pre_release_gate\.py` -> `ALL GREEN`/);
   assert.doesNotMatch(statusDoc, /branch RC da aprire in PR/);
   assert.doesNotMatch(statusDoc, /pronto per PR dopo commit locale/);
+  assert.doesNotMatch(statusDoc, /commit RC #406 `[0-9a-f]{8}`/);
 });

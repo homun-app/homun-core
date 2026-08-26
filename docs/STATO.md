@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/rc-readiness-2026-08-26` candidato RC; da mergeare in `main` dopo PR #406 verde |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#405 mergeate in `main`; #406 RC readiness aperta e verde; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
-| HEAD codice verificato | base `main` aggiornata a #405 (`b76fe0d2`), commit RC #406 `560845f9` verificato localmente e in CI |
+| Branch | `fabio/rc-readiness-2026-08-26` candidato RC; `main` dopo merge #406 |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#405 mergeate in `main`; #406 RC readiness validata in PR; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
+| HEAD codice verificato | base `main` aggiornata a #405 (`b76fe0d2`), PR #406 verificata localmente e in CI |
 
 ## Dove siamo
 
@@ -1750,19 +1750,20 @@ PR mergeate:
 PR aperte:
 
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
-- #406 `Stabilize RC chat planning and browser flow`: PR RC aperta, CI e
-  build installer verdi, pronta per merge in `main`.
+- #406 `Stabilize RC chat planning and browser flow`: PR RC validata con CI e
+  build installer verdi; se non ancora mergeata, e' pronta per `main`.
 
 Baseline corrente:
 
 - `main` a #405 (`b76fe0d2`); audit finale non-browser post-#404 completato.
-- Diff RC `560845f9` verificato il 2026-08-26 con gate kernel,
-  pre-release gate, CI GitHub, build installer macOS/Linux/Windows e smoke
-  reali gateway/UI su `electron:dev`.
+- Diff RC #406 verificato il 2026-08-26 con gate kernel, pre-release gate, CI
+  GitHub, build installer macOS/Linux/Windows e smoke reali gateway/UI su
+  `electron:dev`.
 
 ## Debito residuo
 
-- Mergeare #406 in `main` dopo la verifica finale dello stato PR.
+- Se #406 non e' ancora mergeata, mergearla in `main` dopo la verifica finale
+  dello stato PR.
 - Eseguire profilo upgrade isolato su build installata, non sul profilo reale
   dell'utente.
 - Decidere il claim pubblico del browser: Selenium/stable browser smoke e'
@@ -1846,7 +1847,8 @@ Baseline corrente:
 
 ## Prossimo lavoro
 
-1. Mergeare #406 in `main` e riallineare il worktree locale.
+1. Se #406 non e' ancora mergeata, mergearla in `main` e riallineare il
+   worktree locale.
 2. Scaricare/installare gli artifact RC prodotti dalla matrice e validare il
    profilo upgrade isolato secondo `docs/testing/release-candidate-matrix.md`.
 3. Prima della produzione pubblica, eseguire QA su build installata con profilo
@@ -1858,9 +1860,9 @@ Baseline corrente:
 Continuo Homun RC readiness. Repo: /Users/fabio/Projects/Homun/app,
 branch `fabio/rc-readiness-2026-08-26` su base main #405 (`b76fe0d2`),
 PR #406 verde su CI, release readiness e build installer macOS/Linux/Windows.
-Prossimo passo: merge #406 in main, poi QA su build installata con profilo
-isolato; i gate locali `kernel_regression_gate.py` e `pre_release_gate.py`
-erano verdi il 2026-08-26.
+Prossimo passo: se #406 non e' ancora mergeata, mergearla in main; poi QA su
+build installata con profilo isolato. I gate locali `kernel_regression_gate.py`
+e `pre_release_gate.py` erano verdi il 2026-08-26.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
