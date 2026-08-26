@@ -201,6 +201,7 @@ pub(crate) fn load_turn_effect_contract(
 pub(crate) struct BrowserToolCtx<'a> {
     pub(crate) browser_used: &'a mut bool,
     pub(crate) last_snapshot: &'a mut String,
+    pub(crate) last_snapshot_semantic_fingerprint: &'a mut String,
     // Machine-derived payment floor refs (never label text), keyed by `target_id`
     // (Build1 Fix 3 — mirrors `payment_context_by_target` below; a single global
     // set let observing tab A clobber tab B's floor). Raises (never lowers) the
@@ -1169,6 +1170,8 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             (None, Ok(value)) => {
                                 let snap = browser_snapshot_text(&value);
                                 if !snap.is_empty() {
+                                    *ctx.last_snapshot_semantic_fingerprint =
+                                        browser_snapshot_semantic_fingerprint(&snap);
                                     *ctx.last_snapshot = snap.clone();
                                     browser_set_target_floor(
                                         ctx.payment_floor_refs,
@@ -1266,6 +1269,8 @@ or tell the user to start the contained computer (Settings → Local computer)."
                         Ok(value) => {
                             let snap = browser_snapshot_text(&value);
                             if !snap.is_empty() {
+                                *ctx.last_snapshot_semantic_fingerprint =
+                                    browser_snapshot_semantic_fingerprint(&snap);
                                 *ctx.last_snapshot = snap.clone();
                                 browser_set_target_floor(
                                     ctx.payment_floor_refs,
@@ -1857,10 +1862,15 @@ navigate elsewhere to work around it.",
                                 Ok(value) => {
                                     let snap = browser_snapshot_text(&value);
                                     // No-progress detection: if the action left
-                                    // the page identical, nudge the model to try
-                                    // a different element/approach instead of
-                                    // repeating the same move.
-                                    let no_change = !snap.is_empty() && snap == *ctx.last_snapshot;
+                                    // the page semantically identical, nudge the model to try a
+                                    // different element/approach instead of treating SPA ref churn as
+                                    // real progress.
+                                    let snap_semantic_fingerprint =
+                                        browser_snapshot_semantic_fingerprint(&snap);
+                                    let no_change = !snap.is_empty()
+                                        && !ctx.last_snapshot_semantic_fingerprint.is_empty()
+                                        && snap_semantic_fingerprint
+                                            == *ctx.last_snapshot_semantic_fingerprint;
                                     if targeted_floored_ref {
                                         browser_mark_target_acted_floored(
                                             ctx.payment_context_by_target,
@@ -1868,6 +1878,8 @@ navigate elsewhere to work around it.",
                                         );
                                     }
                                     if !snap.is_empty() {
+                                        *ctx.last_snapshot_semantic_fingerprint =
+                                            snap_semantic_fingerprint;
                                         *ctx.last_snapshot = snap.clone();
                                         browser_set_target_floor(
                                             ctx.payment_floor_refs,
@@ -2075,6 +2087,10 @@ chosen. Otherwise try a different element, scroll, or wait (kind=wait).]",
                                                         browser_act_error_hint(&error)
                                                     ))
                                                 } else {
+                                                    *ctx.last_snapshot_semantic_fingerprint =
+                                                        browser_snapshot_semantic_fingerprint(
+                                                            &snap,
+                                                        );
                                                     *ctx.last_snapshot = snap.clone();
                                                     browser_set_target_floor(
                                                         ctx.payment_floor_refs,
@@ -4207,7 +4223,12 @@ an uncertain date.",
         };
         // The plan's `goal` rides the canonical plan Value: a sent goal (plan creation)
         // wins, else preserve whatever goal the canonical plan already carries.
-        let plan_goal: Option<String> = sent_goal.or_else(|| plan_value_goal(ctx.plan));
+        let plan_goal = resolve_plan_goal_for_turn(
+            sent_goal,
+            plan_value_goal(ctx.plan),
+            objective_contract_for_execution(ctx.state, ctx.thread_id)
+                .map(|record| record.objective),
+        );
         // 5d.1b: work on a LOCAL copy of the plan (merge mutates in place, and the arm rereads it
         // below); the final plan is returned as an effect (`effects.plan`) and applied after the call.
         // P5: `ctx.plan` is now the opaque `Value`; convert to the typed plan the merge needs.
@@ -5659,6 +5680,35 @@ pub(crate) fn objective_contract_for_execution(
         })
 }
 
+pub(crate) fn resolve_plan_goal_for_turn(
+    sent_goal: Option<String>,
+    existing_plan_goal: Option<String>,
+    objective_goal: Option<String>,
+) -> Option<String> {
+    let objective_goal = objective_goal
+        .map(|goal| goal.trim().to_string())
+        .filter(|goal| !goal.is_empty());
+    let sent_goal = sent_goal
+        .map(|goal| goal.trim().to_string())
+        .filter(|goal| !goal.is_empty());
+
+    match sent_goal {
+        Some(goal) => {
+            if objective_goal.as_ref().is_some_and(|objective| {
+                semantic_decision::request_is_contextual_followup(&goal, objective)
+            }) {
+                objective_goal
+            } else {
+                Some(goal)
+            }
+        }
+        None => existing_plan_goal
+            .map(|goal| goal.trim().to_string())
+            .filter(|goal| !goal.is_empty())
+            .or(objective_goal),
+    }
+}
+
 impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
     async fn execute_tool(
         &self,
@@ -6071,6 +6121,65 @@ fn browser_action_repeat_signature(args_raw: &str) -> String {
     }
 }
 
+pub(crate) fn browser_snapshot_semantic_fingerprint(snapshot: &str) -> String {
+    let mut normalized = String::new();
+    let mut last_was_space = false;
+    for raw_line in snapshot.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with("[page:") || line.starts_with("[page stats:") {
+            continue;
+        }
+        let mut chars = line.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '[' {
+                let mut bracket = String::from("[");
+                for next in chars.by_ref() {
+                    bracket.push(next);
+                    if next == ']' {
+                        break;
+                    }
+                }
+                let ref_token = bracket
+                    .strip_prefix("[ref=e")
+                    .and_then(|rest| rest.strip_suffix(']'));
+                if ref_token.is_some_and(|rest| {
+                    let rest = rest.strip_suffix('*').unwrap_or(rest);
+                    !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
+                }) {
+                    continue;
+                }
+                for bracket_ch in bracket.chars() {
+                    append_normalized_snapshot_char(
+                        &mut normalized,
+                        &mut last_was_space,
+                        bracket_ch,
+                    );
+                }
+                continue;
+            }
+            append_normalized_snapshot_char(&mut normalized, &mut last_was_space, ch);
+        }
+        append_normalized_snapshot_char(&mut normalized, &mut last_was_space, '\n');
+    }
+
+    let stable = normalized.trim();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(&stable, &mut hasher);
+    format!("{:016x}", std::hash::Hasher::finish(&hasher))
+}
+
+fn append_normalized_snapshot_char(target: &mut String, last_was_space: &mut bool, ch: char) {
+    if ch.is_whitespace() {
+        if !*last_was_space {
+            target.push(' ');
+            *last_was_space = true;
+        }
+    } else {
+        target.push(ch);
+        *last_was_space = false;
+    }
+}
+
 pub(crate) fn repeated_browser_action_nudge(
     recent_action_signatures: &mut std::collections::VecDeque<String>,
     tool_name: &str,
@@ -6207,6 +6316,7 @@ Do not repeat it; change strategy, change source, or call browser_done with curr
 pub(crate) struct GatewayBrowserExecutor<'a> {
     pub(crate) browser_session: Option<BrowserAutomationClient<BrowserSidecarSession>>,
     pub(crate) last_snapshot: String,
+    pub(crate) last_snapshot_semantic_fingerprint: String,
     pub(crate) browse_sources: Vec<String>,
     // Machine-derived payment floor refs for the last observation (act/navigate/
     // snapshot), keyed by `target_id` (Build1 Fix 3). Was a single global
@@ -6343,6 +6453,7 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
             let mut bctx = BrowserToolCtx {
                 browser_used: &mut ls.browser_used,
                 last_snapshot: &mut self.last_snapshot,
+                last_snapshot_semantic_fingerprint: &mut self.last_snapshot_semantic_fingerprint,
                 payment_floor_refs: &mut self.last_payment_floor_refs,
                 payment_context_by_target: &mut self.payment_context_by_target,
                 pending_browser_image: &mut ls.pending_browser_image,
@@ -6518,6 +6629,7 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
             let mut bctx = BrowserToolCtx {
                 browser_used: &mut ls.browser_used,
                 last_snapshot: &mut self.last_snapshot,
+                last_snapshot_semantic_fingerprint: &mut self.last_snapshot_semantic_fingerprint,
                 payment_floor_refs: &mut self.last_payment_floor_refs,
                 payment_context_by_target: &mut self.payment_context_by_target,
                 pending_browser_image: &mut ls.pending_browser_image,
@@ -7086,6 +7198,7 @@ impl GatewayBrowseExecutor<'_> {
         GatewayBrowserExecutor {
             browser_session: None,
             last_snapshot: String::new(),
+            last_snapshot_semantic_fingerprint: String::new(),
             browse_sources: Vec::new(),
             last_payment_floor_refs: std::collections::HashMap::new(),
             payment_context_by_target: std::collections::HashMap::new(),

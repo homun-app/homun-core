@@ -1,4 +1,5 @@
 import { useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import { PanelLeftOpen, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { NavDrawer, SettingsDrawer } from "./Sidebar";
 import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
@@ -70,6 +71,7 @@ export function Shell({
 }: ShellProps) {
   const { t } = useTranslation();
   const isSettings = activeView === "settings";
+  const showCollapsedShellControls = !drawerOpen && !isSettings && activeView !== "chat";
   const shellRef = useRef<HTMLDivElement>(null);
   const [drawerWidth, setDrawerWidth] = useState(readStoredDrawerWidth);
 
@@ -122,8 +124,30 @@ export function Shell({
           <div className="window-drag-strip window-drag-strip--right" aria-hidden="true" />
         </div>
       )}
-      {/* Collapsed-state reopen + search now live INSIDE the chat header (ChatView), rendered
-          as no-drag children of the titlebar so the drag region can't swallow their clicks. */}
+      {/* Chat owns its collapsed controls inside ChatTopbar. Secondary views have no
+          chat header, so Shell provides the same recovery controls for the closed drawer. */}
+      {showCollapsedShellControls && (
+        <span className="shell-collapsed-controls">
+          <button
+            type="button"
+            className="task-collapsed-action"
+            aria-label={t("sidebar.expandSidebar")}
+            title={t("sidebar.expandSidebar")}
+            onClick={onToggleDrawer}
+          >
+            <PanelLeftOpen size={17} />
+          </button>
+          <button
+            type="button"
+            className="task-collapsed-action"
+            aria-label={t("sidebar.search")}
+            title={t("sidebar.search")}
+            onClick={onSearchChat}
+          >
+            <Search size={17} />
+          </button>
+        </span>
+      )}
       {drawerOpen && !isSettings && (
         <NavDrawer
           activeView={activeView}

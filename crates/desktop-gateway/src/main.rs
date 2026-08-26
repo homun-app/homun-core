@@ -173,6 +173,7 @@ mod gateway_task_executor_config;
 mod gateway_task_inputs;
 mod gateway_task_maintenance;
 mod gateway_template_catalog;
+mod gateway_temporal_preflight;
 mod gateway_text_safety;
 mod gateway_thread_episodes;
 mod gateway_thread_files;
@@ -1801,6 +1802,16 @@ async fn stream_chat_via_openai(
     let resume_id = transport.resume_id;
     let tx = transport.sink;
     let rx = transport.receiver;
+    if let gateway_temporal_preflight::TemporalPreflightOutcome::EarlyResponse(event) =
+        gateway_temporal_preflight::evaluate_chat_temporal_preflight(request.prompt.as_str())
+    {
+        let _ = emit_stream_event(&tx, event).await;
+        schedule_stream_registry_cleanup(resume_id.clone());
+        return Ok(chat_stream_response_with_effective_model(
+            rx,
+            "temporal_preflight",
+        ));
+    }
     if let PrivacyGuardPreflightOutcome::EarlyResponse(response) =
         evaluate_chat_privacy_guard_preflight(ChatPrivacyGuardPreflightInput {
             http: &state.http,
@@ -2132,6 +2143,7 @@ async fn run_agent_rounds(
     let mut browser_executor = GatewayBrowserExecutor {
         browser_session: None,
         last_snapshot: String::new(),
+        last_snapshot_semantic_fingerprint: String::new(),
         browse_sources: Vec::new(),
         last_payment_floor_refs: std::collections::HashMap::new(),
         payment_context_by_target: std::collections::HashMap::new(),

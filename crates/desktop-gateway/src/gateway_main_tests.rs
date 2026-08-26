@@ -16,21 +16,22 @@ use super::{
     active_llm_concurrency, aggregate_session_state_from_counts, block_stalled_step,
     brain_budgets_for_context_window, browser_anti_loop_nudge, browser_capability_action_refusal,
     browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
-    browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_browse_goal,
-    build_memory_source_grant, build_plan_markdown, classify_connector_error, clawhub_origin,
-    collect_member_counts, command_output_with_timeout, composio_tool_is_read,
-    connector_error_hint, default_browser_headless_value, delegated_browse_tool_outcome,
-    delete_workspace, earlier_browse_call_in_current_round, extract_source_urls, fonti_section,
-    format_memory_block, gateway_memory_user_id, humanize_task_kind, inbound_action,
-    is_internal_task_kind, is_low_value_source_url, is_semantic_duplicate, jail_in_root,
-    llm_concurrency_view, mcp_error_hint, mcp_provider_slug, mcp_stdio_config_from_metadata,
-    mcp_stdio_config_to_metadata, memory_bench_ingest, memory_bench_search, memory_bench_status,
-    memory_facade, memory_source_candidates_from_records, memory_source_facade_error,
-    memory_source_grant_views, memory_sources_flag, memorybench_workspace_id, merge_plan,
-    next_plan_stall, next_ready_task_across_workspaces, normalize_for_dedup, parse_plan_marker,
-    parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_stall_exhausted,
-    plan_step_status, project_filesystem_mcp_instruction, prune_browser_history,
-    redact_sensitive_text, repeated_browser_action_nudge, repeated_browser_failed_action_nudge,
+    browser_snapshot_semantic_fingerprint, browser_snapshot_text, browser_targets_for_goal,
+    browser_url_for_goal, build_browse_goal, build_memory_source_grant, build_plan_markdown,
+    classify_connector_error, clawhub_origin, collect_member_counts, command_output_with_timeout,
+    composio_tool_is_read, connector_error_hint, default_browser_headless_value,
+    delegated_browse_tool_outcome, delete_workspace, earlier_browse_call_in_current_round,
+    extract_source_urls, fonti_section, format_memory_block, gateway_memory_user_id,
+    humanize_task_kind, inbound_action, is_internal_task_kind, is_low_value_source_url,
+    is_semantic_duplicate, jail_in_root, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
+    mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_bench_ingest,
+    memory_bench_search, memory_bench_status, memory_facade, memory_source_candidates_from_records,
+    memory_source_facade_error, memory_source_grant_views, memory_sources_flag,
+    memorybench_workspace_id, merge_plan, next_plan_stall, next_ready_task_across_workspaces,
+    normalize_for_dedup, parse_plan_marker, parse_review_suggestion, plan_done_count,
+    plan_incomplete_reason, plan_stall_exhausted, plan_step_status,
+    project_filesystem_mcp_instruction, prune_browser_history, redact_sensitive_text,
+    repeated_browser_action_nudge, repeated_browser_failed_action_nudge,
     requeue_waiting_resource_tasks, response_language_instruction, rewrite_confirm_to_done,
     run_bash_unsandboxed_result, sanitize_dedup_key, scheduled_thread_sender_for_task_id,
     scheduled_thread_title, search_composio_catalog, should_try_tool_compatibility_fallback,
@@ -4695,6 +4696,7 @@ fn browser_act_receipt_effect_class_follows_action_risk() {
     let journal = super::agent_journal::GatewayJournal::Disabled;
     let mut browser_used = false;
     let mut last_snapshot = String::new();
+    let mut last_snapshot_semantic_fingerprint = String::new();
     let mut floor_refs = std::collections::HashMap::new();
     let mut payment_contexts = std::collections::HashMap::new();
     let mut pending_image = None;
@@ -4707,6 +4709,7 @@ fn browser_act_receipt_effect_class_follows_action_risk() {
     let ctx = super::BrowserToolCtx {
         browser_used: &mut browser_used,
         last_snapshot: &mut last_snapshot,
+        last_snapshot_semantic_fingerprint: &mut last_snapshot_semantic_fingerprint,
         payment_floor_refs: &mut floor_refs,
         payment_context_by_target: &mut payment_contexts,
         pending_browser_image: &mut pending_image,
@@ -4895,6 +4898,7 @@ fn browser_act_pre_dispatch_failure_releases_the_effect_without_suspension() {
     let journal = super::agent_journal::GatewayJournal::Disabled;
     let mut browser_used = false;
     let mut last_snapshot = String::new();
+    let mut last_snapshot_semantic_fingerprint = String::new();
     let mut floor_refs = std::collections::HashMap::new();
     let mut payment_contexts = std::collections::HashMap::new();
     let mut pending_image = None;
@@ -4907,6 +4911,7 @@ fn browser_act_pre_dispatch_failure_releases_the_effect_without_suspension() {
     let ctx = super::BrowserToolCtx {
         browser_used: &mut browser_used,
         last_snapshot: &mut last_snapshot,
+        last_snapshot_semantic_fingerprint: &mut last_snapshot_semantic_fingerprint,
         payment_floor_refs: &mut floor_refs,
         payment_context_by_target: &mut payment_contexts,
         pending_browser_image: &mut pending_image,
@@ -4976,6 +4981,7 @@ fn browser_act_ambiguous_failure_stays_uncertain_and_suspends() {
     let journal = super::agent_journal::GatewayJournal::Disabled;
     let mut browser_used = false;
     let mut last_snapshot = String::new();
+    let mut last_snapshot_semantic_fingerprint = String::new();
     let mut floor_refs = std::collections::HashMap::new();
     let mut payment_contexts = std::collections::HashMap::new();
     let mut pending_image = None;
@@ -4988,6 +4994,7 @@ fn browser_act_ambiguous_failure_stays_uncertain_and_suspends() {
     let mut ctx = super::BrowserToolCtx {
         browser_used: &mut browser_used,
         last_snapshot: &mut last_snapshot,
+        last_snapshot_semantic_fingerprint: &mut last_snapshot_semantic_fingerprint,
         payment_floor_refs: &mut floor_refs,
         payment_context_by_target: &mut payment_contexts,
         pending_browser_image: &mut pending_image,
@@ -15779,6 +15786,32 @@ fn step_advance_requires_a_target_and_normalizes_common_adapter_aliases() {
 }
 
 #[test]
+fn contextual_plan_goal_uses_the_canonical_objective() {
+    let resolved = super::resolve_plan_goal_for_turn(
+        Some("prova per il 30 stessa ora".to_string()),
+        None,
+        Some("Cerca opzioni di treno Milano-Roma per il 30 agosto 2026 verso le 8:00, leggi i risultati e riporta 3-5 opzioni utili con fonti, senza prenotare o comprare nulla.".to_string()),
+    );
+
+    assert_eq!(
+        resolved.as_deref(),
+        Some(
+            "Cerca opzioni di treno Milano-Roma per il 30 agosto 2026 verso le 8:00, leggi i risultati e riporta 3-5 opzioni utili con fonti, senza prenotare o comprare nulla."
+        )
+    );
+
+    let complete_user_goal = super::resolve_plan_goal_for_turn(
+        Some("Analizza il refactor gateway e proponi i prossimi test".to_string()),
+        None,
+        Some("Router summary".to_string()),
+    );
+    assert_eq!(
+        complete_user_goal.as_deref(),
+        Some("Analizza il refactor gateway e proponi i prossimi test")
+    );
+}
+
+#[test]
 fn plan_stall_counts_no_progress_resumes_and_resets_on_progress() {
     // No progress (done-count unchanged across resumes) accumulates; the cap trips.
     let mut stall = 0;
@@ -22420,6 +22453,94 @@ fn broker_enqueue_preallocates_one_linked_user_and_assistant() {
     );
 }
 
+#[tokio::test]
+async fn broker_temporal_preflight_completes_past_slot_without_task_or_browser_lease() {
+    let _env = TestEnv::acquire();
+    let root = isolated_gateway_test_dir("broker-temporal-preflight");
+    std::fs::create_dir_all(&root).unwrap();
+    let database = root.join("homun.sqlite");
+    let chat = ChatStore::open(&database).unwrap();
+    let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
+    let thread = chat.create_thread("workspace_test").unwrap();
+    let mut state = AppState::for_tests();
+    state.chat_store = std::sync::Arc::new(std::sync::Mutex::new(chat));
+    state.task_store = std::sync::Arc::new(std::sync::Mutex::new(tasks));
+    let request_id = "past-slot";
+    let turn_id = local_first_task_runtime::broker::chat_turn_task_id(request_id);
+    let user_id = super::gateway_user_id();
+    let workspace_id = local_first_task_runtime::WorkspaceId::new("workspace_test");
+
+    let (status, Json(body)) = super::enqueue_turn(
+        State(state.clone()),
+        Json(local_first_desktop_gateway::EnqueueTurnRequest {
+            thread_id: thread.thread_id.clone(),
+            request_id: Some(request_id.to_string()),
+            prompt: "mi trovi un treno da Milano a Roma per il 1 gennaio 2020 verso le 8 del mattino. Cerca e leggi i risultati, non prenotare e non comprare nulla.".to_string(),
+            visible_prompt: None,
+            images: Vec::new(),
+            attachments: None,
+            mode: None,
+            model: None,
+            source: Some("interactive".to_string()),
+            routing_binding: None,
+        }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(status, axum::http::StatusCode::CREATED);
+    assert_eq!(body["status"], "queued");
+    assert_eq!(body["turn_id"], turn_id.as_str());
+
+    let task_store = state.task_store.lock().unwrap();
+    assert!(
+        task_store
+            .get_task(&turn_id, &user_id, &workspace_id)
+            .unwrap()
+            .is_none(),
+        "temporal preflight must not create a runnable chat_turn task",
+    );
+    assert_eq!(
+        task_store
+            .resource_usage(
+                &user_id,
+                &workspace_id,
+                local_first_task_runtime::ResourceClass::BrowserSession,
+            )
+            .unwrap(),
+        0,
+        "temporal preflight must not reserve the browser",
+    );
+    let events = task_store.read_turn_events(turn_id.as_str(), 0).unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].kind,
+        local_first_task_runtime::TurnEventKind::Done
+    );
+    assert!(
+        events[0].payload["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("gia' nel passato")
+    );
+    drop(task_store);
+
+    let messages = super::lock_store(&state)
+        .unwrap()
+        .messages(&thread.thread_id)
+        .unwrap()
+        .messages;
+    let assistant = messages
+        .iter()
+        .find(|message| message.id == "local_assistant_past-slot")
+        .expect("preflight assistant message");
+    assert_eq!(
+        assistant.delivery_state,
+        local_first_desktop_gateway::MessageDeliveryState::Delivered
+    );
+    assert!(assistant.text.contains("gia' nel passato"));
+}
+
 #[test]
 fn chat_turn_delivery_transitions_target_the_preallocated_assistant() {
     let state = AppState::for_tests();
@@ -24867,6 +24988,50 @@ fn repeated_browser_action_nudge_resets_on_different_action_signature() {
         repeated_browser_action_nudge(&mut recent, "browser_act", milano, 3)
             .0
             .is_none()
+    );
+}
+
+#[test]
+fn browser_snapshot_semantic_fingerprint_ignores_ref_churn_and_headers() {
+    let first = r#"
+title: Biglietti treni e pullman in Italia e Europa, orari e offerte | Trainline
+[page stats: scrollY=0 scrollHeight=4210 clientHeight=900 interactive=91 total=550]
+- textbox "Da" [ref=e12]: Milano Centrale
+- option "Milano Centrale" [ref=e51*]
+- textbox "A" [ref=e15]: Roma Termini
+- button "Cerca" [ref=e80]
+"#;
+    let second = r#"
+title: Biglietti treni e pullman in Italia e Europa, orari e offerte | Trainline
+[page stats: scrollY=12 scrollHeight=4218 clientHeight=900 interactive=93 total=557]
+- textbox "Da" [ref=e112]: Milano Centrale
+- option "Milano Centrale" [ref=e151]
+- textbox "A" [ref=e115]: Roma Termini
+- button "Cerca" [ref=e180*]
+"#;
+
+    assert_eq!(
+        browser_snapshot_semantic_fingerprint(first),
+        browser_snapshot_semantic_fingerprint(second)
+    );
+}
+
+#[test]
+fn browser_snapshot_semantic_fingerprint_changes_for_real_page_progress() {
+    let form = r#"
+- textbox "Da" [ref=e12]: Milano Centrale
+- textbox "A" [ref=e15]: Roma Termini
+- button "Cerca" [ref=e80]
+"#;
+    let results = r#"
+- heading "Milano Centrale a Roma Termini" [ref=e12]
+- text "08:10 Frecciarossa 9613 durata 3h 10m" [ref=e15]
+- button "Seleziona" [ref=e80]
+"#;
+
+    assert_ne!(
+        browser_snapshot_semantic_fingerprint(form),
+        browser_snapshot_semantic_fingerprint(results)
     );
 }
 

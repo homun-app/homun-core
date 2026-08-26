@@ -83,19 +83,31 @@ fn runtime_plan_steps(plan: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-fn kernel_plan_step_status(raw_status: Option<&str>, turn_is_terminal: bool) -> String {
+fn kernel_plan_step_status(
+    raw_status: Option<&str>,
+    turn_is_terminal: bool,
+    terminal_reason: Option<&str>,
+) -> String {
     let status = raw_status
         .map(str::trim)
         .filter(|status| !status.is_empty())
         .unwrap_or("todo");
     if turn_is_terminal && matches!(status, "doing" | "in_progress" | "in-progress") {
-        "blocked".to_string()
+        if terminal_reason == Some("canonical_completed") {
+            "done".to_string()
+        } else {
+            "blocked".to_string()
+        }
     } else {
         status.to_string()
     }
 }
 
-fn kernel_plan_view(plan: &RuntimePlanRecord, turn_is_terminal: bool) -> Option<KernelPlanView> {
+fn kernel_plan_view(
+    plan: &RuntimePlanRecord,
+    turn_is_terminal: bool,
+    terminal_reason: Option<&str>,
+) -> Option<KernelPlanView> {
     let steps = runtime_plan_steps(&plan.plan_json)
         .into_iter()
         .enumerate()
@@ -116,6 +128,7 @@ fn kernel_plan_view(plan: &RuntimePlanRecord, turn_is_terminal: bool) -> Option<
             let status = kernel_plan_step_status(
                 step.get("status").and_then(Value::as_str),
                 turn_is_terminal,
+                terminal_reason,
             );
             let detail = step
                 .get("detail")
@@ -4223,6 +4236,7 @@ impl TaskStore {
             uncertain_effects: &reducer_effects,
             terminal_reason: terminal_reason.as_deref(),
         });
+        let terminal_reason_for_projection = reduced.terminal_reason.clone();
         let pending_approvals = match (latest_turn_id.as_deref(), latest_turn_record.as_ref()) {
             (Some(turn_id), Some(task)) => {
                 let mut stmt = self.connection.prepare(
@@ -4333,7 +4347,13 @@ impl TaskStore {
         let plan = latest_runtime_plan
             .as_ref()
             .filter(|plan| plan.status == "open")
-            .and_then(|plan| kernel_plan_view(plan, reduced.turn.is_terminal));
+            .and_then(|plan| {
+                kernel_plan_view(
+                    plan,
+                    reduced.turn.is_terminal,
+                    terminal_reason_for_projection.as_deref(),
+                )
+            });
         let mut sub_stmt = self.connection.prepare(
             "SELECT kind, status, task_json, blocked_reason, created_at, updated_at FROM tasks
              WHERE thread_id = ?1 AND kind LIKE 'subagent.%'
@@ -4395,7 +4415,7 @@ impl TaskStore {
             browser: project_kernel_browser_view(
                 &latest_turn_events,
                 browser_checkpoint.as_ref(),
-                terminal_reason.as_deref(),
+                terminal_reason_for_projection.as_deref(),
             ),
             capability_runtime: project_kernel_capability_runtime(&latest_turn_events),
             attention: KernelAttentionView {
@@ -7328,12 +7348,12 @@ mod chat_turn_query_tests {
         let plan = projection.plan.as_ref().unwrap();
         assert_eq!(plan.steps[0].status, "done");
         assert_eq!(
-            plan.steps[1].status, "blocked",
-            "terminal turns must not expose an active plan step to the UI"
+            plan.steps[1].status, "done",
+            "canonical_completed terminal turns should close the active display step"
         );
         assert!(
-            plan.markdown.contains("- [!] **Leggi risultati** (`s2`)"),
-            "terminal plan markdown must match the projected blocked step"
+            plan.markdown.contains("- [x] **Leggi risultati** (`s2`)"),
+            "canonical_completed terminal turns should render the active step as done"
         );
         assert!(
             projection.attention.awaiting_user,
@@ -7345,6 +7365,76 @@ mod chat_turn_query_tests {
             "read uncertainty must be filtered out of user-visible attention"
         );
         assert_eq!(projection.attention.approvals.len(), 1);
+    }
+
+    #[test]
+    fn kernel_thread_projection_terminal_turn_blocks_active_plan_step_when_not_canonical_completed()
+    {
+        let s = store();
+        let task = make_chat_turn(
+            "turn_kernel_projection_failed",
+            "threadKernelProjectionFailure",
+            TaskStatus::Running,
+        );
+        s.insert_chat_turn(
+            &task,
+            "threadKernelProjectionFailure",
+            "req-kernel-projection-failed",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.upsert_runtime_plan(
+            "u",
+            "w",
+            "threadKernelProjectionFailure",
+            0,
+            &json!({
+                "goal": "verifica stato",
+                "steps": [
+                    {"id": "s1", "title": "Fase iniziale", "status": "done", "detail": "ok"},
+                    {"id": "s2", "title": "Verifica finale", "status": "doing", "detail": "in corso"}
+                ]
+            }),
+            "open",
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_kernel_projection_failed",
+            TurnEventKind::Done,
+            json!({"text": "risultato"}),
+        )
+        .unwrap();
+        s.create_agent_run(&NewAgentRun {
+            run_id: "run-kernel-projection-failed".into(),
+            turn_id: "turn_kernel_projection_failed".into(),
+            thread_id: "threadKernelProjectionFailure".into(),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            role: None,
+            model: Some("test-model".into()),
+            provider: Some("test-provider".into()),
+            prompt_fingerprint: None,
+        })
+        .unwrap();
+        s.finish_agent_run(
+            "run-kernel-projection-failed",
+            AgentRunStatus::Completed,
+            Some("gateway_restart"),
+        )
+        .unwrap();
+
+        let projection = s
+            .project_kernel_thread("threadKernelProjectionFailure", 200)
+            .unwrap();
+        assert_eq!(projection.turn.status, "completed");
+        assert_eq!(
+            projection.turn.terminal_reason.as_deref(),
+            Some("gateway_restart")
+        );
+        let plan = projection.plan.as_ref().unwrap();
+        assert_eq!(plan.steps[1].status, "blocked");
+        assert!(plan.markdown.contains("- [!] **Verifica finale** (`s2`)"));
     }
 
     #[test]

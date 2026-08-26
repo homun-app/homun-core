@@ -451,6 +451,62 @@ fn request_is_complex(user_message: &str, calls: &[serde_json::Value]) -> bool {
     distinct_tools.len() >= 2
 }
 
+fn bootstrap_plan_steps_for_unplanned_work() -> Vec<serde_json::Value> {
+    vec![
+        serde_json::json!({
+            "id": "validate_request",
+            "title": "Validate request constraints",
+            "status": "done",
+            "detail": "Confirm the objective and blocking constraints before using external tools.",
+            "done_criterion": "The user request has enough concrete constraints to start safely."
+        }),
+        serde_json::json!({
+            "id": "execute_work",
+            "title": "Execute the requested work",
+            "status": "doing",
+            "detail": "Use the necessary tools to gather or produce the requested result.",
+            "done_criterion": "The required data or artifact exists and is grounded in tool output."
+        }),
+        serde_json::json!({
+            "id": "verify_and_answer",
+            "title": "Verify and answer",
+            "status": "todo",
+            "detail": "Check the result against the request and provide the final answer.",
+            "done_criterion": "The final answer includes the verified result and any relevant sources or caveats."
+        }),
+    ]
+}
+
+async fn bootstrap_plan_before_work_tool(
+    ls: &mut LoopState,
+    plan_progress: &impl PlanProgress,
+    execution_journal: &impl ExecutionJournal,
+    event_sink: &impl EventSink,
+    thread_id: Option<&str>,
+    memory_user_message: &str,
+    round: usize,
+) {
+    let steps = bootstrap_plan_steps_for_unplanned_work();
+    let goal = memory_user_message
+        .split_whitespace()
+        .take(36)
+        .collect::<Vec<_>>()
+        .join(" ");
+    ls.plan = plan_progress.plan_value_from_steps(Some(&goal), &steps);
+    plan_progress
+        .persist_plan(thread_id, Some(&goal), &steps)
+        .await;
+    event_sink
+        .emit(GenerateStreamEvent::PlanUpdate {
+            markdown: build_plan_markdown(Some(&goal), &steps),
+        })
+        .await;
+    execution_journal.record(AgentExecutionEvent::PlanUpdated {
+        round,
+        source: "bootstrap_before_work_tool".to_string(),
+    });
+}
+
 fn browser_exhausted_fallback_answer(
     loop_exit: Option<&str>,
     grounded_browse: Option<&crate::BrowseResult>,
@@ -571,12 +627,11 @@ where
     let mut clarify_card_nudges: u32 = 0;
     let mut resolved_hitl_nudges: u32 = 0;
     let mut grounded_browse_result: Option<crate::BrowseResult> = None;
-    // Plan-before-act gate: fires at most once per turn. When the model tries to execute a
-    // "work" tool before creating a plan (and the request is complex), the gate blocks the
-    // call, injects a "plan first" directive, and lets the loop re-ask the model. Once fired
-    // it stays `true` so the model gets exactly one chance — if it ignores the nudge the next
-    // work tool passes through (no infinite block loop).
-    let mut plan_gate_fired = false;
+    // Plan-before-act gate: when a complex turn starts with a work tool and no
+    // canonical plan, the loop bootstraps a minimal plan itself before dispatch.
+    // The model may refine it later, but external tools never begin while the UI
+    // still has no plan state to project.
+    let mut plan_bootstrapped_before_work = false;
     // Task #8/#9: replan directive injection — fires at most once per turn. When consecutive
     // tool failures (same family or cross-family) exceed the threshold, inject a "revise the plan"
     // directive and continue the loop instead of stopping. Once fired, stays true so the model
@@ -1055,59 +1110,29 @@ again to find the right control). Keep working on the task — do not stop and d
                     };
 
                     // Plan-before-act gate (ADR 0021, single-loop): before dispatching a
-                    // “work” tool, check if a plan exists. If not AND the request is complex,
-                    // block the call and ask the model to plan first. Fires at most once per
-                    // turn (`plan_gate_fired`). Introspective/planning tools are exempt — the
-                    // gate must never fire for `update_plan`, `recall_memory`, etc. Follows
-                    // the same pattern as the `stopped_without_plan` nudge (below) but acts
-                    // BEFORE dispatch instead of after a premature stop.
-                    if !plan_gate_fired
+                    // “work” tool, ensure a canonical plan exists. Introspective/planning
+                    // tools are exempt — the gate must never fire for `update_plan`,
+                    // `recall_memory`, etc.
+                    if !plan_bootstrapped_before_work
                         && !is_introspective_tool(name)
                         && plan_value_steps(&ls.plan).is_empty()
                         && request_is_complex(&memory_user_message, &calls)
                     {
-                        plan_gate_fired = true;
+                        plan_bootstrapped_before_work = true;
                         turn_trace.record(crate::turn_trace::TurnEvent::Nudge {
-                            reason: "plan_before_act_gate".into(),
+                            reason: "plan_bootstrap_before_act".into(),
                             next_step: String::new(),
                         });
-                        // Block the current call: push a tool result so the assistant’s
-                        // tool_calls array is satisfied (OpenAI-compat requires one tool
-                        // message per tool_call_id).
-                        ls.messages.push(serde_json::json!({
-                            "role": "tool",
-                            "tool_call_id": call_id,
-                            "content": "BLOCKED: no plan exists yet. Create a plan with \
-                                update_plan before executing work tools.",
-                        }));
-                        // Skip every remaining call in this round — they are all blocked
-                        // for the same reason. Same pattern as the steering interrupt.
-                        for skipped in calls.iter().skip(idx + 1) {
-                            ls.messages.push(serde_json::json!({
-                                "role": "tool",
-                                "tool_call_id": skipped
-                                    .get("id")
-                                    .and_then(|id| id.as_str())
-                                    .unwrap_or(""),
-                                "content": "SKIPPED: create a plan with update_plan first.",
-                            }));
-                        }
-                        // Inject the directive — the model sees this on the next round
-                        // and should call update_plan before any work tool.
-                        ls.messages.push(serde_json::json!({
-                            "role": "system",
-                            "content": "Before executing any tools, you must first create \
-                                a structured plan. Call update_plan with clear steps, \
-                                dependencies, and done criteria for each step. Then proceed \
-                                with execution.",
-                        }));
-                        let _ = event_sink
-                            .emit(GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››📋 Plan required before action — asking the model to plan first‹‹/ACT››"
-                                    .to_string(),
-                            })
-                            .await;
-                        continue 'rounds;
+                        bootstrap_plan_before_work_tool(
+                            &mut ls,
+                            plan_progress,
+                            execution_journal,
+                            event_sink,
+                            thread_id,
+                            &memory_user_message,
+                            round,
+                        )
+                        .await;
                     }
 
                     if let Some(blocked) = turn_policy.route_blocked(name) {
@@ -5311,47 +5336,6 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
     // Plan-before-act gate integration tests
     // ------------------------------------------------------------------
 
-    /// A tool executor that handles `update_plan` (sets a plan with one done step via
-    /// `ToolEffects`) and counts `make_document` calls. Used by the gate integration tests.
-    #[derive(Default)]
-    struct PlanAwareCountingTool {
-        make_document_calls: std::sync::atomic::AtomicUsize,
-        update_plan_calls: std::sync::atomic::AtomicUsize,
-    }
-    impl CapabilityExecutor for PlanAwareCountingTool {
-        async fn execute_tool(
-            &self,
-            name: &str,
-            _a: &str,
-            _c: &str,
-            _s: &mut LoopState,
-        ) -> Result<ToolOutcome, String> {
-            if name == "make_document" {
-                self.make_document_calls
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            }
-            if name == "update_plan" {
-                self.update_plan_calls
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                return Ok(ToolOutcome {
-                    result: "plan created".to_string(),
-                    effects: ToolEffects {
-                        plan: Some(json!({
-                            "steps": [
-                                {"id": "s1", "title": "Create document", "status": "done", "detail": ""}
-                            ]
-                        })),
-                        ..ToolEffects::default()
-                    },
-                });
-            }
-            Ok(ToolOutcome {
-                result: format!("ran {name}"),
-                effects: ToolEffects::default(),
-            })
-        }
-    }
-
     /// Round 0: emit a `make_document` tool call. Round 1+: answer "Done!".
     #[derive(Default)]
     struct WorkThenAnswerModel {
@@ -5400,75 +5384,8 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         }
     }
 
-    /// Round 0: `make_document` (gate should block). Round 1: `update_plan` (plan created).
-    /// Round 2: `make_document` (executes — plan exists). Round 3+: answer "Done!".
-    /// Captures round-1 messages so the test can assert the gate directive was injected.
-    #[derive(Default)]
-    struct ComplexGateModel {
-        calls: std::sync::atomic::AtomicUsize,
-        round1_messages: Mutex<Vec<Value>>,
-    }
-    impl ModelClient for ComplexGateModel {
-        async fn generate(
-            &self,
-            call: &ModelCall<'_>,
-            on_delta: &(dyn Fn(&str) + Send + Sync),
-        ) -> Result<ModelRoundOutput, ModelCallError> {
-            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let provider = ProviderBinding {
-                model: call.model.to_string(),
-                base_url: call.base_url.to_string(),
-                api_key: None,
-            };
-            let message = match n {
-                0 => json!({
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "work_0",
-                        "type": "function",
-                        "function": { "name": "make_document", "arguments": "{}" },
-                    }],
-                }),
-                1 => {
-                    *self.round1_messages.lock().unwrap() = call.messages.to_vec();
-                    json!({
-                        "role": "assistant",
-                        "content": "",
-                        "tool_calls": [{
-                            "id": "plan_0",
-                            "type": "function",
-                            "function": { "name": "update_plan", "arguments": "{}" },
-                        }],
-                    })
-                }
-                2 => json!({
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "work_1",
-                        "type": "function",
-                        "function": { "name": "make_document", "arguments": "{}" },
-                    }],
-                }),
-                _ => {
-                    on_delta("Done!");
-                    json!({ "role": "assistant", "content": "Done!" })
-                }
-            };
-            Ok(ModelRoundOutput {
-                message,
-                provider,
-                finish_reason: Some(if n <= 2 { "tool_calls" } else { "stop" }.to_string()),
-                usage: Default::default(),
-                latency_ms: None,
-                time_to_first_token_ms: None,
-            })
-        }
-    }
-
-    /// Round 0: `make_document` (gate blocks). Round 1: `make_document` again (gate does NOT
-    /// re-fire — `plan_gate_fired` is true). Round 2+: answer "Done!".
+    /// Round 0 and 1: `make_document` without any model-authored plan. The loop
+    /// should bootstrap exactly one canonical plan before the first work tool.
     #[derive(Default)]
     struct ComplexIgnoreGateModel {
         calls: std::sync::atomic::AtomicUsize,
@@ -5585,7 +5502,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn plan_gate_complex_request_without_plan_triggers_gate() {
+    async fn plan_gate_complex_request_without_plan_bootstraps_plan_before_tool() {
         let mut ls = LoopState::new();
         ls.messages = vec![
             json!({ "role": "system", "content": "sys" }),
@@ -5595,11 +5512,12 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         let sink = Collect::default();
         let journal = CollectJournal::default();
         let mut browser = NoBrowser;
-        let model = ComplexGateModel::default();
-        let tool = PlanAwareCountingTool::default();
+        let model = WorkThenAnswerModel::default();
+        let tool = CountingTool::default();
+        let plan = RecordingPlan::default();
         let mut turn_cfg = cfg();
-        turn_cfg.hard_round_ceiling = 6;
-        turn_cfg.max_rounds = 6;
+        turn_cfg.hard_round_ceiling = 4;
+        turn_cfg.max_rounds = 4;
 
         let outcome = run_turn(
             ls,
@@ -5608,7 +5526,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             &model,
             &tool,
             &mut browser,
-            &RecordingPlan::default(),
+            &plan,
             &DoneJudge,
             &NoCompact,
             &OpenPolicy,
@@ -5630,41 +5548,28 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         )
         .await;
 
-        // The gate blocked round 0's work tool; only round 2's tool executed.
+        // The loop emitted and persisted a plan before dispatching round 0's work tool.
+        let persisted = plan.0.lock().unwrap();
+        assert_eq!(
+            persisted.len(),
+            1,
+            "the plan must be persisted before the first complex work tool runs"
+        );
+        assert_eq!(persisted[0][1]["status"], "doing");
+        drop(persisted);
+        let events = sink.0.lock().unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, GenerateStreamEvent::PlanUpdate { .. })),
+            "the plan must be emitted to the UI before the tool result"
+        );
+        drop(events);
         assert_eq!(
             tool.make_document_calls
                 .load(std::sync::atomic::Ordering::SeqCst),
             1,
-            "make_document must execute exactly once (round 2), not in the blocked round 0"
-        );
-        // The model created a plan after the gate fired.
-        assert_eq!(
-            tool.update_plan_calls
-                .load(std::sync::atomic::Ordering::SeqCst),
-            1,
-            "update_plan must be called exactly once after the gate"
-        );
-        // The gate's system directive was injected into the conversation.
-        let msgs = model.round1_messages.lock().unwrap();
-        let has_directive = msgs.iter().any(|m| {
-            m.get("role").and_then(|r| r.as_str()) == Some("system")
-                && m.get("content")
-                    .and_then(|c| c.as_str())
-                    .is_some_and(|c| c.contains("create a structured plan"))
-        });
-        let has_blocked = msgs.iter().any(|m| {
-            m.get("role").and_then(|r| r.as_str()) == Some("tool")
-                && m.get("content")
-                    .and_then(|c| c.as_str())
-                    .is_some_and(|c| c.contains("BLOCKED"))
-        });
-        assert!(
-            has_directive,
-            "round 1 messages must contain the gate's system directive"
-        );
-        assert!(
-            has_blocked,
-            "round 1 messages must contain the blocked tool result"
+            "make_document must execute exactly once after the bootstrap plan exists"
         );
         assert!(
             outcome.memory_answer.contains("Done!"),
@@ -5740,7 +5645,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn plan_gate_fires_only_once_per_turn() {
+    async fn plan_gate_ignoring_model_still_gets_bootstrap_plan_before_tool() {
         let mut ls = LoopState::new();
         ls.messages = vec![
             json!({ "role": "system", "content": "sys" }),
@@ -5752,6 +5657,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         let mut browser = NoBrowser;
         let model = ComplexIgnoreGateModel::default();
         let tool = CountingTool::default();
+        let plan = RecordingPlan::default();
         let mut turn_cfg = cfg();
         turn_cfg.hard_round_ceiling = 5;
         turn_cfg.max_rounds = 5;
@@ -5763,7 +5669,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             &model,
             &tool,
             &mut browser,
-            &NoPlan,
+            &plan,
             &DoneJudge,
             &NoCompact,
             &OpenPolicy,
@@ -5785,25 +5691,39 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         )
         .await;
 
-        // Round 0's work tool was BLOCKED by the gate; round 1's work tool EXECUTED
-        // (the gate did not re-fire). Total: exactly one make_document execution.
+        // The model ignores planning twice, but the loop still provides one canonical
+        // plan before the first tool and does not emit duplicate bootstrap plans.
         assert_eq!(
             tool.make_document_calls
                 .load(std::sync::atomic::Ordering::SeqCst),
-            1,
-            "gate must fire only once: round 0 blocked, round 1 executes"
+            2,
+            "both work calls execute, but only after the loop has plan state"
         );
-        // The gate's directive was injected on round 0 (visible in round 1's messages).
+        let events = sink.0.lock().unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, GenerateStreamEvent::PlanUpdate { .. }))
+                .count(),
+            1,
+            "the bootstrap plan should be emitted once, not on every ignored planning opportunity"
+        );
+        drop(events);
+        assert_eq!(
+            plan.0.lock().unwrap().len(),
+            1,
+            "the bootstrap plan should be persisted once"
+        );
         let msgs = model.round1_messages.lock().unwrap();
-        let has_directive = msgs.iter().any(|m| {
-            m.get("role").and_then(|r| r.as_str()) == Some("system")
+        let has_plan_marker = msgs.iter().any(|m| {
+            m.get("role").and_then(|r| r.as_str()) == Some("assistant")
                 && m.get("content")
                     .and_then(|c| c.as_str())
-                    .is_some_and(|c| c.contains("create a structured plan"))
+                    .is_some_and(|c| c.contains("‹‹PLAN››") || c.contains("validate_request"))
         });
         assert!(
-            has_directive,
-            "round 1 messages must contain the gate's directive from round 0"
+            !has_plan_marker,
+            "the bootstrap plan is canonical loop state and UI event, not fake assistant prose"
         );
         assert!(
             outcome.memory_answer.contains("Done!"),

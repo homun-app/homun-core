@@ -220,21 +220,20 @@ pub fn resolve(
 
     let human = {
         let base = format!(
-            "{} {} {} {}",
-            crate::weekday_it(start.weekday()),
+            "{:02}/{:02}/{:04}",
             start.day(),
-            crate::month_it(start.month()),
-            start.year(),
+            start.month(),
+            start.year()
         );
         match intent.time {
             TimeSpec::None => base,
-            TimeSpec::At { hour, minute } => format!("{base} at {hour:02}:{minute:02}"),
+            TimeSpec::At { hour, minute } => format!("{base} alle {hour:02}:{minute:02}"),
             TimeSpec::Part(part) => {
                 let label = match part {
-                    DayPart::Morning => "morning",
-                    DayPart::Afternoon => "afternoon",
-                    DayPart::Evening => "evening",
-                    DayPart::Night => "night",
+                    DayPart::Morning => "mattina",
+                    DayPart::Afternoon => "pomeriggio",
+                    DayPart::Evening => "sera",
+                    DayPart::Night => "notte",
                 };
                 format!("{base} ({label})")
             }
@@ -260,10 +259,9 @@ pub fn resolve(
 
 fn now_human(anchor: &jiff::Zoned) -> String {
     format!(
-        "{} {} {} {} at {:02}:{:02}",
-        crate::weekday_it(anchor.weekday()),
+        "{:02}/{:02}/{:04} alle {:02}:{:02}",
         anchor.day(),
-        crate::month_it(anchor.month()),
+        anchor.month(),
         anchor.year(),
         anchor.hour(),
         anchor.minute(),
@@ -428,6 +426,7 @@ mod tests {
         };
         let got = r(intent);
         assert_eq!(got.iso, "2026-06-11T07:00:00+02:00");
+        assert_eq!(got.human, "11/06/2026 alle 07:00");
         assert!(got.is_future);
     }
 
