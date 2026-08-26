@@ -106,6 +106,8 @@ fn start_gateway(data_dir: &Path, reservation: ReservedPort) -> GatewayProcess {
         .env("HOMUN_WORKSPACE_ID", WORKSPACE_ID)
         .env("HOMUN_TASK_EXECUTOR_WORKER", "off")
         .env("HOMUN_TASK_WORKER_COUNT", "1")
+        .env("HOMUN_INFERENCE_BASE_URL", "http://127.0.0.1:9/v1")
+        .env("HOMUN_INFERENCE_MODEL", "crash-recovery-test-model")
         .env(
             "HOMUN_VAULT_WRAP_KEY",
             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",

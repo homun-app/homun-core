@@ -426,7 +426,7 @@ pub struct TaskStore {
     pub(crate) connection: Connection,
 }
 
-fn insert_turn_event_on(
+pub(crate) fn insert_turn_event_on(
     connection: &Connection,
     turn_id: &str,
     kind: TurnEventKind,
@@ -459,7 +459,7 @@ fn insert_turn_event_on(
     })
 }
 
-fn first_terminal_event_on(
+pub(crate) fn first_terminal_event_on(
     connection: &Connection,
     turn_id: &str,
 ) -> TaskRuntimeResult<Option<TurnEvent>> {
@@ -3156,6 +3156,31 @@ impl TaskStore {
             params![
                 user_id.as_str(),
                 workspace_id.as_str(),
+                resource_class.as_str()
+            ],
+            |row| row.get(0),
+        )?;
+        Ok(units.unwrap_or_default() as u32)
+    }
+
+    pub fn resource_usage_for_task(
+        &self,
+        task: &TaskRecord,
+        resource_class: ResourceClass,
+    ) -> TaskRuntimeResult<u32> {
+        let units: Option<i64> = self.connection.query_row(
+            "
+            SELECT SUM(units)
+            FROM resource_reservations
+            WHERE task_id = ?1
+              AND user_id = ?2
+              AND workspace_id = ?3
+              AND resource_class = ?4
+            ",
+            params![
+                task.task_id.as_str(),
+                task.user_id.as_str(),
+                task.workspace_id.as_str(),
                 resource_class.as_str()
             ],
             |row| row.get(0),

@@ -109,8 +109,10 @@ impl ResourceGovernor {
             let Some(limit) = self.limits.limit_for(requirement.class) else {
                 continue;
             };
-            let used =
+            let total_used =
                 store.resource_usage(&task.user_id, &task.workspace_id, requirement.class)?;
+            let own_units = store.resource_usage_for_task(task, requirement.class)?;
+            let used = total_used.saturating_sub(own_units);
             let available = limit.saturating_sub(used);
             if requirement.units > available {
                 return Ok(Some(format!(

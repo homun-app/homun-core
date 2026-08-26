@@ -102,6 +102,12 @@ pub(crate) fn complete_temporal_preflight_chat_turn_core(
     Option<local_first_task_runtime::broker::EnqueuedTurn>,
     local_first_task_runtime::broker::EnqueueError,
 > {
+    let user_id = gateway_user_id();
+    let workspace_id = lock_store(state)
+        .ok()
+        .and_then(|store| store.workspace_for_thread(&input.thread_id).ok())
+        .map(WorkspaceId::new)
+        .unwrap_or_else(gateway_workspace_id);
     let store = state.task_store.lock().map_err(|error| {
         local_first_task_runtime::broker::EnqueueError::Store(
             local_first_task_runtime::TaskRuntimeError::Store(format!("task store lock: {error}")),
@@ -115,26 +121,71 @@ pub(crate) fn complete_temporal_preflight_chat_turn_core(
         return Ok(None);
     }
     let task_id = local_first_task_runtime::broker::chat_turn_task_id(&input.request_id);
-    store
-        .with_transaction(|tx| insert_broker_temporal_preflight_messages(tx, input, text))
-        .map_err(local_first_task_runtime::broker::EnqueueError::Store)?;
-    store
-        .insert_terminal_event_once(
-            task_id.as_str(),
-            local_first_task_runtime::TurnEventKind::Done,
-            serde_json::json!({
+    let completed = local_first_task_runtime::broker::complete_chat_turn_atomic(
+        &store,
+        &user_id,
+        &workspace_id,
+        input,
+        local_first_task_runtime::broker::TerminalChatTurn {
+            status: local_first_task_runtime::TaskStatus::Completed,
+            event_kind: local_first_task_runtime::TurnEventKind::Done,
+            event_payload: serde_json::json!({
                 "assistant_message_id": input.assistant_message_id,
                 "execution_id": task_id.as_str(),
                 "revision": 1,
                 "text": text,
             }),
+        },
+        |tx| insert_broker_temporal_preflight_messages(tx, input, text),
+    )?;
+    Ok(Some(completed))
+}
+
+pub(crate) fn fail_model_preflight_chat_turn_core(
+    state: &AppState,
+    input: &local_first_task_runtime::broker::ChatTurnInput,
+    text: &str,
+) -> Result<
+    Option<local_first_task_runtime::broker::EnqueuedTurn>,
+    local_first_task_runtime::broker::EnqueueError,
+> {
+    let user_id = gateway_user_id();
+    let workspace_id = lock_store(state)
+        .ok()
+        .and_then(|store| store.workspace_for_thread(&input.thread_id).ok())
+        .map(WorkspaceId::new)
+        .unwrap_or_else(gateway_workspace_id);
+    let store = state.task_store.lock().map_err(|error| {
+        local_first_task_runtime::broker::EnqueueError::Store(
+            local_first_task_runtime::TaskRuntimeError::Store(format!("task store lock: {error}")),
         )
-        .map_err(local_first_task_runtime::broker::EnqueueError::Store)?;
-    Ok(Some(local_first_task_runtime::broker::EnqueuedTurn {
-        task_id,
-        thread_id: input.thread_id.clone(),
-        position_in_queue: 0,
-    }))
+    })?;
+    if store
+        .active_chat_turn_for_thread(&input.thread_id)
+        .map_err(local_first_task_runtime::broker::EnqueueError::Store)?
+        .is_some()
+    {
+        return Ok(None);
+    }
+    let task_id = local_first_task_runtime::broker::chat_turn_task_id(&input.request_id);
+    let failed = local_first_task_runtime::broker::complete_chat_turn_atomic(
+        &store,
+        &user_id,
+        &workspace_id,
+        input,
+        local_first_task_runtime::broker::TerminalChatTurn {
+            status: local_first_task_runtime::TaskStatus::Failed,
+            event_kind: local_first_task_runtime::TurnEventKind::Error,
+            event_payload: serde_json::json!({
+                "assistant_message_id": input.assistant_message_id,
+                "execution_id": task_id.as_str(),
+                "revision": 1,
+                "text": text,
+            }),
+        },
+        |tx| insert_broker_model_preflight_messages(tx, input, text),
+    )?;
+    Ok(Some(failed))
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -372,6 +423,39 @@ pub(crate) fn insert_broker_temporal_preflight_messages(
         .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))
 }
 
+pub(crate) fn insert_broker_model_preflight_messages(
+    tx: &rusqlite::Transaction<'_>,
+    input: &local_first_task_runtime::broker::ChatTurnInput,
+    text: &str,
+) -> local_first_task_runtime::TaskRuntimeResult<()> {
+    let visible_prompt = input.visible_prompt.as_deref().unwrap_or(&input.prompt);
+    let mut user = channel_chat_message_with_id(
+        "user",
+        visible_prompt,
+        &format!("local_user_{}", input.request_id),
+    );
+    user.attachments = broker_turn_message_attachments(input);
+    let mut assistant =
+        channel_chat_message_with_id("assistant", text, &input.assistant_message_id);
+    assistant.linked_task_id = Some(
+        local_first_task_runtime::broker::chat_turn_task_id(&input.request_id)
+            .as_str()
+            .to_string(),
+    );
+    assistant.memory_reuse = Some(local_first_memory::MemoryReuseEnvelope::blocked_unknown());
+    assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Failed;
+    ChatStore::insert_linked_turn_messages(tx, &input.thread_id, &user, &assistant)
+        .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))
+}
+
+pub(crate) fn chat_model_configuration_missing() -> bool {
+    crate::effective_inference_base_url().is_none()
+}
+
+pub(crate) fn missing_model_provider_text() -> &'static str {
+    "No model provider is configured. Open Settings > Providers and add or enable a provider before starting a chat."
+}
+
 pub(crate) fn insert_broker_steering_user_message(
     tx: &rusqlite::Transaction<'_>,
     input: &local_first_task_runtime::broker::ChatTurnInput,
@@ -551,10 +635,33 @@ pub(crate) async fn enqueue_turn(
                 "turn_id": completed.task_id.as_str(),
                 "thread_id": completed.thread_id,
                 "request_id": request_id,
-                "status": "queued",
+                "status": "completed",
                 "position_in_queue": completed.position_in_queue,
             })),
         ));
+    }
+    if chat_model_configuration_missing() {
+        let text = missing_model_provider_text();
+        if let Some(failed) =
+            fail_model_preflight_chat_turn_core(&state, &input, text).map_err(|error| {
+                GatewayError {
+                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    code: "model_preflight_store",
+                    message: error.to_string(),
+                }
+            })?
+        {
+            return Ok((
+                StatusCode::CREATED,
+                Json(serde_json::json!({
+                    "turn_id": failed.task_id.as_str(),
+                    "thread_id": failed.thread_id,
+                    "request_id": request_id,
+                    "status": "failed",
+                    "position_in_queue": failed.position_in_queue,
+                })),
+            ));
+        }
     }
     if let Some(resumed) =
         resume_suspended_user_turn_core(&state, &input).map_err(|error| GatewayError {

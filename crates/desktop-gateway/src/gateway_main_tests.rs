@@ -22461,14 +22461,14 @@ async fn broker_temporal_preflight_completes_past_slot_without_task_or_browser_l
     let database = root.join("homun.sqlite");
     let chat = ChatStore::open(&database).unwrap();
     let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
-    let thread = chat.create_thread("workspace_test").unwrap();
+    let workspace_id = super::gateway_workspace_id();
+    let thread = chat.create_thread(workspace_id.as_str()).unwrap();
     let mut state = AppState::for_tests();
     state.chat_store = std::sync::Arc::new(std::sync::Mutex::new(chat));
     state.task_store = std::sync::Arc::new(std::sync::Mutex::new(tasks));
     let request_id = "past-slot";
     let turn_id = local_first_task_runtime::broker::chat_turn_task_id(request_id);
     let user_id = super::gateway_user_id();
-    let workspace_id = local_first_task_runtime::WorkspaceId::new("workspace_test");
 
     let (status, Json(body)) = super::enqueue_turn(
         State(state.clone()),
@@ -22489,41 +22489,56 @@ async fn broker_temporal_preflight_completes_past_slot_without_task_or_browser_l
     .unwrap();
 
     assert_eq!(status, axum::http::StatusCode::CREATED);
-    assert_eq!(body["status"], "queued");
+    assert_eq!(body["status"], "completed");
     assert_eq!(body["turn_id"], turn_id.as_str());
 
-    let task_store = state.task_store.lock().unwrap();
-    assert!(
-        task_store
+    {
+        let task_store = state.task_store.lock().unwrap();
+        let turn = task_store
             .get_task(&turn_id, &user_id, &workspace_id)
             .unwrap()
-            .is_none(),
-        "temporal preflight must not create a runnable chat_turn task",
-    );
-    assert_eq!(
-        task_store
-            .resource_usage(
-                &user_id,
-                &workspace_id,
-                local_first_task_runtime::ResourceClass::BrowserSession,
-            )
-            .unwrap(),
-        0,
-        "temporal preflight must not reserve the browser",
-    );
-    let events = task_store.read_turn_events(turn_id.as_str(), 0).unwrap();
-    assert_eq!(events.len(), 1);
-    assert_eq!(
-        events[0].kind,
-        local_first_task_runtime::TurnEventKind::Done
-    );
-    assert!(
-        events[0].payload["text"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("gia' nel passato")
-    );
-    drop(task_store);
+            .expect("temporal preflight must create an inspectable terminal chat_turn");
+        assert_eq!(
+            turn.status,
+            local_first_task_runtime::TaskStatus::Completed,
+            "temporal preflight must be terminal and must not enter the worker queue",
+        );
+        assert_eq!(
+            turn.input_json["thread_id"].as_str(),
+            Some(thread.thread_id.as_str())
+        );
+        assert_eq!(turn.input_json["request_id"].as_str(), Some(request_id));
+        assert_eq!(
+            task_store
+                .resource_usage(
+                    &user_id,
+                    &workspace_id,
+                    local_first_task_runtime::ResourceClass::BrowserSession,
+                )
+                .unwrap(),
+            0,
+            "temporal preflight must not reserve the browser",
+        );
+        let events = task_store.read_turn_events(turn_id.as_str(), 0).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].kind,
+            local_first_task_runtime::TurnEventKind::Done
+        );
+        assert!(
+            events[0].payload["text"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("gia' nel passato")
+        );
+    }
+
+    let Json(turn_body) = super::get_turn(Path(turn_id.as_str().to_string()), State(state.clone()))
+        .await
+        .unwrap();
+    assert_eq!(turn_body["status"], "completed");
+    assert_eq!(turn_body["thread_id"], thread.thread_id);
+    assert_eq!(turn_body["request_id"], request_id);
 
     let messages = super::lock_store(&state)
         .unwrap()
@@ -22539,6 +22554,99 @@ async fn broker_temporal_preflight_completes_past_slot_without_task_or_browser_l
         local_first_desktop_gateway::MessageDeliveryState::Delivered
     );
     assert!(assistant.text.contains("gia' nel passato"));
+}
+
+#[tokio::test]
+async fn broker_model_preflight_fails_without_configured_provider() {
+    let root = isolated_gateway_test_dir("broker-model-preflight");
+    std::fs::create_dir_all(&root).unwrap();
+    let data_dir = TestGatewayDataDir::new(&root);
+    data_dir
+        .env()
+        .set("HOMUN_INFERENCE_BASE_URL", None)
+        .set("HOMUN_INFERENCE_MODEL", None)
+        .set("HOMUN_INFERENCE_API_KEY", None)
+        .set("HOMUN_INFERENCE_API_KEY_FILE", None)
+        .set("HOMUN_INFERENCE_BACKEND", None);
+    let database = root.join("homun.sqlite");
+    let chat = ChatStore::open(&database).unwrap();
+    let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
+    let workspace_id = super::gateway_workspace_id();
+    let thread = chat.create_thread(workspace_id.as_str()).unwrap();
+    let mut state = AppState::for_tests();
+    state.chat_store = std::sync::Arc::new(std::sync::Mutex::new(chat));
+    state.task_store = std::sync::Arc::new(std::sync::Mutex::new(tasks));
+    let request_id = "missing-provider";
+    let turn_id = local_first_task_runtime::broker::chat_turn_task_id(request_id);
+    let user_id = super::gateway_user_id();
+
+    let (status, Json(body)) = super::enqueue_turn(
+        State(state.clone()),
+        Json(local_first_desktop_gateway::EnqueueTurnRequest {
+            thread_id: thread.thread_id.clone(),
+            request_id: Some(request_id.to_string()),
+            prompt: "Rispondi solo: ok".to_string(),
+            visible_prompt: None,
+            images: Vec::new(),
+            attachments: None,
+            mode: None,
+            model: None,
+            source: Some("interactive".to_string()),
+            routing_binding: None,
+        }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(status, axum::http::StatusCode::CREATED);
+    assert_eq!(body["status"], "failed");
+    assert_eq!(body["turn_id"], turn_id.as_str());
+
+    let task_store = state.task_store.lock().unwrap();
+    let turn = task_store
+        .get_task(&turn_id, &user_id, &workspace_id)
+        .unwrap()
+        .expect("model preflight must create an inspectable terminal chat_turn");
+    assert_eq!(
+        turn.status,
+        local_first_task_runtime::TaskStatus::Failed,
+        "model preflight must not enter the worker queue",
+    );
+    assert_eq!(
+        task_store
+            .resource_usage(
+                &user_id,
+                &workspace_id,
+                local_first_task_runtime::ResourceClass::BrowserSession,
+            )
+            .unwrap(),
+        0,
+        "model preflight must not reserve the browser",
+    );
+    let events = task_store.read_turn_events(turn_id.as_str(), 0).unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].kind,
+        local_first_task_runtime::TurnEventKind::Error
+    );
+    let text = events[0].payload["text"].as_str().unwrap_or_default();
+    assert!(text.contains("No model provider is configured"), "{text}");
+    drop(task_store);
+
+    let messages = super::lock_store(&state)
+        .unwrap()
+        .messages(&thread.thread_id)
+        .unwrap()
+        .messages;
+    let assistant = messages
+        .iter()
+        .find(|message| message.id == "local_assistant_missing-provider")
+        .expect("assistant message");
+    assert_eq!(
+        assistant.delivery_state,
+        local_first_desktop_gateway::MessageDeliveryState::Failed
+    );
+    assert!(assistant.text.contains("No model provider is configured"));
 }
 
 #[test]

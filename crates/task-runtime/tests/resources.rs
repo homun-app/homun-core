@@ -97,6 +97,46 @@ fn resource_governor_requeues_waiting_task_when_capacity_returns() {
 }
 
 #[test]
+fn resource_governor_requeues_waiting_task_with_own_reservation() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let user = UserId::new("user_1");
+    let workspace = WorkspaceId::new("workspace_1");
+    let task = task("blocked", &user, &workspace)
+        .with_resource(ResourceRequirement::new(ResourceClass::BrowserSession, 1));
+    store.insert_task(&task).unwrap();
+    let governor =
+        ResourceGovernor::new(ResourceLimits::new().with_limit(ResourceClass::BrowserSession, 1));
+
+    governor.reserve(&store, &task, "worker_a").unwrap();
+    store
+        .update_task_status(
+            &task.task_id,
+            &task.user_id,
+            &task.workspace_id,
+            TaskStatus::WaitingResource,
+            Some("resource browser_session requires 1 units but only 0 available"),
+        )
+        .unwrap();
+
+    let blocked = store
+        .get_task(&TaskId::new("blocked"), &user, &workspace)
+        .unwrap()
+        .unwrap();
+    assert!(
+        governor
+            .requeue_waiting_if_available(&store, &blocked)
+            .unwrap()
+    );
+    let reloaded = store
+        .get_task(&TaskId::new("blocked"), &user, &workspace)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(reloaded.status, TaskStatus::Queued);
+    assert_eq!(reloaded.blocked_reason, None);
+}
+
+#[test]
 fn resource_governor_tracks_multiple_resource_classes() {
     let store = TaskStore::open_in_memory().unwrap();
     let user = UserId::new("user_1");

@@ -468,7 +468,7 @@ fn insert_chat_turn_on(
             task.user_id.as_str(),
             task.workspace_id.as_str(),
             task.kind,
-            "queued",
+            task.status.as_str(),
             "high",
             task.created_at.unix_timestamp(),
             task.updated_at.unix_timestamp(),
@@ -489,6 +489,68 @@ fn insert_chat_turn_on(
         ],
     )?;
     Ok(())
+}
+
+#[derive(Debug, Clone)]
+pub struct TerminalChatTurn {
+    pub status: TaskStatus,
+    pub event_kind: TurnEventKind,
+    pub event_payload: Value,
+}
+
+pub fn complete_chat_turn_atomic<F>(
+    store: &TaskStore,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+    input: &ChatTurnInput,
+    terminal: TerminalChatTurn,
+    insert_turn_messages: F,
+) -> Result<EnqueuedTurn, EnqueueError>
+where
+    F: FnMut(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
+{
+    let mut insert_turn_messages = insert_turn_messages;
+    retry_transient_enqueue(|| {
+        if let Some(active) = store.active_chat_turn_for_thread(&input.thread_id)? {
+            return Err(EnqueueError::ThreadBusy {
+                thread_id: input.thread_id.clone(),
+                active_turn_id: active,
+            });
+        }
+
+        let mut task = queued_chat_turn_task(user_id, workspace_id, input);
+        task.status = terminal.status;
+        task.resource_requirements = Vec::new();
+        let task_id = task.task_id.clone();
+        let active = store.with_transaction(|tx| {
+            if let Some(active) = active_chat_turn_on(tx, &input.thread_id)? {
+                return Ok(Some(active));
+            }
+            insert_turn_messages(tx)?;
+            insert_chat_turn_on(tx, &task, input)?;
+            if crate::store::first_terminal_event_on(tx, task_id.as_str())?.is_none() {
+                crate::store::insert_turn_event_on(
+                    tx,
+                    task_id.as_str(),
+                    terminal.event_kind,
+                    terminal.event_payload.clone(),
+                )?;
+            }
+            Ok(None)
+        })?;
+        if let Some(active_turn_id) = active {
+            return Err(EnqueueError::ThreadBusy {
+                thread_id: input.thread_id.clone(),
+                active_turn_id,
+            });
+        }
+
+        Ok(EnqueuedTurn {
+            task_id,
+            thread_id: input.thread_id.clone(),
+            position_in_queue: 0,
+        })
+    })
 }
 
 pub fn enqueue_chat_turn_atomic<F>(
