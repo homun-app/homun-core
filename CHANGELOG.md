@@ -10,6 +10,25 @@ single line so the site captures its full text; version delimiters are `## [x.y.
 
 ## [Unreleased]
 
+## [0.1.1095] — 2026-08-26
+
+A release candidate focused on making the agent kernel easier to reason about, test and ship.
+
+## Highlights
+- **The chat runtime now has one typed turn contract.** Goal, policy, perimeter, recall, tools, execution identity, tracing and tail state now move through explicit owners instead of scattered scalar state.
+- **The UI follows the canonical runtime projection.** Active turn, submission state, task queue, composer mode and thread status now render from the runtime view model instead of independent fallbacks.
+- **Release readiness is stricter.** The pre-release and kernel gates now cover canonical turn lifecycle, gateway ownership, browser semantic progress and packaged-app smoke behavior before a release can be cut.
+
+## Improvements
+- **Legacy fallback paths have been removed.** Mock transcripts, preview seeds, starter-message helpers, local-ready copy and unused mock runtime exports no longer compete with real task state.
+- **Planning and browser flow are easier to audit.** RC status evidence now records where planning, browser semantics and terminal task state come from, so regressions are checked against owners rather than screenshots.
+- **Resource reservations no longer self-block a task.** A running turn can reuse its own browser reservation without being incorrectly held in `waiting_resource`.
+
+## Fixes
+- **Requests for an already-past time fail fast.** A same-day request such as “today at 8” is completed canonically with a visible explanation instead of launching browser automation.
+- **Preflight completions close the whole turn.** The assistant message, terminal task state and terminal event are written together, so the UI no longer keeps showing a task as still thinking after a preflight answer.
+- **Browser smoke tests reject cosmetic success.** A browser task must now produce semantic evidence from the page; generic “completed” states or unavailable-browser fallbacks fail the release gate.
+
 ## [0.1.1094] — 2026-07-30
 
 A release candidate built around deterministic recovery, security gates and reproducible installers.
@@ -55,5 +74,6 @@ A browser that completes real tasks, and a noticeably smoother app.
 - **The local model respects its timeout.** A stuck generation no longer keeps Homun busy indefinitely.
 
 [Unreleased]: https://github.com/homun-app/homun-releases/releases
+[0.1.1095]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1095
 [0.1.1094]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1094
 [0.1.1093]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1093
