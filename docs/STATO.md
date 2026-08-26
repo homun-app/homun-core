@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-26 (branch RC `fabio/rc-readiness-2026-08-26`: preflight temporale, bootstrap piano prima dei tool complessi, recovery sidebar fuori chat e fingerprint semantico browser verificati localmente; `python3 scripts/kernel_regression_gate.py` e `python3 scripts/pre_release_gate.py` verdi; smoke live gateway/UI eseguiti su `electron:dev`).**
+> **Ultimo aggiornamento: 2026-08-26 (PR #406 RC readiness verde: preflight temporale, bootstrap piano prima dei tool complessi, recovery sidebar fuori chat e fingerprint semantico browser verificati localmente; CI, release readiness e build installer macOS/Linux/Windows verdi; smoke live gateway/UI eseguiti su `electron:dev`).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `fabio/rc-readiness-2026-08-26` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#405 mergeate in `main`; branch RC da aprire in PR; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
-| HEAD codice verificato | base `main` aggiornata a #405 (`b76fe0d2`), diff RC locale verificato prima della PR |
+| Branch | `fabio/rc-readiness-2026-08-26` candidato RC; da mergeare in `main` dopo PR #406 verde |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#405 mergeate in `main`; #406 RC readiness aperta e verde; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
+| HEAD codice verificato | base `main` aggiornata a #405 (`b76fe0d2`), commit RC #406 `560845f9` verificato localmente e in CI |
 
 ## Dove siamo
 
@@ -39,9 +39,9 @@ protocollo anti-regressione vive in
 
 ## RC readiness - 2026-08-26
 
-Branch candidato: `fabio/rc-readiness-2026-08-26`, su base `main` #405
-(`b76fe0d2`). Questa slice stabilizza i regressi osservati nelle chat reali
-senza introdurre un nuovo owner parallelo:
+Branch candidato: `fabio/rc-readiness-2026-08-26`, PR #406, su base `main`
+#405 (`b76fe0d2`). Questa slice stabilizza i regressi osservati nelle chat
+reali senza introdurre un nuovo owner parallelo:
 
 - `crates/desktop-gateway/src/gateway_temporal_preflight.rs` intercetta richieste
   operative con slot assoluto gia' nel passato prima di creare task eseguibili o
@@ -70,6 +70,8 @@ Evidenza locale sul branch:
 - `npm run test:cursor-grammar`
 - `python3 scripts/kernel_regression_gate.py` -> `ALL GREEN`
 - `python3 scripts/pre_release_gate.py` -> `ALL GREEN`
+- PR #406 CI: frontend, backend, Landlock, release readiness, build installer
+  macOS/Linux/Windows -> green
 
 Smoke live su `npm run electron:dev`:
 
@@ -1748,20 +1750,19 @@ PR mergeate:
 PR aperte:
 
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
-- Branch RC `fabio/rc-readiness-2026-08-26` pronto per PR dopo commit locale.
+- #406 `Stabilize RC chat planning and browser flow`: PR RC aperta, CI e
+  build installer verdi, pronta per merge in `main`.
 
 Baseline corrente:
 
 - `main` a #405 (`b76fe0d2`); audit finale non-browser post-#404 completato.
-- Diff RC locale verificato il 2026-08-26 con gate kernel, pre-release gate e
-  smoke reali gateway/UI su `electron:dev`.
+- Diff RC `560845f9` verificato il 2026-08-26 con gate kernel,
+  pre-release gate, CI GitHub, build installer macOS/Linux/Windows e smoke
+  reali gateway/UI su `electron:dev`.
 
 ## Debito residuo
 
-- Aprire PR per `fabio/rc-readiness-2026-08-26` e attendere CI verde sullo
-  stesso commit candidato.
-- Eseguire build installer multipiattaforma e checksum manifest secondo
-  `docs/testing/release-candidate-matrix.md`.
+- Mergeare #406 in `main` dopo la verifica finale dello stato PR.
 - Eseguire profilo upgrade isolato su build installata, non sul profilo reale
   dell'utente.
 - Decidere il claim pubblico del browser: Selenium/stable browser smoke e'
@@ -1845,10 +1846,9 @@ Baseline corrente:
 
 ## Prossimo lavoro
 
-1. Committare il branch `fabio/rc-readiness-2026-08-26`, aprire PR e verificare
-   CI sul commit candidato.
-2. Se CI e' verde, lanciare build installer multipiattaforma e validare gli
-   artifact/checksum secondo `docs/testing/release-candidate-matrix.md`.
+1. Mergeare #406 in `main` e riallineare il worktree locale.
+2. Scaricare/installare gli artifact RC prodotti dalla matrice e validare il
+   profilo upgrade isolato secondo `docs/testing/release-candidate-matrix.md`.
 3. Prima della produzione pubblica, eseguire QA su build installata con profilo
    isolato e registrare limiti/known issues del browser complesso.
 
@@ -1856,9 +1856,11 @@ Baseline corrente:
 
 ```text
 Continuo Homun RC readiness. Repo: /Users/fabio/Projects/Homun/app,
-branch `fabio/rc-readiness-2026-08-26` su base main #405 (`b76fe0d2`).
-Prossimo passo: commit, PR, CI e installer matrix; i gate locali
-`kernel_regression_gate.py` e `pre_release_gate.py` erano verdi il 2026-08-26.
+branch `fabio/rc-readiness-2026-08-26` su base main #405 (`b76fe0d2`),
+PR #406 verde su CI, release readiness e build installer macOS/Linux/Windows.
+Prossimo passo: merge #406 in main, poi QA su build installata con profilo
+isolato; i gate locali `kernel_regression_gate.py` e `pre_release_gate.py`
+erano verdi il 2026-08-26.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,
