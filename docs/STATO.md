@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-25 (typed turn-policy/perimeter/memory-intent/channel-context/plan-seed/plan-resume/execution-identity/tail/loop-seed/actor-scope/tool-runtime/trace-runtime/config-runtime e UI active-turn/status/submission/composer-mode/task-queue/transcript/capability/mock-runtime/mock-data-split runtime-view-model mergeati fino a #392; baseline stato riallineato a #404; preview fallback UI mergeata #395; initial thread loader starter fallback mergeata #397; read-model starter helper mergeata #399; local chat ready seed mergeata #400; empty hero subtitle mergeata #401; thread preview readiness copy mergeata #402; localSessionReady i18n key mergeata #403; chatApi static local subtitles mergeata #404; audit finale non-browser completato).**
+> **Ultimo aggiornamento: 2026-08-26 (PR #406 RC readiness verde: preflight temporale, bootstrap piano prima dei tool complessi, recovery sidebar fuori chat e fingerprint semantico browser verificati localmente; CI, release readiness e build installer macOS/Linux/Windows verdi; smoke live gateway/UI eseguiti su `electron:dev`).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -12,9 +12,9 @@
 | --- | --- |
 | Repo | `/Users/fabio/Projects/Homun/app` |
 | Worktree corrente | `/Users/fabio/Projects/Homun/app` |
-| Branch | `main` |
-| PR | #108-#116, #118-#283, #285-#286 e #288-#404 mergeate in `main`; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
-| HEAD codice verificato | `main` aggiornato a #404 (`418a0b8c`) |
+| Branch | `fabio/rc-readiness-2026-08-26` candidato RC; `main` dopo merge #406 |
+| PR | #108-#116, #118-#283, #285-#286 e #288-#405 mergeate in `main`; #406 RC readiness validata in PR; #117 browser draft separata; #284 e #372 chiuse non mergeate dopo retarget stack |
+| HEAD codice verificato | base `main` aggiornata a #405 (`b76fe0d2`), PR #406 verificata localmente e in CI |
 
 ## Dove siamo
 
@@ -36,6 +36,64 @@ matrice owner/gate vive in
 [`testing/kernel-contract-matrix.md`](testing/kernel-contract-matrix.md). Il
 protocollo anti-regressione vive in
 [`testing/anti-regression-protocol.md`](testing/anti-regression-protocol.md).
+
+## RC readiness - 2026-08-26
+
+Branch candidato: `fabio/rc-readiness-2026-08-26`, PR #406, su base `main`
+#405 (`b76fe0d2`). Questa slice stabilizza i regressi osservati nelle chat
+reali senza introdurre un nuovo owner parallelo:
+
+- `crates/desktop-gateway/src/gateway_temporal_preflight.rs` intercetta richieste
+  operative con slot assoluto gia' nel passato prima di creare task eseguibili o
+  riservare il browser; il broker persiste user+assistant e un evento terminale
+  `done`.
+- `crates/engine/src/agent_loop.rs` crea un piano canonico minimo prima del primo
+  tool di lavoro complesso quando il modello non ha ancora prodotto un piano; il
+  piano viene persistito ed emesso come `plan_update`, non come finta prosa
+  assistant.
+- `crates/task-runtime/src/store.rs` chiude gli step `doing` come `done` solo per
+  terminali `canonical_completed`; gli altri terminali espongono lo step come
+  `blocked`.
+- `crates/desktop-gateway/src/gateway_tool_execution.rs` confronta snapshot
+  browser con fingerprint semantico stabile, ignorando churn di ref e page stats,
+  cosi' una SPA non viene scambiata per progresso reale.
+- `apps/desktop/src/components/Shell.tsx` espone i controlli di riapertura
+  sidebar anche nelle viste non-chat, dove `ChatTopbar` non e' presente.
+
+Evidenza locale sul branch:
+
+- `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway gateway_temporal_preflight -- --nocapture`
+- `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway broker_temporal_preflight -- --nocapture`
+- `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway browser_snapshot_semantic_fingerprint -- --nocapture`
+- `cargo test -p local-first-engine plan_gate_ -- --nocapture`
+- `cargo test -p local-first-task-runtime kernel_thread_projection_terminal_turn -- --nocapture`
+- `npm run test:cursor-grammar`
+- `python3 scripts/kernel_regression_gate.py` -> `ALL GREEN`
+- `python3 scripts/pre_release_gate.py` -> `ALL GREEN`
+- PR #406 CI: frontend, backend, Landlock, release readiness, build installer
+  macOS/Linux/Windows -> green
+
+Smoke live su `npm run electron:dev`:
+
+- preflight temporale reale: richiesta treno Milano-Roma 25 agosto 2026 ore 8
+  rifiutata con testo "gia' nel passato", un solo evento terminale, proiezione
+  `idle`, nessuna attesa utente;
+- `scripts/production_smoke.py --scenario S1`: chat semplice terminale
+  `canonical_completed`;
+- `scripts/kernel_live_smoke.py`: browser reale su `https://www.selenium.dev`,
+  titolo `Selenium`, terminale `canonical_completed`;
+- `scripts/production_smoke.py --scenario S6`: browser form-fill Selenium
+  terminale `canonical_completed`; eventi: `plan_update` prima dell'apertura
+  browser;
+- `scripts/production_smoke.py --scenario S7`: URL `.invalid` termina con
+  diagnosi esplicita e piano bloccato, non resta in thinking;
+- smoke UI Playwright su `http://127.0.0.1:1420/`: Automations -> Collapse
+  sidebar mostra `Expand sidebar` e `Search`; `Expand sidebar` ripristina il
+  menu principale.
+
+Limite non chiuso da questa slice: siti web complessi come Trenitalia/Trainline
+restano una sessione browser dedicata e non sono un claim production-grade per
+la RC.
 
 ## Runtime V2 - chiuso su main
 
@@ -1692,18 +1750,25 @@ PR mergeate:
 PR aperte:
 
 - #117 browser draft separata, fuori dal lavoro non-browser corrente.
-- Nessuna PR non-browser aperta dopo #404.
+- #406 `Stabilize RC chat planning and browser flow`: PR RC validata con CI e
+  build installer verdi; se non ancora mergeata, e' pronta per `main`.
 
 Baseline corrente:
 
-- `main` a #404 (`418a0b8c`); audit finale non-browser post-#404 completato.
+- `main` a #405 (`b76fe0d2`); audit finale non-browser post-#404 completato.
+- Diff RC #406 verificato il 2026-08-26 con gate kernel, pre-release gate, CI
+  GitHub, build installer macOS/Linux/Windows e smoke reali gateway/UI su
+  `electron:dev`.
 
 ## Debito residuo
 
-- Smoke Electron reale su `main` pulito: chat, plan progress, browser read
-  research, Activity/browser island, composer mode, nessuna card di verifica per
-  azioni browser read-only.
-- Aggiornare eventuali note release/RC dopo smoke visuale reale.
+- Se #406 non e' ancora mergeata, mergearla in `main` dopo la verifica finale
+  dello stato PR.
+- Eseguire profilo upgrade isolato su build installata, non sul profilo reale
+  dell'utente.
+- Decidere il claim pubblico del browser: Selenium/stable browser smoke e'
+  coperto; Trenitalia/Trainline restano limitazione nota o sessione hardening
+  separata prima di promettere web automation complessa.
 - `ThreadActivityProjection` e la route backend compat
   `GET /api/chat/threads/{thread_id}/activity` sono stati rimossi nella cleanup
   backend 2026-08-12; il read model canonico e' `KernelThreadProjection`.
@@ -1782,18 +1847,22 @@ Baseline corrente:
 
 ## Prossimo lavoro
 
-1. Sessione browser dedicata dopo il refactor kernel: smoke Electron reale su
-   goal/plan/progress e treni Milano-Roma read-only.
-2. Gate RC su `main` pulito dopo la sessione browser: `make test`, release
-   readiness, installer matrix e smoke visuale desktop.
+1. Se #406 non e' ancora mergeata, mergearla in `main` e riallineare il
+   worktree locale.
+2. Scaricare/installare gli artifact RC prodotti dalla matrice e validare il
+   profilo upgrade isolato secondo `docs/testing/release-candidate-matrix.md`.
+3. Prima della produzione pubblica, eseguire QA su build installata con profilo
+   isolato e registrare limiti/known issues del browser complesso.
 
 ## Prompt di ripartenza
 
 ```text
-Continuo Homun Runtime V2. Repo: /Users/fabio/Projects/Homun/app,
-main aggiornato a #404 (`418a0b8c`), nessuna PR non-browser aperta dopo #404.
-Prossimo passo: sessione browser dedicata su goal/plan/progress e treni
-Milano-Roma read-only, poi gate RC su `main` pulito.
+Continuo Homun RC readiness. Repo: /Users/fabio/Projects/Homun/app,
+branch `fabio/rc-readiness-2026-08-26` su base main #405 (`b76fe0d2`),
+PR #406 verde su CI, release readiness e build installer macOS/Linux/Windows.
+Prossimo passo: se #406 non e' ancora mergeata, mergearla in main; poi QA su
+build installata con profilo isolato. I gate locali `kernel_regression_gate.py`
+e `pre_release_gate.py` erano verdi il 2026-08-26.
 Leggi docs/STATO.md, docs/architecture/kernel-v2-contract.md e
 docs/testing/kernel-contract-matrix.md.
 Regola: codice = verita; ogni modifica deve avere owner canonico, Kill List,

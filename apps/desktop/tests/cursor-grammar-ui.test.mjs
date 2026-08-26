@@ -470,6 +470,13 @@ const chatTopbar = await readFile(
   if (error.code === "ENOENT") return "";
   throw error;
 });
+const shell = await readFile(
+  new URL("../src/components/Shell.tsx", import.meta.url),
+  "utf8",
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const chatTranscript = await readFile(
   new URL("../src/components/ChatTranscript.tsx", import.meta.url),
   "utf8",
@@ -1637,6 +1644,15 @@ test("ChatView delegates the chat topbar to ChatTopbar", () => {
   assert.match(chatTopbar, /export function ChatTopbar/);
   assert.match(chatTopbar, /<header className="task-topbar"/);
   assert.match(chatTopbar, /<ChatHeaderMenu/);
+});
+
+test("Shell exposes collapsed sidebar recovery outside chat views", () => {
+  assert.match(shell, /activeView !== "chat"/);
+  assert.match(shell, /shell-collapsed-controls/);
+  assert.match(shell, /onToggleDrawer/);
+  assert.match(shell, /onSearchChat/);
+  assert.match(legacyStyles, /\.shell-collapsed-controls/);
+  assert.match(legacyStyles, /-webkit-app-region:\s*no-drag/);
 });
 
 test("ChatView does not keep the retired unused inline computer timeline component", () => {

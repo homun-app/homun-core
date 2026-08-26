@@ -738,6 +738,12 @@ pub(crate) fn objective_contract_projection_for_request(
         let request = source_request.trim();
         if request.is_empty() {
             decision.objective.clone()
+        } else if request_is_contextual_followup(request, &decision.objective) {
+            decision
+                .objective
+                .chars()
+                .take(MAX_OBJECTIVE_CHARS)
+                .collect()
         } else {
             request.chars().take(MAX_OBJECTIVE_CHARS).collect()
         }
@@ -772,6 +778,39 @@ pub(crate) fn objective_contract_projection_for_request(
             "artifact_requested": decision.deliverable.artifact_requested,
         }),
     }
+}
+
+pub(crate) fn request_is_contextual_followup(request: &str, resolved_objective: &str) -> bool {
+    let request = request.trim();
+    let resolved = resolved_objective.trim();
+    if request.is_empty()
+        || resolved.is_empty()
+        || request.eq_ignore_ascii_case(resolved)
+        || resolved.chars().count() <= request.chars().count()
+    {
+        return false;
+    }
+
+    let request = request.to_ascii_lowercase();
+    [
+        "stess",
+        "same ",
+        "as before",
+        "come prima",
+        "di prima",
+        "quello",
+        "quella",
+        "questo",
+        "questa",
+        "anche ",
+        "again",
+        "instead",
+        "invece",
+        "al posto",
+        "riprov",
+    ]
+    .iter()
+    .any(|marker| request.contains(marker))
 }
 
 pub(crate) fn steering_requires_confirmation(
@@ -1018,6 +1057,29 @@ mod tests {
         assert_eq!(
             projection.scope_json["router_objective"],
             "Lossy router summary"
+        );
+    }
+
+    #[test]
+    fn new_objective_from_contextual_followup_persists_the_router_expansion() {
+        let mut decision = read_only_decision();
+        decision.objective = "Cerca opzioni di treno Milano-Roma per il 30 agosto 2026 verso le 8:00, leggi i risultati e riporta 3-5 opzioni utili con fonti, senza prenotare o comprare nulla.".to_string();
+        let validated = validate_decision(decision, &registry(), None).unwrap();
+        let request = "prova per il 30 stessa ora";
+
+        let projection = objective_contract_projection_for_request(
+            &validated,
+            None,
+            "thread-1",
+            "workspace-1",
+            None,
+            request,
+        );
+
+        assert_eq!(projection.objective, validated.decision.objective);
+        assert_eq!(
+            projection.scope_json["router_objective"],
+            validated.decision.objective
         );
     }
 

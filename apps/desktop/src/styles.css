@@ -1318,6 +1318,16 @@ small {
   z-index: 205;
   -webkit-app-region: no-drag;
 }
+.shell-collapsed-controls {
+  position: absolute;
+  top: 7px;
+  left: 78px;
+  z-index: 205;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
 .task-collapsed-action {
   display: inline-flex;
   align-items: center;

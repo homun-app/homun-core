@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const statusDoc = readFileSync(resolve(here, "../../../../docs/STATO.md"), "utf8");
+const rcBaselinePattern = /base `main` aggiornata a #405 \(`b76fe0d2`\), PR #406 verificata localmente e in CI/;
 
 test("status doc records the merged legacy lifecycle cleanup", () => {
   assert.match(statusDoc, /#375/);
@@ -16,7 +17,7 @@ test("status doc records the merged legacy lifecycle cleanup", () => {
 test("status doc records a concrete current main baseline without stale slice branch", () => {
   assert.match(
     statusDoc,
-    /\| HEAD codice verificato \| `main` aggiornato a #[0-9]+ \(`[0-9a-f]{8}`\) \|/,
+    /\| HEAD codice verificato \| base `main` aggiornata a #[0-9]+ \(`[0-9a-f]{8}`\), PR #[0-9]+ verificata localmente e in CI \|/,
   );
   assert.doesNotMatch(statusDoc, /fabio\/status-after-ui-lifecycle-retirement/);
 });
@@ -27,7 +28,8 @@ test("status doc records the merged runtime view model turn contract", () => {
   assert.match(statusDoc, /#381/);
   assert.match(statusDoc, /#383/);
   assert.match(statusDoc, /#384/);
-  assert.match(statusDoc, /main` aggiornato a #404 \(`418a0b8c`\)/);
+  assert.match(statusDoc, /#406/);
+  assert.match(statusDoc, rcBaselinePattern);
   assert.doesNotMatch(statusDoc, /slice runtimeViewModel turn status in corso/);
   assert.doesNotMatch(statusDoc, /fabio\/ui-runtime-view-model-turn-contract/);
 });
@@ -35,7 +37,7 @@ test("status doc records the merged runtime view model turn contract", () => {
 test("status doc records the merged composer-mode presenter cleanup slice", () => {
   assert.match(statusDoc, /Slice UI composer-mode presenter contract mergeata #379/);
   assert.match(statusDoc, /Slice doc composer-mode owner cleanup mergeata #381/);
-  assert.match(statusDoc, /\| Branch \| `main` \|/);
+  assert.match(statusDoc, /\| Branch \| `fabio\/rc-readiness-2026-08-26` candidato RC; `main` dopo merge #406 \|/);
   assert.doesNotMatch(statusDoc, /fabio\/docs-composer-mode-owner-cleanup/);
   assert.doesNotMatch(statusDoc, /doc composer-mode owner cleanup in corso/);
   assert.doesNotMatch(statusDoc, /Slice locale UI composer-mode presenter contract in corso/);
@@ -55,28 +57,28 @@ test("status doc records the merged selected task and task queue cleanup slices"
 
 test("status doc records the merged mock transcript cleanup slice", () => {
   assert.match(statusDoc, /Slice App mock transcript seed mergeata #386/);
-  assert.match(statusDoc, /main` aggiornato a #404 \(`418a0b8c`\)/);
+  assert.match(statusDoc, rcBaselinePattern);
   assert.match(statusDoc, /mockData` non deve piu' esportare `chatMessages`/);
   assert.doesNotMatch(statusDoc, /fabio\/remove-app-mock-transcript-seed/);
 });
 
 test("status doc records the merged capability fallback cleanup slice", () => {
   assert.match(statusDoc, /Slice capability mock fallback mergeata #388/);
-  assert.match(statusDoc, /main` aggiornato a #404 \(`418a0b8c`\)/);
+  assert.match(statusDoc, rcBaselinePattern);
   assert.match(statusDoc, /mockData` non deve piu' esportare `connections`/);
   assert.doesNotMatch(statusDoc, /fabio\/remove-capability-mock-fallback/);
 });
 
 test("status doc records the merged unused mock runtime export cleanup slice", () => {
   assert.match(statusDoc, /Cleanup unused mock runtime exports/);
-  assert.match(statusDoc, /main` aggiornato a #404 \(`418a0b8c`\)/);
+  assert.match(statusDoc, rcBaselinePattern);
   assert.match(statusDoc, /computerSession`, `tasks`, `approvals`, `runtimeHealth`, `memorySummary`/);
   assert.doesNotMatch(statusDoc, /fabio\/remove-unused-mock-runtime-exports/);
 });
 
 test("status doc records the mock data owner split cleanup contract", () => {
   assert.match(statusDoc, /Slice mock data owner split/);
-  assert.match(statusDoc, /main` aggiornato a #404 \(`418a0b8c`\)/);
+  assert.match(statusDoc, rcBaselinePattern);
   assert.match(statusDoc, /apps\/desktop\/src\/data\/mockData\.ts` e' stato rimosso/);
   assert.match(statusDoc, /navigationConfig\.ts/);
   assert.match(statusDoc, /demoWorkspaceData\.ts/);
@@ -144,5 +146,18 @@ test("status doc records the post chatApi non-browser audit boundary", () => {
   assert.match(statusDoc, /Audit finale non-browser post-#404 completato/);
   assert.match(statusDoc, /`Local model` residuo e' provenance message-scoped/);
   assert.match(statusDoc, /`Local chat` residuo in `coreBridge` resta browser\/local-computer scoped/);
-  assert.match(statusDoc, /Sessione browser dedicata/);
+  assert.match(statusDoc, /Trenitalia\/Trainline restano limitazione nota o sessione hardening/);
+});
+
+test("status doc records the RC readiness branch and live smoke evidence", () => {
+  assert.match(statusDoc, /fabio\/rc-readiness-2026-08-26/);
+  assert.match(statusDoc, /#406 RC readiness validata in PR/);
+  assert.match(statusDoc, /CI e\s+build installer verdi/);
+  assert.match(statusDoc, /preflight temporale reale/);
+  assert.match(statusDoc, /plan_update` prima dell'apertura\s+browser/);
+  assert.match(statusDoc, /Automations -> Collapse\s+sidebar mostra `Expand sidebar`/);
+  assert.match(statusDoc, /python3 scripts\/pre_release_gate\.py` -> `ALL GREEN`/);
+  assert.doesNotMatch(statusDoc, /branch RC da aprire in PR/);
+  assert.doesNotMatch(statusDoc, /pronto per PR dopo commit locale/);
+  assert.doesNotMatch(statusDoc, /commit RC #406 `[0-9a-f]{8}`/);
 });
