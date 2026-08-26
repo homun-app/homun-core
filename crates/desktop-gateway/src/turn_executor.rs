@@ -291,6 +291,16 @@ fn agent_resume_state(
             .ok_or_else(|| crate::LocalTaskExecutionError {
                 message: format!("referenced execution checkpoint {checkpoint_id} is missing"),
             })?;
+        if matches!(
+            prior_outcome.as_ref(),
+            ExecutionOutcome::Suspended {
+                wake: WakeCondition::At { .. },
+                ..
+            }
+        ) && checkpoint.payload.get("agent_state").is_none()
+        {
+            return Ok(None);
+        }
         let (agent_state, prior_agent_run_id) =
             verified_execution_agent_state(&checkpoint.checkpoint_id, &checkpoint.payload)?;
 
@@ -1446,6 +1456,95 @@ mod tests {
                 checkpoint: later_prior_state,
                 apply_wake_input: true,
             })
+        );
+    }
+
+    #[test]
+    fn timer_retry_without_agent_state_starts_fresh() {
+        let state = AppState::for_tests();
+        let user = UserId::new("user-1");
+        let workspace = WorkspaceId::new("workspace-1");
+        let task = TaskRecord::new(
+            "turn-timer-retry",
+            user.clone(),
+            workspace.clone(),
+            "chat_turn",
+            "retry",
+            json!({"thread_id": "thread-1"}),
+        );
+        let contract = ValidatedExecutionContract::try_from(ExecutionContract::new(
+            "turn-timer-retry",
+            "chat_turn",
+            ExecutionScope {
+                user_id: user.as_str().into(),
+                workspace_id: workspace.as_str().into(),
+                thread_id: Some("thread-1".into()),
+            },
+            serde_json::to_value(&task).unwrap(),
+        ))
+        .unwrap();
+
+        let scheduled_at = time::OffsetDateTime::now_utc().unix_timestamp() - 1;
+        let retry_contract = {
+            let store = state.task_store.lock().unwrap();
+            store.insert_task(&task).unwrap();
+            store.create_execution(&contract).unwrap();
+            let checkpoint = store
+                .append_checkpoint(
+                    &task.task_id,
+                    &task.user_id,
+                    &task.workspace_id,
+                    json!({
+                        "kind": "execution_started",
+                        "task_id": task.task_id.as_str(),
+                    }),
+                    json!({
+                        "kind": "execution_started",
+                        "task_id": task.task_id.as_str(),
+                    }),
+                )
+                .unwrap();
+            let outcome = ValidatedExecutionOutcome::new(
+                ExecutionOutcome::Suspended {
+                    wake: WakeCondition::At {
+                        unix_seconds: scheduled_at,
+                    },
+                    checkpoint: CheckpointEnvelope::new(
+                        "turn-timer-retry",
+                        1,
+                        "chat_turn",
+                        1,
+                        CheckpointDataRef::Redacted {
+                            record_ref: DurableDataRef::from_store_id(&checkpoint.checkpoint_id)
+                                .unwrap(),
+                        },
+                    )
+                    .with_resume_context(
+                        None,
+                        WakeCondition::At {
+                            unix_seconds: scheduled_at,
+                        },
+                        Vec::new(),
+                    ),
+                },
+                &contract,
+            )
+            .unwrap();
+            store.commit_execution_outcome(&outcome).unwrap();
+            store
+                .wake_due_executions(time::OffsetDateTime::now_utc(), 1)
+                .unwrap();
+            store
+                .execution("turn-timer-retry")
+                .unwrap()
+                .unwrap()
+                .contract
+        };
+
+        assert!(retry_contract.as_ref().revision > 1);
+        assert_eq!(
+            agent_resume_state(&state, &task, &retry_contract).unwrap(),
+            None
         );
     }
 

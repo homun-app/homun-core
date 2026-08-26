@@ -143,6 +143,7 @@ pub(crate) async fn project_chat_execution(
             .get("answer")
             .and_then(serde_json::Value::as_str)
             .map(crate::strip_chat_markers),
+        ExecutionOutcome::Failed { .. } => failed_chat_terminal_text(outcome),
         _ => None,
     };
     let payload = serde_json::json!({
@@ -349,6 +350,17 @@ fn project_message_state(
         .map_err(projection_lock_error)?
         .set_message_delivery_state(thread_id, assistant_message_id, delivery)
         .map_err(|error| projection_error(error.to_string()))?;
+    if updated
+        && matches!(outcome, ExecutionOutcome::Failed { .. })
+        && let Some(text) = failed_chat_terminal_text(outcome)
+    {
+        state
+            .chat_store
+            .lock()
+            .map_err(projection_lock_error)?
+            .set_message_text(thread_id, assistant_message_id, &text)
+            .map_err(|error| projection_error(error.to_string()))?;
+    }
     if !updated && !matches!(outcome, ExecutionOutcome::Failed { .. }) {
         let thread_exists = state
             .chat_store
@@ -364,6 +376,18 @@ fn project_message_state(
         }
     }
     Ok(())
+}
+
+fn failed_chat_terminal_text(outcome: &ExecutionOutcome) -> Option<String> {
+    let ExecutionOutcome::Failed { failure } = outcome else {
+        return None;
+    };
+    let detail = failure.redacted_detail.trim();
+    if detail.is_empty() {
+        Some("The task failed before a response could be generated.".to_string())
+    } else {
+        Some(detail.to_string())
+    }
 }
 
 fn project_objective(
@@ -821,6 +845,120 @@ mod tests {
 
         project_message_state(&state, &thread.thread_id, &assistant.id, &outcome)
             .expect("deleted thread has no visible message left to project");
+    }
+
+    #[tokio::test]
+    async fn failed_chat_projection_surfaces_redacted_failure_text() {
+        let state = crate::AppState::for_tests();
+        let thread = state
+            .chat_store
+            .lock()
+            .expect("chat store")
+            .create_thread("workspace-1")
+            .expect("thread");
+        let mut assistant = local_first_desktop_gateway::seeded_ready_message(
+            &thread.thread_id,
+            "2027-01-15T08:00:00Z".to_string(),
+        );
+        assistant.id = "assistant-failed-projection".to_string();
+        assistant.text.clear();
+        assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
+        state
+            .chat_store
+            .lock()
+            .expect("chat store")
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .expect("assistant");
+
+        let mut task = TaskRecord::new(
+            "turn-failed-projection",
+            UserId::new("user-1"),
+            WorkspaceId::new("workspace-1"),
+            "chat_turn",
+            "projection test",
+            serde_json::json!({
+                "thread_id": thread.thread_id,
+                "assistant_message_id": assistant.id,
+            }),
+        );
+        task.status = TaskStatus::Running;
+        state
+            .task_store
+            .lock()
+            .expect("task store")
+            .insert_task(&task)
+            .expect("task");
+        state
+            .task_store
+            .lock()
+            .expect("task store")
+            .create_agent_run(&NewAgentRun {
+                run_id: "run-failed-projection".to_string(),
+                turn_id: task.task_id.as_str().to_string(),
+                thread_id: thread.thread_id.clone(),
+                user_id: task.user_id.as_str().to_string(),
+                workspace_id: task.workspace_id.as_str().to_string(),
+                role: None,
+                model: None,
+                provider: None,
+                prompt_fingerprint: None,
+            })
+            .expect("run");
+        let contract: ValidatedExecutionContract = ExecutionContract::new(
+            task.task_id.as_str(),
+            "chat_turn",
+            ExecutionScope {
+                user_id: task.user_id.as_str().to_string(),
+                workspace_id: task.workspace_id.as_str().to_string(),
+                thread_id: Some(thread.thread_id.clone()),
+            },
+            serde_json::json!({}),
+        )
+        .try_into()
+        .expect("contract");
+        let outcome = ExecutionOutcome::Failed {
+            failure: ExecutionFailure::transient(
+                "chat_transport_unavailable",
+                "Provider not configured.",
+            ),
+        };
+        state
+            .task_store
+            .lock()
+            .expect("task store")
+            .create_execution(&contract)
+            .expect("create execution");
+
+        assert_eq!(
+            project_chat_execution(&state, &task, &contract, &outcome, None)
+                .await
+                .expect("project failed chat turn"),
+            ProjectionAttempt::Completed
+        );
+
+        let stored = state
+            .chat_store
+            .lock()
+            .expect("chat store")
+            .message(&thread.thread_id, &assistant.id)
+            .expect("message lookup")
+            .expect("message");
+        assert_eq!(
+            stored.delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Failed
+        );
+        assert_eq!(stored.text, "Provider not configured.");
+        let events = state
+            .task_store
+            .lock()
+            .expect("task store")
+            .read_turn_events(task.task_id.as_str(), 0)
+            .expect("events");
+        let event = events
+            .iter()
+            .find(|event| event.kind == TurnEventKind::Error)
+            .expect("error event");
+        assert_eq!(event.payload["text"], "Provider not configured.");
     }
 
     #[test]

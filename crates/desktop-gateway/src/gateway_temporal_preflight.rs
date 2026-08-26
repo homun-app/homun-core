@@ -99,10 +99,10 @@ fn explicit_absolute_datetime_intent(
     anchor: &jiff::Zoned,
 ) -> Option<temporal::TemporalIntent> {
     let tokens = normalized_tokens(prompt);
-    let (date_index, date) = find_absolute_date(&tokens, anchor)?;
+    let (date_index, day) = find_explicit_day_ref(&tokens, anchor)?;
     let (hour, minute) = find_time(&tokens, date_index)?;
     Some(temporal::TemporalIntent {
-        day: temporal::DayRef::Absolute(date),
+        day,
         time: temporal::TimeSpec::At { hour, minute },
     })
 }
@@ -124,11 +124,14 @@ fn normalized_tokens(prompt: &str) -> Vec<String> {
         .collect()
 }
 
-fn find_absolute_date(
+fn find_explicit_day_ref(
     tokens: &[String],
     anchor: &jiff::Zoned,
-) -> Option<(usize, jiff::civil::Date)> {
+) -> Option<(usize, temporal::DayRef)> {
     for (index, token) in tokens.iter().enumerate() {
+        if matches!(token.as_str(), "oggi" | "today") {
+            return Some((index, temporal::DayRef::RelativeDay(0)));
+        }
         let Ok(day) = token.parse::<i8>() else {
             continue;
         };
@@ -149,14 +152,14 @@ fn find_absolute_date(
             .unwrap_or(anchor.year());
         let raw = format!("{year:04}-{month:02}-{day:02}");
         let date = raw.parse::<jiff::civil::Date>().ok()?;
-        return Some((index, date));
+        return Some((index, temporal::DayRef::Absolute(date)));
     }
     None
 }
 
 fn find_time(tokens: &[String], date_index: usize) -> Option<(i8, i8)> {
     for (index, token) in tokens.iter().enumerate() {
-        if index == date_index || index == date_index + 2 {
+        if index == date_index {
             continue;
         }
         let Some((mut hour, minute)) = parse_hour_token(token) else {
@@ -255,6 +258,20 @@ mod tests {
     fn past_train_departure_today_short_circuits_before_browser() {
         let prompt =
             "mi trovi un treno da Milano a Roma per il 25 agosto 2026 verso le 8 del mattino";
+
+        let TemporalPreflightOutcome::EarlyResponse(GenerateStreamEvent::Done { text, .. }) =
+            evaluate_chat_temporal_preflight_at(prompt, &anchor())
+        else {
+            panic!("expected early response");
+        };
+
+        assert!(text.contains("gia' nel passato"));
+        assert!(text.contains("14:39"));
+    }
+
+    #[test]
+    fn past_train_departure_relative_today_short_circuits_before_browser() {
+        let prompt = "Mi trovi un treno da Milano a Roma oggi alle 8 del mattino";
 
         let TemporalPreflightOutcome::EarlyResponse(GenerateStreamEvent::Done { text, .. }) =
             evaluate_chat_temporal_preflight_at(prompt, &anchor())

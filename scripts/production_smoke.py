@@ -34,6 +34,8 @@ TERMINAL_STATUSES = frozenset(
         "suspended",
     }
 )
+SUCCESS_STATUSES = frozenset({"completed"})
+MARKER_SUCCESS_STATUSES = frozenset({"completed", "waiting_user", "waiting_user_approval"})
 
 
 @dataclass(frozen=True)
@@ -43,6 +45,8 @@ class Scenario:
     prompt: str
     expect_marker: str | None = None
     forbid_plaintext: str | None = None
+    require_text: tuple[str, ...] = ()
+    forbid_output: tuple[str, ...] = ()
     max_seconds: int = 180
 
 
@@ -74,12 +78,29 @@ def build_scenarios() -> list[Scenario]:
             "S6",
             "Browser form fill",
             "Apri https://www.selenium.dev/selenium/web/web-form.html e compila Text input con smoke.",
+            require_text=("Text input", "smoke"),
+            forbid_output=(
+                "browser non è disponibile",
+                "browser non e' disponibile",
+                "browser unavailable",
+                "session unavailable",
+                "contained computer",
+                "non ho potuto completare",
+            ),
             max_seconds=300,
         ),
         Scenario(
             "S7",
             "Dead URL plan settles",
             "Crea un piano e apri https://nonexistent-homun-validation-zzzz.invalid/dead-page poi dimmi il titolo.",
+            require_text=("nonexistent-homun-validation-zzzz.invalid",),
+            forbid_output=(
+                "browser non è disponibile",
+                "browser non e' disponibile",
+                "browser unavailable",
+                "session unavailable",
+                "contained computer",
+            ),
             max_seconds=240,
         ),
         Scenario(
@@ -215,28 +236,51 @@ def wait_turn_output(base: str, token: str, turn_id: str, max_seconds: int) -> t
     return last_status, _flatten(events), time.time() - started
 
 
-def run_turn_via_broker(base: str, scenario: Scenario, token: str) -> tuple[str, float]:
+def run_turn_via_broker(base: str, scenario: Scenario, token: str) -> tuple[str, str, float]:
     thread_id = create_thread(base, token, f"smoke {scenario.id}")
     turn_id = enqueue_turn(base, token, thread_id, scenario)
     status, output, elapsed = wait_turn_output(base, token, turn_id, scenario.max_seconds)
-    # Include status so failures remain diagnosable without a second request.
-    return f"status={status}\n{output}", elapsed
+    return status, output, elapsed
+
+
+def status_allows_success(status: str, scenario: Scenario, output: str) -> bool:
+    normalized = status.lower()
+    if scenario.expect_marker:
+        return scenario.expect_marker in output and normalized in MARKER_SUCCESS_STATUSES
+    if normalized not in SUCCESS_STATUSES:
+        return False
+    output_lower = output.lower()
+    if any(required.lower() not in output_lower for required in scenario.require_text):
+        return False
+    if any(forbidden.lower() in output_lower for forbidden in scenario.forbid_output):
+        return False
+    return True
 
 
 def run_scenario(base: str, scenario: Scenario, token: str) -> bool:
     print(f"== {scenario.id}: {scenario.name} ==", flush=True)
     try:
-        output, elapsed = run_turn_via_broker(base, scenario, token)
+        status, output, elapsed = run_turn_via_broker(base, scenario, token)
     except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as error:
         print(f"FAIL {scenario.id}: gateway error: {error}", flush=True)
         return False
-    ok = True
+    ok = status_allows_success(status, scenario, output)
+    if not ok:
+        print(f"FAIL {scenario.id}: unexpected terminal status {status}", flush=True)
     if scenario.expect_marker and scenario.expect_marker not in output:
         print(f"FAIL {scenario.id}: missing marker {scenario.expect_marker}", flush=True)
         ok = False
     if scenario.forbid_plaintext and scenario.forbid_plaintext in output:
         print(f"FAIL {scenario.id}: forbidden plaintext leaked", flush=True)
         ok = False
+    for required in scenario.require_text:
+        if required.lower() not in output.lower():
+            print(f"FAIL {scenario.id}: missing required text {required!r}", flush=True)
+            ok = False
+    for forbidden in scenario.forbid_output:
+        if forbidden.lower() in output.lower():
+            print(f"FAIL {scenario.id}: forbidden output {forbidden!r}", flush=True)
+            ok = False
     print(f"{'PASS' if ok else 'FAIL'} {scenario.id}: {elapsed:.1f}s", flush=True)
     return ok
 
