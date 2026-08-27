@@ -24,6 +24,7 @@ export const composerModelButtonLabel = implementation.composerModelButtonLabel 
   effectiveModelLabel: string | null | undefined,
   selectedNextModel: string | null | undefined,
   unavailableLabel: string | null | undefined,
+  autoLabel?: string | null | undefined,
 ) => string;
 
 export const latestAssistantEffectiveModel = implementation.latestAssistantEffectiveModel as (

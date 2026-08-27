@@ -38,6 +38,8 @@ python3 scripts/production_smoke.py --profile extended --gateway-base http://127
 | `X1` | Automation lifecycle probe | chat, automation, memory, tool | automation di test non attiva, stato/id/azione successiva chiari |
 | `X2` | Skill and tool selection probe | chat, skill, tool, model | scelta skill/tool spiegabile, nessun file creato |
 | `X3` | Memory privacy model interplay | chat, memory, privacy, model | preferenza non sensibile salvabile, nessun dato personale/secret in output |
+| `X4` | Code workspace auto-routing probe | chat, code, model | workspace temporaneo reale, lettura file progetto, marker `CODE_CONTEXT_OK`, nessuna modifica file |
+| `SUB1` | Agentic subagent runner probe | subagent, capability, model | `SubagentTask` esegue tool read fake, `status: Done`, output con `summary` |
 
 ## Regole Di Esecuzione
 
@@ -58,3 +60,11 @@ python3 scripts/production_smoke.py --profile extended --gateway-base http://127
 7. Le fixture persistenti create dal runner, come il record Vault smoke di `S3`,
    devono essere rimosse dal runner stesso; record preesistenti non vanno
    cancellati.
+8. Gli scenari codice devono creare un workspace/cartella reale: senza workspace
+   il turno `Auto` resta orchestrator e non prova il routing/capability coding.
+9. `SUB1` e' un probe live separato dal runner HTTP finche' non esiste un
+   trigger broker stabile per `subagent.*`. Comando verificato:
+
+```bash
+cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway orchestrated_subagent_gathers_on_gemma4 -- --ignored --nocapture
+```

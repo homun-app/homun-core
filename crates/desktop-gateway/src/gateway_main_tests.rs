@@ -51,7 +51,7 @@ fn gateway_main_tests_owner_smoke() {
 use crate::browser_safety;
 use crate::chat_store::{self, ChatStore};
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use local_first_engine::plan::collapse_plan_markers;
 // 5.D1c.2: test-only engine helpers (not used by non-test gateway code, so imported here, not at
 // the crate top where they'd read as unused).
@@ -22899,9 +22899,13 @@ async fn broker_temporal_preflight_completes_past_slot_without_task_or_browser_l
         );
     }
 
-    let Json(turn_body) = super::get_turn(Path(turn_id.as_str().to_string()), State(state.clone()))
-        .await
-        .unwrap();
+    let Json(turn_body) = super::get_turn(
+        Path(turn_id.as_str().to_string()),
+        State(state.clone()),
+        Query(super::TurnSinceQuery::default()),
+    )
+    .await
+    .unwrap();
     assert_eq!(turn_body["status"], "completed");
     assert_eq!(turn_body["thread_id"], thread.thread_id);
     assert_eq!(turn_body["request_id"], request_id);
@@ -22920,6 +22924,69 @@ async fn broker_temporal_preflight_completes_past_slot_without_task_or_browser_l
         local_first_desktop_gateway::MessageDeliveryState::Delivered
     );
     assert!(assistant.text.contains("gia' nel passato"));
+}
+
+#[tokio::test]
+async fn broker_get_turn_honors_workspace_query_for_non_default_workspace() {
+    let _env = TestEnv::acquire();
+    let root = isolated_gateway_test_dir("broker-turn-workspace-query");
+    std::fs::create_dir_all(&root).unwrap();
+    let database = root.join("homun.sqlite");
+    let chat = ChatStore::open(&database).unwrap();
+    let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
+    let workspace_id = local_first_task_runtime::WorkspaceId::new("workspace_turn_scope_query");
+    let thread = chat.create_thread(workspace_id.as_str()).unwrap();
+    let mut state = AppState::for_tests();
+    state.chat_store = std::sync::Arc::new(std::sync::Mutex::new(chat));
+    state.task_store = std::sync::Arc::new(std::sync::Mutex::new(tasks));
+    let request_id = "workspace-scope-past-slot";
+    let turn_id = local_first_task_runtime::broker::chat_turn_task_id(request_id);
+
+    let (status, Json(body)) = super::enqueue_turn(
+        State(state.clone()),
+        Json(local_first_desktop_gateway::EnqueueTurnRequest {
+            thread_id: thread.thread_id.clone(),
+            request_id: Some(request_id.to_string()),
+            prompt: "mi trovi un treno da Milano a Roma per il 1 gennaio 2020 verso le 8 del mattino. Cerca e leggi i risultati, non prenotare e non comprare nulla.".to_string(),
+            visible_prompt: None,
+            images: Vec::new(),
+            attachments: None,
+            mode: None,
+            model: None,
+            source: Some("interactive".to_string()),
+            routing_binding: None,
+        }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(status, axum::http::StatusCode::CREATED);
+    assert_eq!(body["status"], "completed");
+    assert_eq!(body["turn_id"], turn_id.as_str());
+
+    let missing = super::get_turn(
+        Path(turn_id.as_str().to_string()),
+        State(state.clone()),
+        Query(super::TurnSinceQuery::default()),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(missing.status, axum::http::StatusCode::NOT_FOUND);
+    assert_eq!(missing.code, "turn_not_found");
+
+    let Json(turn_body) = super::get_turn(
+        Path(turn_id.as_str().to_string()),
+        State(state.clone()),
+        Query(super::TurnSinceQuery {
+            since: None,
+            workspace: Some(workspace_id.as_str().to_string()),
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(turn_body["status"], "completed");
+    assert_eq!(turn_body["thread_id"], thread.thread_id);
+    assert_eq!(turn_body["request_id"], request_id);
 }
 
 #[tokio::test]

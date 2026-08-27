@@ -31,6 +31,7 @@ stati impossibili che ha permesso il bug.
 | Modelli/routing | `gateway_model_routing`, provider registry, `agent_runs` attribution | scelta modello spiegabile; run ha role/model/provider; fallback non diventa owner nascosto | `scripts/audit_homun_state.py --routing-decisions ...` | baseline `S1`, `S5`, `S9`; extended `X2`, `X3` |
 | Tool/skill/capability | `gateway_tool_execution`, capability routing, execution receipts | side effect tracciato; skill/tool non cambia lifecycle; approval per write incerta | owner tests + kernel projection fixtures | baseline `S6`, `S8`; `S8` deve usare checkout HTTPS pubblico/configurabile e rifiutare blocchi browser, non prompt simulato; extended `X2` |
 | Automation | `gateway_automation_routes`, task runtime automation runs | trigger/run separati dalla chat interattiva; automation non eredita stato/liveness del thread sbagliato | automation owner tests + `scripts/audit_homun_state.py` per run appesi | extended `X1` |
+| Code/subagents | workspace routing, `gateway_tool_execution`, `gateway_subagent_execution`, runtime plan state | `Auto` in workspace progetto usa contesto progetto; subagent produce outcome tracciato; nessun file viene modificato in scenari read-only | owner tests subagent/runtime plan + `scripts/production_smoke.py --scenario X4`; `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway orchestrated_subagent_gathers_on_gemma4 -- --ignored --nocapture` | extended `X4`; `SUB1` live finche' il trigger broker subagent non e' stabile |
 | UI projection | `/kernel-projection`, `kernelProjectionPresenter`, runtime view model | UI proietta stato canonico; non decide completion/liveness da marker o testo | `scripts/smoke_kernel_projection.py`, desktop unit tests | app smoke Electron su profilo isolato |
 | Release/artifact | CI, packaged artifact QA, signing/notarization | CI verde non prova artifact installato; checksum/install/launch/firma sono evidenze separate | `python3 scripts/pre_release_gate.py` | production smoke su app installata |
 
@@ -99,7 +100,9 @@ Il profilo `extended` include:
 
 - `X1` automation lifecycle probe;
 - `X2` skill/tool selection probe;
-- `X3` interazione memoria/privacy/modello.
+- `X3` interazione memoria/privacy/modello;
+- `X4` code workspace auto-routing probe;
+- `SUB1` subagent runner probe tramite test live ignorato.
 
 Esecuzione completa:
 

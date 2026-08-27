@@ -27,16 +27,16 @@ test("missing gateway effective_model never falls back to requested or global mo
   assert.notEqual(effectiveModel, globalModel);
 });
 
-test("model labels display the selected next-turn model instead of unavailable provenance", () => {
+test("model button labels display the next-turn selection instead of unavailable provenance", () => {
   assert.equal(modelLabelFromSelection("provider-410c::deepseek-v4-pro"), "deepseek-v4-pro");
   assert.equal(modelLabelFromSelection("plain-model"), "plain-model");
   assert.equal(
-    composerModelButtonLabel("Unavailable", "provider-410c::deepseek-v4-pro", "Unavailable"),
+    composerModelButtonLabel("Unavailable", "provider-410c::deepseek-v4-pro", "Unavailable", "Auto"),
     "deepseek-v4-pro",
   );
   assert.equal(
-    composerModelButtonLabel(null, null, "Unavailable"),
-    "Unavailable",
+    composerModelButtonLabel("Unavailable", null, "Unavailable", "Auto"),
+    "Auto",
   );
 });
 

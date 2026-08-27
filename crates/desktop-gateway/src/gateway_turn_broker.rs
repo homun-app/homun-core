@@ -763,6 +763,7 @@ pub(crate) async fn enqueue_turn(
 pub(crate) async fn get_turn(
     Path(turn_id): Path<String>,
     State(state): State<AppState>,
+    Query(query): Query<TurnSinceQuery>,
 ) -> Result<Json<Value>, GatewayError> {
     let store = state.task_store.lock().map_err(|e| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -770,7 +771,7 @@ pub(crate) async fn get_turn(
         message: format!("lock: {e}"),
     })?;
     let user_id = gateway_user_id();
-    let workspace_id = gateway_workspace_id();
+    let workspace_id = resolve_turn_workspace(&query);
     let task_id = TaskId::new(&turn_id);
     let task = store
         .get_task(&task_id, &user_id, &workspace_id)
@@ -860,6 +861,7 @@ pub(crate) fn cancel_chat_turn_and_finalize_bubble(
 pub(crate) async fn cancel_turn(
     Path(turn_id): Path<String>,
     State(state): State<AppState>,
+    Query(query): Query<TurnSinceQuery>,
 ) -> Result<StatusCode, GatewayError> {
     let store = state.task_store.lock().map_err(|e| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -867,7 +869,7 @@ pub(crate) async fn cancel_turn(
         message: format!("lock: {e}"),
     })?;
     let user_id = gateway_user_id();
-    let workspace_id = gateway_workspace_id();
+    let workspace_id = resolve_turn_workspace(&query);
     let task_id = TaskId::new(&turn_id);
     let delivery_task = store
         .get_task(&task_id, &user_id, &workspace_id)
@@ -912,11 +914,23 @@ pub(crate) async fn cancel_turn(
     })
 }
 
-/// Query params for the events/stream endpoints.
-#[derive(Debug, Clone, Deserialize)]
+/// Query params for turn inspection/cancel/events/stream endpoints.
+#[derive(Debug, Clone, Deserialize, Default)]
 pub(crate) struct TurnSinceQuery {
     #[serde(default)]
     pub(crate) since: Option<i64>,
+    #[serde(default)]
+    pub(crate) workspace: Option<String>,
+}
+
+pub(crate) fn resolve_turn_workspace(query: &TurnSinceQuery) -> WorkspaceId {
+    query
+        .workspace
+        .as_deref()
+        .map(str::trim)
+        .filter(|workspace| !workspace.is_empty())
+        .map(WorkspaceId::new)
+        .unwrap_or_else(gateway_workspace_id)
 }
 
 pub(crate) fn execution_thread_workspace(
@@ -1107,18 +1121,16 @@ pub(crate) async fn get_latest_agent_checkpoint(
 pub(crate) async fn get_agent_runs(
     Path(turn_id): Path<String>,
     State(state): State<AppState>,
+    Query(query): Query<TurnSinceQuery>,
 ) -> Result<Json<Vec<local_first_task_runtime::AgentRun>>, GatewayError> {
     let store = state.task_store.lock().map_err(|error| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "agent_run_store_lock",
         message: format!("lock: {error}"),
     })?;
+    let workspace_id = resolve_turn_workspace(&query);
     let runs = store
-        .list_agent_runs_for_turn(
-            &turn_id,
-            gateway_user_id().as_str(),
-            gateway_workspace_id().as_str(),
-        )
+        .list_agent_runs_for_turn(&turn_id, gateway_user_id().as_str(), workspace_id.as_str())
         .map_err(|error| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "agent_run_list",

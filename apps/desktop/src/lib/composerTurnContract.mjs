@@ -17,9 +17,15 @@ export function modelLabelFromSelection(value) {
   return nonEmptyString(parts[parts.length - 1]) ?? selected;
 }
 
-export function composerModelButtonLabel(effectiveModelLabel, selectedNextModel, unavailableLabel) {
+export function composerModelButtonLabel(
+  effectiveModelLabel,
+  selectedNextModel,
+  unavailableLabel,
+  autoLabel,
+) {
   return (
     modelLabelFromSelection(selectedNextModel)
+    ?? nonEmptyString(autoLabel)
     ?? nonEmptyString(effectiveModelLabel)
     ?? nonEmptyString(unavailableLabel)
     ?? "Unavailable"

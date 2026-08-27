@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 import scripts.production_smoke as smoke
 
@@ -47,7 +48,7 @@ class ProductionSmokeTests(unittest.TestCase):
         all_scenarios = smoke.build_scenarios(profile="all")
 
         self.assertEqual([scenario.id for scenario in baseline], [f"S{i}" for i in range(1, 10)])
-        self.assertEqual([scenario.id for scenario in extended], ["X1", "X2", "X3"])
+        self.assertEqual([scenario.id for scenario in extended], ["X1", "X2", "X3", "X4"])
         self.assertEqual(
             [scenario.id for scenario in all_scenarios],
             [scenario.id for scenario in baseline + extended],
@@ -57,6 +58,9 @@ class ProductionSmokeTests(unittest.TestCase):
         self.assertIn("skill", by_id["X2"].domains)
         self.assertIn("memory", by_id["X3"].domains)
         self.assertIn("privacy", by_id["X3"].domains)
+        self.assertIn("code", by_id["X4"].domains)
+        self.assertIn("temp_code_workspace", by_id["X4"].setup)
+        self.assertIn("CODE_CONTEXT_OK", by_id["X4"].require_text)
 
     def test_broker_helpers_are_exported(self):
         # Guard the live path: smoke must use turns broker, not generate_stream.
@@ -71,6 +75,23 @@ class ProductionSmokeTests(unittest.TestCase):
         self.assertTrue(callable(smoke.create_thread))
         self.assertTrue(callable(smoke.enqueue_turn))
         self.assertTrue(callable(smoke.run_turn_via_broker))
+
+    def test_create_thread_scopes_to_workspace_when_setup_provides_one(self):
+        calls = []
+
+        def fake_request(base, token, method, path, body=None, timeout=60):
+            calls.append((method, path, body))
+            return 200, {"thread_id": "thread-code"}
+
+        original = smoke._request
+        smoke._request = fake_request
+        try:
+            thread_id = smoke.create_thread("http://gateway", "token", "smoke X4", "workspace_code")
+        finally:
+            smoke._request = original
+
+        self.assertEqual(thread_id, "thread-code")
+        self.assertEqual(calls, [("POST", "/api/chat/threads?workspace=workspace_code", {"title": "smoke X4"})])
 
     def test_status_success_requires_completed_for_plain_scenarios(self):
         scenario = smoke.Scenario("SX", "plain", "Rispondi ok")
@@ -90,6 +111,66 @@ class ProductionSmokeTests(unittest.TestCase):
         self.assertTrue(smoke.status_allows_success("completed", s6, success))
         self.assertFalse(smoke.status_allows_success("completed", s6, browser_unavailable))
         self.assertFalse(smoke.status_allows_success("completed", s6, "Fatto ma senza evidenza"))
+
+    def test_wait_turn_output_retries_transient_turn_not_found(self):
+        calls = []
+
+        def fake_request(base, token, method, path, body=None, timeout=60):
+            calls.append(path)
+            if path == "/api/chat/turns/turn-1" and calls.count(path) == 1:
+                raise RuntimeError(
+                    'HTTP 404 /api/chat/turns/turn-1: {"error":{"code":"turn_not_found"}}'
+                )
+            if path == "/api/chat/turns/turn-1":
+                return 200, {"status": "completed"}
+            if path == "/api/chat/turns/turn-1/events?since=0":
+                return 200, [{"text": "done"}]
+            raise AssertionError(path)
+
+        original_sleep = smoke.time.sleep
+        original_request = smoke._request
+        smoke.time.sleep = lambda _seconds: None
+        smoke._request = fake_request
+        try:
+            status, output, _elapsed = smoke.wait_turn_output(
+                "http://gateway",
+                "token",
+                "turn-1",
+                2,
+            )
+        finally:
+            smoke._request = original_request
+            smoke.time.sleep = original_sleep
+
+        self.assertEqual(status, "completed")
+        self.assertIn("done", output)
+
+    def test_wait_turn_output_scopes_polling_to_workspace(self):
+        calls = []
+
+        def fake_request(base, token, method, path, body=None, timeout=60):
+            calls.append(path)
+            if path == "/api/chat/turns/turn-1?workspace=workspace_code":
+                return 200, {"status": "completed"}
+            if path == "/api/chat/turns/turn-1/events?since=0&workspace=workspace_code":
+                return 200, [{"text": "CODE_CONTEXT_OK add_numbers 5"}]
+            raise AssertionError(path)
+
+        original_request = smoke._request
+        smoke._request = fake_request
+        try:
+            status, output, _elapsed = smoke.wait_turn_output(
+                "http://gateway",
+                "token",
+                "turn-1",
+                2,
+                "workspace_code",
+            )
+        finally:
+            smoke._request = original_request
+
+        self.assertEqual(status, "completed")
+        self.assertIn("CODE_CONTEXT_OK", output)
 
     def test_marker_scenarios_require_marker_and_wait_or_completed_status(self):
         scenario = smoke.Scenario("SY", "approval", "ask", expect_marker="PAYMENT_APPROVAL")
@@ -175,6 +256,65 @@ class ProductionSmokeTests(unittest.TestCase):
             smoke._request = original
 
         self.assertEqual(calls, [("DELETE", "/api/vault/records/vault_smoke", None)])
+
+    def test_temp_code_workspace_setup_creates_workspace_and_cleans_it(self):
+        calls = []
+
+        def fake_request(base, token, method, path, body=None, timeout=60):
+            calls.append((method, path, body))
+            if method == "POST" and path == "/api/workspaces":
+                return 200, {
+                    "active_workspace_id": "default",
+                    "workspaces": [
+                        {"id": "workspace_code", "name": body["name"], "folder": body["folder"]}
+                    ],
+                }
+            if method == "POST" and path == "/api/workspaces/workspace_code/delete":
+                return 200, {"active_workspace_id": "default", "workspaces": []}
+            raise AssertionError((method, path, body))
+
+        scenario = next(item for item in smoke.build_scenarios(profile="extended") if item.id == "X4")
+        original = smoke._request
+        smoke._request = fake_request
+        try:
+            with mock.patch("scripts.production_smoke.shutil.rmtree") as rmtree:
+                state = smoke.prepare_scenario("http://gateway", "token", scenario)
+                self.assertEqual(state["workspace_id"], "workspace_code")
+                self.assertIn("CODE_CONTEXT_OK", state["scenario"].prompt)
+                self.assertIn(state["project_root"], state["scenario"].prompt)
+                smoke.cleanup_scenario(state, scenario_passed=True)
+                rmtree.assert_called_once_with(state["project_root"], ignore_errors=True)
+        finally:
+            smoke._request = original
+
+        self.assertEqual(calls[0][0:2], ("POST", "/api/workspaces"))
+        self.assertEqual(calls[-1][0:2], ("POST", "/api/workspaces/workspace_code/delete"))
+
+    def test_temp_code_workspace_cleanup_preserves_fixture_on_failure(self):
+        calls = []
+
+        def fake_request(base, token, method, path, body=None, timeout=60):
+            calls.append((method, path, body))
+            return 200, {}
+
+        original = smoke._request
+        smoke._request = fake_request
+        try:
+            with mock.patch("scripts.production_smoke.shutil.rmtree") as rmtree:
+                smoke.cleanup_scenario(
+                    {
+                        "base": "http://gateway",
+                        "token": "token",
+                        "workspace_id": "workspace_code",
+                        "temp_project_root": "/tmp/homun-code-smoke-x",
+                    },
+                    scenario_passed=False,
+                )
+                rmtree.assert_not_called()
+        finally:
+            smoke._request = original
+
+        self.assertEqual(calls, [])
 
     def test_checkout_fixture_setup_rewrites_prompt_to_public_checkout_url(self):
         scenario = next(item for item in smoke.build_scenarios() if item.id == "S8")

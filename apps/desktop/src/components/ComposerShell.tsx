@@ -233,6 +233,7 @@ export function ComposerShell(props: ComposerShellProps) {
     props.effectiveModelLabel,
     props.selectedNextTurnModel,
     t("composer.runtime.unavailable"),
+    t("composer.auto"),
   );
   const runtimeView = runtimeContextView(props.runtimeContext, props.selectedNextTurnModel);
 

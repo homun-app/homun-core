@@ -129,11 +129,7 @@ pub(crate) fn fanout_legacy_card_markers_from_text(state: &AppState, turn_id: &s
                     .unwrap_or(false);
                 if !already_present {
                     let _ = crate::turn_executor::emit_turn_event(
-                        state,
-                        &store,
-                        turn_id,
-                        kind.clone(),
-                        payload,
+                        state, &store, turn_id, kind, payload,
                     );
                 }
             }

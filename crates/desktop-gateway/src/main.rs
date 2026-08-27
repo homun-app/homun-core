@@ -992,17 +992,24 @@ mod agent_run_api_tests {
                 .unwrap();
         }
 
-        let runs = get_agent_runs(Path("turn-api".to_string()), State(state.clone()))
-            .await
-            .unwrap()
-            .0;
+        let runs = get_agent_runs(
+            Path("turn-api".to_string()),
+            State(state.clone()),
+            Query(TurnSinceQuery::default()),
+        )
+        .await
+        .unwrap()
+        .0;
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].run_id, "run-api");
 
         let events = get_agent_run_events(
             Path("run-api".to_string()),
             State(state.clone()),
-            Query(TurnSinceQuery { since: Some(1) }),
+            Query(TurnSinceQuery {
+                since: Some(1),
+                workspace: None,
+            }),
         )
         .await
         .unwrap()
@@ -1022,7 +1029,10 @@ mod agent_run_api_tests {
         let cursor_error = get_agent_run_events(
             Path("run-api".to_string()),
             State(state.clone()),
-            Query(TurnSinceQuery { since: Some(-1) }),
+            Query(TurnSinceQuery {
+                since: Some(-1),
+                workspace: None,
+            }),
         )
         .await
         .unwrap_err();

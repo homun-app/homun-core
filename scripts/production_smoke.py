@@ -13,7 +13,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -26,6 +28,7 @@ from typing import Any
 
 DEFAULT_GATEWAY_BASE = "http://127.0.0.1:18765"
 DEFAULT_CHECKOUT_FIXTURE_URL = "https://stripe.com/payments/elements"
+CODE_SMOKE_MARKER = "CODE_CONTEXT_OK"
 TERMINAL_STATUSES = frozenset(
     {
         "completed",
@@ -190,6 +193,15 @@ def extended_scenarios() -> list[Scenario]:
             forbid_output=("codice fiscale", "targa", "segreto"),
             max_seconds=240,
         ),
+        Scenario(
+            "X4",
+            "Code workspace auto-routing probe",
+            "Nel progetto temporaneo {project_root}, leggi README.md e src/math_utils.py. Rispondi con {marker}, il nome funzione add_numbers e il risultato di add_numbers(2, 3). Non modificare file.",
+            domains=("chat", "code", "model"),
+            setup=("temp_code_workspace",),
+            require_text=(CODE_SMOKE_MARKER, "add_numbers", "5"),
+            max_seconds=240,
+        ),
     ]
 
 
@@ -253,12 +265,20 @@ def _request(
         raise RuntimeError(f"HTTP {error.code} {path}: {raw[:500]}") from error
 
 
-def create_thread(base: str, token: str, title: str) -> str:
+def workspace_scoped_path(path: str, workspace_id: str | None) -> str:
+    if not workspace_id:
+        return path
+    separator = "&" if "?" in path else "?"
+    return f"{path}{separator}{urllib.parse.urlencode({'workspace': workspace_id})}"
+
+
+def create_thread(base: str, token: str, title: str, workspace_id: str | None = None) -> str:
+    path = workspace_scoped_path("/api/chat/threads", workspace_id)
     status, body = _request(
         base,
         token,
         "POST",
-        "/api/chat/threads",
+        path,
         {"title": title},
     )
     if status != 200 or not isinstance(body, dict) or not body.get("thread_id"):
@@ -344,7 +364,42 @@ def start_checkout_fixture() -> dict[str, Any]:
     return {"checkout_url": checkout_url}
 
 
-def cleanup_scenario(state: dict[str, Any]) -> None:
+def create_temp_code_workspace(base: str, token: str) -> dict[str, Any]:
+    project_root = tempfile.mkdtemp(prefix="homun-code-smoke-")
+    src_dir = os.path.join(project_root, "src")
+    os.makedirs(src_dir, exist_ok=True)
+    with open(os.path.join(project_root, "README.md"), "w", encoding="utf-8") as handle:
+        handle.write("# Homun code smoke\n\nThis project verifies code context routing.\n")
+    with open(os.path.join(src_dir, "math_utils.py"), "w", encoding="utf-8") as handle:
+        handle.write(
+            "def add_numbers(left: int, right: int) -> int:\n"
+            "    return left + right\n"
+        )
+    _, body = _request(
+        base,
+        token,
+        "POST",
+        "/api/workspaces",
+        {"name": "homun-code-smoke", "folder": project_root},
+        timeout=30,
+    )
+    workspaces = body.get("workspaces", []) if isinstance(body, dict) else []
+    workspace_id = ""
+    for workspace in workspaces:
+        if isinstance(workspace, dict) and workspace.get("folder") == project_root:
+            workspace_id = str(workspace.get("id", ""))
+            break
+    if not workspace_id:
+        shutil.rmtree(project_root, ignore_errors=True)
+        raise RuntimeError(f"workspace create failed body={body!r}")
+    return {
+        "workspace_id": workspace_id,
+        "project_root": project_root,
+        "temp_project_root": project_root,
+    }
+
+
+def cleanup_scenario(state: dict[str, Any], scenario_passed: bool = True) -> None:
     if state.get("vault_seeded") and state.get("vault_record_id"):
         try:
             _request(
@@ -356,6 +411,26 @@ def cleanup_scenario(state: dict[str, Any]) -> None:
             )
         except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as error:
             print(f"WARN cleanup vault seed failed: {error}", file=sys.stderr, flush=True)
+    if state.get("workspace_id") and state.get("temp_project_root"):
+        if not scenario_passed:
+            print(
+                "WARN preserving failed code smoke workspace "
+                f"{state['workspace_id']} at {state['temp_project_root']}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return
+        try:
+            _request(
+                str(state.get("base", "")),
+                str(state.get("token", "")),
+                "POST",
+                f"/api/workspaces/{urllib.parse.quote(str(state['workspace_id']), safe='')}/delete",
+                timeout=30,
+            )
+        except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as error:
+            print(f"WARN cleanup workspace failed: {error}", file=sys.stderr, flush=True)
+        shutil.rmtree(str(state["temp_project_root"]), ignore_errors=True)
     server = state.get("checkout_server")
     if server is not None:
         server.shutdown()
@@ -373,22 +448,53 @@ def prepare_scenario(base: str, token: str, scenario: Scenario) -> dict[str, Any
                 state["scenario"],
                 prompt=state["scenario"].prompt.format(checkout_url=state["checkout_url"]),
             )
+        elif setup == "temp_code_workspace":
+            state.update(create_temp_code_workspace(base, token))
+            state["scenario"] = replace(
+                state["scenario"],
+                prompt=state["scenario"].prompt.format(
+                    project_root=state["project_root"],
+                    marker=CODE_SMOKE_MARKER,
+                ),
+            )
         else:
             raise RuntimeError(f"unknown scenario setup: {setup}")
     return state
 
 
-def wait_turn_output(base: str, token: str, turn_id: str, max_seconds: int) -> tuple[str, str, float]:
+def wait_turn_output(
+    base: str,
+    token: str,
+    turn_id: str,
+    max_seconds: int,
+    workspace_id: str | None = None,
+) -> tuple[str, str, float]:
     """Return (status, flattened_events_text, elapsed_seconds)."""
     started = time.time()
     deadline = started + max_seconds
     last_status = "unknown"
     events: Any = []
     while time.time() < deadline:
-        _, state = _request(base, token, "GET", f"/api/chat/turns/{turn_id}", timeout=30)
-        _, events = _request(
-            base, token, "GET", f"/api/chat/turns/{turn_id}/events?since=0", timeout=30
-        )
+        try:
+            _, state = _request(
+                base,
+                token,
+                "GET",
+                workspace_scoped_path(f"/api/chat/turns/{turn_id}", workspace_id),
+                timeout=30,
+            )
+            _, events = _request(
+                base,
+                token,
+                "GET",
+                workspace_scoped_path(f"/api/chat/turns/{turn_id}/events?since=0", workspace_id),
+                timeout=30,
+            )
+        except RuntimeError as error:
+            if "turn_not_found" in str(error):
+                time.sleep(0.75)
+                continue
+            raise
         if isinstance(state, dict):
             last_status = str(state.get("status") or state.get("state") or "unknown")
         if normalize_status(last_status) in TERMINAL_STATUSES:
@@ -401,16 +507,23 @@ def wait_turn_output(base: str, token: str, turn_id: str, max_seconds: int) -> t
     return last_status, _flatten(events), time.time() - started
 
 
-def run_turn_via_broker(base: str, scenario: Scenario, token: str) -> tuple[str, str, float]:
+def run_turn_via_broker(
+    base: str,
+    scenario: Scenario,
+    token: str,
+) -> tuple[str, str, float, dict[str, Any]]:
     state = prepare_scenario(base, token, scenario)
-    try:
-        prepared = state["scenario"]
-        thread_id = create_thread(base, token, f"smoke {prepared.id}")
-        turn_id = enqueue_turn(base, token, thread_id, prepared)
-        status, output, elapsed = wait_turn_output(base, token, turn_id, prepared.max_seconds)
-        return status, output, elapsed
-    finally:
-        cleanup_scenario(state)
+    prepared = state["scenario"]
+    thread_id = create_thread(base, token, f"smoke {prepared.id}", state.get("workspace_id"))
+    turn_id = enqueue_turn(base, token, thread_id, prepared)
+    status, output, elapsed = wait_turn_output(
+        base,
+        token,
+        turn_id,
+        prepared.max_seconds,
+        state.get("workspace_id"),
+    )
+    return status, output, elapsed, state
 
 
 def status_allows_success(status: str, scenario: Scenario, output: str) -> bool:
@@ -429,10 +542,13 @@ def status_allows_success(status: str, scenario: Scenario, output: str) -> bool:
 
 def run_scenario(base: str, scenario: Scenario, token: str) -> bool:
     print(f"== {scenario.id}: {scenario.name} ==", flush=True)
+    state: dict[str, Any] | None = None
     try:
-        status, output, elapsed = run_turn_via_broker(base, scenario, token)
+        status, output, elapsed, state = run_turn_via_broker(base, scenario, token)
     except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as error:
         print(f"FAIL {scenario.id}: gateway error: {error}", flush=True)
+        if state is not None:
+            cleanup_scenario(state, scenario_passed=False)
         return False
     ok = status_allows_success(status, scenario, output)
     if not ok:
@@ -452,6 +568,8 @@ def run_scenario(base: str, scenario: Scenario, token: str) -> bool:
             print(f"FAIL {scenario.id}: forbidden output {forbidden!r}", flush=True)
             ok = False
     print(f"{'PASS' if ok else 'FAIL'} {scenario.id}: {elapsed:.1f}s", flush=True)
+    if state is not None:
+        cleanup_scenario(state, scenario_passed=ok)
     return ok
 
 
