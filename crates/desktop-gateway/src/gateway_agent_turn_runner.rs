@@ -132,6 +132,19 @@ pub(crate) async fn run_agent_turn_into_message_with_fanout(
         .lock()
         .ok()
         .and_then(|map| map.get(&request_id).cloned());
+    if let Some(entry) = entry.as_ref() {
+        let stream_buffer_empty = entry
+            .lines
+            .lock()
+            .map(|lines| lines.is_empty())
+            .unwrap_or(true);
+        if stream_buffer_empty
+            && let Some(outcome) = entry.outcome.lock().ok().and_then(|slot| slot.clone())
+            && !outcome.memory_answer.trim().is_empty()
+        {
+            fanout_legacy_card_markers_from_text(state, turn_id, &outcome.memory_answer);
+        }
+    }
     if let Some(abort) = stream_abort_registry()
         .lock()
         .ok()

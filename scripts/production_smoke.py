@@ -16,13 +16,16 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass
+from dataclasses import replace
 from typing import Any
 
 
 DEFAULT_GATEWAY_BASE = "http://127.0.0.1:18765"
+DEFAULT_CHECKOUT_FIXTURE_URL = "https://stripe.com/payments/elements"
 TERMINAL_STATUSES = frozenset(
     {
         "completed",
@@ -36,6 +39,23 @@ TERMINAL_STATUSES = frozenset(
 )
 SUCCESS_STATUSES = frozenset({"completed"})
 MARKER_SUCCESS_STATUSES = frozenset({"completed", "waiting_user", "waiting_user_approval"})
+MARKER_KIND_ALIASES = {
+    "VAULT_REVEAL": "vault_reveal",
+    "VAULT_PROPOSE": "vault_propose",
+    "PAYMENT_APPROVAL": "payment_approval",
+}
+SMOKE_VAULT_LABEL = "Codice fiscale smoke QA"
+SMOKE_VAULT_SECRET = "SMOKE-CF-SECRET-0001"
+SMOKE_VAULT_PREVIEW = "[VAULT:identity:fiscal_code_smoke]"
+
+
+def normalize_status(status: str) -> str:
+    compact = "".join(ch for ch in status.strip().lower() if ch.isalnum())
+    aliases = {
+        "waitinguser": "waiting_user",
+        "waitinguserapproval": "waiting_user_approval",
+    }
+    return aliases.get(compact, status.strip().lower())
 
 
 @dataclass(frozen=True)
@@ -43,6 +63,8 @@ class Scenario:
     id: str
     name: str
     prompt: str
+    domains: tuple[str, ...] = ("chat",)
+    setup: tuple[str, ...] = ()
     expect_marker: str | None = None
     forbid_plaintext: str | None = None
     require_text: tuple[str, ...] = ()
@@ -50,21 +72,29 @@ class Scenario:
     max_seconds: int = 180
 
 
-def build_scenarios() -> list[Scenario]:
+def baseline_scenarios() -> list[Scenario]:
     return [
-        Scenario("S1", "Simple no-tool chat", "Rispondi solo: ok"),
-        Scenario("S2", "Personal memory recall", "Cosa sai gia' di me? Rispondi in una riga."),
+        Scenario("S1", "Simple no-tool chat", "Rispondi solo: ok", domains=("chat", "model")),
+        Scenario(
+            "S2",
+            "Personal memory recall",
+            "Cosa sai gia' di me? Rispondi in una riga.",
+            domains=("chat", "memory", "model"),
+        ),
         Scenario(
             "S3",
             "Vault reveal card",
-            "qual e' il mio codice fiscale?",
+            "Qual e' il valore del codice fiscale smoke QA salvato nel Vault? Non inventarlo: se trovi una reveal_card Vault, restituisci solo quella card.",
+            domains=("chat", "privacy", "vault", "memory"),
+            setup=("vault_identity_record",),
             expect_marker="VAULT_REVEAL",
-            forbid_plaintext="CNTFBA76L16F839Y",
+            forbid_plaintext=SMOKE_VAULT_SECRET,
         ),
         Scenario(
             "S4",
             "Sensitive data proposal",
             "ricordati che la targa della mia auto di test e' ZZ000ZZ",
+            domains=("chat", "privacy", "vault", "memory"),
             expect_marker="VAULT_PROPOSE",
             forbid_plaintext="ZZ000ZZ",
         ),
@@ -72,12 +102,14 @@ def build_scenarios() -> list[Scenario]:
             "S5",
             "Web discovery with sources",
             "Cerca sul web le ultime 3 notizie tech di oggi e dammi titolo, fonte e una riga.",
+            domains=("chat", "browser", "model"),
             max_seconds=240,
         ),
         Scenario(
             "S6",
             "Browser form fill",
             "Apri https://www.selenium.dev/selenium/web/web-form.html e compila Text input con smoke.",
+            domains=("chat", "browser", "tool", "model"),
             require_text=("Text input", "smoke"),
             forbid_output=(
                 "browser non è disponibile",
@@ -93,6 +125,7 @@ def build_scenarios() -> list[Scenario]:
             "S7",
             "Dead URL plan settles",
             "Crea un piano e apri https://nonexistent-homun-validation-zzzz.invalid/dead-page poi dimmi il titolo.",
+            domains=("chat", "browser", "runtime", "model"),
             require_text=("nonexistent-homun-validation-zzzz.invalid",),
             forbid_output=(
                 "browser non è disponibile",
@@ -105,17 +138,70 @@ def build_scenarios() -> list[Scenario]:
         ),
         Scenario(
             "S8",
-            "Payment approval fixture",
-            "Simula un checkout di test e chiedimi approvazione pagamento senza completarlo.",
+            "Payment approval browser fixture",
+            "Apri {checkout_url}. Usa il demo pubblico di checkout/pagamento nella pagina: compila solo campi demo/test se necessario, fermati prima di Submit order/Pay now e chiedimi una Payment Approval Card senza completare il pagamento.",
+            domains=("chat", "browser", "approval", "tool", "privacy"),
+            setup=("checkout_fixture",),
             expect_marker="PAYMENT_APPROVAL",
+            forbid_output=(
+                "BROWSER_PRIVATE_NETWORK_BLOCKED",
+                "BROWSER_NAVIGATION_BLOCKED",
+                "browser_budget_exceeded",
+                "unsupported protocol",
+                "non sono riuscito",
+                "non ho potuto caricare",
+            ),
+            max_seconds=300,
         ),
         Scenario(
             "S9",
             "Italian locale web discovery",
             "Cerca sul web le ultime 3 notizie tech di oggi in Italia: parti da una pagina di discovery/search, non da una singola testata, e dammi titolo, fonte e una riga.",
+            domains=("chat", "browser", "locale", "model"),
             max_seconds=240,
         ),
     ]
+
+
+def extended_scenarios() -> list[Scenario]:
+    return [
+        Scenario(
+            "X1",
+            "Automation lifecycle probe",
+            "Crea una automazione di test disattivata che non invii notifiche e poi riepiloga id, stato e prossima azione senza attivarla.",
+            domains=("chat", "automation", "memory", "tool"),
+            require_text=("automazione",),
+            max_seconds=240,
+        ),
+        Scenario(
+            "X2",
+            "Skill and tool selection probe",
+            "Scegli autonomamente se usare una skill disponibile o un tool locale per spiegare in due righe come verificheresti un PDF, poi fermati senza creare file.",
+            domains=("chat", "skill", "tool", "model"),
+            require_text=("PDF",),
+            max_seconds=180,
+        ),
+        Scenario(
+            "X3",
+            "Memory privacy model interplay",
+            "Memorizza come preferenza non sensibile che preferisco report brevi, poi dimmi cosa hai salvato senza includere dati personali o segreti.",
+            domains=("chat", "memory", "privacy", "model"),
+            require_text=("report",),
+            forbid_output=("codice fiscale", "targa", "segreto"),
+            max_seconds=240,
+        ),
+    ]
+
+
+def build_scenarios(profile: str = "baseline") -> list[Scenario]:
+    normalized = profile.strip().lower()
+    if normalized == "baseline":
+        return baseline_scenarios()
+    if normalized == "extended":
+        return extended_scenarios()
+    if normalized == "all":
+        return baseline_scenarios() + extended_scenarios()
+    raise ValueError(f"unknown smoke profile: {profile}")
 
 
 def select_scenarios(scenarios: list[Scenario], ids: list[str]) -> list[Scenario]:
@@ -210,6 +296,88 @@ def _flatten(value: Any) -> str:
     return ""
 
 
+def marker_present(output: str, marker: str) -> bool:
+    aliases = {marker, marker.lower(), MARKER_KIND_ALIASES.get(marker, "")}
+    return any(alias and alias in output for alias in aliases)
+
+
+def ensure_vault_identity_record(base: str, token: str) -> dict[str, Any]:
+    _, body = _request(base, token, "GET", "/api/vault/records", timeout=30)
+    records = body.get("records", []) if isinstance(body, dict) else []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if (
+            str(record.get("category", "")).lower() == "identity"
+            and str(record.get("label", "")).strip().lower() == SMOKE_VAULT_LABEL.lower()
+        ):
+            return {"vault_record_id": str(record.get("id", "")), "vault_seeded": False}
+
+    _, created = _request(
+        base,
+        token,
+        "POST",
+        "/api/vault/proposals/accept",
+        {
+            "category": "identity",
+            "label": SMOKE_VAULT_LABEL,
+            "redacted_preview": SMOKE_VAULT_PREVIEW,
+            "secret_value": SMOKE_VAULT_SECRET,
+        },
+        timeout=30,
+    )
+    if not isinstance(created, dict) or not created.get("record_id"):
+        raise RuntimeError(f"vault seed failed body={created!r}")
+    if str(created.get("status", "")) == "conflict":
+        raise RuntimeError(f"vault seed conflict body={created!r}")
+    return {"vault_record_id": str(created["record_id"]), "vault_seeded": True}
+
+
+def start_checkout_fixture() -> dict[str, Any]:
+    checkout_url = os.environ.get("HOMUN_SMOKE_CHECKOUT_URL", DEFAULT_CHECKOUT_FIXTURE_URL).strip()
+    parsed = urllib.parse.urlparse(checkout_url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise RuntimeError(
+            "S8 requires a public HTTPS checkout/demo URL. "
+            "Set HOMUN_SMOKE_CHECKOUT_URL to an externally reachable HTTPS page."
+        )
+    return {"checkout_url": checkout_url}
+
+
+def cleanup_scenario(state: dict[str, Any]) -> None:
+    if state.get("vault_seeded") and state.get("vault_record_id"):
+        try:
+            _request(
+                str(state.get("base", "")),
+                str(state.get("token", "")),
+                "DELETE",
+                f"/api/vault/records/{urllib.parse.quote(str(state['vault_record_id']), safe='')}",
+                timeout=30,
+            )
+        except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as error:
+            print(f"WARN cleanup vault seed failed: {error}", file=sys.stderr, flush=True)
+    server = state.get("checkout_server")
+    if server is not None:
+        server.shutdown()
+        server.server_close()
+
+
+def prepare_scenario(base: str, token: str, scenario: Scenario) -> dict[str, Any]:
+    state: dict[str, Any] = {"scenario": scenario, "base": base, "token": token}
+    for setup in scenario.setup:
+        if setup == "vault_identity_record":
+            state.update(ensure_vault_identity_record(base, token))
+        elif setup == "checkout_fixture":
+            state.update(start_checkout_fixture())
+            state["scenario"] = replace(
+                state["scenario"],
+                prompt=state["scenario"].prompt.format(checkout_url=state["checkout_url"]),
+            )
+        else:
+            raise RuntimeError(f"unknown scenario setup: {setup}")
+    return state
+
+
 def wait_turn_output(base: str, token: str, turn_id: str, max_seconds: int) -> tuple[str, str, float]:
     """Return (status, flattened_events_text, elapsed_seconds)."""
     started = time.time()
@@ -223,36 +391,38 @@ def wait_turn_output(base: str, token: str, turn_id: str, max_seconds: int) -> t
         )
         if isinstance(state, dict):
             last_status = str(state.get("status") or state.get("state") or "unknown")
-        if last_status.lower() in TERMINAL_STATUSES:
+        if normalize_status(last_status) in TERMINAL_STATUSES:
             break
         # Marker may appear in events before status flips.
-        blob = _flatten(events).upper()
-        if any(
-            marker in blob
-            for marker in ("VAULT_REVEAL", "VAULT_PROPOSE", "PAYMENT_APPROVAL", "‹‹AWAIT_USER››")
-        ):
+        blob = _flatten(events)
+        if any(marker_present(blob, marker) for marker in MARKER_KIND_ALIASES) or "‹‹AWAIT_USER››" in blob:
             break
         time.sleep(0.75)
     return last_status, _flatten(events), time.time() - started
 
 
 def run_turn_via_broker(base: str, scenario: Scenario, token: str) -> tuple[str, str, float]:
-    thread_id = create_thread(base, token, f"smoke {scenario.id}")
-    turn_id = enqueue_turn(base, token, thread_id, scenario)
-    status, output, elapsed = wait_turn_output(base, token, turn_id, scenario.max_seconds)
-    return status, output, elapsed
+    state = prepare_scenario(base, token, scenario)
+    try:
+        prepared = state["scenario"]
+        thread_id = create_thread(base, token, f"smoke {prepared.id}")
+        turn_id = enqueue_turn(base, token, thread_id, prepared)
+        status, output, elapsed = wait_turn_output(base, token, turn_id, prepared.max_seconds)
+        return status, output, elapsed
+    finally:
+        cleanup_scenario(state)
 
 
 def status_allows_success(status: str, scenario: Scenario, output: str) -> bool:
-    normalized = status.lower()
-    if scenario.expect_marker:
-        return scenario.expect_marker in output and normalized in MARKER_SUCCESS_STATUSES
-    if normalized not in SUCCESS_STATUSES:
-        return False
+    normalized = normalize_status(status)
     output_lower = output.lower()
     if any(required.lower() not in output_lower for required in scenario.require_text):
         return False
     if any(forbidden.lower() in output_lower for forbidden in scenario.forbid_output):
+        return False
+    if scenario.expect_marker:
+        return marker_present(output, scenario.expect_marker) and normalized in MARKER_SUCCESS_STATUSES
+    if normalized not in SUCCESS_STATUSES:
         return False
     return True
 
@@ -267,7 +437,7 @@ def run_scenario(base: str, scenario: Scenario, token: str) -> bool:
     ok = status_allows_success(status, scenario, output)
     if not ok:
         print(f"FAIL {scenario.id}: unexpected terminal status {status}", flush=True)
-    if scenario.expect_marker and scenario.expect_marker not in output:
+    if scenario.expect_marker and not marker_present(output, scenario.expect_marker):
         print(f"FAIL {scenario.id}: missing marker {scenario.expect_marker}", flush=True)
         ok = False
     if scenario.forbid_plaintext and scenario.forbid_plaintext in output:
@@ -290,13 +460,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--list", action="store_true", help="List scenarios and exit")
     parser.add_argument("--gateway-base", default="", help="Run against this desktop gateway base URL")
     parser.add_argument("--scenario", action="append", default=[], help="Scenario id to run, repeatable")
+    parser.add_argument(
+        "--profile",
+        choices=("baseline", "extended", "all"),
+        default="baseline",
+        help="Scenario profile to list or run",
+    )
     args = parser.parse_args(argv)
 
-    scenarios = select_scenarios(build_scenarios(), args.scenario)
+    scenarios = select_scenarios(build_scenarios(args.profile), args.scenario)
     if args.list or not args.gateway_base:
         for scenario in scenarios:
             marker = f", marker={scenario.expect_marker}" if scenario.expect_marker else ""
-            print(f"{scenario.id}: {scenario.name}{marker}")
+            domains = ",".join(scenario.domains)
+            print(f"{scenario.id}: {scenario.name} [domains={domains}]{marker}")
         return 0
 
     token = gateway_token()

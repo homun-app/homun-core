@@ -8,7 +8,12 @@ import { once } from "node:events";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { rotateLogFile, createLogWriter, pipeChildStream } = require("../electron/lib/logging.cjs");
+const {
+  rotateLogFile,
+  createLogWriter,
+  pipeChildStream,
+  copyFeedbackLogs,
+} = require("../electron/lib/logging.cjs");
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "homun-logtest-"));
@@ -103,4 +108,29 @@ test("pipeChildStream swallows stream errors instead of crashing", async () => {
   // assertion; the content check confirms pre-error lines were kept.
   const content = fs.readFileSync(path.join(dir, "gateway.log"), "utf8");
   assert.match(content, /\[err\] before error\n/);
+});
+
+test("copyFeedbackLogs redacts sensitive plaintext and skips symlinks", () => {
+  const source = tmpDir();
+  const nested = path.join(source, "nested");
+  fs.mkdirSync(nested);
+  fs.writeFileSync(
+    path.join(source, "turn-trace.jsonl"),
+    'prompt RSSMRA80A01H501U key sk-proj_testsecretvalue1234567890\n',
+  );
+  fs.writeFileSync(path.join(nested, "gateway.log"), "Authorization: Bearer abcdefghijklmnopqrstuvwxyz\n");
+  fs.symlinkSync(path.join(os.homedir(), ".ssh"), path.join(source, "outside-link"));
+
+  const dest = path.join(tmpDir(), "logs");
+  copyFeedbackLogs(source, dest);
+
+  const top = fs.readFileSync(path.join(dest, "turn-trace.jsonl"), "utf8");
+  const child = fs.readFileSync(path.join(dest, "nested", "gateway.log"), "utf8");
+  assert.doesNotMatch(top, /RSSMRA80A01H501U/);
+  assert.doesNotMatch(top, /sk-proj_testsecretvalue1234567890/);
+  assert.doesNotMatch(child, /Bearer abcdefghijklmnopqrstuvwxyz/);
+  assert.match(top, /\[REDACTED:identity\]/);
+  assert.match(top, /\[REDACTED:secret\]/);
+  assert.match(child, /Authorization: \[REDACTED:bearer\]/);
+  assert.equal(fs.existsSync(path.join(dest, "outside-link")), false);
 });

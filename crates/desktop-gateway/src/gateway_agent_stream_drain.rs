@@ -165,11 +165,54 @@ pub(crate) async fn drain_agent_stream_into_message_with_fanout(
     }
 
     let mut typed_outcome = None;
-    while final_text.is_none() && typed_outcome.is_none() {
+    let mut typed_outcome_grace_started: Option<std::time::Instant> = None;
+    while final_text.is_none() {
+        if typed_outcome.is_some() {
+            let started = typed_outcome_grace_started.get_or_insert_with(std::time::Instant::now);
+            let elapsed = started.elapsed();
+            let grace = std::time::Duration::from_millis(75);
+            if elapsed >= grace {
+                break;
+            }
+            match tokio::time::timeout(grace - elapsed, brx.recv()).await {
+                Ok(Ok(line)) => {
+                    let terminal =
+                        apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+                    memory_reuse.observe_line(&line);
+                    persist_redacted_user_text_from_stream_line(
+                        state,
+                        thread_id,
+                        user_message_id,
+                        &line,
+                    );
+                    persist_recall_event_part(state, thread_id, assistant_message_id, &line);
+                    fanout_turn_event(state, turn_id, &line);
+                    if streamed_text.len() != last_flushed_len
+                        && last_flush.elapsed() >= std::time::Duration::from_millis(200)
+                    {
+                        update_channel_assistant_message(
+                            state,
+                            thread_id,
+                            assistant_message_id,
+                            &streamed_text,
+                        );
+                        last_flush = std::time::Instant::now();
+                        last_flushed_len = streamed_text.len();
+                    }
+                    if terminal {
+                        break;
+                    }
+                }
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => continue,
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) | Err(_) => break,
+            }
+            continue;
+        }
         let outcome_ready = entry.outcome_ready.notified();
         if let Some(outcome) = entry.outcome.lock().ok().and_then(|slot| slot.clone()) {
             typed_outcome = Some(outcome);
-            break;
+            typed_outcome_grace_started = Some(std::time::Instant::now());
+            continue;
         }
         tokio::select! {
             received = brx.recv() => match received {
@@ -205,6 +248,7 @@ pub(crate) async fn drain_agent_stream_into_message_with_fanout(
             },
             _ = outcome_ready => {
                 typed_outcome = entry.outcome.lock().ok().and_then(|slot| slot.clone());
+                typed_outcome_grace_started = Some(std::time::Instant::now());
             }
         }
     }

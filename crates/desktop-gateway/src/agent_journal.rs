@@ -75,6 +75,20 @@ impl GatewayExecutionJournal {
                     match message {
                         WriterMessage::Event { kind, round, payload } => {
                             if let Some(store) = &store {
+                                if kind == "prompt_snapshot" {
+                                    let model = payload.get("model").and_then(Value::as_str);
+                                    let provider = payload.get("provider").and_then(Value::as_str);
+                                    let fingerprint =
+                                        payload.get("fingerprint").and_then(Value::as_str);
+                                    if let Err(error) = store.backfill_agent_run_attribution(
+                                        &run_id,
+                                        model,
+                                        provider,
+                                        fingerprint,
+                                    ) {
+                                        tracing::warn!(target: "agent::journal", %run_id, %error, "journal attribution backfill failed");
+                                    }
+                                }
                                 if let Err(error) = store.append_agent_run_event(
                                     &run_id,
                                     seq,
@@ -580,6 +594,64 @@ mod tests {
         assert_eq!(redacted["api_key"], "[REDACTED]");
         assert_eq!(redacted["nested"]["refresh_token"], "[REDACTED]");
         assert_eq!(redacted["nested"]["safe"], "kept");
+    }
+
+    #[test]
+    fn prompt_snapshot_backfills_agent_run_model_provider_attribution() {
+        let path = std::env::temp_dir().join(format!(
+            "homun-agent-journal-attribution-{}-{}.sqlite",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = TaskStore::open(&path).unwrap();
+        store
+            .create_agent_run(&NewAgentRun {
+                run_id: "run-attribution".to_string(),
+                turn_id: "turn-attribution".to_string(),
+                thread_id: "thread-attribution".to_string(),
+                user_id: "u".to_string(),
+                workspace_id: "w".to_string(),
+                role: Some("orchestrator".to_string()),
+                model: None,
+                provider: None,
+                prompt_fingerprint: None,
+            })
+            .unwrap();
+        drop(store);
+
+        let journal =
+            GatewayExecutionJournal::start("run-attribution".to_string(), path.clone()).unwrap();
+        let snapshot = build_prompt_snapshot(
+            "model-from-snapshot",
+            "provider-from-snapshot",
+            &[json!({"role": "user", "content": "safe"})],
+            &[],
+            false,
+            None,
+        );
+        let expected_fingerprint = snapshot.fingerprint.clone();
+        journal.record(AgentExecutionEvent::PromptSnapshot { round: 1, snapshot });
+        assert!(journal.close_and_flush());
+
+        let store = TaskStore::open(&path).unwrap();
+        let runs = store
+            .list_agent_runs_for_turn("turn-attribution", "u", "w")
+            .unwrap();
+        assert_eq!(runs[0].role.as_deref(), Some("orchestrator"));
+        assert_eq!(runs[0].model.as_deref(), Some("model-from-snapshot"));
+        assert_eq!(runs[0].provider.as_deref(), Some("provider-from-snapshot"));
+        assert_eq!(
+            runs[0].prompt_fingerprint.as_deref(),
+            Some(expected_fingerprint.as_str())
+        );
+        drop(store);
+        drop(journal);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("sqlite-wal"));
+        let _ = std::fs::remove_file(path.with_extension("sqlite-shm"));
     }
 
     #[test]

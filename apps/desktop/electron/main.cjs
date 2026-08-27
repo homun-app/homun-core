@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
-const { createLogWriter, resolveLogsDir, pipeChildStream } = require("./lib/logging.cjs");
+const { createLogWriter, resolveLogsDir, pipeChildStream, copyFeedbackLogs } = require("./lib/logging.cjs");
 const { nextRestartDelay } = require("./lib/watchdog.cjs");
 const { performFactoryReset } = require("./lib/factory-reset.cjs");
 const { resolveAppVersion } = require("./app-version.cjs");
@@ -730,17 +730,9 @@ ipcMain.handle("lfpa:feedback-bundle", async () => {
       // Copy only regular files and directories — skip symlinks/special files.
       // Defense-in-depth for the privacy invariant (caposaldo #3): a planted
       // symlink in logs/ must never let the bundle reach outside the logs dir.
-      fs.cpSync(LOGS_DIR, path.join(payload, "logs"), {
-        recursive: true,
-        filter: (src) => {
-          try {
-            const s = fs.lstatSync(src);
-            return s.isDirectory() || s.isFile();
-          } catch {
-            return false;
-          }
-        },
-      });
+      // Text logs are redacted during staging so legacy plaintext does not leak
+      // through "Report a problem" even when old on-disk logs predate current guards.
+      copyFeedbackLogs(LOGS_DIR, path.join(payload, "logs"));
     }
     const report = {
       generatedAt: new Date().toISOString(),

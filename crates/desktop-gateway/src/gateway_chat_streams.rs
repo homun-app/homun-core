@@ -151,6 +151,51 @@ pub(crate) fn chat_stream_response_with_effective_model(
         .expect("valid streaming response")
 }
 
+pub(crate) async fn emit_early_stream_event(
+    sink: &StreamSink,
+    event: GenerateStreamEvent,
+) -> Result<(), ()> {
+    let outcome = early_stream_event_outcome(&event);
+    emit_stream_event(sink, event).await?;
+    publish_stream_outcome(&sink.entry, outcome);
+    Ok(())
+}
+
+fn early_stream_event_outcome(event: &GenerateStreamEvent) -> local_first_engine::TurnOutcome {
+    match event {
+        GenerateStreamEvent::Done { text, .. } => local_first_engine::TurnOutcome {
+            stop: local_first_engine::TurnStop::Completed,
+            memory_answer: text.clone(),
+            ..Default::default()
+        },
+        GenerateStreamEvent::Error {
+            code,
+            message,
+            retryable,
+        } => {
+            let redacted_message = crate::redact_sensitive_text(message);
+            local_first_engine::TurnOutcome {
+                stop: local_first_engine::TurnStop::Failed {
+                    failure: if *retryable {
+                        local_first_execution_protocol::ExecutionFailure::transient(
+                            code.clone(),
+                            redacted_message.clone(),
+                        )
+                    } else {
+                        local_first_execution_protocol::ExecutionFailure::permanent(
+                            code.clone(),
+                            redacted_message.clone(),
+                        )
+                    },
+                },
+                memory_answer: redacted_message,
+                ..Default::default()
+            }
+        }
+        _ => local_first_engine::TurnOutcome::default(),
+    }
+}
+
 // The engine's output seam (ADR 0024 inc 5b): the future loop-in-the-engine emits every stream
 // event through `EventSink`; the gateway fans it onto the transport here (NDJSON body + WS mirror).
 impl local_first_engine::EventSink for StreamSink {
@@ -194,6 +239,10 @@ pub(crate) fn agent_turn_stream_request_id(assistant_message_id: &str) -> String
 
 pub(crate) fn broker_turn_stream_request_id(turn_id: &str) -> String {
     format!("broker-{turn_id}")
+}
+
+pub(crate) fn broker_turn_id_from_stream_request_id(request_id: &str) -> &str {
+    request_id.strip_prefix("broker-").unwrap_or(request_id)
 }
 
 fn stream_event_is_terminal(line: &str) -> bool {

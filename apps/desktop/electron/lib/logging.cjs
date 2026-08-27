@@ -9,6 +9,7 @@ const readline = require("node:readline");
 
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_KEEP = 5;
+const TEXT_LOG_EXTENSIONS = new Set([".log", ".jsonl", ".json", ".txt"]);
 
 // Single root for all diagnostics (shell log, gateway log, Rust panic log):
 // the feedback bundle archives this one directory and nothing else.
@@ -74,11 +75,49 @@ function pipeChildStream(stream, writer, label) {
   rl.on("line", (line) => writer.log(label ? `[${label}] ${line}` : line));
 }
 
+function redactDiagnosticText(text) {
+  return text
+    .replace(/\b[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]\b/gi, "[REDACTED:identity]")
+    .replace(/\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}\b/g, "[REDACTED:secret]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b/gi, "[REDACTED:bearer]");
+}
+
+function copyFeedbackLogs(sourceDir, targetDir) {
+  if (!fs.existsSync(sourceDir)) return;
+  const copyEntry = (src, dst) => {
+    let stat;
+    try {
+      stat = fs.lstatSync(src);
+    } catch {
+      return;
+    }
+    if (stat.isSymbolicLink()) return;
+    if (stat.isDirectory()) {
+      fs.mkdirSync(dst, { recursive: true });
+      for (const name of fs.readdirSync(src)) {
+        copyEntry(path.join(src, name), path.join(dst, name));
+      }
+      return;
+    }
+    if (!stat.isFile()) return;
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    if (TEXT_LOG_EXTENSIONS.has(path.extname(src).toLowerCase())) {
+      const content = fs.readFileSync(src, "utf8");
+      fs.writeFileSync(dst, redactDiagnosticText(content));
+      return;
+    }
+    fs.copyFileSync(src, dst);
+  };
+  copyEntry(sourceDir, targetDir);
+}
+
 module.exports = {
   resolveLogsDir,
   rotateLogFile,
   createLogWriter,
   pipeChildStream,
+  redactDiagnosticText,
+  copyFeedbackLogs,
   DEFAULT_MAX_BYTES,
   DEFAULT_KEEP,
 };

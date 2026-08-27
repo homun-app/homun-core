@@ -402,7 +402,14 @@ fn resolve_semantic_decision_for_context(
             model,
         )
     } else {
-        semantic_decision::resolve_model_value(model_value, &capabilities, active, provider, model)
+        semantic_decision::resolve_model_value_with_latest_message(
+            model_value,
+            &capabilities,
+            active,
+            provider,
+            model,
+            prompt,
+        )
     }
 }
 
@@ -420,9 +427,6 @@ fn try_resume_open_wait(
         return None;
     }
     let decision = hitl_resume::hitl_resume_semantic_decision(&wait, prompt, active);
-    if let Err(error) = store.resolve_open_hitl_wait(thread_id, &wait.wait_id) {
-        eprintln!("[hitl] failed to resolve wait {}: {error}", wait.wait_id);
-    }
     if let Ok(mut map) = state.hitl_resume_by_thread.lock() {
         map.insert(
             thread_id.to_string(),
@@ -447,7 +451,16 @@ pub(crate) fn take_hitl_resume_turn_context(
     thread_id: Option<&str>,
 ) -> Option<HitlResumeTurnContext> {
     let thread_id = thread_id.filter(|id| !id.trim().is_empty())?;
-    state.hitl_resume_by_thread.lock().ok()?.remove(thread_id)
+    let context = state.hitl_resume_by_thread.lock().ok()?.remove(thread_id)?;
+    if let Ok(store) = lock_store(state)
+        && let Err(error) = store.resolve_open_hitl_wait(thread_id, &context.wait.wait_id)
+    {
+        eprintln!(
+            "[hitl] failed to resolve wait {}: {error}",
+            context.wait.wait_id
+        );
+    }
+    Some(context)
 }
 
 /// Error classes eligible for the semantic-decision auth/availability fallback:

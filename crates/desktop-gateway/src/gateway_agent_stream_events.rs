@@ -75,6 +75,44 @@ pub(crate) fn turn_event_from_stream_value(
                 .cloned()
                 .unwrap_or(serde_json::Value::Null),
         ),
+        "choice_prompt" => (
+            local_first_task_runtime::TurnEventKind::ChoicePrompt,
+            value
+                .get("payload")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        ),
+        "vault_propose" => (
+            local_first_task_runtime::TurnEventKind::VaultPropose,
+            value
+                .get("payload")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        ),
+        "vault_reveal" => (
+            local_first_task_runtime::TurnEventKind::VaultReveal,
+            value
+                .get("payload")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        ),
+        "payment_approval" => (
+            local_first_task_runtime::TurnEventKind::PaymentApproval,
+            value
+                .get("payload")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        ),
+        "done" => (
+            local_first_task_runtime::TurnEventKind::Done,
+            serde_json::json!({
+                "text": value.get("text").and_then(Value::as_str).unwrap_or(""),
+                "redacted_user_text": value
+                    .get("redacted_user_text")
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+            }),
+        ),
         "error" => (
             local_first_task_runtime::TurnEventKind::Error,
             serde_json::json!({
@@ -83,7 +121,7 @@ pub(crate) fn turn_event_from_stream_value(
                 "retryable": value.get("retryable").and_then(Value::as_bool).unwrap_or(false),
             }),
         ),
-        // Unknown event types (e.g. choice_prompt, vault_propose) are not turn events.
+        // Unknown event types are not turn events.
         _ => return None,
     };
     Some((kind, payload))

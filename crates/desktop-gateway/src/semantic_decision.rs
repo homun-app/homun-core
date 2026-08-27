@@ -474,6 +474,72 @@ pub(crate) fn safe_fallback(
     }
 }
 
+fn fallback_memory_intent_from_latest_message(latest_message: &str) -> MemoryIntent {
+    let normalized = latest_message.to_ascii_lowercase();
+    let asks_for_value = [
+        "valore", "value", "qual e", "qual è", "mostra", "recupera", "reveal", "sblocca",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle));
+    let mentions_vault = normalized.contains("vault");
+    let mentions_sensitive_vault_term = [
+        "codice fiscale",
+        "fiscal code",
+        "fiscale",
+        "targa",
+        "license plate",
+        "password",
+        "token",
+        "passaporto",
+        "passport",
+        "carta",
+        "card",
+        "cvv",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle));
+    let authorizes_local_lookup = [
+        "autorizzo",
+        "autorizza",
+        "authorized",
+        "authorize",
+        "cerca",
+        "ricerca",
+        "salvato",
+        "saved",
+        "memoria",
+        "memory",
+        "vault",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle));
+
+    let mut intent = MemoryIntent::safe_default();
+    if asks_for_value
+        && mentions_sensitive_vault_term
+        && (mentions_vault || authorizes_local_lookup)
+    {
+        intent.search_personal = true;
+        intent.vault_value_requested = true;
+    }
+    intent
+}
+
+pub(crate) fn safe_fallback_with_latest_message(
+    active: Option<&ObjectiveContractRecord>,
+    reason: &str,
+    latest_message: &str,
+) -> ValidatedSemanticDecision {
+    let mut fallback = safe_fallback(active, reason);
+    let inferred = fallback_memory_intent_from_latest_message(latest_message);
+    if inferred.search_personal || inferred.vault_value_requested {
+        fallback.decision.memory_intent.search_personal = inferred.search_personal;
+        fallback.decision.memory_intent.vault_value_requested = inferred.vault_value_requested;
+        fallback.decision.memory_intent.standalone_choice_request = false;
+    }
+    fallback
+}
+
 pub(crate) fn semantic_decision_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "object",
@@ -596,14 +662,23 @@ mode: do not replace it with a smaller or legacy shape.\n\nREQUIRED OUTPUT JSON 
     )
 }
 
-pub(crate) fn resolve_model_value(
+pub(crate) fn resolve_model_value_with_latest_message(
     value: Result<serde_json::Value, String>,
     registry: &[CapabilitySemanticEntry],
     active: Option<&ObjectiveContractRecord>,
     provider: Option<&str>,
     model: Option<&str>,
+    latest_message: &str,
 ) -> ValidatedSemanticDecision {
-    resolve_model_value_for_context(value, registry, active, provider, model, false)
+    resolve_model_value_for_context(
+        value,
+        registry,
+        active,
+        provider,
+        model,
+        false,
+        Some(latest_message),
+    )
 }
 
 pub(crate) fn resolve_steering_model_value(
@@ -613,7 +688,7 @@ pub(crate) fn resolve_steering_model_value(
     provider: Option<&str>,
     model: Option<&str>,
 ) -> ValidatedSemanticDecision {
-    resolve_model_value_for_context(value, registry, active, provider, model, true)
+    resolve_model_value_for_context(value, registry, active, provider, model, true, None)
 }
 
 fn resolve_model_value_for_context(
@@ -623,15 +698,22 @@ fn resolve_model_value_for_context(
     provider: Option<&str>,
     model: Option<&str>,
     steering_control: bool,
+    latest_message: Option<&str>,
 ) -> ValidatedSemanticDecision {
+    let fallback = |active: Option<&ObjectiveContractRecord>, reason: &str| {
+        latest_message.map_or_else(
+            || safe_fallback(active, reason),
+            |message| safe_fallback_with_latest_message(active, reason, message),
+        )
+    };
     let value = match value {
         Ok(value) => value,
-        Err(reason) => return safe_fallback(active, &reason),
+        Err(reason) => return fallback(active, &reason),
     };
     let mut decision = match serde_json::from_value::<SemanticDecision>(value) {
         Ok(decision) => decision,
         Err(_) => {
-            let mut fallback = safe_fallback(active, "invalid_model_output");
+            let mut fallback = fallback(active, "invalid_model_output");
             fallback.provenance.validator_rejection_code = Some("invalid_model_output".to_string());
             return fallback;
         }
@@ -642,7 +724,7 @@ fn resolve_model_value_for_context(
     // (see docs/superpowers/specs/2026-07-24-steering-park-resume-design.md Part 4).
     // New-turn routing keeps the threshold unchanged.
     if !steering_control && decision.confidence < 0.45 {
-        let mut fallback = safe_fallback(active, "low_confidence");
+        let mut fallback = fallback(active, "low_confidence");
         fallback.provenance.validator_rejection_code = Some("low_confidence".to_string());
         return fallback;
     }
@@ -663,7 +745,7 @@ fn resolve_model_value_for_context(
             validated
         }
         Err(error) => {
-            let mut fallback = safe_fallback(active, error.code);
+            let mut fallback = fallback(active, error.code);
             fallback.provenance.validator_rejection_code = Some(error.code.to_string());
             fallback
         }
@@ -981,12 +1063,13 @@ mod tests {
 
     #[test]
     fn malformed_or_contradictory_model_output_uses_safe_fallback() {
-        let malformed = resolve_model_value(
+        let malformed = resolve_model_value_with_latest_message(
             Err("invalid_json".to_string()),
             &registry(),
             None,
             Some("provider"),
             Some("model"),
+            "",
         );
         assert_eq!(malformed.decision.mode, ObjectiveMode::ReadOnlyAnalysis);
         assert_eq!(
@@ -997,12 +1080,13 @@ mod tests {
         let mut contradiction = read_only_decision();
         contradiction.execution_shape = ExecutionShape::Workflow;
         contradiction.selected_capability = Some("make_document".to_string());
-        let contradictory = resolve_model_value(
+        let contradictory = resolve_model_value_with_latest_message(
             Ok(serde_json::to_value(contradiction).unwrap()),
             &registry(),
             None,
             Some("provider"),
             Some("model"),
+            "",
         );
         assert_eq!(
             contradictory.provenance.fallback_reason.as_deref(),
@@ -1012,6 +1096,25 @@ mod tests {
             contradictory.decision.execution_shape,
             ExecutionShape::AgentLoop
         );
+    }
+
+    #[test]
+    fn fallback_preserves_explicit_vault_value_request_from_latest_message() {
+        let validated = resolve_model_value_with_latest_message(
+            Err("missing_capability".to_string()),
+            &registry(),
+            None,
+            Some("provider"),
+            Some("model"),
+            "Autorizzo la ricerca locale nel Vault: qual e' il valore del codice fiscale smoke QA?",
+        );
+
+        assert_eq!(
+            validated.provenance.fallback_reason.as_deref(),
+            Some("missing_capability")
+        );
+        assert!(validated.decision.memory_intent.search_personal);
+        assert!(validated.decision.memory_intent.vault_value_requested);
     }
 
     #[test]
@@ -1378,12 +1481,13 @@ mod tests {
         let mut decision = read_only_decision();
         decision.confidence = 0.44;
 
-        let validated = resolve_model_value(
+        let validated = resolve_model_value_with_latest_message(
             Ok(serde_json::to_value(decision).unwrap()),
             &registry(),
             None,
             Some("provider"),
             Some("model"),
+            "",
         );
 
         // New-turn routing keeps the threshold: an unrelated low-confidence decision

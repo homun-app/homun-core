@@ -1805,7 +1805,7 @@ async fn stream_chat_via_openai(
     if let gateway_temporal_preflight::TemporalPreflightOutcome::EarlyResponse(event) =
         gateway_temporal_preflight::evaluate_chat_temporal_preflight(request.prompt.as_str())
     {
-        let _ = emit_stream_event(&tx, event).await;
+        let _ = emit_early_stream_event(&tx, event).await;
         schedule_stream_registry_cleanup(resume_id.clone());
         return Ok(chat_stream_response_with_effective_model(
             rx,
@@ -1824,7 +1824,20 @@ async fn stream_chat_via_openai(
         })
         .await
     {
-        let _ = emit_stream_event(&tx, response.event).await;
+        let early_text = match &response.event {
+            GenerateStreamEvent::Done { text, .. } => Some(text.clone()),
+            _ => None,
+        };
+        let _ = emit_early_stream_event(&tx, response.event).await;
+        let turn_id = broker_turn_id_from_stream_request_id(&request.request_id);
+        if let Some(text) = early_text.as_deref() {
+            fanout_legacy_card_markers_from_text(state, turn_id, text);
+        }
+        if let Ok(lines) = tx.entry.lines.lock() {
+            for line in lines.iter() {
+                fanout_turn_event(state, turn_id, line);
+            }
+        }
         schedule_stream_registry_cleanup(resume_id.clone());
         return Ok(chat_stream_response_with_effective_model(
             rx,
@@ -1846,7 +1859,7 @@ async fn stream_chat_via_openai(
             text,
             effective_model,
         } => {
-            let _ = emit_stream_event(
+            let _ = emit_early_stream_event(
                 &tx,
                 GenerateStreamEvent::Done {
                     text,

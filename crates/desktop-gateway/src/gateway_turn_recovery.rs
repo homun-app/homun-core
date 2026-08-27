@@ -107,6 +107,15 @@ impl GatewayTurnRecoveryRunner for RuntimeGatewayTurnRecoveryRunner<'_> {
         if let Err(error) = store.abort_orphaned_running_agent_runs("gateway_restart") {
             eprintln!("agent journal: boot recovery error: {error}");
         }
+        match store.abort_running_agent_runs_for_terminal_tasks("gateway_restart") {
+            Ok(aborted) if aborted > 0 => {
+                eprintln!("agent journal: aborted {aborted} stale terminal-task runs");
+            }
+            Ok(_) => {}
+            Err(error) => {
+                eprintln!("agent journal: terminal-task run recovery error: {error}");
+            }
+        }
         let user_id = crate::gateway_user_id();
         let workspace_id = crate::gateway_workspace_id();
         let recovered = local_first_task_runtime::broker::recover_chat_turns_at_boot(

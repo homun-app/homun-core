@@ -86,6 +86,62 @@ pub(crate) fn persist_redacted_user_text_from_stream_line(
     }
 }
 
+pub(crate) fn fanout_legacy_card_markers_from_text(state: &AppState, turn_id: &str, text: &str) {
+    for (open, close, kind) in [
+        (
+            "‹‹CHOICES››",
+            "‹‹/CHOICES››",
+            local_first_task_runtime::TurnEventKind::ChoicePrompt,
+        ),
+        (
+            "‹‹VAULT_PROPOSE››",
+            "‹‹/VAULT_PROPOSE››",
+            local_first_task_runtime::TurnEventKind::VaultPropose,
+        ),
+        (
+            "‹‹VAULT_REVEAL››",
+            "‹‹/VAULT_REVEAL››",
+            local_first_task_runtime::TurnEventKind::VaultReveal,
+        ),
+        (
+            "‹‹PAYMENT_APPROVAL››",
+            "‹‹/PAYMENT_APPROVAL››",
+            local_first_task_runtime::TurnEventKind::PaymentApproval,
+        ),
+    ] {
+        let mut cursor = text;
+        while let Some(start) = cursor.find(open) {
+            let after_open = start + open.len();
+            let Some(close_rel) = cursor[after_open..].find(close) else {
+                break;
+            };
+            let payload_text = &cursor[after_open..after_open + close_rel];
+            if let Ok(payload) = serde_json::from_str::<serde_json::Value>(payload_text)
+                && let Ok(store) = state.task_store.lock()
+            {
+                let already_present = store
+                    .read_turn_events(turn_id, 0)
+                    .map(|events| {
+                        events
+                            .iter()
+                            .any(|event| event.kind == kind && event.payload == payload)
+                    })
+                    .unwrap_or(false);
+                if !already_present {
+                    let _ = crate::turn_executor::emit_turn_event(
+                        state,
+                        &store,
+                        turn_id,
+                        kind.clone(),
+                        payload,
+                    );
+                }
+            }
+            cursor = &cursor[after_open + close_rel + close.len()..];
+        }
+    }
+}
+
 /// Maps a raw stream NDJSON line to a TurnEventKind + payload and emits it via
 /// the turn_executor fan-out (durable turn_events + live broadcast). Best-effort:
 /// unparseable lines or unknown types are silently skipped (they don't affect the
@@ -103,6 +159,11 @@ pub(crate) fn fanout_turn_event(state: &AppState, turn_id: &str, line: &str) {
         .and_then(|t| t.as_str())
         .unwrap_or("unknown");
     tracing::debug!(target: "broker::fanout", turn_id = %turn_id, kind = %kind_str, "stream event");
+    if kind_str == "done"
+        && let Some(text) = value.get("text").and_then(serde_json::Value::as_str)
+    {
+        fanout_legacy_card_markers_from_text(state, turn_id, text);
+    }
     let Some((kind, payload)) = turn_event_from_stream_value(&value) else {
         return;
     };

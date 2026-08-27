@@ -6608,6 +6608,50 @@ fn hitl_choice_resume_binds_semantic_without_new_objective() {
             .unwrap()
             .open_hitl_wait(&thread_id)
             .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
+fn taking_hitl_resume_context_marks_wait_resolved() {
+    let state = super::AppState::for_tests();
+    let thread = state
+        .chat_store
+        .lock()
+        .unwrap()
+        .create_thread("ws_hitl_take")
+        .expect("thread");
+    let thread_id = thread.thread_id.clone();
+    {
+        let store = state.chat_store.lock().unwrap();
+        let payload = serde_json::json!({
+            "question": "Which?",
+            "multi": false,
+            "options": ["Alpha", "Beta"]
+        });
+        store
+            .set_open_hitl_wait(
+                "wait_take",
+                &thread_id,
+                "msg_src",
+                "choice",
+                &payload.to_string(),
+                "{}",
+            )
+            .expect("persist wait");
+    }
+
+    let _ = super::resolve_semantic_decision(&state, Some(&thread_id), "Alpha", None, None);
+    let context = super::take_hitl_resume_turn_context(&state, Some(&thread_id));
+
+    assert!(context.is_some());
+    assert!(
+        state
+            .chat_store
+            .lock()
+            .unwrap()
+            .open_hitl_wait(&thread_id)
+            .unwrap()
             .is_none()
     );
 }
@@ -14504,6 +14548,173 @@ fn broker_stream_extracts_redacted_user_text_from_terminal_event() {
 }
 
 #[tokio::test]
+async fn privacy_preflight_early_response_publishes_typed_outcome() {
+    let root = isolated_gateway_test_dir("privacy-preflight-typed-outcome");
+    std::fs::create_dir_all(&root).unwrap();
+    let database = root.join("homun.sqlite");
+    let chat = ChatStore::open(&database).unwrap();
+    let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
+    let workspace_id = super::gateway_workspace_id();
+    let thread = chat.create_thread(workspace_id.as_str()).unwrap();
+    let mut state = AppState::for_tests();
+    state.chat_store = std::sync::Arc::new(std::sync::Mutex::new(chat));
+    state.task_store = std::sync::Arc::new(std::sync::Mutex::new(tasks));
+    let request_id = "privacy-early-outcome";
+
+    let response = super::stream_chat_via_openai(
+        &state,
+        local_first_desktop_gateway::ChatGenerateStreamRequest {
+            request_id: request_id.to_string(),
+            agent_run_id: None,
+            agent_checkpoint: None,
+            checkpoint_input: None,
+            prompt: "Fabio Cantone CNTFBA76L16F839Y".to_string(),
+            thread_id: Some(thread.thread_id.clone()),
+            context: Vec::new(),
+            max_context_chars: None,
+            model: None,
+            images: Vec::new(),
+            attachments: Vec::new(),
+            max_tokens: 2000,
+            temperature: 0.3,
+            wait_if_busy: true,
+            request_timeout_seconds: None,
+            tool_policy: Some("full".to_string()),
+            mode: None,
+        },
+        "http://127.0.0.1:9/v1".to_string(),
+        "llama3.2".to_string(),
+        None,
+    )
+    .await
+    .expect("privacy preflight returns a stream response");
+    let entry = super::stream_registry()
+        .lock()
+        .unwrap()
+        .get(request_id)
+        .cloned()
+        .expect("registered stream entry");
+    let _ = axum::body::to_bytes(response.into_body(), usize::MAX).await;
+
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        super::wait_for_stream_outcome(entry),
+    )
+    .await
+    .expect("privacy early response must wake typed outcome waiters");
+    assert!(matches!(
+        outcome.stop,
+        local_first_engine::TurnStop::Completed
+    ));
+    assert!(outcome.memory_answer.contains("VAULT_PROPOSE"));
+}
+
+#[tokio::test]
+async fn privacy_preflight_broker_drain_persists_vault_proposal_event() {
+    let root = isolated_gateway_test_dir("privacy-preflight-broker-fanout");
+    std::fs::create_dir_all(&root).unwrap();
+    let database = root.join("homun.sqlite");
+    let chat = ChatStore::open(&database).unwrap();
+    let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
+    let workspace_id = super::gateway_workspace_id();
+    let thread = chat.create_thread(workspace_id.as_str()).unwrap();
+    let user = super::channel_chat_message_with_id(
+        "user",
+        "Fabio Cantone CNTFBA76L16F839Y",
+        "privacy_broker_user",
+    );
+    let assistant = local_first_desktop_gateway::seeded_ready_message(
+        &thread.thread_id,
+        "unix:1001.000000000".to_string(),
+    );
+    chat.commit_prompt_result(&thread.thread_id, &user, &assistant, None)
+        .unwrap();
+    let mut state = AppState::for_tests();
+    state.chat_store = std::sync::Arc::new(std::sync::Mutex::new(chat));
+    state.task_store = std::sync::Arc::new(std::sync::Mutex::new(tasks));
+    let request_id = "broker-turn_privacy_broker_fanout";
+
+    let response = super::stream_chat_via_openai(
+        &state,
+        local_first_desktop_gateway::ChatGenerateStreamRequest {
+            request_id: request_id.to_string(),
+            agent_run_id: None,
+            agent_checkpoint: None,
+            checkpoint_input: None,
+            prompt: "Fabio Cantone CNTFBA76L16F839Y".to_string(),
+            thread_id: Some(thread.thread_id.clone()),
+            context: Vec::new(),
+            max_context_chars: None,
+            model: None,
+            images: Vec::new(),
+            attachments: Vec::new(),
+            max_tokens: 2000,
+            temperature: 0.3,
+            wait_if_busy: true,
+            request_timeout_seconds: None,
+            tool_policy: Some("full".to_string()),
+            mode: None,
+        },
+        "http://127.0.0.1:9/v1".to_string(),
+        "llama3.2".to_string(),
+        None,
+    )
+    .await
+    .expect("privacy preflight returns a stream response");
+    let entry = super::stream_registry()
+        .lock()
+        .unwrap()
+        .get(request_id)
+        .cloned()
+        .expect("registered stream entry");
+    let buffered = entry.lines.lock().unwrap().join("\n");
+    assert!(
+        buffered.contains("VAULT_PROPOSE"),
+        "privacy early response must buffer the vault proposal stream line"
+    );
+    let immediate_events = state
+        .task_store
+        .lock()
+        .unwrap()
+        .read_turn_events("turn_privacy_broker_fanout", 0)
+        .unwrap();
+    assert!(
+        serde_json::to_string(&immediate_events)
+            .unwrap()
+            .contains("VAULT_PROPOSE"),
+        "broker privacy preflight must fan out card markers before executor finalization"
+    );
+    let body_task = tokio::spawn(async move {
+        let _ = axum::body::to_bytes(response.into_body(), usize::MAX).await;
+    });
+
+    super::drain_agent_stream_into_message_with_fanout(
+        &state,
+        &thread.thread_id,
+        &user.id,
+        &assistant.id,
+        entry,
+        "turn_privacy_broker_fanout",
+        local_first_desktop_gateway::MessageDeliveryState::Delivered,
+    )
+    .await
+    .expect("drain succeeds");
+    let _ = body_task.await;
+
+    let events = state
+        .task_store
+        .lock()
+        .unwrap()
+        .read_turn_events("turn_privacy_broker_fanout", 0)
+        .unwrap();
+    let flattened = serde_json::to_string(&events).unwrap();
+    assert!(
+        flattened.contains("VAULT_PROPOSE"),
+        "events did not include vault marker: {flattened}"
+    );
+}
+
+#[tokio::test]
 async fn emit_stream_event_publishes_structured_event_without_legacy_marker_delta_by_default() {
     let (mpsc, mut rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(4);
     let (tx, _) = tokio::sync::broadcast::channel::<String>(4);
@@ -14585,6 +14796,161 @@ fn fanout_recall_preserves_the_payload_and_uses_recall_kind() {
     let (kind, payload) = super::turn_event_from_stream_value(&raw).expect("recall maps");
     assert_eq!(kind, local_first_task_runtime::TurnEventKind::Recall);
     assert_eq!(payload, raw["payload"]);
+}
+
+#[test]
+fn fanout_vault_propose_preserves_card_payload() {
+    let raw = serde_json::json!({
+        "type": "vault_propose",
+        "payload": {
+            "category": "vehicles",
+            "label": "Targa auto",
+            "redacted_preview": "[VAULT:vehicles:plate]",
+            "pending_id": "pending_1"
+        }
+    });
+
+    let (kind, payload) = super::turn_event_from_stream_value(&raw).expect("vault card maps");
+
+    assert_eq!(kind.as_str(), "vault_propose");
+    assert_eq!(payload, raw["payload"]);
+}
+
+#[test]
+fn fanout_done_with_legacy_vault_marker_is_durable() {
+    let state = super::AppState::for_tests();
+    let line = serde_json::json!({
+        "type": "done",
+        "text": "‹‹VAULT_PROPOSE››{\"pending_id\":\"pending_1\"}‹‹/VAULT_PROPOSE››",
+        "metrics": {}
+    })
+    .to_string();
+
+    super::fanout_turn_event(&state, "turn_done_vault_marker", &line);
+
+    let events = state
+        .task_store
+        .lock()
+        .unwrap()
+        .read_turn_events("turn_done_vault_marker", 0)
+        .unwrap();
+    let flattened = serde_json::to_string(&events).unwrap();
+    assert!(
+        flattened.contains("VAULT_PROPOSE"),
+        "done fanout events did not include marker: {flattened}"
+    );
+}
+
+#[test]
+fn fanout_legacy_card_markers_handles_multiple_vault_markers() {
+    let state = super::AppState::for_tests();
+    let text = "‹‹VAULT_PROPOSE››{\"pending_id\":\"pending_1\"}‹‹/VAULT_PROPOSE››\n\
+        ‹‹VAULT_PROPOSE››{\"pending_id\":\"pending_2\"}‹‹/VAULT_PROPOSE››";
+
+    super::fanout_legacy_card_markers_from_text(&state, "turn_multiple_vault_markers", text);
+
+    let events = state
+        .task_store
+        .lock()
+        .unwrap()
+        .read_turn_events("turn_multiple_vault_markers", 0)
+        .unwrap();
+    let flattened = serde_json::to_string(&events).unwrap();
+    assert!(flattened.contains("VAULT_PROPOSE") || flattened.contains("vault_propose"));
+}
+
+#[tokio::test]
+async fn broker_fanout_waits_for_terminal_line_after_typed_outcome() {
+    let state = super::AppState::for_tests();
+    let thread = super::lock_store(&state)
+        .unwrap()
+        .create_thread("workspace-broker-fanout")
+        .unwrap();
+    let assistant = local_first_desktop_gateway::seeded_ready_message(
+        &thread.thread_id,
+        "unix:1000.000000000".to_string(),
+    );
+    super::lock_store(&state)
+        .unwrap()
+        .append_assistant_message(&thread.thread_id, &assistant)
+        .unwrap();
+
+    let (mpsc, _rx) = tokio::sync::mpsc::channel(4);
+    let (tx, _btx) = tokio::sync::broadcast::channel(4);
+    let entry = std::sync::Arc::new(super::StreamEntry {
+        lines: std::sync::Mutex::new(Vec::new()),
+        tx,
+        finished: std::sync::atomic::AtomicBool::new(false),
+        last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
+        thread_id: Some(thread.thread_id.clone()),
+        assistant_message_id: std::sync::Mutex::new(None),
+        outcome: std::sync::Mutex::new(None),
+        outcome_ready: tokio::sync::Notify::new(),
+    });
+    let sink = super::StreamSink {
+        mpsc,
+        entry: entry.clone(),
+    };
+    super::publish_stream_outcome(
+        &entry,
+        local_first_engine::TurnOutcome {
+            stop: local_first_engine::TurnStop::Completed,
+            memory_answer: "‹‹VAULT_PROPOSE››{\"pending_id\":\"pending_1\"}‹‹/VAULT_PROPOSE››"
+                .to_string(),
+            ..Default::default()
+        },
+    );
+
+    let state_for_drain = state.clone();
+    let thread_id = thread.thread_id.clone();
+    let assistant_id = assistant.id.clone();
+    let drain = tokio::spawn(async move {
+        super::drain_agent_stream_into_message_with_fanout(
+            &state_for_drain,
+            &thread_id,
+            "user_broker_race",
+            &assistant_id,
+            entry,
+            "turn_broker_race",
+            local_first_desktop_gateway::MessageDeliveryState::Delivered,
+        )
+        .await
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    super::emit_stream_event(
+        &sink,
+        super::GenerateStreamEvent::VaultPropose {
+            payload: serde_json::json!({
+                "category": "vehicles",
+                "label": "Targa auto",
+                "redacted_preview": "[VAULT:vehicles:plate]",
+                "pending_id": "pending_1"
+            }),
+        },
+    )
+    .await
+    .expect("vault card line emits");
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), drain)
+        .await
+        .expect("drain completes")
+        .expect("drain joins")
+        .expect("drain succeeds");
+
+    let events = state
+        .task_store
+        .lock()
+        .unwrap()
+        .read_turn_events("turn_broker_race", 0)
+        .unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|event| event.kind.as_str() == "vault_propose"
+                && event.payload["pending_id"] == "pending_1"),
+        "vault card must be durable on the broker turn events endpoint"
+    );
 }
 
 #[test]

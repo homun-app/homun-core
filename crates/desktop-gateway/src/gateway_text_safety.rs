@@ -82,6 +82,10 @@ pub(crate) fn redact_sensitive_text(input: &str) -> String {
             return output;
         }
     }
+    let classified = local_first_vault::classify_sensitive_text(&output);
+    if classified.has_critical {
+        return classified.redacted_text;
+    }
     output
 }
 

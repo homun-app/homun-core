@@ -3539,6 +3539,52 @@ impl TaskStore {
         })
     }
 
+    /// Fill attribution discovered after run creation, typically from the first
+    /// prompt snapshot. Existing values win so retry/replay cannot rewrite a
+    /// run's canonical model/provider record.
+    pub fn backfill_agent_run_attribution(
+        &self,
+        run_id: &str,
+        model: Option<&str>,
+        provider: Option<&str>,
+        prompt_fingerprint: Option<&str>,
+    ) -> TaskRuntimeResult<usize> {
+        let model = model
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let provider = provider
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let prompt_fingerprint = prompt_fingerprint
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        Ok(self.connection.execute(
+            "UPDATE agent_runs
+             SET model = CASE
+                    WHEN (model IS NULL OR model = '') AND ?2 IS NOT NULL THEN ?2
+                    ELSE model
+                 END,
+                 provider = CASE
+                    WHEN (provider IS NULL OR provider = '') AND ?3 IS NOT NULL THEN ?3
+                    ELSE provider
+                 END,
+                 prompt_fingerprint = CASE
+                    WHEN (prompt_fingerprint IS NULL OR prompt_fingerprint = '') AND ?4 IS NOT NULL THEN ?4
+                    ELSE prompt_fingerprint
+                 END
+             WHERE run_id = ?1
+               AND (
+                    ((model IS NULL OR model = '') AND ?2 IS NOT NULL)
+                 OR ((provider IS NULL OR provider = '') AND ?3 IS NOT NULL)
+                 OR ((prompt_fingerprint IS NULL OR prompt_fingerprint = '') AND ?4 IS NOT NULL)
+               )",
+            params![run_id, model, provider, prompt_fingerprint],
+        )?)
+    }
+
     pub fn append_agent_run_event(
         &self,
         run_id: &str,
@@ -3937,6 +3983,31 @@ impl TaskStore {
                    SELECT 1 FROM executions
                    WHERE executions.execution_id = agent_runs.turn_id
                      AND executions.outcome_committed_at IS NOT NULL
+               )",
+            params![OffsetDateTime::now_utc().unix_timestamp(), terminal_reason],
+        )?)
+    }
+
+    /// Abort stale running agent-run journals whose owning chat turn is already
+    /// terminal. This is narrower than `abort_running_agent_runs`: it does not
+    /// touch genuinely active work, but repairs read-model contradictions left
+    /// behind when projection/tail paths reached terminal task state before the
+    /// agent run row was finalized.
+    pub fn abort_running_agent_runs_for_terminal_tasks(
+        &self,
+        terminal_reason: &str,
+    ) -> TaskRuntimeResult<usize> {
+        Ok(self.connection.execute(
+            "UPDATE agent_runs
+             SET status = 'aborted', completed_at = ?1, terminal_reason = ?2
+             WHERE status = 'running'
+               AND EXISTS (
+                   SELECT 1 FROM tasks
+                   WHERE tasks.task_id = agent_runs.turn_id
+                     AND tasks.user_id = agent_runs.user_id
+                     AND tasks.workspace_id = agent_runs.workspace_id
+                     AND tasks.kind = 'chat_turn'
+                     AND tasks.status IN ('completed', 'failed', 'cancelled', 'expired')
                )",
             params![OffsetDateTime::now_utc().unix_timestamp(), terminal_reason],
         )?)
@@ -6335,6 +6406,57 @@ mod agent_control_state_tests {
     }
 
     #[test]
+    fn agent_run_attribution_backfills_missing_model_provider_from_prompt_snapshot() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let mut new_run = run("run-attribution");
+        new_run.role = Some("orchestrator".to_string());
+        store.create_agent_run(&new_run).unwrap();
+
+        assert_eq!(
+            store
+                .backfill_agent_run_attribution(
+                    "run-attribution",
+                    Some("gpt-test"),
+                    Some("openai-compatible"),
+                    Some("prompt-fingerprint"),
+                )
+                .unwrap(),
+            1
+        );
+        let loaded = store
+            .list_agent_runs_for_turn("turn", "user", "workspace")
+            .unwrap();
+        assert_eq!(loaded[0].role.as_deref(), Some("orchestrator"));
+        assert_eq!(loaded[0].model.as_deref(), Some("gpt-test"));
+        assert_eq!(loaded[0].provider.as_deref(), Some("openai-compatible"));
+        assert_eq!(
+            loaded[0].prompt_fingerprint.as_deref(),
+            Some("prompt-fingerprint")
+        );
+
+        assert_eq!(
+            store
+                .backfill_agent_run_attribution(
+                    "run-attribution",
+                    Some("other-model"),
+                    Some("other-provider"),
+                    Some("other-fingerprint"),
+                )
+                .unwrap(),
+            0
+        );
+        let loaded = store
+            .list_agent_runs_for_turn("turn", "user", "workspace")
+            .unwrap();
+        assert_eq!(loaded[0].model.as_deref(), Some("gpt-test"));
+        assert_eq!(loaded[0].provider.as_deref(), Some("openai-compatible"));
+        assert_eq!(
+            loaded[0].prompt_fingerprint.as_deref(),
+            Some("prompt-fingerprint")
+        );
+    }
+
+    #[test]
     fn checkpoint_recovery_requires_gateway_restart_abort() {
         let store = TaskStore::open_in_memory().unwrap();
         store.create_agent_run(&run("run")).unwrap();
@@ -7109,6 +7231,44 @@ mod chat_turn_query_tests {
             None,
             "completed turns do not block a new enqueue"
         );
+    }
+
+    #[test]
+    fn abort_terminal_task_agent_runs_aborts_running_run_left_behind() {
+        let s = store();
+        let terminal = make_chat_turn("turn_terminal", "thread_x", TaskStatus::Completed);
+        s.insert_chat_turn(
+            &terminal,
+            "thread_x",
+            "chat_stream_terminal",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.create_agent_run(&NewAgentRun {
+            run_id: "run-terminal".into(),
+            turn_id: "turn_terminal".into(),
+            thread_id: "thread_x".into(),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            role: Some("orchestrator".into()),
+            model: Some("qwen".into()),
+            provider: Some("ollama".into()),
+            prompt_fingerprint: Some("fp".into()),
+        })
+        .unwrap();
+
+        assert_eq!(
+            s.abort_running_agent_runs_for_terminal_tasks("gateway_restart")
+                .unwrap(),
+            1
+        );
+
+        let runs = s
+            .list_agent_runs_for_turn("turn_terminal", "u", "w")
+            .unwrap();
+        assert_eq!(runs[0].status, AgentRunStatus::Aborted);
+        assert_eq!(runs[0].terminal_reason.as_deref(), Some("gateway_restart"));
     }
 
     #[test]

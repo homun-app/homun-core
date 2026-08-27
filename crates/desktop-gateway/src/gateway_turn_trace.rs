@@ -31,9 +31,10 @@ pub(crate) fn begin_turn_trace(entry: TurnTraceEntry) -> local_first_engine::tur
     } else {
         local_first_engine::turn_trace::TurnTrace::disabled()
     };
+    let redacted_prompt = crate::redact_sensitive_text(&entry.prompt);
     turn_trace.record(local_first_engine::turn_trace::TurnEvent::TurnReceived {
-        prompt_head: entry.prompt.chars().take(200).collect(),
-        prompt_len: entry.prompt.chars().count(),
+        prompt_head: redacted_prompt.chars().take(200).collect(),
+        prompt_len: redacted_prompt.chars().count(),
         mode: entry.mode.as_deref().unwrap_or("agent").to_string(),
         model: entry.model,
     });
@@ -86,11 +87,12 @@ pub(crate) fn record_chat_turn_start_trace(input: ChatTurnStartTraceInput<'_>) {
     let tier = load_provider_registry()
         .tier_for_model(input.model)
         .as_str();
+    let redacted_prompt = crate::redact_sensitive_text(input.prompt);
     input
         .turn_trace
         .record(local_first_engine::turn_trace::TurnEvent::TurnStart {
-            prompt_head: input.prompt.chars().take(200).collect(),
-            prompt_len: input.prompt.chars().count(),
+            prompt_head: redacted_prompt.chars().take(200).collect(),
+            prompt_len: redacted_prompt.chars().count(),
             mode: input.turn_policy.mode.to_string(),
             model: input.model.to_string(),
             tier: tier.to_string(),
@@ -123,6 +125,26 @@ mod tests {
         assert!(line.contains("\"prompt_len\":11"));
         assert!(line.contains("\"mode\":\"agent\""));
         assert!(line.contains("\"model\":\"gpt-test\""));
+    }
+
+    #[test]
+    fn gateway_turn_trace_redacts_sensitive_prompt_head() {
+        let dir = unique_temp_dir("redacted");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let _trace = begin_turn_trace(TurnTraceEntry {
+            request_id: "turn-sensitive".to_string(),
+            prompt: "Fabio Cantone CNTFBA76L16F839Y".to_string(),
+            mode: Some("agent".to_string()),
+            model: "gpt-test".to_string(),
+            enabled: true,
+            logs_dir: Ok(dir.clone()),
+            max_bytes: 5_000_000,
+        });
+
+        let line = std::fs::read_to_string(dir.join("turn-trace.jsonl")).unwrap();
+        assert!(line.contains("[VAULT:identity:codice_fiscale]"));
+        assert!(!line.contains("CNTFBA76L16F839Y"));
     }
 
     #[test]

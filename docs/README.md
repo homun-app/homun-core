@@ -15,6 +15,8 @@
 | [`decisions/`](decisions/) | ADR immutabili — il “perché” storico, non lo stato corrente |
 | [`testing/anti-regression-protocol.md`](testing/anti-regression-protocol.md) | Gate minimo per non far rientrare regressioni chat/runtime/UI |
 | [`testing/kernel-contract-matrix.md`](testing/kernel-contract-matrix.md) | Matrix owner/test/smoke dei contratti kernel vivi |
+| [`testing/system-risk-matrix.md`](testing/system-risk-matrix.md) | Matrice domini rischio + audit DB/log + scenari live complessi |
+| [`testing/usage-scenarios.md`](testing/usage-scenarios.md) | Catalogo scenari d'uso baseline/extended per smoke live |
 | [`testing/gateway-ownership-contracts.md`](testing/gateway-ownership-contracts.md) | Confini owner del gateway e regole per non far rientrare il monolite |
 | [`testing/release-candidate-matrix.md`](testing/release-candidate-matrix.md) | Gate release installata |
 | [`distribution.md`](distribution.md) · [`release-macos.md`](release-macos.md) · [`windows-signing.md`](windows-signing.md) | Distribuzione / firma |

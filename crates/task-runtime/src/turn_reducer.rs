@@ -96,6 +96,10 @@ pub fn reduce_turn_events(events: &[TurnEvent]) -> TurnStateSnapshot {
                 event.kind,
                 TurnEventKind::Activity
                     | TurnEventKind::PlanUpdate
+                    | TurnEventKind::ChoicePrompt
+                    | TurnEventKind::VaultPropose
+                    | TurnEventKind::VaultReveal
+                    | TurnEventKind::PaymentApproval
                     | TurnEventKind::StepAdvance
                     | TurnEventKind::Heartbeat
             ) {
@@ -162,6 +166,10 @@ pub fn reduce_turn_events(events: &[TurnEvent]) -> TurnStateSnapshot {
             | TurnEventKind::PlanUpdate
             | TurnEventKind::Tool
             | TurnEventKind::Recall
+            | TurnEventKind::ChoicePrompt
+            | TurnEventKind::VaultPropose
+            | TurnEventKind::VaultReveal
+            | TurnEventKind::PaymentApproval
             | TurnEventKind::Retry
             | TurnEventKind::Queued
             | TurnEventKind::StepAdvance
