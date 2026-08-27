@@ -439,6 +439,20 @@ pub(crate) fn create_automation_from_chat_with_store(
     } else {
         ApprovalPolicy::Autonomous
     };
+    let enabled = args
+        .get("enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    if let AutomationTrigger::Schedule { recurrence, tz } = &trigger
+        && local_first_task_runtime::next_occurrence(
+            recurrence,
+            tz.as_deref(),
+            OffsetDateTime::now_utc(),
+        )
+        .is_none()
+    {
+        return format!("Invalid recurrence: recurrence '{recurrence}' is not valid");
+    }
     // Dedup: a near-identical existing automation (same trigger kind + >0.6 prompt overlap).
     let new_kind = match &trigger {
         AutomationTrigger::Schedule { .. } => "schedule",
@@ -472,7 +486,7 @@ pub(crate) fn create_automation_from_chat_with_store(
         trigger,
         prompt,
         approval,
-        enabled: true,
+        enabled,
         source: AutomationSource::Chat,
         task_id: None,
         created_at: now,
@@ -480,17 +494,24 @@ pub(crate) fn create_automation_from_chat_with_store(
         last_fired_at: None,
         state: None,
     };
-    match materialize_automation_task(store, &automation) {
-        Ok(task_id) => automation.task_id = task_id,
-        Err(msg) => return format!("Invalid recurrence: {msg}"),
+    if automation.enabled {
+        match materialize_automation_task(store, &automation) {
+            Ok(task_id) => automation.task_id = task_id,
+            Err(msg) => return format!("Invalid recurrence: {msg}"),
+        }
     }
     if store.upsert_automation(&automation).is_err() {
         return "I couldn't save the automation.".to_string();
     }
     format!(
-        "✅ Automation created: «{}» — {}. You'll find it in the Automations section.",
+        "✅ Automation created: «{}» — {}. Status: {}. You'll find it in the Automations section.",
         automation.title,
-        automation_trigger_summary(&automation.trigger)
+        automation_trigger_summary(&automation.trigger),
+        if automation.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
     )
 }
 

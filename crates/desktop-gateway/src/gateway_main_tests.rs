@@ -3495,6 +3495,42 @@ fn browser_done_parser_unwraps_provider_text_wrapped_items() {
 }
 
 #[test]
+fn browser_done_parser_unwraps_provider_stringified_items_array() {
+    let payload = super::parse_browser_done_payload(
+            r#"{
+                "status":"completed",
+                "answer":"Stripe payment controls were detected",
+                "items":"[{\"type\":\"payment_demo_present\",\"description\":\"Demo pubblico di checkout Stripe Elements rilevato\"},{\"type\":\"payment_control_detected\",\"description\":\"Rilevato pulsante di pagamento\"}]",
+                "sources":["https://stripe.com/payments/elements"]
+            }"#,
+        )
+        .expect("provider stringified item array");
+
+    assert_eq!(payload.items.len(), 2);
+    assert_eq!(payload.items[0]["type"], "payment_demo_present");
+    assert_eq!(payload.items[1]["type"], "payment_control_detected");
+}
+
+#[test]
+fn browser_done_parser_repairs_provider_stringified_items_with_unquoted_keys() {
+    let payload = super::parse_browser_done_payload(
+            r#"{
+                "status":"completed",
+                "answer":"Stripe payment controls were detected",
+                "items":"[{\"heading\":\"Demo 1 - Payment Element\", fields\":[\"Card number\",\"Security code\"], amount\":\"$175.00\", button\":\"Pay $175.00\", type\":\"static visual preview\"}]",
+                "sources":["https://stripe.com/payments/elements"]
+            }"#,
+        )
+        .expect("provider stringified item array with malformed keys");
+
+    assert_eq!(payload.items.len(), 1);
+    assert_eq!(payload.items[0]["heading"], "Demo 1 - Payment Element");
+    assert_eq!(payload.items[0]["fields"][0], "Card number");
+    assert_eq!(payload.items[0]["amount"], "$175.00");
+    assert_eq!(payload.items[0]["button"], "Pay $175.00");
+}
+
+#[test]
 fn browser_done_parser_unwraps_provider_text_wrapped_string_fields() {
     let payload = super::parse_browser_done_payload(
         r#"{
@@ -22528,6 +22564,32 @@ fn create_automation_from_chat_uses_active_scope() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn create_automation_from_chat_can_create_disabled_without_materializing_schedule() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let user = UserId::new("user_project");
+    let workspace = WorkspaceId::new("workspace_project");
+    let args = serde_json::json!({
+        "title": "Disabled smoke automation",
+        "prompt": "Summarize a smoke signal.",
+        "trigger_type": "schedule",
+        "recurrence": "every 1d",
+        "enabled": false,
+        "require_confirmation": true
+    })
+    .to_string();
+
+    let response = super::create_automation_from_chat_with_store(&store, &args, &user, &workspace);
+
+    assert!(response.contains("Automation created"), "{response}");
+    assert!(response.contains("disabled"), "{response}");
+    let automations = store.list_automations(&user, &workspace).unwrap();
+    assert_eq!(automations.len(), 1);
+    assert_eq!(automations[0].title, "Disabled smoke automation");
+    assert!(!automations[0].enabled);
+    assert_eq!(automations[0].task_id, None);
 }
 
 #[test]

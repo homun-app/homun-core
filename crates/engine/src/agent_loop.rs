@@ -896,11 +896,21 @@ missing, give what you have and note the gap in one short line.",
             }
             // Upstream and transport failures end the loop; a visible final answer may still be
             // recovered by the post-loop synthesis from accumulated turn prose.
-            Err(crate::ModelCallError::Upstream(_)) => {
+            Err(crate::ModelCallError::Upstream(message)) => {
+                protocol_failure =
+                    Some(local_first_execution_protocol::ExecutionFailure::permanent(
+                        "model_upstream_error",
+                        message,
+                    ));
                 loop_exit = Some("model_upstream_error");
                 break;
             }
-            Err(crate::ModelCallError::Transport(_)) => {
+            Err(crate::ModelCallError::Transport(message)) => {
+                protocol_failure =
+                    Some(local_first_execution_protocol::ExecutionFailure::permanent(
+                        "model_transport_error",
+                        message,
+                    ));
                 loop_exit = Some("model_transport_error");
                 break;
             }
@@ -2519,6 +2529,34 @@ mod tests {
         }
     }
 
+    struct TransportFailureModel;
+
+    impl ModelClient for TransportFailureModel {
+        async fn generate(
+            &self,
+            _call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            Err(ModelCallError::Transport(
+                "The model didn't respond (timeout/network). Try again shortly.".to_string(),
+            ))
+        }
+    }
+
+    struct UpstreamFailureModel;
+
+    impl ModelClient for UpstreamFailureModel {
+        async fn generate(
+            &self,
+            _call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            Err(ModelCallError::Upstream(
+                "The model provider returned an error. Select a different model.".to_string(),
+            ))
+        }
+    }
+
     struct StructuredAnswerModel;
 
     impl ModelClient for StructuredAnswerModel {
@@ -2979,6 +3017,112 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn model_transport_error_is_the_failed_turn_reason_not_no_reply() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "hello" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = TransportFailureModel;
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+
+        let outcome = run_turn(
+            ls,
+            cfg(),
+            &usage_context(),
+            &model,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "hello".into(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let crate::TurnStop::Failed { failure } = outcome.stop else {
+            panic!("transport failure must fail the turn");
+        };
+        assert_eq!(failure.code, "model_transport_error");
+        assert_eq!(
+            failure.redacted_detail,
+            "The model didn't respond (timeout/network). Try again shortly."
+        );
+        assert_ne!(failure.code, "no_reply");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn model_upstream_error_is_the_failed_turn_reason_not_no_reply() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "hello" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = UpstreamFailureModel;
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+
+        let outcome = run_turn(
+            ls,
+            cfg(),
+            &usage_context(),
+            &model,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "hello".into(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let crate::TurnStop::Failed { failure } = outcome.stop else {
+            panic!("upstream failure must fail the turn");
+        };
+        assert_eq!(failure.code, "model_upstream_error");
+        assert_eq!(
+            failure.redacted_detail,
+            "The model provider returned an error. Select a different model."
+        );
+        assert_ne!(failure.code, "no_reply");
     }
 
     #[tokio::test(flavor = "current_thread")]

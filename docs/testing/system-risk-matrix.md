@@ -29,8 +29,8 @@ stati impossibili che ha permesso il bug.
 | Memoria | `local-first-memory`, `MemoryFacade`, memory briefing/recall owners | ogni memoria live ha provenance; memoria sensibile non resta plaintext; recall rispetta workspace/privacy/sensitivity | `scripts/audit_homun_state.py --memory-db ...` | `production_smoke.py` scenari `S2`, `X3` |
 | Privacy/Vault | `gateway_privacy_preflight`, `gateway_text_safety`, `local-first-vault` | input critico non raggiunge modello chat; log/trace non contengono raw; record Vault ha secret material cifrato | `scripts/audit_homun_state.py --vault-db ... --logs-dir ...` | `production_smoke.py` scenari `S3`, `S4`, `X3`; `S3` deve seedare un record Vault reale |
 | Modelli/routing | `gateway_model_routing`, provider registry, `agent_runs` attribution | scelta modello spiegabile; run ha role/model/provider; fallback non diventa owner nascosto | `scripts/audit_homun_state.py --routing-decisions ...` | baseline `S1`, `S5`, `S9`; extended `X2`, `X3` |
-| Tool/skill/capability | `gateway_tool_execution`, capability routing, execution receipts | side effect tracciato; skill/tool non cambia lifecycle; approval per write incerta | owner tests + kernel projection fixtures | baseline `S6`, `S8`; `S8` deve usare checkout HTTPS pubblico/configurabile e rifiutare blocchi browser, non prompt simulato; extended `X2` |
-| Automation | `gateway_automation_routes`, task runtime automation runs | trigger/run separati dalla chat interattiva; automation non eredita stato/liveness del thread sbagliato | automation owner tests + `scripts/audit_homun_state.py` per run appesi | extended `X1` |
+| Tool/skill/capability | `gateway_tool_execution`, capability routing, execution receipts | side effect tracciato; skill/tool/MCP non cambia lifecycle; approval per write incerta | owner tests + kernel projection fixtures | baseline `S6`, `S8`; `S8` deve usare checkout HTTPS pubblico/configurabile e rifiutare blocchi browser, non prompt simulato; extended `X2`, `X6` |
+| Automation | `gateway_automation_routes`, task runtime automation runs | trigger/run separati dalla chat interattiva; automation non eredita stato/liveness del thread sbagliato | automation owner tests + `scripts/audit_homun_state.py` per run appesi | extended `X1`, `X5` |
 | Code/subagents | workspace routing, `gateway_tool_execution`, `gateway_subagent_execution`, runtime plan state | `Auto` in workspace progetto usa contesto progetto; subagent produce outcome tracciato; nessun file viene modificato in scenari read-only | owner tests subagent/runtime plan + `scripts/production_smoke.py --scenario X4`; `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway orchestrated_subagent_gathers_on_gemma4 -- --ignored --nocapture` | extended `X4`; `SUB1` live finche' il trigger broker subagent non e' stabile |
 | UI projection | `/kernel-projection`, `kernelProjectionPresenter`, runtime view model | UI proietta stato canonico; non decide completion/liveness da marker o testo | `scripts/smoke_kernel_projection.py`, desktop unit tests | app smoke Electron su profilo isolato |
 | Release/artifact | CI, packaged artifact QA, signing/notarization | CI verde non prova artifact installato; checksum/install/launch/firma sono evidenze separate | `python3 scripts/pre_release_gate.py` | production smoke su app installata |
@@ -89,6 +89,10 @@ python3 scripts/production_smoke.py --list
 python3 scripts/production_smoke.py --profile baseline --gateway-base http://127.0.0.1:18765
 ```
 
+Nota 2026-08-28: `S8` resta intenzionalmente un canary rosso finche' il
+flusso checkout non produce una `Payment Approval Card` strutturata. Un testo
+"simulato" o un `browser_budget_exceeded` non chiudono lo scenario.
+
 Scenari complessi opt-in:
 
 ```bash
@@ -102,6 +106,8 @@ Il profilo `extended` include:
 - `X2` skill/tool selection probe;
 - `X3` interazione memoria/privacy/modello;
 - `X4` code workspace auto-routing probe;
+- `X5` automation API scoped lifecycle;
+- `X6` MCP stdio API scoped lifecycle;
 - `SUB1` subagent runner probe tramite test live ignorato.
 
 Esecuzione completa:

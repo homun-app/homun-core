@@ -383,6 +383,14 @@ pub(crate) fn parse_browser_done_payload(
     }
 
     match object.get_mut("items") {
+        Some(items @ serde_json::Value::String(_)) => {
+            let encoded = items.as_str().unwrap_or("").trim();
+            if let Some(parsed @ (serde_json::Value::Array(_) | serde_json::Value::Object(_))) =
+                parse_jsonish_browser_done_value(encoded)
+            {
+                *items = parsed;
+            }
+        }
         Some(items @ serde_json::Value::Object(_)) => {
             *items = serde_json::Value::Array(vec![items.take()]);
         }
@@ -445,6 +453,41 @@ pub(crate) fn parse_browser_done_payload(
     }
 
     serde_json::from_value(value).map_err(|error| format!("invalid terminal shape: {error}"))
+}
+
+fn parse_jsonish_browser_done_value(encoded: &str) -> Option<serde_json::Value> {
+    serde_json::from_str::<serde_json::Value>(encoded)
+        .ok()
+        .or_else(|| {
+            let repaired = repair_browser_done_unquoted_keys(encoded);
+            if repaired == encoded {
+                return None;
+            }
+            serde_json::from_str::<serde_json::Value>(&repaired).ok()
+        })
+}
+
+fn repair_browser_done_unquoted_keys(encoded: &str) -> String {
+    let mut repaired = encoded.to_string();
+    for key in [
+        "heading",
+        "fields",
+        "amount",
+        "button",
+        "type",
+        "description",
+        "source",
+        "title",
+        "url",
+        "name",
+    ] {
+        for prefix in ["{", "{ ", ",", ", "] {
+            let needle = format!("{prefix}{key}\":");
+            let replacement = format!("{prefix}\"{key}\":");
+            repaired = repaired.replace(&needle, &replacement);
+        }
+    }
+    repaired
 }
 
 pub(crate) fn initial_manager_tool_schemas_for_test(

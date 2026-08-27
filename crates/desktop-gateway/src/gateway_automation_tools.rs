@@ -55,6 +55,7 @@ pub(crate) fn create_automation_tool_schema() -> serde_json::Value {
                     "event_tool": { "type": "string", "description": "Only for event on a CONNECTED SERVICE (Gmail/Calendar/Slack/MCP/…): the EXACT name of the read tool to poll cyclically (discover it with find_capability), e.g. \"GMAIL_FETCH_EMAILS\". Leave empty for a channel event." },
                     "event_args": { "type": "object", "description": "Only with event_tool: the query arguments (e.g. {\"query\":\"is:unread from:mario\"})" },
                     "event_key_field": { "type": "string", "description": "Only with event_tool: the field that uniquely identifies an item (so already-seen ones don't trigger again), e.g. \"messageId\", \"id\"." },
+                    "enabled": { "type": "boolean", "description": "false = create it disabled/paused without scheduling or firing; true/default = active." },
                     "require_confirmation": { "type": "boolean", "description": "true (default) = asks for confirmation before sending/publishing; false = autonomous" }
                 },
                 "required": ["title", "prompt", "trigger_type"]
@@ -113,6 +114,10 @@ mod tests {
         assert_eq!(schedule["function"]["parameters"]["required"][1], "every");
 
         let create = create_automation_tool_schema();
+        assert_eq!(
+            create["function"]["parameters"]["properties"]["enabled"]["type"],
+            "boolean"
+        );
         assert_eq!(create["function"]["parameters"]["required"][0], "title");
         assert_eq!(create["function"]["parameters"]["required"][1], "prompt");
         assert_eq!(

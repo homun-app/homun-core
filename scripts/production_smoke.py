@@ -107,7 +107,14 @@ def baseline_scenarios() -> list[Scenario]:
             "Web discovery with sources",
             "Cerca sul web le ultime 3 notizie tech di oggi e dammi titolo, fonte e una riga.",
             domains=("chat", "browser", "model"),
-            max_seconds=240,
+            require_text=("1.", "2.", "3."),
+            forbid_output=(
+                "risultato parziale",
+                "non ho potuto completare",
+                "solo 1 notizia",
+                "non 3",
+            ),
+            max_seconds=420,
         ),
         Scenario(
             "S6",
@@ -121,6 +128,10 @@ def baseline_scenarios() -> list[Scenario]:
                 "browser unavailable",
                 "session unavailable",
                 "contained computer",
+                "BROWSER_SIDECAR_TIMEOUT",
+                "non è riuscito",
+                "non e' riuscito",
+                "non ho quindi potuto",
                 "non ho potuto completare",
             ),
             max_seconds=300,
@@ -162,7 +173,14 @@ def baseline_scenarios() -> list[Scenario]:
             "Italian locale web discovery",
             "Cerca sul web le ultime 3 notizie tech di oggi in Italia: parti da una pagina di discovery/search, non da una singola testata, e dammi titolo, fonte e una riga.",
             domains=("chat", "browser", "locale", "model"),
-            max_seconds=240,
+            require_text=("1.", "2.", "3."),
+            forbid_output=(
+                "risultato parziale",
+                "non ho potuto completare",
+                "solo 1 notizia",
+                "non 3",
+            ),
+            max_seconds=600,
         ),
     ]
 
@@ -174,6 +192,7 @@ def extended_scenarios() -> list[Scenario]:
             "Automation lifecycle probe",
             "Crea una automazione di test disattivata che non invii notifiche e poi riepiloga id, stato e prossima azione senza attivarla.",
             domains=("chat", "automation", "memory", "tool"),
+            setup=("temp_automation_workspace",),
             require_text=("automazione",),
             max_seconds=240,
         ),
@@ -209,6 +228,14 @@ def extended_scenarios() -> list[Scenario]:
             "Create/list/toggle/delete a scoped scheduled automation through the gateway API.",
             domains=("automation", "api", "workspace"),
             runner="automation_api",
+            max_seconds=60,
+        ),
+        Scenario(
+            "X6",
+            "MCP stdio API scoped lifecycle",
+            "Connect/list/disconnect a scoped stdio MCP server through the gateway API.",
+            domains=("mcp", "api", "workspace", "tool"),
+            runner="mcp_stdio_api",
             max_seconds=60,
         ),
     ]
@@ -432,7 +459,69 @@ def create_temp_automation_workspace(base: str, token: str) -> dict[str, Any]:
     return {"workspace_id": workspace_id, "temp_project_root": project_root}
 
 
+def create_temp_mcp_workspace(base: str, token: str) -> dict[str, Any]:
+    project_root = tempfile.mkdtemp(prefix="homun-mcp-smoke-")
+    with open(os.path.join(project_root, "README.md"), "w", encoding="utf-8") as handle:
+        handle.write("# Homun MCP smoke\n")
+    _, body = _request(
+        base,
+        token,
+        "POST",
+        "/api/workspaces",
+        {"name": "homun-mcp-smoke", "folder": project_root},
+        timeout=30,
+    )
+    workspaces = body.get("workspaces", []) if isinstance(body, dict) else []
+    workspace_id = ""
+    for workspace in workspaces:
+        if isinstance(workspace, dict) and workspace.get("folder") == project_root:
+            workspace_id = str(workspace.get("id", ""))
+            break
+    if not workspace_id:
+        shutil.rmtree(project_root, ignore_errors=True)
+        raise RuntimeError(f"MCP workspace create failed body={body!r}")
+    return {"workspace_id": workspace_id, "temp_project_root": project_root}
+
+
+def resolve_fake_mcp_stdio_binary(explicit_path: str | None = None) -> str:
+    candidates = [
+        explicit_path,
+        os.environ.get("HOMUN_SMOKE_MCP_STDIO"),
+        os.environ.get("CARGO_BIN_EXE_fake_mcp_stdio"),
+    ]
+    target_dir = os.environ.get("CARGO_TARGET_DIR")
+    if target_dir:
+        candidates.append(os.path.join(target_dir, "debug", "fake_mcp_stdio"))
+    repo_target = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "target", "debug", "fake_mcp_stdio"))
+    candidates.extend(
+        [
+            os.path.expanduser("~/.cache/cargo-target/debug/fake_mcp_stdio"),
+            repo_target,
+        ]
+    )
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    raise RuntimeError(
+        "fake_mcp_stdio binary not found. Build it first with: "
+        "cargo build -p local-first-capabilities --bin fake_mcp_stdio"
+    )
+
+
 def cleanup_scenario(state: dict[str, Any], scenario_passed: bool = True) -> None:
+    if state.get("mcp_provider_id") and state.get("mcp_workspace_id"):
+        try:
+            query = urllib.parse.urlencode({"workspace": str(state["mcp_workspace_id"])})
+            _request(
+                str(state.get("base", "")),
+                str(state.get("token", "")),
+                "POST",
+                f"/api/capabilities/mcp/disconnect?{query}",
+                {"provider_id": str(state["mcp_provider_id"])},
+                timeout=30,
+            )
+        except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as error:
+            print(f"WARN cleanup MCP failed: {error}", file=sys.stderr, flush=True)
     if state.get("automation_id") and state.get("automation_workspace_id"):
         try:
             automation_id = urllib.parse.quote(str(state["automation_id"]), safe="")
@@ -503,6 +592,8 @@ def prepare_scenario(base: str, token: str, scenario: Scenario) -> dict[str, Any
                     marker=CODE_SMOKE_MARKER,
                 ),
             )
+        elif setup == "temp_automation_workspace":
+            state.update(create_temp_automation_workspace(base, token))
         else:
             raise RuntimeError(f"unknown scenario setup: {setup}")
     return state
@@ -544,10 +635,6 @@ def wait_turn_output(
         if isinstance(state, dict):
             last_status = str(state.get("status") or state.get("state") or "unknown")
         if normalize_status(last_status) in TERMINAL_STATUSES:
-            break
-        # Marker may appear in events before status flips.
-        blob = _flatten(events)
-        if any(marker_present(blob, marker) for marker in MARKER_KIND_ALIASES) or "‹‹AWAIT_USER››" in blob:
             break
         time.sleep(0.75)
     return last_status, _flatten(events), time.time() - started
@@ -649,6 +736,73 @@ def run_automation_api_lifecycle(
     return ("completed" if not failed else "failed"), output, time.time() - started, state
 
 
+def run_mcp_stdio_lifecycle(
+    base: str,
+    token: str,
+    fake_mcp_stdio_path: str | None = None,
+) -> tuple[str, str, float, dict[str, Any]]:
+    started = time.time()
+    state: dict[str, Any] = {"base": base, "token": token}
+    state.update(create_temp_mcp_workspace(base, token))
+    workspace_id = str(state["workspace_id"])
+    query = urllib.parse.urlencode({"workspace": workspace_id})
+    command = resolve_fake_mcp_stdio_binary(fake_mcp_stdio_path)
+    status, connected = _request(
+        base,
+        token,
+        "POST",
+        f"/api/capabilities/mcp/connect?{query}",
+        {
+            "name": "homun smoke mcp",
+            "command": command,
+            "args": [],
+            "env": {},
+        },
+        timeout=30,
+    )
+    if status != 200 or not isinstance(connected, dict) or not connected.get("provider_id"):
+        raise RuntimeError(f"MCP connect failed status={status} body={connected!r}")
+    state["mcp_provider_id"] = str(connected["provider_id"])
+    state["mcp_workspace_id"] = workspace_id
+    checks = {
+        "connect_provider": connected.get("provider_id") == "mcp:homun-smoke-mcp",
+        "connect_connection": connected.get("connection_id") == "mcp-homun-smoke-mcp",
+        "connect_tools": connected.get("tools_cached") == 1,
+        "connect_discovery": connected.get("discovery_error") is None,
+    }
+
+    _, listed = _request(
+        base,
+        token,
+        "GET",
+        f"/api/capabilities/mcp/connected?{query}",
+        timeout=30,
+    )
+    servers = listed.get("servers", []) if isinstance(listed, dict) else []
+    checks["list_connected"] = any(
+        item.get("provider_id") == state["mcp_provider_id"]
+        and item.get("tools") == 1
+        for item in servers
+        if isinstance(item, dict)
+    )
+
+    _, disconnected = _request(
+        base,
+        token,
+        "POST",
+        f"/api/capabilities/mcp/disconnect?{query}",
+        {"provider_id": state["mcp_provider_id"]},
+        timeout=30,
+    )
+    checks["disconnect_ack"] = isinstance(disconnected, dict) and disconnected.get("removed") is True
+    state.pop("mcp_provider_id", None)
+    state.pop("mcp_workspace_id", None)
+
+    failed = [name for name, ok in checks.items() if not ok]
+    output = "mcp_stdio_lifecycle " + ("ok" if not failed else "failed_checks=" + ",".join(failed))
+    return ("completed" if not failed else "failed"), output, time.time() - started, state
+
+
 def status_allows_success(status: str, scenario: Scenario, output: str) -> bool:
     normalized = normalize_status(status)
     output_lower = output.lower()
@@ -669,6 +823,8 @@ def run_scenario(base: str, scenario: Scenario, token: str) -> bool:
     try:
         if scenario.runner == "automation_api":
             status, output, elapsed, state = run_automation_api_lifecycle(base, token)
+        elif scenario.runner == "mcp_stdio_api":
+            status, output, elapsed, state = run_mcp_stdio_lifecycle(base, token)
         else:
             status, output, elapsed, state = run_turn_via_broker(base, scenario, token)
     except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as error:

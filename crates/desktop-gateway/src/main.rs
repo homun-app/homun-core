@@ -961,6 +961,36 @@ mod agent_run_api_tests {
             .unwrap();
     }
 
+    #[test]
+    fn early_preflight_response_backfills_agent_run_attribution() {
+        let state = AppState::for_tests();
+        seed_run(
+            &state,
+            "run-privacy-preflight",
+            "turn-privacy-preflight",
+            gateway_user_id().as_str(),
+        );
+
+        backfill_early_response_agent_run_attribution(
+            &state,
+            Some("run-privacy-preflight"),
+            "privacy_guard",
+        );
+
+        let runs = state
+            .task_store
+            .lock()
+            .unwrap()
+            .list_agent_runs_for_turn(
+                "turn-privacy-preflight",
+                gateway_user_id().as_str(),
+                gateway_workspace_id().as_str(),
+            )
+            .unwrap();
+        assert_eq!(runs[0].model.as_deref(), Some("privacy_guard"));
+        assert_eq!(runs[0].provider.as_deref(), Some("local_preflight"));
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn agent_run_api_is_ordered_cursor_based_and_scope_checked() {
         let state = AppState::for_tests();
@@ -1815,6 +1845,11 @@ async fn stream_chat_via_openai(
     if let gateway_temporal_preflight::TemporalPreflightOutcome::EarlyResponse(event) =
         gateway_temporal_preflight::evaluate_chat_temporal_preflight(request.prompt.as_str())
     {
+        backfill_early_response_agent_run_attribution(
+            state,
+            request.agent_run_id.as_deref(),
+            "temporal_preflight",
+        );
         let _ = emit_early_stream_event(&tx, event).await;
         schedule_stream_registry_cleanup(resume_id.clone());
         return Ok(chat_stream_response_with_effective_model(
@@ -1834,6 +1869,11 @@ async fn stream_chat_via_openai(
         })
         .await
     {
+        backfill_early_response_agent_run_attribution(
+            state,
+            request.agent_run_id.as_deref(),
+            response.effective_model,
+        );
         let early_text = match &response.event {
             GenerateStreamEvent::Done { text, .. } => Some(text.clone()),
             _ => None,
@@ -1869,6 +1909,11 @@ async fn stream_chat_via_openai(
             text,
             effective_model,
         } => {
+            backfill_early_response_agent_run_attribution(
+                state,
+                request.agent_run_id.as_deref(),
+                &effective_model,
+            );
             let _ = emit_early_stream_event(
                 &tx,
                 GenerateStreamEvent::Done {
@@ -2065,6 +2110,37 @@ async fn stream_chat_via_openai(
     }
 
     Ok(chat_stream_response(rx))
+}
+
+fn backfill_early_response_agent_run_attribution(
+    state: &AppState,
+    agent_run_id: Option<&str>,
+    effective_model: &str,
+) {
+    let Some(run_id) = agent_run_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    if effective_model.trim().is_empty() {
+        return;
+    }
+    if let Ok(store) = state.task_store.lock()
+        && let Err(error) = store.backfill_agent_run_attribution(
+            run_id,
+            Some(effective_model),
+            Some("local_preflight"),
+            None,
+        )
+    {
+        tracing::warn!(
+            target: "agent::journal",
+            %run_id,
+            %error,
+            "could not backfill early-response agent run attribution"
+        );
+    }
 }
 
 // ADR 0024 inc 5 (5.D1a): the agent turn's round loop + forced synthesis + post-turn

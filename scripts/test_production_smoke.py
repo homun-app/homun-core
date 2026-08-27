@@ -30,6 +30,7 @@ class ProductionSmokeTests(unittest.TestCase):
         self.assertIn("smoke", scenarios[2].prompt.lower())
         self.assertIn("Italian locale", scenarios[8].name)
         self.assertIn("Italia", scenarios[8].prompt)
+        self.assertGreaterEqual(scenarios[8].max_seconds, 600)
         self.assertIn("Text input", scenarios[5].require_text)
         self.assertIn("contained computer", scenarios[5].forbid_output)
         self.assertIn("contained computer", scenarios[6].forbid_output)
@@ -48,13 +49,14 @@ class ProductionSmokeTests(unittest.TestCase):
         all_scenarios = smoke.build_scenarios(profile="all")
 
         self.assertEqual([scenario.id for scenario in baseline], [f"S{i}" for i in range(1, 10)])
-        self.assertEqual([scenario.id for scenario in extended], ["X1", "X2", "X3", "X4", "X5"])
+        self.assertEqual([scenario.id for scenario in extended], ["X1", "X2", "X3", "X4", "X5", "X6"])
         self.assertEqual(
             [scenario.id for scenario in all_scenarios],
             [scenario.id for scenario in baseline + extended],
         )
         by_id = {scenario.id: scenario for scenario in extended}
         self.assertIn("automation", by_id["X1"].domains)
+        self.assertIn("temp_automation_workspace", by_id["X1"].setup)
         self.assertIn("skill", by_id["X2"].domains)
         self.assertIn("memory", by_id["X3"].domains)
         self.assertIn("privacy", by_id["X3"].domains)
@@ -63,6 +65,8 @@ class ProductionSmokeTests(unittest.TestCase):
         self.assertIn("CODE_CONTEXT_OK", by_id["X4"].require_text)
         self.assertIn("automation", by_id["X5"].domains)
         self.assertEqual(by_id["X5"].runner, "automation_api")
+        self.assertIn("mcp", by_id["X6"].domains)
+        self.assertEqual(by_id["X6"].runner, "mcp_stdio_api")
 
     def test_broker_helpers_are_exported(self):
         # Guard the live path: smoke must use turns broker, not generate_stream.
@@ -120,10 +124,26 @@ class ProductionSmokeTests(unittest.TestCase):
             "Non ho potuto completare il task: il browser non è disponibile "
             "perché il contained computer non è in esecuzione."
         )
+        browser_timeout = (
+            "Il tentativo non è riuscito: BROWSER_SIDECAR_TIMEOUT. "
+            "Non ho quindi potuto compilare Text input con smoke."
+        )
 
         self.assertTrue(smoke.status_allows_success("completed", s6, success))
         self.assertFalse(smoke.status_allows_success("completed", s6, browser_unavailable))
+        self.assertFalse(smoke.status_allows_success("completed", s6, browser_timeout))
         self.assertFalse(smoke.status_allows_success("completed", s6, "Fatto ma senza evidenza"))
+
+    def test_web_discovery_scenarios_reject_partial_one_item_answers(self):
+        s9 = next(scenario for scenario in smoke.build_scenarios() if scenario.id == "S9")
+
+        self.assertFalse(
+            smoke.status_allows_success(
+                "completed",
+                s9,
+                "Risultato parziale: sono riuscito a estrarre solo 1 notizia tech di oggi, non 3.",
+            )
+        )
 
     def test_wait_turn_output_retries_transient_turn_not_found(self):
         calls = []
@@ -157,6 +177,36 @@ class ProductionSmokeTests(unittest.TestCase):
 
         self.assertEqual(status, "completed")
         self.assertIn("done", output)
+
+    def test_wait_turn_output_does_not_stop_on_marker_before_terminal_status(self):
+        status_calls = 0
+
+        def fake_request(base, token, method, path, body=None, timeout=60):
+            nonlocal status_calls
+            if path == "/api/chat/turns/turn-1":
+                status_calls += 1
+                return 200, {"status": "running" if status_calls == 1 else "completed"}
+            if path == "/api/chat/turns/turn-1/events?since=0":
+                return 200, [{"kind": "vault_reveal", "payload": {"record_id": "vault_smoke"}}]
+            raise AssertionError(path)
+
+        original_sleep = smoke.time.sleep
+        original_request = smoke._request
+        smoke.time.sleep = lambda _seconds: None
+        smoke._request = fake_request
+        try:
+            status, output, _elapsed = smoke.wait_turn_output(
+                "http://gateway",
+                "token",
+                "turn-1",
+                2,
+            )
+        finally:
+            smoke._request = original_request
+            smoke.time.sleep = original_sleep
+
+        self.assertEqual(status, "completed")
+        self.assertIn("vault_smoke", output)
 
     def test_wait_turn_output_scopes_polling_to_workspace(self):
         calls = []
@@ -392,6 +442,61 @@ class ProductionSmokeTests(unittest.TestCase):
 
         self.assertIn(("DELETE", "/api/automations/auto_smoke?workspace_id=workspace_auto", None), calls)
         self.assertEqual(calls[-1][0:2], ("POST", "/api/workspaces/workspace_auto/delete"))
+
+    def test_mcp_stdio_lifecycle_connects_lists_and_disconnects_scoped_server(self):
+        calls = []
+
+        def fake_request(base, token, method, path, body=None, timeout=60):
+            calls.append((method, path, body))
+            if method == "POST" and path == "/api/workspaces":
+                return 200, {
+                    "workspaces": [
+                        {"id": "workspace_mcp", "name": body["name"], "folder": body["folder"]}
+                    ],
+                }
+            if method == "POST" and path == "/api/capabilities/mcp/connect?workspace=workspace_mcp":
+                self.assertEqual(body["name"], "homun smoke mcp")
+                self.assertTrue(body["command"].endswith("fake_mcp_stdio"))
+                return 200, {
+                    "provider_id": "mcp:homun-smoke-mcp",
+                    "connection_id": "mcp-homun-smoke-mcp",
+                    "tools_cached": 1,
+                    "discovery_error": None,
+                }
+            if method == "GET" and path == "/api/capabilities/mcp/connected?workspace=workspace_mcp":
+                return 200, {
+                    "servers": [
+                        {"provider_id": "mcp:homun-smoke-mcp", "name": "homun smoke mcp", "tools": 1}
+                    ]
+                }
+            if method == "POST" and path == "/api/capabilities/mcp/disconnect?workspace=workspace_mcp":
+                self.assertEqual(body["provider_id"], "mcp:homun-smoke-mcp")
+                return 200, {"removed": True}
+            if method == "POST" and path == "/api/workspaces/workspace_mcp/delete":
+                return 200, {"workspaces": []}
+            raise AssertionError((method, path, body))
+
+        original_request = smoke._request
+        smoke._request = fake_request
+        try:
+            with mock.patch("scripts.production_smoke.shutil.rmtree") as rmtree:
+                status, output, _elapsed, state = smoke.run_mcp_stdio_lifecycle(
+                    "http://gateway",
+                    "token",
+                    "/tmp/fake_mcp_stdio",
+                )
+                self.assertEqual(status, "completed")
+                self.assertIn("mcp_stdio_lifecycle ok", output)
+                smoke.cleanup_scenario(state, scenario_passed=True)
+                rmtree.assert_called_once_with(state["temp_project_root"], ignore_errors=True)
+        finally:
+            smoke._request = original_request
+
+        self.assertIn(
+            ("POST", "/api/capabilities/mcp/disconnect?workspace=workspace_mcp", {"provider_id": "mcp:homun-smoke-mcp"}),
+            calls,
+        )
+        self.assertEqual(calls[-1][0:2], ("POST", "/api/workspaces/workspace_mcp/delete"))
 
     def test_checkout_fixture_setup_rewrites_prompt_to_public_checkout_url(self):
         scenario = next(item for item in smoke.build_scenarios() if item.id == "S8")
