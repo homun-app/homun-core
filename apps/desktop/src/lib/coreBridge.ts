@@ -1468,6 +1468,7 @@ export type AutomationTriggerJson =
 
 export type ManagedAutomation = {
   id: string;
+  workspace_id: string;
   title: string;
   trigger: AutomationTriggerJson;
   trigger_summary: string;

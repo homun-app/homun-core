@@ -22146,6 +22146,34 @@ fn scheduled_automation_materializes_visible_proactive_task() {
 }
 
 #[test]
+fn automation_json_exposes_workspace_scope() {
+    let now = time::OffsetDateTime::now_utc();
+    let automation = Automation {
+        id: "auto_project".to_string(),
+        user_id: UserId::new("user_auto"),
+        workspace_id: WorkspaceId::new("workspace_project"),
+        title: "Project automation".to_string(),
+        trigger: AutomationTrigger::Schedule {
+            recurrence: "every 1d".to_string(),
+            tz: None,
+        },
+        prompt: "Check project status".to_string(),
+        approval: ApprovalPolicy::Confirm,
+        enabled: true,
+        source: AutomationSource::Manual,
+        task_id: Some("autorun_project".to_string()),
+        created_at: now,
+        updated_at: now,
+        last_fired_at: None,
+        state: None,
+    };
+
+    let json = super::automation_to_json(&automation);
+
+    assert_eq!(json["workspace_id"], "workspace_project");
+}
+
+#[test]
 fn automation_projection_uses_kernel_contract_for_waiting_and_completed_turns() {
     let store = TaskStore::open_in_memory().unwrap();
     let user = UserId::new("user_auto");

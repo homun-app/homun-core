@@ -115,6 +115,7 @@ pub(crate) fn automation_to_json(a: &Automation) -> serde_json::Value {
     };
     serde_json::json!({
         "id": a.id,
+        "workspace_id": a.workspace_id,
         "title": a.title,
         "trigger": a.trigger,
         "trigger_summary": automation_trigger_summary(&a.trigger),

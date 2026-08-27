@@ -67,6 +67,7 @@ class Scenario:
     name: str
     prompt: str
     domains: tuple[str, ...] = ("chat",)
+    runner: str = "chat"
     setup: tuple[str, ...] = ()
     expect_marker: str | None = None
     forbid_plaintext: str | None = None
@@ -190,7 +191,7 @@ def extended_scenarios() -> list[Scenario]:
             "Memorizza come preferenza non sensibile che preferisco report brevi, poi dimmi cosa hai salvato senza includere dati personali o segreti.",
             domains=("chat", "memory", "privacy", "model"),
             require_text=("report",),
-            forbid_output=("codice fiscale", "targa", "segreto"),
+            forbid_output=("codice fiscale", "targa"),
             max_seconds=240,
         ),
         Scenario(
@@ -201,6 +202,14 @@ def extended_scenarios() -> list[Scenario]:
             setup=("temp_code_workspace",),
             require_text=(CODE_SMOKE_MARKER, "add_numbers", "5"),
             max_seconds=240,
+        ),
+        Scenario(
+            "X5",
+            "Automation API scoped lifecycle",
+            "Create/list/toggle/delete a scoped scheduled automation through the gateway API.",
+            domains=("automation", "api", "workspace"),
+            runner="automation_api",
+            max_seconds=60,
         ),
     ]
 
@@ -399,7 +408,44 @@ def create_temp_code_workspace(base: str, token: str) -> dict[str, Any]:
     }
 
 
+def create_temp_automation_workspace(base: str, token: str) -> dict[str, Any]:
+    project_root = tempfile.mkdtemp(prefix="homun-auto-smoke-")
+    with open(os.path.join(project_root, "README.md"), "w", encoding="utf-8") as handle:
+        handle.write("# Homun automation smoke\n")
+    _, body = _request(
+        base,
+        token,
+        "POST",
+        "/api/workspaces",
+        {"name": "homun-auto-smoke", "folder": project_root},
+        timeout=30,
+    )
+    workspaces = body.get("workspaces", []) if isinstance(body, dict) else []
+    workspace_id = ""
+    for workspace in workspaces:
+        if isinstance(workspace, dict) and workspace.get("folder") == project_root:
+            workspace_id = str(workspace.get("id", ""))
+            break
+    if not workspace_id:
+        shutil.rmtree(project_root, ignore_errors=True)
+        raise RuntimeError(f"automation workspace create failed body={body!r}")
+    return {"workspace_id": workspace_id, "temp_project_root": project_root}
+
+
 def cleanup_scenario(state: dict[str, Any], scenario_passed: bool = True) -> None:
+    if state.get("automation_id") and state.get("automation_workspace_id"):
+        try:
+            automation_id = urllib.parse.quote(str(state["automation_id"]), safe="")
+            query = urllib.parse.urlencode({"workspace_id": str(state["automation_workspace_id"])})
+            _request(
+                str(state.get("base", "")),
+                str(state.get("token", "")),
+                "DELETE",
+                f"/api/automations/{automation_id}?{query}",
+                timeout=30,
+            )
+        except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as error:
+            print(f"WARN cleanup automation failed: {error}", file=sys.stderr, flush=True)
     if state.get("vault_seeded") and state.get("vault_record_id"):
         try:
             _request(
@@ -526,6 +572,83 @@ def run_turn_via_broker(
     return status, output, elapsed, state
 
 
+def run_automation_api_lifecycle(
+    base: str,
+    token: str,
+) -> tuple[str, str, float, dict[str, Any]]:
+    started = time.time()
+    state: dict[str, Any] = {"base": base, "token": token}
+    state.update(create_temp_automation_workspace(base, token))
+    workspace_id = str(state["workspace_id"])
+    query = urllib.parse.urlencode({"workspace_id": workspace_id})
+    status, created = _request(
+        base,
+        token,
+        "POST",
+        "/api/automations",
+        {
+            "title": "homun automation smoke",
+            "trigger": {"type": "schedule", "recurrence": "every 1d", "tz": "Europe/Rome"},
+            "prompt": "Rispondi solo ok per smoke automation; non inviare messaggi esterni.",
+            "workspace_id": workspace_id,
+            "approval": "confirm",
+            "source": "manual",
+        },
+        timeout=30,
+    )
+    if status != 200 or not isinstance(created, dict) or not created.get("id"):
+        raise RuntimeError(f"automation create failed status={status} body={created!r}")
+    state["automation_id"] = str(created["id"])
+    state["automation_workspace_id"] = workspace_id
+    checks = {
+        "create_workspace": created.get("workspace_id") == workspace_id,
+        "create_enabled": created.get("enabled") is True,
+        "create_task": isinstance(created.get("task_id"), str) and created["task_id"].startswith("autorun_"),
+        "create_next_run": isinstance(created.get("next_run"), int),
+        "create_approval": created.get("approval") == "confirm",
+    }
+
+    _, listed = _request(base, token, "GET", f"/api/automations?{query}", timeout=30)
+    scoped_items = listed.get("automations", []) if isinstance(listed, dict) else []
+    checks["list_scoped"] = any(
+        item.get("id") == state["automation_id"] and item.get("workspace_id") == workspace_id
+        for item in scoped_items
+        if isinstance(item, dict)
+    )
+
+    automation_id = urllib.parse.quote(str(state["automation_id"]), safe="")
+    _, toggled = _request(
+        base,
+        token,
+        "POST",
+        f"/api/automations/{automation_id}/toggle?{query}",
+        timeout=30,
+    )
+    checks["toggle_workspace"] = isinstance(toggled, dict) and toggled.get("workspace_id") == workspace_id
+    checks["toggle_disabled"] = isinstance(toggled, dict) and toggled.get("enabled") is False
+    checks["toggle_task_cancelled"] = isinstance(toggled, dict) and toggled.get("task_id") is None
+
+    _, deleted = _request(
+        base,
+        token,
+        "DELETE",
+        f"/api/automations/{automation_id}?{query}",
+        timeout=30,
+    )
+    checks["delete_ack"] = isinstance(deleted, dict) and deleted.get("deleted") == state["automation_id"]
+    _, listed_after = _request(base, token, "GET", f"/api/automations?{query}", timeout=30)
+    after_items = listed_after.get("automations", []) if isinstance(listed_after, dict) else []
+    checks["delete_absent"] = not any(
+        item.get("id") == state["automation_id"] for item in after_items if isinstance(item, dict)
+    )
+
+    failed = [name for name, ok in checks.items() if not ok]
+    output = "automation_api_lifecycle " + (
+        "ok" if not failed else "failed_checks=" + ",".join(failed)
+    )
+    return ("completed" if not failed else "failed"), output, time.time() - started, state
+
+
 def status_allows_success(status: str, scenario: Scenario, output: str) -> bool:
     normalized = normalize_status(status)
     output_lower = output.lower()
@@ -544,7 +667,10 @@ def run_scenario(base: str, scenario: Scenario, token: str) -> bool:
     print(f"== {scenario.id}: {scenario.name} ==", flush=True)
     state: dict[str, Any] | None = None
     try:
-        status, output, elapsed, state = run_turn_via_broker(base, scenario, token)
+        if scenario.runner == "automation_api":
+            status, output, elapsed, state = run_automation_api_lifecycle(base, token)
+        else:
+            status, output, elapsed, state = run_turn_via_broker(base, scenario, token)
     except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as error:
         print(f"FAIL {scenario.id}: gateway error: {error}", flush=True)
         if state is not None:

@@ -48,7 +48,7 @@ class ProductionSmokeTests(unittest.TestCase):
         all_scenarios = smoke.build_scenarios(profile="all")
 
         self.assertEqual([scenario.id for scenario in baseline], [f"S{i}" for i in range(1, 10)])
-        self.assertEqual([scenario.id for scenario in extended], ["X1", "X2", "X3", "X4"])
+        self.assertEqual([scenario.id for scenario in extended], ["X1", "X2", "X3", "X4", "X5"])
         self.assertEqual(
             [scenario.id for scenario in all_scenarios],
             [scenario.id for scenario in baseline + extended],
@@ -61,6 +61,8 @@ class ProductionSmokeTests(unittest.TestCase):
         self.assertIn("code", by_id["X4"].domains)
         self.assertIn("temp_code_workspace", by_id["X4"].setup)
         self.assertIn("CODE_CONTEXT_OK", by_id["X4"].require_text)
+        self.assertIn("automation", by_id["X5"].domains)
+        self.assertEqual(by_id["X5"].runner, "automation_api")
 
     def test_broker_helpers_are_exported(self):
         # Guard the live path: smoke must use turns broker, not generate_stream.
@@ -99,6 +101,17 @@ class ProductionSmokeTests(unittest.TestCase):
         self.assertTrue(smoke.status_allows_success("completed", scenario, "anything"))
         self.assertFalse(smoke.status_allows_success("failed", scenario, "anything"))
         self.assertFalse(smoke.status_allows_success("suspended", scenario, "anything"))
+
+    def test_x3_allows_secret_word_in_explicit_negative_statement(self):
+        scenario = next(item for item in smoke.build_scenarios(profile="extended") if item.id == "X3")
+
+        self.assertTrue(
+            smoke.status_allows_success(
+                "completed",
+                scenario,
+                "Ho salvato la preferenza: report brevi. Nessun dato personale ne' segreto.",
+            )
+        )
 
     def test_browser_scenarios_require_semantic_success_not_just_completed_status(self):
         s6 = next(scenario for scenario in smoke.build_scenarios() if scenario.id == "S6")
@@ -315,6 +328,70 @@ class ProductionSmokeTests(unittest.TestCase):
             smoke._request = original
 
         self.assertEqual(calls, [])
+
+    def test_automation_api_lifecycle_uses_scoped_crud_and_cleanup(self):
+        calls = []
+        auto_id = "auto_smoke"
+        list_calls = 0
+
+        def fake_request(base, token, method, path, body=None, timeout=60):
+            nonlocal list_calls
+            calls.append((method, path, body))
+            if method == "POST" and path == "/api/workspaces":
+                return 200, {
+                    "workspaces": [
+                        {"id": "workspace_auto", "name": body["name"], "folder": body["folder"]}
+                    ],
+                }
+            if method == "POST" and path == "/api/automations":
+                self.assertEqual(body["workspace_id"], "workspace_auto")
+                return 200, {
+                    "id": auto_id,
+                    "workspace_id": "workspace_auto",
+                    "enabled": True,
+                    "task_id": "autorun_smoke",
+                    "next_run": 1_782_000_000,
+                    "approval": "confirm",
+                }
+            if method == "GET" and path == "/api/automations?workspace_id=workspace_auto":
+                list_calls += 1
+                if list_calls == 1:
+                    return 200, {
+                        "automations": [
+                            {"id": auto_id, "workspace_id": "workspace_auto"},
+                        ]
+                    }
+                return 200, {"automations": []}
+            if method == "POST" and path == "/api/automations/auto_smoke/toggle?workspace_id=workspace_auto":
+                return 200, {
+                    "id": auto_id,
+                    "workspace_id": "workspace_auto",
+                    "enabled": False,
+                    "task_id": None,
+                }
+            if method == "DELETE" and path == "/api/automations/auto_smoke?workspace_id=workspace_auto":
+                return 200, {"deleted": auto_id}
+            if method == "POST" and path == "/api/workspaces/workspace_auto/delete":
+                return 200, {"workspaces": []}
+            raise AssertionError((method, path, body))
+
+        original_request = smoke._request
+        smoke._request = fake_request
+        try:
+            with mock.patch("scripts.production_smoke.shutil.rmtree") as rmtree:
+                status, output, _elapsed, state = smoke.run_automation_api_lifecycle(
+                    "http://gateway",
+                    "token",
+                )
+                self.assertEqual(status, "completed")
+                self.assertIn("automation_api_lifecycle ok", output)
+                smoke.cleanup_scenario(state, scenario_passed=True)
+                rmtree.assert_called_once_with(state["temp_project_root"], ignore_errors=True)
+        finally:
+            smoke._request = original_request
+
+        self.assertIn(("DELETE", "/api/automations/auto_smoke?workspace_id=workspace_auto", None), calls)
+        self.assertEqual(calls[-1][0:2], ("POST", "/api/workspaces/workspace_auto/delete"))
 
     def test_checkout_fixture_setup_rewrites_prompt_to_public_checkout_url(self):
         scenario = next(item for item in smoke.build_scenarios() if item.id == "S8")
