@@ -35,6 +35,7 @@ function activityStatus(input) {
 }
 
 export function nextWorkspaceSection(activeSection, requestedSection) {
+  if (requestedSection === "browser") return null;
   return activeSection === requestedSection ? null : requestedSection;
 }
 

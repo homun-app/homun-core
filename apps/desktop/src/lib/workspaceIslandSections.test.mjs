@@ -59,6 +59,11 @@ test("terminal is never exposed as a workspace capability", () => {
 
 test("clicking the active section collapses and siblings swap directly", () => {
   assert.equal(nextWorkspaceSection(null, "activity"), "activity");
-  assert.equal(nextWorkspaceSection("activity", "browser"), "browser");
-  assert.equal(nextWorkspaceSection("browser", "browser"), null);
+  assert.equal(nextWorkspaceSection("activity", "artifacts"), "artifacts");
+  assert.equal(nextWorkspaceSection("artifacts", "artifacts"), null);
+});
+
+test("browser rail click keeps the side island closed so PiP stays visible", () => {
+  assert.equal(nextWorkspaceSection(null, "browser"), null);
+  assert.equal(nextWorkspaceSection("activity", "browser"), null);
 });
