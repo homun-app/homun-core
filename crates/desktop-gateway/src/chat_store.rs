@@ -4342,6 +4342,11 @@ fn push_json_marker_part(
 ) {
     for body in marker_bodies(text, marker) {
         if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&body) {
+            if marker == "PAYMENT_APPROVAL"
+                && !local_first_desktop_gateway::valid_payment_approval_payload(&payload)
+            {
+                continue;
+            }
             parts.push(serde_json::json!({
                 "type": event_type,
                 "payload": payload,

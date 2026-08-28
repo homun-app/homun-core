@@ -96,13 +96,16 @@ pub(crate) fn turn_event_from_stream_value(
                 .cloned()
                 .unwrap_or(serde_json::Value::Null),
         ),
-        "payment_approval" => (
-            local_first_task_runtime::TurnEventKind::PaymentApproval,
-            value
+        "payment_approval" => (local_first_task_runtime::TurnEventKind::PaymentApproval, {
+            let payload = value
                 .get("payload")
                 .cloned()
-                .unwrap_or(serde_json::Value::Null),
-        ),
+                .unwrap_or(serde_json::Value::Null);
+            if !local_first_desktop_gateway::valid_payment_approval_payload(&payload) {
+                return None;
+            }
+            payload
+        }),
         "done" => (
             local_first_task_runtime::TurnEventKind::Done,
             serde_json::json!({

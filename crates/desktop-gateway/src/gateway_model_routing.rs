@@ -1106,6 +1106,31 @@ Retry with a different approach, or replan if the action is not feasible."
     ))
 }
 
+pub(crate) fn parse_completion_judge_verdict(content: &str) -> Option<serde_json::Value> {
+    let trimmed = content.trim();
+    let json_slice = match (trimmed.find('{'), trimmed.rfind('}')) {
+        (Some(a), Some(b)) if b > a => trimmed[a..=b].to_string(),
+        _ => {
+            let fragment = trimmed.trim_matches('`').trim().trim_end_matches(',');
+            if fragment.starts_with("\"complete\"") {
+                format!("{{{fragment}}}")
+            } else if fragment.starts_with("\": true, \"reason\"")
+                || fragment.starts_with("\": false, \"reason\"")
+            {
+                format!("{{\"complete{fragment}}}")
+            } else {
+                return None;
+            }
+        }
+    };
+    let verdict = serde_json::from_str::<serde_json::Value>(&json_slice).ok()?;
+    if verdict.get("complete")?.is_boolean() && verdict.get("reason")?.is_string() {
+        Some(verdict)
+    } else {
+        None
+    }
+}
+
 /// F2 verification gate: an independent LLM-judge deciding whether a plan step is
 /// ACTUALLY complete, from the step title, its done-criterion, and the EVIDENCE (tool
 /// calls + results gathered while the step ran). Cheap, non-streaming, on the fast
@@ -1193,21 +1218,8 @@ pub(crate) async fn verify_step_complete(
         .pointer("/choices/0/message/content")
         .and_then(|c| c.as_str())
         .unwrap_or("");
-    // Tolerant parse: the model may wrap the JSON in prose or code fences.
-    let json_slice = match (content.find('{'), content.rfind('}')) {
-        (Some(a), Some(b)) if b > a => &content[a..=b],
-        _ => {
-            let snippet: String = body.to_string().chars().take(300).collect();
-            tracing::warn!(
-                target: "orchestration::verify_step",
-                model = %model, %base_url, body = %snippet,
-                "step-verify LLM returned no JSON object — leaving the step open (fail-closed)"
-            );
-            return (false, "completion verifier returned no verdict".to_string());
-        }
-    };
-    match serde_json::from_str::<serde_json::Value>(json_slice) {
-        Ok(v) => {
+    match parse_completion_judge_verdict(content) {
+        Some(v) => {
             let complete = v.get("complete").and_then(|b| b.as_bool()).unwrap_or(false);
             let reason = v
                 .get("reason")
@@ -1216,10 +1228,15 @@ pub(crate) async fn verify_step_complete(
                 .to_string();
             (complete, reason)
         }
-        Err(_) => (
-            false,
-            "completion verifier returned invalid JSON".to_string(),
-        ),
+        None => {
+            let snippet: String = body.to_string().chars().take(300).collect();
+            tracing::warn!(
+                target: "orchestration::verify_step",
+                model = %model, %base_url, body = %snippet,
+                "step-verify LLM returned no JSON verdict — leaving the step open (fail-closed)"
+            );
+            (false, "completion verifier returned no verdict".to_string())
+        }
     }
 }
 
@@ -1301,23 +1318,18 @@ request is COMPLETE. Reply with STRICT JSON only, no prose: \
         .pointer("/choices/0/message/content")
         .and_then(|c| c.as_str())
         .unwrap_or("");
-    // Tolerant parse: the model may wrap the JSON in prose or code fences.
-    let json_slice = match (content.find('{'), content.rfind('}')) {
-        (Some(a), Some(b)) if b > a => &content[a..=b],
-        _ => {
+    match parse_completion_judge_verdict(content) {
+        // `complete` defaults to true on any parse gap → NOT incomplete → no nudge (fail-open).
+        Some(v) => !v.get("complete").and_then(|b| b.as_bool()).unwrap_or(true),
+        None => {
             let snippet: String = body.to_string().chars().take(300).collect();
             tracing::warn!(
                 target: "orchestration::task_complete",
                 model = %model, %base_url, body = %snippet,
-                "task-complete judge returned no JSON object (e.g. reasoning-budget starvation) — assuming complete (fail-open)"
+                "task-complete judge returned no JSON verdict (e.g. reasoning-budget starvation) — assuming complete (fail-open)"
             );
-            return false;
+            false
         }
-    };
-    match serde_json::from_str::<serde_json::Value>(json_slice) {
-        // `complete` defaults to true on any parse gap → NOT incomplete → no nudge (fail-open).
-        Ok(v) => !v.get("complete").and_then(|b| b.as_bool()).unwrap_or(true),
-        Err(_) => false,
     }
 }
 

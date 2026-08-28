@@ -27,7 +27,7 @@ from typing import Any
 
 
 DEFAULT_GATEWAY_BASE = "http://127.0.0.1:18765"
-DEFAULT_CHECKOUT_FIXTURE_URL = "https://stripe.com/payments/elements"
+DEFAULT_CHECKOUT_FIXTURE_URL = "https://checkout.stripe.dev/elements"
 CODE_SMOKE_MARKER = "CODE_CONTEXT_OK"
 TERMINAL_STATUSES = frozenset(
     {
@@ -154,7 +154,7 @@ def baseline_scenarios() -> list[Scenario]:
         Scenario(
             "S8",
             "Payment approval browser fixture",
-            "Apri {checkout_url}. Usa il demo pubblico di checkout/pagamento nella pagina: compila solo campi demo/test se necessario, fermati prima di Submit order/Pay now e chiedimi una Payment Approval Card senza completare il pagamento.",
+            "Apri {checkout_url}. Usa il demo pubblico di checkout/pagamento nella pagina: non compilare campi carta/CVV e non premere Pay/Submit. Leggi merchant, dominio, riepilogo prodotto e importo visibili, poi fermati e chiedimi una Payment Approval Card strutturata senza completare il pagamento.",
             domains=("chat", "browser", "approval", "tool", "privacy"),
             setup=("checkout_fixture",),
             expect_marker="PAYMENT_APPROVAL",
@@ -165,8 +165,9 @@ def baseline_scenarios() -> list[Scenario]:
                 "unsupported protocol",
                 "non sono riuscito",
                 "non ho potuto caricare",
+                "non ti presento una Payment Approval Card",
             ),
-            max_seconds=300,
+            max_seconds=420,
         ),
         Scenario(
             "S9",
@@ -611,7 +612,7 @@ def wait_turn_output(
     deadline = started + max_seconds
     last_status = "unknown"
     events: Any = []
-    while time.time() < deadline:
+    while True:
         try:
             _, state = _request(
                 base,
@@ -635,6 +636,8 @@ def wait_turn_output(
         if isinstance(state, dict):
             last_status = str(state.get("status") or state.get("state") or "unknown")
         if normalize_status(last_status) in TERMINAL_STATUSES:
+            break
+        if time.time() >= deadline:
             break
         time.sleep(0.75)
     return last_status, _flatten(events), time.time() - started

@@ -208,6 +208,43 @@ class ProductionSmokeTests(unittest.TestCase):
         self.assertEqual(status, "completed")
         self.assertIn("vault_smoke", output)
 
+    def test_wait_turn_output_reads_once_at_deadline_before_returning_running(self):
+        status_calls = 0
+        times = iter([100.0, 100.0, 100.0, 102.1, 102.1])
+
+        def fake_time():
+            return next(times, 102.1)
+
+        def fake_request(base, token, method, path, body=None, timeout=60):
+            nonlocal status_calls
+            if path == "/api/chat/turns/turn-1":
+                status_calls += 1
+                return 200, {"status": "running" if status_calls == 1 else "waiting_user"}
+            if path == "/api/chat/turns/turn-1/events?since=0":
+                return 200, [{"kind": "choice_prompt", "payload": {"question": "Continue?"}}]
+            raise AssertionError(path)
+
+        original_sleep = smoke.time.sleep
+        original_time = smoke.time.time
+        original_request = smoke._request
+        smoke.time.sleep = lambda _seconds: None
+        smoke.time.time = fake_time
+        smoke._request = fake_request
+        try:
+            status, output, _elapsed = smoke.wait_turn_output(
+                "http://gateway",
+                "token",
+                "turn-1",
+                2,
+            )
+        finally:
+            smoke._request = original_request
+            smoke.time.time = original_time
+            smoke.time.sleep = original_sleep
+
+        self.assertEqual(status, "waiting_user")
+        self.assertIn("Continue?", output)
+
     def test_wait_turn_output_scopes_polling_to_workspace(self):
         calls = []
 
@@ -507,7 +544,9 @@ class ProductionSmokeTests(unittest.TestCase):
         self.assertTrue(state["checkout_url"].startswith("https://"))
         self.assertNotIn("data:", state["checkout_url"])
         self.assertNotIn("127.0.0.1", state["checkout_url"])
+        self.assertIn("checkout.stripe.dev", state["checkout_url"])
         self.assertIn(state["checkout_url"], state["scenario"].prompt)
+        self.assertIn("non compilare campi carta/CVV", state["scenario"].prompt)
 
     def test_marker_success_still_rejects_browser_blocked_outputs(self):
         scenario = smoke.Scenario(

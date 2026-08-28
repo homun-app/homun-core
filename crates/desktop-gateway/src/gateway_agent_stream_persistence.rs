@@ -24,19 +24,22 @@ pub(crate) fn update_channel_assistant_message(
 
 pub(crate) fn finalize_streamed_assistant_message(
     state: &AppState,
+    turn_id: &str,
     thread_id: &str,
     message_id: &str,
     text: &str,
     collector: &StreamMemoryReuseCollector,
     requested_delivery_state: local_first_desktop_gateway::MessageDeliveryState,
 ) -> Result<(), String> {
+    let mut event_parts = collector.event_parts().to_vec();
+    merge_turn_payment_event_parts(state, turn_id, &mut event_parts);
     let store = lock_store(state).map_err(|error| error.message)?;
     store
         .finalize_assistant_message_with_delivery_state(
             thread_id,
             message_id,
             text,
-            collector.event_parts(),
+            &event_parts,
             &collector.envelope(),
             requested_delivery_state,
         )
@@ -47,6 +50,34 @@ pub(crate) fn finalize_streamed_assistant_message(
         "workspace": base_workspace_id(),
     }));
     Ok(())
+}
+
+fn merge_turn_payment_event_parts(
+    state: &AppState,
+    turn_id: &str,
+    event_parts: &mut Vec<serde_json::Value>,
+) {
+    let Ok(store) = state.task_store.lock() else {
+        return;
+    };
+    let Ok(events) = store.read_turn_events(turn_id, 0) else {
+        return;
+    };
+    for event in events {
+        if event.kind != local_first_task_runtime::TurnEventKind::PaymentApproval {
+            continue;
+        }
+        if !local_first_desktop_gateway::valid_payment_approval_payload(&event.payload) {
+            continue;
+        }
+        let part = serde_json::json!({
+            "type": "payment_approval",
+            "payload": event.payload,
+        });
+        if !event_parts.iter().any(|existing| existing == &part) {
+            event_parts.push(part);
+        }
+    }
 }
 
 /// Stores an emitted Recall part with the assistant message. This is deliberately
@@ -117,6 +148,8 @@ pub(crate) fn fanout_legacy_card_markers_from_text(state: &AppState, turn_id: &s
             };
             let payload_text = &cursor[after_open..after_open + close_rel];
             if let Ok(payload) = serde_json::from_str::<serde_json::Value>(payload_text)
+                && (kind != local_first_task_runtime::TurnEventKind::PaymentApproval
+                    || local_first_desktop_gateway::valid_payment_approval_payload(&payload))
                 && let Ok(store) = state.task_store.lock()
             {
                 let already_present = store

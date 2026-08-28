@@ -32,6 +32,50 @@ const MAX_SINGLE_CONTEXT_MESSAGE_CHARS: usize = 2_000;
 /// per-message small-model clamp is lifted (the total budget still bounds the sum).
 const CAPABLE_CHAT_CONTEXT_CHARS: usize = 32_000;
 
+pub fn valid_payment_approval_payload(payload: &serde_json::Value) -> bool {
+    let Some(snapshot) = payload
+        .get("snapshot")
+        .and_then(serde_json::Value::as_object)
+    else {
+        return false;
+    };
+    let required_text = [
+        "approval_id",
+        "merchant",
+        "domain",
+        "currency",
+        "product_summary",
+        "payment_method_label",
+        "checkout_fingerprint",
+    ];
+    for key in required_text {
+        let Some(value) = snapshot
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+        else {
+            return false;
+        };
+        if value.is_empty() || value == "..." || value.contains('<') || value.contains('>') {
+            return false;
+        }
+    }
+    let Some(approval_id) = snapshot
+        .get("approval_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+    else {
+        return false;
+    };
+    if !approval_id.starts_with("pay_") {
+        return false;
+    }
+    snapshot
+        .get("amount_minor")
+        .and_then(serde_json::Value::as_i64)
+        .is_some_and(|amount| amount > 0)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatContextRole {

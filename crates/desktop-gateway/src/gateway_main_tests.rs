@@ -1213,6 +1213,21 @@ impl TestMemorySourcesFlag {
     }
 }
 
+struct TestMemoryWorkspace;
+
+impl TestMemoryWorkspace {
+    fn set(id: &str) -> Self {
+        super::set_memory_workspace(id);
+        Self
+    }
+}
+
+impl Drop for TestMemoryWorkspace {
+    fn drop(&mut self) {
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+    }
+}
+
 async fn memory_source_response_code(response: axum::response::Response) -> Option<String> {
     let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
         .await
@@ -5262,6 +5277,7 @@ fn malformed_actionable_marker_is_not_persisted_into_delivered_model_context() {
     let raw = "Visible answer. ‹‹MCP_CONFIRM››{not valid json}‹‹/MCP_CONFIRM››";
     super::finalize_streamed_assistant_message(
         &state,
+        "turn_malformed_actionable_marker",
         &thread.thread_id,
         &assistant.id,
         raw,
@@ -5313,6 +5329,7 @@ fn canonical_stream_finalization_does_not_project_hitl_from_markers() {
 
     super::finalize_streamed_assistant_message(
         &state,
+        "turn_canonical_stream_marker",
         &thread.thread_id,
         &assistant.id,
         raw,
@@ -5356,6 +5373,7 @@ fn transcript_parts_render_after_reload_without_marker_text() {
 
     super::finalize_streamed_assistant_message(
         &state,
+        "turn_transcript_parts_reload",
         &thread.thread_id,
         &assistant.id,
         "Pick one.",
@@ -5378,6 +5396,97 @@ fn transcript_parts_render_after_reload_without_marker_text() {
     assert_eq!(saved.event_parts[0]["type"], "actionable_card");
     assert_eq!(saved.event_parts[0]["kind"], "CHOICES");
     assert_eq!(saved.event_parts[0]["payload"]["question"], "Which?");
+}
+
+#[test]
+fn payment_approval_turn_event_survives_stream_finalization_without_marker_text() {
+    let state = super::AppState::for_tests();
+    let thread = state
+        .chat_store
+        .lock()
+        .unwrap()
+        .create_thread("payment_event_parts_reload")
+        .expect("thread");
+    let assistant = super::channel_chat_message_with_id("assistant", "", "payment_parts_assistant");
+    state
+        .chat_store
+        .lock()
+        .unwrap()
+        .append_assistant_message(&thread.thread_id, &assistant)
+        .expect("assistant message");
+    let turn_id = "turn_payment_event_parts_reload";
+    let payload = serde_json::json!({
+        "snapshot": {
+            "approval_id": "pay_live_123",
+            "merchant": "Stripe Elements Demo",
+            "domain": "checkout.stripe.dev",
+            "amount_minor": 12196,
+            "currency": "USD",
+            "product_summary": "Pure Glow Cream + The Pure Set",
+            "payment_method_label": "Test card 4242",
+            "checkout_fingerprint": "stripe-elements-demo-12196-usd"
+        }
+    });
+    {
+        let store = state.task_store.lock().unwrap();
+        super::turn_executor::emit_turn_event(
+            &state,
+            &store,
+            turn_id,
+            local_first_task_runtime::TurnEventKind::PaymentApproval,
+            payload.clone(),
+        )
+        .expect("payment event");
+    }
+
+    super::finalize_streamed_assistant_message(
+        &state,
+        turn_id,
+        &thread.thread_id,
+        &assistant.id,
+        "Ti presento la richiesta di approvazione:\n\n",
+        &super::StreamMemoryReuseCollector::default(),
+        local_first_desktop_gateway::MessageDeliveryState::Delivered,
+    )
+    .expect("finalize typed payment part");
+
+    let saved = state
+        .chat_store
+        .lock()
+        .unwrap()
+        .message(&thread.thread_id, &assistant.id)
+        .unwrap()
+        .unwrap();
+    assert!(!saved.text.contains("PAYMENT_APPROVAL"));
+    assert_eq!(saved.event_parts.len(), 1);
+    assert_eq!(saved.event_parts[0]["type"], "payment_approval");
+    assert_eq!(saved.event_parts[0]["payload"], payload);
+}
+
+#[test]
+fn placeholder_payment_approval_marker_is_not_fanned_out_as_a_real_card() {
+    let state = super::AppState::for_tests();
+    let turn_id = "turn_payment_placeholder_filter";
+    let placeholder = "‹‹PAYMENT_APPROVAL››{\"snapshot\":{\"approval_id\":\"pay_<uuid>\",\"merchant\":\"...\",\"domain\":\"...\",\"amount_minor\":5900,\"currency\":\"EUR\",\"product_summary\":\"...\",\"payment_method_label\":\"Visa 1111\",\"checkout_fingerprint\":\"...\"}}‹‹/PAYMENT_APPROVAL››";
+    let real = "‹‹PAYMENT_APPROVAL››{\"snapshot\":{\"approval_id\":\"pay_real_123\",\"merchant\":\"Stripe Elements Demo\",\"domain\":\"checkout.stripe.dev\",\"amount_minor\":12196,\"currency\":\"USD\",\"product_summary\":\"Pure Glow Cream + The Pure Set\",\"payment_method_label\":\"Test card 4242\",\"checkout_fingerprint\":\"stripe-elements-demo-12196-usd\"}}‹‹/PAYMENT_APPROVAL››";
+
+    super::fanout_legacy_card_markers_from_text(&state, turn_id, &format!("{placeholder}\n{real}"));
+
+    let events = state
+        .task_store
+        .lock()
+        .unwrap()
+        .read_turn_events(turn_id, 0)
+        .unwrap();
+    let payment_events = events
+        .iter()
+        .filter(|event| event.kind == local_first_task_runtime::TurnEventKind::PaymentApproval)
+        .collect::<Vec<_>>();
+    assert_eq!(payment_events.len(), 1);
+    assert_eq!(
+        payment_events[0].payload["snapshot"]["approval_id"],
+        "pay_real_123"
+    );
 }
 
 #[test]
@@ -10146,6 +10255,36 @@ fn orchestration_completion_judge_uses_strict_schema() {
         response_format.pointer("/json_schema/schema/additionalProperties"),
         Some(&serde_json::Value::Bool(false))
     );
+}
+
+#[test]
+fn completion_judge_parser_accepts_strict_object_and_complete_fragment_only() {
+    let object = super::parse_completion_judge_verdict(
+        "```json\n{\"complete\":true,\"reason\":\"evidence matched\"}\n```",
+    )
+    .expect("object verdict");
+    assert_eq!(object["complete"], true);
+    assert_eq!(object["reason"], "evidence matched");
+
+    let fragment = super::parse_completion_judge_verdict(
+        "\"complete\": false, \"reason\": \"missing external result\"",
+    )
+    .expect("fragment verdict");
+    assert_eq!(fragment["complete"], false);
+    assert_eq!(fragment["reason"], "missing external result");
+
+    let truncated_fragment =
+        super::parse_completion_judge_verdict("\": true, \"reason\": \"external result observed\"")
+            .expect("truncated completion-key verdict");
+    assert_eq!(truncated_fragment["complete"], true);
+    assert_eq!(truncated_fragment["reason"], "external result observed");
+
+    assert!(
+        super::parse_completion_judge_verdict("\": true, \"comment\": \"missing reason\"")
+            .is_none()
+    );
+    assert!(super::parse_completion_judge_verdict("complete: true").is_none());
+    assert!(super::parse_completion_judge_verdict("The step looks complete.").is_none());
 }
 
 #[test]
@@ -17257,11 +17396,9 @@ fn project_briefing_requires_personal_preferences_grant() {
     use local_first_memory::MemoryRecallService as _;
 
     let _flag = TestMemorySourcesFlag::set(Some("on"));
-    let previous_user = std::env::var("HOMUN_USER_ID").ok();
-    unsafe {
-        std::env::set_var("HOMUN_USER_ID", "briefing-grant-user");
-    }
-    super::set_memory_workspace("project-a");
+    let env = TestEnv::acquire();
+    env.set("HOMUN_USER_ID", Some("briefing-grant-user"));
+    let _workspace = TestMemoryWorkspace::set("project-a");
 
     let facade =
         super::MemoryFacade::new(local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap());
@@ -17328,26 +17465,14 @@ fn project_briefing_requires_personal_preferences_grant() {
     let cached = service.brief(&scope, "Review the project status");
     assert_eq!(first.linked_hits, cached.linked_hits);
     assert_eq!(cached.linked_hits.len(), 1);
-
-    super::set_memory_workspace(super::PERSONAL_WORKSPACE);
-    match previous_user {
-        Some(value) => unsafe {
-            std::env::set_var("HOMUN_USER_ID", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOMUN_USER_ID");
-        },
-    }
 }
 
 #[test]
 fn project_briefing_enforces_compiled_personal_source_policy() {
     let _flag = TestMemorySourcesFlag::set(Some("on"));
-    let previous_user = std::env::var("HOMUN_USER_ID").ok();
-    unsafe {
-        std::env::set_var("HOMUN_USER_ID", "briefing-policy-user");
-    }
-    super::set_memory_workspace("project-a");
+    let env = TestEnv::acquire();
+    env.set("HOMUN_USER_ID", Some("briefing-policy-user"));
+    let _workspace = TestMemoryWorkspace::set("project-a");
 
     let facade =
         super::MemoryFacade::new(local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap());
@@ -17398,26 +17523,14 @@ fn project_briefing_enforces_compiled_personal_source_policy() {
     let state = test_app_state_for_brief(facade);
     let (personal_items, _) = super::gather_profile_memory_with_options(&state, true, true);
     assert!(personal_items.is_empty());
-
-    super::set_memory_workspace(super::PERSONAL_WORKSPACE);
-    match previous_user {
-        Some(value) => unsafe {
-            std::env::set_var("HOMUN_USER_ID", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOMUN_USER_ID");
-        },
-    }
 }
 
 #[test]
 fn project_briefing_does_not_promote_individual_allow_outside_preferences_collection() {
     let _flag = TestMemorySourcesFlag::set(Some("on"));
-    let previous_user = std::env::var("HOMUN_USER_ID").ok();
-    unsafe {
-        std::env::set_var("HOMUN_USER_ID", "briefing-allow-user");
-    }
-    super::set_memory_workspace("project-a");
+    let env = TestEnv::acquire();
+    env.set("HOMUN_USER_ID", Some("briefing-allow-user"));
+    let _workspace = TestMemoryWorkspace::set("project-a");
     let facade =
         super::MemoryFacade::new(local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap());
     let user = local_first_memory::UserId::new("briefing-allow-user");
@@ -17459,26 +17572,14 @@ fn project_briefing_does_not_promote_individual_allow_outside_preferences_collec
     let state = test_app_state_for_brief(facade);
     let (personal_items, _) = super::gather_profile_memory_with_options(&state, true, true);
     assert!(personal_items.is_empty());
-
-    super::set_memory_workspace(super::PERSONAL_WORKSPACE);
-    match previous_user {
-        Some(value) => unsafe {
-            std::env::set_var("HOMUN_USER_ID", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOMUN_USER_ID");
-        },
-    }
 }
 
 #[test]
 fn revoking_grant_changes_briefing_fingerprint() {
     let _flag = TestMemorySourcesFlag::set(Some("on"));
-    let previous_user = std::env::var("HOMUN_USER_ID").ok();
-    unsafe {
-        std::env::set_var("HOMUN_USER_ID", "briefing-revoke-user");
-    }
-    super::set_memory_workspace("project-a");
+    let env = TestEnv::acquire();
+    env.set("HOMUN_USER_ID", Some("briefing-revoke-user"));
+    let _workspace = TestMemoryWorkspace::set("project-a");
 
     let facade =
         super::MemoryFacade::new(local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap());
@@ -17492,26 +17593,14 @@ fn revoking_grant_changes_briefing_fingerprint() {
         .unwrap();
     let after = super::memory_briefing_source_fingerprint(&state, &user, &project, 11);
     assert_ne!(before, after);
-
-    super::set_memory_workspace(super::PERSONAL_WORKSPACE);
-    match previous_user {
-        Some(value) => unsafe {
-            std::env::set_var("HOMUN_USER_ID", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOMUN_USER_ID");
-        },
-    }
 }
 
 #[test]
 fn expiry_and_source_update_change_briefing_fingerprint() {
     let _flag = TestMemorySourcesFlag::set(Some("on"));
-    let previous_user = std::env::var("HOMUN_USER_ID").ok();
-    unsafe {
-        std::env::set_var("HOMUN_USER_ID", "briefing-expiry-user");
-    }
-    super::set_memory_workspace("project-a");
+    let env = TestEnv::acquire();
+    env.set("HOMUN_USER_ID", Some("briefing-expiry-user"));
+    let _workspace = TestMemoryWorkspace::set("project-a");
 
     let facade =
         super::MemoryFacade::new(local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap());
@@ -17560,26 +17649,14 @@ fn expiry_and_source_update_change_briefing_fingerprint() {
     assert_ne!(before_update, after_update);
     let after_expiry = super::memory_briefing_source_fingerprint(&state, &user, &project, 20);
     assert_ne!(after_update, after_expiry);
-
-    super::set_memory_workspace(super::PERSONAL_WORKSPACE);
-    match previous_user {
-        Some(value) => unsafe {
-            std::env::set_var("HOMUN_USER_ID", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOMUN_USER_ID");
-        },
-    }
 }
 
 #[test]
 fn cached_briefing_is_rejected_when_grant_is_revoked_after_lookup() {
     let _flag = TestMemorySourcesFlag::set(Some("on"));
-    let previous_user = std::env::var("HOMUN_USER_ID").ok();
-    unsafe {
-        std::env::set_var("HOMUN_USER_ID", "briefing-toctou-user");
-    }
-    super::set_memory_workspace("project-a");
+    let env = TestEnv::acquire();
+    env.set("HOMUN_USER_ID", Some("briefing-toctou-user"));
+    let _workspace = TestMemoryWorkspace::set("project-a");
     let facade =
         super::MemoryFacade::new(local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap());
     let user = local_first_memory::UserId::new("briefing-toctou-user");
@@ -17626,16 +17703,6 @@ fn cached_briefing_is_rejected_when_grant_is_revoked_after_lookup() {
         },
     );
     assert!(cached.is_none());
-
-    super::set_memory_workspace(super::PERSONAL_WORKSPACE);
-    match previous_user {
-        Some(value) => unsafe {
-            std::env::set_var("HOMUN_USER_ID", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOMUN_USER_ID");
-        },
-    }
 }
 
 #[test]

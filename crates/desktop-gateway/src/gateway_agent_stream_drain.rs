@@ -102,6 +102,7 @@ pub(crate) async fn drain_agent_stream_into_message(
     }
     finalize_streamed_assistant_message(
         state,
+        "",
         thread_id,
         assistant_message_id,
         &raw_final_text,
@@ -278,6 +279,7 @@ pub(crate) async fn drain_agent_stream_into_message_with_fanout(
     if !(final_text.is_empty() && actionable_cards.is_empty()) {
         finalize_streamed_assistant_message(
             state,
+            turn_id,
             thread_id,
             assistant_message_id,
             &raw_final_text,
