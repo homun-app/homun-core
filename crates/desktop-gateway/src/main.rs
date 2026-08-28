@@ -265,11 +265,11 @@ pub(crate) use gateway_memory_bench::{
 #[cfg(test)]
 use gateway_memory_briefing::{
     BriefingMemoryItem, format_memory_block, gather_profile_memory_for_prompt,
-    gather_profile_memory_with_options, gather_profile_memory_with_provenance,
+    gather_profile_memory_with_provenance,
 };
 use gateway_memory_briefing::{
     CHAT_MEMORY_BUDGET_CHARS, MemoryInjectionPolicy, format_memory_block_with_provenance,
-    gather_profile_memory_for_intent_with_provenance, memory_briefing_source_fingerprint,
+    gather_profile_memory_for_workspace_with_provenance, memory_briefing_source_fingerprint,
     memory_injection_policy, memory_intent_allows_recall,
     memory_intent_context_for_semantic_contract, memory_intent_for_execution,
     revalidated_cached_briefing,
@@ -1629,6 +1629,7 @@ async fn stream_chat_via_openai(
         chat_channel,
         turn_policy,
         contact_memory_perimeter,
+        memory_workspace,
     } = chat_turn_context;
     // Budget the prompt against the model's REAL context window (catalog `context_window`,
     // auto-filled from `/api/show`, F0.3d) instead of a flat 32k default — so a 128k model
@@ -1676,8 +1677,7 @@ async fn stream_chat_via_openai(
     let mcp_schemas = connected_prompt.mcp_schemas;
     let has_composio = connected_prompt.has_composio;
     let system = connected_prompt.system;
-    let skill_prompt_catalog =
-        prepare_skill_prompt_catalog(gateway_memory_workspace_id().as_str()).await;
+    let skill_prompt_catalog = prepare_skill_prompt_catalog(memory_workspace.as_str()).await;
     let enabled_skills = skill_prompt_catalog.enabled_skills;
     let homuncoder = skill_prompt_catalog.homuncoder;
     let is_project = skill_prompt_catalog.is_project;
@@ -1726,6 +1726,7 @@ async fn stream_chat_via_openai(
             thread_id: request.thread_id.as_deref(),
             contact: contact_ctx.as_ref(),
             contact_memory_perimeter: &contact_memory_perimeter,
+            memory_workspace: &memory_workspace,
             is_project,
             memory_intent: &memory_intent,
             memory_injection,

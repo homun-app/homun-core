@@ -1347,7 +1347,7 @@ fn goal_propose_prompt_instruction_has_one_gateway_owner() {
         "main.rs still owns the runtime workspace decision to append goal-propose guidance"
     );
     assert!(
-        workspace_prompt.contains("ws.as_str() != PERSONAL_WORKSPACE"),
+        workspace_prompt.contains("memory_workspace.as_str() != PERSONAL_WORKSPACE"),
         "chat workspace prompt context owner must decide when to append goal-propose guidance"
     );
 }

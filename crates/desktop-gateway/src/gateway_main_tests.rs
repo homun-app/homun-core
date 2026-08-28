@@ -1213,12 +1213,19 @@ impl TestMemorySourcesFlag {
     }
 }
 
-struct TestMemoryWorkspace;
+struct TestMemoryWorkspace {
+    _env: TestEnv,
+}
 
 impl TestMemoryWorkspace {
     fn set(id: &str) -> Self {
+        let env = TestEnv::acquire();
         super::set_memory_workspace(id);
-        Self
+        Self { _env: env }
+    }
+
+    fn switch(&self, id: &str) {
+        super::set_memory_workspace(id);
     }
 }
 
@@ -17091,39 +17098,23 @@ fn budgeted_briefing_attests_only_linked_items_that_enter_the_prompt() {
 /// `briefing_pack_personal_shape_is_well_formed_with_profile_only`.
 #[test]
 fn scope_from_active_workspace_projects_personal_and_project() {
-    let _env_guard = TestEnv::acquire();
-    // Salvaguarda e ripristina lo scope memory globale (test condiviso).
-    let prev = std::env::var("HOMUN_USER_ID").ok();
-    // SAFETY: test isolato; ripristinato sotto.
-    unsafe {
-        std::env::set_var("HOMUN_USER_ID", "local-user");
-    }
+    let env = TestEnv::acquire();
+    env.set("HOMUN_USER_ID", Some("local-user"));
+    let workspace = TestMemoryWorkspace::set(super::PERSONAL_WORKSPACE);
 
-    super::set_memory_workspace(super::PERSONAL_WORKSPACE);
     let personal = super::scope_from_active_workspace();
     assert!(
         matches!(personal, super::MemoryScope::Personal),
         "workspace personale deve proiettarsi in MemoryScope::Personal"
     );
 
-    super::set_memory_workspace("proj-acme");
+    workspace.switch("proj-acme");
     let project = super::scope_from_active_workspace();
     match project {
         super::MemoryScope::Project(ws) => {
             assert_eq!(ws.as_str(), "proj-acme");
         }
         other => panic!("workspace nominato deve proiettarsi in Project(_), got {other:?}"),
-    }
-
-    // Ripristino.
-    super::set_memory_workspace(super::PERSONAL_WORKSPACE);
-    match prev {
-        Some(value) => unsafe {
-            std::env::set_var("HOMUN_USER_ID", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOMUN_USER_ID");
-        },
     }
 }
 
@@ -17391,6 +17382,26 @@ fn insert_test_source_grant(
         .unwrap();
 }
 
+fn gather_profile_memory_for_test_scope(
+    state: &super::AppState,
+    user: &local_first_memory::UserId,
+    workspace: &local_first_memory::WorkspaceId,
+    personal_preferences_only_override: bool,
+    include_project: bool,
+) -> (Vec<String>, Vec<String>) {
+    let (personal, project) = super::gather_profile_memory_for_workspace_with_provenance(
+        state,
+        user,
+        workspace,
+        personal_preferences_only_override,
+        include_project,
+    );
+    (
+        personal.into_iter().map(|item| item.text).collect(),
+        project.into_iter().map(|item| item.text).collect(),
+    )
+}
+
 #[test]
 fn project_briefing_requires_personal_preferences_grant() {
     use local_first_memory::MemoryRecallService as _;
@@ -17423,7 +17434,8 @@ fn project_briefing_requires_personal_preferences_grant() {
     );
     let state = test_app_state_for_brief(facade);
 
-    let (before, project_before) = super::gather_profile_memory_with_options(&state, true, true);
+    let (before, project_before) =
+        gather_profile_memory_for_test_scope(&state, &user, &project, true, true);
     assert!(before.is_empty());
     assert!(project_before.is_empty());
 
@@ -17436,7 +17448,7 @@ fn project_briefing_requires_personal_preferences_grant() {
         "Project-local fact",
     );
     insert_preferences_grant(super::memory_facade(&state), &user, &project, "prefs-grant");
-    let (after, _) = super::gather_profile_memory_with_options(&state, true, true);
+    let (after, _) = gather_profile_memory_for_test_scope(&state, &user, &project, true, true);
     assert_eq!(after, vec!["Prefers Italian".to_string()]);
     let (structured, structured_project) =
         super::gather_profile_memory_with_provenance(&state, true, true);
@@ -17521,7 +17533,8 @@ fn project_briefing_enforces_compiled_personal_source_policy() {
         })
         .unwrap();
     let state = test_app_state_for_brief(facade);
-    let (personal_items, _) = super::gather_profile_memory_with_options(&state, true, true);
+    let (personal_items, _) =
+        gather_profile_memory_for_test_scope(&state, &user, &project, true, true);
     assert!(personal_items.is_empty());
 }
 
@@ -17548,7 +17561,7 @@ fn project_briefing_does_not_promote_individual_allow_outside_preferences_collec
         .upsert_memory_source_grant(&local_first_memory::MemorySourceGrant {
             id: "knowledge-with-allow".to_string(),
             consumer_user_id: user.clone(),
-            consumer_workspace_id: project,
+            consumer_workspace_id: project.clone(),
             source_user_id: user.clone(),
             source_workspace_id: personal,
             collections: [local_first_memory::MemoryCollectionKey::Knowledge]
@@ -17570,7 +17583,8 @@ fn project_briefing_does_not_promote_individual_allow_outside_preferences_collec
         })
         .unwrap();
     let state = test_app_state_for_brief(facade);
-    let (personal_items, _) = super::gather_profile_memory_with_options(&state, true, true);
+    let (personal_items, _) =
+        gather_profile_memory_for_test_scope(&state, &user, &project, true, true);
     assert!(personal_items.is_empty());
 }
 
@@ -17743,13 +17757,10 @@ async fn memory_service_on_and_off_use_same_linked_source_coordinator() {
     std::fs::create_dir_all(&dir).unwrap();
     let _data = TestGatewayDataDir::new(&dir);
     write_memory_source_workspaces(&dir, false);
-    let previous_user = std::env::var("HOMUN_USER_ID").ok();
-    let previous_service = std::env::var("HOMUN_MEMORY_SERVICE").ok();
-    unsafe {
-        std::env::set_var("HOMUN_USER_ID", "recall-parity-user");
-        std::env::set_var("HOMUN_MEMORY_SERVICE", "on");
-    }
-    super::set_memory_workspace("project-a");
+    let env = TestEnv::acquire();
+    env.set("HOMUN_USER_ID", Some("recall-parity-user"))
+        .set("HOMUN_MEMORY_SERVICE", Some("on"));
+    let _workspace = TestMemoryWorkspace::set("project-a");
 
     let facade =
         super::MemoryFacade::new(local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap());
@@ -17809,9 +17820,7 @@ async fn memory_service_on_and_off_use_same_linked_source_coordinator() {
             &local_first_memory::MemoryScope::Project(consumer.clone()),
         )
         .await;
-    unsafe {
-        std::env::set_var("HOMUN_MEMORY_SERVICE", "off");
-    }
+    env.set("HOMUN_MEMORY_SERVICE", Some("off"));
     let mut inline_state = state.clone();
     super::install_memory_service_if_enabled(
         &mut inline_state,
@@ -17867,24 +17876,6 @@ async fn memory_service_on_and_off_use_same_linked_source_coordinator() {
             .id,
         last_available_access.id
     );
-
-    super::set_memory_workspace(super::PERSONAL_WORKSPACE);
-    match previous_user {
-        Some(value) => unsafe {
-            std::env::set_var("HOMUN_USER_ID", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOMUN_USER_ID");
-        },
-    }
-    match previous_service {
-        Some(value) => unsafe {
-            std::env::set_var("HOMUN_MEMORY_SERVICE", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOMUN_MEMORY_SERVICE");
-        },
-    }
 }
 
 #[test]
@@ -18174,10 +18165,8 @@ fn recall_memory_tool_uses_linked_sources_only_from_projects() {
     std::fs::create_dir_all(&dir).unwrap();
     let _data = TestGatewayDataDir::new(&dir);
     write_memory_source_workspaces(&dir, false);
-    let previous_user = std::env::var("HOMUN_USER_ID").ok();
-    unsafe {
-        std::env::set_var("HOMUN_USER_ID", "tool-source-user");
-    }
+    let env = TestEnv::acquire();
+    env.set("HOMUN_USER_ID", Some("tool-source-user"));
     let facade =
         super::MemoryFacade::new(local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap());
     let user = local_first_memory::UserId::new("tool-source-user");
@@ -18201,7 +18190,7 @@ fn recall_memory_tool_uses_linked_sources_only_from_projects() {
     );
     let state = test_app_state_for_brief(facade);
 
-    super::set_memory_workspace("project-a");
+    let workspace = TestMemoryWorkspace::set("project-a");
     let project = super::recall_memory(&state, "When do we launch?", false);
     assert!(project.response.contains("Launch in September"));
     let payload = super::recall_stream_payload_from_outcome(&project, "When do we launch?");
@@ -18217,27 +18206,16 @@ fn recall_memory_tool_uses_linked_sources_only_from_projects() {
     assert!(hit.score > 0.0);
     assert!(!hit.r#ref.is_empty());
     assert_eq!(hit.kind, "decision");
-    super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+    workspace.switch(super::PERSONAL_WORKSPACE);
     let personal = super::recall_memory(&state, "When do we launch?", false);
     assert!(!personal.response.contains("Launch in September"));
-
-    match previous_user {
-        Some(value) => unsafe {
-            std::env::set_var("HOMUN_USER_ID", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOMUN_USER_ID");
-        },
-    }
 }
 
 #[test]
 fn recall_memory_does_not_relabel_thread_episodes_as_local_hits() {
     let _flag = TestMemorySourcesFlag::set(Some("off"));
-    let previous_user = std::env::var("HOMUN_USER_ID").ok();
-    unsafe {
-        std::env::set_var("HOMUN_USER_ID", "episode-bypass-user");
-    }
+    let env = TestEnv::acquire();
+    env.set("HOMUN_USER_ID", Some("episode-bypass-user"));
     let facade =
         super::MemoryFacade::new(local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap());
     let user = local_first_memory::UserId::new("episode-bypass-user");
@@ -18249,7 +18227,7 @@ fn recall_memory_does_not_relabel_thread_episodes_as_local_hits() {
         "project-a",
     );
     let state = test_app_state_for_brief(facade);
-    super::set_memory_workspace("project-a");
+    let _workspace = TestMemoryWorkspace::set("project-a");
 
     let outcome = super::recall_memory(&state, "NEBULA-7429", false);
 
@@ -18257,10 +18235,6 @@ fn recall_memory_does_not_relabel_thread_episodes_as_local_hits() {
     assert!(!outcome.payload.hits.iter().any(|hit| {
         hit.kind == "conversation" && hit.grant_id.is_none() && hit.r#ref.is_empty()
     }));
-    match previous_user {
-        Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value) },
-        None => unsafe { std::env::remove_var("HOMUN_USER_ID") },
-    }
 }
 
 /// ADR 0022 — Tappa 1: TEST DI PARITÀ RUNTIME (DoD).
@@ -18272,14 +18246,12 @@ fn recall_memory_does_not_relabel_thread_episodes_as_local_hits() {
 /// si aggiusta il service, si investiga (kickoff, stop-and-ask).
 #[test]
 fn brief_via_service_matches_inline_assembly_personal_and_project() {
-    let _env_guard = TestEnv::acquire();
+    let env = TestEnv::acquire();
     // Il metodo brief() viene dal trait MemoryRecallService: portiamolo in scope.
     use super::MemoryRecallService;
     // User id stabile per entrambi gli scope (le funzioni leggono la globale).
-    let prev_user = std::env::var("HOMUN_USER_ID").ok();
-    unsafe {
-        std::env::set_var("HOMUN_USER_ID", "parity-user");
-    }
+    env.set("HOMUN_USER_ID", Some("parity-user"));
+    let workspace = TestMemoryWorkspace::set(super::PERSONAL_WORKSPACE);
 
     // Messaggio "normale" (non-breve): attiva sia il profile-memory completo
     // sia gli open-loops. È il caso in cui i due gating prompt-dipendenti
@@ -18292,7 +18264,7 @@ fn brief_via_service_matches_inline_assembly_personal_and_project() {
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
         let state = test_app_state_for_brief(facade);
-        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        workspace.switch(super::PERSONAL_WORKSPACE);
         let scope = super::scope_from_active_workspace();
         let service = super::InProcessMemoryRecallService::new(
             state.clone(),
@@ -18320,7 +18292,7 @@ fn brief_via_service_matches_inline_assembly_personal_and_project() {
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
         let state = test_app_state_for_brief(facade);
-        super::set_memory_workspace("proj-parity");
+        workspace.switch("proj-parity");
         let scope = super::scope_from_active_workspace();
         let service = super::InProcessMemoryRecallService::new(
             state.clone(),
@@ -18334,17 +18306,6 @@ fn brief_via_service_matches_inline_assembly_personal_and_project() {
             "PARITÀ PROJECT: service.brief() deve produrre gli stessi blocchi dell'inline"
         );
     }
-
-    // Ripristino.
-    super::set_memory_workspace(super::PERSONAL_WORKSPACE);
-    match prev_user {
-        Some(value) => unsafe {
-            std::env::set_var("HOMUN_USER_ID", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOMUN_USER_ID");
-        },
-    }
 }
 
 /// ADR 0022 (Tappa 1.5) — la cache del briefing si invalida a ogni scrittura
@@ -18353,11 +18314,8 @@ fn brief_via_service_matches_inline_assembly_personal_and_project() {
 /// serve la cache stale (cache miss → rebuild che riflette la nuova memoria).
 #[test]
 fn briefing_cache_invalidates_after_memory_write() {
-    let _env_guard = TestEnv::acquire();
-    let prev_user = std::env::var("HOMUN_USER_ID").ok();
-    unsafe {
-        std::env::set_var("HOMUN_USER_ID", "invalidate-user");
-    }
+    let env = TestEnv::acquire();
+    env.set("HOMUN_USER_ID", Some("invalidate-user"));
 
     let facade =
         super::MemoryFacade::new(local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap());
@@ -18404,16 +18362,6 @@ fn briefing_cache_invalidates_after_memory_write() {
         gen_after > gen_before,
         "una scrittura deve incrementare la generation (invalida la cache)"
     );
-
-    // Ripristino.
-    match prev_user {
-        Some(value) => unsafe {
-            std::env::set_var("HOMUN_USER_ID", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOMUN_USER_ID");
-        },
-    }
 }
 
 /// Task 3 (Working Island Redesign): the `/api/memory/goals` payload — the one
@@ -18423,11 +18371,8 @@ fn briefing_cache_invalidates_after_memory_write() {
 /// deriving the text a second way.
 #[tokio::test]
 async fn project_context_exposes_objective_from_goal_memory() {
-    let _env_guard = TestEnv::acquire();
-    let prev_user = std::env::var("HOMUN_USER_ID").ok();
-    unsafe {
-        std::env::set_var("HOMUN_USER_ID", "objective-user");
-    }
+    let env = TestEnv::acquire();
+    env.set("HOMUN_USER_ID", Some("objective-user"));
 
     let facade =
         super::MemoryFacade::new(local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap());
@@ -18467,7 +18412,7 @@ async fn project_context_exposes_objective_from_goal_memory() {
     // only now (after all the SQLite setup above) to keep the window where this
     // process-global is non-default as short as possible — MEMORY_WORKSPACE is
     // shared with every other test in this binary running concurrently.
-    super::set_memory_workspace("proj-island");
+    let _workspace = TestMemoryWorkspace::set("proj-island");
 
     // Direct unit assertion on the reused derivation function.
     let objective = super::project_objective_block(&state);
@@ -18505,17 +18450,6 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
         Some(1),
         "sanity: the goal memory is also counted as before (projectGoalCount source)"
     );
-
-    // Ripristino.
-    super::set_memory_workspace(super::PERSONAL_WORKSPACE);
-    match prev_user {
-        Some(value) => unsafe {
-            std::env::set_var("HOMUN_USER_ID", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOMUN_USER_ID");
-        },
-    }
 }
 
 /// Regression guard for the scope-consistency bug: the objective in the
@@ -18525,11 +18459,8 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
 /// the request to B, and assert the payload shows B's objective — never A's.
 #[tokio::test]
 async fn project_context_objective_follows_request_workspace_not_global() {
-    let _env_guard = TestEnv::acquire();
-    let prev_user = std::env::var("HOMUN_USER_ID").ok();
-    unsafe {
-        std::env::set_var("HOMUN_USER_ID", "objective-scope-user");
-    }
+    let env = TestEnv::acquire();
+    env.set("HOMUN_USER_ID", Some("objective-scope-user"));
 
     let facade =
         super::MemoryFacade::new(local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap());
@@ -18571,7 +18502,7 @@ async fn project_context_objective_follows_request_workspace_not_global() {
 
     // The process-global scope points at project A — as a concurrent run-turn on a
     // DIFFERENT project would leave it. The GET must ignore it.
-    super::set_memory_workspace("proj-alpha");
+    let _workspace = TestMemoryWorkspace::set("proj-alpha");
 
     let response = super::memory_goals_list(
         axum::extract::State(state.clone()),
@@ -18598,17 +18529,6 @@ async fn project_context_objective_follows_request_workspace_not_global() {
         Some("proj-beta"),
         "sanity: the payload's workspace is the request's, matching its objective"
     );
-
-    // Ripristino.
-    super::set_memory_workspace(super::PERSONAL_WORKSPACE);
-    match prev_user {
-        Some(value) => unsafe {
-            std::env::set_var("HOMUN_USER_ID", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOMUN_USER_ID");
-        },
-    }
 }
 
 #[test]

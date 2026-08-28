@@ -189,13 +189,6 @@ pub(crate) fn gather_profile_memory_for_prompt(
     gather_profile_memory_with_options(state, !intent.search_personal, intent.search_project)
 }
 
-pub(crate) fn gather_profile_memory_for_intent_with_provenance(
-    state: &AppState,
-    intent: &semantic_decision::MemoryIntent,
-) -> (Vec<BriefingMemoryItem>, Vec<BriefingMemoryItem>) {
-    gather_profile_memory_with_provenance(state, !intent.search_personal, intent.search_project)
-}
-
 #[cfg(test)]
 pub(crate) fn gather_profile_memory_with_options(
     state: &AppState,
@@ -213,19 +206,36 @@ pub(crate) fn gather_profile_memory_with_options(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn gather_profile_memory_with_provenance(
     state: &AppState,
     personal_preferences_only_override: bool,
     include_project: bool,
 ) -> (Vec<BriefingMemoryItem>, Vec<BriefingMemoryItem>) {
-    let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
+    gather_profile_memory_for_workspace_with_provenance(
+        state,
+        &user,
+        &active,
+        personal_preferences_only_override,
+        include_project,
+    )
+}
+
+pub(crate) fn gather_profile_memory_for_workspace_with_provenance(
+    state: &AppState,
+    user: &MemoryUserId,
+    active: &MemoryWorkspaceId,
+    personal_preferences_only_override: bool,
+    include_project: bool,
+) -> (Vec<BriefingMemoryItem>, Vec<BriefingMemoryItem>) {
+    let facade = memory_facade(state);
     let in_project = active.as_str() != PERSONAL_WORKSPACE;
     let sources = briefing_authorized_sources(
         facade,
-        &user,
-        &active,
+        user,
+        active,
         i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX),
     );
     let personal = sources

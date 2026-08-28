@@ -3,7 +3,8 @@ use crate::gateway_memory_prompt_context::{
     artifact_provenance_context_for_query, workflow_status_context_for_query,
 };
 use crate::gateway_memory_turn_context::{
-    project_brief_block, project_objective_block, recent_work_block,
+    objective_block_for_workspace, project_brief_block_for_workspace,
+    recent_work_block_for_workspace,
 };
 use crate::gateway_recall_context::gather_open_loops;
 use crate::*;
@@ -139,20 +140,14 @@ pub(crate) fn recall_pack_on_facade(
 
 impl MemoryRecallService for InProcessMemoryRecallService {
     fn brief(&self, scope: &MemoryScope, _user_message: &str) -> BriefingPack {
-        // `scope` è portato per il contratto (isolation by construction); l'impl delegante
-        // usa il workspace attivo del gateway, coerente con `relevant_memory_for_prompt`.
-        // Lo scope diventa realmente autoritativo in Tappa 4. Qui l'assert garantisce
-        // coerenza in debug (discrepanza = segnale di un bug nel wiring, non da zittire).
-        debug_assert!(scope.workspace_id() == gateway_memory_workspace_id());
-
         // recent_work NON è cached: dipende da git log (non dalla memoria), va
         // ricalcolato fresco ogni brief() come nel path inline.
-        let recent_work = recent_work_block(&self.state);
+        let workspace = scope.workspace_id();
+        let recent_work = recent_work_block_for_workspace(&self.state, &workspace);
 
         // ADR 0022 (Tappa 1.5) — cache del briefing per i 3 blocchi memory-backed.
         // Hit solo se generation AND prompt_fingerprint combaciano.
         let user = gateway_memory_user_id();
-        let workspace = gateway_memory_workspace_id();
         let memory_intent = scope
             .thread_id()
             .map(|thread_id| memory_intent_for_execution(&self.state, Some(thread_id)))
@@ -197,7 +192,13 @@ impl MemoryRecallService for InProcessMemoryRecallService {
             }
 
             let (memory_personal, memory_project) =
-                gather_profile_memory_for_intent_with_provenance(&self.state, &memory_intent);
+                gather_profile_memory_for_workspace_with_provenance(
+                    &self.state,
+                    &user,
+                    &workspace,
+                    !memory_intent.search_personal,
+                    memory_intent.search_project,
+                );
             let memory_open_loops = if injection_policy.include_cross_thread {
                 gather_open_loops(&self.state, 6)
             } else {
@@ -211,8 +212,8 @@ impl MemoryRecallService for InProcessMemoryRecallService {
             );
             let profile_block = formatted_profile.block;
             let linked_hits = formatted_profile.linked_hits;
-            let objective = project_objective_block(&self.state);
-            let brief = project_brief_block(&self.state);
+            let objective = objective_block_for_workspace(&self.state, &workspace);
+            let brief = project_brief_block_for_workspace(&self.state, &workspace);
             let current_generation =
                 memory_facade(&self.state).briefing_generation(&user, &workspace);
             let current_source_fingerprint = memory_briefing_source_fingerprint(

@@ -21,6 +21,7 @@ pub(crate) struct ChatTurnContext {
     pub(crate) chat_channel: ChatChannelContext,
     pub(crate) turn_policy: ChatTurnPolicy,
     pub(crate) contact_memory_perimeter: ContactMemoryPerimeter,
+    pub(crate) memory_workspace: MemoryWorkspaceId,
 }
 
 pub(crate) struct ChatTurnPolicy {
@@ -43,7 +44,7 @@ pub(crate) struct ContactMemoryPerimeter {
 }
 
 pub(crate) fn prepare_chat_turn_context(input: ChatTurnContextInput<'_>) -> ChatTurnContext {
-    bind_thread_memory_workspace(input.state, input.thread_id);
+    let memory_workspace = bind_thread_memory_workspace(input.state, input.thread_id);
 
     let (contact, channel_owner) = contact_turn_context(input.state, input.thread_id);
     if verbose_debug()
@@ -72,6 +73,7 @@ pub(crate) fn prepare_chat_turn_context(input: ChatTurnContextInput<'_>) -> Chat
         chat_channel,
         turn_policy,
         contact_memory_perimeter,
+        memory_workspace,
     }
 }
 
@@ -112,16 +114,18 @@ pub(crate) fn resolve_contact_memory_perimeter(
     }
 }
 
-fn bind_thread_memory_workspace(state: &AppState, thread_id: Option<&str>) {
+fn bind_thread_memory_workspace(state: &AppState, thread_id: Option<&str>) -> MemoryWorkspaceId {
     if let Some(thread_id) = thread_id {
         if let Ok(store) = lock_store(state)
             && let Ok(workspace) = store.workspace_for_thread(thread_id)
         {
             set_memory_workspace(&workspace);
+            return canonical_memory_workspace_id(&workspace);
         }
     } else {
         set_memory_workspace("");
     }
+    gateway_memory_workspace_id()
 }
 
 fn note_real_user_activity(thread_id: Option<&str>, channel_owner: bool) {

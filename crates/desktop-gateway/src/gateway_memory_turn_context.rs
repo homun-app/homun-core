@@ -55,15 +55,23 @@ POINT IT OUT before proceeding. The objectives:",
 /// Reads the active project's `brief.md` for INJECTION into the briefing (push): the
 /// recent state the assistant should always hold. None for personal/threads or
 /// when no brief exists yet. Capped so it never dominates the prompt.
+#[cfg(test)]
 pub(crate) fn project_brief_block(state: &AppState) -> Option<String> {
     let ws = gateway_memory_workspace_id();
+    project_brief_block_for_workspace(state, &ws)
+}
+
+pub(crate) fn project_brief_block_for_workspace(
+    state: &AppState,
+    ws: &MemoryWorkspaceId,
+) -> Option<String> {
     if ws.as_str() == PERSONAL_WORKSPACE || ws.as_str() == THREADS_WORKSPACE {
         return None;
     }
     let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let page = facade
-        .list_wiki_pages_for_ui(&user, &ws)
+        .list_wiki_pages_for_ui(&user, ws)
         .ok()?
         .into_iter()
         .find(|p| p.path == "brief.md")?;
@@ -80,9 +88,17 @@ pub(crate) fn project_brief_block(state: &AppState) -> Option<String> {
 /// Recent work (push): the active project's last git commits — "what we last worked on",
 /// so a new conversation resumes the thread instead of starting cold. Distinct from the
 /// brief (goals/state): this is the activity timeline. Projects-with-git only; capped.
+#[cfg(test)]
 pub(crate) fn recent_work_block(state: &AppState) -> Option<String> {
-    let _ = state; // kept for signature symmetry with the other briefing blocks
     let ws = gateway_memory_workspace_id();
+    recent_work_block_for_workspace(state, &ws)
+}
+
+pub(crate) fn recent_work_block_for_workspace(
+    state: &AppState,
+    ws: &MemoryWorkspaceId,
+) -> Option<String> {
+    let _ = state; // kept for signature symmetry with the other briefing blocks
     if ws.as_str() == PERSONAL_WORKSPACE || ws.as_str() == THREADS_WORKSPACE {
         return None;
     }
@@ -125,10 +141,6 @@ pub(crate) fn recent_work_block(state: &AppState) -> Option<String> {
 /// always-on canonico, quindi qui mappiamo solo Personal/Project.
 pub(crate) fn scope_from_active_workspace() -> MemoryScope {
     memory_scope_for_workspace(gateway_memory_workspace_id(), None)
-}
-
-pub(crate) fn memory_scope_for_turn(thread_id: Option<&str>) -> MemoryScope {
-    memory_scope_for_workspace(gateway_memory_workspace_id(), thread_id)
 }
 
 pub(crate) fn memory_scope_for_workspace(
