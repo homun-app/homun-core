@@ -10,6 +10,22 @@ single line so the site captures its full text; version delimiters are `## [x.y.
 
 ## [Unreleased]
 
+## [0.1.1096] — 2026-08-30
+
+A focused release candidate for browser PiP behavior and memory/privacy scope stability.
+
+## Highlights
+- **Browser controls now open the browser directly.** Clicking Browser in the working island opens the PiP browser instead of first expanding the right-side panel.
+- **Memory briefing now follows the turn workspace.** Chat turns carry their resolved memory workspace explicitly, so project and personal recall do not drift through process-global workspace state.
+
+## Improvements
+- **Gateway prompt assembly uses explicit memory scope.** Briefing, recall payloads, relevant code context, project brief and recent work now share the same per-turn workspace identity.
+- **Memory tests are more deterministic.** Gateway memory fixtures isolate their workspace state, reducing full-suite-only regressions that do not reproduce in a single test.
+
+## Fixes
+- **Browser rail clicks no longer require a second click for PiP.** The Browser section is no longer treated as a side-panel section by the workspace island state machine.
+- **Project memory no longer leaks across concurrent gateway checks.** The in-process memory recall service treats the provided memory scope as authoritative instead of re-reading mutable global workspace context.
+
 ## [0.1.1095] — 2026-08-26
 
 A release candidate focused on making the agent kernel easier to reason about, test and ship.
@@ -74,6 +90,7 @@ A browser that completes real tasks, and a noticeably smoother app.
 - **The local model respects its timeout.** A stuck generation no longer keeps Homun busy indefinitely.
 
 [Unreleased]: https://github.com/homun-app/homun-releases/releases
+[0.1.1096]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1096
 [0.1.1095]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1095
 [0.1.1094]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1094
 [0.1.1093]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1093
