@@ -476,6 +476,31 @@ class ProductionSmokeTests(unittest.TestCase):
 
         self.assertEqual(calls, [])
 
+    def test_smoke_turn_cleanup_cancels_nonterminal_failed_scenario(self):
+        calls = []
+
+        def fake_request(base, token, method, path, body=None, timeout=60):
+            calls.append((method, path, body))
+            return 200, {}
+
+        original = smoke._request
+        smoke._request = fake_request
+        try:
+            smoke.cleanup_scenario(
+                {
+                    "base": "http://gateway",
+                    "token": "token",
+                    "thread_id": "thread_smoke",
+                    "turn_id": "turn smoke/id",
+                    "last_status": "running",
+                },
+                scenario_passed=False,
+            )
+        finally:
+            smoke._request = original
+
+        self.assertEqual(calls, [("POST", "/api/tasks/turn%20smoke%2Fid/cancel", None)])
+
     def test_automation_api_lifecycle_uses_scoped_crud_and_cleanup(self):
         calls = []
         auto_id = "auto_smoke"

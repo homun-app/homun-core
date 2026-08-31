@@ -295,6 +295,14 @@ fn project_agent_run(
     store
         .finish_agent_run(&run_id, run_status, Some(reason))
         .map_err(projection_store_error)?;
+    store
+        .abort_running_agent_runs_for_turn(
+            task.task_id.as_str(),
+            task.user_id.as_str(),
+            task.workspace_id.as_str(),
+            "superseded_by_terminal_projection",
+        )
+        .map_err(projection_store_error)?;
     if let Ok(data_dir) = crate::gateway_data_dir() {
         crate::working_ledger::materialize(
             &store,
@@ -650,6 +658,22 @@ mod tests {
                 prompt_fingerprint: None,
             })
             .expect("run");
+        state
+            .task_store
+            .lock()
+            .expect("task store")
+            .create_agent_run(&NewAgentRun {
+                run_id: "run-projection-stale-sibling".to_string(),
+                turn_id: task.task_id.as_str().to_string(),
+                thread_id: thread.thread_id.clone(),
+                user_id: task.user_id.as_str().to_string(),
+                workspace_id: task.workspace_id.as_str().to_string(),
+                role: None,
+                model: None,
+                provider: None,
+                prompt_fingerprint: None,
+            })
+            .expect("stale sibling run");
         let contract: ValidatedExecutionContract = ExecutionContract::new(
             task.task_id.as_str(),
             "chat_turn",
@@ -703,16 +727,18 @@ mod tests {
                     .status,
                 TaskStatus::Completed
             );
+            let runs = store
+                .list_agent_runs_for_turn(
+                    task.task_id.as_str(),
+                    task.user_id.as_str(),
+                    task.workspace_id.as_str(),
+                )
+                .expect("load projected runs");
+            assert_eq!(runs[0].status, AgentRunStatus::Completed);
+            assert_eq!(runs[1].status, AgentRunStatus::Aborted);
             assert_eq!(
-                store
-                    .list_agent_runs_for_turn(
-                        task.task_id.as_str(),
-                        task.user_id.as_str(),
-                        task.workspace_id.as_str(),
-                    )
-                    .expect("load projected run")[0]
-                    .status,
-                AgentRunStatus::Completed
+                runs[1].terminal_reason.as_deref(),
+                Some("superseded_by_terminal_projection")
             );
         }
 

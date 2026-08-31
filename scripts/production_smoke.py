@@ -522,6 +522,19 @@ def resolve_fake_mcp_stdio_binary(explicit_path: str | None = None) -> str:
 
 
 def cleanup_scenario(state: dict[str, Any], scenario_passed: bool = True) -> None:
+    if not scenario_passed and state.get("turn_id"):
+        last_status = normalize_status(str(state.get("last_status") or "unknown"))
+        if last_status not in TERMINAL_STATUSES:
+            try:
+                _request(
+                    str(state.get("base", "")),
+                    str(state.get("token", "")),
+                    "POST",
+                    f"/api/tasks/{urllib.parse.quote(str(state['turn_id']), safe='')}/cancel",
+                    timeout=30,
+                )
+            except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as error:
+                print(f"WARN cleanup smoke turn cancel failed: {error}", file=sys.stderr, flush=True)
     if scenario_passed and state.get("thread_id"):
         try:
             _request(
@@ -676,6 +689,7 @@ def run_turn_via_broker(
     thread_id = create_thread(base, token, f"smoke {prepared.id}", state.get("workspace_id"))
     state["thread_id"] = thread_id
     turn_id = enqueue_turn(base, token, thread_id, prepared)
+    state["turn_id"] = turn_id
     status, output, elapsed = wait_turn_output(
         base,
         token,
@@ -683,6 +697,7 @@ def run_turn_via_broker(
         prepared.max_seconds,
         state.get("workspace_id"),
     )
+    state["last_status"] = status
     return status, output, elapsed, state
 
 
