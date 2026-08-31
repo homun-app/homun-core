@@ -593,6 +593,19 @@ fn browser_incomplete_failure_code(loop_exit: Option<&str>) -> &'static str {
     }
 }
 
+fn browser_incomplete_failure(
+    loop_exit: Option<&str>,
+) -> local_first_execution_protocol::ExecutionFailure {
+    let code = browser_incomplete_failure_code(loop_exit);
+    let detail = "The browser stopped before completing the requested work";
+    match loop_exit {
+        Some("structured_no_progress") => {
+            local_first_execution_protocol::ExecutionFailure::permanent(code, detail)
+        }
+        _ => local_first_execution_protocol::ExecutionFailure::transient(code, detail),
+    }
+}
+
 /// Run ONE agent turn: the bounded guarded ReAct loop + forced synthesis. GENERIC over the seams so
 /// the engine stays decoupled from the gateway's `AppState`/transport — the gateway builds the impls
 /// (constructed per turn) and injects them. Returns the [`crate::TurnOutcome`] the gateway's post-turn
@@ -1098,6 +1111,7 @@ again to find the right control). Keep working on the task — do not stop and d
             let mut pending_confirm = false;
             let mut stop_for_no_progress = false;
             let mut nudge_no_progress = false;
+            let mut delegated_browse_no_progress = false;
             let mut control_after_tools = None;
             let mut terminal_route_block = false;
             // Bundle the turn-level state the dispatch loop touches into `ctx` so
@@ -1243,69 +1257,73 @@ again to find the right control). Keep working on the task — do not stop and d
                         call_id: call_id.clone(),
                         name: name.to_string(),
                     });
-                    let (result, tool_effects, interrupted) = if is_browser_granular_tool(name) {
-                        // Browser: through the BrowserExecutor seam (ADR 0026 / ADR 0025). The executor owns
-                        // the browser subsystem's private state (session, snapshots, tab/nav bookkeeping)
-                        // and mutates the loop-visible browser fields + provider via `&mut ls`. Produces no
-                        // ToolEffects (it mutates directly). Folds into a recursive `browse` at ADR 0025.
-                        tokio::select! {
-                            outcome = browser_executor.execute_browser(name, args_raw, &call_id, &mut ls) => {
-                                // Browser dispatch uses the same ToolOutcome contract as every other
-                                // capability. Besides machine progress hints it can therefore suspend
-                                // immediately on an uncertain durable effect receipt.
-                                (outcome.result, outcome.effects, None)
-                            }
-                            control = wait_for_interrupting_control(model_client) => {
-                                (
-                                    "Tool execution interrupted by validated user steering.".to_string(),
-                                    crate::ToolEffects::default(),
-                                    Some(control),
-                                )
-                            }
-                        }
-                    } else {
-                        // Non-browser: through the CapabilityExecutor seam (ADR 0026). The executor builds
-                        // the per-call ChatToolCtx from `&mut ls` + its held read-only context. `args_raw`
-                        // (the model's exact JSON string) is passed through unchanged — no round-trip.
-                        let delegated_browse = name == "browse";
-                        // The `browse` sub-agent call gets the ABSOLUTE cap as a fresh hard deadline
-                        // from NOW (this call) — not a cumulative `cap - elapsed` that shrinks as the
-                        // turn runs and folds in pre-browse (e.g. curl) time, which starved the browse
-                        // on a slow model. The sub-turn's own per-progress stall window
-                        // (`config.rs` `max_stall_ms`, reset on success) is the real control; this is a
-                        // final backstop on a single browse call.
-                        let browser_deadline = tokio::time::sleep(
-                            std::time::Duration::from_millis(cfg.browser_budget.max_elapsed_ms),
-                        );
-                        tokio::pin!(browser_deadline);
-                        tokio::select! {
-                            biased;
-                            control = wait_for_interrupting_control(model_client) => {
-                                (
-                                    "Tool execution interrupted by validated user steering.".to_string(),
-                                    crate::ToolEffects::default(),
-                                    Some(control),
-                                )
-                            }
-                            _ = &mut browser_deadline, if delegated_browse => {
-                                (
-                                    "found: false\nnote: browse stopped because the turn's browser time budget was exhausted; synthesize from earlier evidence".to_string(),
-                                    crate::ToolEffects {
-                                        browser_activity_observed: true,
-                                        outcome_hint: Some(crate::ToolOutcomeHint::NoProgress),
-                                        ..crate::ToolEffects::default()
-                                    },
-                                    None,
-                                )
-                            }
-                            outcome = capability_executor.execute_tool(name, args_raw, &call_id, &mut ls) => {
-                                match outcome {
-                                    Ok(o) => (o.result, o.effects, None),
-                                    Err(e) => (e, crate::ToolEffects::default(), None),
+                    let (result, tool_effects, interrupted, delegated_browse_timed_out) =
+                        if is_browser_granular_tool(name) {
+                            // Browser: through the BrowserExecutor seam (ADR 0026 / ADR 0025). The executor owns
+                            // the browser subsystem's private state (session, snapshots, tab/nav bookkeeping)
+                            // and mutates the loop-visible browser fields + provider via `&mut ls`. Produces no
+                            // ToolEffects (it mutates directly). Folds into a recursive `browse` at ADR 0025.
+                            tokio::select! {
+                                outcome = browser_executor.execute_browser(name, args_raw, &call_id, &mut ls) => {
+                                    // Browser dispatch uses the same ToolOutcome contract as every other
+                                    // capability. Besides machine progress hints it can therefore suspend
+                                    // immediately on an uncertain durable effect receipt.
+                                    (outcome.result, outcome.effects, None, false)
+                                }
+                                control = wait_for_interrupting_control(model_client) => {
+                                    (
+                                        "Tool execution interrupted by validated user steering.".to_string(),
+                                        crate::ToolEffects::default(),
+                                        Some(control),
+                                        false,
+                                    )
                                 }
                             }
-                        }
-                    };
+                        } else {
+                            // Non-browser: through the CapabilityExecutor seam (ADR 0026). The executor builds
+                            // the per-call ChatToolCtx from `&mut ls` + its held read-only context. `args_raw`
+                            // (the model's exact JSON string) is passed through unchanged — no round-trip.
+                            let delegated_browse = name == "browse";
+                            // The `browse` sub-agent call gets the ABSOLUTE cap as a fresh hard deadline
+                            // from NOW (this call) — not a cumulative `cap - elapsed` that shrinks as the
+                            // turn runs and folds in pre-browse (e.g. curl) time, which starved the browse
+                            // on a slow model. The sub-turn's own per-progress stall window
+                            // (`config.rs` `max_stall_ms`, reset on success) is the real control; this is a
+                            // final backstop on a single browse call.
+                            let browser_deadline = tokio::time::sleep(
+                                std::time::Duration::from_millis(cfg.browser_budget.max_elapsed_ms),
+                            );
+                            tokio::pin!(browser_deadline);
+                            tokio::select! {
+                                biased;
+                                control = wait_for_interrupting_control(model_client) => {
+                                    (
+                                        "Tool execution interrupted by validated user steering.".to_string(),
+                                        crate::ToolEffects::default(),
+                                        Some(control),
+                                        false,
+                                    )
+                                }
+                                _ = &mut browser_deadline, if delegated_browse => {
+                                    (
+                                        "found: false\nnote: browse stopped because the turn's browser time budget was exhausted; synthesize from earlier evidence".to_string(),
+                                        crate::ToolEffects {
+                                            browser_activity_observed: true,
+                                            outcome_hint: Some(crate::ToolOutcomeHint::NoProgress),
+                                            ..crate::ToolEffects::default()
+                                        },
+                                        None,
+                                        true,
+                                    )
+                                }
+                                outcome = capability_executor.execute_tool(name, args_raw, &call_id, &mut ls) => {
+                                    match outcome {
+                                        Ok(o) => (o.result, o.effects, None, false),
+                                        Err(e) => (e, crate::ToolEffects::default(), None, false),
+                                    }
+                                }
+                            }
+                        };
                     if let Some(control) = interrupted {
                         if is_browser_granular_tool(name) {
                             browser_executor.interrupt().await;
@@ -1448,6 +1466,9 @@ again to find the right control). Keep working on the task — do not stop and d
                             .emit(GenerateStreamEvent::ToolResult { payload })
                             .await;
                     }
+                    if name == "browse" {
+                        ls.browser_used = true;
+                    }
                     if browser_activity_is_progress {
                         last_browser_progress_at = Instant::now();
                         // Manager-level counterpart of the granular-browser progress reset: only a
@@ -1494,6 +1515,9 @@ again to find the right control). Keep working on the task — do not stop and d
                         {
                             grounded_browse_result = Some(browse_result);
                         }
+                    }
+                    if name == "browse" && outcome == "no_progress" {
+                        delegated_browse_no_progress = true;
                     }
                     if name == "recall_memory" {
                         ls.pending_vault_reveal_marker = extract_vault_reveal_marker(&result)
@@ -1584,6 +1608,33 @@ again to find the right control). Keep working on the task — do not stop and d
                         if let Some(dir) = trace_dir.as_deref() {
                             crate::trace::append(dir, &rec);
                         }
+                    }
+                    if delegated_browse_no_progress {
+                        if delegated_browse_timed_out {
+                            let elapsed_ms = u64::try_from(turn_started_at.elapsed().as_millis())
+                                .unwrap_or(u64::MAX);
+                            execution_journal.record(AgentExecutionEvent::BrowserBudgetExceeded {
+                                round,
+                                reason: "elapsed".to_string(),
+                                elapsed_ms,
+                                failed_navigations: ls.browser_failed_navigations,
+                                no_progress: ls.browser_no_progress,
+                            });
+                            let _ = event_sink
+                                .emit(GenerateStreamEvent::Activity {
+                                    text: "browser_budget_exceeded:elapsed".to_string(),
+                                })
+                                .await;
+                            loop_exit = Some("browser_budget_exceeded");
+                        } else {
+                            let _ = event_sink
+                                .emit(GenerateStreamEvent::Activity {
+                                    text: "structured_no_progress".to_string(),
+                                })
+                                .await;
+                            loop_exit = Some("structured_no_progress");
+                        }
+                        break 'rounds;
                     }
                     if let Some(receipt_ref) = suspend_effect_receipt {
                         effect_resolution_receipt = Some(receipt_ref);
@@ -2247,124 +2298,122 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
             }
             // Skip forced synthesis — fall through to outcome assembly.
         } else {
-            // Turn trace: the loop exited without a committed answer → the guaranteed post-loop synthesis
-            // fires. No per-round finish_reason applies on this exhaustion path (the loop broke on the
-            // round/nav budget or a transport error); a synthetic marker keeps the event greppable.
-            turn_trace.record(crate::turn_trace::TurnEvent::ForcedSynthesis {
-                finish_reason: "post_loop_exhausted".into(),
-            });
-            execution_journal.record(AgentExecutionEvent::ForcedSynthesis {
-                round: None,
-                reason: "post_loop_exhausted".to_string(),
-            });
-            // Guaranteed synthesis: the model exhausted the tool rounds without a
-            // text answer (it kept calling tools). Force one final NO-TOOLS call so it
-            // synthesizes from what it did, instead of dead-ending on "limite di passi".
-            // GENERIC across domains (coding, documents, web), not travel-specific.
-            ls.messages.push(serde_json::json!({
-            "role": "user",
-            "content": "No more tools are available. Write the FINAL ANSWER NOW for \
-        the user, synthesizing what you did and found in the previous steps: for a coding task \
-        say what you created/modified and how it's used/run; for a search report the results with \
-        details. Be complete and concrete. If something failed, say so clearly and propose how \
-        to proceed."
-        }));
-            // ADR 0024 inc 5 (P2b): the forced synthesis now goes through the SAME
-            // engine::ModelClient seam as the per-round call — `is_final_round: true` (no
-            // tools, fresh answer budget) — so it inherits retry/backoff, the mid-turn
-            // provider fallback and the OpenAI/Ollama-native collectors instead of the old
-            // single inline POST (which could dead-end on one transient failure). The impl
-            // streams the answer live via its captured StreamSink, exactly like the loop.
-            // A provider swap here is moot (the turn ends right after), and any error leaves
-            // the turn without a delivery unless already-accumulated text is visibly answer prose.
-            execution_journal.record(AgentExecutionEvent::PromptSnapshot {
-                round: cfg.hard_round_ceiling,
-                snapshot: crate::execution_journal::build_prompt_snapshot_with_packets(
-                    &ls.provider.model,
-                    &ls.provider.base_url,
-                    &ls.messages,
-                    &[],
-                    true,
-                    None,
-                    &ls.prompt_packets,
-                ),
-            });
-            let mut synthesis_usage = usage_context.clone();
-            synthesis_usage.call_id = format!("{}:forced_synthesis", usage_context.call_id);
-            synthesis_usage.purpose_detail = Some("forced_synthesis".to_string());
-            synthesis_usage.round = u32::try_from(cfg.hard_round_ceiling).ok();
-            let synth_out = model_client
-                .generate(
-                    &crate::ModelCall {
-                        base_url: &ls.provider.base_url,
-                        model: &ls.provider.model,
-                        api_key: ls.provider.api_key.as_deref(),
-                        messages: &ls.messages,
-                        tools: &[],
-                        temperature,
-                        is_final_round: true,
-                        // No tools offered on the forced-synthesis call, so forcing is moot — kept
-                        // `None` for consistency with every other non-main-round call site.
-                        forced_tool: None,
-                        usage: &synthesis_usage,
-                    },
-                    &|_tok| {},
-                )
-                .await;
-            let synth_text = model_normalize::sanitize_model_text(
-                synth_out
-                    .as_ref()
-                    .ok()
-                    .and_then(|o| o.message.get("content"))
-                    .and_then(|c| c.as_str())
-                    .unwrap_or(""),
-            );
-            if let Ok(output) = &synth_out {
-                execution_journal.record(AgentExecutionEvent::ModelResponse {
-                    round: cfg.hard_round_ceiling,
-                    finish_reason: output.finish_reason.clone(),
-                    content_chars: synth_text.chars().count(),
-                    tool_calls: 0,
-                });
-            }
-            // synth_text was already streamed live by the collector; commit it only when it contains
-            // visible prose. If it does not, the accumulated turn text gets the same validation.
             let browser_incomplete = ls.browser_used && browser_incomplete_loop_exit(loop_exit);
-            if browser_incomplete {
-                protocol_failure =
-                    Some(local_first_execution_protocol::ExecutionFailure::transient(
-                        browser_incomplete_failure_code(loop_exit),
-                        "The browser stopped before completing the requested work",
-                    ));
-            }
             let candidate = if browser_incomplete {
-                Some(browser_exhausted_fallback_answer(
-                    loop_exit,
-                    grounded_browse_result.as_ref(),
-                    &browse_sources,
-                ))
-            } else if visible_answer(&synth_text).is_some() {
-                let synthesis_blocks = preserved_display_marker_blocks(&synth_text);
-                let accumulated_prefix = preserved_display_marker_blocks(&ls.accumulated)
-                    .into_iter()
-                    .filter(|block| !synthesis_blocks.iter().any(|synthesis| synthesis == block))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                Some(if accumulated_prefix.is_empty() {
-                    synth_text
-                } else {
-                    format!("{accumulated_prefix}\n{synth_text}")
-                })
-            } else if visible_answer(&ls.accumulated).is_some() {
-                Some(ls.accumulated.clone())
-            } else if ls.browser_used {
+                protocol_failure = Some(browser_incomplete_failure(loop_exit));
                 Some(browser_exhausted_fallback_answer(
                     loop_exit,
                     grounded_browse_result.as_ref(),
                     &browse_sources,
                 ))
             } else {
-                None
+                // Turn trace: the loop exited without a committed answer → the guaranteed post-loop synthesis
+                // fires. No per-round finish_reason applies on this exhaustion path (the loop broke on the
+                // round/nav budget or a transport error); a synthetic marker keeps the event greppable.
+                turn_trace.record(crate::turn_trace::TurnEvent::ForcedSynthesis {
+                    finish_reason: "post_loop_exhausted".into(),
+                });
+                execution_journal.record(AgentExecutionEvent::ForcedSynthesis {
+                    round: None,
+                    reason: "post_loop_exhausted".to_string(),
+                });
+                // Guaranteed synthesis: the model exhausted the tool rounds without a
+                // text answer (it kept calling tools). Force one final NO-TOOLS call so it
+                // synthesizes from what it did, instead of dead-ending on "limite di passi".
+                // GENERIC across domains (coding, documents, web), not travel-specific.
+                ls.messages.push(serde_json::json!({
+                "role": "user",
+                "content": "No more tools are available. Write the FINAL ANSWER NOW for \
+            the user, synthesizing what you did and found in the previous steps: for a coding task \
+            say what you created/modified and how it's used/run; for a search report the results with \
+            details. Be complete and concrete. If something failed, say so clearly and propose how \
+            to proceed."
+            }));
+                // ADR 0024 inc 5 (P2b): the forced synthesis now goes through the SAME
+                // engine::ModelClient seam as the per-round call — `is_final_round: true` (no
+                // tools, fresh answer budget) — so it inherits retry/backoff, the mid-turn
+                // provider fallback and the OpenAI/Ollama-native collectors instead of the old
+                // single inline POST (which could dead-end on one transient failure). The impl
+                // streams the answer live via its captured StreamSink, exactly like the loop.
+                // A provider swap here is moot (the turn ends right after), and any error leaves
+                // the turn without a delivery unless already-accumulated text is visibly answer prose.
+                execution_journal.record(AgentExecutionEvent::PromptSnapshot {
+                    round: cfg.hard_round_ceiling,
+                    snapshot: crate::execution_journal::build_prompt_snapshot_with_packets(
+                        &ls.provider.model,
+                        &ls.provider.base_url,
+                        &ls.messages,
+                        &[],
+                        true,
+                        None,
+                        &ls.prompt_packets,
+                    ),
+                });
+                let mut synthesis_usage = usage_context.clone();
+                synthesis_usage.call_id = format!("{}:forced_synthesis", usage_context.call_id);
+                synthesis_usage.purpose_detail = Some("forced_synthesis".to_string());
+                synthesis_usage.round = u32::try_from(cfg.hard_round_ceiling).ok();
+                let synth_out = model_client
+                    .generate(
+                        &crate::ModelCall {
+                            base_url: &ls.provider.base_url,
+                            model: &ls.provider.model,
+                            api_key: ls.provider.api_key.as_deref(),
+                            messages: &ls.messages,
+                            tools: &[],
+                            temperature,
+                            is_final_round: true,
+                            // No tools offered on the forced-synthesis call, so forcing is moot — kept
+                            // `None` for consistency with every other non-main-round call site.
+                            forced_tool: None,
+                            usage: &synthesis_usage,
+                        },
+                        &|_tok| {},
+                    )
+                    .await;
+                let synth_text = model_normalize::sanitize_model_text(
+                    synth_out
+                        .as_ref()
+                        .ok()
+                        .and_then(|o| o.message.get("content"))
+                        .and_then(|c| c.as_str())
+                        .unwrap_or(""),
+                );
+                if let Ok(output) = &synth_out {
+                    execution_journal.record(AgentExecutionEvent::ModelResponse {
+                        round: cfg.hard_round_ceiling,
+                        finish_reason: output.finish_reason.clone(),
+                        content_chars: synth_text.chars().count(),
+                        tool_calls: 0,
+                    });
+                }
+                // synth_text was already streamed live by the collector; commit it only when it contains
+                // visible prose. If it does not, the accumulated turn text gets the same validation.
+                if visible_answer(&synth_text).is_some() {
+                    let synthesis_blocks = preserved_display_marker_blocks(&synth_text);
+                    let accumulated_prefix = preserved_display_marker_blocks(&ls.accumulated)
+                        .into_iter()
+                        .filter(|block| {
+                            !synthesis_blocks.iter().any(|synthesis| synthesis == block)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    Some(if accumulated_prefix.is_empty() {
+                        synth_text
+                    } else {
+                        format!("{accumulated_prefix}\n{synth_text}")
+                    })
+                } else if visible_answer(&ls.accumulated).is_some() {
+                    Some(ls.accumulated.clone())
+                } else if ls.browser_used {
+                    Some(browser_exhausted_fallback_answer(
+                        loop_exit,
+                        grounded_browse_result.as_ref(),
+                        &browse_sources,
+                    ))
+                } else {
+                    None
+                }
             };
             if let Some(mut final_text) = candidate {
                 if let Some(fonti) = fonti_section(&browse_sources, &final_text) {
@@ -4459,10 +4508,14 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
     }
 
     fn assert_browser_budget_failed(outcome: &crate::TurnOutcome) {
+        assert_browser_failure_code(outcome, "browser_budget_exceeded");
+    }
+
+    fn assert_browser_failure_code(outcome: &crate::TurnOutcome, code: &str) {
         let crate::TurnStop::Failed { failure } = &outcome.stop else {
-            panic!("browser budget exhaustion must fail the turn");
+            panic!("browser incomplete work must fail the turn");
         };
-        assert_eq!(failure.code, "browser_budget_exceeded");
+        assert_eq!(failure.code, code);
     }
 
     #[test]
@@ -5056,7 +5109,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn browser_circuit_breaker_synthesizes_once() {
+    async fn browser_circuit_breaker_delivers_fallback_without_forced_synthesis() {
         let mut ls = LoopState::new();
         ls.messages = vec![
             json!({ "role": "system", "content": "sys" }),
@@ -5116,7 +5169,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
                 .iter()
                 .filter(|kind| kind.as_str() == "forced_synthesis")
                 .count(),
-            1
+            0
         );
         drop(journal_events);
         let done_events = sink
@@ -6537,7 +6590,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
 
         assert!(started.elapsed() < std::time::Duration::from_millis(100));
         assert_browser_budget_failed(&outcome);
-        assert_eq!(model.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(model.calls.load(Ordering::SeqCst), 1);
     }
 
     /// Round 0 delegates to `browse`; the next round answers from the result — no `is_final_round`
@@ -6582,6 +6635,49 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
                     api_key: None,
                 },
                 finish_reason: Some(finish.to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct NoProgressBrowseThenChoiceModel {
+        calls: AtomicUsize,
+    }
+
+    impl ModelClient for NoProgressBrowseThenChoiceModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let message = if index == 0 {
+                json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "browse_0",
+                        "type": "function",
+                        "function": { "name": "browse", "arguments": "{\"goal\":\"test\"}" }
+                    }]
+                })
+            } else {
+                json!({
+                    "role": "assistant",
+                    "content": r#"‹‹CHOICES››{"question":"Vuoi che riprovi?","options":["Si","No"]}‹‹/CHOICES››"#
+                })
+            };
+            Ok(ModelRoundOutput {
+                message,
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some(if index == 0 { "tool_calls" } else { "stop" }.to_string()),
                 usage: Default::default(),
                 latency_ms: None,
                 time_to_first_token_ms: None,
@@ -6659,7 +6755,92 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn no_progress_delegated_browse_does_not_reset_the_manager_stall_window() {
+    async fn no_progress_delegated_browse_terminalizes_without_user_wait() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = NoProgressBrowseThenChoiceModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.browser_budget.max_elapsed_ms = 300_000;
+        turn_cfg.browser_budget.max_stall_ms = 300_000;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &SlowNoProgressDelegatedBrowse,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let crate::TurnStop::Failed { failure } = &outcome.stop else {
+            panic!(
+                "no-progress browse must fail canonically, got {:?}",
+                outcome.stop
+            );
+        };
+        assert_eq!(failure.code, "browser_structured_no_progress");
+        assert_eq!(
+            failure.class,
+            local_first_execution_protocol::FailureClass::Permanent
+        );
+        assert!(outcome.awaiting_user.is_none());
+        assert!(
+            !outcome.memory_answer.contains("‹‹CHOICES››"),
+            "{}",
+            outcome.memory_answer
+        );
+        assert!(
+            outcome.memory_answer.contains("Non sono riuscito"),
+            "{}",
+            outcome.memory_answer
+        );
+        assert_eq!(
+            model.calls.load(Ordering::SeqCst),
+            1,
+            "browser no-progress must not invoke forced synthesis"
+        );
+        let forced_synthesis = journal
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|kind| kind.as_str() == "forced_synthesis")
+            .count();
+        assert_eq!(
+            forced_synthesis, 0,
+            "browser no-progress must terminalize without post-loop synthesis"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn no_progress_delegated_browse_terminalizes_before_manager_stall_window() {
         let mut ls = LoopState::new();
         ls.messages = vec![
             json!({ "role": "system", "content": "sys" }),
@@ -6674,7 +6855,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         turn_cfg.browser_budget.max_elapsed_ms = 300_000;
         turn_cfg.browser_budget.max_stall_ms = 80;
 
-        let _ = run_turn(
+        let outcome = run_turn(
             ls,
             turn_cfg,
             &usage_context(),
@@ -6711,14 +6892,21 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             .filter(|kind| kind.as_str() == "browser_budget_exceeded")
             .count();
         assert_eq!(
-            stalls, 1,
-            "a no-progress browse must not reset the manager stall window"
+            stalls, 0,
+            "the delegated browse no-progress terminalizes before the manager stall window"
         );
         assert_eq!(
             model.calls.load(Ordering::SeqCst),
-            2,
-            "the model may get one post-browse synthesis round, but the no-progress browse must still trip the stall guard"
+            1,
+            "the model does not get a normal post-browse turn or forced synthesis"
         );
+        let crate::TurnStop::Failed { failure } = &outcome.stop else {
+            panic!(
+                "no-progress browse must fail the turn, got {:?}",
+                outcome.stop
+            );
+        };
+        assert_eq!(failure.code, "browser_structured_no_progress");
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -6766,7 +6954,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         )
         .await;
 
-        assert_browser_budget_failed(&outcome);
+        assert_browser_failure_code(&outcome, "browser_structured_no_progress");
         assert!(
             outcome.memory_answer.contains("Non sono riuscito"),
             "{}",
@@ -6819,7 +7007,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         )
         .await;
 
-        assert_browser_budget_failed(&outcome);
+        assert_browser_failure_code(&outcome, "browser_structured_no_progress");
         assert!(
             outcome.memory_answer.contains("FR 9512"),
             "{}",
