@@ -3408,20 +3408,20 @@ impl TaskStore {
         if turn_event_kind_is_terminal(kind)
             && let Some(mut existing) = first_terminal_event_on(&tx, turn_id)?
         {
-            let may_adopt_matching_legacy_terminal = existing.kind == kind
-                && existing
-                    .payload
-                    .get("projection_ref")
-                    .and_then(Value::as_str)
-                    .is_none();
-            if may_adopt_matching_legacy_terminal {
+            let may_adopt_legacy_terminal = existing
+                .payload
+                .get("projection_ref")
+                .and_then(Value::as_str)
+                .is_none()
+                && (existing.kind == kind || kind == TurnEventKind::Cancelled);
+            if may_adopt_legacy_terminal {
                 let changed = tx.execute(
-                    "UPDATE turn_events SET payload_json = ?1
-                     WHERE event_id = ?2 AND kind = ?3",
+                    "UPDATE turn_events SET kind = ?1, payload_json = ?2
+                     WHERE event_id = ?3",
                     params![
+                        kind.as_str(),
                         serde_json::to_string(&payload)?,
                         existing.event_id,
-                        existing.kind.as_str()
                     ],
                 )?;
                 if changed != 1 {
@@ -3429,6 +3429,7 @@ impl TaskStore {
                         "legacy terminal event disappeared during projection adoption".into(),
                     ));
                 }
+                existing.kind = kind;
                 existing.payload = payload;
                 tx.commit()?;
                 return Ok(TerminalWrite::Inserted(existing));
@@ -6995,6 +6996,59 @@ mod turn_event_tests {
         assert!(matches!(first, TerminalWrite::Inserted(_)));
         assert!(matches!(late, TerminalWrite::Existing(_)));
         assert_eq!(store.read_turn_events("turn", 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn canonical_projection_replaces_unacknowledged_legacy_terminal_event() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store
+            .insert_terminal_event_once("turn", TurnEventKind::Done, json!({"text": "legacy"}))
+            .unwrap();
+
+        let projected = store
+            .insert_turn_projection_event_once(
+                "turn",
+                TurnEventKind::Cancelled,
+                "turn:2",
+                json!({"projection_ref": "turn:2", "reason": "user"}),
+            )
+            .unwrap();
+
+        assert!(matches!(projected, TerminalWrite::Inserted(_)));
+        let events = store.read_turn_events("turn", 0).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, TurnEventKind::Cancelled);
+        assert_eq!(
+            events[0]
+                .payload
+                .get("projection_ref")
+                .and_then(Value::as_str),
+            Some("turn:2")
+        );
+    }
+
+    #[test]
+    fn canonical_projection_conflicts_with_existing_canonical_terminal_event() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store
+            .insert_turn_projection_event_once(
+                "turn",
+                TurnEventKind::Done,
+                "turn:1",
+                json!({"projection_ref": "turn:1", "text": "done"}),
+            )
+            .unwrap();
+
+        let err = store
+            .insert_turn_projection_event_once(
+                "turn",
+                TurnEventKind::Cancelled,
+                "turn:2",
+                json!({"projection_ref": "turn:2", "reason": "user"}),
+            )
+            .expect_err("a second canonical terminal must conflict");
+
+        assert!(err.to_string().contains("canonical projection conflicts"));
     }
 
     #[test]
