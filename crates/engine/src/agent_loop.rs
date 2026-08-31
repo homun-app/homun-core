@@ -2307,7 +2307,7 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
             }
             // synth_text was already streamed live by the collector; commit it only when it contains
             // visible prose. If it does not, the accumulated turn text gets the same validation.
-            let candidate = if visible_answer(&synth_text).is_some() {
+            let mut candidate = if visible_answer(&synth_text).is_some() {
                 let synthesis_blocks = preserved_display_marker_blocks(&synth_text);
                 let accumulated_prefix = preserved_display_marker_blocks(&ls.accumulated)
                     .into_iter()
@@ -2330,6 +2330,18 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
             } else {
                 None
             };
+            if loop_exit == Some("browser_budget_exceeded")
+                && ls.browser_used
+                && !grounded_browse_result
+                    .as_ref()
+                    .is_some_and(|result| result.found)
+            {
+                candidate = Some(browser_exhausted_fallback_answer(
+                    loop_exit,
+                    grounded_browse_result.as_ref(),
+                    &browse_sources,
+                ));
+            }
             if let Some(mut final_text) = candidate {
                 if let Some(fonti) = fonti_section(&browse_sources, &final_text) {
                     final_text.push_str(&fonti);
@@ -6342,6 +6354,50 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         }
     }
 
+    #[derive(Default)]
+    struct BrowserRetryPromiseFinalModel {
+        calls: AtomicUsize,
+    }
+
+    impl ModelClient for BrowserRetryPromiseFinalModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let message = if index == 0 {
+                json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "retry_browse",
+                        "type": "function",
+                        "function": { "name": "browse", "arguments": "{\"goal\":\"test\"}" }
+                    }]
+                })
+            } else {
+                assert!(call.is_final_round);
+                json!({
+                    "role": "assistant",
+                    "content": "Trenitalia non ha risposto al click di ricerca. Provo subito con un aggregatore alternativo."
+                })
+            };
+            Ok(ModelRoundOutput {
+                message,
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some(if index == 0 { "tool_calls" } else { "stop" }.to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
     struct SlowDelegatedBrowse;
 
     impl CapabilityExecutor for SlowDelegatedBrowse {
@@ -6703,6 +6759,64 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         assert_eq!(outcome.stop, crate::TurnStop::Completed);
         assert!(
             outcome.memory_answer.contains("Non sono riuscito"),
+            "{}",
+            outcome.memory_answer
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn browser_exhaustion_rejects_retry_promise_as_final_answer() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = BrowserRetryPromiseFinalModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.browser_budget.max_elapsed_ms = 300_000;
+        turn_cfg.browser_budget.max_stall_ms = 80;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &SlowNoProgressDelegatedBrowse,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
+        assert!(
+            outcome.memory_answer.contains("Non sono riuscito"),
+            "{}",
+            outcome.memory_answer
+        );
+        assert!(
+            !outcome.memory_answer.contains("Provo subito"),
             "{}",
             outcome.memory_answer
         );
