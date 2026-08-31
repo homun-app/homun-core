@@ -79,6 +79,7 @@ creato il driving task), senza ritornare titolo, prompt o trigger completo.
 Evidenza locale:
 
 - `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway automation_dry_run -- --nocapture`
+- `python3 -m unittest scripts.test_production_smoke -v`
 
 ## Browser Island PiP - 2026-08-31
 

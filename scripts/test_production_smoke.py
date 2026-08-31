@@ -430,6 +430,18 @@ class ProductionSmokeTests(unittest.TestCase):
                         {"id": "workspace_auto", "name": body["name"], "folder": body["folder"]}
                     ],
                 }
+            if method == "POST" and path == "/api/automations/dry-run":
+                self.assertEqual(body["workspace_id"], "workspace_auto")
+                return 200, {
+                    "valid": True,
+                    "workspace_id": "workspace_auto",
+                    "trigger_kind": "schedule",
+                    "approval": "confirm",
+                    "source": "manual",
+                    "would_create_automation": True,
+                    "would_materialize_task": True,
+                    "next_run": 1_782_000_000,
+                }
             if method == "POST" and path == "/api/automations":
                 self.assertEqual(body["workspace_id"], "workspace_auto")
                 return 200, {
@@ -443,6 +455,8 @@ class ProductionSmokeTests(unittest.TestCase):
             if method == "GET" and path == "/api/automations?workspace_id=workspace_auto":
                 list_calls += 1
                 if list_calls == 1:
+                    return 200, {"automations": []}
+                if list_calls == 2:
                     return 200, {
                         "automations": [
                             {"id": auto_id, "workspace_id": "workspace_auto"},
@@ -477,6 +491,7 @@ class ProductionSmokeTests(unittest.TestCase):
         finally:
             smoke._request = original_request
 
+        self.assertIn(("POST", "/api/automations/dry-run", mock.ANY), calls)
         self.assertIn(("DELETE", "/api/automations/auto_smoke?workspace_id=workspace_auto", None), calls)
         self.assertEqual(calls[-1][0:2], ("POST", "/api/workspaces/workspace_auto/delete"))
 

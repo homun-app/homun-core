@@ -119,8 +119,8 @@ Il profilo `extended` include:
 
 Nota 2026-08-31: le automation espongono anche `POST
 /api/automations/dry-run`, che valida request e recurrence senza creare rule o
-task e senza restituire prompt/trigger completi. Questo endpoint va usato dagli
-scenari prima di materializzare automation reali.
+task e senza restituire prompt/trigger completi. Lo scenario esteso `X5` lo usa
+prima di materializzare automation reali.
 
 Esecuzione completa:
 

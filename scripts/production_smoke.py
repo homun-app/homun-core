@@ -225,8 +225,8 @@ def extended_scenarios() -> list[Scenario]:
         ),
         Scenario(
             "X5",
-            "Automation API scoped lifecycle",
-            "Create/list/toggle/delete a scoped scheduled automation through the gateway API.",
+            "Automation API dry-run and scoped lifecycle",
+            "Dry-run/create/list/toggle/delete a scoped scheduled automation through the gateway API.",
             domains=("automation", "api", "workspace"),
             runner="automation_api",
             max_seconds=60,
@@ -671,19 +671,36 @@ def run_automation_api_lifecycle(
     state.update(create_temp_automation_workspace(base, token))
     workspace_id = str(state["workspace_id"])
     query = urllib.parse.urlencode({"workspace_id": workspace_id})
+    automation_body = {
+        "title": "homun automation smoke",
+        "trigger": {"type": "schedule", "recurrence": "every 1d", "tz": "Europe/Rome"},
+        "prompt": "Rispondi solo ok per smoke automation; non inviare messaggi esterni.",
+        "workspace_id": workspace_id,
+        "approval": "confirm",
+        "source": "manual",
+    }
+    status, dry_run = _request(
+        base,
+        token,
+        "POST",
+        "/api/automations/dry-run",
+        automation_body,
+        timeout=30,
+    )
+    if status != 200 or not isinstance(dry_run, dict):
+        raise RuntimeError(f"automation dry-run failed status={status} body={dry_run!r}")
+    _, listed_before_create = _request(base, token, "GET", f"/api/automations?{query}", timeout=30)
+    before_items = (
+        listed_before_create.get("automations", [])
+        if isinstance(listed_before_create, dict)
+        else []
+    )
     status, created = _request(
         base,
         token,
         "POST",
         "/api/automations",
-        {
-            "title": "homun automation smoke",
-            "trigger": {"type": "schedule", "recurrence": "every 1d", "tz": "Europe/Rome"},
-            "prompt": "Rispondi solo ok per smoke automation; non inviare messaggi esterni.",
-            "workspace_id": workspace_id,
-            "approval": "confirm",
-            "source": "manual",
-        },
+        automation_body,
         timeout=30,
     )
     if status != 200 or not isinstance(created, dict) or not created.get("id"):
@@ -691,6 +708,14 @@ def run_automation_api_lifecycle(
     state["automation_id"] = str(created["id"])
     state["automation_workspace_id"] = workspace_id
     checks = {
+        "dry_run_valid": dry_run.get("valid") is True,
+        "dry_run_workspace": dry_run.get("workspace_id") == workspace_id,
+        "dry_run_task_preview": dry_run.get("would_materialize_task") is True,
+        "dry_run_next_run": isinstance(dry_run.get("next_run"), int),
+        "dry_run_no_sensitive_echo": not any(
+            key in dry_run for key in ("title", "prompt", "trigger")
+        ),
+        "dry_run_no_materialization": not any(isinstance(item, dict) for item in before_items),
         "create_workspace": created.get("workspace_id") == workspace_id,
         "create_enabled": created.get("enabled") is True,
         "create_task": isinstance(created.get("task_id"), str) and created["task_id"].startswith("autorun_"),
