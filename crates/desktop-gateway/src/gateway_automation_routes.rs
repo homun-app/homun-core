@@ -131,6 +131,27 @@ pub(crate) fn automation_to_json(a: &Automation) -> serde_json::Value {
     })
 }
 
+fn validate_automation_trigger(
+    trigger: &AutomationTrigger,
+    now: OffsetDateTime,
+) -> Result<Option<OffsetDateTime>, String> {
+    match trigger {
+        AutomationTrigger::Schedule { recurrence, tz } => {
+            local_first_task_runtime::next_occurrence(recurrence, tz.as_deref(), now)
+                .map(Some)
+                .ok_or_else(|| format!("recurrence '{recurrence}' is not valid"))
+        }
+        AutomationTrigger::Event { .. } => Ok(None),
+    }
+}
+
+fn automation_trigger_kind(trigger: &AutomationTrigger) -> &'static str {
+    match trigger {
+        AutomationTrigger::Schedule { .. } => "schedule",
+        AutomationTrigger::Event { .. } => "event",
+    }
+}
+
 /// For a Schedule automation, create the recurring TaskRecord that DRIVES it and return its
 /// id (tagged with `automation_id` so the run + queue can trace it back). Event automations
 /// return `None` — their runs are materialized when the event fires (Auto-C). Validates the
@@ -1287,6 +1308,36 @@ pub(crate) async fn automation_runs(
     Ok(Json(serde_json::json!({ "runs": runs })))
 }
 
+/// POST /api/automations/dry-run — validate an automation request without
+/// persisting the rule or materializing its driving task.
+pub(crate) async fn automation_dry_run(
+    Query(scope): Query<AutomationScopeQuery>,
+    Json(req): Json<AutomationCreateRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let workspace = automation_workspace_scope(
+        req.workspace_id
+            .as_deref()
+            .or(scope.workspace_id.as_deref()),
+    );
+    let now = OffsetDateTime::now_utc();
+    let next_run = validate_automation_trigger(&req.trigger, now).map_err(|msg| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "bad_recurrence",
+        message: msg,
+    })?;
+    let trigger_kind = automation_trigger_kind(&req.trigger);
+    Ok(Json(serde_json::json!({
+        "valid": true,
+        "workspace_id": workspace,
+        "trigger_kind": trigger_kind,
+        "approval": req.approval.unwrap_or_default(),
+        "source": req.source.unwrap_or(AutomationSource::Manual),
+        "would_create_automation": true,
+        "would_materialize_task": trigger_kind == "schedule",
+        "next_run": next_run.map(|t| t.unix_timestamp()),
+    })))
+}
+
 /// POST /api/automations — create an automation (the rule). Phase A persists it;
 /// schedule/event wiring (it actually firing) lands in Auto-B / Auto-C.
 pub(crate) async fn automation_create(
@@ -1294,20 +1345,13 @@ pub(crate) async fn automation_create(
     Json(req): Json<AutomationCreateRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     // Validate a schedule trigger's recurrence up front (fail fast, like schedule_task).
-    if let AutomationTrigger::Schedule { recurrence, tz } = &req.trigger
-        && local_first_task_runtime::next_occurrence(
-            recurrence,
-            tz.as_deref(),
-            OffsetDateTime::now_utc(),
-        )
-        .is_none()
-    {
-        return Err(GatewayError {
+    validate_automation_trigger(&req.trigger, OffsetDateTime::now_utc()).map_err(|msg| {
+        GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "bad_recurrence",
-            message: format!("recurrence '{recurrence}' is not valid"),
-        });
-    }
+            message: msg,
+        }
+    })?;
     let now = OffsetDateTime::now_utc();
     let workspace = automation_workspace_scope(req.workspace_id.as_deref());
     let mut automation = Automation {
@@ -1360,19 +1404,14 @@ pub(crate) async fn automation_update(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let workspace = automation_workspace_scope(scope.workspace_id.as_deref());
     // Validate a new schedule recurrence up front (fail fast, like create).
-    if let Some(AutomationTrigger::Schedule { recurrence, tz }) = &req.trigger
-        && local_first_task_runtime::next_occurrence(
-            recurrence,
-            tz.as_deref(),
-            OffsetDateTime::now_utc(),
-        )
-        .is_none()
-    {
-        return Err(GatewayError {
-            status: StatusCode::BAD_REQUEST,
-            code: "bad_recurrence",
-            message: format!("recurrence '{recurrence}' is not valid"),
-        });
+    if let Some(trigger) = &req.trigger {
+        validate_automation_trigger(trigger, OffsetDateTime::now_utc()).map_err(|msg| {
+            GatewayError {
+                status: StatusCode::BAD_REQUEST,
+                code: "bad_recurrence",
+                message: msg,
+            }
+        })?;
     }
     let store = lock_task_store(&state).map_err(|_| GatewayError {
         status: StatusCode::SERVICE_UNAVAILABLE,

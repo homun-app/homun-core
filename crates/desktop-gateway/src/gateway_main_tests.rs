@@ -1292,6 +1292,15 @@ fn memory_publication_route_test_app(state: super::AppState) -> axum::Router {
         .with_state(state)
 }
 
+fn automation_route_test_app(state: super::AppState) -> axum::Router {
+    axum::Router::new()
+        .route(
+            "/api/automations/dry-run",
+            axum::routing::post(super::automation_dry_run),
+        )
+        .with_state(state)
+}
+
 async fn memory_source_response_json(
     response: axum::response::Response,
 ) -> (axum::http::StatusCode, serde_json::Value) {
@@ -22166,6 +22175,125 @@ fn scheduled_automation_materializes_visible_proactive_task() {
     );
     assert_eq!(task.retry_policy.max_attempts, 3);
     assert_eq!(task.retry_policy.backoff_seconds, 120);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn automation_dry_run_validates_without_materializing_task() {
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+
+    let dir = isolated_gateway_test_dir("automation-dry-run");
+    std::fs::create_dir_all(&dir).unwrap();
+    let _data = TestGatewayDataDir::new(&dir);
+    let state = super::AppState::for_tests();
+    let app = automation_route_test_app(state.clone());
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/automations/dry-run")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "workspace_id": "workspace_auto",
+                        "title": "Daily check",
+                        "trigger": {
+                            "type": "schedule",
+                            "recurrence": "every 1d",
+                            "tz": "Europe/Rome"
+                        },
+                        "prompt": "Check the project and report status",
+                        "approval": "confirm",
+                        "source": "manual"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let (status, body) = memory_source_response_json(response).await;
+
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(body["valid"], true);
+    assert_eq!(body["workspace_id"], "workspace_auto");
+    assert_eq!(body["trigger_kind"], "schedule");
+    assert_eq!(body["approval"], "confirm");
+    assert_eq!(body["source"], "manual");
+    assert_eq!(body["would_create_automation"], true);
+    assert_eq!(body["would_materialize_task"], true);
+    assert!(body["next_run"].as_i64().is_some());
+    assert!(body.get("title").is_none());
+    assert!(body.get("prompt").is_none());
+    assert!(body.get("trigger").is_none());
+
+    {
+        let store = super::lock_task_store(&state).unwrap();
+        assert!(
+            store
+                .list_tasks(
+                    &super::gateway_user_id(),
+                    &WorkspaceId::new("workspace_auto")
+                )
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            store
+                .list_automations(
+                    &super::gateway_user_id(),
+                    &WorkspaceId::new("workspace_auto")
+                )
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    let invalid = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/automations/dry-run?workspace_id=workspace_auto")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "title": "Broken schedule",
+                        "trigger": {
+                            "type": "schedule",
+                            "recurrence": "not a recurrence"
+                        },
+                        "prompt": "This should not materialize anything"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let (status, body) = memory_source_response_json(invalid).await;
+
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "bad_recurrence");
+    let store = super::lock_task_store(&state).unwrap();
+    assert!(
+        store
+            .list_tasks(
+                &super::gateway_user_id(),
+                &WorkspaceId::new("workspace_auto")
+            )
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        store
+            .list_automations(
+                &super::gateway_user_id(),
+                &WorkspaceId::new("workspace_auto")
+            )
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]

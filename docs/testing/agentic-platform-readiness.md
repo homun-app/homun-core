@@ -68,6 +68,12 @@ ancora stati impossibili:
   ora mostra la risoluzione `Auto -> role -> provider/model` quando il runtime
   context e' disponibile, ma resta da completare la spiegazione del routing nei
   dettagli Settings/dashboard;
+- le automation hanno un primo dry-run HTTP non mutante: valida schedule/event e
+  `next_run` senza creare rule o task, e risponde solo con metadata non
+  sensibili;
+- i subagent hanno gia' queue/lease/retry/checkpoint, ma per task lunghi serve
+  ancora delega broker-owned, proiezione parent/child e result delivery
+  idempotente;
 - il click Browser nella island apre prima pannello laterale e poi PiP, mentre
   il comportamento atteso e' PiP diretto.
 
@@ -122,6 +128,12 @@ Ogni fix deve chiudere una classe, non un singolo sintomo:
    Addon/MCP restano fuori da questa slice: vanno studiati in una sessione
    dedicata con modello di permessi, installazione, compatibilita' e governance.
 
+6. Long-task delegation.
+   Portare `subagent.*` vicino a Codex: la delega deve essere broker-owned e
+   fail-visible, la proiezione kernel deve esporre child id/checkpoint/result
+   redatti, e la consegna al parent thread deve passare da outbox idempotente.
+   Il budget limita una run, non l'objective.
+
 ## Task Lunghi
 
 Il budget delle azioni non deve essere il limite dell'obiettivo. Deve limitare
@@ -171,8 +183,7 @@ Non tagliare una nuova versione pubblica come "distribuibile" finche':
 - la dashboard spiega sempre cosa e' in corso, cosa e' bloccato, quale modello
   sta lavorando e quale azione richiede consenso.
 
-Il prossimo lavoro concreto dopo la prima slice lifecycle e' decidere se
-chiudere il repair read-only -> preview/apply oppure passare alla clarity del
-model routing (`Unavailable`/`Auto`). Senza questi due owner, continueremo a
-scoprire bug dal vivo per caso invece di bloccare le classi di regressione prima
-della chat reale.
+Il prossimo lavoro concreto dopo lifecycle/model/dry-run e' scegliere una slice
+fra repair preview/apply, Browser PiP diretto o long-task delegation. Senza
+questi owner, continueremo a scoprire bug dal vivo per caso invece di bloccare
+le classi di regressione prima della chat reale.

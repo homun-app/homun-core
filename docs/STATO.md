@@ -67,6 +67,27 @@ I codici principali osservati sono `completed_task_with_browser_budget_exceeded`
 memoria senza evidence e `agent_run_missing_model_attribution`. La slice e'
 diagnostica/read-only: non ripara ancora il profilo reale.
 
+## Automation Dry Run - 2026-08-31
+
+Slice locale su `fabio/automation-dry-run`: le automation ora hanno un endpoint
+di validazione non mutante per scenario lab e UI. `POST
+/api/automations/dry-run` riusa il validatore canonico delle recurrence, ma non
+persiste la rule e non materializza task. La risposta e' metadata-only
+(`valid`, workspace, tipo trigger, approval/source, `next_run` e se verrebbe
+creato il driving task), senza ritornare titolo, prompt o trigger completo.
+
+Evidenza locale:
+
+- `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway automation_dry_run -- --nocapture`
+
+## Subagent Runtime Audit - 2026-08-31
+
+Audit read-only con subagente: Homun ha queue, lease, retry e checkpoint per
+`subagent.*`, ma non e' ancora affidabile quanto Codex sui task lunghi. I punti
+da chiudere sono: delega broker-owned e fail-visible, proiezione parent/child
+con id/checkpoint/result, e consegna risultato idempotente via outbox invece di
+append sincrono dopo `mark_task_completed`.
+
 ## Model Selector Clarity - 2026-08-31
 
 Slice locale su `fabio/model-selector-clarity`: il composer mantiene la

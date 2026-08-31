@@ -312,6 +312,7 @@ pub(crate) fn build_gateway_router(state: AppState) -> Router {
             "/api/automations",
             get(automations_list).post(automation_create),
         )
+        .route("/api/automations/dry-run", post(automation_dry_run))
         .route("/api/automations/{id}/toggle", post(automation_toggle))
         .route("/api/automations/{id}/runs", get(automation_runs))
         .route(
