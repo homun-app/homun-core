@@ -557,6 +557,15 @@ pub fn emit_turn_event(
             local_first_task_runtime::TerminalWrite::Existing(_) => return Ok(()),
         }
     } else {
+        if store.turn_has_terminal_event(turn_id)? {
+            tracing::debug!(
+                target: "broker::fanout",
+                turn_id = %turn_id,
+                kind = %kind.as_str(),
+                "dropping non-terminal event after terminal turn event"
+            );
+            return Ok(());
+        }
         store.insert_turn_event(turn_id, kind, payload.clone())?
     };
     broadcast_turn_event(state, turn_id, &event);
@@ -1867,6 +1876,43 @@ mod tests {
             Err(tokio::sync::broadcast::error::TryRecvError::Empty)
         ));
         unregister_turn("turn_test_terminal");
+    }
+
+    #[test]
+    fn emit_drops_non_terminal_events_after_terminal() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let state = AppState::for_tests();
+        let broadcast = register_turn("turn_test_late_activity");
+        let mut rx = broadcast.tx.subscribe();
+
+        emit_turn_event(
+            &state,
+            &store,
+            "turn_test_late_activity",
+            TurnEventKind::Cancelled,
+            json!({"reason": "user_cancel"}),
+        )
+        .unwrap();
+        emit_turn_event(
+            &state,
+            &store,
+            "turn_test_late_activity",
+            TurnEventKind::Activity,
+            json!({"text": "late browser activity"}),
+        )
+        .unwrap();
+
+        let events = store
+            .read_turn_events("turn_test_late_activity", 0)
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, TurnEventKind::Cancelled);
+        assert_eq!(rx.try_recv().unwrap().kind, "cancelled");
+        assert!(matches!(
+            rx.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+        unregister_turn("turn_test_late_activity");
     }
 
     #[test]

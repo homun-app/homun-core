@@ -3384,6 +3384,13 @@ impl TaskStore {
         Ok(TerminalWrite::Inserted(event))
     }
 
+    pub fn turn_has_terminal_event(&self, turn_id: &str) -> TaskRuntimeResult<bool> {
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let has_terminal = first_terminal_event_on(&tx, turn_id)?.is_some();
+        tx.commit()?;
+        Ok(has_terminal)
+    }
+
     /// Atomically persists one visible event for a canonical execution projection.
     /// The projection reference is the idempotency identity across overlapping workers.
     pub fn insert_turn_projection_event_once(
