@@ -108,6 +108,19 @@ Evidenza locale:
 - `cd apps/desktop && node --test tests/gateway-token.test.mjs`
 - `cd apps/desktop && node --test tests/electron-gateway-startup.test.mjs tests/electron-main-names.test.mjs tests/gateway-token.test.mjs`
 
+## Package Cargo Target Dir - 2026-08-31
+
+Slice locale su `fabio/package-cargo-target-dir`: `prepare-package.mjs` non
+assume piu' `repoRoot/target/release`, ma copia gateway e channel bridge dal
+`target_directory` risolto da `cargo metadata`. Questo chiude il rischio di
+staging/release con binari vecchi quando Cargo usa un target dir esterno.
+
+Evidenza locale:
+
+- `cd apps/desktop && node --test tests/release-workflow.test.mjs`
+- `cargo build -p local-first-desktop-gateway --release`
+- `python3 scripts/production_smoke.py --profile extended --scenario X5 --gateway-base http://127.0.0.1:18766` -> `PASS X5`
+
 ## Subagent Runtime Audit - 2026-08-31
 
 Audit read-only con subagente: Homun ha queue, lease, retry e checkpoint per

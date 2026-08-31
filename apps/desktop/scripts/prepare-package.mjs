@@ -17,6 +17,21 @@ const helperBuildDir = join(appRoot, ".package", "host-computer-build");
 let helperBundle = join(helperBuildDir, "HomunComputerService.app");
 
 function run(command, args, cwd) {
+  const result = runCommand(command, args, cwd, "inherit");
+  if (result.status !== 0) {
+    throw new Error(`${command} ${args.join(" ")} failed with ${result.status}`);
+  }
+}
+
+function runCapture(command, args, cwd) {
+  const result = runCommand(command, args, cwd, "pipe");
+  if (result.status !== 0) {
+    throw new Error(`${command} ${args.join(" ")} failed with ${result.status}: ${result.stderr}`);
+  }
+  return result.stdout;
+}
+
+function runCommand(command, args, cwd, stdio) {
   let executable = command;
   let executableArgs = args;
   if (process.platform === "win32" && command === "npm") {
@@ -29,13 +44,24 @@ function run(command, args, cwd) {
   } else if (process.platform === "win32" && command === "cargo") {
     executable = "cargo.exe";
   }
-  const result = spawnSync(executable, executableArgs, {
+  return spawnSync(executable, executableArgs, {
     cwd,
-    stdio: "inherit",
+    encoding: "utf8",
+    stdio,
   });
-  if (result.status !== 0) {
-    throw new Error(`${command} ${args.join(" ")} failed with ${result.status}`);
+}
+
+function cargoTargetDir(cwd) {
+  const metadataRaw = runCapture(
+    "cargo",
+    ["metadata", "--format-version", "1", "--no-deps"],
+    cwd,
+  );
+  const metadata = JSON.parse(metadataRaw);
+  if (!metadata.target_directory) {
+    throw new Error(`Cargo metadata missing target_directory for ${cwd}`);
   }
+  return metadata.target_directory;
 }
 
 if (!skipBuild) {
@@ -84,7 +110,7 @@ if (process.platform === "darwin") {
 const executable = process.platform === "win32"
   ? "local-first-desktop-gateway.exe"
   : "local-first-desktop-gateway";
-const gatewaySource = join(repoRoot, "target", "release", executable);
+const gatewaySource = join(cargoTargetDir(repoRoot), "release", executable);
 const gatewayTarget = join(resourcesDir, "bin", executable);
 if (!existsSync(gatewaySource)) {
   throw new Error(`Gateway release binary not found: ${gatewaySource}`);
@@ -133,7 +159,8 @@ cpSync(templatesSource, templatesTarget, { recursive: true });
 const bridgeExe = process.platform === "win32" ? ".exe" : "";
 const stagedBridges = [];
 for (const bridge of ["channel-telegram", "channel-whatsapp"]) {
-  const bridgeSource = join(repoRoot, "runtimes", bridge, "target", "release", `${bridge}${bridgeExe}`);
+  const bridgeRoot = join(repoRoot, "runtimes", bridge);
+  const bridgeSource = join(cargoTargetDir(bridgeRoot), "release", `${bridge}${bridgeExe}`);
   if (!existsSync(bridgeSource)) {
     throw new Error(`Channel bridge binary not found: ${bridgeSource}`);
   }

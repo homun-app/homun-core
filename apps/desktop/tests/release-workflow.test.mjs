@@ -5,6 +5,7 @@ import { test } from "node:test";
 
 const workflowPath = path.resolve(import.meta.dirname, "../../../.github/workflows/build.yml");
 const ciWorkflowPath = path.resolve(import.meta.dirname, "../../../.github/workflows/ci.yml");
+const preparePackagePath = path.resolve(import.meta.dirname, "../scripts/prepare-package.mjs");
 
 test("installer matrix depends on same-run release readiness", async () => {
   const workflow = await readFile(workflowPath, "utf8");
@@ -50,4 +51,16 @@ test("CI and packaging use the same supported Node runtime", async () => {
     assert.doesNotMatch(workflow, /node-version:\s*(?:"?20"?)/);
     assert.match(workflow, /node-version:\s*24/);
   }
+});
+
+test("package preparation copies Cargo binaries from Cargo's resolved target directory", async () => {
+  const prepare = await readFile(preparePackagePath, "utf8");
+
+  assert.match(prepare, /"metadata",\s*"--format-version",\s*"1",\s*"--no-deps"/);
+  assert.match(prepare, /target_directory/);
+  assert.doesNotMatch(
+    prepare,
+    /join\(repoRoot,\s*"target",\s*"release"/,
+    "package preparation must not assume Cargo writes under repoRoot/target",
+  );
 });
