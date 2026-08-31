@@ -94,6 +94,20 @@ Evidenza locale:
 - `cd apps/desktop && node --test src/lib/workspaceIslandSections.test.mjs`
 - `cd apps/desktop && npm run build`
 
+## Gateway Token Packaged App - 2026-08-31
+
+Slice locale su `fabio/packaged-gateway-token-file`: Electron usa lo stesso
+contratto token in dev e packaged. Se `HOMUN_DESKTOP_GATEWAY_TOKEN` e' esplicito
+vince l'env; altrimenti l'app riusa o crea `~/.homun/desktop-gateway-token` con
+permessi privati. Questo rende eseguibili gli smoke CLI contro l'app installata
+reale invece di lasciare il gateway packaged con un bearer token random solo in
+memoria.
+
+Evidenza locale:
+
+- `cd apps/desktop && node --test tests/gateway-token.test.mjs`
+- `cd apps/desktop && node --test tests/electron-gateway-startup.test.mjs tests/electron-main-names.test.mjs tests/gateway-token.test.mjs`
+
 ## Subagent Runtime Audit - 2026-08-31
 
 Audit read-only con subagente: Homun ha queue, lease, retry e checkpoint per

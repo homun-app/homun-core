@@ -1,7 +1,6 @@
 const { app, BrowserWindow, Menu, Notification, shell, ipcMain, dialog, nativeImage, nativeTheme, powerSaveBlocker, session } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { spawn, spawnSync, execFileSync } = require("node:child_process");
-const { randomBytes } = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -9,6 +8,7 @@ const { pathToFileURL } = require("node:url");
 const { createLogWriter, resolveLogsDir, pipeChildStream, copyFeedbackLogs } = require("./lib/logging.cjs");
 const { nextRestartDelay } = require("./lib/watchdog.cjs");
 const { performFactoryReset } = require("./lib/factory-reset.cjs");
+const { resolveGatewayToken } = require("./lib/gateway-token.cjs");
 const { resolveAppVersion } = require("./app-version.cjs");
 const desktopPackage = require("../package.json");
 
@@ -21,8 +21,7 @@ const DEV_SERVER_URL = process.env.HOMUN_DESKTOP_URL ?? "http://127.0.0.1:1420/"
 const GATEWAY_PORT = process.env.HOMUN_DESKTOP_GATEWAY_PORT ?? "18765";
 const GATEWAY_URL =
   process.env.HOMUN_DESKTOP_GATEWAY_URL ?? `http://127.0.0.1:${GATEWAY_PORT}`;
-const GATEWAY_TOKEN =
-  process.env.HOMUN_DESKTOP_GATEWAY_TOKEN ?? randomBytes(32).toString("hex");
+const GATEWAY_TOKEN = resolveGatewayToken();
 const GATEWAY_STARTUP_TIMEOUT_MS = app.isPackaged ? 60_000 : 180_000;
 const HOMUN_VERSION = resolveAppVersion({
   isPackaged: app.isPackaged,
