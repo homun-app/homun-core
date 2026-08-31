@@ -234,6 +234,7 @@ export function ComposerShell(props: ComposerShellProps) {
     props.selectedNextTurnModel,
     t("composer.runtime.unavailable"),
     t("composer.auto"),
+    props.runtimeContext,
   );
   const runtimeView = runtimeContextView(props.runtimeContext, props.selectedNextTurnModel);
 
@@ -402,7 +403,7 @@ export function ComposerShell(props: ComposerShellProps) {
 
       <div className="composer-metadata-row">
         <button id="composer-mode-trigger" ref={modeRef} type="button" aria-label={t("composer.mode")} aria-haspopup="menu" aria-expanded={rootOpen("mode")} onClick={() => openRoot("mode")}><Bot size={13} /><span>{modeLabel}</span></button>
-        <button id="composer-model-trigger" ref={modelRef} className="composer-model-button" type="button" aria-label={t("composer.model")} aria-haspopup="menu" aria-expanded={rootOpen("model")} onClick={() => openRoot("model")}><span>{modelButtonLabel}</span><Settings2 size={13} /></button>
+        <button id="composer-model-trigger" ref={modelRef} className="composer-model-button" type="button" aria-label={t("composer.model")} title={modelButtonLabel} aria-haspopup="menu" aria-expanded={rootOpen("model")} onClick={() => openRoot("model")}><span>{modelButtonLabel}</span><Settings2 size={13} /></button>
         <span className="composer-metadata-item" aria-label={t("composer.environment")}><Monitor size={13} /><span>{props.environmentLabel}</span></span>
         <button id="composer-runtime-trigger" ref={runtimeRef} className="composer-runtime-button" type="button" aria-label={t("composer.runtimeContext")} title={t("composer.runtimeContext")} aria-haspopup="dialog" aria-expanded={rootOpen("runtime")} onClick={() => { props.onRefreshRuntimeContext(); openRoot("runtime"); }}><Settings2 size={13} /></button>
       </div>

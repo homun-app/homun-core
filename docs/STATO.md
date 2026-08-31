@@ -67,6 +67,19 @@ I codici principali osservati sono `completed_task_with_browser_budget_exceeded`
 memoria senza evidence e `agent_run_missing_model_attribution`. La slice e'
 diagnostica/read-only: non ripara ancora il profilo reale.
 
+## Model Selector Clarity - 2026-08-31
+
+Slice locale su `fabio/model-selector-clarity`: il composer mantiene la
+semantica next-turn (`Auto` non e' l'ultimo modello assistant) ma, quando il
+runtime context contiene la rotta effettiva, la label del bottone modello puo'
+mostrare `Auto -> role -> provider/model` e il titolo nativo conserva la stringa
+completa anche quando il bottone tronca visivamente.
+
+Evidenza locale:
+
+- `cd apps/desktop && node --test src/lib/composerTurnContract.test.mjs`
+- `cd apps/desktop && npm run build`
+
 ## RC readiness - 2026-08-26
 
 Branch candidato: `fabio/rc-readiness-2026-08-26`, PR #406, su base `main`

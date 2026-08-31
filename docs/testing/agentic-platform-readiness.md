@@ -64,8 +64,10 @@ ancora stati impossibili:
   storico reale;
 - approval inline come `SANDBOX_ESCALATE` non e' proiettata nella stessa coda
   canonica delle approval;
-- il selettore modello mostra `Unavailable` mentre la select risolve `Auto`,
-  quindi l'utente non vede chi e' il vero owner della scelta;
+- il selettore modello non deve confondere `Unavailable` con `Auto`: il bottone
+  ora mostra la risoluzione `Auto -> role -> provider/model` quando il runtime
+  context e' disponibile, ma resta da completare la spiegazione del routing nei
+  dettagli Settings/dashboard;
 - il click Browser nella island apre prima pannello laterale e poi PiP, mentre
   il comportamento atteso e' PiP diretto.
 
@@ -107,9 +109,10 @@ Ogni fix deve chiudere una classe, non un singolo sintomo:
    deve aprire direttamente il PiP se il browser e' l'azione primaria.
 
 4. Model routing clarity.
-   Sostituire `Unavailable`/`Auto` ambiguo con `Auto -> role -> provider/model`.
-   Mostrare anche perche' un ruolo e' locale/cloud, se e' fallback, e cosa manca
-   per `image_generation` o altri ruoli non risolti.
+   Prima slice UI completata: il composer non mostra `Unavailable` come scelta
+   quando il prossimo turno e' `Auto`, e la label puo' esporre la rotta risolta
+   dal runtime context. Restano da mostrare il motivo della scelta, fallback,
+   local/cloud e cosa manca per `image_generation` o altri ruoli non risolti.
 
 5. Scenario Lab business-first.
    Aggiungere scenari live realistici: lead CRM da email a spreadsheet,

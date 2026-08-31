@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  autoModelResolutionLabel,
   composerModelButtonLabel,
   effectiveModelFromGateway,
   latestAssistantEffectiveModel,
@@ -38,6 +39,27 @@ test("model button labels display the next-turn selection instead of unavailable
     composerModelButtonLabel("Unavailable", null, "Unavailable", "Auto"),
     "Auto",
   );
+});
+
+test("auto model button label exposes the resolved runtime route when available", () => {
+  assert.equal(
+    autoModelResolutionLabel({
+      role: "chat",
+      provider: "ollama",
+      effective_model: "qwen3.5:4b",
+    }, "Auto"),
+    "Auto -> chat -> ollama/qwen3.5:4b",
+  );
+  assert.equal(
+    composerModelButtonLabel("Unavailable", null, "Unavailable", "Auto", {
+      role: "chat",
+      provider: "ollama",
+      effective_model: "qwen3.5:4b",
+    }),
+    "Auto -> chat -> ollama/qwen3.5:4b",
+  );
+  assert.equal(autoModelResolutionLabel({ effective_model: "qwen3.5:4b" }, "Auto"), "Auto -> qwen3.5:4b");
+  assert.equal(autoModelResolutionLabel({}, "Auto"), "Auto");
 });
 
 test("latest assistant without provenance stays unavailable instead of reusing an older model", () => {
