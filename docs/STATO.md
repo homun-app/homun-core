@@ -121,6 +121,20 @@ Evidenza locale:
 - `cargo build -p local-first-desktop-gateway --release`
 - `python3 scripts/production_smoke.py --profile extended --scenario X5 --gateway-base http://127.0.0.1:18766` -> `PASS X5`
 
+## Browser Smoke Semantic Failure - 2026-08-31
+
+Slice locale su `fabio/browser-smoke-semantic-failure`: gli smoke S5/S9 non
+accettano piu' come successo una risposta browser che include numerazione o
+fonti ma dichiara timeout/fallimento operativo (`non ho dati verificati`,
+`ricerca non andata a buon fine`, `andata in timeout`). Il caso nasce da S9 live
+che aveva terminalizzato `completed` pur rispondendo che la ricerca treni non
+aveva prodotto dati verificati.
+
+Evidenza locale:
+
+- `python3 -m unittest scripts.test_production_smoke -v`
+- `python3 scripts/production_smoke.py --profile all --scenario S9 --gateway-base http://127.0.0.1:18766` -> `PASS S9` con criterio piu' severo
+
 ## Subagent Runtime Audit - 2026-08-31
 
 Audit read-only con subagente: Homun ha queue, lease, retry e checkpoint per

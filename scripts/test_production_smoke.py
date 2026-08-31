@@ -144,6 +144,20 @@ class ProductionSmokeTests(unittest.TestCase):
                 "Risultato parziale: sono riuscito a estrarre solo 1 notizia tech di oggi, non 3.",
             )
         )
+        self.assertFalse(
+            smoke.status_allows_success(
+                "completed",
+                s9,
+                (
+                    "1. Fonte: https://www.trenitalia.com/it.html\n"
+                    "2. Come procedere\n"
+                    "3. Sources\n"
+                    "Non ho ancora dati verificati da riportarti: la ricerca non e' andata "
+                    "a buon fine. La ricerca pero' e' andata in timeout prima che la lista "
+                    "dei risultati venisse caricata."
+                ),
+            )
+        )
 
     def test_wait_turn_output_retries_transient_turn_not_found(self):
         calls = []
