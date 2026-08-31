@@ -135,6 +135,18 @@ Evidenza locale:
 - `python3 -m unittest scripts.test_production_smoke -v`
 - `python3 scripts/production_smoke.py --profile all --scenario S9 --gateway-base http://127.0.0.1:18766` -> `PASS S9` con criterio piu' severo
 
+## Smoke Thread Cleanup - 2026-08-31
+
+Slice locale su `fabio/smoke-thread-cleanup`: `production_smoke.py` elimina il
+thread chat creato da uno scenario passato e conserva invece il thread quando lo
+scenario fallisce, cosi' il profilo reale resta piu' pulito senza perdere
+evidenza diagnostica sui fail.
+
+Evidenza locale:
+
+- `python3 -m unittest scripts.test_production_smoke -v`
+- `python3 scripts/production_smoke.py --profile all --scenario S1 --gateway-base http://127.0.0.1:18766` -> `PASS S1`, conteggio `smoke S1` invariato a 0
+
 ## Subagent Runtime Audit - 2026-08-31
 
 Audit read-only con subagente: Homun ha queue, lease, retry e checkpoint per

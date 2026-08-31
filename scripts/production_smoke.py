@@ -522,6 +522,17 @@ def resolve_fake_mcp_stdio_binary(explicit_path: str | None = None) -> str:
 
 
 def cleanup_scenario(state: dict[str, Any], scenario_passed: bool = True) -> None:
+    if scenario_passed and state.get("thread_id"):
+        try:
+            _request(
+                str(state.get("base", "")),
+                str(state.get("token", "")),
+                "DELETE",
+                f"/api/chat/threads/{urllib.parse.quote(str(state['thread_id']), safe='')}",
+                timeout=30,
+            )
+        except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as error:
+            print(f"WARN cleanup smoke thread failed: {error}", file=sys.stderr, flush=True)
     if state.get("mcp_provider_id") and state.get("mcp_workspace_id"):
         try:
             query = urllib.parse.urlencode({"workspace": str(state["mcp_workspace_id"])})
@@ -663,6 +674,7 @@ def run_turn_via_broker(
     state = prepare_scenario(base, token, scenario)
     prepared = state["scenario"]
     thread_id = create_thread(base, token, f"smoke {prepared.id}", state.get("workspace_id"))
+    state["thread_id"] = thread_id
     turn_id = enqueue_turn(base, token, thread_id, prepared)
     status, output, elapsed = wait_turn_output(
         base,

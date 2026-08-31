@@ -430,6 +430,52 @@ class ProductionSmokeTests(unittest.TestCase):
 
         self.assertEqual(calls, [])
 
+    def test_smoke_thread_cleanup_deletes_created_thread_on_success(self):
+        calls = []
+
+        def fake_request(base, token, method, path, body=None, timeout=60):
+            calls.append((method, path, body))
+            return 200, {}
+
+        original = smoke._request
+        smoke._request = fake_request
+        try:
+            smoke.cleanup_scenario(
+                {
+                    "base": "http://gateway",
+                    "token": "token",
+                    "thread_id": "thread_smoke",
+                },
+                scenario_passed=True,
+            )
+        finally:
+            smoke._request = original
+
+        self.assertEqual(calls, [("DELETE", "/api/chat/threads/thread_smoke", None)])
+
+    def test_smoke_thread_cleanup_preserves_created_thread_on_failure(self):
+        calls = []
+
+        def fake_request(base, token, method, path, body=None, timeout=60):
+            calls.append((method, path, body))
+            return 200, {}
+
+        original = smoke._request
+        smoke._request = fake_request
+        try:
+            smoke.cleanup_scenario(
+                {
+                    "base": "http://gateway",
+                    "token": "token",
+                    "thread_id": "thread_smoke",
+                },
+                scenario_passed=False,
+            )
+        finally:
+            smoke._request = original
+
+        self.assertEqual(calls, [])
+
     def test_automation_api_lifecycle_uses_scoped_crud_and_cleanup(self):
         calls = []
         auto_id = "auto_smoke"
