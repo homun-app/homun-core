@@ -6813,6 +6813,11 @@ price/buy control inside the same card. If a labeled CTA click comes back with \
 (or the breadcrumb stays on the same step, e.g. still \"SCELTA VIAGGIO\"), do NOT repeat that ref — \
 click the card/price control for that same solution instead. \"Continua\" / \"Avanti\" often appears ONLY \
 AFTER you open the solution and pick a fare; if you do not see it yet, you are still on the results step.\n\
+2c. LIST / DISCOVERY PAGES — when the goal asks for a list of search/news/results and the current \
+page already shows enough cards or rows with the required fields, extract those rows directly and \
+call browser_done. Do NOT open every individual article/result just to summarize it. Use visible \
+headlines, source labels, timestamps and snippets from the listing page as the list items; open an \
+individual result only when the listing page genuinely lacks a required field for enough items.\n\
 3. Prefer a login-free, text-rich source (Wikipedia, an official page) over login-walled or \
 JavaScript-heavy SPAs. Keep 2-3 candidate sources; if one is blocked or has no data, try the next — \
 do not repeat the same failing search.\n\
@@ -6907,14 +6912,107 @@ pub(crate) fn parse_browse_request(args_raw: &str) -> ParsedBrowseRequest {
         .filter(|v| v.starts_with("https://") || v.starts_with("http://"))
         .map(str::to_string)
         .or_else(|| direct_browse_start_url(&goal));
-    let contract = value.get("result_contract").cloned().and_then(|v| {
+    let explicit_contract = value.get("result_contract").cloned().and_then(|v| {
         serde_json::from_value::<local_first_engine::browse::BrowseResultContract>(v).ok()
     });
+    let contract = normalize_browse_contract_for_goal(&goal, explicit_contract);
     ParsedBrowseRequest {
         goal,
         hint_url,
         contract,
     }
+}
+
+pub(crate) fn normalize_browse_contract_for_goal(
+    goal: &str,
+    explicit: Option<local_first_engine::browse::BrowseResultContract>,
+) -> Option<local_first_engine::browse::BrowseResultContract> {
+    let Some(required_checkout) = checkout_approval_browse_contract(goal) else {
+        return explicit;
+    };
+    let Some(mut contract) = explicit else {
+        return Some(required_checkout);
+    };
+
+    contract.kind = local_first_engine::browse::BrowseResultKind::Fact;
+    contract.minimum_items = Some(contract.minimum_items.unwrap_or(1).max(1));
+    if contract
+        .boundary
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty()
+    {
+        contract.boundary = required_checkout.boundary.clone();
+    }
+    for required_field in required_checkout.fields {
+        match contract
+            .fields
+            .iter_mut()
+            .find(|field| field.name == required_field.name)
+        {
+            Some(field) => field.required |= required_field.required,
+            None => contract.fields.push(required_field),
+        }
+    }
+    Some(contract)
+}
+
+pub(crate) fn checkout_approval_browse_contract(
+    goal: &str,
+) -> Option<local_first_engine::browse::BrowseResultContract> {
+    let lower = goal.to_ascii_lowercase();
+    let asks_for_approval_card = lower.contains("payment approval")
+        || lower.contains("payment_approval")
+        || lower.contains("approval card")
+        || lower.contains("approvazione pagamento");
+    let stop_before_payment = lower.contains("non premere pay")
+        || lower.contains("non premere submit")
+        || lower.contains("non compilare campi carta")
+        || lower.contains("senza premere pay")
+        || lower.contains("senza completare")
+        || lower.contains("stop before")
+        || lower.contains("without pressing pay")
+        || lower.contains("do not press pay")
+        || lower.contains("do not submit")
+        || lower.contains("do not complete");
+    let checkout_context = lower.contains("checkout")
+        || lower.contains("payment")
+        || lower.contains("pagamento")
+        || lower.contains("pay now")
+        || lower.contains("submit order");
+    if !(checkout_context && (asks_for_approval_card || stop_before_payment)) {
+        return None;
+    }
+
+    Some(local_first_engine::browse::BrowseResultContract {
+        kind: local_first_engine::browse::BrowseResultKind::Fact,
+        minimum_items: Some(1),
+        fields: [
+            ("merchant", true),
+            ("domain", true),
+            ("amount", true),
+            ("currency", true),
+            ("product_summary", true),
+            ("payment_control_visible", false),
+            ("payment_not_submitted", false),
+            ("amount_minor", false),
+            ("payment_method_label", false),
+            ("checkout_fingerprint", false),
+        ]
+        .into_iter()
+        .map(
+            |(name, required)| local_first_engine::browse::BrowseResultField {
+                name: name.to_string(),
+                required,
+            },
+        )
+        .collect(),
+        boundary: Some(
+            "Stop before submitting, paying, placing the order, or using a payment control."
+                .to_string(),
+        ),
+    })
 }
 
 pub(crate) fn direct_browse_start_url(goal: &str) -> Option<String> {
@@ -6987,6 +7085,22 @@ values for browser_act before taking another snapshot:\n",
         );
         out.push_str(observation);
     }
+    if checkout_approval_browse_contract(goal).is_some() {
+        out.push_str(
+            "\n\nPayment approval extraction:\n\
+- Do not press Pay, Submit order, Place order, or any equivalent payment control.\n\
+- Your browser task is complete when you can report the checkout facts needed for the manager to \
+ask the user for a Payment Approval Card.\n\
+- Use status=`completed` when the snapshot contains merchant/domain, product summary, amount and \
+currency. Do not use `partial` merely because you intentionally stopped before Pay/Submit.\n\
+- If no separate merchant label is visible, derive merchant from the checkout host or brand shown \
+on the page; for https://checkout.stripe.dev/elements use merchant=`Stripe Elements Demo` and \
+domain=`checkout.stripe.dev`.\n\
+- Set `payment_not_submitted` to true only if no payment/order action was committed.\n\
+- Report the exact visible formatted total in `amount` and the visible or inferred currency in \
+`currency`; include `amount_minor` only when the conversion is obvious.",
+        );
+    }
     if let Some(contract) = &request.contract {
         out.push_str("\n\nResult contract:\n");
         out.push_str(&serde_json::to_string_pretty(contract).unwrap_or_default());
@@ -7024,6 +7138,8 @@ pub(crate) fn browse_result_contract_shape_hint(
 - Put the data in `items`; the prose `answer` does not satisfy the contract.\n\
 - For kind={kind}, return one object per result row. You need at least {minimum_items} item(s) unless \
 the data is genuinely unavailable.\n\
+- On search/discovery pages, if at least {minimum_items} cards or rows show the required fields, use \
+those listing rows directly; do not open each article/result.\n\
 - Example item object: {example}",
         required_keys = required.join(", "),
         kind = kind,

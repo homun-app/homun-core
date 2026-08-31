@@ -185,6 +185,87 @@ class ProductionSmokeTests(unittest.TestCase):
             )
         )
 
+    def test_smoke_output_marks_latest_incomplete_plan(self):
+        output = smoke.smoke_output(
+            [
+                {
+                    "kind": "plan_update",
+                    "payload": {
+                        "markdown": (
+                            "**Goal**: browse\n\n"
+                            "- [x] **Validate** (`validate`): ok\n"
+                            "- [-] **Verify and answer** (`verify`): pending"
+                        )
+                    },
+                },
+                {"kind": "done", "payload": {"text": "1. a\n2. b\n3. c"}},
+            ]
+        )
+
+        self.assertIn(smoke.INCOMPLETE_PLAN_SENTINEL, output)
+        s9 = next(scenario for scenario in smoke.build_scenarios() if scenario.id == "S9")
+        self.assertFalse(smoke.status_allows_success("completed", s9, output))
+
+    def test_payment_marker_allows_incomplete_plan_sentinel(self):
+        output = smoke.smoke_output(
+            [
+                {
+                    "kind": "plan_update",
+                    "payload": {
+                        "markdown": (
+                            "**Goal**: approval\n\n"
+                            "- [x] **Read checkout** (`read`): ok\n"
+                            "- [-] **Verify and answer** (`verify`): waiting for card"
+                        )
+                    },
+                },
+                {
+                    "kind": "payment_approval",
+                    "payload": {
+                        "snapshot": {
+                            "approval_id": "pay_test",
+                            "merchant": "Stripe Elements Demo",
+                            "domain": "checkout.stripe.dev",
+                            "amount_minor": 12196,
+                            "currency": "USD",
+                        }
+                    },
+                },
+            ]
+        )
+
+        s8 = next(scenario for scenario in smoke.build_scenarios() if scenario.id == "S8")
+        self.assertIn(smoke.INCOMPLETE_PLAN_SENTINEL, output)
+        self.assertTrue(smoke.status_allows_success("completed", s8, output))
+
+    def test_smoke_output_uses_latest_plan_update_only(self):
+        output = smoke.smoke_output(
+            [
+                {
+                    "kind": "plan_update",
+                    "payload": {
+                        "markdown": (
+                            "**Goal**: browse\n\n"
+                            "- [x] **Validate** (`validate`): ok\n"
+                            "- [-] **Verify and answer** (`verify`): pending"
+                        )
+                    },
+                },
+                {
+                    "kind": "plan_update",
+                    "payload": {
+                        "markdown": (
+                            "**Goal**: browse\n\n"
+                            "- [x] **Validate** (`validate`): ok\n"
+                            "- [x] **Verify and answer** (`verify`): done"
+                        )
+                    },
+                },
+            ]
+        )
+
+        self.assertNotIn(smoke.INCOMPLETE_PLAN_SENTINEL, output)
+
     def test_wait_turn_output_retries_transient_turn_not_found(self):
         calls = []
 

@@ -3360,9 +3360,19 @@ fn build_browse_user_goal_includes_contract_item_shape_hint() {
     assert!(goal.contains("Required item keys: title, source, summary"));
     assert!(goal.contains("Put the data in `items`"));
     assert!(goal.contains("at least 3 item(s)"));
+    assert!(goal.contains("use those listing rows directly"));
     assert!(goal.contains("\"title\":\"<title>\""));
     assert!(goal.contains("\"source\":\"<source>\""));
     assert!(goal.contains("\"summary\":\"<summary>\""));
+}
+
+#[test]
+fn browse_subagent_prompt_extracts_list_contracts_from_discovery_pages() {
+    let prompt = super::browse_subagent_system_prompt(false);
+
+    assert!(prompt.contains("LIST / DISCOVERY PAGES"));
+    assert!(prompt.contains("extract those rows directly"));
+    assert!(prompt.contains("Do NOT open every individual article/result"));
 }
 
 #[test]
@@ -3742,6 +3752,87 @@ fn parse_browse_request_keeps_model_contract_without_keyword_inference() {
     let contract = parsed.contract.unwrap();
     assert_eq!(contract.minimum_items, Some(3));
     assert_eq!(contract.fields[0].name, "departure");
+}
+
+#[test]
+fn parse_browse_request_infers_checkout_approval_contract() {
+    let parsed = super::parse_browse_request(
+        r#"{
+            "goal":"Apri https://checkout.stripe.dev/elements, leggi il checkout e chiedimi una Payment Approval Card senza premere Pay",
+            "hints":{"url":"https://checkout.stripe.dev/elements"}
+        }"#,
+    );
+
+    let contract = parsed
+        .contract
+        .as_ref()
+        .expect("checkout approval goals need a browser result contract");
+    assert_eq!(
+        contract.kind,
+        local_first_engine::browse::BrowseResultKind::Fact
+    );
+    assert_eq!(contract.minimum_items, Some(1));
+    assert_eq!(
+        contract.boundary.as_deref(),
+        Some("Stop before submitting, paying, placing the order, or using a payment control.")
+    );
+    let required = contract
+        .fields
+        .iter()
+        .filter(|field| field.required)
+        .map(|field| field.name.as_str())
+        .collect::<Vec<_>>();
+    assert!(required.contains(&"merchant"));
+    assert!(required.contains(&"domain"));
+    assert!(required.contains(&"amount"));
+    assert!(required.contains(&"currency"));
+    assert!(required.contains(&"product_summary"));
+    assert!(!required.contains(&"amount_minor"));
+    assert!(!required.contains(&"payment_control_visible"));
+    assert!(!required.contains(&"payment_not_submitted"));
+
+    let goal = super::build_browse_user_goal(&parsed, None, None);
+    assert!(goal.contains("Use status=`completed`"));
+    assert!(goal.contains("Stripe Elements Demo"));
+}
+
+#[test]
+fn parse_browse_request_enriches_partial_checkout_approval_contract() {
+    let parsed = super::parse_browse_request(
+        r#"{
+            "goal":"Apri https://checkout.stripe.dev/elements e leggi SOLO i dati visibili del demo pubblico di checkout/pagamento: merchant, dominio, riepilogo prodotto e importo totale. NON compilare campi carta/CVV e NON premere Pay/Submit.",
+            "result_contract":{
+                "kind":"fact",
+                "fields":[
+                    {"name":"merchant","required":true},
+                    {"name":"domain","required":true},
+                    {"name":"product_summary","required":true},
+                    {"name":"amount","required":true},
+                    {"name":"currency","required":true}
+                ]
+            }
+        }"#,
+    );
+
+    let contract = parsed
+        .contract
+        .expect("explicit checkout contracts must be enriched");
+    assert_eq!(
+        contract.kind,
+        local_first_engine::browse::BrowseResultKind::Fact
+    );
+    assert_eq!(contract.minimum_items, Some(1));
+    let required = contract
+        .fields
+        .iter()
+        .filter(|field| field.required)
+        .map(|field| field.name.as_str())
+        .collect::<Vec<_>>();
+    assert!(required.contains(&"merchant"));
+    assert!(required.contains(&"amount"));
+    assert!(required.contains(&"currency"));
+    assert!(!required.contains(&"amount_minor"));
+    assert!(!required.contains(&"payment_not_submitted"));
 }
 
 #[test]

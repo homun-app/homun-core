@@ -50,6 +50,7 @@ MARKER_KIND_ALIASES = {
 SMOKE_VAULT_LABEL = "Codice fiscale smoke QA"
 SMOKE_VAULT_SECRET = "SMOKE-CF-SECRET-0001"
 SMOKE_VAULT_PREVIEW = "[VAULT:identity:fiscal_code_smoke]"
+INCOMPLETE_PLAN_SENTINEL = "HOMUN_SMOKE_INCOMPLETE_PLAN"
 
 
 def normalize_status(status: str) -> str:
@@ -371,6 +372,65 @@ def _flatten(value: Any) -> str:
     return ""
 
 
+def _event_kind(event: Any) -> str:
+    if not isinstance(event, dict):
+        return ""
+    return str(event.get("kind") or event.get("type") or "").strip()
+
+
+def _event_payload(event: Any) -> Any:
+    if not isinstance(event, dict):
+        return None
+    payload = event.get("payload")
+    if payload is not None:
+        return payload
+    payload_json = event.get("payload_json")
+    if isinstance(payload_json, str):
+        try:
+            return json.loads(payload_json)
+        except json.JSONDecodeError:
+            return None
+    return event
+
+
+def _iter_events(value: Any):
+    if isinstance(value, list):
+        for item in value:
+            yield from _iter_events(item)
+        return
+    if not isinstance(value, dict):
+        return
+    nested = value.get("events")
+    if isinstance(nested, list):
+        yield from _iter_events(nested)
+        return
+    yield value
+
+
+def latest_plan_is_incomplete(events: Any) -> bool:
+    latest_markdown = ""
+    for event in _iter_events(events):
+        if _event_kind(event) != "plan_update":
+            continue
+        payload = _event_payload(event)
+        if isinstance(payload, dict):
+            markdown = str(payload.get("markdown") or "")
+        else:
+            markdown = ""
+        if markdown:
+            latest_markdown = markdown
+    if not latest_markdown:
+        return False
+    return any(marker in latest_markdown for marker in ("- [-]", "- [ ]"))
+
+
+def smoke_output(events: Any) -> str:
+    output = _flatten(events)
+    if latest_plan_is_incomplete(events):
+        output = f"{output}\n{INCOMPLETE_PLAN_SENTINEL}"
+    return output
+
+
 def marker_present(output: str, marker: str) -> bool:
     aliases = {marker, marker.lower(), MARKER_KIND_ALIASES.get(marker, "")}
     return any(alias and alias in output for alias in aliases)
@@ -682,7 +742,7 @@ def wait_turn_output(
         if time.time() >= deadline:
             break
         time.sleep(0.75)
-    return last_status, _flatten(events), time.time() - started
+    return last_status, smoke_output(events), time.time() - started
 
 
 def run_turn_via_broker(
@@ -885,6 +945,8 @@ def status_allows_success(status: str, scenario: Scenario, output: str) -> bool:
         return False
     if scenario.expect_marker:
         return marker_present(output, scenario.expect_marker) and normalized in MARKER_SUCCESS_STATUSES
+    if INCOMPLETE_PLAN_SENTINEL.lower() in output_lower:
+        return False
     if normalized not in SUCCESS_STATUSES:
         return False
     return True

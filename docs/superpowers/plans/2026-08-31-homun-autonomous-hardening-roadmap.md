@@ -26,6 +26,13 @@
 4. Run integrity audits after the scenario tranche and classify new findings.
 5. Commit every verified fix; leave red scenario evidence explicit when not fixed.
 
+## Current Checkpoint - 2026-08-31 Evening
+
+- Browser delegation now pre-navigates direct URL goals, seeds initial observations, forces `browser_done` only inside browser sub-turns, and keeps S5/S8/S9 package smokes guarded by semantic validators.
+- S8 Payment Approval is the active reference for guarded checkout work: the browser sub-turn must return visible checkout facts with a fact contract, and the smoke harness treats a canonical `payment_approval` event as the success marker even if the runtime plan remains open for user approval.
+- The next autonomous tranche should start with extended scenarios X1/X2/X4/X6, then inspect long-running lifecycle/budget behavior before returning to public release readiness.
+- Do not treat addon architecture as closed in this plan; keep it as a separate product-design session.
+
 ---
 
 ### Task 1: Reproduce And Diagnose S6 Browser Form Fill
@@ -364,4 +371,3 @@ Expected: pushed commit per bug class; no generated smoke artifacts committed.
 - Stop immediately if the next fix would touch addon architecture or plugin governance deeply; that is a separate session.
 - Stop if a live scenario requires real credentials, a real payment, or non-test external writes.
 - Before final report, kill `package:smoke`, Electron, gateway, and channel sidecars used for testing.
-
