@@ -39,6 +39,13 @@ export function nextWorkspaceSection(activeSection, requestedSection) {
   return activeSection === requestedSection ? null : requestedSection;
 }
 
+export function workspaceSectionSelection(activeSection, requestedSection) {
+  return {
+    activeSection: nextWorkspaceSection(activeSection, requestedSection),
+    browserDockRequested: requestedSection === "browser",
+  };
+}
+
 export function projectWorkspaceSections(input = {}) {
   const sections = [];
   const planSteps = Array.isArray(input.planSteps) ? input.planSteps : [];

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   nextWorkspaceSection,
   projectWorkspaceSections,
+  workspaceSectionSelection,
 } from "./workspaceIslandSections.mjs";
 
 test("empty unavailable capabilities produce no rail", () => {
@@ -66,4 +67,12 @@ test("clicking the active section collapses and siblings swap directly", () => {
 test("browser rail click keeps the side island closed so PiP stays visible", () => {
   assert.equal(nextWorkspaceSection(null, "browser"), null);
   assert.equal(nextWorkspaceSection("activity", "browser"), null);
+  assert.deepEqual(workspaceSectionSelection("activity", "browser"), {
+    activeSection: null,
+    browserDockRequested: true,
+  });
+  assert.deepEqual(workspaceSectionSelection(null, "activity"), {
+    activeSection: "activity",
+    browserDockRequested: false,
+  });
 });

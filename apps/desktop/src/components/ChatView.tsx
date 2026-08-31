@@ -635,7 +635,7 @@ export function ChatView({
         artifactSources={islandArtifacts}
         fileSources={islandFileSources}
         onRetryBrowserBudget={regenerateAnswer}
-        onOpenComputer={() => openUtilityTab("computer")}
+        onOpenBrowserDock={hideInspector}
         onOpenSource={(source) =>
           openUtilityTab(source.action === "artifact" ? "artifact" : "file")
         }

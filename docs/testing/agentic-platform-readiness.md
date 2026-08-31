@@ -74,8 +74,9 @@ ancora stati impossibili:
 - i subagent hanno gia' queue/lease/retry/checkpoint, ma per task lunghi serve
   ancora delega broker-owned, proiezione parent/child e result delivery
   idempotente;
-- il click Browser nella island apre prima pannello laterale e poi PiP, mentre
-  il comportamento atteso e' PiP diretto.
+- il click Browser nella island ora e' cablato come richiesta PiP/dock: mantiene
+  chiusa la side island e chiude l'inspector invece di aprire la colonna
+  `computer`.
 
 ## Classi Di Stabilita'
 
@@ -112,7 +113,8 @@ Ogni fix deve chiudere una classe, non un singolo sintomo:
 3. Unified Run Center.
    La UI deve avere un centro unico per run, approval, retry, logs, effetti,
    automazioni e browser state. Le island restano shortcut, ma il click Browser
-   deve aprire direttamente il PiP se il browser e' l'azione primaria.
+   e' stato riportato a shortcut PiP diretto, senza apertura della colonna
+   inspector.
 
 4. Model routing clarity.
    Prima slice UI completata: il composer non mostra `Unavailable` come scelta

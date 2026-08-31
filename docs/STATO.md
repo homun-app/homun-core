@@ -80,6 +80,19 @@ Evidenza locale:
 
 - `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway automation_dry_run -- --nocapture`
 
+## Browser Island PiP - 2026-08-31
+
+Slice locale su `fabio/browser-island-pip-direct`: il click Browser nella
+workspace island resta una richiesta PiP/dock, non una apertura della colonna
+inspector. La logica pura ora espone anche `browserDockRequested`, il rail
+Browser mantiene la side island chiusa e `ChatView` chiude l'inspector per
+lasciare visibile il dock del browser gia' montato nella chat.
+
+Evidenza locale:
+
+- `cd apps/desktop && node --test src/lib/workspaceIslandSections.test.mjs`
+- `cd apps/desktop && npm run build`
+
 ## Subagent Runtime Audit - 2026-08-31
 
 Audit read-only con subagente: Homun ha queue, lease, retry e checkpoint per

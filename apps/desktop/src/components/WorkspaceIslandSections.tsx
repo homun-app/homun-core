@@ -34,7 +34,7 @@ interface WorkspaceIslandSectionsProps {
   artifactSources: IslandSource[];
   fileSources: IslandSource[];
   onRetryBrowserBudget: (assistantMessageId: string) => void;
-  onOpenComputer: () => void;
+  onOpenBrowserDock: () => void;
   onOpenSource: (source: IslandSource) => void;
 }
 
@@ -54,7 +54,7 @@ export function WorkspaceIslandSections({
   artifactSources,
   fileSources,
   onRetryBrowserBudget,
-  onOpenComputer,
+  onOpenBrowserDock,
   onOpenSource,
 }: WorkspaceIslandSectionsProps) {
   const { t } = useTranslation();
@@ -188,7 +188,7 @@ export function WorkspaceIslandSections({
     return (
       <div className="workspace-island-browser">
         {previewDataUrl ? <img src={previewDataUrl} alt={previewTitle} /> : null}
-        <button type="button" onClick={onOpenComputer}>
+        <button type="button" onClick={onOpenBrowserDock}>
           <Monitor size={15} aria-hidden="true" />
           <span>{t("chat.inspector.views.computer")}</span>
         </button>

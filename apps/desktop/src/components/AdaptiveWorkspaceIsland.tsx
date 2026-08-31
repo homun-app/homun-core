@@ -9,7 +9,7 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  nextWorkspaceSection,
+  workspaceSectionSelection,
   type WorkspaceSection,
   type WorkspaceSectionId,
 } from "../lib/workspaceIslandSections";
@@ -30,6 +30,7 @@ export interface AdaptiveWorkspaceIslandProps {
   sections: WorkspaceSection[];
   renderSection: (section: WorkspaceSectionId) => ReactNode;
   openSectionRequest?: { section: WorkspaceSectionId; nonce: number };
+  onOpenBrowserDock?: () => void;
   disabled?: boolean;
 }
 
@@ -38,6 +39,7 @@ export function AdaptiveWorkspaceIsland({
   sections,
   renderSection,
   openSectionRequest,
+  onOpenBrowserDock,
   disabled = false,
 }: AdaptiveWorkspaceIslandProps) {
   const { t } = useTranslation();
@@ -189,7 +191,9 @@ export function AdaptiveWorkspaceIsland({
               aria-pressed={activeSection === section.id}
               title={t(section.labelKey)}
               onClick={() => {
-                setActiveSection(nextWorkspaceSection(activeSection, section.id));
+                const selection = workspaceSectionSelection(activeSection, section.id);
+                setActiveSection(selection.activeSection);
+                if (selection.browserDockRequested) onOpenBrowserDock?.();
               }}
             >
               <Icon size={10} aria-hidden="true" />

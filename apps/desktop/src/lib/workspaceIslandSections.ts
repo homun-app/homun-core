@@ -27,6 +27,11 @@ export const nextWorkspaceSection = implementation.nextWorkspaceSection as (
   requestedSection: WorkspaceSectionId,
 ) => WorkspaceSectionId | null;
 
+export const workspaceSectionSelection = implementation.workspaceSectionSelection as (
+  activeSection: WorkspaceSectionId | null,
+  requestedSection: WorkspaceSectionId,
+) => { activeSection: WorkspaceSectionId | null; browserDockRequested: boolean };
+
 export const projectWorkspaceSections = implementation.projectWorkspaceSections as (
   input?: WorkspaceIslandInput,
 ) => WorkspaceSection[];

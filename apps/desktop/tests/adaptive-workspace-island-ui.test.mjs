@@ -18,7 +18,8 @@ test("adaptive workspace island is collapsed by default and resets per thread", 
   const source = await readFile(componentPath, "utf8");
   assert.match(source, /useState<WorkspaceSectionId\s*\|\s*null>\(null\)/);
   assert.match(source, /setActiveSection\(null\)[\s\S]*?\[threadId\]/);
-  assert.match(source, /nextWorkspaceSection\(activeSection,\s*section\.id\)/);
+  assert.match(source, /workspaceSectionSelection\(activeSection,\s*section\.id\)/);
+  assert.match(source, /selection\.browserDockRequested[\s\S]*?onOpenBrowserDock\?\.\(\)/);
   assert.match(source, /openSectionRequest\?\.nonce/);
   assert.match(source, /setActiveSection\(openSectionRequest\.section\)/);
   assert.match(source, /closest\("\.active-task-layout"\)/);

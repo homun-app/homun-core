@@ -25,7 +25,7 @@ interface ChatWorkspaceDockProps {
   threadId: string;
   workInProgress: boolean;
   onComputerLiveChange: (status: { active: boolean; activity: string | null }) => void;
-  onOpenComputer: () => void;
+  onOpenBrowserDock: () => void;
   onOpenSource: (source: IslandSource) => void;
   onRetryBrowserBudget: (assistantMessageId: string) => void;
 }
@@ -49,7 +49,7 @@ export function ChatWorkspaceDock({
   threadId,
   workInProgress,
   onComputerLiveChange,
-  onOpenComputer,
+  onOpenBrowserDock,
   onOpenSource,
   onRetryBrowserBudget,
 }: ChatWorkspaceDockProps) {
@@ -60,6 +60,7 @@ export function ChatWorkspaceDock({
         sections={sections}
         disabled={disabled}
         openSectionRequest={{ section: "activity", nonce: openActivityNonce }}
+        onOpenBrowserDock={onOpenBrowserDock}
         renderSection={(section) => (
           <WorkspaceIslandSections
             section={section}
@@ -77,7 +78,7 @@ export function ChatWorkspaceDock({
             artifactSources={artifactSources}
             fileSources={fileSources}
             onRetryBrowserBudget={onRetryBrowserBudget}
-            onOpenComputer={onOpenComputer}
+            onOpenBrowserDock={onOpenBrowserDock}
             onOpenSource={onOpenSource}
           />
         )}
