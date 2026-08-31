@@ -424,7 +424,7 @@ use gateway_automation_tools::{
 pub(crate) use gateway_browser_tools::{
     BROWSE_SUBTURN_MAX_ELAPSED_MS, BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR,
     COMPOSIO_CATALOG_CAP, COMPOSIO_DISCOVERY_RESULTS, COMPOSIO_RESULT_CHARS, MCP_CATALOG_CAP,
-    browse_subagent_nav_cap, browser_act_error_hint, browser_act_tool_schema,
+    browse_subagent_nav_cap_for_contract, browser_act_error_hint, browser_act_tool_schema,
     browser_action_execution_fields_are_schema_legal, browser_action_outcome_hint,
     browser_dialog_tool_schema, browser_done_tool_schema, browser_navigate_failure_hint,
     browser_navigate_tool_schema, browser_rehydrate_tool_schema, browser_screenshot_tool_schema,

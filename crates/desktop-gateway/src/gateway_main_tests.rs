@@ -3296,16 +3296,73 @@ fn build_browse_goal_parses_goal_and_folds_hints() {
     // ADR 0025: the manager's browse args → the sub-turn goal string. Bare goal passes through;
     // hints (url/container) fold into the text since the browser sub-prompt has no separate hint slot.
     assert_eq!(build_browse_goal(r#"{"goal":"BTC price"}"#), "BTC price");
-    assert_eq!(
-        build_browse_goal(
-            r#"{"goal":"Serie A standings","hints":{"url":"https://x.com","container":"wikipedia"}}"#
-        ),
-        "Serie A standings (start at https://x.com) (prefer wikipedia)"
+    let hinted = build_browse_goal(
+        r#"{"goal":"Serie A standings","hints":{"url":"https://x.com","container":"wikipedia"}}"#,
     );
+    assert!(hinted.contains("Serie A standings"));
+    assert!(hinted.contains("Starting page: https://x.com"));
+    assert!(hinted.contains("already opened"));
+    assert!(hinted.contains("Do not search"));
+    assert!(hinted.contains("Preferred source/container: wikipedia"));
     // Missing/blank goal → empty (the caller refuses the call); malformed JSON is safe.
     assert_eq!(build_browse_goal(r#"{"hints":{"url":"https://x"}}"#), "");
     assert_eq!(build_browse_goal(r#"{"goal":"   "}"#), "");
     assert_eq!(build_browse_goal("not json"), "");
+}
+
+#[test]
+fn build_browse_goal_marks_direct_url_as_already_opened() {
+    let goal = build_browse_goal(
+        r#"{"goal":"Apri https://www.selenium.dev/selenium/web/web-form.html e compila Text input con smoke."}"#,
+    );
+
+    assert!(goal.contains("https://www.selenium.dev/selenium/web/web-form.html"));
+    assert!(
+        goal.contains("already opened"),
+        "direct URL browse goals must tell the subagent that pre-navigation already happened: {goal}"
+    );
+    assert!(
+        goal.to_ascii_lowercase().contains("do not search"),
+        "direct URL browse goals must keep the subagent on the opened page: {goal}"
+    );
+    assert!(
+        goal.contains("browser_act"),
+        "form-fill goals must steer the subagent toward acting on the opened page: {goal}"
+    );
+}
+
+#[test]
+fn build_browse_user_goal_includes_initial_pre_navigation_observation() {
+    let request = super::parse_browse_request(
+        r#"{"goal":"Apri https://www.selenium.dev/selenium/web/web-form.html e compila Text input con smoke."}"#,
+    );
+    let goal = super::build_browse_user_goal(
+        &request,
+        None,
+        Some(
+            "Page opened (https://www.selenium.dev/selenium/web/web-form.html). Snapshot:\n- textbox \"Text input\" [ref=e7]",
+        ),
+    );
+
+    assert!(goal.contains("Initial browser observation"));
+    assert!(goal.contains("Use these [ref=...] values for browser_act"));
+    assert!(goal.contains("textbox \"Text input\" [ref=e7]"));
+}
+
+#[test]
+fn build_browse_user_goal_includes_contract_item_shape_hint() {
+    let request = super::parse_browse_request(
+        r#"{"goal":"Cerca 3 notizie tech","result_contract":{"kind":"list","minimum_items":3,"fields":[{"name":"title","required":true},{"name":"source","required":true},{"name":"summary","required":true}]}}"#,
+    );
+    let goal = super::build_browse_user_goal(&request, None, None);
+
+    assert!(goal.contains("browser_done item shape"));
+    assert!(goal.contains("Required item keys: title, source, summary"));
+    assert!(goal.contains("Put the data in `items`"));
+    assert!(goal.contains("at least 3 item(s)"));
+    assert!(goal.contains("\"title\":\"<title>\""));
+    assert!(goal.contains("\"source\":\"<source>\""));
+    assert!(goal.contains("\"summary\":\"<summary>\""));
 }
 
 #[test]
@@ -4162,6 +4219,26 @@ fn delegated_browse_outcome_marks_browser_activity_and_structured_progress() {
         missing_outcome.effects.outcome_hint,
         Some(local_first_engine::ToolOutcomeHint::NoProgress)
     );
+
+    let blocked = local_first_engine::BrowseResult {
+        found: false,
+        answer: "The browser could not resolve the requested page, so no title is available."
+            .to_string(),
+        sources: vec!["https://nonexistent-homun-validation-zzzz.invalid/dead-page".to_string()],
+        confidence: local_first_engine::browse::Confidence::Low,
+        note: Some("blocked".to_string()),
+        status: local_first_engine::browse::BrowserDoneStatus::Blocked,
+        items: Vec::new(),
+        fields_missing: Vec::new(),
+        evidence: vec!["DNS resolution failed".to_string()],
+    };
+    let blocked_outcome = delegated_browse_tool_outcome(&blocked, None);
+    assert!(blocked_outcome.effects.browser_activity_observed);
+    assert_eq!(
+        blocked_outcome.effects.outcome_hint,
+        Some(local_first_engine::ToolOutcomeHint::Success),
+        "terminal browser_done blocked is evidence the manager can report, not browse no-progress"
+    );
 }
 
 #[test]
@@ -4205,6 +4282,35 @@ fn delegated_browse_outcome_preserves_effect_suspension() {
 fn browse_subagent_uses_a_tighter_navigation_cap_per_single_goal() {
     assert_eq!(super::bounded_browse_subagent_nav_cap(20), 8);
     assert_eq!(super::bounded_browse_subagent_nav_cap(5), 5);
+}
+
+#[test]
+fn browse_subagent_list_contract_gets_extra_discovery_navigation_budget() {
+    let contract = local_first_engine::browse::BrowseResultContract {
+        kind: local_first_engine::browse::BrowseResultKind::List,
+        minimum_items: Some(3),
+        fields: vec![
+            local_first_engine::browse::BrowseResultField {
+                name: "title".into(),
+                required: true,
+            },
+            local_first_engine::browse::BrowseResultField {
+                name: "source".into(),
+                required: true,
+            },
+            local_first_engine::browse::BrowseResultField {
+                name: "summary".into(),
+                required: true,
+            },
+        ],
+        boundary: Some("read news results".into()),
+    };
+
+    assert_eq!(
+        super::browse_subagent_nav_cap_for_contract(Some(&contract)),
+        12
+    );
+    assert_eq!(super::browse_subagent_nav_cap_for_contract(None), 8);
 }
 
 /// Activity relay for the browse sub-turn (regression: island Activity panel stayed empty during
@@ -7126,6 +7232,15 @@ fn browse_subagent_prompt_exposes_its_terminal_tool() {
     assert!(prompt.contains("ONLY these tools:"));
     assert!(prompt.contains("browser_done"));
     assert!(prompt.contains("calling browser_done"));
+}
+
+#[test]
+fn browse_subagent_prompt_keeps_direct_url_goals_on_opened_page() {
+    let prompt = super::browse_subagent_system_prompt(true);
+    assert!(prompt.contains("\"open <url>\""));
+    assert!(prompt.contains("\"Apri <url>\""));
+    assert!(prompt.contains("Do NOT search"));
+    assert!(prompt.contains("use browser_act on the opened page"));
 }
 
 #[test]
@@ -26155,6 +26270,40 @@ fn browser_snapshot_semantic_fingerprint_changes_for_real_page_progress() {
         browser_snapshot_semantic_fingerprint(form),
         browser_snapshot_semantic_fingerprint(results)
     );
+}
+
+#[test]
+fn browser_cached_snapshot_fallback_returns_last_observation_refs() {
+    let fallback = super::browser_cached_snapshot_fallback(
+        "Snapshot",
+        "target temporarily unavailable",
+        "textbox \"Text input\" [ref=e7]",
+    )
+    .expect("fallback");
+
+    assert!(fallback.contains("Snapshot failed"));
+    assert!(fallback.contains("last successful browser observation"));
+    assert!(fallback.contains("browser_act"));
+    assert!(fallback.contains("textbox \"Text input\" [ref=e7]"));
+    assert!(fallback.contains("target temporarily unavailable"));
+}
+
+#[test]
+fn browser_cached_snapshot_fallback_refuses_empty_snapshot() {
+    assert!(super::browser_cached_snapshot_fallback("Snapshot", "boom", "   ").is_none());
+}
+
+#[test]
+fn browser_navigation_timeout_triggers_recycle_recovery() {
+    assert!(super::browser_navigation_should_recycle_after_error(
+        "connectOverCDP timeout while attaching"
+    ));
+    assert!(super::browser_navigation_should_recycle_after_error(
+        super::BROWSER_SIDECAR_TIMEOUT_ERROR
+    ));
+    assert!(!super::browser_navigation_should_recycle_after_error(
+        "Navigation failed: net::ERR_NAME_NOT_RESOLVED"
+    ));
 }
 
 #[test]

@@ -1138,7 +1138,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                 // #1's pre-spawn `browser_cdp_ok` can't see this
                                 // ws-level wedge, so heal it on the failure (same
                                 // self-heal the drive's shared path already has).
-                                if cdp_wedge_signature(&error) {
+                                if browser_navigation_should_recycle_after_error(&error) {
                                     let _ = emit_stream_event(
                                         ctx.tx,
                                         GenerateStreamEvent::Delta {
@@ -1218,7 +1218,12 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             }
                             (None, Err(error)) => {
                                 push_browser_step(format!("navigate {url}"), "error");
-                                Err(format!("Page opened but snapshot failed: {error}"))
+                                browser_cached_snapshot_fallback(
+                                    "Page opened but fresh snapshot",
+                                    &error,
+                                    ctx.last_snapshot,
+                                )
+                                .ok_or_else(|| format!("Page opened but snapshot failed: {error}"))
                             }
                         }
                     }
@@ -1309,7 +1314,8 @@ or tell the user to start the contained computer (Settings → Local computer)."
                         }
                         Err(error) => {
                             push_browser_step("snapshot".to_string(), "error");
-                            Err(format!("Snapshot failed: {error}"))
+                            browser_cached_snapshot_fallback("Snapshot", &error, ctx.last_snapshot)
+                                .ok_or_else(|| format!("Snapshot failed: {error}"))
                         }
                     }
                 }
@@ -6168,6 +6174,26 @@ pub(crate) fn browser_snapshot_semantic_fingerprint(snapshot: &str) -> String {
     format!("{:016x}", std::hash::Hasher::finish(&hasher))
 }
 
+pub(crate) fn browser_cached_snapshot_fallback(
+    operation: &str,
+    error: &str,
+    last_snapshot: &str,
+) -> Option<String> {
+    let snapshot = last_snapshot.trim();
+    if snapshot.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{operation} failed, but the last successful browser observation is still available. \
+Use these [ref=...] values for the next browser_act; if an action reports a stale ref, take a fresh \
+browser_snapshot before retrying.\nFresh observation error: {error}\n\nCached snapshot:\n{snapshot}"
+    ))
+}
+
+pub(crate) fn browser_navigation_should_recycle_after_error(error: &str) -> bool {
+    cdp_wedge_signature(error) || error.contains(BROWSER_SIDECAR_TIMEOUT_ERROR)
+}
+
 fn append_normalized_snapshot_char(target: &mut String, last_was_space: &mut bool, ch: char) {
     if ch.is_whitespace() {
         if !*last_was_space {
@@ -6740,13 +6766,15 @@ pub(crate) fn browse_subagent_system_prompt(allow_rehydrate: bool) -> String {
 browse and answer.\n\
 \n\
 METHOD:\n\
-1. Open a source with browser_navigate, then read the snapshot. IF the goal says \"start at <url>\", you \
-have ALREADY been opened on the best site for this task (a working search/booking engine) — read its \
-snapshot and DO THE TASK RIGHT THERE. Do NOT navigate to a different website or domain, and in particular \
-do NOT switch to a brand's main portal (e.g. a company .com landing page) just because the goal mentions \
-that brand: those portals are heavier and frequently BLOCK automation, so every action there hangs and \
-times out. Stay on the page you were given and fill its form; only navigate elsewhere if the current page \
-visibly cannot do the task at all (no relevant form/results after you actually read it).\n\
+1. If the goal says \"start at <url>\", \"open <url>\", \"Apri <url>\", or includes a Starting page block, \
+the gateway has ALREADY opened that page for you. First read the current snapshot and DO THE TASK RIGHT \
+THERE. Do NOT search the web or navigate to Google/DDG for that goal. When the goal asks you to fill, \
+click, select, or submit controls on that page, use browser_act on the opened page. Do NOT navigate to a \
+different website or domain, and in particular do NOT switch to a brand's main portal (e.g. a company .com \
+landing page) just because the goal mentions that brand: those portals are heavier and frequently BLOCK \
+automation, so every action there hangs and times out. Stay on the page you were given and fill its form; \
+only navigate elsewhere if the current page visibly cannot do the task at all (no relevant form/results \
+after you actually read it). Otherwise, open a source with browser_navigate, then read the snapshot.\n\
 2. FILLING A SEARCH/BOOKING FORM — one field at a time, and for each station/city/airport field you MUST \
 select its suggestion before moving on:\n\
    a) kind='type' the name into the field (e.g. \"Napoli\").\n\
@@ -6877,7 +6905,8 @@ pub(crate) fn parse_browse_request(args_raw: &str) -> ParsedBrowseRequest {
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|v| v.starts_with("https://") || v.starts_with("http://"))
-        .map(str::to_string);
+        .map(str::to_string)
+        .or_else(|| direct_browse_start_url(&goal));
     let contract = value.get("result_contract").cloned().and_then(|v| {
         serde_json::from_value::<local_first_engine::browse::BrowseResultContract>(v).ok()
     });
@@ -6888,29 +6917,129 @@ pub(crate) fn parse_browse_request(args_raw: &str) -> ParsedBrowseRequest {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn build_browse_goal(args_raw: &str) -> String {
-    let parsed = parse_browse_request(args_raw);
-    let goal = parsed.goal.trim();
+pub(crate) fn direct_browse_start_url(goal: &str) -> Option<String> {
+    let urls = goal
+        .split_whitespace()
+        .filter_map(|token| {
+            let candidate = token.trim_matches(|c: char| {
+                matches!(
+                    c,
+                    '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | ';' | '"' | '\'' | '.'
+                )
+            });
+            (candidate.starts_with("https://") || candidate.starts_with("http://"))
+                .then(|| candidate.to_string())
+        })
+        .collect::<Vec<_>>();
+    if urls.len() != 1 {
+        return None;
+    }
+    let normalized = goal.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = normalized.to_ascii_lowercase();
+    let looks_like_open_goal = lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.contains("apri http://")
+        || lower.contains("apri https://")
+        || lower.contains("apri il link")
+        || lower.contains("open http://")
+        || lower.contains("open https://")
+        || lower.contains("go to http://")
+        || lower.contains("go to https://")
+        || lower.contains("vai su http://")
+        || lower.contains("vai su https://")
+        || lower.contains("start at http://")
+        || lower.contains("start at https://");
+    looks_like_open_goal.then(|| urls[0].clone())
+}
+
+pub(crate) fn build_browse_user_goal(
+    request: &ParsedBrowseRequest,
+    hint_container: Option<&str>,
+    initial_observation: Option<&str>,
+) -> String {
+    let goal = request.goal.trim();
     if goal.is_empty() {
         return String::new();
     }
     let mut out = goal.to_string();
-    let v: serde_json::Value = serde_json::from_str(args_raw).unwrap_or(serde_json::Value::Null);
-    let hints = v.get("hints");
-    if let Some(url) = parsed.hint_url.as_deref() {
-        out.push_str(&format!(" (start at {url})"));
+    if let Some(url) = request.hint_url.as_deref() {
+        out.push_str(&format!(
+            "\n\nStarting page: {url}\n\
+The gateway has already opened this URL in the browser before this sub-turn. Treat the current page as \
+the source of truth. Do not search the web or navigate to Google/DDG for this goal. Read the current \
+snapshot and, when the task asks to fill, click, select, or submit page controls, use browser_act on the \
+opened page."
+        ));
     }
-    if let Some(container) = hints
-        .and_then(|h| h.get("container"))
-        .and_then(|c| c.as_str())
+    if let Some(container) = hint_container
+        .map(str::trim)
+        .filter(|container| !container.is_empty())
     {
-        let container = container.trim();
-        if !container.is_empty() {
-            out.push_str(&format!(" (prefer {container})"));
-        }
+        out.push_str(&format!("\n\nPreferred source/container: {container}"));
+    }
+    if let Some(observation) = initial_observation
+        .map(str::trim)
+        .filter(|observation| !observation.is_empty())
+    {
+        out.push_str(
+            "\n\nInitial browser observation from the already-opened page. Use these [ref=...] \
+values for browser_act before taking another snapshot:\n",
+        );
+        out.push_str(observation);
+    }
+    if let Some(contract) = &request.contract {
+        out.push_str("\n\nResult contract:\n");
+        out.push_str(&serde_json::to_string_pretty(contract).unwrap_or_default());
+        out.push_str(&browse_result_contract_shape_hint(contract));
     }
     out
+}
+
+pub(crate) fn browse_result_contract_shape_hint(
+    contract: &local_first_engine::browse::BrowseResultContract,
+) -> String {
+    let required = contract
+        .fields
+        .iter()
+        .filter(|field| field.required)
+        .map(|field| field.name.as_str())
+        .collect::<Vec<_>>();
+    if required.is_empty() {
+        return String::new();
+    }
+
+    let mut example = serde_json::Map::new();
+    for field in &contract.fields {
+        example.insert(
+            field.name.clone(),
+            serde_json::Value::String(format!("<{}>", field.name)),
+        );
+    }
+    let minimum_items = contract.minimum_items.unwrap_or(1).max(1);
+    let kind = serde_json::to_string(&contract.kind).unwrap_or_else(|_| "\"list\"".to_string());
+    let kind = kind.trim_matches('"');
+    format!(
+        "\n\nbrowser_done item shape:\n\
+- Required item keys: {required_keys}\n\
+- Put the data in `items`; the prose `answer` does not satisfy the contract.\n\
+- For kind={kind}, return one object per result row. You need at least {minimum_items} item(s) unless \
+the data is genuinely unavailable.\n\
+- Example item object: {example}",
+        required_keys = required.join(", "),
+        kind = kind,
+        example = serde_json::Value::Object(example)
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn build_browse_goal(args_raw: &str) -> String {
+    let parsed = parse_browse_request(args_raw);
+    let v: serde_json::Value = serde_json::from_str(args_raw).unwrap_or(serde_json::Value::Null);
+    let hint_container = v
+        .get("hints")
+        .and_then(|h| h.get("container"))
+        .and_then(|c| c.as_str());
+    build_browse_user_goal(&parsed, hint_container, None)
 }
 
 /// The manager can emit several `browse` calls in one response, but it cannot
@@ -7041,19 +7170,24 @@ pub(crate) fn delegated_browse_tool_outcome(
     result: &local_first_engine::BrowseResult,
     suspend_effect_receipt: Option<local_first_execution_protocol::EffectReceiptRef>,
 ) -> local_first_engine::ToolOutcome {
+    let completed =
+        result.found && result.status == local_first_engine::browse::BrowserDoneStatus::Completed;
+    let terminal_negative_with_evidence = matches!(
+        result.status,
+        local_first_engine::browse::BrowserDoneStatus::Blocked
+            | local_first_engine::browse::BrowserDoneStatus::Unavailable
+    ) && (!result.answer.trim().is_empty()
+        || !result.evidence.is_empty()
+        || !result.sources.is_empty());
     local_first_engine::ToolOutcome {
         result: local_first_engine::browse::browse_result_for_manager(result),
         effects: local_first_engine::ToolEffects {
             browser_activity_observed: true,
-            outcome_hint: Some(
-                if result.found
-                    && result.status == local_first_engine::browse::BrowserDoneStatus::Completed
-                {
-                    local_first_engine::ToolOutcomeHint::Success
-                } else {
-                    local_first_engine::ToolOutcomeHint::NoProgress
-                },
-            ),
+            outcome_hint: Some(if completed || terminal_negative_with_evidence {
+                local_first_engine::ToolOutcomeHint::Success
+            } else {
+                local_first_engine::ToolOutcomeHint::NoProgress
+            }),
             suspend_effect_receipt,
             ..Default::default()
         },
@@ -7238,22 +7372,11 @@ impl GatewayBrowseExecutor<'_> {
             .or_else(chat_openai_stream_config)
             .unwrap_or_default();
 
-        let user_goal = match &request.contract {
-            Some(contract) => format!(
-                "{}\n\nResult contract:\n{}",
-                request.goal,
-                serde_json::to_string_pretty(contract).unwrap_or_default()
-            ),
-            None => request.goal.clone(),
-        };
+        let mut user_goal = build_browse_user_goal(&request, None, None);
 
         // Seed the ISOLATED sub-state: a clean 2-message context and only granular browser tools.
         // Read-only objectives omit rehydration. Nothing from the manager crosses this boundary.
         let mut ls = local_first_engine::LoopState::new();
-        ls.messages = local_first_engine::browse::seed_browse_messages(
-            &browse_subagent_system_prompt(!self.read_only),
-            &user_goal,
-        );
         ls.tool_schemas = browse_subagent_tool_schemas(self.read_only, request.contract.as_ref());
         ls.provider = local_first_engine::ProviderBinding {
             model,
@@ -7359,8 +7482,12 @@ impl GatewayBrowseExecutor<'_> {
                     suspend_effect_receipt: Some(receipt_ref),
                 };
             }
+            let pre_nav_success = !matches!(
+                pre_navigation.effects.outcome_hint,
+                Some(local_first_engine::contract::ToolOutcomeHint::NoProgress)
+            );
             let pre_nav_metrics = serde_json::json!({
-                "stop_reason": "completed",
+                "stop_reason": if pre_nav_success { "completed" } else { "no_progress" },
                 "action_kinds": ["navigate"],
             });
             journal.record(browser_protocol_journal_event(
@@ -7376,7 +7503,15 @@ impl GatewayBrowseExecutor<'_> {
                 ),
                 "done",
             );
+            if pre_nav_success {
+                user_goal =
+                    build_browse_user_goal(&request, None, Some(pre_navigation.result.as_str()));
+            }
         }
+        ls.messages = local_first_engine::browse::seed_browse_messages(
+            &browse_subagent_system_prompt(!self.read_only),
+            &user_goal,
+        );
         // The sub-turn does NO plan tracking / F3 compaction / route-blocking / completion-nudging — that
         // is the manager's job. All four ports are inert no-ops, and the cfg disables the plan machinery.
         let plan_progress = NoPlanProgress;
@@ -7402,7 +7537,7 @@ impl GatewayBrowseExecutor<'_> {
             hard_round_ceiling: browse_hard_round_ceiling(rounds),
             max_rounds: rounds,
             browser_max_rounds: rounds,
-            browser_nav_cap: browse_subagent_nav_cap(),
+            browser_nav_cap: browse_subagent_nav_cap_for_contract(request.contract.as_ref()),
             browser_budget: local_first_engine::config::BrowserBudget {
                 // `max_elapsed_ms` is now the ABSOLUTE backstop (never resets) — generous, so a
                 // progressing browse is never choked by it. The PRIMARY control is `max_stall_ms`:

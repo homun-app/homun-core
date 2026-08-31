@@ -593,6 +593,27 @@ fn browser_incomplete_failure_code(loop_exit: Option<&str>) -> &'static str {
     }
 }
 
+fn tool_schema_name(schema: &serde_json::Value) -> Option<&str> {
+    schema
+        .get("function")
+        .and_then(|function| function.get("name"))
+        .and_then(serde_json::Value::as_str)
+}
+
+fn has_tool_schema(tools: &[serde_json::Value], name: &str) -> bool {
+    tools
+        .iter()
+        .any(|schema| tool_schema_name(schema) == Some(name))
+}
+
+fn only_tool_schema(tools: &[serde_json::Value], name: &str) -> Vec<serde_json::Value> {
+    tools
+        .iter()
+        .filter(|schema| tool_schema_name(schema) == Some(name))
+        .cloned()
+        .collect()
+}
+
 fn browser_incomplete_failure(
     loop_exit: Option<&str>,
 ) -> local_first_execution_protocol::ExecutionFailure {
@@ -773,6 +794,7 @@ where
         // data). `ls.step_evidence` is cleared on every step close, so this counts
         // navigations for the CURRENT step only. Restores 64f08e4d's budget control
         // for the distinct-URL case (cold-context consent walls → wander → burn).
+        let mut force_browser_done_this_round: Option<&'static str> = None;
         if ls.browser_used {
             let step_navs = ls
                 .step_evidence
@@ -787,8 +809,12 @@ gathered‹‹/ACT››"
                             .to_string(),
                     })
                     .await;
-                loop_exit = Some("browser_nav_cap_reached");
-                break;
+                if cfg.browser_subturn && has_tool_schema(&ls.tool_schemas, "browser_done") {
+                    force_browser_done_this_round = Some("navigation_cap");
+                } else {
+                    loop_exit = Some("browser_nav_cap_reached");
+                    break;
+                }
             }
         }
         // Context hygiene: at up to 32 rounds the ls.accumulated snapshots/images
@@ -827,6 +853,14 @@ gathered‹‹/ACT››"
         // final answer when a SINGLE step stalls for the whole budget (or the 600-round
         // hard ceiling) — so the harness drives the task end-to-end on its own.
         let is_final_round = rounds_since_progress + 1 >= max_rounds;
+        if force_browser_done_this_round.is_none()
+            && cfg.browser_subturn
+            && is_final_round
+            && turn_used_tools
+            && has_tool_schema(&ls.tool_schemas, "browser_done")
+        {
+            force_browser_done_this_round = Some("final_round");
+        }
         // Final round: tools are omitted so the model MUST answer in text. Without an
         // explicit directive a model that was mid-browse writes a TRANSITION note
         // ("now I'll compose the briefing", "I'll update the plan") instead of the
@@ -835,7 +869,26 @@ gathered‹‹/ACT››"
         // Tell it to OUTPUT the finished deliverable from what it already gathered. The
         // separate forced-synthesis (`!final_done` path below) covers the case where the
         // model instead keeps calling tools until the budget breaks the loop.
-        if is_final_round && turn_used_tools {
+        if let Some(reason) = force_browser_done_this_round {
+            let content = match reason {
+                "navigation_cap" => {
+                    "You have reached the navigation/source cap for this browser task. Do NOT \
+navigate, click, scroll, or take another snapshot. Call browser_done NOW using the concrete facts \
+already visible in the browser observations. For a list result contract, fill items with one object \
+per result and include every required field. If fewer required items are genuinely available, use \
+status=\"partial\" and list the missing fields."
+                }
+                _ => {
+                    "This is your FINAL browser-contract step. Do NOT write free-form prose and do \
+NOT call any browser tool except browser_done. Call browser_done NOW using the concrete facts already \
+visible in the browser observations. For a list result contract, fill items with one object per \
+result and include every required field. If fewer required items are genuinely available, use \
+status=\"partial\" and list the missing fields."
+                }
+            };
+            ls.messages
+                .push(serde_json::json!({ "role": "user", "content": content }));
+        } else if is_final_round && turn_used_tools {
             ls.messages.push(serde_json::json!({
                 "role": "user",
                 "content": "This is your FINAL step — no more tools or browsing are \
@@ -850,19 +903,31 @@ missing, give what you have and note the gap in one short line.",
         // HTTP, retry/backoff, provider fallback, and the OpenAI/Ollama stream collectors are
         // owned there. A mid-round provider swap comes back via ProviderBinding so the next
         // rounds use the effective provider.
+        let browser_done_tool_schemas;
+        let tools_for_round = if force_browser_done_this_round.is_some() {
+            browser_done_tool_schemas = only_tool_schema(&ls.tool_schemas, "browser_done");
+            browser_done_tool_schemas.as_slice()
+        } else {
+            ls.tool_schemas.as_slice()
+        };
+        let model_is_final_round = is_final_round && force_browser_done_this_round.is_none();
+        let forced_tool_for_round = if force_browser_done_this_round.is_some() {
+            Some("browser_done")
+        } else if round == 0 {
+            cfg.forced_tool.as_deref()
+        } else {
+            None
+        };
+
         execution_journal.record(AgentExecutionEvent::PromptSnapshot {
             round,
             snapshot: crate::execution_journal::build_prompt_snapshot_with_packets(
                 &ls.provider.model,
                 &ls.provider.base_url,
                 &ls.messages,
-                &ls.tool_schemas,
-                is_final_round,
-                if round == 0 {
-                    cfg.forced_tool.as_deref()
-                } else {
-                    None
-                },
+                tools_for_round,
+                model_is_final_round,
+                forced_tool_for_round,
                 &ls.prompt_packets,
             ),
         });
@@ -874,14 +939,10 @@ missing, give what you have and note the gap in one short line.",
             model: &ls.provider.model,
             api_key: ls.provider.api_key.as_deref(),
             messages: &ls.messages,
-            tools: &ls.tool_schemas,
+            tools: tools_for_round,
             temperature,
-            is_final_round,
-            forced_tool: if round == 0 {
-                cfg.forced_tool.as_deref()
-            } else {
-                None
-            },
+            is_final_round: model_is_final_round,
+            forced_tool: forced_tool_for_round,
             usage: &round_usage,
         };
         let mut control_during_model = None;
@@ -3395,6 +3456,175 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[derive(Default)]
+    struct NavCapThenBrowserDoneModel {
+        calls: AtomicUsize,
+        forced_done_calls: AtomicUsize,
+    }
+
+    impl ModelClient for NavCapThenBrowserDoneModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if call.forced_tool == Some("browser_done") {
+                self.forced_done_calls.fetch_add(1, Ordering::SeqCst);
+                let tool_names = call
+                    .tools
+                    .iter()
+                    .filter_map(|tool| {
+                        tool.get("function")
+                            .and_then(|function| function.get("name"))
+                            .and_then(serde_json::Value::as_str)
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(tool_names, vec!["browser_done"]);
+                return Ok(ModelRoundOutput {
+                    message: json!({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_done",
+                            "type": "function",
+                            "function": {
+                                "name": "browser_done",
+                                "arguments": "{\"status\":\"completed\",\"answer\":\"done\",\"items\":[{\"title\":\"A\",\"source\":\"News\",\"summary\":\"One line\"}],\"sources\":[\"https://news.example\"],\"evidence\":[\"snapshot\"]}"
+                            }
+                        }]
+                    }),
+                    provider,
+                    finish_reason: Some("tool_calls".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                });
+            }
+
+            Ok(ModelRoundOutput {
+                message: json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": format!("nav_{index}"),
+                        "type": "function",
+                        "function": {
+                            "name": "browser_navigate",
+                            "arguments": format!("{{\"url\":\"https://news.example/{index}\"}}")
+                        },
+                    }],
+                }),
+                provider,
+                finish_reason: Some("tool_calls".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    struct NavCapBrowser;
+
+    impl BrowserExecutor for NavCapBrowser {
+        async fn execute_browser(
+            &mut self,
+            name: &str,
+            _args: &str,
+            _call_id: &str,
+            state: &mut LoopState,
+        ) -> ToolOutcome {
+            state.browser_used = true;
+            match name {
+                "browser_navigate" => browser_outcome(
+                    "Page opened (https://news.example/0). Snapshot: A source row",
+                    crate::contract::ToolOutcomeHint::Success,
+                ),
+                "browser_done" => {
+                    browser_outcome("done", crate::contract::ToolOutcomeHint::Success)
+                }
+                other => panic!("unexpected browser tool after nav cap: {other}"),
+            }
+        }
+
+        async fn close_session(&mut self, _browser_used: bool) {}
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn browser_subturn_nav_cap_forces_browser_done_only() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        ls.tool_schemas = vec![
+            json!({
+                "type": "function",
+                "function": {
+                    "name": "browser_navigate",
+                    "parameters": { "type": "object", "properties": {} }
+                }
+            }),
+            json!({
+                "type": "function",
+                "function": {
+                    "name": "browser_done",
+                    "parameters": { "type": "object", "properties": {} }
+                }
+            }),
+        ];
+        let model = NavCapThenBrowserDoneModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NavCapBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.browser_subturn = true;
+        turn_cfg.hard_round_ceiling = 6;
+        turn_cfg.browser_max_rounds = 6;
+        turn_cfg.browser_nav_cap = 1;
+        turn_cfg.browser_budget.max_no_progress = 50;
+        turn_cfg.browser_budget.max_stall_ms = 600_000;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
+        assert_eq!(outcome.memory_answer, "done");
+        assert_eq!(model.forced_done_calls.load(Ordering::SeqCst), 1);
     }
 
     /// E2: `browser_done` is the browse SUB-turn's own completion signal. Outside that sub-turn

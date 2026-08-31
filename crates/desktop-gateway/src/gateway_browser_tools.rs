@@ -128,6 +128,7 @@ pub(crate) fn chat_manager_browser_budget() -> local_first_engine::BrowserBudget
 #[allow(dead_code)]
 pub(crate) const BROWSE_SUBAGENT_MAX_ELAPSED_MS: u64 = 900_000;
 pub(crate) const BROWSE_SUBAGENT_MAX_NAVS: usize = 8;
+pub(crate) const BROWSE_SUBAGENT_LIST_MAX_NAVS: usize = 12;
 
 #[allow(dead_code)]
 pub(crate) fn browse_subagent_budget() -> local_first_engine::BrowserBudget {
@@ -146,8 +147,19 @@ pub(crate) fn bounded_browse_subagent_nav_cap(configured_cap: usize) -> usize {
     configured_cap.min(BROWSE_SUBAGENT_MAX_NAVS)
 }
 
-pub(crate) fn browse_subagent_nav_cap() -> usize {
-    bounded_browse_subagent_nav_cap(chat_browser_nav_cap())
+pub(crate) fn browse_subagent_nav_cap_for_contract(
+    contract: Option<&local_first_engine::browse::BrowseResultContract>,
+) -> usize {
+    let configured_cap = chat_browser_nav_cap();
+    let is_multi_item_list = contract.is_some_and(|contract| {
+        contract.kind == local_first_engine::browse::BrowseResultKind::List
+            && contract.minimum_items.unwrap_or(0) >= 3
+    });
+    if is_multi_item_list {
+        configured_cap.min(BROWSE_SUBAGENT_LIST_MAX_NAVS)
+    } else {
+        bounded_browse_subagent_nav_cap(configured_cap)
+    }
 }
 
 /// How many connected-service tools to pull into the searchable catalog (NOT
