@@ -23195,6 +23195,64 @@ async fn broker_get_turn_honors_workspace_query_for_non_default_workspace() {
 }
 
 #[tokio::test]
+async fn broker_get_turn_prefers_terminal_event_status_over_stale_task_status() {
+    let _env = TestEnv::acquire();
+    let root = isolated_gateway_test_dir("broker-turn-terminal-read-model");
+    std::fs::create_dir_all(&root).unwrap();
+    let database = root.join("homun.sqlite");
+    let chat = ChatStore::open(&database).unwrap();
+    let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
+    let workspace_id = super::gateway_workspace_id();
+    let thread = chat.create_thread(workspace_id.as_str()).unwrap();
+    let mut state = AppState::for_tests();
+    state.chat_store = std::sync::Arc::new(std::sync::Mutex::new(chat));
+    state.task_store = std::sync::Arc::new(std::sync::Mutex::new(tasks));
+    let turn_id = "turn-terminal-read-model";
+
+    {
+        let task_store = state.task_store.lock().unwrap();
+        let mut task = TaskRecord::new(
+            turn_id,
+            super::gateway_user_id(),
+            workspace_id.clone(),
+            "chat_turn",
+            "seed running turn with terminal event",
+            serde_json::json!({
+                "thread_id": thread.thread_id,
+                "request_id": "terminal-read-model",
+            }),
+        );
+        task.status = TaskStatus::Running;
+        task_store
+            .insert_chat_turn(
+                &task,
+                &thread.thread_id,
+                "terminal-read-model",
+                "interactive",
+                "full",
+            )
+            .unwrap();
+        task_store
+            .insert_turn_event(
+                turn_id,
+                local_first_task_runtime::TurnEventKind::Cancelled,
+                serde_json::json!({"text": "cancelled"}),
+            )
+            .unwrap();
+    }
+
+    let Json(turn_body) = super::get_turn(
+        Path(turn_id.to_string()),
+        State(state),
+        Query(super::TurnSinceQuery::default()),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(turn_body["status"], "cancelled");
+}
+
+#[tokio::test]
 async fn broker_model_preflight_fails_without_configured_provider() {
     let root = isolated_gateway_test_dir("broker-model-preflight");
     std::fs::create_dir_all(&root).unwrap();

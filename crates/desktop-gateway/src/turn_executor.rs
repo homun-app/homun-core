@@ -537,6 +537,17 @@ pub fn emit_turn_event(
     kind: TurnEventKind,
     payload: Value,
 ) -> TaskRuntimeResult<()> {
+    if !local_first_task_runtime::turn_event_kind_is_terminal(kind)
+        && store.turn_has_terminal_event(turn_id)?
+    {
+        tracing::debug!(
+            target: "broker::fanout",
+            turn_id = %turn_id,
+            kind = %kind.as_str(),
+            "dropping non-terminal event after terminal turn event"
+        );
+        return Ok(());
+    }
     let event = if let Some(projection_ref) = payload.get("projection_ref").and_then(Value::as_str)
     {
         match store.insert_turn_projection_event_once(
@@ -557,15 +568,6 @@ pub fn emit_turn_event(
             local_first_task_runtime::TerminalWrite::Existing(_) => return Ok(()),
         }
     } else {
-        if store.turn_has_terminal_event(turn_id)? {
-            tracing::debug!(
-                target: "broker::fanout",
-                turn_id = %turn_id,
-                kind = %kind.as_str(),
-                "dropping non-terminal event after terminal turn event"
-            );
-            return Ok(());
-        }
         store.insert_turn_event(turn_id, kind, payload.clone())?
     };
     broadcast_turn_event(state, turn_id, &event);
@@ -1913,6 +1915,50 @@ mod tests {
             Err(tokio::sync::broadcast::error::TryRecvError::Empty)
         ));
         unregister_turn("turn_test_late_activity");
+    }
+
+    #[test]
+    fn emit_drops_late_non_terminal_projection_after_terminal() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let state = AppState::for_tests();
+        let broadcast = register_turn("turn_test_late_projection");
+        let mut rx = broadcast.tx.subscribe();
+
+        emit_turn_event(
+            &state,
+            &store,
+            "turn_test_late_projection",
+            TurnEventKind::Cancelled,
+            json!({
+                "projection_ref": "turn_test_late_projection:2",
+                "revision": 2
+            }),
+        )
+        .unwrap();
+        emit_turn_event(
+            &state,
+            &store,
+            "turn_test_late_projection",
+            TurnEventKind::Suspended,
+            json!({
+                "projection_ref": "turn_test_late_projection:1",
+                "revision": 1,
+                "wake_kind": "at"
+            }),
+        )
+        .unwrap();
+
+        let events = store
+            .read_turn_events("turn_test_late_projection", 0)
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, TurnEventKind::Cancelled);
+        assert_eq!(rx.try_recv().unwrap().kind, "cancelled");
+        assert!(matches!(
+            rx.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+        unregister_turn("turn_test_late_projection");
     }
 
     #[test]

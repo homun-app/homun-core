@@ -785,16 +785,42 @@ pub(crate) async fn get_turn(
             code: "turn_not_found",
             message: format!("turn {turn_id} not found"),
         })?;
+    let status =
+        visible_turn_status(&store, task_id.as_str(), task.status).map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "broker_get_events",
+            message: format!("{e}"),
+        })?;
     Ok(Json(serde_json::json!({
         "turn_id": turn_id,
         "thread_id": task.input_json.get("thread_id").and_then(|v| v.as_str()),
         "request_id": task.input_json.get("request_id").and_then(|v| v.as_str()),
-        "status": format!("{:?}", task.status).to_lowercase(),
+        "status": status,
         "priority": format!("{:?}", task.priority).to_lowercase(),
         "source": task.input_json.get("source").and_then(|v| v.as_str()),
         "created_at": task.created_at.unix_timestamp(),
         "updated_at": task.updated_at.unix_timestamp(),
     })))
+}
+
+fn visible_turn_status(
+    store: &local_first_task_runtime::TaskStore,
+    turn_id: &str,
+    task_status: local_first_task_runtime::TaskStatus,
+) -> Result<&'static str, local_first_task_runtime::TaskRuntimeError> {
+    use local_first_task_runtime::ReducedTurnStatus;
+
+    let events = store.read_turn_events(turn_id, 0)?;
+    let reduced = local_first_task_runtime::reduce_turn_events(&events);
+    let status = match reduced.status {
+        ReducedTurnStatus::Completed => "completed",
+        ReducedTurnStatus::Failed => "failed",
+        ReducedTurnStatus::Cancelled => "cancelled",
+        ReducedTurnStatus::WaitingUser => "waiting_user",
+        ReducedTurnStatus::WaitingApproval => "waiting_user_approval",
+        ReducedTurnStatus::Empty | ReducedTurnStatus::Running => task_status.as_str(),
+    };
+    Ok(status)
 }
 
 /// Cancels a chat_turn task via the broker AND finalizes its assistant bubble
