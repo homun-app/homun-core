@@ -111,8 +111,45 @@ Ogni fix deve chiudere una classe, non un singolo sintomo:
    Aggiungere scenari live realistici: lead CRM da email a spreadsheet,
    preventivo/fattura con approval, ricerca web con report e fonti, riunione
    calendario con follow-up, support ticket multi-step, browser checkout senza
-   pagamento, automazione ricorrente con dry-run, addon MCP install/disconnect,
-   coding maintenance con test.
+   pagamento, automazione ricorrente con dry-run e coding maintenance con test.
+   Addon/MCP restano fuori da questa slice: vanno studiati in una sessione
+   dedicata con modello di permessi, installazione, compatibilita' e governance.
+
+## Task Lunghi
+
+Il budget delle azioni non deve essere il limite dell'obiettivo. Deve limitare
+solo un singolo turno o una singola esecuzione, per evitare loop ciechi,
+consumo incontrollato o azioni ripetute senza progresso.
+
+Per avvicinarsi alla robustezza di Codex/Manus serve un livello superiore:
+
+- `Objective`: obiettivo durevole, anche multi-giorno o multi-settimana;
+- `Run`: una sessione esecutiva breve, con budget, modello, toolset e log;
+- `Checkpoint`: stato verificabile dopo ogni run, con prossimo passo esplicito;
+- `Wake`: ripresa pianificata o richiesta da evento/automation/user approval;
+- `Receipt`: prova di effetti, file, browser, connector, memoria o errore;
+- `Supervisor`: decide se continuare, parcheggiare, chiedere approval o fallire.
+
+OpenCode usa `steps` come limite di agent: all'ultimo step disabilita i tool e
+obbliga una risposta testuale di riepilogo. Ha pero' input/sessioni durevoli e
+un coordinator che serializza i drain per sessione e coalesca i wake. Questo e'
+corretto per un coding turn, ma non basta per un processo aziendale lungo.
+
+Homun deve tenere budget bassi per run e continuita' alta per objective:
+
+```text
+objective mensile
+  -> run 1: scoperta e piano, budget 20 azioni
+  -> checkpoint: cosa e' stato provato, cosa manca
+  -> wake: domani / dopo approval / dopo evento CRM
+  -> run 2: esegui prossimo step, budget 20 azioni
+  -> checkpoint ...
+```
+
+Regola di prodotto: quando finisce il budget, Homun non deve "morire". Deve
+salvare checkpoint, mostrare stato `parked`/`waiting`/`blocked`, e proporre o
+programmare la prossima ripresa. Solo i loop senza progresso devono fermare
+l'obiettivo.
 
 ## Readiness Bar
 
