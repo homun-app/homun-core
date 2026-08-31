@@ -99,6 +99,32 @@ class ProductionSmokeTests(unittest.TestCase):
         self.assertEqual(thread_id, "thread-code")
         self.assertEqual(calls, [("POST", "/api/chat/threads?workspace=workspace_code", {"title": "smoke X4"})])
 
+    def test_enqueue_turn_scopes_to_workspace_when_setup_provides_one(self):
+        calls = []
+        scenario = smoke.Scenario("X4", "code", "Controlla il progetto")
+
+        def fake_request(base, token, method, path, body=None, timeout=60):
+            calls.append((method, path, body))
+            return 201, {"turn_id": "turn-code"}
+
+        original = smoke._request
+        smoke._request = fake_request
+        try:
+            turn_id = smoke.enqueue_turn(
+                "http://gateway",
+                "token",
+                "thread-code",
+                scenario,
+                "workspace_code",
+            )
+        finally:
+            smoke._request = original
+
+        self.assertEqual(turn_id, "turn-code")
+        self.assertEqual(calls[0][0], "POST")
+        self.assertEqual(calls[0][1], "/api/chat/turns?workspace=workspace_code")
+        self.assertEqual(calls[0][2]["thread_id"], "thread-code")
+
     def test_status_success_requires_completed_for_plain_scenarios(self):
         scenario = smoke.Scenario("SX", "plain", "Rispondi ok")
 

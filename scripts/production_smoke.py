@@ -335,13 +335,19 @@ def create_thread(base: str, token: str, title: str, workspace_id: str | None = 
     return str(body["thread_id"])
 
 
-def enqueue_turn(base: str, token: str, thread_id: str, scenario: Scenario) -> str:
+def enqueue_turn(
+    base: str,
+    token: str,
+    thread_id: str,
+    scenario: Scenario,
+    workspace_id: str | None = None,
+) -> str:
     request_id = f"production-smoke-{scenario.id.lower()}-{uuid.uuid4().hex[:10]}"
     status, body = _request(
         base,
         token,
         "POST",
-        "/api/chat/turns",
+        workspace_scoped_path("/api/chat/turns", workspace_id),
         {
             "thread_id": thread_id,
             "request_id": request_id,
@@ -688,7 +694,7 @@ def run_turn_via_broker(
     prepared = state["scenario"]
     thread_id = create_thread(base, token, f"smoke {prepared.id}", state.get("workspace_id"))
     state["thread_id"] = thread_id
-    turn_id = enqueue_turn(base, token, thread_id, prepared)
+    turn_id = enqueue_turn(base, token, thread_id, prepared, state.get("workspace_id"))
     state["turn_id"] = turn_id
     status, output, elapsed = wait_turn_output(
         base,

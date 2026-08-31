@@ -5,6 +5,7 @@ import { test } from "node:test";
 
 const workflowPath = path.resolve(import.meta.dirname, "../../../.github/workflows/build.yml");
 const ciWorkflowPath = path.resolve(import.meta.dirname, "../../../.github/workflows/ci.yml");
+const packagePath = path.resolve(import.meta.dirname, "../package.json");
 const preparePackagePath = path.resolve(import.meta.dirname, "../scripts/prepare-package.mjs");
 
 test("installer matrix depends on same-run release readiness", async () => {
@@ -63,4 +64,12 @@ test("package preparation copies Cargo binaries from Cargo's resolved target dir
     /join\(repoRoot,\s*"target",\s*"release"/,
     "package preparation must not assume Cargo writes under repoRoot/target",
   );
+});
+
+test("package smoke uses the configured Cargo target directory", async () => {
+  const pkg = JSON.parse(await readFile(packagePath, "utf8"));
+  const packageSmoke = pkg.scripts["package:smoke"];
+
+  assert.match(packageSmoke, /CARGO_TARGET_DIR/);
+  assert.match(packageSmoke, /package:prepare -- --skip-build/);
 });

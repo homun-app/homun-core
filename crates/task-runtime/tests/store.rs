@@ -109,6 +109,60 @@ fn store_inserts_loads_and_updates_task_status() {
 }
 
 #[test]
+fn store_lists_same_task_id_for_user_across_workspaces_without_cross_user_leakage() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let user = UserId::new("user_1");
+    let other_user = UserId::new("user_2");
+    let older_workspace = WorkspaceId::new("workspace_older");
+    let newer_workspace = WorkspaceId::new("workspace_newer");
+
+    let older = TaskRecord::new(
+        "task_shared",
+        user.clone(),
+        older_workspace.clone(),
+        "chat_turn",
+        "older",
+        json!({}),
+    );
+    store.insert_task(&older).unwrap();
+
+    let newer = TaskRecord::new(
+        "task_shared",
+        user.clone(),
+        newer_workspace.clone(),
+        "chat_turn",
+        "newer",
+        json!({}),
+    );
+    store.insert_task(&newer).unwrap();
+
+    store
+        .insert_task(&TaskRecord::new(
+            "task_shared",
+            other_user,
+            WorkspaceId::new("workspace_other_user"),
+            "chat_turn",
+            "other user",
+            json!({}),
+        ))
+        .unwrap();
+
+    let tasks = store
+        .tasks_for_user_by_id(&TaskId::new("task_shared"), &user)
+        .unwrap();
+
+    assert_eq!(tasks.len(), 2);
+    assert!(tasks.iter().all(|task| task.user_id == user));
+    assert_eq!(
+        tasks
+            .iter()
+            .map(|task| task.workspace_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![newer_workspace.as_str(), older_workspace.as_str()]
+    );
+}
+
+#[test]
 fn store_isolates_tasks_by_user_and_workspace() {
     let store = TaskStore::open_in_memory().unwrap();
     let task = TaskRecord::new(

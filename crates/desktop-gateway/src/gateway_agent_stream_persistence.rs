@@ -196,6 +196,9 @@ pub(crate) fn fanout_turn_event(state: &AppState, turn_id: &str, line: &str) {
     let Some((kind, payload)) = turn_event_from_stream_value(&value) else {
         return;
     };
+    if local_first_task_runtime::turn_event_kind_is_terminal(kind) {
+        return;
+    }
     if let Ok(store) = state.task_store.lock() {
         let _ = crate::turn_executor::emit_turn_event(state, &store, turn_id, kind, payload);
     }

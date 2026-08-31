@@ -261,6 +261,32 @@ class AuditHomunStateTests(unittest.TestCase):
 
         self.assertIn("completed_task_with_browser_budget_exceeded", self.finding_codes(report))
 
+    def test_active_task_with_terminal_turn_event_is_reported(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-1', 'user-1', 'workspace-1', 'chat_turn',
+                'running', 1, 2, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into turn_events (turn_id, seq, kind, payload_json, created_at)
+            values ('turn-1', 1, 'done', '{"text":"done"}', 2)
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertIn("active_task_with_terminal_turn_event", self.finding_codes(report))
+
     def test_waiting_approval_task_without_canonical_approval_is_reported(self):
         paths = self.with_paths()
         conn = sqlite3.connect(paths.runtime_db)

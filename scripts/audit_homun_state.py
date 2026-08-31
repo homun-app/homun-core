@@ -220,6 +220,32 @@ def audit_runtime(paths: AuditInputs, findings: list[dict[str, Any]], warnings: 
             for row in row_dicts(
                 conn,
                 """
+                select t.task_id, t.status as task_status, max(e.created_at) as terminal_at
+                from tasks t
+                join turn_events e on e.turn_id = t.task_id
+                where t.status in (
+                  'queued', 'pending', 'running', 'waiting_time',
+                  'waiting_external_event', 'waiting_user_approval',
+                  'waiting_resource', 'paused', 'parked'
+                )
+                  and e.kind in ('done', 'error', 'cancelled')
+                group by t.task_id, t.status
+                order by terminal_at desc
+                limit 100
+                """,
+            ):
+                finding(
+                    findings,
+                    domain="chat_runtime",
+                    code="active_task_with_terminal_turn_event",
+                    severity="error",
+                    owner="turn_lifecycle_projection",
+                    summary=f"active task {row['task_id']} is {row['task_status']} but has a terminal turn event",
+                    ref=row["task_id"],
+                )
+            for row in row_dicts(
+                conn,
+                """
                 select t.task_id
                 from tasks t
                 join turn_events e on e.turn_id = t.task_id

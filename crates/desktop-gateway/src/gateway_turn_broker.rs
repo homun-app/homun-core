@@ -773,18 +773,43 @@ pub(crate) async fn get_turn(
     let user_id = gateway_user_id();
     let workspace_id = resolve_turn_workspace(&query);
     let task_id = TaskId::new(&turn_id);
-    let task = store
+    let task = match store
         .get_task(&task_id, &user_id, &workspace_id)
         .map_err(|e| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "broker_get",
             message: format!("{e}"),
-        })?
-        .ok_or_else(|| GatewayError {
-            status: StatusCode::NOT_FOUND,
-            code: "turn_not_found",
-            message: format!("turn {turn_id} not found"),
-        })?;
+        })? {
+        Some(task) => task,
+        None if query
+            .workspace
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|s| !s.is_empty()) =>
+        {
+            store
+                .tasks_for_user_by_id(&task_id, &user_id)
+                .map_err(|e| GatewayError {
+                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    code: "broker_get",
+                    message: format!("{e}"),
+                })?
+                .into_iter()
+                .find(|candidate| candidate.workspace_id.as_str() == workspace_id.as_str())
+                .ok_or_else(|| GatewayError {
+                    status: StatusCode::NOT_FOUND,
+                    code: "turn_not_found",
+                    message: format!("turn {turn_id} not found"),
+                })?
+        }
+        None => {
+            return Err(GatewayError {
+                status: StatusCode::NOT_FOUND,
+                code: "turn_not_found",
+                message: format!("turn {turn_id} not found"),
+            });
+        }
+    };
     let status =
         visible_turn_status(&store, task_id.as_str(), task.status).map_err(|e| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -816,7 +841,12 @@ fn visible_turn_status(
         ReducedTurnStatus::Completed => "completed",
         ReducedTurnStatus::Failed => "failed",
         ReducedTurnStatus::Cancelled => "cancelled",
-        ReducedTurnStatus::WaitingUser => "waiting_user",
+        ReducedTurnStatus::WaitingUser
+            if task_status == local_first_task_runtime::TaskStatus::WaitingUserApproval =>
+        {
+            "waiting_user"
+        }
+        ReducedTurnStatus::WaitingUser => task_status.as_str(),
         ReducedTurnStatus::WaitingApproval => "waiting_user_approval",
         ReducedTurnStatus::Empty | ReducedTurnStatus::Running => task_status.as_str(),
     };

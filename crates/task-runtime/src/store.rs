@@ -2665,6 +2665,29 @@ impl TaskStore {
             .transpose()
     }
 
+    pub fn tasks_for_user_by_id(
+        &self,
+        task_id: &TaskId,
+        user_id: &UserId,
+    ) -> TaskRuntimeResult<Vec<TaskRecord>> {
+        let mut statement = self.connection.prepare(
+            "
+            SELECT task_json
+            FROM tasks
+            WHERE task_id = ?1 AND user_id = ?2
+            ORDER BY updated_at DESC, workspace_id ASC
+            ",
+        )?;
+        let rows = statement.query_map(params![task_id.as_str(), user_id.as_str()], |row| {
+            row.get::<_, String>(0)
+        })?;
+        rows.map(|row| {
+            let json = row?;
+            Ok(serde_json::from_str::<TaskRecord>(&json)?)
+        })
+        .collect()
+    }
+
     pub fn update_task_status(
         &self,
         task_id: &TaskId,
@@ -5314,6 +5337,35 @@ impl TaskStore {
         }
 
         let mut stmt = self.connection.prepare(
+            "SELECT t.task_id, t.status
+             FROM tasks t
+             JOIN turn_events e ON e.turn_id = t.task_id
+             WHERE t.status IN (
+               'queued', 'pending', 'running', 'waiting_time',
+               'waiting_external_event', 'waiting_user_approval',
+               'waiting_resource', 'paused', 'parked'
+             )
+               AND e.kind IN ('done', 'error', 'cancelled')
+             GROUP BY t.task_id, t.status
+             ORDER BY MAX(e.created_at) DESC
+             LIMIT 100",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (task_id, task_status) = row?;
+            findings.push(runtime_integrity_finding(
+                "chat_runtime",
+                "active_task_with_terminal_turn_event",
+                "error",
+                "turn_lifecycle_projection",
+                format!("active task {task_id} is {task_status} but has a terminal turn event"),
+                Some(task_id),
+            ));
+        }
+
+        let mut stmt = self.connection.prepare(
             "SELECT t.task_id
              FROM tasks t
              JOIN turn_events e ON e.turn_id = t.task_id
@@ -7692,6 +7744,26 @@ mod chat_turn_query_tests {
         )
         .unwrap();
 
+        let active_with_terminal = make_chat_turn(
+            "turn_active_terminal_event",
+            "thread_active",
+            TaskStatus::Running,
+        );
+        s.insert_chat_turn(
+            &active_with_terminal,
+            "thread_active",
+            "req-active",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.insert_terminal_event_once(
+            "turn_active_terminal_event",
+            TurnEventKind::Done,
+            json!({"text": "done"}),
+        )
+        .unwrap();
+
         let waiting = make_chat_turn(
             "turn_waiting_approval",
             "thread_waiting",
@@ -7716,6 +7788,7 @@ mod chat_turn_query_tests {
         assert!(!report.integrity_ok);
         assert!(codes.contains("terminal_task_with_running_agent_run"));
         assert!(codes.contains("running_agent_run_without_active_task"));
+        assert!(codes.contains("active_task_with_terminal_turn_event"));
         assert!(codes.contains("completed_task_with_browser_budget_exceeded"));
         assert!(codes.contains("waiting_approval_task_without_canonical_approval"));
     }

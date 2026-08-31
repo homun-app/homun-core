@@ -5506,6 +5506,34 @@ fn placeholder_payment_approval_marker_is_not_fanned_out_as_a_real_card() {
 }
 
 #[test]
+fn stream_terminal_events_do_not_persist_before_canonical_projection() {
+    let state = super::AppState::for_tests();
+    let turn_id = "turn_stream_terminal_guard";
+
+    super::fanout_turn_event(
+        &state,
+        turn_id,
+        r#"{"type":"done","text":"visible final text"}"#,
+    );
+    super::fanout_turn_event(
+        &state,
+        turn_id,
+        r#"{"type":"error","code":"provider_error","message":"failed"}"#,
+    );
+
+    let events = state
+        .task_store
+        .lock()
+        .unwrap()
+        .read_turn_events(turn_id, 0)
+        .unwrap();
+    assert!(
+        events.is_empty(),
+        "stream fanout must not persist terminal events before task projection"
+    );
+}
+
+#[test]
 fn user_reply_resumes_the_suspended_chat_execution_in_place() {
     let _env = TestEnv::acquire();
     let state = super::AppState::for_tests();
@@ -14870,10 +14898,16 @@ async fn privacy_preflight_broker_drain_persists_vault_proposal_event() {
         .read_turn_events("turn_privacy_broker_fanout", 0)
         .unwrap();
     assert!(
-        serde_json::to_string(&immediate_events)
-            .unwrap()
-            .contains("VAULT_PROPOSE"),
+        immediate_events
+            .iter()
+            .any(|event| event.kind == local_first_task_runtime::TurnEventKind::VaultPropose),
         "broker privacy preflight must fan out card markers before executor finalization"
+    );
+    assert!(
+        immediate_events
+            .iter()
+            .all(|event| !local_first_task_runtime::turn_event_kind_is_terminal(event.kind)),
+        "stream fanout must leave terminal events to canonical projection"
     );
     let body_task = tokio::spawn(async move {
         let _ = axum::body::to_bytes(response.into_body(), usize::MAX).await;
@@ -14898,10 +14932,17 @@ async fn privacy_preflight_broker_drain_persists_vault_proposal_event() {
         .unwrap()
         .read_turn_events("turn_privacy_broker_fanout", 0)
         .unwrap();
-    let flattened = serde_json::to_string(&events).unwrap();
     assert!(
-        flattened.contains("VAULT_PROPOSE"),
-        "events did not include vault marker: {flattened}"
+        events
+            .iter()
+            .any(|event| event.kind == local_first_task_runtime::TurnEventKind::VaultPropose),
+        "events did not include vault marker: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|event| !local_first_task_runtime::turn_event_kind_is_terminal(event.kind)),
+        "stream fanout must leave terminal events to canonical projection: {events:?}"
     );
 }
 
@@ -15025,10 +15066,17 @@ fn fanout_done_with_legacy_vault_marker_is_durable() {
         .unwrap()
         .read_turn_events("turn_done_vault_marker", 0)
         .unwrap();
-    let flattened = serde_json::to_string(&events).unwrap();
     assert!(
-        flattened.contains("VAULT_PROPOSE"),
-        "done fanout events did not include marker: {flattened}"
+        events
+            .iter()
+            .any(|event| event.kind == local_first_task_runtime::TurnEventKind::VaultPropose),
+        "done fanout events did not include marker: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|event| !local_first_task_runtime::turn_event_kind_is_terminal(event.kind)),
+        "done fanout must not persist a terminal event before canonical projection: {events:?}"
     );
 }
 
@@ -23250,6 +23298,193 @@ async fn broker_get_turn_prefers_terminal_event_status_over_stale_task_status() 
     .unwrap();
 
     assert_eq!(turn_body["status"], "cancelled");
+}
+
+#[tokio::test]
+async fn broker_get_turn_reads_active_turns_in_non_default_workspace() {
+    let _env = TestEnv::acquire();
+    let root = isolated_gateway_test_dir("broker-turn-active-workspace-query");
+    std::fs::create_dir_all(&root).unwrap();
+    let database = root.join("homun.sqlite");
+    let chat = ChatStore::open(&database).unwrap();
+    let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
+    let workspace_id = local_first_task_runtime::WorkspaceId::new("workspace_active_query");
+    let thread = chat.create_thread(workspace_id.as_str()).unwrap();
+    let mut state = AppState::for_tests();
+    state.chat_store = std::sync::Arc::new(std::sync::Mutex::new(chat));
+    state.task_store = std::sync::Arc::new(std::sync::Mutex::new(tasks));
+    let turn_id = "turn-active-workspace-query";
+
+    {
+        let task_store = state.task_store.lock().unwrap();
+        let mut task = TaskRecord::new(
+            turn_id,
+            super::gateway_user_id(),
+            workspace_id.clone(),
+            "chat_turn",
+            "seed active workspace turn",
+            serde_json::json!({
+                "thread_id": thread.thread_id,
+                "request_id": "active-workspace-query",
+            }),
+        );
+        task.status = TaskStatus::Running;
+        task_store
+            .insert_chat_turn(
+                &task,
+                &thread.thread_id,
+                "active-workspace-query",
+                "interactive",
+                "full",
+            )
+            .unwrap();
+    }
+
+    let Json(turn_body) = super::get_turn(
+        Path(turn_id.to_string()),
+        State(state),
+        Query(super::TurnSinceQuery {
+            since: None,
+            workspace: Some(workspace_id.as_str().to_string()),
+        }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(turn_body["status"], "running");
+    assert_eq!(turn_body["thread_id"], thread.thread_id);
+    assert_eq!(turn_body["request_id"], "active-workspace-query");
+}
+
+#[tokio::test]
+async fn broker_get_turn_http_route_parses_workspace_query_for_active_turns() {
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+
+    let _env = TestEnv::acquire();
+    let root = isolated_gateway_test_dir("broker-turn-active-workspace-http-query");
+    std::fs::create_dir_all(&root).unwrap();
+    let database = root.join("homun.sqlite");
+    let chat = ChatStore::open(&database).unwrap();
+    let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
+    let workspace_id = local_first_task_runtime::WorkspaceId::new("workspace_active_http_query");
+    let thread = chat.create_thread(workspace_id.as_str()).unwrap();
+    let mut state = AppState::for_tests();
+    state.chat_store = std::sync::Arc::new(std::sync::Mutex::new(chat));
+    state.task_store = std::sync::Arc::new(std::sync::Mutex::new(tasks));
+    let turn_id = "turn-active-workspace-http-query";
+
+    {
+        let task_store = state.task_store.lock().unwrap();
+        let mut task = TaskRecord::new(
+            turn_id,
+            super::gateway_user_id(),
+            workspace_id.clone(),
+            "chat_turn",
+            "seed active workspace turn",
+            serde_json::json!({
+                "thread_id": thread.thread_id,
+                "request_id": "active-workspace-http-query",
+            }),
+        );
+        task.status = TaskStatus::Running;
+        task_store
+            .insert_chat_turn(
+                &task,
+                &thread.thread_id,
+                "active-workspace-http-query",
+                "interactive",
+                "full",
+            )
+            .unwrap();
+    }
+
+    let response = super::gateway_routes::build_gateway_router(state)
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/chat/turns/{turn_id}?workspace={}",
+                    workspace_id.as_str()
+                ))
+                .header("Authorization", "Bearer test-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let turn_body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(turn_body["status"], "running");
+    assert_eq!(turn_body["thread_id"], thread.thread_id);
+}
+
+#[tokio::test]
+async fn broker_get_turn_preserves_timed_retry_status_for_suspended_turns() {
+    let _env = TestEnv::acquire();
+    let root = isolated_gateway_test_dir("broker-turn-suspended-timed-retry");
+    std::fs::create_dir_all(&root).unwrap();
+    let database = root.join("homun.sqlite");
+    let chat = ChatStore::open(&database).unwrap();
+    let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
+    let workspace_id = local_first_task_runtime::WorkspaceId::new("workspace_timed_retry");
+    let thread = chat.create_thread(workspace_id.as_str()).unwrap();
+    let mut state = AppState::for_tests();
+    state.chat_store = std::sync::Arc::new(std::sync::Mutex::new(chat));
+    state.task_store = std::sync::Arc::new(std::sync::Mutex::new(tasks));
+    let turn_id = "turn-suspended-timed-retry";
+
+    {
+        let task_store = state.task_store.lock().unwrap();
+        let mut task = TaskRecord::new(
+            turn_id,
+            super::gateway_user_id(),
+            workspace_id.clone(),
+            "chat_turn",
+            "seed timed retry turn",
+            serde_json::json!({
+                "thread_id": thread.thread_id,
+                "request_id": "timed-retry",
+            }),
+        );
+        task.status = TaskStatus::WaitingTime;
+        task_store
+            .insert_chat_turn(
+                &task,
+                &thread.thread_id,
+                "timed-retry",
+                "interactive",
+                "full",
+            )
+            .unwrap();
+        task_store
+            .insert_turn_event(
+                turn_id,
+                local_first_task_runtime::TurnEventKind::Suspended,
+                serde_json::json!({
+                    "execution_id": turn_id,
+                    "revision": 1,
+                    "wake_kind": "at",
+                }),
+            )
+            .unwrap();
+    }
+
+    let Json(turn_body) = super::get_turn(
+        Path(turn_id.to_string()),
+        State(state),
+        Query(super::TurnSinceQuery {
+            since: None,
+            workspace: Some(workspace_id.as_str().to_string()),
+        }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(turn_body["status"], "waiting_time");
 }
 
 #[tokio::test]

@@ -65,6 +65,31 @@ fn scheduler_selects_ready_tasks_across_workspaces_with_global_ordering() {
 }
 
 #[test]
+fn scheduler_selects_ready_project_task_when_personal_task_is_not_before_future() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let user = UserId::new("user_1");
+    let personal = WorkspaceId::new("local-workspace");
+    let project = WorkspaceId::new("workspace_project");
+    let now = OffsetDateTime::now_utc();
+
+    let mut future_personal =
+        task("future_automation", &user, &personal).with_priority(TaskPriority::Normal);
+    future_personal.not_before = Some(now + Duration::days(1));
+    store.insert_task(&future_personal).unwrap();
+
+    let ready_project = task("project_turn", &user, &project).with_priority(TaskPriority::High);
+    store.insert_task(&ready_project).unwrap();
+
+    let ready = TaskScheduler::new()
+        .ready_tasks_for_user(&store, &user, now, 1)
+        .unwrap();
+
+    assert_eq!(ready.len(), 1);
+    assert_eq!(ready[0].task_id.as_str(), "project_turn");
+    assert_eq!(ready[0].workspace_id, project);
+}
+
+#[test]
 fn scheduler_skips_tasks_before_not_before_time() {
     let store = TaskStore::open_in_memory().unwrap();
     let user = UserId::new("user_1");
