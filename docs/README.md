@@ -16,6 +16,7 @@
 | [`testing/anti-regression-protocol.md`](testing/anti-regression-protocol.md) | Gate minimo per non far rientrare regressioni chat/runtime/UI |
 | [`testing/kernel-contract-matrix.md`](testing/kernel-contract-matrix.md) | Matrix owner/test/smoke dei contratti kernel vivi |
 | [`testing/system-risk-matrix.md`](testing/system-risk-matrix.md) | Matrice domini rischio + audit DB/log + scenari live complessi |
+| [`testing/agentic-platform-readiness.md`](testing/agentic-platform-readiness.md) | Benchmark Manus/OpenClaw/Codex/OpenCode e slice prioritarie per portare Homun a piattaforma agentica business |
 | [`testing/usage-scenarios.md`](testing/usage-scenarios.md) | Catalogo scenari d'uso baseline/extended per smoke live |
 | [`testing/gateway-ownership-contracts.md`](testing/gateway-ownership-contracts.md) | Confini owner del gateway e regole per non far rientrare il monolite |
 | [`testing/release-candidate-matrix.md`](testing/release-candidate-matrix.md) | Gate release installata |
