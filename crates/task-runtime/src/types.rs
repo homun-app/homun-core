@@ -1,6 +1,7 @@
 use local_first_execution_protocol::{EffectClass, EffectReceiptRef, EffectReceiptStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use time::OffsetDateTime;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -152,6 +153,27 @@ impl std::str::FromStr for TaskStatus {
             _ => Err(format!("unknown task status: {value}")),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeIntegrityFinding {
+    pub domain: String,
+    pub code: String,
+    pub severity: String,
+    pub owner: String,
+    pub summary: String,
+    #[serde(rename = "ref", skip_serializing_if = "Option::is_none")]
+    pub ref_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeIntegrityReport {
+    pub integrity_ok: bool,
+    pub total_findings: u64,
+    pub error_count: u64,
+    pub warning_count: u64,
+    pub finding_counts: BTreeMap<String, u64>,
+    pub findings: Vec<RuntimeIntegrityFinding>,
 }
 
 #[cfg(test)]

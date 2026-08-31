@@ -37,6 +37,36 @@ matrice owner/gate vive in
 protocollo anti-regressione vive in
 [`testing/anti-regression-protocol.md`](testing/anti-regression-protocol.md).
 
+## Lifecycle Integrity - 2026-08-31
+
+Slice locale su `fabio/lifecycle-integrity-audit`: l'audit read-only del core
+ora copre anche stati lifecycle impossibili prima visibili solo nelle chat reali:
+
+- `scripts/audit_homun_state.py` segnala run `running` senza task attivo,
+  messaggi assistant `streaming`/`retrying` senza run attivo, task completati con
+  `browser_budget_exceeded` e task `waiting_user_approval` senza approval/HITL
+  canonico;
+- `crates/task-runtime/src/store.rs::audit_runtime_integrity` espone la stessa
+  proiezione strutturata per il runtime;
+- `/api/integrity/audit` restituisce anche `runtime`, oltre a `memory`, `vault`
+  e `graphs`, senza includere contenuto sensibile del task.
+
+Evidenza locale:
+
+- `python3 -m unittest scripts.test_audit_homun_state -v`
+- `cargo test -p local-first-task-runtime runtime_integrity_audit_reports_lifecycle_contradictions -- --nocapture`
+- `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway integrity_audit -- --nocapture`
+- `python3 scripts/kernel_regression_gate.py` -> `ALL GREEN`
+
+Audit read-only sul profilo reale/default del 2026-08-31: `python3
+scripts/audit_homun_state.py` torna `ok=false` con 51 errori e 217 warning.
+I codici principali osservati sono `completed_task_with_browser_budget_exceeded`
+(37), `streaming_assistant_without_active_run` (2),
+`waiting_approval_task_without_canonical_approval` (4),
+`log_contains_sensitive_plaintext` (8), piu' debito storico warning su HITL,
+memoria senza evidence e `agent_run_missing_model_attribution`. La slice e'
+diagnostica/read-only: non ripara ancora il profilo reale.
+
 ## RC readiness - 2026-08-26
 
 Branch candidato: `fabio/rc-readiness-2026-08-26`, PR #406, su base `main`

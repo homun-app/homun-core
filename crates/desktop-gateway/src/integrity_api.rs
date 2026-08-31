@@ -3,6 +3,7 @@ use local_first_memory::{
     DataSensitivity, MemoryIntegrityReport, MemoryRepairAction, MemoryRepairEstimate,
     PrivacyDomain, ProjectGraphImportReport, UserId, WorkspaceId, normalize_graphify_value,
 };
+use local_first_task_runtime::RuntimeIntegrityReport;
 use local_first_vault::VaultIntegrityReport;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -33,6 +34,7 @@ pub struct GraphIntegrityStatus {
 pub struct IntegrityAuditResponse {
     pub memory: MemoryIntegrityReport,
     pub vault: VaultIntegrityReport,
+    pub runtime: RuntimeIntegrityReport,
     pub graphs: Vec<GraphIntegrityStatus>,
 }
 

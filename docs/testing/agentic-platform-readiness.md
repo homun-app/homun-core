@@ -59,7 +59,9 @@ ancora stati impossibili:
   Payment Approval Card strutturata e c'era `browser_budget_exceeded`;
 - esistono residui storici nel DB reale: run vecchi `running`, messaggi
   `streaming`, task `waiting_user_approval`, effetti incerti;
-- `/api/integrity/audit` non intercetta ancora lifecycle debt;
+- `/api/integrity/audit` ora espone una prima sezione `runtime` read-only per
+  lifecycle debt, ma non ha ancora repair preview/apply per riconciliare lo
+  storico reale;
 - approval inline come `SANDBOX_ESCALATE` non e' proiettata nella stessa coda
   canonica delle approval;
 - il selettore modello mostra `Unavailable` mentre la select risolve `Auto`,
@@ -86,10 +88,12 @@ Ogni fix deve chiudere una classe, non un singolo sintomo:
 ## Slice Prioritarie
 
 1. Lifecycle integrity gate.
-   Estendere `scripts/audit_homun_state.py` e `/api/integrity/audit` per
-   rilevare run `running` senza stream, messaggi `streaming` appesi, task HITL
-   non proiettati, effetti incerti e browser budget terminali. Prima read-only,
-   poi repair preview/apply.
+   Prima slice completata: `scripts/audit_homun_state.py` e
+   `/api/integrity/audit.runtime` rilevano run `running` senza task attivo,
+   messaggi assistant `streaming` appesi, task approval senza oggetto canonico
+   e browser budget terminali su task completati. Restano da aggiungere repair
+   preview/apply, effetti incerti e integrazione nel gate kernel dopo
+   classificazione del rumore reale.
 
 2. Approval contract hardening.
    Rendere impossibile chiudere `S8` con testo simulato: Payment Approval Card,
@@ -164,6 +168,8 @@ Non tagliare una nuova versione pubblica come "distribuibile" finche':
 - la dashboard spiega sempre cosa e' in corso, cosa e' bloccato, quale modello
   sta lavorando e quale azione richiede consenso.
 
-Il prossimo lavoro concreto e' la slice 1: audit lifecycle + integrity API.
-Senza quella, continueremo a scoprire bug dal vivo per caso invece di bloccare
-le classi di regressione prima della chat reale.
+Il prossimo lavoro concreto dopo la prima slice lifecycle e' decidere se
+chiudere il repair read-only -> preview/apply oppure passare alla clarity del
+model routing (`Unavailable`/`Auto`). Senza questi due owner, continueremo a
+scoprire bug dal vivo per caso invece di bloccare le classi di regressione prima
+della chat reale.

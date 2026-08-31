@@ -19,6 +19,17 @@ from typing import Any, Iterable
 
 
 TERMINAL_TASK_STATUSES = {"completed", "failed", "cancelled", "expired"}
+ACTIVE_TASK_STATUSES = {
+    "queued",
+    "pending",
+    "running",
+    "waiting_time",
+    "waiting_external_event",
+    "waiting_user_approval",
+    "waiting_resource",
+    "paused",
+    "parked",
+}
 ALLOWED_ROUTING_STAGES = {
     "semantic",
     "heuristic_fallback",
@@ -156,6 +167,116 @@ def audit_runtime(paths: AuditInputs, findings: list[dict[str, Any]], warnings: 
                 summary=f"terminal task {row['task_id']} is {row['task_status']} but agent run is still running",
                 ref=row["run_id"],
             )
+        for row in row_dicts(
+            conn,
+            """
+            select r.run_id, r.turn_id, r.thread_id, r.started_at
+            from agent_runs r
+            left join tasks t on t.task_id = r.turn_id
+            where r.status = 'running'
+              and (t.task_id is null or t.status not in (
+                'queued', 'pending', 'running', 'waiting_time',
+                'waiting_external_event', 'waiting_user_approval',
+                'waiting_resource', 'paused', 'parked'
+              ))
+            order by r.started_at desc
+            limit 100
+            """,
+        ):
+            finding(
+                findings,
+                domain="chat_runtime",
+                code="running_agent_run_without_active_task",
+                severity="error",
+                owner="agent_run_projection",
+                summary="running agent run has no matching active task",
+                ref=row["run_id"],
+            )
+        if table_exists(conn, "chat_messages") and column_exists(conn, "chat_messages", "delivery_state"):
+            for row in row_dicts(
+                conn,
+                """
+                select m.id, m.thread_id, m.linked_task_id, m.delivery_state
+                from chat_messages m
+                left join agent_runs r on r.turn_id = m.linked_task_id and r.status = 'running'
+                where m.role = 'assistant'
+                  and m.delivery_state in ('streaming', 'retrying')
+                  and coalesce(m.linked_task_id, '') <> ''
+                  and r.run_id is null
+                order by m.timestamp desc
+                limit 100
+                """,
+            ):
+                finding(
+                    findings,
+                    domain="chat_runtime",
+                    code="streaming_assistant_without_active_run",
+                    severity="error",
+                    owner="message_delivery_projection",
+                    summary=f"assistant message remains {row['delivery_state']} without an active agent run",
+                    ref=row["id"],
+                )
+        if table_exists(conn, "turn_events"):
+            for row in row_dicts(
+                conn,
+                """
+                select t.task_id
+                from tasks t
+                join turn_events e on e.turn_id = t.task_id
+                where t.status = 'completed'
+                  and e.payload_json like '%browser_budget_exceeded%'
+                group by t.task_id
+                order by max(e.created_at) desc
+                limit 100
+                """,
+            ):
+                finding(
+                    findings,
+                    domain="browser",
+                    code="completed_task_with_browser_budget_exceeded",
+                    severity="error",
+                    owner="browser_outcome_projection",
+                    summary="completed task contains a browser budget exhaustion event",
+                    ref=row["task_id"],
+                )
+        if table_exists(conn, "task_approvals"):
+            for row in row_dicts(
+                conn,
+                """
+                select t.task_id, t.thread_id
+                from tasks t
+                where t.status = 'waiting_user_approval'
+                  and not exists (
+                    select 1 from task_approvals a
+                    where a.task_id = t.task_id
+                      and a.user_id = t.user_id
+                      and a.workspace_id = t.workspace_id
+                      and a.status = 'pending'
+                  )
+                  and (
+                    not exists (
+                      select 1 from sqlite_master
+                      where type in ('table', 'view') and name = 'thread_hitl_waits'
+                    )
+                    or not exists (
+                      select 1 from thread_hitl_waits h
+                      where h.thread_id = t.thread_id
+                        and h.status = 'open'
+                    )
+                  )
+                order by t.updated_at desc
+                limit 100
+                """,
+            ):
+                finding(
+                    findings,
+                    domain="chat_runtime",
+                    code="waiting_approval_task_without_canonical_approval",
+                    severity="error",
+                    owner="approval_projection",
+                    summary="task waits for user approval but no canonical pending approval or open HITL wait is visible",
+                    ref=row["task_id"],
+                )
         if table_exists(conn, "thread_hitl_waits"):
             for row in row_dicts(
                 conn,

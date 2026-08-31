@@ -52,6 +52,33 @@ def create_runtime_schema(conn: sqlite3.Connection) -> None:
             created_at integer not null,
             resolved_at integer
         );
+        create table chat_messages (
+            id text primary key,
+            thread_id text not null,
+            role text not null,
+            text text not null,
+            timestamp text not null,
+            linked_task_id text,
+            delivery_state text not null default 'delivered'
+        );
+        create table turn_events (
+            event_id integer primary key autoincrement,
+            turn_id text not null,
+            seq integer not null,
+            kind text not null,
+            payload_json text not null,
+            created_at integer not null
+        );
+        create table task_approvals (
+            approval_id text primary key,
+            task_id text not null,
+            user_id text not null,
+            workspace_id text not null,
+            status text not null,
+            created_at integer not null,
+            updated_at integer not null,
+            approval_json text not null
+        );
         """
     )
 
@@ -158,6 +185,101 @@ class AuditHomunStateTests(unittest.TestCase):
         report = audit.audit_homun_state(paths)
 
         self.assertIn("terminal_task_with_running_agent_run", self.finding_codes(report))
+
+    def test_running_agent_run_without_active_task_is_reported(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into agent_runs (
+                run_id, turn_id, thread_id, user_id, workspace_id, attempt,
+                status, role, model, provider, prompt_fingerprint, started_at,
+                completed_at, terminal_reason, schema_version
+            ) values ('run-orphan', 'turn-missing', 'thread-1', 'user-1',
+                'workspace-1', 1, 'running', 'orchestrator', 'qwen',
+                'ollama', 'fp', 1, null, null, 1)
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertIn("running_agent_run_without_active_task", self.finding_codes(report))
+
+    def test_streaming_assistant_without_active_run_is_reported(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-1', 'user-1', 'workspace-1', 'chat_turn',
+                'completed', 1, 2, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into chat_messages (
+                id, thread_id, role, text, timestamp, linked_task_id, delivery_state
+            ) values ('message-1', 'thread-1', 'assistant', '', '2', 'turn-1', 'streaming')
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertIn("streaming_assistant_without_active_run", self.finding_codes(report))
+
+    def test_completed_task_with_browser_budget_exceeded_is_reported(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-1', 'user-1', 'workspace-1', 'chat_turn',
+                'completed', 1, 2, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into turn_events (turn_id, seq, kind, payload_json, created_at)
+            values ('turn-1', 1, 'activity', '{"status":"browser_budget_exceeded:stall"}', 2)
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertIn("completed_task_with_browser_budget_exceeded", self.finding_codes(report))
+
+    def test_waiting_approval_task_without_canonical_approval_is_reported(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-1', 'user-1', 'workspace-1', 'chat_turn',
+                'waiting_user_approval', 1, 2, null, '{}', 'thread-1')
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertIn("waiting_approval_task_without_canonical_approval", self.finding_codes(report))
 
     def test_sensitive_memory_without_vault_containment_is_reported_without_leaking_value(self):
         paths = self.with_paths()

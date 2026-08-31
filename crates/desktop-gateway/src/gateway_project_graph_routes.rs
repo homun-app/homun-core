@@ -451,9 +451,13 @@ pub(crate) async fn integrity_audit(
     let vault = lock_vault_store(&state)?
         .audit_integrity()
         .map_err(|error| integrity_internal_error("integrity_audit_failed", error))?;
+    let runtime = lock_task_store(&state)?
+        .audit_runtime_integrity()
+        .map_err(|error| integrity_internal_error("integrity_audit_failed", error))?;
     Ok(Json(IntegrityAuditResponse {
         memory,
         vault,
+        runtime,
         graphs: integrity_graph_statuses(),
     }))
 }

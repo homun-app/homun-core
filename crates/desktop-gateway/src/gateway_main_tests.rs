@@ -25345,6 +25345,7 @@ async fn integrity_audit_returns_counts_and_graph_freshness_without_content() {
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(body["memory"]["integrity_ok"], true);
     assert_eq!(body["vault"]["integrity_ok"], true);
+    assert_eq!(body["runtime"]["integrity_ok"], true);
     assert_eq!(body["graphs"][0]["status"], "missing");
     assert!(!body.to_string().contains("PRIVATE_SENTINEL"));
     assert!(
@@ -25352,6 +25353,88 @@ async fn integrity_audit_returns_counts_and_graph_freshness_without_content() {
             .to_string()
             .contains(project.to_string_lossy().as_ref())
     );
+
+    drop(_data_dir);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn integrity_audit_reports_runtime_lifecycle_findings_without_content() {
+    use tower::ServiceExt;
+
+    let dir = isolated_gateway_test_dir("integrity-audit-runtime");
+    std::fs::create_dir_all(&dir).unwrap();
+    let _data_dir = TestGatewayDataDir::new(&dir);
+    let state = super::AppState::for_tests();
+    let user = super::gateway_user_id();
+    let workspace = WorkspaceId::new("workspace_test");
+    let mut task = TaskRecord::new(
+        "turn_runtime_integrity",
+        user.clone(),
+        workspace.clone(),
+        "chat_turn",
+        "Runtime lifecycle sentinel",
+        serde_json::json!({
+            "thread_id": "thread_runtime_integrity",
+            "secret": "RUNTIME_SECRET_SENTINEL",
+        }),
+    );
+    task.status = TaskStatus::Completed;
+    {
+        let store = state.task_store.lock().unwrap();
+        store
+            .insert_chat_turn(
+                &task,
+                "thread_runtime_integrity",
+                "req-runtime-integrity",
+                "interactive",
+                "full",
+            )
+            .unwrap();
+        store
+            .create_agent_run(&local_first_task_runtime::NewAgentRun {
+                run_id: "run_runtime_integrity".to_string(),
+                turn_id: "turn_runtime_integrity".to_string(),
+                thread_id: "thread_runtime_integrity".to_string(),
+                user_id: user.as_str().to_string(),
+                workspace_id: workspace.as_str().to_string(),
+                role: Some("orchestrator".to_string()),
+                model: Some("qwen".to_string()),
+                provider: Some("ollama".to_string()),
+                prompt_fingerprint: None,
+            })
+            .unwrap();
+        store
+            .insert_turn_event(
+                "turn_runtime_integrity",
+                local_first_task_runtime::TurnEventKind::Activity,
+                serde_json::json!({"status": "browser_budget_exceeded:stall"}),
+            )
+            .unwrap();
+    }
+
+    let response = integrity_route_test_app(state)
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/api/integrity/audit")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let (status, body) = memory_source_response_json(response).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(body["runtime"]["integrity_ok"], false);
+    assert_eq!(
+        body["runtime"]["finding_counts"]["terminal_task_with_running_agent_run"],
+        1
+    );
+    assert_eq!(
+        body["runtime"]["finding_counts"]["completed_task_with_browser_budget_exceeded"],
+        1
+    );
+    assert!(!body.to_string().contains("RUNTIME_SECRET_SENTINEL"));
 
     drop(_data_dir);
     let _ = std::fs::remove_dir_all(dir);

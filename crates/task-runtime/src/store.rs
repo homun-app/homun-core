@@ -9,15 +9,16 @@ use crate::{
     KernelBrowserView, KernelCapabilityRuntimeView, KernelPlanStepView, KernelPlanView,
     KernelThreadActions, KernelThreadProjection, KernelTurnView, KernelUncertainEffectView,
     NewAgentRun, NewBrowserCheckpoint, NewExecutionEffectReceipt, NewTurnSteering,
-    ObjectiveContractRecord, ObjectiveMode, ProjectionClaim, ResourceClass, RuntimePlanRecord,
-    SubagentInfo, TaskCheckpoint, TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError,
-    TaskRuntimeResult, TaskStatus, TerminalWrite, ThreadAttention, TurnEvent, TurnEventKind,
-    TurnSteeringRecord, TurnSteeringStatus, UserId, WorkspaceId,
+    ObjectiveContractRecord, ObjectiveMode, ProjectionClaim, ResourceClass,
+    RuntimeIntegrityFinding, RuntimeIntegrityReport, RuntimePlanRecord, SubagentInfo,
+    TaskCheckpoint, TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult,
+    TaskStatus, TerminalWrite, ThreadAttention, TurnEvent, TurnEventKind, TurnSteeringRecord,
+    TurnSteeringStatus, UserId, WorkspaceId,
 };
 use local_first_execution_protocol::{EffectClass, EffectReceiptRef, EffectReceiptStatus};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use time::OffsetDateTime;
 
@@ -5214,6 +5215,221 @@ pub(crate) fn load_effect_receipt_on(
         .optional()?)
 }
 
+impl TaskStore {
+    pub fn audit_runtime_integrity(&self) -> TaskRuntimeResult<RuntimeIntegrityReport> {
+        let mut findings = Vec::new();
+
+        let mut stmt = self.connection.prepare(
+            "SELECT t.task_id, t.status, r.run_id
+             FROM tasks t
+             JOIN agent_runs r ON r.turn_id = t.task_id
+             WHERE t.status IN ('completed', 'failed', 'cancelled', 'expired')
+               AND r.status = 'running'
+             ORDER BY t.updated_at DESC, r.started_at DESC
+             LIMIT 100",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (task_id, task_status, run_id) = row?;
+            findings.push(runtime_integrity_finding(
+                "chat_runtime",
+                "terminal_task_with_running_agent_run",
+                "error",
+                "agent_run_projection",
+                format!("terminal task {task_id} is {task_status} but agent run is still running"),
+                Some(run_id),
+            ));
+        }
+
+        let mut stmt = self.connection.prepare(
+            "SELECT r.run_id
+             FROM agent_runs r
+             LEFT JOIN tasks t ON t.task_id = r.turn_id
+             WHERE r.status = 'running'
+               AND (t.task_id IS NULL OR t.status NOT IN (
+                 'queued', 'pending', 'running', 'waiting_time',
+                 'waiting_external_event', 'waiting_user_approval',
+                 'waiting_resource', 'paused', 'parked'
+               ))
+             ORDER BY r.started_at DESC
+             LIMIT 100",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        for run_id in rows {
+            findings.push(runtime_integrity_finding(
+                "chat_runtime",
+                "running_agent_run_without_active_task",
+                "error",
+                "agent_run_projection",
+                "running agent run has no matching active task",
+                Some(run_id?),
+            ));
+        }
+
+        if table_exists(&self.connection, "chat_messages")
+            && column_exists(&self.connection, "chat_messages", "delivery_state")
+        {
+            let mut stmt = self.connection.prepare(
+                "SELECT m.id, m.delivery_state
+                 FROM chat_messages m
+                 LEFT JOIN agent_runs r
+                   ON r.turn_id = m.linked_task_id AND r.status = 'running'
+                 WHERE m.role = 'assistant'
+                   AND m.delivery_state IN ('streaming', 'retrying')
+                   AND COALESCE(m.linked_task_id, '') <> ''
+                   AND r.run_id IS NULL
+                 ORDER BY m.timestamp DESC
+                 LIMIT 100",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            for row in rows {
+                let (message_id, delivery_state) = row?;
+                findings.push(runtime_integrity_finding(
+                    "chat_runtime",
+                    "streaming_assistant_without_active_run",
+                    "error",
+                    "message_delivery_projection",
+                    format!(
+                        "assistant message remains {delivery_state} without an active agent run"
+                    ),
+                    Some(message_id),
+                ));
+            }
+        }
+
+        let mut stmt = self.connection.prepare(
+            "SELECT t.task_id
+             FROM tasks t
+             JOIN turn_events e ON e.turn_id = t.task_id
+             WHERE t.status = 'completed'
+               AND e.payload_json LIKE '%browser_budget_exceeded%'
+             GROUP BY t.task_id
+             ORDER BY MAX(e.created_at) DESC
+             LIMIT 100",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        for task_id in rows {
+            findings.push(runtime_integrity_finding(
+                "browser",
+                "completed_task_with_browser_budget_exceeded",
+                "error",
+                "browser_outcome_projection",
+                "completed task contains a browser budget exhaustion event",
+                Some(task_id?),
+            ));
+        }
+
+        let waiting_approval_sql = if table_exists(&self.connection, "thread_hitl_waits") {
+            "SELECT t.task_id
+             FROM tasks t
+             WHERE t.status = 'waiting_user_approval'
+               AND NOT EXISTS (
+                 SELECT 1 FROM task_approvals a
+                 WHERE a.task_id = t.task_id
+                   AND a.user_id = t.user_id
+                   AND a.workspace_id = t.workspace_id
+                   AND a.status = 'pending'
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM thread_hitl_waits h
+                 WHERE h.thread_id = t.thread_id
+                   AND h.status = 'open'
+               )
+             ORDER BY t.updated_at DESC
+             LIMIT 100"
+        } else {
+            "SELECT t.task_id
+             FROM tasks t
+             WHERE t.status = 'waiting_user_approval'
+               AND NOT EXISTS (
+                 SELECT 1 FROM task_approvals a
+                 WHERE a.task_id = t.task_id
+                   AND a.user_id = t.user_id
+                   AND a.workspace_id = t.workspace_id
+                   AND a.status = 'pending'
+               )
+             ORDER BY t.updated_at DESC
+             LIMIT 100"
+        };
+        let mut stmt = self.connection.prepare(waiting_approval_sql)?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        for task_id in rows {
+            findings.push(runtime_integrity_finding(
+                "chat_runtime",
+                "waiting_approval_task_without_canonical_approval",
+                "error",
+                "approval_projection",
+                "task waits for user approval but no canonical pending approval or open HITL wait is visible",
+                Some(task_id?),
+            ));
+        }
+
+        Ok(runtime_integrity_report(findings))
+    }
+}
+
+fn runtime_integrity_finding(
+    domain: impl Into<String>,
+    code: impl Into<String>,
+    severity: impl Into<String>,
+    owner: impl Into<String>,
+    summary: impl Into<String>,
+    ref_id: Option<String>,
+) -> RuntimeIntegrityFinding {
+    RuntimeIntegrityFinding {
+        domain: domain.into(),
+        code: code.into(),
+        severity: severity.into(),
+        owner: owner.into(),
+        summary: summary.into(),
+        ref_id,
+    }
+}
+
+fn runtime_integrity_report(mut findings: Vec<RuntimeIntegrityFinding>) -> RuntimeIntegrityReport {
+    findings.sort_by(|left, right| {
+        (
+            left.severity.as_str() != "error",
+            left.domain.as_str(),
+            left.code.as_str(),
+            left.ref_id.as_deref().unwrap_or_default(),
+        )
+            .cmp(&(
+                right.severity.as_str() != "error",
+                right.domain.as_str(),
+                right.code.as_str(),
+                right.ref_id.as_deref().unwrap_or_default(),
+            ))
+    });
+    let mut finding_counts = BTreeMap::new();
+    let mut error_count = 0;
+    let mut warning_count = 0;
+    for finding in &findings {
+        *finding_counts.entry(finding.code.clone()).or_insert(0) += 1;
+        if finding.severity == "error" {
+            error_count += 1;
+        } else {
+            warning_count += 1;
+        }
+    }
+    RuntimeIntegrityReport {
+        integrity_ok: error_count == 0,
+        total_findings: findings.len() as u64,
+        error_count,
+        warning_count,
+        finding_counts,
+        findings,
+    }
+}
+
 fn invalid_receipt_column(index: usize, message: impl Into<String>) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(
         index,
@@ -7388,6 +7604,59 @@ mod chat_turn_query_tests {
             projection.activity[0].text, "Almost done",
             "finalizing preserves durable activity rows"
         );
+    }
+
+    #[test]
+    fn runtime_integrity_audit_reports_lifecycle_contradictions() {
+        let s = store();
+        let completed = make_chat_turn("turn_done", "thread_done", TaskStatus::Completed);
+        s.insert_chat_turn(&completed, "thread_done", "req-done", "interactive", "full")
+            .unwrap();
+        s.create_agent_run(&NewAgentRun {
+            run_id: "run-stale".into(),
+            turn_id: "turn_done".into(),
+            thread_id: "thread_done".into(),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            role: Some("orchestrator".into()),
+            model: Some("qwen".into()),
+            provider: Some("ollama".into()),
+            prompt_fingerprint: None,
+        })
+        .unwrap();
+        s.insert_turn_event(
+            "turn_done",
+            TurnEventKind::Activity,
+            json!({"status": "browser_budget_exceeded:stall"}),
+        )
+        .unwrap();
+
+        let waiting = make_chat_turn(
+            "turn_waiting_approval",
+            "thread_waiting",
+            TaskStatus::WaitingUserApproval,
+        );
+        s.insert_chat_turn(
+            &waiting,
+            "thread_waiting",
+            "req-waiting",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+
+        let report = s.audit_runtime_integrity().unwrap();
+        let codes = report
+            .findings
+            .iter()
+            .map(|finding| finding.code.as_str())
+            .collect::<BTreeSet<_>>();
+
+        assert!(!report.integrity_ok);
+        assert!(codes.contains("terminal_task_with_running_agent_run"));
+        assert!(codes.contains("running_agent_run_without_active_task"));
+        assert!(codes.contains("completed_task_with_browser_budget_exceeded"));
+        assert!(codes.contains("waiting_approval_task_without_canonical_approval"));
     }
 
     #[test]

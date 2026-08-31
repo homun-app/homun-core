@@ -58,9 +58,9 @@ pub use types::{
     KernelCapabilityRuntimeView, KernelPlanStepView, KernelPlanView, KernelThreadActions,
     KernelThreadProjection, KernelTurnView, KernelUncertainEffectView, NewAgentRun,
     NewBrowserCheckpoint, NewExecutionEffectReceipt, NewTurnSteering, ObjectiveContractRecord,
-    ObjectiveMode, ResourceClass, ResourceRequirement, RetryPolicy, RuntimePlanRecord,
-    SubagentInfo, TaskId, TaskPriority, TaskRecord, TaskStatus, TerminalWrite, ThreadAttention,
-    TurnEvent, TurnEventKind, TurnSteeringRecord, TurnSteeringStatus, UserId, WorkflowId,
-    WorkspaceId,
+    ObjectiveMode, ResourceClass, ResourceRequirement, RetryPolicy, RuntimeIntegrityFinding,
+    RuntimeIntegrityReport, RuntimePlanRecord, SubagentInfo, TaskId, TaskPriority, TaskRecord,
+    TaskStatus, TerminalWrite, ThreadAttention, TurnEvent, TurnEventKind, TurnSteeringRecord,
+    TurnSteeringStatus, UserId, WorkflowId, WorkspaceId,
 };
 pub use ui::{TaskQueueSnapshot, TaskUiDetail, TaskUiItem, TaskUiReadModel};

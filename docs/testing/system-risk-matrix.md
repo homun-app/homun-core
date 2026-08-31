@@ -1,6 +1,6 @@
 # System Risk Matrix
 
-Verificato 2026-08-27 sul branch di lavoro corrente.
+Verificato 2026-08-31 sul branch di lavoro corrente.
 
 Questa matrice serve a evitare che chat, memoria, privacy, modelli, tool,
 automation e UI vengano verificati solo quando un utente inciampa in una
@@ -60,6 +60,10 @@ mantiene i conteggi completi in `summary` e mostra solo un campione per codice
 tramite `--max-findings-per-code`. La prima versione copre:
 
 - task terminale con `agent_runs.running`;
+- run `agent_runs.running` senza task attivo corrispondente;
+- messaggi assistant `streaming`/`retrying` senza run attivo;
+- task `completed` con evento `browser_budget_exceeded`;
+- task `waiting_user_approval` senza approval canonica pendente o HITL open;
 - HITL risolto senza run successivo;
 - run senza role/model/provider;
 - memoria live con pattern sensibili plaintext;
@@ -69,6 +73,9 @@ tramite `--max-findings-per-code`. La prima versione copre:
 - log diagnostici con pattern sensibili raw;
 - routing decision senza stage/candidato/modello spiegabile.
 
+La stessa copertura lifecycle read-only e' esposta anche da
+`/api/integrity/audit` nella sezione `runtime`, insieme a `memory`, `vault` e
+`graphs`, per permettere alla dashboard di mostrare owner/codici canonici.
 Non e' ancora cablato nel gate kernel per evitare falsi positivi sul DB reale.
 Quando il rumore e' classificato, va aggiunto come step deterministico.
 
