@@ -596,6 +596,332 @@ def audit_routing_decisions(
             )
 
 
+def safe_payload_summary(raw: str | None) -> dict[str, Any]:
+    """Extract non-sensitive diagnostic fields without returning raw payloads."""
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"payload": "invalid_json"}
+    if not isinstance(payload, dict):
+        return {"payload": type(payload).__name__}
+    summary: dict[str, Any] = {}
+    for key in ("status", "code", "error_code", "tool", "tool_name", "terminal_reason"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            summary[key] = scrub_observability_value(value)
+    tool_calls = payload.get("tool_calls")
+    if isinstance(tool_calls, list):
+        names = []
+        for call in tool_calls[:5]:
+            name = call.get("name") if isinstance(call, dict) else None
+            if isinstance(name, str) and name.strip():
+                names.append(scrub_observability_value(name))
+        if names:
+            summary["tool_calls"] = names
+            summary["tool_call_count"] = len(tool_calls)
+    return summary
+
+
+def scrub_observability_value(value: str) -> str:
+    stripped = value.strip()
+    if sensitive_detector(stripped):
+        return "[REDACTED]"
+    if len(stripped) > 160:
+        return f"{stripped[:157]}..."
+    return stripped
+
+
+def add_diagnostic_gap(
+    gaps: list[dict[str, Any]],
+    *,
+    code: str,
+    owner: str,
+    summary: str,
+    ref: str,
+    severity: str = "warning",
+) -> None:
+    gaps.append(
+        {
+            "code": code,
+            "severity": severity,
+            "owner": owner,
+            "summary": summary,
+            "ref": ref,
+        }
+    )
+
+
+def build_runtime_observability(
+    paths: AuditInputs,
+    warnings: list[dict[str, str]],
+    *,
+    max_timelines: int = 20,
+    max_gaps: int = 100,
+) -> dict[str, Any]:
+    conn = open_optional_db(paths.runtime_db, "runtime_observability", warnings)
+    if conn is None:
+        return {"summary": {"timelines": 0, "diagnostic_gaps": 0}, "timelines": [], "diagnostic_gaps": []}
+    try:
+        required = {"tasks", "agent_runs", "turn_events"}
+        missing = sorted(table for table in required if not table_exists(conn, table))
+        if missing:
+            warn(
+                warnings,
+                "runtime_observability",
+                f"missing tables: {', '.join(missing)}",
+                paths.runtime_db,
+            )
+            return {"summary": {"timelines": 0, "diagnostic_gaps": 0}, "timelines": [], "diagnostic_gaps": []}
+
+        recent_tasks = row_dicts(
+            conn,
+            """
+            select task_id, thread_id, user_id, workspace_id, status, created_at,
+                   updated_at, blocked_reason
+            from tasks
+            where kind = 'chat_turn'
+            order by updated_at desc, created_at desc
+            limit ?
+            """,
+            (max_timelines,),
+        )
+        timelines = [
+            build_turn_timeline(conn, task)
+            for task in recent_tasks
+        ]
+        gaps = build_runtime_diagnostic_gaps(conn, max_gaps=max_gaps)
+        return {
+            "summary": {
+                "timelines": len(timelines),
+                "diagnostic_gaps": len(gaps),
+            },
+            "timelines": timelines,
+            "diagnostic_gaps": gaps,
+        }
+    finally:
+        conn.close()
+
+
+def build_turn_timeline(conn: sqlite3.Connection, task: dict[str, Any]) -> dict[str, Any]:
+    turn_id = task["task_id"]
+    runs = row_dicts(
+        conn,
+        """
+        select run_id, attempt, status, role, model, provider, started_at,
+               completed_at, terminal_reason
+        from agent_runs
+        where turn_id = ?
+        order by attempt asc, started_at asc
+        """,
+        (turn_id,),
+    )
+    turn_events = row_dicts(
+        conn,
+        """
+        select seq, kind, payload_json, created_at
+        from turn_events
+        where turn_id = ?
+        order by seq asc
+        """,
+        (turn_id,),
+    )
+    run_events: list[dict[str, Any]] = []
+    if table_exists(conn, "agent_run_events"):
+        run_events = row_dicts(
+            conn,
+            """
+            select e.run_id, e.seq, e.round, e.kind, e.payload_json, e.created_at
+            from agent_run_events e
+            join agent_runs r on r.run_id = e.run_id
+            where r.turn_id = ?
+            order by e.created_at asc, e.seq asc
+            """,
+            (turn_id,),
+        )
+
+    events: list[dict[str, Any]] = [
+        {
+            "phase": "task_created",
+            "at": task["created_at"],
+            "status": task["status"],
+        }
+    ]
+    for run in runs:
+        events.append(
+            {
+                "phase": "run_started",
+                "at": run["started_at"],
+                "run_id": run["run_id"],
+                "attempt": run["attempt"],
+                "status": run["status"],
+                "role": run.get("role") or None,
+                "provider": run.get("provider") or None,
+                "model": run.get("model") or None,
+            }
+        )
+        if run.get("completed_at") is not None:
+            run_completed = {
+                "phase": "run_completed",
+                "at": run["completed_at"],
+                "run_id": run["run_id"],
+                "status": run["status"],
+            }
+            if run.get("terminal_reason"):
+                run_completed["terminal_reason"] = run["terminal_reason"]
+            events.append(run_completed)
+    for event in run_events:
+        timeline_event = {
+            "phase": f"run_event:{event['kind']}",
+            "at": event["created_at"],
+            "run_id": event["run_id"],
+            "seq": event["seq"],
+        }
+        if event.get("round") is not None:
+            timeline_event["round"] = event["round"]
+        summary = safe_payload_summary(event.get("payload_json"))
+        if summary:
+            timeline_event["payload"] = summary
+        events.append(timeline_event)
+    for event in turn_events:
+        timeline_event = {
+            "phase": f"turn_event:{event['kind']}",
+            "at": event["created_at"],
+            "seq": event["seq"],
+        }
+        summary = safe_payload_summary(event.get("payload_json"))
+        if summary:
+            timeline_event["payload"] = summary
+        events.append(timeline_event)
+    events.append(
+        {
+            "phase": "task_updated",
+            "at": task["updated_at"],
+            "status": task["status"],
+        }
+    )
+    events.sort(key=lambda item: (item.get("at") is None, item.get("at") or 0, phase_sort_key(item["phase"])))
+
+    latest_run = runs[-1] if runs else {}
+    return {
+        "turn_id": turn_id,
+        "thread_id": task.get("thread_id"),
+        "status": task["status"],
+        "blocked_reason": task.get("blocked_reason"),
+        "model": {
+            "role": latest_run.get("role") or None,
+            "provider": latest_run.get("provider") or None,
+            "model": latest_run.get("model") or None,
+        },
+        "events": events,
+    }
+
+
+def phase_sort_key(phase: str) -> int:
+    order = {
+        "task_created": 0,
+        "run_started": 1,
+        "run_completed": 90,
+        "task_updated": 100,
+    }
+    if phase.startswith("run_event:"):
+        return 10
+    if phase.startswith("turn_event:"):
+        return 80
+    return order.get(phase, 50)
+
+
+def build_runtime_diagnostic_gaps(conn: sqlite3.Connection, *, max_gaps: int) -> list[dict[str, Any]]:
+    gaps: list[dict[str, Any]] = []
+    for row in row_dicts(
+        conn,
+        """
+        select run_id, status
+        from agent_runs
+        where status in ('completed', 'failed', 'aborted')
+          and coalesce(terminal_reason, '') = ''
+        order by completed_at desc, started_at desc
+        limit ?
+        """,
+        (max_gaps,),
+    ):
+        add_diagnostic_gap(
+            gaps,
+            code=f"{row['status']}_run_missing_terminal_reason",
+            owner="agent_run_projection",
+            summary=f"{row['status']} agent run has no terminal_reason",
+            ref=row["run_id"],
+        )
+    remaining = max(0, max_gaps - len(gaps))
+    if remaining:
+        for row in row_dicts(
+            conn,
+            """
+            select run_id
+            from agent_runs
+            where status in ('running', 'completed', 'failed', 'aborted')
+              and (coalesce(role, '') = '' or coalesce(model, '') = '' or coalesce(provider, '') = '')
+            order by started_at desc
+            limit ?
+            """,
+            (remaining,),
+        ):
+            add_diagnostic_gap(
+                gaps,
+                code="run_missing_model_attribution",
+                owner="model_routing",
+                summary="agent run lacks role/model/provider, so Auto/Unavailable cannot be explained from the run row",
+                ref=row["run_id"],
+            )
+    remaining = max(0, max_gaps - len(gaps))
+    if remaining and table_exists(conn, "agent_run_events"):
+        for row in row_dicts(
+            conn,
+            """
+            select r.run_id
+            from agent_runs r
+            left join agent_run_events e on e.run_id = r.run_id
+            where r.status in ('running', 'completed', 'failed', 'aborted')
+              and e.run_id is null
+            order by r.started_at desc
+            limit ?
+            """,
+            (remaining,),
+        ):
+            add_diagnostic_gap(
+                gaps,
+                code="run_without_agent_run_events",
+                owner="agent_journal",
+                summary="agent run has no round/tool/model journal events",
+                ref=row["run_id"],
+            )
+    remaining = max(0, max_gaps - len(gaps))
+    if remaining:
+        for row in row_dicts(
+            conn,
+            """
+            select t.task_id
+            from tasks t
+            left join turn_events e on e.turn_id = t.task_id
+            where t.kind = 'chat_turn'
+              and t.status not in ('queued', 'pending')
+              and e.turn_id is null
+            order by t.updated_at desc
+            limit ?
+            """,
+            (remaining,),
+        ):
+            add_diagnostic_gap(
+                gaps,
+                code="turn_without_turn_events",
+                owner="turn_executor",
+                summary="non-pending chat turn has no durable turn_events timeline",
+                ref=row["task_id"],
+            )
+    return gaps
+
+
 def summarize_findings(findings: list[dict[str, Any]]) -> dict[str, Any]:
     by_code: dict[str, dict[str, Any]] = {}
     by_domain: dict[str, int] = {}
@@ -665,12 +991,14 @@ def audit_homun_state(
     audit_vault(paths, findings, warnings)
     audit_logs(paths, findings, warnings)
     audit_routing_decisions(paths, findings, warnings)
+    observability = build_runtime_observability(paths, warnings)
     findings.sort(key=lambda item: (item["severity"] != "error", item["domain"], item["code"], item.get("ref", "")))
     summary = summarize_findings(findings)
     capped_findings = cap_findings_by_code(findings, summary, max_findings_per_code)
     return {
         "ok": summary["errors"] == 0,
         "summary": summary,
+        "observability": observability,
         "findings": capped_findings,
         "warnings": warnings,
         "paths": {

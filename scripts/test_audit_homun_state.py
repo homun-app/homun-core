@@ -42,6 +42,15 @@ def create_runtime_schema(conn: sqlite3.Connection) -> None:
             terminal_reason text,
             schema_version integer not null
         );
+        create table agent_run_events (
+            event_id integer primary key autoincrement,
+            run_id text not null,
+            seq integer not null,
+            round integer,
+            kind text not null,
+            payload_json text not null,
+            created_at integer not null
+        );
         create table thread_hitl_waits (
             wait_id text primary key,
             thread_id text not null,
@@ -520,6 +529,127 @@ class AuditHomunStateTests(unittest.TestCase):
             report["summary"]["by_code"]["memory_without_evidence"]["omitted"],
             3,
         )
+
+    def test_observability_timeline_summarizes_runtime_without_leaking_payload_text(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-1', 'user-1', 'workspace-1', 'chat_turn',
+                'completed', 10, 40, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_runs (
+                run_id, turn_id, thread_id, user_id, workspace_id, attempt,
+                status, role, model, provider, prompt_fingerprint, started_at,
+                completed_at, terminal_reason, schema_version
+            ) values ('run-1', 'turn-1', 'thread-1', 'user-1', 'workspace-1',
+                1, 'completed', 'orchestrator', 'qwen', 'ollama', 'fp', 11,
+                39, 'canonical_completed', 1)
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_run_events (
+                run_id, seq, round, kind, payload_json, created_at
+            ) values (
+                'run-1', 1, 0, 'prompt_snapshot',
+                '{"prompt_head":"utente RSSMRA80A01H501U"}', 12
+            )
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_run_events (
+                run_id, seq, round, kind, payload_json, created_at
+            ) values (
+                'run-1', 2, 0, 'model_response',
+                '{"tool_calls":[{"name":"browser.open"}],"content":"ok"}', 20
+            )
+            """
+        )
+        conn.execute(
+            """
+            insert into turn_events (turn_id, seq, kind, payload_json, created_at)
+            values ('turn-1', 1, 'activity', '{"status":"browser_done: ok"}', 30)
+            """
+        )
+        conn.execute(
+            """
+            insert into turn_events (turn_id, seq, kind, payload_json, created_at)
+            values ('turn-1', 2, 'done', '{"text":"done RSSMRA80A01H501U"}', 40)
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        timelines = report["observability"]["timelines"]
+        self.assertEqual(len(timelines), 1)
+        timeline = timelines[0]
+        self.assertEqual(timeline["turn_id"], "turn-1")
+        self.assertEqual(timeline["status"], "completed")
+        self.assertEqual(timeline["model"], {"role": "orchestrator", "provider": "ollama", "model": "qwen"})
+        self.assertEqual(
+            [event["phase"] for event in timeline["events"]],
+            [
+                "task_created",
+                "run_started",
+                "run_event:prompt_snapshot",
+                "run_event:model_response",
+                "turn_event:activity",
+                "run_completed",
+                "turn_event:done",
+                "task_updated",
+            ],
+        )
+        encoded = json.dumps(report)
+        self.assertNotIn("RSSMRA80A01H501U", encoded)
+        self.assertNotIn("prompt_head", encoded)
+        self.assertNotIn("text", encoded)
+
+    def test_observability_reports_gaps_that_make_runtime_debugging_ambiguous(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-1', 'user-1', 'workspace-1', 'chat_turn',
+                'completed', 10, 40, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_runs (
+                run_id, turn_id, thread_id, user_id, workspace_id, attempt,
+                status, role, model, provider, prompt_fingerprint, started_at,
+                completed_at, terminal_reason, schema_version
+            ) values ('run-1', 'turn-1', 'thread-1', 'user-1', 'workspace-1',
+                1, 'completed', 'orchestrator', '', '', 'fp', 11,
+                39, null, 1)
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        gap_codes = {gap["code"] for gap in report["observability"]["diagnostic_gaps"]}
+        self.assertIn("completed_run_missing_terminal_reason", gap_codes)
+        self.assertIn("run_missing_model_attribution", gap_codes)
+        self.assertIn("run_without_agent_run_events", gap_codes)
+        self.assertIn("turn_without_turn_events", gap_codes)
+        self.assertEqual(report["observability"]["summary"]["diagnostic_gaps"], 4)
 
 
 if __name__ == "__main__":

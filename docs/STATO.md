@@ -168,6 +168,28 @@ Evidenza locale:
 - `cd apps/desktop && node --test src/lib/composerTurnContract.test.mjs`
 - `cd apps/desktop && npm run build`
 
+## Core Observability Audit - 2026-09-01
+
+Slice locale su `main`: `scripts/audit_homun_state.py` ora produce anche una
+sezione `observability` read-only. La sezione costruisce timeline redatte per i
+turni chat recenti unendo `tasks`, `agent_runs`, `agent_run_events` e
+`turn_events`, ed espone gap diagnostici che rendono ambigui i bug reali:
+run terminali senza `terminal_reason`, run senza role/provider/model, run senza
+journal round/tool/model e turn non pendenti senza `turn_events`.
+
+La timeline non include testo utente/assistant o payload raw; riporta solo fasi,
+status, id tecnici, modello effettivo e piccoli campi diagnostici consentiti
+(`status`, `code`, `error_code`, `tool`, `tool_name`, `terminal_reason`,
+`tool_calls`) con detector privacy applicato.
+
+Evidenza locale:
+
+- `python3 -m unittest scripts.test_audit_homun_state -v`
+- `python3 -m py_compile scripts/audit_homun_state.py scripts/test_audit_homun_state.py`
+- `python3 scripts/audit_homun_state.py --max-findings-per-code 0` sul profilo
+  reale -> `ok=true`, `errors=0`, `warnings=218`,
+  `observability.timelines=20`, `observability.diagnostic_gaps=100`
+
 ## RC readiness - 2026-08-26
 
 Branch candidato: `fabio/rc-readiness-2026-08-26`, PR #406, su base `main`
