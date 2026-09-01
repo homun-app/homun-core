@@ -211,7 +211,17 @@ Evidenza locale:
   `X6` MCP stdio scoped lifecycle -> `PASS X6: 0.8s`,
   `X7` long business checkpoint -> `PASS X7: 74.9s`,
   `S8` payment approval browser fixture -> `PASS S8: 61.7s`
+- Smoke reale `S8` ha scoperto un residuo runtime: la cancellazione del thread
+  passava ma lasciava il relativo `chat_turn` in `waiting_user_approval` senza
+  approval/HITL canonico. Fix locale: `DELETE /api/chat/threads/{thread_id}`
+  ora purga anche i `chat_turn` runtime scoped al thread; con binario release
+  aggiornato `S8` resta `PASS S8: 65.7s` e il conteggio orphan non aumenta.
+  I 3 residui creati dai run precedenti sono stati chiusi via
+  `/api/integrity/repair/apply` con backup runtime `392896512` bytes; audit CLI
+  successivo -> `ok=true`.
 - `cargo test -p local-first-task-runtime runtime_integrity_audit_exposes_observability_gaps_without_task_content -- --nocapture`
+- `cargo test -p local-first-task-runtime thread_chat_turn_purge_deletes_owned_runtime_rows_only -- --nocapture`
+- `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway delete_chat_thread_purges_its_execution_journal -- --nocapture`
 - `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway integrity_audit_reports_runtime_lifecycle_findings_without_content -- --nocapture`
 - `cd apps/desktop && node --test src/lib/runtimeContext.test.mjs`
 - `cd apps/desktop && node --test src/lib/composerTurnContract.test.mjs src/lib/runtimeContext.test.mjs`

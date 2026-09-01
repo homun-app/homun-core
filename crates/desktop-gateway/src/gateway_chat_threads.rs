@@ -249,6 +249,9 @@ pub(crate) async fn delete_chat_thread(
         task_store
             .purge_runtime_plan_for_thread(gateway_user_id().as_str(), &workspace_id, &thread_id)
             .map_err(GatewayError::task)?;
+        task_store
+            .purge_chat_turns_for_thread(&thread_id, gateway_user_id().as_str(), &workspace_id)
+            .map_err(GatewayError::task)?;
     }
     let snapshot = lock_store(&state)?
         .delete_thread(&thread_id)
@@ -334,6 +337,27 @@ mod tests {
                 prompt_fingerprint: None,
             })
             .unwrap();
+        let mut waiting_turn = local_first_task_runtime::TaskRecord::new(
+            "delete-thread-waiting-turn",
+            user.clone(),
+            local_first_task_runtime::WorkspaceId::new("journal-workspace"),
+            "chat_turn",
+            "waiting approval",
+            serde_json::json!({}),
+        );
+        waiting_turn.status = local_first_task_runtime::TaskStatus::WaitingUserApproval;
+        state
+            .task_store
+            .lock()
+            .unwrap()
+            .insert_chat_turn(
+                &waiting_turn,
+                &thread.thread_id,
+                "delete-thread-request",
+                "interactive",
+                "full",
+            )
+            .unwrap();
 
         let _ = super::delete_chat_thread(
             axum::extract::State(state.clone()),
@@ -350,6 +374,19 @@ mod tests {
                 .list_agent_runs_for_turn("delete-thread-turn", user.as_str(), "journal-workspace",)
                 .unwrap()
                 .is_empty()
+        );
+        assert!(
+            state
+                .task_store
+                .lock()
+                .unwrap()
+                .get_task(
+                    &local_first_task_runtime::TaskId::new("delete-thread-waiting-turn"),
+                    &user,
+                    &local_first_task_runtime::WorkspaceId::new("journal-workspace"),
+                )
+                .unwrap()
+                .is_none()
         );
         assert!(
             state

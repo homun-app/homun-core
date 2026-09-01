@@ -4285,6 +4285,125 @@ impl TaskStore {
         )?)
     }
 
+    /// Deletes chat-turn runtime rows owned by one deleted chat thread.
+    ///
+    /// Chat deletion already removes the visible transcript. Leaving active
+    /// `chat_turn` tasks behind makes integrity checks and dashboards report
+    /// invisible work that the user can no longer resume from the deleted thread.
+    pub fn purge_chat_turns_for_thread(
+        &self,
+        thread_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<usize> {
+        let tx = self.connection.unchecked_transaction()?;
+        let task_scope = "
+            SELECT task_id FROM tasks
+            WHERE thread_id = ?1
+              AND user_id = ?2
+              AND workspace_id = ?3
+              AND kind = 'chat_turn'
+        ";
+        tx.execute(
+            &format!(
+                "DELETE FROM task_dependencies
+                 WHERE user_id = ?2 AND workspace_id = ?3
+                   AND (task_id IN ({task_scope}) OR depends_on_task_id IN ({task_scope}))"
+            ),
+            params![thread_id, user_id, workspace_id],
+        )?;
+        tx.execute(
+            &format!(
+                "DELETE FROM resource_reservations
+                 WHERE user_id = ?2 AND workspace_id = ?3
+                   AND task_id IN ({task_scope})"
+            ),
+            params![thread_id, user_id, workspace_id],
+        )?;
+        tx.execute(
+            &format!(
+                "DELETE FROM task_checkpoints
+                 WHERE user_id = ?2 AND workspace_id = ?3
+                   AND task_id IN ({task_scope})"
+            ),
+            params![thread_id, user_id, workspace_id],
+        )?;
+        tx.execute(
+            &format!(
+                "DELETE FROM task_approvals
+                 WHERE user_id = ?2 AND workspace_id = ?3
+                   AND task_id IN ({task_scope})"
+            ),
+            params![thread_id, user_id, workspace_id],
+        )?;
+        tx.execute(
+            &format!("DELETE FROM turn_events WHERE turn_id IN ({task_scope})"),
+            params![thread_id, user_id, workspace_id],
+        )?;
+        tx.execute(
+            "DELETE FROM turn_steering
+             WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3",
+            params![user_id, workspace_id, thread_id],
+        )?;
+        tx.execute(
+            "DELETE FROM browser_checkpoints
+             WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3",
+            params![user_id, workspace_id, thread_id],
+        )?;
+        tx.execute(
+            "DELETE FROM execution_projection_outbox
+             WHERE execution_id IN (
+                 SELECT execution_id FROM executions
+                 WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3
+             )",
+            params![user_id, workspace_id, thread_id],
+        )?;
+        tx.execute(
+            "DELETE FROM execution_effect_compensations
+             WHERE receipt_ref IN (
+                 SELECT receipt_ref FROM execution_effect_receipts
+                 WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3
+             )",
+            params![user_id, workspace_id, thread_id],
+        )?;
+        tx.execute(
+            "DELETE FROM execution_effect_receipts
+             WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3",
+            params![user_id, workspace_id, thread_id],
+        )?;
+        tx.execute(
+            "DELETE FROM execution_wakes
+             WHERE execution_id IN (
+                 SELECT execution_id FROM executions
+                 WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3
+             )",
+            params![user_id, workspace_id, thread_id],
+        )?;
+        tx.execute(
+            "DELETE FROM execution_events
+             WHERE execution_id IN (
+                 SELECT execution_id FROM executions
+                 WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3
+             )",
+            params![user_id, workspace_id, thread_id],
+        )?;
+        tx.execute(
+            "DELETE FROM executions
+             WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3",
+            params![user_id, workspace_id, thread_id],
+        )?;
+        let deleted = tx.execute(
+            "DELETE FROM tasks
+             WHERE thread_id = ?1
+               AND user_id = ?2
+               AND workspace_id = ?3
+               AND kind = 'chat_turn'",
+            params![thread_id, user_id, workspace_id],
+        )?;
+        tx.commit()?;
+        Ok(deleted)
+    }
+
     /// Deletes a bounded batch of old terminal runs; event rows cascade with their parent run.
     pub fn purge_terminal_agent_runs_before(
         &self,
@@ -7955,6 +8074,125 @@ mod chat_turn_query_tests {
             omitted_bounded_count: 0,
             expires_at: 2_000_000_000,
         }
+    }
+
+    #[test]
+    fn thread_chat_turn_purge_deletes_owned_runtime_rows_only() {
+        let store = store();
+        let owned = make_chat_turn(
+            "turn-owned",
+            "thread-owned",
+            TaskStatus::WaitingUserApproval,
+        );
+        let other_thread = make_chat_turn(
+            "turn-other-thread",
+            "thread-other",
+            TaskStatus::WaitingUserApproval,
+        );
+        let mut other_workspace = make_chat_turn(
+            "turn-other-workspace",
+            "thread-owned",
+            TaskStatus::WaitingUserApproval,
+        );
+        other_workspace.workspace_id = WorkspaceId::new("other-workspace");
+        store
+            .insert_chat_turn(&owned, "thread-owned", "req-owned", "interactive", "full")
+            .unwrap();
+        store
+            .insert_chat_turn(
+                &other_thread,
+                "thread-other",
+                "req-other-thread",
+                "interactive",
+                "full",
+            )
+            .unwrap();
+        store
+            .insert_chat_turn(
+                &other_workspace,
+                "thread-owned",
+                "req-other-workspace",
+                "interactive",
+                "full",
+            )
+            .unwrap();
+        store
+            .insert_turn_event(
+                "turn-owned",
+                TurnEventKind::Activity,
+                json!({"status":"waiting"}),
+            )
+            .unwrap();
+        store
+            .connection
+            .execute(
+                "INSERT INTO task_approvals (
+                    approval_id, task_id, user_id, workspace_id, status,
+                    created_at, updated_at, approval_json
+                 ) VALUES ('approval-owned', 'turn-owned', 'u', 'w', 'pending', 1, 1, '{}')",
+                [],
+            )
+            .unwrap();
+
+        assert_eq!(
+            store
+                .purge_chat_turns_for_thread("thread-owned", "u", "w")
+                .unwrap(),
+            1
+        );
+
+        assert!(
+            store
+                .get_task(
+                    &TaskId::new("turn-owned"),
+                    &UserId::new("u"),
+                    &WorkspaceId::new("w")
+                )
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            store
+                .get_task(
+                    &TaskId::new("turn-other-thread"),
+                    &UserId::new("u"),
+                    &WorkspaceId::new("w")
+                )
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::WaitingUserApproval
+        );
+        assert_eq!(
+            store
+                .get_task(
+                    &TaskId::new("turn-other-workspace"),
+                    &UserId::new("u"),
+                    &WorkspaceId::new("other-workspace")
+                )
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::WaitingUserApproval
+        );
+        let owned_events: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM turn_events WHERE turn_id = 'turn-owned'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(owned_events, 0);
+        let owned_approvals: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM task_approvals WHERE task_id = 'turn-owned'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(owned_approvals, 0);
     }
 
     #[test]
