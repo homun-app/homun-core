@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runtimeContextView } from "./runtimeContext.mjs";
+import { runtimeContextView, runtimeIntegrityView } from "./runtimeContext.mjs";
 
 const unavailableContributions = {
   conversation: null,
@@ -97,4 +97,53 @@ test("view exposes only the redacted runtime contract", () => {
     "usedTokens",
   ]);
   assert.doesNotMatch(JSON.stringify(view), /secret|run-secret|turn-secret/);
+});
+
+test("runtime integrity view summarizes observability gaps without exposing refs", () => {
+  const view = runtimeIntegrityView({
+    runtime: {
+      integrity_ok: true,
+      error_count: 0,
+      warning_count: 8,
+      observability: {
+        summary: { diagnostic_gaps: 3 },
+        diagnostic_gaps: [
+          {
+            code: "run_missing_model_attribution",
+            severity: "warning",
+            owner: "model_routing",
+            summary: "agent run lacks role/model/provider",
+            ref: "run-secret",
+          },
+          {
+            code: "turn_without_turn_events",
+            owner: "turn_executor",
+            summary: "turn lacks durable events",
+          },
+        ],
+      },
+    },
+  }, 1);
+
+  assert.equal(view.available, true);
+  assert.equal(view.healthy, false);
+  assert.equal(view.diagnosticGapCount, 3);
+  assert.equal(view.visibleDiagnosticGaps.length, 1);
+  assert.equal(view.hiddenDiagnosticGapCount, 2);
+  assert.deepEqual(view.visibleDiagnosticGaps[0], {
+    code: "run_missing_model_attribution",
+    severity: "warning",
+    owner: "model_routing",
+    summary: "agent run lacks role/model/provider",
+  });
+  assert.doesNotMatch(JSON.stringify(view), /run-secret/);
+});
+
+test("runtime integrity view treats missing audit as unavailable", () => {
+  const view = runtimeIntegrityView(null);
+
+  assert.equal(view.available, false);
+  assert.equal(view.healthy, false);
+  assert.equal(view.diagnosticGapCount, 0);
+  assert.deepEqual(view.visibleDiagnosticGaps, []);
 });

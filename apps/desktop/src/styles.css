@@ -8403,6 +8403,44 @@ small {
   line-height: 1.35;
 }
 
+.runtime-diagnostics-card {
+  align-items: flex-start;
+}
+
+.runtime-diagnostics-card .set-btn {
+  flex-shrink: 0;
+}
+
+.runtime-diagnostics-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: var(--s3) 0 0;
+  padding: 0;
+}
+
+.runtime-diagnostics-list li {
+  display: grid;
+  grid-template-columns: minmax(92px, 0.22fr) minmax(180px, 0.34fr) minmax(0, 1fr);
+  gap: var(--s2);
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.runtime-diagnostics-list code {
+  color: var(--text);
+  font-size: 12px;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.runtime-diagnostics-list small {
+  min-width: 0;
+  line-height: 1.35;
+}
+
 .mdl-models-head {
   display: flex;
   align-items: center;

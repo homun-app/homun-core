@@ -1012,6 +1012,38 @@ export interface SystemStatus {
   browser_sessions: number;
 }
 
+export interface RuntimeDiagnosticGap {
+  code: string;
+  severity: string;
+  owner: string;
+  summary: string;
+  ref?: string;
+}
+
+export interface RuntimeIntegrityReport {
+  integrity_ok: boolean;
+  error_count: number;
+  warning_count: number;
+  finding_counts: Record<string, number>;
+  observability?: {
+    summary?: {
+      diagnostic_gaps?: number;
+    };
+    diagnostic_gaps?: RuntimeDiagnosticGap[];
+  };
+  findings: Array<{
+    code: string;
+    severity: string;
+    owner: string;
+    summary: string;
+    ref?: string;
+  }>;
+}
+
+export interface IntegrityAuditResponse {
+  runtime: RuntimeIntegrityReport;
+}
+
 export interface CloseAllBrowsersResult {
   closed_sessions: number;
   closed_tabs: number;
@@ -2070,6 +2102,10 @@ async function electronSetRole(input: {
 
 async function electronSystemStatus(): Promise<SystemStatus> {
   return gatewayGetJson<SystemStatus>("/api/system/status");
+}
+
+async function electronIntegrityAudit(): Promise<IntegrityAuditResponse> {
+  return gatewayGetJson<IntegrityAuditResponse>("/api/integrity/audit");
 }
 
 async function electronCloseAllBrowsers(): Promise<CloseAllBrowsersResult> {
@@ -3449,6 +3485,7 @@ export const coreBridge = {
   updateInfo: () => electronUpdateInfo(),
   triggerUpdate: () => electronTriggerUpdate(),
   systemStatus: () => electronSystemStatus(),
+  integrityAudit: () => electronIntegrityAudit(),
   closeAllBrowsers: () => electronCloseAllBrowsers(),
   workspaces: () => electronWorkspaces(),
   createWorkspace: (name: string, folder: string) => electronCreateteWorkspace(name, folder),

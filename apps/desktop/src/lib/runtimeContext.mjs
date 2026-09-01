@@ -50,3 +50,56 @@ export function runtimeContextView(response, selectedNextModel) {
     compacted: source.compacted === true,
   };
 }
+
+function finiteCount(value) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+function diagnosticGapView(value) {
+  if (!value || typeof value !== "object") return null;
+  const code = nullableString(value.code);
+  const owner = nullableString(value.owner);
+  const summary = nullableString(value.summary);
+  if (!code || !owner || !summary) return null;
+  return {
+    code,
+    owner,
+    summary,
+    severity: nullableString(value.severity) ?? "warning",
+  };
+}
+
+export function runtimeIntegrityView(response, maxVisibleGaps = 4) {
+  const source = response && typeof response === "object" ? response : {};
+  const runtime = source.runtime && typeof source.runtime === "object" ? source.runtime : {};
+  const observability =
+    runtime.observability && typeof runtime.observability === "object"
+      ? runtime.observability
+      : {};
+  const summary =
+    observability.summary && typeof observability.summary === "object"
+      ? observability.summary
+      : {};
+  const rawGaps = Array.isArray(observability.diagnostic_gaps)
+    ? observability.diagnostic_gaps
+    : [];
+  const diagnosticGaps = rawGaps
+    .map(diagnosticGapView)
+    .filter(Boolean)
+    .slice(0, Math.max(0, maxVisibleGaps));
+  const diagnosticGapCount = finiteCount(summary.diagnostic_gaps);
+  const integrityOk = runtime.integrity_ok === true;
+  const errorCount = finiteCount(runtime.error_count);
+  const warningCount = finiteCount(runtime.warning_count);
+
+  return {
+    available: Boolean(source.runtime && typeof source.runtime === "object"),
+    healthy: integrityOk && diagnosticGapCount === 0,
+    integrityOk,
+    errorCount,
+    warningCount,
+    diagnosticGapCount,
+    visibleDiagnosticGaps: diagnosticGaps,
+    hiddenDiagnosticGapCount: Math.max(0, diagnosticGapCount - diagnosticGaps.length),
+  };
+}

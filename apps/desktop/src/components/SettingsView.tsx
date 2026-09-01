@@ -97,6 +97,10 @@ import {
   revokeHostComputerGrant,
 } from "../lib/coreBridge";
 import {
+  runtimeIntegrityView,
+  type RuntimeIntegrityView,
+} from "../lib/runtimeContext";
+import {
   catalogDisplayIdentity,
   catalogIdentity,
   catalogInstallState,
@@ -1564,6 +1568,8 @@ function RuntimePane({
   const { t } = useTranslation();
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [roles, setRoles] = useState<RoleView[]>([]);
+  const [integrity, setIntegrity] = useState<RuntimeIntegrityView | null>(null);
+  const [integrityLoading, setIntegrityLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   // Provider modal: a provider id (edit existing) or "add" (new), null = closed.
@@ -1609,6 +1615,17 @@ function RuntimePane({
     }
   };
 
+  const reloadIntegrity = async () => {
+    setIntegrityLoading(true);
+    try {
+      setIntegrity(runtimeIntegrityView(await coreBridge.integrityAudit()));
+    } catch {
+      setIntegrity(runtimeIntegrityView(null));
+    } finally {
+      setIntegrityLoading(false);
+    }
+  };
+
   useEffect(() => {
     void (async () => {
       try {
@@ -1619,6 +1636,7 @@ function RuntimePane({
         /* leave empty */
       }
       await reloadRoles();
+      await reloadIntegrity();
     })();
   }, []);
 
@@ -1794,6 +1812,11 @@ function RuntimePane({
             The router automatically picks the best model among the eligible ones; you can
             force a specific one.
           </p>
+          <RuntimeDiagnosticsCard
+            value={integrity}
+            loading={integrityLoading}
+            onRefresh={() => void reloadIntegrity()}
+          />
           {roles.length === 0 ? (
             <p className="set-hint">{t("settings.addProviderAndRefresh")}</p>
           ) : (
@@ -2046,6 +2069,56 @@ function RuntimePane({
       {note && sub !== "providers" && (
         <p className="set-hint" style={{ marginTop: "var(--s3)" }}>{note}</p>
       )}
+    </div>
+  );
+}
+
+function RuntimeDiagnosticsCard({
+  value,
+  loading,
+  onRefresh,
+}: {
+  value: RuntimeIntegrityView | null;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  const available = value?.available === true;
+  const healthy = value?.healthy === true;
+  const gapCount = value?.diagnosticGapCount ?? 0;
+  return (
+    <div className="mdl-row runtime-diagnostics-card">
+      <div className="mdl-row-main">
+        <div className="mdl-row-top">
+          <strong>Core diagnostics</strong>
+          <span className={`set-badge ${healthy ? "green" : available ? "red" : "muted"}`}>
+            {loading ? "Checking" : healthy ? "Clean" : available ? `${gapCount} gaps` : "Unavailable"}
+          </span>
+        </div>
+        <p className="mdl-detail-sub">
+          Runtime integrity and observability gaps from the canonical audit endpoint.
+        </p>
+        {available && value && value.visibleDiagnosticGaps.length > 0 ? (
+          <ul className="runtime-diagnostics-list">
+            {value.visibleDiagnosticGaps.map((gap) => (
+              <li key={`${gap.owner}:${gap.code}`}>
+                <span>{gap.owner}</span>
+                <code>{gap.code}</code>
+                <small>{gap.summary}</small>
+              </li>
+            ))}
+            {value.hiddenDiagnosticGapCount > 0 ? (
+              <li>
+                <span>more</span>
+                <code>{value.hiddenDiagnosticGapCount}</code>
+                <small>Additional gaps hidden in this compact view.</small>
+              </li>
+            ) : null}
+          </ul>
+        ) : null}
+      </div>
+      <button className="set-btn" type="button" disabled={loading} onClick={onRefresh}>
+        <RefreshCw size={14} /> Refresh
+      </button>
     </div>
   );
 }
