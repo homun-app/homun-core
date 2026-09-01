@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 import scripts.audit_homun_state as audit
+import scripts.repair_homun_logs as log_repair
 
 
 def create_runtime_schema(conn: sqlite3.Connection) -> None:
@@ -427,6 +428,49 @@ class AuditHomunStateTests(unittest.TestCase):
         self.assertIn("routing_decision_unexplained", codes)
         encoded = json.dumps(report)
         self.assertNotIn("RSSMRA80A01H501U", encoded)
+
+    def test_log_repair_previews_applies_with_backup_and_removes_sensitive_plaintext(self):
+        paths = self.with_paths()
+        paths.logs_dir.mkdir()
+        trace = paths.logs_dir / "turn-trace.jsonl"
+        trace.write_text(
+            '{"prompt_head":"utente RSSMRA80A01H501U"}\n'
+            '{"prompt_head":"Authorization: Bearer abcdefghijklmnop utente ok"}\n'
+            '{"prompt_head":"safe"}\n',
+            encoding="utf-8",
+        )
+        backup_dir = paths.logs_dir.parent / "backups" / "privacy-logs" / "test-backup"
+
+        preview = log_repair.preview_log_repair(paths.logs_dir)
+
+        self.assertEqual(preview["total_files"], 1)
+        self.assertEqual(preview["total_redactions"], 2)
+        self.assertIn("RSSMRA80A01H501U", trace.read_text(encoding="utf-8"))
+        with self.assertRaises(ValueError):
+            log_repair.apply_log_repair(paths.logs_dir, backup_dir, confirm=False)
+
+        result = log_repair.apply_log_repair(paths.logs_dir, backup_dir, confirm=True)
+
+        self.assertTrue(result["backup"]["created"])
+        self.assertEqual(result["backup"]["files"], 1)
+        self.assertTrue((backup_dir / "turn-trace.jsonl").is_file())
+        redacted = trace.read_text(encoding="utf-8")
+        self.assertNotIn("RSSMRA80A01H501U", redacted)
+        self.assertNotIn("Bearer abcdefghijklmnop", redacted)
+        self.assertIn("[REDACTED:identity]", redacted)
+        self.assertIn("[REDACTED:credential]", redacted)
+        report = audit.audit_homun_state(paths)
+        self.assertNotIn("log_contains_sensitive_plaintext", self.finding_codes(report))
+        encoded = json.dumps(result)
+        self.assertNotIn("RSSMRA80A01H501U", encoded)
+        self.assertNotIn(str(trace), encoded)
+        second = log_repair.apply_log_repair(
+            paths.logs_dir,
+            paths.logs_dir.parent / "backups" / "privacy-logs" / "second-backup",
+            confirm=True,
+        )
+        self.assertFalse(second["backup"]["created"])
+        self.assertEqual(second["total_redactions"], 0)
 
     def test_report_caps_repeated_findings_and_keeps_summary_counts(self):
         paths = self.with_paths()

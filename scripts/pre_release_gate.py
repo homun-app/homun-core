@@ -109,6 +109,7 @@ def build_plan(env: dict[str, str]) -> list[Step]:
                 "scripts.test_smoke_kernel_projection",
                 "scripts.test_e2e_browser_diagnostic",
                 "scripts.test_production_smoke",
+                "scripts.test_audit_homun_state",
                 "-v",
             ],
         ),
