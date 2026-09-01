@@ -203,7 +203,7 @@ fn effect_class_token(effect_class: &EffectClass) -> &'static str {
 fn browser_budget_failure_reason(text: &str) -> Option<&str> {
     let reason = text.trim().strip_prefix("browser_budget_exceeded:")?;
     match reason {
-        "wall_clock" | "failed_navigations" | "no_progress" => Some(reason),
+        "wall_clock" | "stall" | "failed_navigations" | "no_progress" => Some(reason),
         _ => Some("unknown"),
     }
 }
@@ -8415,6 +8415,28 @@ mod chat_turn_query_tests {
             projection.activity.is_empty(),
             "typed browser budget failures must not leak as generic activity rows"
         );
+    }
+
+    #[test]
+    fn browser_stall_failure_reason_is_preserved() {
+        let s = store();
+        insert_browser_turn(
+            &s,
+            "turn_browser_stall",
+            "threadBrowserStall",
+            TaskStatus::Running,
+        );
+        s.insert_turn_event(
+            "turn_browser_stall",
+            TurnEventKind::Activity,
+            json!({"text": "browser_budget_exceeded:stall"}),
+        )
+        .unwrap();
+
+        let projection = s.project_kernel_thread("threadBrowserStall", 200).unwrap();
+
+        assert_eq!(projection.browser.state, "failed");
+        assert_eq!(projection.browser.failure_reason.as_deref(), Some("stall"));
     }
 
     #[test]
