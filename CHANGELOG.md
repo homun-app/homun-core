@@ -10,6 +10,25 @@ single line so the site captures its full text; version delimiters are `## [x.y.
 
 ## [Unreleased]
 
+## [0.1.1097] — 2026-09-01
+
+A production hardening release for real-profile integrity, browser automation failures and model-selection clarity.
+
+## Highlights
+- **Real profile integrity can now be audited and repaired.** Homun can detect stale streaming turns, orphaned approvals and browser tasks that exhausted their action budget, then close them canonically with backups.
+- **Model selection is easier to trust.** The composer treats `Unavailable` as a placeholder, keeps `Auto` visible for automatic routing and records the effective model choice as routing metadata.
+- **Browser automation failures are more explicit.** Browser tasks that make no semantic progress now end as failures with preserved evidence instead of looking like successful assistant text.
+
+## Improvements
+- **Production smoke coverage now includes longer agentic scenarios.** The local release gate covers browser no-progress, long-process checkpointing, subagent probes, automation dry-runs and runtime integrity checks.
+- **Packaged builds use the right gateway and token contract.** Desktop packaging and development startup now verify the bundled gateway path and keep the gateway token outside the renderer bundle.
+- **Automation and project-graph diagnostics expose safer integrity signals.** Gateway routes now support dry-run checks and compact lifecycle audit output without leaking local paths.
+
+## Fixes
+- **Sensitive trace logs can be repaired locally.** A dedicated privacy repair tool redacts known sensitive values from historical turn traces and writes an auditable backup.
+- **Waiting approval tasks no longer stay orphaned forever.** The integrity repair path can fail stale HITL waits that no longer have an active runtime owner.
+- **Completed browser-budget tasks no longer pollute the runtime audit.** Historical tasks that finished after exhausting browser budget are reclassified so real-profile audits can return to zero hard errors.
+
 ## [0.1.1096] — 2026-08-30
 
 A focused release candidate for browser PiP behavior and memory/privacy scope stability.
@@ -90,6 +109,7 @@ A browser that completes real tasks, and a noticeably smoother app.
 - **The local model respects its timeout.** A stuck generation no longer keeps Homun busy indefinitely.
 
 [Unreleased]: https://github.com/homun-app/homun-releases/releases
+[0.1.1097]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1097
 [0.1.1096]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1096
 [0.1.1095]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1095
 [0.1.1094]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1094
