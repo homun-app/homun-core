@@ -287,6 +287,44 @@ class AuditHomunStateTests(unittest.TestCase):
 
         self.assertIn("active_task_with_terminal_turn_event", self.finding_codes(report))
 
+    def test_waiting_approval_with_open_hitl_allows_terminal_turn_event(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-1', 'user-1', 'workspace-1', 'chat_turn',
+                'waiting_user_approval', 1, 2, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into turn_events (turn_id, seq, kind, payload_json, created_at)
+            values ('turn-1', 1, 'done', '{"text":"done"}', 2)
+            """
+        )
+        conn.execute(
+            """
+            insert into thread_hitl_waits (
+                wait_id, thread_id, source_message_id, kind, payload_json,
+                open_work_json, status, created_at, resolved_at
+            ) values (
+                'wait-1', 'thread-1', 'message-1', 'payment', '{}',
+                '{}', 'open', 2, null
+            )
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertNotIn("active_task_with_terminal_turn_event", self.finding_codes(report))
+        self.assertNotIn("waiting_approval_task_without_canonical_approval", self.finding_codes(report))
+
     def test_waiting_approval_task_without_canonical_approval_is_reported(self):
         paths = self.with_paths()
         conn = sqlite3.connect(paths.runtime_db)

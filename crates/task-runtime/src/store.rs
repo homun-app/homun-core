@@ -5336,7 +5336,39 @@ impl TaskStore {
             }
         }
 
-        let mut stmt = self.connection.prepare(
+        let mut terminal_wait_exemptions = Vec::new();
+        if table_exists(&self.connection, "task_approvals") {
+            terminal_wait_exemptions.push(
+                "EXISTS (
+                   SELECT 1 FROM task_approvals a
+                   WHERE a.task_id = t.task_id
+                     AND a.user_id = t.user_id
+                     AND a.workspace_id = t.workspace_id
+                     AND a.status = 'pending'
+                 )",
+            );
+        }
+        if table_exists(&self.connection, "thread_hitl_waits") {
+            terminal_wait_exemptions.push(
+                "EXISTS (
+                   SELECT 1 FROM thread_hitl_waits h
+                   WHERE h.thread_id = t.thread_id
+                     AND h.status = 'open'
+                 )",
+            );
+        }
+        let terminal_wait_clause = if terminal_wait_exemptions.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "AND NOT (
+                   t.status = 'waiting_user_approval'
+                   AND ({})
+                 )",
+                terminal_wait_exemptions.join(" OR ")
+            )
+        };
+        let mut stmt = self.connection.prepare(&format!(
             "SELECT t.task_id, t.status
              FROM tasks t
              JOIN turn_events e ON e.turn_id = t.task_id
@@ -5346,10 +5378,11 @@ impl TaskStore {
                'waiting_resource', 'paused', 'parked'
              )
                AND e.kind IN ('done', 'error', 'cancelled')
+               {terminal_wait_clause}
              GROUP BY t.task_id, t.status
              ORDER BY MAX(e.created_at) DESC
-             LIMIT 100",
-        )?;
+             LIMIT 100"
+        ))?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
@@ -7791,6 +7824,69 @@ mod chat_turn_query_tests {
         assert!(codes.contains("active_task_with_terminal_turn_event"));
         assert!(codes.contains("completed_task_with_browser_budget_exceeded"));
         assert!(codes.contains("waiting_approval_task_without_canonical_approval"));
+    }
+
+    #[test]
+    fn runtime_integrity_allows_terminal_event_for_open_hitl_waiting_approval() {
+        let s = store();
+        let waiting = make_chat_turn(
+            "turn_waiting_hitl",
+            "thread_waiting_hitl",
+            TaskStatus::WaitingUserApproval,
+        );
+        s.insert_chat_turn(
+            &waiting,
+            "thread_waiting_hitl",
+            "req-waiting-hitl",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.insert_terminal_event_once(
+            "turn_waiting_hitl",
+            TurnEventKind::Done,
+            json!({"text": "done"}),
+        )
+        .unwrap();
+        s.connection
+            .execute(
+                "CREATE TABLE thread_hitl_waits (
+                    wait_id TEXT PRIMARY KEY,
+                    thread_id TEXT NOT NULL,
+                    source_message_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    open_work_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    resolved_at INTEGER
+                )",
+                [],
+            )
+            .unwrap();
+        s.connection
+            .execute(
+                "INSERT INTO thread_hitl_waits (
+                    wait_id, thread_id, source_message_id, kind, payload_json,
+                    open_work_json, status, created_at, resolved_at
+                ) VALUES (
+                    'wait-hitl', 'thread_waiting_hitl', 'message-hitl', 'payment',
+                    '{}', '{}', 'open', 2, NULL
+                )",
+                [],
+            )
+            .unwrap();
+
+        let report = s.audit_runtime_integrity().unwrap();
+        let codes = report
+            .findings
+            .iter()
+            .map(|finding| finding.code.as_str())
+            .collect::<BTreeSet<_>>();
+
+        assert!(report.integrity_ok);
+        assert!(!codes.contains("active_task_with_terminal_turn_event"));
+        assert!(!codes.contains("waiting_approval_task_without_canonical_approval"));
     }
 
     #[test]

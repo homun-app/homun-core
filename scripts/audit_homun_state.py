@@ -217,9 +217,40 @@ def audit_runtime(paths: AuditInputs, findings: list[dict[str, Any]], warnings: 
                     ref=row["id"],
                 )
         if table_exists(conn, "turn_events"):
+            terminal_wait_exemptions: list[str] = []
+            if table_exists(conn, "task_approvals"):
+                terminal_wait_exemptions.append(
+                    """
+                    exists (
+                      select 1 from task_approvals a
+                      where a.task_id = t.task_id
+                        and a.user_id = t.user_id
+                        and a.workspace_id = t.workspace_id
+                        and a.status = 'pending'
+                    )
+                    """
+                )
+            if table_exists(conn, "thread_hitl_waits"):
+                terminal_wait_exemptions.append(
+                    """
+                    exists (
+                      select 1 from thread_hitl_waits h
+                      where h.thread_id = t.thread_id
+                        and h.status = 'open'
+                    )
+                    """
+                )
+            terminal_wait_clause = ""
+            if terminal_wait_exemptions:
+                terminal_wait_clause = f"""
+                  and not (
+                    t.status = 'waiting_user_approval'
+                    and ({' or '.join(terminal_wait_exemptions)})
+                  )
+                """
             for row in row_dicts(
                 conn,
-                """
+                f"""
                 select t.task_id, t.status as task_status, max(e.created_at) as terminal_at
                 from tasks t
                 join turn_events e on e.turn_id = t.task_id
@@ -229,6 +260,7 @@ def audit_runtime(paths: AuditInputs, findings: list[dict[str, Any]], warnings: 
                   'waiting_resource', 'paused', 'parked'
                 )
                   and e.kind in ('done', 'error', 'cancelled')
+                {terminal_wait_clause}
                 group by t.task_id, t.status
                 order by terminal_at desc
                 limit 100
