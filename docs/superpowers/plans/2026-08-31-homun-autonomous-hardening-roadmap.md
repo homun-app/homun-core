@@ -374,6 +374,17 @@ git push
 
 Expected: pushed commit per bug class; no generated smoke artifacts committed.
 
+**2026-09-01 update:** added the first runtime repair action for
+`streaming_assistant_without_active_run`. `/api/integrity/repair/preview` now
+accepts `fail_stale_streaming_assistants` as a runtime-only action, estimates
+affected rows from the canonical runtime audit, and binds the preview to a
+runtime checksum/token. `/api/integrity/repair/apply` requires the matching
+preview and confirmation, backs up the unified `homun.sqlite`, marks only stale
+assistant `streaming`/`retrying` rows with no active run as `failed`, and returns
+metadata-only before/after runtime reports. Verified with focused runtime tests,
+focused gateway integrity tests, gateway ownership contract, and full
+`python3 scripts/pre_release_gate.py`.
+
 ---
 
 ## Stop Conditions

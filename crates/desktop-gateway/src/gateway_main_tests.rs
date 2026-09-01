@@ -26204,6 +26204,104 @@ async fn integrity_repair_apply_creates_private_backup_without_exposing_paths() 
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[tokio::test]
+async fn integrity_repair_apply_fails_stale_streaming_assistant_without_exposing_content() {
+    use tower::ServiceExt;
+
+    let dir = isolated_gateway_test_dir("integrity-repair-runtime");
+    std::fs::create_dir_all(&dir).unwrap();
+    let _data_dir = TestGatewayDataDir::new(&dir);
+    let database = dir.join("homun.sqlite");
+    let chat = ChatStore::open(&database).unwrap();
+    let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
+    let thread = chat.create_thread("workspace_runtime_repair").unwrap();
+    let mut assistant = local_first_desktop_gateway::seeded_ready_message(
+        &thread.thread_id,
+        "unix:100.000000000".to_string(),
+    );
+    assistant.id = "assistant_runtime_repair".to_string();
+    assistant.text = "SECRET_RUNTIME_REPAIR_SENTINEL".to_string();
+    assistant.linked_task_id = Some("turn_without_active_run".to_string());
+    assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
+    chat.append_assistant_message(&thread.thread_id, &assistant)
+        .unwrap();
+
+    let mut state = super::AppState::for_tests();
+    state.chat_store = std::sync::Arc::new(std::sync::Mutex::new(chat));
+    state.task_store = std::sync::Arc::new(std::sync::Mutex::new(tasks));
+    let app = integrity_route_test_app(state.clone());
+
+    let preview_response = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/integrity/repair/preview")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::json!({
+                        "actions": [{ "type": "fail_stale_streaming_assistants" }]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let (preview_status, mut preview) = memory_source_response_json(preview_response).await;
+    assert_eq!(preview_status, axum::http::StatusCode::OK);
+    assert_eq!(preview["estimates"][0]["estimated_rows"], 1);
+    assert!(
+        !preview
+            .to_string()
+            .contains("SECRET_RUNTIME_REPAIR_SENTINEL")
+    );
+    preview["confirm"] = serde_json::json!(true);
+
+    let response = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/integrity/repair/apply")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(preview.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let (status, body) = memory_source_response_json(response).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(body["backup"]["created"], true);
+    assert!(body["backup"]["bytes"].as_u64().unwrap() > 0);
+    assert_eq!(body["runtime_before"]["integrity_ok"], false);
+    assert_eq!(body["runtime_after"]["integrity_ok"], true);
+    let encoded = body.to_string();
+    assert!(!encoded.contains("SECRET_RUNTIME_REPAIR_SENTINEL"));
+    assert!(!encoded.contains(database.to_string_lossy().as_ref()));
+    let backup_root = dir.join("backups").join("integrity-runtime");
+    let backup_directories = std::fs::read_dir(&backup_root)
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(backup_directories.len(), 1);
+    assert!(backup_directories[0].path().join("homun.sqlite").is_file());
+    let delivery_state = state
+        .chat_store
+        .lock()
+        .unwrap()
+        .message(&thread.thread_id, "assistant_runtime_repair")
+        .unwrap()
+        .unwrap()
+        .delivery_state;
+    assert_eq!(
+        delivery_state,
+        local_first_desktop_gateway::MessageDeliveryState::Failed
+    );
+
+    drop(_data_dir);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn browser_anti_loop_nudge_injects_after_threshold_consecutive_snapshots() {
     let threshold = 3;

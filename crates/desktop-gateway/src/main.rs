@@ -702,10 +702,11 @@ use local_first_capabilities::{
 use local_first_desktop_gateway::browser_checkpoint::BrowserCheckpointSecretStore;
 use local_first_desktop_gateway::integrity_api::{
     GraphIntegrityStatus, IntegrityAuditResponse, IntegrityBackupSummary, IntegrityRepairAction,
-    IntegrityRepairApplyRequest, IntegrityRepairApplyResponse, IntegrityRepairEstimate,
-    IntegrityRepairPreviewRequest, IntegrityRepairPreviewResponse, LinkedMemoryRepairApplyRequest,
-    LinkedMemoryRepairApplyResponse, canonical_integrity_actions, gateway_approval_token,
-    gateway_audit_checksum, inspect_registered_graph,
+    IntegrityRepairApplyRequest, IntegrityRepairApplyResponse, IntegrityRepairDomain,
+    IntegrityRepairEstimate, IntegrityRepairPreviewRequest, IntegrityRepairPreviewResponse,
+    LinkedMemoryRepairApplyRequest, LinkedMemoryRepairApplyResponse, canonical_integrity_actions,
+    gateway_approval_token, gateway_audit_checksum, gateway_runtime_audit_checksum,
+    inspect_registered_graph,
 };
 use local_first_desktop_gateway::linked_memory_repair::{
     LinkedMemoryRepairPreview, LinkedRepairError, LinkedRepairFailureInjection,

@@ -405,6 +405,22 @@ fn integrity_preview_for_actions(
                 estimated_rows,
             }],
         )
+    } else if actions[0].repair_domain() == IntegrityRepairDomain::Runtime {
+        let store = lock_task_store(state)?;
+        let runtime = store
+            .audit_runtime_integrity()
+            .map_err(|error| integrity_internal_error("integrity_audit_failed", error))?;
+        let estimated_rows = store
+            .count_stale_streaming_assistant_messages()
+            .map_err(|error| integrity_internal_error("integrity_preview_failed", error))?;
+        (
+            gateway_runtime_audit_checksum(&runtime, &actions)
+                .map_err(|error| integrity_internal_error("integrity_preview_failed", error))?,
+            vec![IntegrityRepairEstimate {
+                action: actions[0].clone(),
+                estimated_rows,
+            }],
+        )
     } else {
         let memory_actions = actions
             .iter()
@@ -567,6 +583,18 @@ fn next_integrity_backup_path() -> Result<PathBuf, GatewayError> {
     Ok(directory.join("memory.sqlite"))
 }
 
+fn next_runtime_integrity_backup_path() -> Result<PathBuf, GatewayError> {
+    let timestamp = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    let directory = gateway_data_dir()
+        .map_err(|error| integrity_internal_error("integrity_backup_failed", error))?
+        .join("backups")
+        .join("integrity-runtime")
+        .join(format!("{timestamp}-{}", uuid::Uuid::new_v4().simple()));
+    fs::create_dir_all(&directory)
+        .map_err(|error| integrity_internal_error("integrity_backup_failed", error))?;
+    Ok(directory.join("homun.sqlite"))
+}
+
 pub(crate) async fn integrity_repair_apply(
     State(state): State<AppState>,
     Json(request): Json<IntegrityRepairApplyRequest>,
@@ -621,14 +649,48 @@ pub(crate) async fn integrity_repair_apply(
         let graph_status =
             integrity_graph_status_for_workspace(&MemoryWorkspaceId::new(workspace_id))?;
         return Ok(Json(IntegrityRepairApplyResponse {
-            before,
-            after,
+            before: Some(before),
+            after: Some(after),
+            runtime_before: None,
+            runtime_after: None,
             backup: IntegrityBackupSummary {
                 created: true,
                 bytes: backup.bytes_copied,
             },
             applied: current.estimates,
             refreshed_graphs: vec![graph_status],
+        }));
+    }
+
+    if current.actions[0].repair_domain() == IntegrityRepairDomain::Runtime {
+        let backup_path = next_runtime_integrity_backup_path()?;
+        let store = lock_task_store(&state)?;
+        let bytes = store
+            .backup_to(backup_path)
+            .map_err(|error| integrity_internal_error("integrity_backup_failed", error))?;
+        let before = store
+            .audit_runtime_integrity()
+            .map_err(|error| integrity_internal_error("integrity_audit_failed", error))?;
+        let changed = store
+            .fail_stale_streaming_assistant_messages()
+            .map_err(|error| integrity_internal_error("integrity_repair_failed", error))?;
+        let after = store
+            .audit_runtime_integrity()
+            .map_err(|error| integrity_internal_error("integrity_audit_failed", error))?;
+        return Ok(Json(IntegrityRepairApplyResponse {
+            before: None,
+            after: None,
+            runtime_before: Some(before),
+            runtime_after: Some(after),
+            backup: IntegrityBackupSummary {
+                created: true,
+                bytes,
+            },
+            applied: vec![IntegrityRepairEstimate {
+                action: current.actions[0].clone(),
+                estimated_rows: changed,
+            }],
+            refreshed_graphs: Vec::new(),
         }));
     }
 
@@ -685,8 +747,10 @@ pub(crate) async fn integrity_repair_apply(
             }
         })?;
     Ok(Json(IntegrityRepairApplyResponse {
-        before: result.before,
-        after: result.after,
+        before: Some(result.before),
+        after: Some(result.after),
+        runtime_before: None,
+        runtime_after: None,
         backup: IntegrityBackupSummary {
             created: true,
             bytes: result.backup.bytes_copied,

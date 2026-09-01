@@ -19,7 +19,8 @@ use local_first_execution_protocol::{EffectClass, EffectReceiptRef, EffectReceip
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use time::OffsetDateTime;
 
 /// "subagent.review" → "Review"; "subagent.code_reviewer" → "Code reviewer".
@@ -425,6 +426,7 @@ fn project_kernel_browser_view(
 
 pub struct TaskStore {
     pub(crate) connection: Connection,
+    db_path: Option<PathBuf>,
 }
 
 pub(crate) fn insert_turn_event_on(
@@ -541,8 +543,10 @@ fn projection_event_on(
 
 impl TaskStore {
     pub fn open(path: impl AsRef<Path>) -> TaskRuntimeResult<Self> {
+        let db_path = path.as_ref().to_path_buf();
         let store = Self {
-            connection: Connection::open(path)?,
+            connection: Connection::open(&db_path)?,
+            db_path: Some(db_path),
         };
         // WAL enables concurrent readers + serialized writers — required when two
         // stores (chat + task) point at the same file. busy_timeout avoids transient
@@ -557,6 +561,7 @@ impl TaskStore {
     pub fn open_in_memory() -> TaskRuntimeResult<Self> {
         let store = Self {
             connection: Connection::open_in_memory()?,
+            db_path: None,
         };
         // WAL is a no-op on in-memory DBs but busy_timeout still applies.
         store
@@ -564,6 +569,23 @@ impl TaskStore {
             .execute_batch("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;")?;
         store.run_migrations()?;
         Ok(store)
+    }
+
+    pub fn backup_to(&self, destination: impl AsRef<Path>) -> TaskRuntimeResult<u64> {
+        let Some(source_path) = &self.db_path else {
+            return Err(TaskRuntimeError::Store(
+                "task runtime backup requires file-backed store".to_string(),
+            ));
+        };
+        let destination_path = destination.as_ref();
+        if let Some(parent) = destination_path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| TaskRuntimeError::Store(error.to_string()))?;
+        }
+        self.connection
+            .execute_batch("PRAGMA wal_checkpoint(FULL);")?;
+        fs::copy(source_path, destination_path)
+            .map_err(|error| TaskRuntimeError::Store(error.to_string()))
     }
 
     pub fn run_migrations(&self) -> TaskRuntimeResult<()> {
@@ -5229,6 +5251,12 @@ fn claim_existing_non_executable_receipt_on(
     claim_effect_receipt_on(connection, receipt_ref).map(Some)
 }
 
+fn stale_streaming_assistant_repair_supported(connection: &Connection) -> bool {
+    table_exists(connection, "chat_messages")
+        && column_exists(connection, "chat_messages", "linked_task_id")
+        && column_exists(connection, "chat_messages", "delivery_state")
+}
+
 pub(crate) fn load_effect_receipt_on(
     conn: &Connection,
     receipt_ref: &EffectReceiptRef,
@@ -5247,6 +5275,46 @@ pub(crate) fn load_effect_receipt_on(
 }
 
 impl TaskStore {
+    pub fn count_stale_streaming_assistant_messages(&self) -> TaskRuntimeResult<u64> {
+        if !stale_streaming_assistant_repair_supported(&self.connection) {
+            return Ok(0);
+        }
+        Ok(self.connection.query_row(
+            "SELECT COUNT(*)
+             FROM chat_messages m
+             LEFT JOIN agent_runs r
+               ON r.turn_id = m.linked_task_id AND r.status = 'running'
+             WHERE m.role = 'assistant'
+               AND m.delivery_state IN ('streaming', 'retrying')
+               AND COALESCE(m.linked_task_id, '') <> ''
+               AND r.run_id IS NULL",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub fn fail_stale_streaming_assistant_messages(&self) -> TaskRuntimeResult<u64> {
+        if !stale_streaming_assistant_repair_supported(&self.connection) {
+            return Ok(0);
+        }
+        let changed = self.connection.execute(
+            "UPDATE chat_messages
+                SET delivery_state = 'failed'
+              WHERE id IN (
+                SELECT m.id
+                FROM chat_messages m
+                LEFT JOIN agent_runs r
+                  ON r.turn_id = m.linked_task_id AND r.status = 'running'
+                WHERE m.role = 'assistant'
+                  AND m.delivery_state IN ('streaming', 'retrying')
+                  AND COALESCE(m.linked_task_id, '') <> ''
+                  AND r.run_id IS NULL
+              )",
+            [],
+        )?;
+        Ok(changed as u64)
+    }
+
     pub fn audit_runtime_integrity(&self) -> TaskRuntimeResult<RuntimeIntegrityReport> {
         let mut findings = Vec::new();
 
@@ -5303,9 +5371,7 @@ impl TaskStore {
             ));
         }
 
-        if table_exists(&self.connection, "chat_messages")
-            && column_exists(&self.connection, "chat_messages", "delivery_state")
-        {
+        if stale_streaming_assistant_repair_supported(&self.connection) {
             let mut stmt = self.connection.prepare(
                 "SELECT m.id, m.delivery_state
                  FROM chat_messages m
@@ -7887,6 +7953,81 @@ mod chat_turn_query_tests {
         assert!(report.integrity_ok);
         assert!(!codes.contains("active_task_with_terminal_turn_event"));
         assert!(!codes.contains("waiting_approval_task_without_canonical_approval"));
+    }
+
+    #[test]
+    fn runtime_integrity_repair_fails_stale_streaming_assistant_messages() {
+        let s = store();
+        s.connection
+            .execute_batch(
+                "CREATE TABLE chat_messages (
+                    id TEXT PRIMARY KEY,
+                    thread_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    linked_task_id TEXT,
+                    delivery_state TEXT NOT NULL
+                );
+                INSERT INTO chat_messages (
+                    id, thread_id, role, text, timestamp, linked_task_id, delivery_state
+                ) VALUES (
+                    'assistant_stale',
+                    'thread_stale',
+                    'assistant',
+                    'SECRET_TRANSCRIPT_SENTINEL',
+                    '100',
+                    'turn_without_run',
+                    'streaming'
+                );
+                INSERT INTO chat_messages (
+                    id, thread_id, role, text, timestamp, linked_task_id, delivery_state
+                ) VALUES (
+                    'assistant_delivered',
+                    'thread_stale',
+                    'assistant',
+                    'Visible answer',
+                    '101',
+                    'turn_without_run',
+                    'delivered'
+                );",
+            )
+            .unwrap();
+
+        let before = s.audit_runtime_integrity().unwrap();
+        assert_eq!(
+            before
+                .finding_counts
+                .get("streaming_assistant_without_active_run"),
+            Some(&1)
+        );
+        assert_eq!(s.count_stale_streaming_assistant_messages().unwrap(), 1);
+
+        let repaired = s.fail_stale_streaming_assistant_messages().unwrap();
+        assert_eq!(repaired, 1);
+        let delivery_state: String = s
+            .connection
+            .query_row(
+                "SELECT delivery_state FROM chat_messages WHERE id = 'assistant_stale'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(delivery_state, "failed");
+        assert_eq!(s.count_stale_streaming_assistant_messages().unwrap(), 0);
+        assert_eq!(s.fail_stale_streaming_assistant_messages().unwrap(), 0);
+
+        let after = s.audit_runtime_integrity().unwrap();
+        assert!(
+            !after
+                .finding_counts
+                .contains_key("streaming_assistant_without_active_run")
+        );
+        assert!(
+            !serde_json::to_string(&after)
+                .unwrap()
+                .contains("SECRET_TRANSCRIPT_SENTINEL")
+        );
     }
 
     #[test]

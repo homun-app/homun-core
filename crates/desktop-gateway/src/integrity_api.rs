@@ -48,6 +48,7 @@ pub enum IntegrityRepairAction {
     RebuildFts,
     PurgeUnknownWorkspace { workspace_id: WorkspaceId },
     RefreshProjectGraph { workspace_id: WorkspaceId },
+    FailStaleStreamingAssistants,
 }
 
 impl IntegrityRepairAction {
@@ -67,13 +68,33 @@ impl IntegrityRepairAction {
                     workspace_id: workspace_id.clone(),
                 })
             }
-            Self::RefreshProjectGraph { .. } => None,
+            Self::RefreshProjectGraph { .. } | Self::FailStaleStreamingAssistants => None,
         }
     }
 
     pub fn is_graph_refresh(&self) -> bool {
         matches!(self, Self::RefreshProjectGraph { .. })
     }
+
+    pub fn repair_domain(&self) -> IntegrityRepairDomain {
+        match self {
+            Self::RefreshProjectGraph { .. } => IntegrityRepairDomain::Graph,
+            Self::FailStaleStreamingAssistants => IntegrityRepairDomain::Runtime,
+            Self::RemoveGraphifyDuplicateRelations { .. }
+            | Self::RemoveOrphanEmbeddings
+            | Self::RemoveOrphanEvidenceLinks
+            | Self::RemoveMissingWikiLinks
+            | Self::RebuildFts
+            | Self::PurgeUnknownWorkspace { .. } => IntegrityRepairDomain::Memory,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IntegrityRepairDomain {
+    Memory,
+    Graph,
+    Runtime,
 }
 
 impl From<MemoryRepairAction> for IntegrityRepairAction {
@@ -137,8 +158,14 @@ pub struct IntegrityBackupSummary {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct IntegrityRepairApplyResponse {
-    pub before: MemoryIntegrityReport,
-    pub after: MemoryIntegrityReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before: Option<MemoryIntegrityReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after: Option<MemoryIntegrityReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_before: Option<RuntimeIntegrityReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_after: Option<RuntimeIntegrityReport>,
     pub backup: IntegrityBackupSummary,
     pub applied: Vec<IntegrityRepairEstimate>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -229,13 +256,14 @@ pub fn canonical_integrity_actions(
             return Err("integrity repair contains duplicate actions".to_string());
         }
     }
-    let has_graph = encoded.iter().any(|(_, action)| action.is_graph_refresh());
-    let has_memory = encoded.iter().any(|(_, action)| !action.is_graph_refresh());
-    if has_graph && has_memory {
-        return Err(
-            "project graph refresh and database repair require separate previews".to_string(),
-        );
+    let domains = encoded
+        .iter()
+        .map(|(_, action)| action.repair_domain())
+        .collect::<std::collections::BTreeSet<_>>();
+    if domains.len() > 1 {
+        return Err("integrity repair domains require separate previews".to_string());
     }
+    let has_graph = domains.contains(&IntegrityRepairDomain::Graph);
     if has_graph && encoded.len() != 1 {
         return Err("preview one project graph refresh at a time".to_string());
     }
@@ -262,6 +290,18 @@ pub fn gateway_approval_token(
 ) -> Result<String, String> {
     let mut hasher = Sha256::new();
     hasher.update(audit_checksum.as_bytes());
+    hasher.update([0]);
+    hasher.update(serde_json::to_vec(actions).map_err(|error| error.to_string())?);
+    Ok(hex_digest(hasher.finalize()))
+}
+
+pub fn gateway_runtime_audit_checksum(
+    runtime: &RuntimeIntegrityReport,
+    actions: &[IntegrityRepairAction],
+) -> Result<String, String> {
+    let mut hasher = Sha256::new();
+    hasher.update(b"homun-runtime-integrity-repair-v1\0");
+    hasher.update(serde_json::to_vec(runtime).map_err(|error| error.to_string())?);
     hasher.update([0]);
     hasher.update(serde_json::to_vec(actions).map_err(|error| error.to_string())?);
     Ok(hex_digest(hasher.finalize()))
