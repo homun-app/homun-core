@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 PYTHON = sys.executable or "python3"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DESKTOP = os.path.join(ROOT, "apps", "desktop")
+BROWSER_AUTOMATION = os.path.join(ROOT, "runtimes", "browser-automation")
 MEMORYBENCH_PROVIDER = os.path.join(ROOT, "benchmarks", "memorybench", "homun-provider")
 GATEWAY_EVAL_SNIPPET = (
     "import scripts.eval_suite as e; "
@@ -75,6 +76,11 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             "desktop dependency audit",
             ["npm", "audit", "--audit-level=high"],
             cwd=DESKTOP,
+        ),
+        Step(
+            "browser automation dependency audit",
+            ["npm", "audit", "--audit-level=high"],
+            cwd=BROWSER_AUTOMATION,
         ),
         Step(
             "capability tests",

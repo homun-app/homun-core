@@ -206,7 +206,7 @@ Evidenza locale:
 
 - `python3 -m unittest scripts.test_audit_homun_state -v`
 - `python3 scripts/audit_homun_state.py --max-findings-per-code 3 --max-timeline-events 20`
-  sul profilo reale -> `ok=true`, report bounded con timeline campionate
+  sul profilo reale -> report bounded con timeline campionate
 - `python3 scripts/audit_homun_state.py --data-dir "$tmp" --max-findings-per-code 0`
   -> `paths.sources.data_dir=--data-dir`
 - `python3 scripts/audit_homun_state.py --max-findings-per-code 0` sul profilo
@@ -253,8 +253,79 @@ Evidenza locale:
 - `cargo fmt --all -- --check`
 - `python3 -m py_compile scripts/audit_homun_state.py scripts/test_audit_homun_state.py`
 - `python3 scripts/audit_homun_state.py --max-findings-per-code 0` sul profilo
-  reale -> `ok=true`, `errors=0`, `warnings=218`,
-  `observability.timelines=20`, `observability.diagnostic_gaps=100`
+  reale, prima del detector plan finale -> `ok=true`, `errors=0`,
+  `warnings=218`, `observability.timelines=20`,
+  `observability.diagnostic_gaps=100`
+
+## Packaged Production Smoke - 2026-09-01
+
+Slice locale su `main`: il package smoke e' stato ricostruito e rieseguito sul
+profilo reale con gateway dedicato `http://127.0.0.1:18768`, separato dai
+sidecar WhatsApp/Telegram. La matrice smoke ora fallisce se uno scenario richiesto
+non appartiene al profilo selezionato, evitando falsi verdi tipo
+`--scenario X5` senza `--profile all`.
+
+Risultati osservati sul package ricostruito:
+
+- `X5` automation API lifecycle -> `PASS X5: 0.0s`
+- `X6` MCP stdio API lifecycle -> `PASS X6: 0.0s`
+- `X2` skill/tool selection -> `PASS X2: 16.0s`
+- `X4` code workspace routing -> `PASS X4: 40.6s`
+- `X7` long business process checkpoint -> `PASS X7: 40.5s`
+- `X1` automation via chat -> `PASS X1: 49.0s`
+- `X3` memory/privacy -> `PASS X3: 23.7s`
+- `S1` chat semplice -> `PASS S1: 11.5s`
+- `S2` operational prompt -> `PASS S2: 9.9s`
+- `S3` chat lunga con piano -> `PASS S3: 67.3s`
+- `S4` modello/route semplice -> `PASS S4: 11.4s`
+- `S5` browser base -> `PASS S5: 90.8s`
+- `S6` browser form-fill -> `PASS S6: 137.6s`
+- `S7` dead URL plan settles -> `PASS S7: 68.7s`
+- `S8` payment approval browser fixture -> `PASS S8: 56.5s`
+- `S9` Italian locale web discovery -> `PASS S9: 155.6s`
+
+Il fallimento iniziale di `S9` non era un problema di risposta finale: la chat
+aveva prodotto tre risultati numerati con fonti, ma l'ultimo `plan_update`
+restava con uno step aperto. `scripts/audit_homun_state.py` ora segnala
+`completed_turn_with_incomplete_plan` e il runtime chiude correttamente anche i
+report numerati con link sorgente, non solo le tabelle.
+
+Evidenza locale aggiunta:
+
+- `python3 -m unittest scripts.test_production_smoke -v`
+- `python3 scripts/production_smoke.py --gateway-base http://127.0.0.1:18768 --scenario X5`
+  -> exit `2`, scenario non selezionato dal profilo `baseline`
+- `python3 scripts/production_smoke.py --gateway-base http://127.0.0.1:18768 --profile all --scenario X5 --scenario X6`
+  -> `PASS X5`, `PASS X6`
+- `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway reconcile_final_plan_marker_closes_numbered_report_with_source_link -- --nocapture`
+- `python3 -m unittest scripts.test_audit_homun_state -v`
+- `cargo fmt --all -- --check`
+- `python3 scripts/pre_release_gate.py`
+- `cd runtimes/browser-automation && npm audit --audit-level=high`
+  -> `found 0 vulnerabilities`
+- `cd apps/desktop && npm run package:prepare`; poi
+  `cd apps/desktop/.package/resources/browser-automation && npm audit --audit-level=high`
+  -> `found 0 vulnerabilities`, `nanoid=3.3.18`
+
+Stato profilo reale dopo il nuovo detector:
+
+- `scripts/audit_homun_state.py --max-findings-per-code 3 --max-timeline-events 20`
+  -> `ok=false`, `errors=62`, `warnings=218`
+- Errori: `completed_turn_with_incomplete_plan=62`, owner
+  `runtime_plan_projection`; includono storico e almeno un vecchio run smoke
+  volutamente fallito.
+- Warning: `agent_run_missing_model_attribution=100`,
+  `legacy_memory_without_evidence=100`,
+  `resolved_hitl_without_followup_run=18`.
+
+Blocchi residui prima di dichiarare una release production-grade:
+
+- distinguere nell'audit tra regressioni correnti e debito storico importato,
+  senza cancellare o riscrivere stato reale solo per rendere verde il report;
+- attendere CI verde sull'ultimo commit di `main` prima di taggare una nuova
+  release;
+- se si taglia una build pubblica, verificare artefatti, checksum,
+  signing/notarization e smoke sull'app installata, non solo sul sorgente.
 
 ## RC readiness - 2026-08-26
 

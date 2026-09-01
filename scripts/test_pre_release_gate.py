@@ -14,6 +14,7 @@ class PreReleaseGateTests(unittest.TestCase):
         self.assertIn("rust clippy", labels)
         self.assertIn("desktop dependency install", labels)
         self.assertIn("desktop dependency audit", labels)
+        self.assertIn("browser automation dependency audit", labels)
         self.assertIn("task runtime tests", labels)
         self.assertIn("turn consistency audit unit tests", labels)
         self.assertIn("kernel projection smoke", labels)
@@ -69,6 +70,8 @@ class PreReleaseGateTests(unittest.TestCase):
         self.assertEqual(plan[3].cwd, gate.DESKTOP)
         self.assertEqual(plan[4].command, ["npm", "audit", "--audit-level=high"])
         self.assertEqual(plan[4].cwd, gate.DESKTOP)
+        self.assertEqual(plan[5].command, ["npm", "audit", "--audit-level=high"])
+        self.assertEqual(plan[5].cwd, gate.BROWSER_AUTOMATION)
         self.assertIn("capability tests", labels)
         self.assertIn("orchestrator tests", labels)
         self.assertIn("gateway tests", labels)
@@ -132,6 +135,7 @@ class PreReleaseGateTests(unittest.TestCase):
                 "rust clippy",
                 "desktop dependency install",
                 "desktop dependency audit",
+                "browser automation dependency audit",
                 "capability tests",
                 "orchestrator tests",
                 "task runtime tests",
