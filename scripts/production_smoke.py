@@ -287,6 +287,16 @@ def select_scenarios(scenarios: list[Scenario], ids: list[str]) -> list[Scenario
     return [scenario for scenario in scenarios if scenario.id.upper() in wanted]
 
 
+def missing_scenario_ids(scenarios: list[Scenario], ids: list[str]) -> list[str]:
+    available = {scenario.id.upper() for scenario in scenarios}
+    missing: list[str] = []
+    for item in ids:
+        normalized = item.strip().upper()
+        if normalized and normalized not in available:
+            missing.append(normalized)
+    return missing
+
+
 def gateway_token() -> str:
     for key in ("HOMUN_EVAL_GATEWAY_TOKEN", "HOMUN_DESKTOP_GATEWAY_TOKEN"):
         value = os.environ.get(key)
@@ -681,7 +691,8 @@ def cleanup_scenario(state: dict[str, Any], scenario_passed: bool = True) -> Non
                 timeout=30,
             )
         except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as error:
-            print(f"WARN cleanup workspace failed: {error}", file=sys.stderr, flush=True)
+            if "workspace_not_found" not in str(error):
+                print(f"WARN cleanup workspace failed: {error}", file=sys.stderr, flush=True)
         shutil.rmtree(str(state["temp_project_root"]), ignore_errors=True)
     server = state.get("checkout_server")
     if server is not None:
@@ -1017,7 +1028,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    scenarios = select_scenarios(build_scenarios(args.profile), args.scenario)
+    profile_scenarios = build_scenarios(args.profile)
+    missing = missing_scenario_ids(profile_scenarios, args.scenario)
+    if missing:
+        print(
+            "Unknown scenario for profile "
+            f"{args.profile}: {', '.join(missing)}. "
+            "Use --profile all to run extended ids such as X5/X6.",
+            file=sys.stderr,
+        )
+        return 2
+    scenarios = select_scenarios(profile_scenarios, args.scenario)
     if args.list or not args.gateway_base:
         for scenario in scenarios:
             marker = f", marker={scenario.expect_marker}" if scenario.expect_marker else ""

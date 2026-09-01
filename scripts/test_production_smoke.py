@@ -43,6 +43,18 @@ class ProductionSmokeTests(unittest.TestCase):
 
         self.assertEqual([scenario.id for scenario in selected], ["S1", "S3"])
 
+    def test_missing_scenario_ids_detects_ids_outside_selected_profile(self):
+        scenarios = smoke.build_scenarios()
+
+        self.assertEqual(smoke.missing_scenario_ids(scenarios, ["S1", "X5"]), ["X5"])
+
+    def test_main_fails_when_requested_scenario_is_not_in_selected_profile(self):
+        with mock.patch("sys.stderr") as stderr:
+            code = smoke.main(["--gateway-base", "http://gateway", "--scenario", "X5"])
+
+        self.assertEqual(code, 2)
+        self.assertIn("Use --profile all", "".join(call.args[0] for call in stderr.write.call_args_list))
+
     def test_extended_profile_adds_complex_chat_automation_skill_and_memory_scenarios(self):
         baseline = smoke.build_scenarios()
         extended = smoke.build_scenarios(profile="extended")
@@ -614,6 +626,33 @@ class ProductionSmokeTests(unittest.TestCase):
             smoke._request = original
 
         self.assertEqual(calls, [("POST", "/api/tasks/turn%20smoke%2Fid/cancel", None)])
+
+    def test_cleanup_ignores_already_deleted_temp_workspace(self):
+        def fake_request(base, token, method, path, body=None, timeout=60):
+            if method == "POST" and path == "/api/workspaces/workspace_gone/delete":
+                raise RuntimeError(
+                    'HTTP 404 /api/workspaces/workspace_gone/delete: {"error":{"code":"workspace_not_found"}}'
+                )
+            raise AssertionError((method, path, body))
+
+        original = smoke._request
+        smoke._request = fake_request
+        try:
+            with mock.patch("scripts.production_smoke.shutil.rmtree") as rmtree:
+                with mock.patch("sys.stderr") as stderr:
+                    smoke.cleanup_scenario(
+                        {
+                            "base": "http://gateway",
+                            "token": "token",
+                            "workspace_id": "workspace_gone",
+                            "temp_project_root": "/tmp/homun-gone",
+                        },
+                        scenario_passed=True,
+                    )
+                rmtree.assert_called_once_with("/tmp/homun-gone", ignore_errors=True)
+                self.assertFalse(stderr.write.called)
+        finally:
+            smoke._request = original
 
     def test_automation_api_lifecycle_uses_scoped_crud_and_cleanup(self):
         calls = []
