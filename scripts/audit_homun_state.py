@@ -35,6 +35,8 @@ ALLOWED_ROUTING_STAGES = {
     "heuristic_fallback",
     "single_candidate",
     "heuristic_disabled",
+    "chat_config",
+    "manual_override",
 }
 LOG_EXTENSIONS = {".log", ".jsonl", ".json", ".txt"}
 SENSITIVE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (

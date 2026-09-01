@@ -39,6 +39,10 @@ test("model button labels display the next-turn selection instead of unavailable
     composerModelButtonLabel("Unavailable", null, "Unavailable", "Auto"),
     "Auto",
   );
+  assert.equal(
+    composerModelButtonLabel("Unavailable", "Unavailable", "Unavailable", "Auto"),
+    "Auto",
+  );
 });
 
 test("auto model button label exposes the resolved runtime route when available", () => {

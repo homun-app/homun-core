@@ -20,6 +20,7 @@ pub(crate) async fn run_agent_turn_into_message(
 ) -> Result<Option<AgentTurnResult>, String> {
     let (base_url, model, api_key) = chat_role_config_for_thread(state, Some(thread_id))
         .ok_or_else(|| "chat role configuration is unavailable".to_string())?;
+    log_chat_model_selection(prompt, "chat", &base_url, &model, false);
     let context = agent_turn_context(
         state,
         thread_id,
@@ -99,6 +100,22 @@ pub(crate) async fn run_agent_turn_into_message_with_fanout(
 ) -> Result<BrokerAgentTurnResult, String> {
     let (base_url, model, api_key) =
         chat_model_config_for_turn(state, Some(thread_id), model_override)?;
+    log_chat_model_selection(
+        prompt,
+        if model_override
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty())
+        {
+            "manual"
+        } else {
+            "chat"
+        },
+        &base_url,
+        &model,
+        model_override
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty()),
+    );
     let context = agent_turn_context(
         state,
         thread_id,

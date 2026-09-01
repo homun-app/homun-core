@@ -26524,6 +26524,33 @@ async fn integrity_repair_apply_fails_completed_browser_budget_without_exposing_
 }
 
 #[test]
+fn chat_model_selection_logs_metadata_only_decision_for_auto() {
+    let dir = isolated_gateway_test_dir("chat-model-selection-log");
+    std::fs::create_dir_all(&dir).unwrap();
+    let _data_dir = TestGatewayDataDir::new(&dir);
+
+    super::log_chat_model_selection(
+        "Rispondi a RSSMRA80A01H501U",
+        "chat",
+        "http://127.0.0.1:11434/v1",
+        "qwen3.5:4b",
+        false,
+    );
+
+    let decisions = super::load_routing_decisions();
+    assert_eq!(decisions.len(), 1);
+    assert_eq!(decisions[0].role, "chat");
+    assert_eq!(decisions[0].chosen_provider, "legacy");
+    assert_eq!(decisions[0].chosen_model, "qwen3.5:4b");
+    assert_eq!(decisions[0].stage, "chat_config");
+    assert!(!decisions[0].goal.contains("RSSMRA80A01H501U"));
+    assert!(dir.join("routing-decisions.json").is_file());
+
+    drop(_data_dir);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn browser_anti_loop_nudge_injects_after_threshold_consecutive_snapshots() {
     let threshold = 3;
     // First snapshot: count goes to 1, no nudge.

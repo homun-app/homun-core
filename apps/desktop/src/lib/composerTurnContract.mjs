@@ -2,6 +2,13 @@ function nonEmptyString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function modelEvidenceString(value, unavailableLabel) {
+  const model = nonEmptyString(value);
+  const unavailable = nonEmptyString(unavailableLabel);
+  if (model && unavailable && model.toLowerCase() === unavailable.toLowerCase()) return null;
+  return model;
+}
+
 export function selectedModelAfterSubmission(selectedModel, accepted) {
   return accepted ? null : selectedModel ?? null;
 }
@@ -15,6 +22,10 @@ export function modelLabelFromSelection(value) {
   if (!selected) return null;
   const parts = selected.split("::");
   return nonEmptyString(parts[parts.length - 1]) ?? selected;
+}
+
+function modelLabelFromSelectionEvidence(value, unavailableLabel) {
+  return modelEvidenceString(modelLabelFromSelection(value), unavailableLabel);
 }
 
 export function autoModelResolutionLabel(runtimeContext, autoLabel) {
@@ -37,9 +48,9 @@ export function composerModelButtonLabel(
   runtimeContext,
 ) {
   return (
-    modelLabelFromSelection(selectedNextModel)
+    modelLabelFromSelectionEvidence(selectedNextModel, unavailableLabel)
     ?? autoModelResolutionLabel(runtimeContext, autoLabel)
-    ?? nonEmptyString(effectiveModelLabel)
+    ?? modelEvidenceString(effectiveModelLabel, unavailableLabel)
     ?? nonEmptyString(unavailableLabel)
     ?? "Unavailable"
   );

@@ -96,6 +96,46 @@ pub(crate) fn log_routing_decision(entry: RoutingDecision) {
     }
 }
 
+fn provider_id_for_effective_chat_model(base_url: &str, model: &str) -> String {
+    let registry = load_provider_registry();
+    let canonical_base = canonical_provider_base_url(base_url);
+    registry
+        .providers
+        .iter()
+        .find(|provider| {
+            canonical_provider_base_url(&provider.base_url) == canonical_base
+                && provider.models.iter().any(|entry| entry.id == model)
+        })
+        .map(|provider| provider.id.clone())
+        .unwrap_or_else(|| "legacy".to_string())
+}
+
+pub(crate) fn log_chat_model_selection(
+    goal: &str,
+    role: &str,
+    base_url: &str,
+    model: &str,
+    manual_override: bool,
+) {
+    let model = model.trim();
+    if model.is_empty() {
+        return;
+    }
+    log_routing_decision(RoutingDecision {
+        ts: now_epoch_secs(),
+        role: role.to_string(),
+        goal: truncate_chars(&redact_sensitive_text(goal), 140),
+        candidates: vec![model.to_string()],
+        chosen_provider: provider_id_for_effective_chat_model(base_url, model),
+        chosen_model: model.to_string(),
+        stage: if manual_override {
+            "manual_override".to_string()
+        } else {
+            "chat_config".to_string()
+        },
+    });
+}
+
 /// Resolves the cloud inference API key, preferring a 0600 key file over the
 /// environment. A key file is not inherited by child processes (e.g. the browser
 /// sidecar) and is not visible in `ps`/`/proc/<pid>/environ`, so it is the safer
