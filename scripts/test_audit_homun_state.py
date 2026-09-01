@@ -718,6 +718,59 @@ class AuditHomunStateTests(unittest.TestCase):
         self.assertIn("turn_without_turn_events", gap_codes)
         self.assertEqual(report["observability"]["summary"]["diagnostic_gaps"], 4)
 
+    def test_observability_timeline_caps_noisy_events_but_keeps_terminal_tail(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-noisy', 'user-1', 'workspace-1', 'chat_turn',
+                'completed', 10, 100, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_runs (
+                run_id, turn_id, thread_id, user_id, workspace_id, attempt,
+                status, role, model, provider, prompt_fingerprint, started_at,
+                completed_at, terminal_reason, schema_version
+            ) values ('run-noisy', 'turn-noisy', 'thread-1', 'user-1', 'workspace-1',
+                1, 'completed', 'orchestrator', 'qwen', 'ollama', 'fp', 11,
+                99, 'canonical_completed', 1)
+            """
+        )
+        for seq in range(1, 40):
+            conn.execute(
+                """
+                insert into agent_run_events (
+                    run_id, seq, round, kind, payload_json, created_at
+                ) values ('run-noisy', ?, ?, 'model_response', '{}', ?)
+                """,
+                (seq, seq, 20 + seq),
+            )
+        conn.execute(
+            """
+            insert into turn_events (turn_id, seq, kind, payload_json, created_at)
+            values ('turn-noisy', 1, 'done', '{"status":"done"}', 99)
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths, max_timeline_events=12)
+
+        timeline = report["observability"]["timelines"][0]
+        self.assertEqual(timeline["events_total"], 44)
+        self.assertEqual(timeline["events_omitted"], 33)
+        self.assertEqual(len(timeline["events"]), 12)
+        self.assertIn({"phase": "events_omitted", "count": 33}, timeline["events"])
+        self.assertEqual(timeline["events"][-3]["phase"], "turn_event:done")
+        self.assertEqual(timeline["events"][-2]["phase"], "run_completed")
+        self.assertEqual(timeline["events"][-1]["phase"], "task_updated")
+
 
 if __name__ == "__main__":
     unittest.main()

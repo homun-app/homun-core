@@ -197,10 +197,16 @@ La timeline non include testo utente/assistant o payload raw; riporta solo fasi,
 status, id tecnici, modello effettivo e piccoli campi diagnostici consentiti
 (`status`, `code`, `error_code`, `tool`, `tool_name`, `terminal_reason`,
 `tool_calls`) con detector privacy applicato.
+Le timeline sono inoltre bounded per default: ogni turno riporta
+`events_total`/`events_omitted` e stampa solo un campione testa+coda degli
+eventi, cosi' un browser/task rumoroso non rende inutilizzabile il report CLI
+ma conserva comunque la coda terminale per capire come si e' chiuso il turno.
 
 Evidenza locale:
 
 - `python3 -m unittest scripts.test_audit_homun_state -v`
+- `python3 scripts/audit_homun_state.py --max-findings-per-code 3 --max-timeline-events 20`
+  sul profilo reale -> `ok=true`, report bounded con timeline campionate
 - `python3 scripts/audit_homun_state.py --data-dir "$tmp" --max-findings-per-code 0`
   -> `paths.sources.data_dir=--data-dir`
 - `python3 scripts/audit_homun_state.py --max-findings-per-code 0` sul profilo

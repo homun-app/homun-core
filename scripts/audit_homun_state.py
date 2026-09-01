@@ -782,6 +782,7 @@ def build_runtime_observability(
     *,
     max_timelines: int = 20,
     max_gaps: int = 100,
+    max_events_per_timeline: int = 120,
 ) -> dict[str, Any]:
     conn = open_optional_db(paths.runtime_db, "runtime_observability", warnings)
     if conn is None:
@@ -811,7 +812,7 @@ def build_runtime_observability(
             (max_timelines,),
         )
         timelines = [
-            build_turn_timeline(conn, task)
+            build_turn_timeline(conn, task, max_events=max_events_per_timeline)
             for task in recent_tasks
         ]
         gaps = build_runtime_diagnostic_gaps(conn, max_gaps=max_gaps)
@@ -827,7 +828,12 @@ def build_runtime_observability(
         conn.close()
 
 
-def build_turn_timeline(conn: sqlite3.Connection, task: dict[str, Any]) -> dict[str, Any]:
+def build_turn_timeline(
+    conn: sqlite3.Connection,
+    task: dict[str, Any],
+    *,
+    max_events: int = 120,
+) -> dict[str, Any]:
     turn_id = task["task_id"]
     runs = row_dicts(
         conn,
@@ -925,6 +931,13 @@ def build_turn_timeline(conn: sqlite3.Connection, task: dict[str, Any]) -> dict[
         }
     )
     events.sort(key=lambda item: (item.get("at") is None, item.get("at") or 0, phase_sort_key(item["phase"])))
+    events_total = len(events)
+    events = cap_timeline_events(events, max_events)
+    events_omitted = sum(
+        int(event.get("count") or 0)
+        for event in events
+        if event.get("phase") == "events_omitted"
+    )
 
     latest_run = runs[-1] if runs else {}
     return {
@@ -937,8 +950,30 @@ def build_turn_timeline(conn: sqlite3.Connection, task: dict[str, Any]) -> dict[
             "provider": latest_run.get("provider") or None,
             "model": latest_run.get("model") or None,
         },
+        "events_total": events_total,
+        "events_omitted": events_omitted,
         "events": events,
     }
+
+
+def cap_timeline_events(events: list[dict[str, Any]], max_events: int) -> list[dict[str, Any]]:
+    if max_events <= 0:
+        return [{"phase": "events_omitted", "count": len(events)}] if events else []
+    if len(events) <= max_events:
+        return events
+    if max_events == 1:
+        return [{"phase": "events_omitted", "count": len(events)}]
+
+    prefix_count = min(10, max(1, max_events // 3))
+    suffix_count = max_events - prefix_count - 1
+    if suffix_count <= 0:
+        prefix_count = max_events - 1
+        suffix_count = 0
+    omitted = len(events) - prefix_count - suffix_count
+    capped = [*events[:prefix_count], {"phase": "events_omitted", "count": omitted}]
+    if suffix_count:
+        capped.extend(events[-suffix_count:])
+    return capped
 
 
 def phase_sort_key(phase: str) -> int:
@@ -1105,6 +1140,7 @@ def audit_homun_state(
     inputs: AuditInputs | None = None,
     *,
     max_findings_per_code: int = 20,
+    max_timeline_events: int = 120,
 ) -> dict[str, Any]:
     paths = inputs or default_inputs()
     findings: list[dict[str, Any]] = []
@@ -1114,7 +1150,11 @@ def audit_homun_state(
     audit_vault(paths, findings, warnings)
     audit_logs(paths, findings, warnings)
     audit_routing_decisions(paths, findings, warnings)
-    observability = build_runtime_observability(paths, warnings)
+    observability = build_runtime_observability(
+        paths,
+        warnings,
+        max_events_per_timeline=max_timeline_events,
+    )
     findings.sort(key=lambda item: (item["severity"] != "error", item["domain"], item["code"], item.get("ref", "")))
     summary = summarize_findings(findings)
     capped_findings = cap_findings_by_code(findings, summary, max_findings_per_code)
@@ -1161,6 +1201,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=20,
         help="Maximum sample findings to print per finding code; summary keeps total counts",
     )
+    parser.add_argument(
+        "--max-timeline-events",
+        type=int,
+        default=120,
+        help="Maximum sample events to print per runtime timeline; summary keeps total counts",
+    )
     return parser.parse_args(argv)
 
 
@@ -1169,6 +1215,7 @@ def main(argv: list[str] | None = None) -> int:
     report = audit_homun_state(
         inputs_from_args(args),
         max_findings_per_code=args.max_findings_per_code,
+        max_timeline_events=args.max_timeline_events,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["ok"] else 1
