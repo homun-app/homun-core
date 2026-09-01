@@ -10,7 +10,7 @@ single line so the site captures its full text; version delimiters are `## [x.y.
 
 ## [Unreleased]
 
-## [0.1.1097] — 2026-09-01
+## [0.1.1098] — 2026-09-01
 
 A production hardening release for real-profile integrity, browser automation failures and model-selection clarity.
 
@@ -28,6 +28,7 @@ A production hardening release for real-profile integrity, browser automation fa
 - **Sensitive trace logs can be repaired locally.** A dedicated privacy repair tool redacts known sensitive values from historical turn traces and writes an auditable backup.
 - **Waiting approval tasks no longer stay orphaned forever.** The integrity repair path can fail stale HITL waits that no longer have an active runtime owner.
 - **Completed browser-budget tasks no longer pollute the runtime audit.** Historical tasks that finished after exhausting browser budget are reclassified so real-profile audits can return to zero hard errors.
+- **The skill runtime no longer ships a vulnerable Wasmtime build.** Wasmtime is updated to the patched `46.0.3` release required by the RustSec gate.
 
 ## [0.1.1096] — 2026-08-30
 
@@ -109,7 +110,7 @@ A browser that completes real tasks, and a noticeably smoother app.
 - **The local model respects its timeout.** A stuck generation no longer keeps Homun busy indefinitely.
 
 [Unreleased]: https://github.com/homun-app/homun-releases/releases
-[0.1.1097]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1097
+[0.1.1098]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1098
 [0.1.1096]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1096
 [0.1.1095]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1095
 [0.1.1094]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1094
