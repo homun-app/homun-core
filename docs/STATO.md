@@ -206,6 +206,11 @@ Evidenza locale:
 - `python3 scripts/audit_homun_state.py --max-findings-per-code 0` sul profilo
   reale -> `legacy_memory_without_evidence=100`, nessun
   `memory_without_evidence`
+- Packaged smoke su gateway `http://127.0.0.1:18766`:
+  `X5` automation scoped lifecycle -> `PASS X5: 0.0s`,
+  `X6` MCP stdio scoped lifecycle -> `PASS X6: 0.8s`,
+  `X7` long business checkpoint -> `PASS X7: 74.9s`,
+  `S8` payment approval browser fixture -> `PASS S8: 61.7s`
 - `cargo test -p local-first-task-runtime runtime_integrity_audit_exposes_observability_gaps_without_task_content -- --nocapture`
 - `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway integrity_audit_reports_runtime_lifecycle_findings_without_content -- --nocapture`
 - `cd apps/desktop && node --test src/lib/runtimeContext.test.mjs`
