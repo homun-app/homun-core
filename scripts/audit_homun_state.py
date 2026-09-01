@@ -586,13 +586,31 @@ def audit_runtime(paths: AuditInputs, findings: list[dict[str, Any]], warnings: 
                     ref=row["wait_id"],
                 )
         if all(column_exists(conn, "agent_runs", column) for column in ("role", "model", "provider")):
+            snapshot_evidence_clause = ""
+            if table_exists(conn, "agent_run_events"):
+                snapshot_evidence_clause = """
+                    and not exists (
+                        select 1
+                        from agent_run_events e
+                        where e.run_id = agent_runs.run_id
+                          and e.kind = 'prompt_snapshot'
+                          and coalesce(json_extract(e.payload_json, '$.model'), '') <> ''
+                          and coalesce(json_extract(e.payload_json, '$.provider'), '') <> ''
+                    )
+                """
             for row in row_dicts(
                 conn,
-                """
+                f"""
                 select run_id, role, model, provider, status
                 from agent_runs
                 where status in ('running', 'completed', 'failed', 'aborted')
-                  and (coalesce(role, '') = '' or coalesce(model, '') = '' or coalesce(provider, '') = '')
+                  and (
+                    coalesce(role, '') = ''
+                    or (
+                      (coalesce(model, '') = '' or coalesce(provider, '') = '')
+                      {snapshot_evidence_clause}
+                    )
+                  )
                 order by started_at desc
                 limit 100
                 """,
@@ -1119,13 +1137,31 @@ def build_runtime_diagnostic_gaps(conn: sqlite3.Connection, *, max_gaps: int) ->
         )
     remaining = max(0, max_gaps - len(gaps))
     if remaining:
+        snapshot_evidence_clause = ""
+        if table_exists(conn, "agent_run_events"):
+            snapshot_evidence_clause = """
+                 and not exists (
+                   select 1
+                   from agent_run_events e
+                   where e.run_id = agent_runs.run_id
+                     and e.kind = 'prompt_snapshot'
+                     and coalesce(json_extract(e.payload_json, '$.model'), '') <> ''
+                     and coalesce(json_extract(e.payload_json, '$.provider'), '') <> ''
+                 )
+            """
         for row in row_dicts(
             conn,
-            """
+            f"""
             select run_id
             from agent_runs
             where status in ('running', 'completed', 'failed', 'aborted')
-              and (coalesce(role, '') = '' or coalesce(model, '') = '' or coalesce(provider, '') = '')
+              and (
+                coalesce(role, '') = ''
+                or (
+                  (coalesce(model, '') = '' or coalesce(provider, '') = '')
+                  {snapshot_evidence_clause}
+                )
+              )
             order by started_at desc
             limit ?
             """,

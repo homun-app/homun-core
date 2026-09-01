@@ -268,6 +268,44 @@ class AuditHomunStateTests(unittest.TestCase):
 
         self.assertIn("running_agent_run_without_active_task", self.finding_codes(report))
 
+    def test_prompt_snapshot_evidence_suppresses_model_attribution_finding(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into agent_runs (
+                run_id, turn_id, thread_id, user_id, workspace_id, attempt,
+                status, role, model, provider, prompt_fingerprint, started_at,
+                completed_at, terminal_reason, schema_version
+            ) values ('run-1', 'turn-1', 'thread-1', 'user-1',
+                'workspace-1', 1, 'completed', 'orchestrator', '',
+                '', '', 1, 2, 'canonical_completed', 1)
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_run_events (
+                run_id, seq, round, kind, payload_json, created_at
+            ) values ('run-1', 2, 0, 'prompt_snapshot', ?, 1)
+            """,
+            (
+                json.dumps(
+                    {
+                        "model": "deepseek-v4-pro",
+                        "provider": "https://ollama.com/v1",
+                        "fingerprint": "fp",
+                    }
+                ),
+            ),
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertNotIn("agent_run_missing_model_attribution", self.finding_codes(report))
+
     def test_streaming_assistant_without_active_run_is_reported(self):
         paths = self.with_paths()
         conn = sqlite3.connect(paths.runtime_db)
@@ -894,6 +932,62 @@ class AuditHomunStateTests(unittest.TestCase):
         self.assertIn("run_without_agent_run_events", gap_codes)
         self.assertIn("turn_without_turn_events", gap_codes)
         self.assertEqual(report["observability"]["summary"]["diagnostic_gaps"], 4)
+
+    def test_observability_uses_prompt_snapshot_as_model_attribution_evidence(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-1', 'user-1', 'workspace-1', 'chat_turn',
+                'completed', 10, 40, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_runs (
+                run_id, turn_id, thread_id, user_id, workspace_id, attempt,
+                status, role, model, provider, prompt_fingerprint, started_at,
+                completed_at, terminal_reason, schema_version
+            ) values ('run-1', 'turn-1', 'thread-1', 'user-1', 'workspace-1',
+                1, 'completed', 'orchestrator', '', '', '', 11,
+                39, 'canonical_completed', 1)
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_run_events (
+                run_id, seq, round, kind, payload_json, created_at
+            ) values ('run-1', 2, 0, 'prompt_snapshot', ?, 12)
+            """,
+            (
+                json.dumps(
+                    {
+                        "model": "deepseek-v4-pro",
+                        "provider": "https://ollama.com/v1",
+                        "fingerprint": "fp",
+                    }
+                ),
+            ),
+        )
+        conn.execute(
+            """
+            insert into turn_events (
+                turn_id, seq, kind, payload_json, created_at
+            ) values ('turn-1', 1, 'done', '{"text":"ok"}', 40)
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        gap_codes = {gap["code"] for gap in report["observability"]["diagnostic_gaps"]}
+        self.assertNotIn("run_missing_model_attribution", gap_codes)
+        self.assertEqual(report["observability"]["summary"]["diagnostic_gaps"], 0)
 
     def test_observability_timeline_caps_noisy_events_but_keeps_terminal_tail(self):
         paths = self.with_paths()

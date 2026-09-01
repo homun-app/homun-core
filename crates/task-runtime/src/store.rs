@@ -6004,7 +6004,20 @@ impl TaskStore {
             "SELECT run_id
              FROM agent_runs
              WHERE status IN ('running', 'completed', 'failed', 'aborted')
-               AND (COALESCE(role, '') = '' OR COALESCE(model, '') = '' OR COALESCE(provider, '') = '')
+               AND (
+                 COALESCE(role, '') = ''
+                 OR (
+                   (COALESCE(model, '') = '' OR COALESCE(provider, '') = '')
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM agent_run_events e
+                     WHERE e.run_id = agent_runs.run_id
+                       AND e.kind = 'prompt_snapshot'
+                       AND COALESCE(json_extract(e.payload_json, '$.model'), '') <> ''
+                       AND COALESCE(json_extract(e.payload_json, '$.provider'), '') <> ''
+                   )
+                 )
+               )
              ORDER BY started_at DESC
              LIMIT ?1",
         )?;
@@ -8670,6 +8683,71 @@ mod chat_turn_query_tests {
         assert!(codes.contains("turn_without_turn_events"));
         assert!(!encoded.contains("Runtime lifecycle sentinel"));
         assert!(!encoded.contains("thread_observable"));
+    }
+
+    #[test]
+    fn runtime_integrity_audit_uses_prompt_snapshot_as_model_attribution_evidence() {
+        let s = store();
+        let completed = make_chat_turn(
+            "turn_snapshot_attributed",
+            "thread_snapshot_attributed",
+            TaskStatus::Completed,
+        );
+        s.insert_chat_turn(
+            &completed,
+            "thread_snapshot_attributed",
+            "req-snapshot-attributed",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.create_agent_run(&NewAgentRun {
+            run_id: "run-snapshot-attributed".into(),
+            turn_id: "turn_snapshot_attributed".into(),
+            thread_id: "thread_snapshot_attributed".into(),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            role: Some("orchestrator".into()),
+            model: None,
+            provider: None,
+            prompt_fingerprint: None,
+        })
+        .unwrap();
+        s.append_agent_run_event(
+            "run-snapshot-attributed",
+            2,
+            Some(0),
+            "prompt_snapshot",
+            &json!({
+                "model": "deepseek-v4-pro",
+                "provider": "https://ollama.com/v1",
+                "fingerprint": "fp"
+            }),
+        )
+        .unwrap();
+        s.finish_agent_run(
+            "run-snapshot-attributed",
+            AgentRunStatus::Completed,
+            Some("canonical_completed"),
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_snapshot_attributed",
+            TurnEventKind::Done,
+            json!({"text": "ok"}),
+        )
+        .unwrap();
+
+        let report = s.audit_runtime_integrity().unwrap();
+        let codes = report
+            .observability
+            .diagnostic_gaps
+            .iter()
+            .map(|gap| gap.code.as_str())
+            .collect::<BTreeSet<_>>();
+
+        assert!(!codes.contains("run_missing_model_attribution"));
+        assert_eq!(report.observability.summary.diagnostic_gaps, 0);
     }
 
     #[test]
