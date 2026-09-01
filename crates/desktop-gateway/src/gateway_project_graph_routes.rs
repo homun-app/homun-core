@@ -410,9 +410,15 @@ fn integrity_preview_for_actions(
         let runtime = store
             .audit_runtime_integrity()
             .map_err(|error| integrity_internal_error("integrity_audit_failed", error))?;
-        let estimated_rows = store
-            .count_stale_streaming_assistant_messages()
-            .map_err(|error| integrity_internal_error("integrity_preview_failed", error))?;
+        let estimated_rows = match &actions[0] {
+            IntegrityRepairAction::FailStaleStreamingAssistants => store
+                .count_stale_streaming_assistant_messages()
+                .map_err(|error| integrity_internal_error("integrity_preview_failed", error))?,
+            IntegrityRepairAction::FailOrphanedWaitingApprovals => store
+                .count_orphaned_waiting_approval_tasks()
+                .map_err(|error| integrity_internal_error("integrity_preview_failed", error))?,
+            _ => 0,
+        };
         (
             gateway_runtime_audit_checksum(&runtime, &actions)
                 .map_err(|error| integrity_internal_error("integrity_preview_failed", error))?,
@@ -671,9 +677,15 @@ pub(crate) async fn integrity_repair_apply(
         let before = store
             .audit_runtime_integrity()
             .map_err(|error| integrity_internal_error("integrity_audit_failed", error))?;
-        let changed = store
-            .fail_stale_streaming_assistant_messages()
-            .map_err(|error| integrity_internal_error("integrity_repair_failed", error))?;
+        let changed = match &current.actions[0] {
+            IntegrityRepairAction::FailStaleStreamingAssistants => store
+                .fail_stale_streaming_assistant_messages()
+                .map_err(|error| integrity_internal_error("integrity_repair_failed", error))?,
+            IntegrityRepairAction::FailOrphanedWaitingApprovals => store
+                .fail_orphaned_waiting_approval_tasks()
+                .map_err(|error| integrity_internal_error("integrity_repair_failed", error))?,
+            _ => 0,
+        };
         let after = store
             .audit_runtime_integrity()
             .map_err(|error| integrity_internal_error("integrity_audit_failed", error))?;

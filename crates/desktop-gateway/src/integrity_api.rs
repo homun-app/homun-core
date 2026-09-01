@@ -49,6 +49,7 @@ pub enum IntegrityRepairAction {
     PurgeUnknownWorkspace { workspace_id: WorkspaceId },
     RefreshProjectGraph { workspace_id: WorkspaceId },
     FailStaleStreamingAssistants,
+    FailOrphanedWaitingApprovals,
 }
 
 impl IntegrityRepairAction {
@@ -68,7 +69,9 @@ impl IntegrityRepairAction {
                     workspace_id: workspace_id.clone(),
                 })
             }
-            Self::RefreshProjectGraph { .. } | Self::FailStaleStreamingAssistants => None,
+            Self::RefreshProjectGraph { .. }
+            | Self::FailStaleStreamingAssistants
+            | Self::FailOrphanedWaitingApprovals => None,
         }
     }
 
@@ -79,7 +82,9 @@ impl IntegrityRepairAction {
     pub fn repair_domain(&self) -> IntegrityRepairDomain {
         match self {
             Self::RefreshProjectGraph { .. } => IntegrityRepairDomain::Graph,
-            Self::FailStaleStreamingAssistants => IntegrityRepairDomain::Runtime,
+            Self::FailStaleStreamingAssistants | Self::FailOrphanedWaitingApprovals => {
+                IntegrityRepairDomain::Runtime
+            }
             Self::RemoveGraphifyDuplicateRelations { .. }
             | Self::RemoveOrphanEmbeddings
             | Self::RemoveOrphanEvidenceLinks

@@ -5315,6 +5315,117 @@ impl TaskStore {
         Ok(changed as u64)
     }
 
+    pub fn count_orphaned_waiting_approval_tasks(&self) -> TaskRuntimeResult<u64> {
+        let sql = if table_exists(&self.connection, "thread_hitl_waits") {
+            "SELECT COUNT(*)
+             FROM tasks t
+             WHERE t.status = 'waiting_user_approval'
+               AND NOT EXISTS (
+                 SELECT 1 FROM task_approvals a
+                 WHERE a.task_id = t.task_id
+                   AND a.user_id = t.user_id
+                   AND a.workspace_id = t.workspace_id
+                   AND a.status = 'pending'
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM thread_hitl_waits h
+                 WHERE h.thread_id = t.thread_id
+                   AND h.status = 'open'
+               )"
+        } else {
+            "SELECT COUNT(*)
+             FROM tasks t
+             WHERE t.status = 'waiting_user_approval'
+               AND NOT EXISTS (
+                 SELECT 1 FROM task_approvals a
+                 WHERE a.task_id = t.task_id
+                   AND a.user_id = t.user_id
+                   AND a.workspace_id = t.workspace_id
+                   AND a.status = 'pending'
+               )"
+        };
+        Ok(self.connection.query_row(sql, [], |row| row.get(0))?)
+    }
+
+    pub fn fail_orphaned_waiting_approval_tasks(&self) -> TaskRuntimeResult<u64> {
+        let sql = if table_exists(&self.connection, "thread_hitl_waits") {
+            "SELECT t.task_id, t.user_id, t.workspace_id, t.task_json
+             FROM tasks t
+             WHERE t.status = 'waiting_user_approval'
+               AND NOT EXISTS (
+                 SELECT 1 FROM task_approvals a
+                 WHERE a.task_id = t.task_id
+                   AND a.user_id = t.user_id
+                   AND a.workspace_id = t.workspace_id
+                   AND a.status = 'pending'
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM thread_hitl_waits h
+                 WHERE h.thread_id = t.thread_id
+                   AND h.status = 'open'
+               )
+             ORDER BY t.updated_at DESC
+             LIMIT 100"
+        } else {
+            "SELECT t.task_id, t.user_id, t.workspace_id, t.task_json
+             FROM tasks t
+             WHERE t.status = 'waiting_user_approval'
+               AND NOT EXISTS (
+                 SELECT 1 FROM task_approvals a
+                 WHERE a.task_id = t.task_id
+                   AND a.user_id = t.user_id
+                   AND a.workspace_id = t.workspace_id
+                   AND a.status = 'pending'
+               )
+             ORDER BY t.updated_at DESC
+             LIMIT 100"
+        };
+        let rows = {
+            let mut stmt = self.connection.prepare(sql)?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let now = OffsetDateTime::now_utc();
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let mut changed = 0_u64;
+        for (task_id, user_id, workspace_id, task_json) in rows {
+            let mut task: TaskRecord = serde_json::from_str(&task_json)?;
+            task.status = TaskStatus::Failed;
+            task.blocked_reason = Some("orphaned_waiting_approval_repaired".to_string());
+            task.updated_at = now;
+            let affected = tx.execute(
+                "UPDATE tasks
+                 SET status = ?1, updated_at = ?2, blocked_reason = ?3, task_json = ?4
+                 WHERE task_id = ?5
+                   AND user_id = ?6
+                   AND workspace_id = ?7
+                   AND status = 'waiting_user_approval'",
+                params![
+                    TaskStatus::Failed.as_str(),
+                    now.unix_timestamp(),
+                    "orphaned_waiting_approval_repaired",
+                    serde_json::to_string(&task)?,
+                    task_id,
+                    user_id,
+                    workspace_id,
+                ],
+            )?;
+            changed += affected as u64;
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+
     pub fn audit_runtime_integrity(&self) -> TaskRuntimeResult<RuntimeIntegrityReport> {
         let mut findings = Vec::new();
 
@@ -8027,6 +8138,115 @@ mod chat_turn_query_tests {
             !serde_json::to_string(&after)
                 .unwrap()
                 .contains("SECRET_TRANSCRIPT_SENTINEL")
+        );
+    }
+
+    #[test]
+    fn runtime_integrity_repair_fails_orphaned_waiting_approval_tasks() {
+        let s = store();
+        let orphaned = make_chat_turn(
+            "turn_orphaned_waiting_approval",
+            "thread_orphaned_waiting_approval",
+            TaskStatus::WaitingUserApproval,
+        );
+        s.insert_chat_turn(
+            &orphaned,
+            "thread_orphaned_waiting_approval",
+            "req-orphaned-waiting-approval",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        let valid = make_chat_turn(
+            "turn_valid_waiting_approval",
+            "thread_valid_waiting_approval",
+            TaskStatus::WaitingUserApproval,
+        );
+        s.insert_chat_turn(
+            &valid,
+            "thread_valid_waiting_approval",
+            "req-valid-waiting-approval",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.connection
+            .execute(
+                "CREATE TABLE thread_hitl_waits (
+                    wait_id TEXT PRIMARY KEY,
+                    thread_id TEXT NOT NULL,
+                    source_message_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    open_work_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    resolved_at INTEGER
+                )",
+                [],
+            )
+            .unwrap();
+        s.connection
+            .execute(
+                "INSERT INTO thread_hitl_waits (
+                    wait_id, thread_id, source_message_id, kind, payload_json,
+                    open_work_json, status, created_at, resolved_at
+                ) VALUES (
+                    'wait-valid-approval',
+                    'thread_valid_waiting_approval',
+                    'message-valid-approval',
+                    'payment',
+                    '{}',
+                    '{}',
+                    'open',
+                    2,
+                    NULL
+                )",
+                [],
+            )
+            .unwrap();
+
+        let before = s.audit_runtime_integrity().unwrap();
+        assert_eq!(
+            before
+                .finding_counts
+                .get("waiting_approval_task_without_canonical_approval"),
+            Some(&1)
+        );
+        assert_eq!(s.count_orphaned_waiting_approval_tasks().unwrap(), 1);
+
+        let repaired = s.fail_orphaned_waiting_approval_tasks().unwrap();
+        assert_eq!(repaired, 1);
+        let repaired_task = s
+            .get_task(
+                &TaskId::new("turn_orphaned_waiting_approval"),
+                &UserId::new("u"),
+                &WorkspaceId::new("w"),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(repaired_task.status, TaskStatus::Failed);
+        assert_eq!(
+            repaired_task.blocked_reason.as_deref(),
+            Some("orphaned_waiting_approval_repaired")
+        );
+        let valid_task = s
+            .get_task(
+                &TaskId::new("turn_valid_waiting_approval"),
+                &UserId::new("u"),
+                &WorkspaceId::new("w"),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(valid_task.status, TaskStatus::WaitingUserApproval);
+        assert_eq!(s.count_orphaned_waiting_approval_tasks().unwrap(), 0);
+        assert_eq!(s.fail_orphaned_waiting_approval_tasks().unwrap(), 0);
+
+        let after = s.audit_runtime_integrity().unwrap();
+        assert!(
+            !after
+                .finding_counts
+                .contains_key("waiting_approval_task_without_canonical_approval")
         );
     }
 
