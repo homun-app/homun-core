@@ -218,6 +218,28 @@ def plan_markdown_is_incomplete(markdown: str) -> bool:
     return any(marker in markdown for marker in ("- [-]", "- [ ]"))
 
 
+def done_payload_has_delivered_answer(payload: dict[str, Any]) -> bool:
+    assistant_message_id = str(payload.get("assistant_message_id") or "").strip()
+    text = str(payload.get("text") or "").strip()
+    return bool(assistant_message_id and text)
+
+
+def events_have_delivered_answer_after_plan(events: Iterable[dict[str, Any]]) -> bool:
+    has_terminal_assistant_id = False
+    has_visible_text = False
+    for row in events:
+        kind = str(row.get("kind") or "")
+        payload = json_object(row.get("payload_json"))
+        if kind == "done" and done_payload_has_delivered_answer(payload):
+            has_terminal_assistant_id = True
+            has_visible_text = True
+        elif kind == "done" and str(payload.get("assistant_message_id") or "").strip():
+            has_terminal_assistant_id = True
+        if kind == "delta" and str(payload.get("text") or "").strip():
+            has_visible_text = True
+    return has_terminal_assistant_id and has_visible_text
+
+
 def finding(
     findings: list[dict[str, Any]],
     *,
@@ -438,6 +460,32 @@ def audit_runtime(paths: AuditInputs, findings: list[dict[str, Any]], warnings: 
                 latest_plan_by_turn[row["task_id"]] = (int(row["seq"]), markdown)
             for task_id, (_seq, markdown) in latest_plan_by_turn.items():
                 if not plan_markdown_is_incomplete(markdown):
+                    continue
+                delivered_answer = events_have_delivered_answer_after_plan(
+                    row_dicts(
+                        conn,
+                        """
+                        select seq, kind, payload_json
+                        from turn_events
+                        where turn_id = ?
+                          and kind in ('delta', 'done')
+                          and seq > ?
+                        order by seq asc
+                        limit 5000
+                        """,
+                        (task_id, _seq),
+                    )
+                )
+                if delivered_answer:
+                    finding(
+                        findings,
+                        domain="chat_runtime",
+                        code="completed_turn_with_unreconciled_delivered_plan",
+                        severity="warning",
+                        owner="runtime_plan_projection",
+                        summary="completed chat turn delivered an answer after an open latest plan_update",
+                        ref=task_id,
+                    )
                     continue
                 finding(
                     findings,

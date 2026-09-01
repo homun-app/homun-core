@@ -321,7 +321,7 @@ class AuditHomunStateTests(unittest.TestCase):
 
         self.assertIn("completed_task_with_browser_budget_exceeded", self.finding_codes(report))
 
-    def test_completed_turn_with_incomplete_latest_plan_is_reported(self):
+    def test_completed_turn_with_incomplete_latest_plan_without_delivered_answer_is_reported(self):
         paths = self.with_paths()
         conn = sqlite3.connect(paths.runtime_db)
         self.addCleanup(conn.close)
@@ -346,7 +346,7 @@ class AuditHomunStateTests(unittest.TestCase):
         conn.execute(
             """
             insert into turn_events (turn_id, seq, kind, payload_json, created_at)
-            values ('turn-plan-open', 2, 'done', '{"text":"done"}', 40)
+            values ('turn-plan-open', 2, 'done', '{}', 40)
             """
         )
         conn.commit()
@@ -354,6 +354,94 @@ class AuditHomunStateTests(unittest.TestCase):
         report = audit.audit_homun_state(paths)
 
         self.assertIn("completed_turn_with_incomplete_plan", self.finding_codes(report))
+
+    def test_completed_turn_with_incomplete_latest_plan_and_delivered_answer_is_warning(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-plan-delivered', 'user-1', 'workspace-1', 'chat_turn',
+                'completed', 10, 40, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into turn_events (turn_id, seq, kind, payload_json, created_at)
+            values ('turn-plan-delivered', 1, 'plan_update',
+                '{"markdown":"- [x] **Gather** (`gather`): done\\n- [-] **Verify** (`verify`): pending"}',
+                20)
+            """
+        )
+        conn.execute(
+            """
+            insert into turn_events (turn_id, seq, kind, payload_json, created_at)
+            values ('turn-plan-delivered', 2, 'done',
+                '{"assistant_message_id":"assistant-1","text":"Final answer"}',
+                40)
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+        by_code = report["summary"]["by_code"]
+
+        self.assertNotIn("completed_turn_with_incomplete_plan", by_code)
+        self.assertEqual(
+            by_code["completed_turn_with_unreconciled_delivered_plan"]["severity"],
+            "warning",
+        )
+
+    def test_completed_turn_with_streamed_answer_after_incomplete_plan_is_warning(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-plan-streamed', 'user-1', 'workspace-1', 'chat_turn',
+                'completed', 10, 40, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into turn_events (turn_id, seq, kind, payload_json, created_at)
+            values ('turn-plan-streamed', 1, 'plan_update',
+                '{"markdown":"- [-] **Gather** (`gather`): pending"}',
+                20)
+            """
+        )
+        conn.execute(
+            """
+            insert into turn_events (turn_id, seq, kind, payload_json, created_at)
+            values ('turn-plan-streamed', 2, 'delta', '{"text":"Final"}', 30)
+            """
+        )
+        conn.execute(
+            """
+            insert into turn_events (turn_id, seq, kind, payload_json, created_at)
+            values ('turn-plan-streamed', 3, 'done',
+                '{"assistant_message_id":"assistant-1"}',
+                40)
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+        by_code = report["summary"]["by_code"]
+
+        self.assertNotIn("completed_turn_with_incomplete_plan", by_code)
+        self.assertEqual(
+            by_code["completed_turn_with_unreconciled_delivered_plan"]["severity"],
+            "warning",
+        )
 
     def test_active_task_with_terminal_turn_event_is_reported(self):
         paths = self.with_paths()

@@ -307,21 +307,21 @@ Evidenza locale aggiunta:
   `cd apps/desktop/.package/resources/browser-automation && npm audit --audit-level=high`
   -> `found 0 vulnerabilities`, `nanoid=3.3.18`
 
-Stato profilo reale dopo il nuovo detector:
+Stato profilo reale dopo la classificazione del piano finale:
 
 - `scripts/audit_homun_state.py --max-findings-per-code 3 --max-timeline-events 20`
-  -> `ok=false`, `errors=62`, `warnings=218`
-- Errori: `completed_turn_with_incomplete_plan=62`, owner
-  `runtime_plan_projection`; includono storico e almeno un vecchio run smoke
-  volutamente fallito.
+  -> `ok=true`, `errors=0`, `warnings=280`
+- I vecchi `completed_turn_with_incomplete_plan` con risposta consegnata sono
+  ora classificati come
+  `completed_turn_with_unreconciled_delivered_plan=62`, warning owner
+  `runtime_plan_projection`: sono debito UX/osservabilita' del piano, non turni
+  bloccati senza risposta.
 - Warning: `agent_run_missing_model_attribution=100`,
   `legacy_memory_without_evidence=100`,
   `resolved_hitl_without_followup_run=18`.
 
 Blocchi residui prima di dichiarare una release production-grade:
 
-- distinguere nell'audit tra regressioni correnti e debito storico importato,
-  senza cancellare o riscrivere stato reale solo per rendere verde il report;
 - attendere CI verde sull'ultimo commit di `main` prima di taggare una nuova
   release;
 - se si taglia una build pubblica, verificare artefatti, checksum,
