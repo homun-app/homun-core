@@ -228,7 +228,9 @@ Evidenza locale:
   Durante la verifica e' emerso anche che `package:smoke` poteva riusare un
   release binary stale perche' forzava `--skip-build`; ora `package:smoke`
   ricostruisce il package, mentre `package:smoke:fast` conserva il path rapido
-  esplicito per chi vuole riusare binari gia' preparati.
+  esplicito per chi vuole riusare binari gia' preparati. Il gateway dello smoke
+  package usa inoltre `127.0.0.1:18768`, non `18766`/`18767`, per non collidere
+  con i sidecar WhatsApp/Telegram quando si testa un profilo reale.
   L'audit reale successivo ha scoperto 2 `chat_turn` storici in `waiting_time`
   senza alcuna `execution_wake` pending: ora CLI e `/api/integrity/audit`
   segnalano `waiting_time_task_without_pending_wake`, e

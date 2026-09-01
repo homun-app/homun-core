@@ -77,3 +77,15 @@ test("package smoke rebuilds the configured Cargo target directory by default", 
   assert.match(fastPackageSmoke, /CARGO_TARGET_DIR/);
   assert.match(fastPackageSmoke, /package:prepare -- --skip-build/);
 });
+
+test("package smoke gateway port does not collide with channel sidecars", async () => {
+  const pkg = JSON.parse(await readFile(packagePath, "utf8"));
+  const scripts = [pkg.scripts["package:smoke"], pkg.scripts["package:smoke:fast"]];
+
+  for (const script of scripts) {
+    assert.match(script, /HOMUN_DESKTOP_GATEWAY_PORT=18768/);
+    assert.match(script, /HOMUN_DESKTOP_GATEWAY_URL=http:\/\/127\.0\.0\.1:18768/);
+    assert.doesNotMatch(script, /HOMUN_DESKTOP_GATEWAY_PORT=18766/);
+    assert.doesNotMatch(script, /HOMUN_DESKTOP_GATEWAY_PORT=18767/);
+  }
+});
