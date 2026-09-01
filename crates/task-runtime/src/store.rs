@@ -5546,6 +5546,84 @@ impl TaskStore {
         Ok(changed)
     }
 
+    pub fn count_waiting_time_tasks_without_pending_wake(&self) -> TaskRuntimeResult<u64> {
+        Ok(self.connection.query_row(
+            "SELECT COUNT(*)
+             FROM tasks t
+             WHERE t.status = 'waiting_time'
+               AND NOT EXISTS (
+                 SELECT 1 FROM execution_wakes w
+                 WHERE w.execution_id = t.task_id
+                   AND w.status = 'pending'
+               )",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub fn fail_waiting_time_tasks_without_pending_wake(&self) -> TaskRuntimeResult<u64> {
+        let rows = {
+            let mut stmt = self.connection.prepare(
+                "SELECT t.task_id, t.user_id, t.workspace_id, t.task_json
+                 FROM tasks t
+                 WHERE t.status = 'waiting_time'
+                   AND NOT EXISTS (
+                     SELECT 1 FROM execution_wakes w
+                     WHERE w.execution_id = t.task_id
+                       AND w.status = 'pending'
+                   )
+                 ORDER BY t.updated_at DESC
+                 LIMIT 100",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let now = OffsetDateTime::now_utc();
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let mut changed = 0_u64;
+        for (task_id, user_id, workspace_id, task_json) in rows {
+            let mut task: TaskRecord = serde_json::from_str(&task_json)?;
+            task.status = TaskStatus::Failed;
+            task.blocked_reason = Some("waiting_time_without_wake_repaired".to_string());
+            task.updated_at = now;
+            let affected = tx.execute(
+                "UPDATE tasks
+                 SET status = ?1, updated_at = ?2, blocked_reason = ?3, task_json = ?4
+                 WHERE task_id = ?5
+                   AND user_id = ?6
+                   AND workspace_id = ?7
+                   AND status = 'waiting_time'
+                   AND NOT EXISTS (
+                     SELECT 1 FROM execution_wakes w
+                     WHERE w.execution_id = tasks.task_id
+                       AND w.status = 'pending'
+                   )",
+                params![
+                    TaskStatus::Failed.as_str(),
+                    now.unix_timestamp(),
+                    "waiting_time_without_wake_repaired",
+                    serde_json::to_string(&task)?,
+                    task_id,
+                    user_id,
+                    workspace_id,
+                ],
+            )?;
+            changed += affected as u64;
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+
     pub fn count_completed_browser_budget_exceeded_tasks(&self) -> TaskRuntimeResult<u64> {
         Ok(self.connection.query_row(
             "SELECT COUNT(*)
@@ -5830,6 +5908,30 @@ impl TaskStore {
                 "error",
                 "approval_projection",
                 "task waits for user approval but no canonical pending approval or open HITL wait is visible",
+                Some(task_id?),
+            ));
+        }
+
+        let mut stmt = self.connection.prepare(
+            "SELECT t.task_id
+             FROM tasks t
+             WHERE t.status = 'waiting_time'
+               AND NOT EXISTS (
+                 SELECT 1 FROM execution_wakes w
+                 WHERE w.execution_id = t.task_id
+                   AND w.status = 'pending'
+               )
+             ORDER BY t.updated_at DESC
+             LIMIT 100",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        for task_id in rows {
+            findings.push(runtime_integrity_finding(
+                "chat_runtime",
+                "waiting_time_task_without_pending_wake",
+                "error",
+                "execution_wake_projection",
+                "task waits for time but no canonical pending execution wake is visible",
                 Some(task_id?),
             ));
         }
@@ -8461,6 +8563,44 @@ mod chat_turn_query_tests {
         )
         .unwrap();
 
+        let waiting_time_without_wake = make_chat_turn(
+            "turn_waiting_time_without_wake",
+            "thread_waiting_time_without_wake",
+            TaskStatus::WaitingTime,
+        );
+        s.insert_chat_turn(
+            &waiting_time_without_wake,
+            "thread_waiting_time_without_wake",
+            "req-waiting-time-without-wake",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+
+        let waiting_time_with_wake = make_chat_turn(
+            "turn_waiting_time_with_wake",
+            "thread_waiting_time_with_wake",
+            TaskStatus::WaitingTime,
+        );
+        s.insert_chat_turn(
+            &waiting_time_with_wake,
+            "thread_waiting_time_with_wake",
+            "req-waiting-time-with-wake",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.connection
+            .execute(
+                "INSERT INTO execution_wakes (
+                   execution_id, revision, dedup_key, condition_json, status,
+                   delivery_json, created_at, delivered_at
+                 ) VALUES (?1, 1, 'v1:at:123', '{\"type\":\"at\",\"unix_seconds\":123}',
+                   'pending', NULL, 1, NULL)",
+                ["turn_waiting_time_with_wake"],
+            )
+            .unwrap();
+
         let report = s.audit_runtime_integrity().unwrap();
         let codes = report
             .findings
@@ -8474,6 +8614,14 @@ mod chat_turn_query_tests {
         assert!(codes.contains("active_task_with_terminal_turn_event"));
         assert!(codes.contains("completed_task_with_browser_budget_exceeded"));
         assert!(codes.contains("waiting_approval_task_without_canonical_approval"));
+        assert!(codes.contains("waiting_time_task_without_pending_wake"));
+        assert!(
+            !report.findings.iter().any(|finding| {
+                finding.code == "waiting_time_task_without_pending_wake"
+                    && finding.ref_id.as_deref() == Some("turn_waiting_time_with_wake")
+            }),
+            "a waiting_time task with a pending execution wake must remain valid"
+        );
     }
 
     #[test]
@@ -8768,6 +8916,97 @@ mod chat_turn_query_tests {
             !after
                 .finding_counts
                 .contains_key("waiting_approval_task_without_canonical_approval")
+        );
+    }
+
+    #[test]
+    fn runtime_integrity_repair_fails_waiting_time_without_pending_wake() {
+        let s = store();
+        let invalid = make_chat_turn(
+            "turn_waiting_time_without_wake",
+            "thread_waiting_time_without_wake",
+            TaskStatus::WaitingTime,
+        );
+        s.insert_chat_turn(
+            &invalid,
+            "thread_waiting_time_without_wake",
+            "req-waiting-time-without-wake",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+
+        let valid = make_chat_turn(
+            "turn_waiting_time_with_wake",
+            "thread_waiting_time_with_wake",
+            TaskStatus::WaitingTime,
+        );
+        s.insert_chat_turn(
+            &valid,
+            "thread_waiting_time_with_wake",
+            "req-waiting-time-with-wake",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.connection
+            .execute(
+                "INSERT INTO execution_wakes (
+                   execution_id, revision, dedup_key, condition_json, status,
+                   delivery_json, created_at, delivered_at
+                 ) VALUES (?1, 1, 'v1:at:123', '{\"type\":\"at\",\"unix_seconds\":123}',
+                   'pending', NULL, 1, NULL)",
+                ["turn_waiting_time_with_wake"],
+            )
+            .unwrap();
+
+        let before = s.audit_runtime_integrity().unwrap();
+        assert_eq!(
+            before
+                .finding_counts
+                .get("waiting_time_task_without_pending_wake"),
+            Some(&1)
+        );
+        assert_eq!(
+            s.count_waiting_time_tasks_without_pending_wake().unwrap(),
+            1
+        );
+
+        let repaired = s.fail_waiting_time_tasks_without_pending_wake().unwrap();
+        assert_eq!(repaired, 1);
+        let repaired_task = s
+            .get_task(
+                &TaskId::new("turn_waiting_time_without_wake"),
+                &UserId::new("u"),
+                &WorkspaceId::new("w"),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(repaired_task.status, TaskStatus::Failed);
+        assert_eq!(
+            repaired_task.blocked_reason.as_deref(),
+            Some("waiting_time_without_wake_repaired")
+        );
+        let valid_task = s
+            .get_task(
+                &TaskId::new("turn_waiting_time_with_wake"),
+                &UserId::new("u"),
+                &WorkspaceId::new("w"),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(valid_task.status, TaskStatus::WaitingTime);
+        assert_eq!(
+            s.count_waiting_time_tasks_without_pending_wake().unwrap(),
+            0
+        );
+        assert_eq!(s.fail_waiting_time_tasks_without_pending_wake().unwrap(), 0);
+
+        let after = s.audit_runtime_integrity().unwrap();
+        assert!(
+            !after
+                .finding_counts
+                .contains_key("waiting_time_task_without_pending_wake")
         );
     }
 

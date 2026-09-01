@@ -229,7 +229,15 @@ Evidenza locale:
   release binary stale perche' forzava `--skip-build`; ora `package:smoke`
   ricostruisce il package, mentre `package:smoke:fast` conserva il path rapido
   esplicito per chi vuole riusare binari gia' preparati.
+  L'audit reale successivo ha scoperto 2 `chat_turn` storici in `waiting_time`
+  senza alcuna `execution_wake` pending: ora CLI e `/api/integrity/audit`
+  segnalano `waiting_time_task_without_pending_wake`, e
+  `/api/integrity/repair/apply` supporta
+  `fail_waiting_time_without_pending_wake` con backup/token per fallire solo i
+  timer senza sveglia canonica ancora presenti.
 - `cargo test -p local-first-task-runtime runtime_integrity_audit_exposes_observability_gaps_without_task_content -- --nocapture`
+- `cargo test -p local-first-task-runtime runtime_integrity_repair_fails_waiting_time_without_pending_wake -- --nocapture`
+- `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway integrity_repair_apply_fails_waiting_time_without_pending_wake_without_exposing_paths -- --nocapture`
 - `cargo test -p local-first-task-runtime thread_chat_turn_purge_deletes_owned_runtime_rows_only -- --nocapture`
 - `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway delete_chat_thread_purges_its_execution_journal -- --nocapture`
 - `cd apps/desktop && node --test tests/release-workflow.test.mjs`

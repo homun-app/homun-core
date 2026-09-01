@@ -91,6 +91,17 @@ def create_runtime_schema(conn: sqlite3.Connection) -> None:
             updated_at integer not null,
             approval_json text not null
         );
+        create table execution_wakes (
+            execution_id text not null,
+            revision integer not null,
+            dedup_key text not null,
+            condition_json text not null,
+            status text not null,
+            delivery_json text,
+            created_at integer not null,
+            delivered_at integer,
+            primary key(execution_id, revision, dedup_key)
+        );
         """
     )
 
@@ -393,6 +404,50 @@ class AuditHomunStateTests(unittest.TestCase):
         report = audit.audit_homun_state(paths)
 
         self.assertIn("waiting_approval_task_without_canonical_approval", self.finding_codes(report))
+
+    def test_waiting_time_task_without_pending_wake_is_reported(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-stuck', 'user-1', 'workspace-1', 'chat_turn',
+                'waiting_time', 1, 2, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-waked', 'user-1', 'workspace-1', 'chat_turn',
+                'waiting_time', 1, 2, null, '{}', 'thread-2')
+            """
+        )
+        conn.execute(
+            """
+            insert into execution_wakes (
+                execution_id, revision, dedup_key, condition_json, status,
+                delivery_json, created_at, delivered_at
+            ) values (
+                'turn-waked', 1, 'v1:at:123', '{"type":"at","unix_seconds":123}',
+                'pending', null, 2, null
+            )
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        stuck = [
+            finding for finding in report["findings"]
+            if finding["code"] == "waiting_time_task_without_pending_wake"
+        ]
+        self.assertEqual([finding["ref"] for finding in stuck], ["turn-stuck"])
 
     def test_sensitive_memory_without_vault_containment_is_reported_without_leaking_value(self):
         paths = self.with_paths()

@@ -453,6 +453,31 @@ def audit_runtime(paths: AuditInputs, findings: list[dict[str, Any]], warnings: 
                     summary="task waits for user approval but no canonical pending approval or open HITL wait is visible",
                     ref=row["task_id"],
                 )
+        if table_exists(conn, "execution_wakes"):
+            for row in row_dicts(
+                conn,
+                """
+                select t.task_id
+                from tasks t
+                where t.status = 'waiting_time'
+                  and not exists (
+                    select 1 from execution_wakes w
+                    where w.execution_id = t.task_id
+                      and w.status = 'pending'
+                  )
+                order by t.updated_at desc
+                limit 100
+                """,
+            ):
+                finding(
+                    findings,
+                    domain="chat_runtime",
+                    code="waiting_time_task_without_pending_wake",
+                    severity="error",
+                    owner="execution_wake_projection",
+                    summary="task waits for time but no canonical pending execution wake is visible",
+                    ref=row["task_id"],
+                )
         if table_exists(conn, "thread_hitl_waits"):
             for row in row_dicts(
                 conn,

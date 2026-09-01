@@ -26420,6 +26420,109 @@ async fn integrity_repair_apply_fails_orphaned_waiting_approval_without_exposing
 }
 
 #[tokio::test]
+async fn integrity_repair_apply_fails_waiting_time_without_pending_wake_without_exposing_paths() {
+    use tower::ServiceExt;
+
+    let dir = isolated_gateway_test_dir("integrity-repair-waiting-time");
+    std::fs::create_dir_all(&dir).unwrap();
+    let _data_dir = TestGatewayDataDir::new(&dir);
+    let database = dir.join("homun.sqlite");
+    let chat = ChatStore::open(&database).unwrap();
+    let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
+    let thread = chat.create_thread("workspace_waiting_time_repair").unwrap();
+    let task_id = local_first_task_runtime::TaskId::new("turn_waiting_time_repair");
+    let user = super::gateway_user_id();
+    let workspace = local_first_task_runtime::WorkspaceId::new("workspace_waiting_time");
+    let mut task = local_first_task_runtime::TaskRecord::new(
+        task_id.as_str(),
+        user.clone(),
+        workspace.clone(),
+        "chat_turn",
+        "waiting time repair",
+        serde_json::json!({
+            "thread_id": thread.thread_id.clone(),
+        }),
+    );
+    task.status = local_first_task_runtime::TaskStatus::WaitingTime;
+    tasks
+        .insert_chat_turn(
+            &task,
+            &thread.thread_id,
+            task_id.as_str(),
+            "interactive",
+            "full",
+        )
+        .unwrap();
+
+    let mut state = super::AppState::for_tests();
+    state.chat_store = std::sync::Arc::new(std::sync::Mutex::new(chat));
+    state.task_store = std::sync::Arc::new(std::sync::Mutex::new(tasks));
+    let app = integrity_route_test_app(state.clone());
+
+    let preview_response = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/integrity/repair/preview")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::json!({
+                        "actions": [{ "type": "fail_waiting_time_without_pending_wake" }]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let (preview_status, mut preview) = memory_source_response_json(preview_response).await;
+    assert_eq!(preview_status, axum::http::StatusCode::OK);
+    assert_eq!(preview["estimates"][0]["estimated_rows"], 1);
+    preview["confirm"] = serde_json::json!(true);
+
+    let response = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/integrity/repair/apply")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(preview.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let (status, body) = memory_source_response_json(response).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(body["backup"]["created"], true);
+    assert!(body["backup"]["bytes"].as_u64().unwrap() > 0);
+    assert_eq!(body["applied"][0]["estimated_rows"], 1);
+    assert!(
+        !body
+            .to_string()
+            .contains(database.to_string_lossy().as_ref())
+    );
+    let repaired = state
+        .task_store
+        .lock()
+        .unwrap()
+        .get_task(&task_id, &user, &workspace)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        repaired.status,
+        local_first_task_runtime::TaskStatus::Failed
+    );
+    assert_eq!(
+        repaired.blocked_reason.as_deref(),
+        Some("waiting_time_without_wake_repaired")
+    );
+
+    drop(_data_dir);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
 async fn integrity_repair_apply_fails_completed_browser_budget_without_exposing_paths() {
     use tower::ServiceExt;
 

@@ -50,6 +50,7 @@ pub enum IntegrityRepairAction {
     RefreshProjectGraph { workspace_id: WorkspaceId },
     FailStaleStreamingAssistants,
     FailOrphanedWaitingApprovals,
+    FailWaitingTimeWithoutPendingWake,
     FailCompletedBrowserBudgetExceeded,
 }
 
@@ -73,6 +74,7 @@ impl IntegrityRepairAction {
             Self::RefreshProjectGraph { .. }
             | Self::FailStaleStreamingAssistants
             | Self::FailOrphanedWaitingApprovals
+            | Self::FailWaitingTimeWithoutPendingWake
             | Self::FailCompletedBrowserBudgetExceeded => None,
         }
     }
@@ -86,6 +88,7 @@ impl IntegrityRepairAction {
             Self::RefreshProjectGraph { .. } => IntegrityRepairDomain::Graph,
             Self::FailStaleStreamingAssistants
             | Self::FailOrphanedWaitingApprovals
+            | Self::FailWaitingTimeWithoutPendingWake
             | Self::FailCompletedBrowserBudgetExceeded => IntegrityRepairDomain::Runtime,
             Self::RemoveGraphifyDuplicateRelations { .. }
             | Self::RemoveOrphanEmbeddings
