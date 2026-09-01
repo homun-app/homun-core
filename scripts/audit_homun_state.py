@@ -204,6 +204,16 @@ def row_dicts(conn: sqlite3.Connection, query: str, params: tuple[Any, ...] = ()
     return [dict(row) for row in conn.execute(query, params).fetchall()]
 
 
+def json_object(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def finding(
     findings: list[dict[str, Any]],
     *,
@@ -545,7 +555,7 @@ def audit_memory(paths: AuditInputs, findings: list[dict[str, Any]], warnings: l
             for row in row_dicts(
                 conn,
                 """
-                select m.ref
+                select m.ref, m.metadata_json
                 from memories m
                 left join memory_evidence e on e.memory_ref = m.ref
                 where m.status not in ('Deleted', 'Rejected', 'Stale', 'deleted', 'rejected', 'stale')
@@ -553,13 +563,20 @@ def audit_memory(paths: AuditInputs, findings: list[dict[str, Any]], warnings: l
                 limit 100
                 """,
             ):
+                metadata = json_object(row.get("metadata_json"))
+                admission = metadata.get("admission") if isinstance(metadata.get("admission"), dict) else None
+                is_legacy = admission is None
                 finding(
                     findings,
                     domain="memory",
-                    code="memory_without_evidence",
+                    code="legacy_memory_without_evidence" if is_legacy else "memory_without_evidence",
                     severity="warning",
                     owner="memory_provenance",
-                    summary="live memory has no evidence link",
+                    summary=(
+                        "legacy live memory has no admission metadata or evidence link"
+                        if is_legacy
+                        else "live memory with admission metadata has no evidence link"
+                    ),
                     ref=row["ref"],
                 )
     finally:

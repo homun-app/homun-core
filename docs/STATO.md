@@ -188,6 +188,10 @@ Lo script diagnostico supporta ora anche `--data-dir` per auditare un profilo
 Homun completo e include `paths.data_dir`/`paths.sources` nel JSON, cosi' un
 report distingue default `~/.homun`, env e override CLI invece di confondere
 profili diversi.
+L'audit memoria distingue inoltre `legacy_memory_without_evidence` dai record
+moderni con `metadata.admission` ma senza link: sul profilo reale i record senza
+provenance risultano legacy, mentre un nuovo `memory_without_evidence` resta una
+regressione della pipeline attuale.
 
 La timeline non include testo utente/assistant o payload raw; riporta solo fasi,
 status, id tecnici, modello effettivo e piccoli campi diagnostici consentiti
@@ -199,6 +203,9 @@ Evidenza locale:
 - `python3 -m unittest scripts.test_audit_homun_state -v`
 - `python3 scripts/audit_homun_state.py --data-dir "$tmp" --max-findings-per-code 0`
   -> `paths.sources.data_dir=--data-dir`
+- `python3 scripts/audit_homun_state.py --max-findings-per-code 0` sul profilo
+  reale -> `legacy_memory_without_evidence=100`, nessun
+  `memory_without_evidence`
 - `cargo test -p local-first-task-runtime runtime_integrity_audit_exposes_observability_gaps_without_task_content -- --nocapture`
 - `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway integrity_audit_reports_runtime_lifecycle_findings_without_content -- --nocapture`
 - `cd apps/desktop && node --test src/lib/runtimeContext.test.mjs`

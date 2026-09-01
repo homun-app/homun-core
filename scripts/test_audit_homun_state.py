@@ -529,7 +529,7 @@ class AuditHomunStateTests(unittest.TestCase):
         self.assertFalse(second["backup"]["created"])
         self.assertEqual(second["total_redactions"], 0)
 
-    def test_report_caps_repeated_findings_and_keeps_summary_counts(self):
+    def test_report_caps_repeated_legacy_memory_findings_and_keeps_summary_counts(self):
         paths = self.with_paths()
         conn = sqlite3.connect(paths.memory_db)
         self.addCleanup(conn.close)
@@ -557,17 +557,45 @@ class AuditHomunStateTests(unittest.TestCase):
         memory_without_evidence = [
             finding
             for finding in report["findings"]
-            if finding["code"] == "memory_without_evidence"
+            if finding["code"] == "legacy_memory_without_evidence"
         ]
         self.assertEqual(len(memory_without_evidence), 2)
         self.assertEqual(
-            report["summary"]["by_code"]["memory_without_evidence"]["count"],
+            report["summary"]["by_code"]["legacy_memory_without_evidence"]["count"],
             5,
         )
         self.assertEqual(
-            report["summary"]["by_code"]["memory_without_evidence"]["omitted"],
+            report["summary"]["by_code"]["legacy_memory_without_evidence"]["omitted"],
             3,
         )
+
+    def test_modern_memory_without_evidence_remains_current_pipeline_warning(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.memory_db)
+        self.addCleanup(conn.close)
+        create_memory_schema(conn)
+        conn.execute(
+            """
+            insert into memories (
+                ref, user_id, workspace_id, memory_type, text, aliases_json,
+                language_hints_json, confidence, status, privacy_domain,
+                sensitivity, metadata_json, created_at, updated_at,
+                last_seen_at, supersedes_json, superseded_by, correction_of
+            ) values (
+                'mem-modern', 'user-1', 'workspace-1', 'fact',
+                'ordinary memory', '[]', '[]', 0.9, 'Active',
+                'personal', 'Private',
+                '{"admission":{"origin":"user_explicit","durability":"durable"}}',
+                '1', '1', null, '[]', null, null
+            )
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertIn("memory_without_evidence", self.finding_codes(report))
+        self.assertNotIn("legacy_memory_without_evidence", self.finding_codes(report))
 
     def test_observability_timeline_summarizes_runtime_without_leaking_payload_text(self):
         paths = self.with_paths()
