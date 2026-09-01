@@ -26026,8 +26026,8 @@ async fn integrity_audit_reports_runtime_lifecycle_findings_without_content() {
                 user_id: user.as_str().to_string(),
                 workspace_id: workspace.as_str().to_string(),
                 role: Some("orchestrator".to_string()),
-                model: Some("qwen".to_string()),
-                provider: Some("ollama".to_string()),
+                model: None,
+                provider: None,
                 prompt_fingerprint: None,
             })
             .unwrap();
@@ -26060,6 +26060,14 @@ async fn integrity_audit_reports_runtime_lifecycle_findings_without_content() {
     assert_eq!(
         body["runtime"]["finding_counts"]["completed_task_with_browser_budget_exceeded"],
         1
+    );
+    assert_eq!(
+        body["runtime"]["observability"]["summary"]["diagnostic_gaps"],
+        1
+    );
+    assert_eq!(
+        body["runtime"]["observability"]["diagnostic_gaps"][0]["code"],
+        "run_missing_model_attribution"
     );
     assert!(!body.to_string().contains("RUNTIME_SECRET_SENTINEL"));
 

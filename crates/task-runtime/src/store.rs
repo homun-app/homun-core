@@ -9,10 +9,11 @@ use crate::{
     KernelBrowserView, KernelCapabilityRuntimeView, KernelPlanStepView, KernelPlanView,
     KernelThreadActions, KernelThreadProjection, KernelTurnView, KernelUncertainEffectView,
     NewAgentRun, NewBrowserCheckpoint, NewExecutionEffectReceipt, NewTurnSteering,
-    ObjectiveContractRecord, ObjectiveMode, ProjectionClaim, ResourceClass,
-    RuntimeIntegrityFinding, RuntimeIntegrityReport, RuntimePlanRecord, SubagentInfo,
-    TaskCheckpoint, TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult,
-    TaskStatus, TerminalWrite, ThreadAttention, TurnEvent, TurnEventKind, TurnSteeringRecord,
+    ObjectiveContractRecord, ObjectiveMode, ProjectionClaim, ResourceClass, RuntimeDiagnosticGap,
+    RuntimeIntegrityFinding, RuntimeIntegrityReport, RuntimeObservabilityReport,
+    RuntimeObservabilitySummary, RuntimePlanRecord, SubagentInfo, TaskCheckpoint,
+    TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
+    TerminalWrite, ThreadAttention, TurnEvent, TurnEventKind, TurnSteeringRecord,
     TurnSteeringStatus, UserId, WorkspaceId,
 };
 use local_first_execution_protocol::{EffectClass, EffectReceiptRef, EffectReceiptStatus};
@@ -5714,7 +5715,150 @@ impl TaskStore {
             ));
         }
 
-        Ok(runtime_integrity_report(findings))
+        let observability = self.runtime_observability_report(100)?;
+        Ok(runtime_integrity_report(findings, observability))
+    }
+
+    fn runtime_observability_report(
+        &self,
+        max_gaps: usize,
+    ) -> TaskRuntimeResult<RuntimeObservabilityReport> {
+        let mut gaps = Vec::new();
+        self.runtime_observability_terminal_reason_gaps(max_gaps, &mut gaps)?;
+        self.runtime_observability_model_attribution_gaps(max_gaps, &mut gaps)?;
+        self.runtime_observability_agent_journal_gaps(max_gaps, &mut gaps)?;
+        self.runtime_observability_turn_event_gaps(max_gaps, &mut gaps)?;
+        if gaps.len() > max_gaps {
+            gaps.truncate(max_gaps);
+        }
+        Ok(RuntimeObservabilityReport {
+            summary: RuntimeObservabilitySummary {
+                diagnostic_gaps: gaps.len() as u64,
+            },
+            diagnostic_gaps: gaps,
+        })
+    }
+
+    fn runtime_observability_terminal_reason_gaps(
+        &self,
+        max_gaps: usize,
+        gaps: &mut Vec<RuntimeDiagnosticGap>,
+    ) -> TaskRuntimeResult<()> {
+        if gaps.len() >= max_gaps {
+            return Ok(());
+        }
+        let mut stmt = self.connection.prepare(
+            "SELECT run_id, status
+             FROM agent_runs
+             WHERE status IN ('completed', 'failed', 'aborted')
+               AND COALESCE(terminal_reason, '') = ''
+             ORDER BY completed_at DESC, started_at DESC
+             LIMIT ?1",
+        )?;
+        let remaining = (max_gaps - gaps.len()) as i64;
+        let rows = stmt.query_map(params![remaining], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (run_id, status) = row?;
+            gaps.push(runtime_diagnostic_gap(
+                format!("{status}_run_missing_terminal_reason"),
+                "agent_run_projection",
+                format!("{status} agent run has no terminal_reason"),
+                Some(run_id),
+            ));
+        }
+        Ok(())
+    }
+
+    fn runtime_observability_model_attribution_gaps(
+        &self,
+        max_gaps: usize,
+        gaps: &mut Vec<RuntimeDiagnosticGap>,
+    ) -> TaskRuntimeResult<()> {
+        if gaps.len() >= max_gaps {
+            return Ok(());
+        }
+        let mut stmt = self.connection.prepare(
+            "SELECT run_id
+             FROM agent_runs
+             WHERE status IN ('running', 'completed', 'failed', 'aborted')
+               AND (COALESCE(role, '') = '' OR COALESCE(model, '') = '' OR COALESCE(provider, '') = '')
+             ORDER BY started_at DESC
+             LIMIT ?1",
+        )?;
+        let remaining = (max_gaps - gaps.len()) as i64;
+        let rows = stmt.query_map(params![remaining], |row| row.get::<_, String>(0))?;
+        for run_id in rows {
+            gaps.push(runtime_diagnostic_gap(
+                "run_missing_model_attribution",
+                "model_routing",
+                "agent run lacks role/model/provider, so Auto/Unavailable cannot be explained from the run row",
+                Some(run_id?),
+            ));
+        }
+        Ok(())
+    }
+
+    fn runtime_observability_agent_journal_gaps(
+        &self,
+        max_gaps: usize,
+        gaps: &mut Vec<RuntimeDiagnosticGap>,
+    ) -> TaskRuntimeResult<()> {
+        if gaps.len() >= max_gaps || !table_exists(&self.connection, "agent_run_events") {
+            return Ok(());
+        }
+        let mut stmt = self.connection.prepare(
+            "SELECT r.run_id
+             FROM agent_runs r
+             LEFT JOIN agent_run_events e ON e.run_id = r.run_id
+             WHERE r.status IN ('running', 'completed', 'failed', 'aborted')
+               AND e.run_id IS NULL
+             ORDER BY r.started_at DESC
+             LIMIT ?1",
+        )?;
+        let remaining = (max_gaps - gaps.len()) as i64;
+        let rows = stmt.query_map(params![remaining], |row| row.get::<_, String>(0))?;
+        for run_id in rows {
+            gaps.push(runtime_diagnostic_gap(
+                "run_without_agent_run_events",
+                "agent_journal",
+                "agent run has no round/tool/model journal events",
+                Some(run_id?),
+            ));
+        }
+        Ok(())
+    }
+
+    fn runtime_observability_turn_event_gaps(
+        &self,
+        max_gaps: usize,
+        gaps: &mut Vec<RuntimeDiagnosticGap>,
+    ) -> TaskRuntimeResult<()> {
+        if gaps.len() >= max_gaps {
+            return Ok(());
+        }
+        let mut stmt = self.connection.prepare(
+            "SELECT t.task_id
+             FROM tasks t
+             LEFT JOIN turn_events e ON e.turn_id = t.task_id
+             WHERE t.kind = 'chat_turn'
+               AND t.status NOT IN ('queued', 'pending')
+               AND e.turn_id IS NULL
+             ORDER BY t.updated_at DESC
+             LIMIT ?1",
+        )?;
+        let remaining = (max_gaps - gaps.len()) as i64;
+        let rows = stmt.query_map(params![remaining], |row| row.get::<_, String>(0))?;
+        for task_id in rows {
+            gaps.push(runtime_diagnostic_gap(
+                "turn_without_turn_events",
+                "turn_executor",
+                "non-pending chat turn has no durable turn_events timeline",
+                Some(task_id?),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -5736,7 +5880,10 @@ fn runtime_integrity_finding(
     }
 }
 
-fn runtime_integrity_report(mut findings: Vec<RuntimeIntegrityFinding>) -> RuntimeIntegrityReport {
+fn runtime_integrity_report(
+    mut findings: Vec<RuntimeIntegrityFinding>,
+    observability: RuntimeObservabilityReport,
+) -> RuntimeIntegrityReport {
     findings.sort_by(|left, right| {
         (
             left.severity.as_str() != "error",
@@ -5768,7 +5915,23 @@ fn runtime_integrity_report(mut findings: Vec<RuntimeIntegrityFinding>) -> Runti
         error_count,
         warning_count,
         finding_counts,
+        observability,
         findings,
+    }
+}
+
+fn runtime_diagnostic_gap(
+    code: impl Into<String>,
+    owner: impl Into<String>,
+    summary: impl Into<String>,
+    ref_id: Option<String>,
+) -> RuntimeDiagnosticGap {
+    RuntimeDiagnosticGap {
+        code: code.into(),
+        severity: "warning".to_string(),
+        owner: owner.into(),
+        summary: summary.into(),
+        ref_id,
     }
 }
 
@@ -8073,6 +8236,54 @@ mod chat_turn_query_tests {
         assert!(codes.contains("active_task_with_terminal_turn_event"));
         assert!(codes.contains("completed_task_with_browser_budget_exceeded"));
         assert!(codes.contains("waiting_approval_task_without_canonical_approval"));
+    }
+
+    #[test]
+    fn runtime_integrity_audit_exposes_observability_gaps_without_task_content() {
+        let s = store();
+        let completed = make_chat_turn(
+            "turn_observable",
+            "thread_observable",
+            TaskStatus::Completed,
+        );
+        s.insert_chat_turn(
+            &completed,
+            "thread_observable",
+            "req-observable",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.create_agent_run(&NewAgentRun {
+            run_id: "run-observable".into(),
+            turn_id: "turn_observable".into(),
+            thread_id: "thread_observable".into(),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            role: Some("orchestrator".into()),
+            model: None,
+            provider: None,
+            prompt_fingerprint: None,
+        })
+        .unwrap();
+        s.finish_agent_run("run-observable", AgentRunStatus::Completed, None)
+            .unwrap();
+
+        let report = s.audit_runtime_integrity().unwrap();
+        let codes = report
+            .observability
+            .diagnostic_gaps
+            .iter()
+            .map(|gap| gap.code.as_str())
+            .collect::<BTreeSet<_>>();
+        let encoded = serde_json::to_string(&report).unwrap();
+
+        assert_eq!(report.observability.summary.diagnostic_gaps, 3);
+        assert!(codes.contains("completed_run_missing_terminal_reason"));
+        assert!(codes.contains("run_missing_model_attribution"));
+        assert!(codes.contains("turn_without_turn_events"));
+        assert!(!encoded.contains("Runtime lifecycle sentinel"));
+        assert!(!encoded.contains("thread_observable"));
     }
 
     #[test]

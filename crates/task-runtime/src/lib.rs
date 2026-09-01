@@ -58,8 +58,9 @@ pub use types::{
     KernelCapabilityRuntimeView, KernelPlanStepView, KernelPlanView, KernelThreadActions,
     KernelThreadProjection, KernelTurnView, KernelUncertainEffectView, NewAgentRun,
     NewBrowserCheckpoint, NewExecutionEffectReceipt, NewTurnSteering, ObjectiveContractRecord,
-    ObjectiveMode, ResourceClass, ResourceRequirement, RetryPolicy, RuntimeIntegrityFinding,
-    RuntimeIntegrityReport, RuntimePlanRecord, SubagentInfo, TaskId, TaskPriority, TaskRecord,
+    ObjectiveMode, ResourceClass, ResourceRequirement, RetryPolicy, RuntimeDiagnosticGap,
+    RuntimeIntegrityFinding, RuntimeIntegrityReport, RuntimeObservabilityReport,
+    RuntimeObservabilitySummary, RuntimePlanRecord, SubagentInfo, TaskId, TaskPriority, TaskRecord,
     TaskStatus, TerminalWrite, ThreadAttention, TurnEvent, TurnEventKind, TurnSteeringRecord,
     TurnSteeringStatus, UserId, WorkflowId, WorkspaceId,
 };

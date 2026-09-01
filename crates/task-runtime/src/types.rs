@@ -166,6 +166,27 @@ pub struct RuntimeIntegrityFinding {
     pub ref_id: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RuntimeObservabilitySummary {
+    pub diagnostic_gaps: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeDiagnosticGap {
+    pub code: String,
+    pub severity: String,
+    pub owner: String,
+    pub summary: String,
+    #[serde(rename = "ref", skip_serializing_if = "Option::is_none")]
+    pub ref_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RuntimeObservabilityReport {
+    pub summary: RuntimeObservabilitySummary,
+    pub diagnostic_gaps: Vec<RuntimeDiagnosticGap>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeIntegrityReport {
     pub integrity_ok: bool,
@@ -173,6 +194,7 @@ pub struct RuntimeIntegrityReport {
     pub error_count: u64,
     pub warning_count: u64,
     pub finding_counts: BTreeMap<String, u64>,
+    pub observability: RuntimeObservabilityReport,
     pub findings: Vec<RuntimeIntegrityFinding>,
 }
 
