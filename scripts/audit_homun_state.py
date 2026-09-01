@@ -567,6 +567,10 @@ def audit_runtime(paths: AuditInputs, findings: list[dict[str, Any]], warnings: 
                 from thread_hitl_waits
                 where status = 'resolved'
                   and resolved_at is not null
+                  and exists (
+                    select 1 from agent_runs r
+                    where r.thread_id = thread_hitl_waits.thread_id
+                  )
                   and not exists (
                     select 1 from agent_runs r
                     where r.thread_id = thread_hitl_waits.thread_id

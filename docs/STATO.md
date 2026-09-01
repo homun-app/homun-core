@@ -310,7 +310,7 @@ Evidenza locale aggiunta:
 Stato profilo reale dopo la classificazione del piano finale:
 
 - `scripts/audit_homun_state.py --max-findings-per-code 3 --max-timeline-events 20`
-  -> `ok=true`, `errors=0`, `warnings=203`
+  -> `ok=true`, `errors=0`, `warnings=185`
 - I vecchi `completed_turn_with_incomplete_plan` con risposta consegnata sono
   ora classificati come
   `completed_turn_with_unreconciled_delivered_plan=62`, warning owner
@@ -321,9 +321,13 @@ Stato profilo reale dopo la classificazione del piano finale:
   diagnostici: Auto/Unavailable e' spiegabile dagli eventi canonici anche se la
   riga storica non era backfillata. Restano 23 run storiche davvero non
   attribuibili perche' prive di ruolo o prive di snapshot modello/provider.
+- I vecchi `resolved_hitl_without_followup_run` senza alcuna `agent_run` nel
+  thread non sono piu' contati come gap HITL moderno: sono conversazioni di
+  luglio precedenti alla strumentazione `agent_runs`, con evidenza runtime in
+  `turn_events` ma senza owner osservabile per la run.
 - Warning: `agent_run_missing_model_attribution=23`,
   `legacy_memory_without_evidence=100`,
-  `resolved_hitl_without_followup_run=18`.
+  `completed_turn_with_unreconciled_delivered_plan=62`.
 
 Blocchi residui prima di dichiarare una release production-grade:
 

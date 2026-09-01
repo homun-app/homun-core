@@ -306,6 +306,43 @@ class AuditHomunStateTests(unittest.TestCase):
 
         self.assertNotIn("agent_run_missing_model_attribution", self.finding_codes(report))
 
+    def test_resolved_hitl_without_any_thread_run_is_legacy_not_followup_gap(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-1', 'user-1', 'workspace-1', 'chat_turn',
+                'completed', 1, 3, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into turn_events (turn_id, seq, kind, payload_json, created_at)
+            values ('turn-1', 1, 'done', '{"text":"done"}', 3)
+            """
+        )
+        conn.execute(
+            """
+            insert into thread_hitl_waits (
+                wait_id, thread_id, source_message_id, kind, payload_json,
+                open_work_json, status, created_at, resolved_at
+            ) values (
+                'wait-legacy', 'thread-1', 'message-1', 'choice', '{}',
+                '{}', 'resolved', 1, 2
+            )
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertNotIn("resolved_hitl_without_followup_run", self.finding_codes(report))
+
     def test_streaming_assistant_without_active_run_is_reported(self):
         paths = self.with_paths()
         conn = sqlite3.connect(paths.runtime_db)
