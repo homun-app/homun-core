@@ -252,6 +252,20 @@ def extended_scenarios() -> list[Scenario]:
             runner="mcp_stdio_api",
             max_seconds=60,
         ),
+        Scenario(
+            "X7",
+            "Long business process checkpoint",
+            "Definisci una run di controllo mensile fatture fornitori come processo aziendale lungo. Non usare browser, non creare file e non inviare messaggi. Devi usare update_plan per creare almeno 6 step canonici, poi chiudere questa run con un checkpoint operativo: cosa e' stato definito, prossimo passo, cosa resta in attesa. Nella risposta finale includi LONG_TASK_CHECKPOINT_OK.",
+            domains=("chat", "runtime", "model", "automation"),
+            require_text=("plan_update", "LONG_TASK_CHECKPOINT_OK", "checkpoint", "prossimo"),
+            forbid_output=(
+                "non posso",
+                "non ho potuto",
+                "browser",
+                "file creato",
+            ),
+            max_seconds=300,
+        ),
     ]
 
 

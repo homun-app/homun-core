@@ -49,7 +49,10 @@ class ProductionSmokeTests(unittest.TestCase):
         all_scenarios = smoke.build_scenarios(profile="all")
 
         self.assertEqual([scenario.id for scenario in baseline], [f"S{i}" for i in range(1, 10)])
-        self.assertEqual([scenario.id for scenario in extended], ["X1", "X2", "X3", "X4", "X5", "X6"])
+        self.assertEqual(
+            [scenario.id for scenario in extended],
+            ["X1", "X2", "X3", "X4", "X5", "X6", "X7"],
+        )
         self.assertEqual(
             [scenario.id for scenario in all_scenarios],
             [scenario.id for scenario in baseline + extended],
@@ -67,6 +70,10 @@ class ProductionSmokeTests(unittest.TestCase):
         self.assertEqual(by_id["X5"].runner, "automation_api")
         self.assertIn("mcp", by_id["X6"].domains)
         self.assertEqual(by_id["X6"].runner, "mcp_stdio_api")
+        self.assertIn("runtime", by_id["X7"].domains)
+        self.assertIn("LONG_TASK_CHECKPOINT_OK", by_id["X7"].require_text)
+        self.assertIn("plan_update", by_id["X7"].require_text)
+        self.assertGreaterEqual(by_id["X7"].max_seconds, 300)
 
     def test_broker_helpers_are_exported(self):
         # Guard the live path: smoke must use turns broker, not generate_stream.
