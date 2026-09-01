@@ -118,8 +118,10 @@ fn plan_step_is_delivery_report(step: &serde_json::Value) -> bool {
 }
 
 fn delivered_answer_has_result_evidence(text: &str) -> bool {
-    delivered_answer_has_markdown_table(text)
-        && (text.matches("http://").count() + text.matches("https://").count()) > 0
+    let source_count = text.matches("http://").count() + text.matches("https://").count();
+    source_count > 0
+        && (delivered_answer_has_markdown_table(text)
+            || delivered_answer_has_numbered_result_list(text))
 }
 
 fn delivered_answer_has_markdown_table(text: &str) -> bool {
@@ -133,6 +135,19 @@ fn delivered_answer_has_markdown_table(text: &str) -> bool {
         previous_row = is_row;
     }
     false
+}
+
+fn delivered_answer_has_numbered_result_list(text: &str) -> bool {
+    let mut found = std::collections::BTreeSet::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        for number in 1..=3 {
+            if trimmed.starts_with(&format!("{number}. ")) {
+                found.insert(number);
+            }
+        }
+    }
+    found.len() == 3
 }
 
 /// Thin text-only wrapper over `plan_steps_reconciled_on_delivery` — the delivery call sites

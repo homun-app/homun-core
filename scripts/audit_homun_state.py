@@ -214,6 +214,10 @@ def json_object(raw: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def plan_markdown_is_incomplete(markdown: str) -> bool:
+    return any(marker in markdown for marker in ("- [-]", "- [ ]"))
+
+
 def finding(
     findings: list[dict[str, Any]],
     *,
@@ -414,6 +418,35 @@ def audit_runtime(paths: AuditInputs, findings: list[dict[str, Any]], warnings: 
                     owner="browser_outcome_projection",
                     summary="completed task contains a browser budget exhaustion event",
                     ref=row["task_id"],
+                )
+            latest_plan_by_turn: dict[str, tuple[int, str]] = {}
+            for row in row_dicts(
+                conn,
+                """
+                select t.task_id, e.seq, e.payload_json
+                from tasks t
+                join turn_events e on e.turn_id = t.task_id
+                where t.kind = 'chat_turn'
+                  and t.status = 'completed'
+                  and e.kind = 'plan_update'
+                order by t.updated_at desc, e.seq asc
+                limit 5000
+                """,
+            ):
+                payload = json_object(row["payload_json"])
+                markdown = str(payload.get("markdown") or "")
+                latest_plan_by_turn[row["task_id"]] = (int(row["seq"]), markdown)
+            for task_id, (_seq, markdown) in latest_plan_by_turn.items():
+                if not plan_markdown_is_incomplete(markdown):
+                    continue
+                finding(
+                    findings,
+                    domain="chat_runtime",
+                    code="completed_turn_with_incomplete_plan",
+                    severity="error",
+                    owner="runtime_plan_projection",
+                    summary="completed chat turn has a latest plan_update with an open step",
+                    ref=task_id,
                 )
         if table_exists(conn, "task_approvals"):
             for row in row_dicts(

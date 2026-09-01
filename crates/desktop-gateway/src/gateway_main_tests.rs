@@ -9535,6 +9535,33 @@ Fonti: https://www.trenitalia.com e https://www.italotreno.it\n\n{}",
 }
 
 #[test]
+fn reconcile_final_plan_marker_closes_numbered_report_with_source_link() {
+    let plan = super::runtime_execution_plan(&[
+        serde_json::json!({"id":"validate_request","title":"Validate request constraints","status":"done","detail":"ok"}),
+        serde_json::json!({"id":"execute_work","title":"Execute the requested work","status":"done","detail":"ok"}),
+        serde_json::json!({"id":"verify_and_answer","title":"Verify and answer","status":"doing","detail":"pending"}),
+    ]);
+    let answer_body = format!(
+        "Ecco le ultime 3 notizie tech di oggi in Italia:\n\n\
+1. Titolo uno - Fonte A - Una riga.\n\n\
+2. Titolo due - Fonte B - Una riga.\n\n\
+3. Titolo tre - Fonte C - Una riga.\n\n\
+Sources\n- https://news.google.com/topics/technology\n\n{}",
+        "Ho verificato la pagina di discovery e riporto tre risultati con fonte. ".repeat(12)
+    );
+    let answer = format!(
+        "‹‹PLAN››{}‹‹/PLAN››\n{}",
+        super::build_plan_markdown(None, &super::execution_plan_steps(&plan)),
+        answer_body
+    );
+
+    let updated = super::reconcile_final_plan_marker_on_delivery(&plan, &answer);
+
+    assert!(updated.contains("- [x] **Verify and answer** (`verify_and_answer`)"));
+    assert!(!updated.contains("- [-] **Verify and answer** (`verify_and_answer`)"));
+}
+
+#[test]
 fn reconcile_final_plan_marker_does_not_launder_blocked_steps() {
     let plan = super::runtime_execution_plan(&[
         serde_json::json!({"id":"s1","title":"Preparare la ricerca","status":"done","detail":"ok"}),
