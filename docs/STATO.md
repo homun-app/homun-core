@@ -219,9 +219,15 @@ Evidenza locale:
   I 3 residui creati dai run precedenti sono stati chiusi via
   `/api/integrity/repair/apply` con backup runtime `392896512` bytes; audit CLI
   successivo -> `ok=true`.
+  Durante la verifica e' emerso anche che `package:smoke` poteva riusare un
+  release binary stale perche' forzava `--skip-build`; ora `package:smoke`
+  ricostruisce il package, mentre `package:smoke:fast` conserva il path rapido
+  esplicito per chi vuole riusare binari gia' preparati.
 - `cargo test -p local-first-task-runtime runtime_integrity_audit_exposes_observability_gaps_without_task_content -- --nocapture`
 - `cargo test -p local-first-task-runtime thread_chat_turn_purge_deletes_owned_runtime_rows_only -- --nocapture`
 - `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway delete_chat_thread_purges_its_execution_journal -- --nocapture`
+- `cd apps/desktop && node --test tests/release-workflow.test.mjs`
+- `cd apps/desktop && npm run test:ui-contract`
 - `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway integrity_audit_reports_runtime_lifecycle_findings_without_content -- --nocapture`
 - `cd apps/desktop && node --test src/lib/runtimeContext.test.mjs`
 - `cd apps/desktop && node --test src/lib/composerTurnContract.test.mjs src/lib/runtimeContext.test.mjs`

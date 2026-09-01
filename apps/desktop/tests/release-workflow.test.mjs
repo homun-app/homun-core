@@ -66,10 +66,14 @@ test("package preparation copies Cargo binaries from Cargo's resolved target dir
   );
 });
 
-test("package smoke uses the configured Cargo target directory", async () => {
+test("package smoke rebuilds the configured Cargo target directory by default", async () => {
   const pkg = JSON.parse(await readFile(packagePath, "utf8"));
   const packageSmoke = pkg.scripts["package:smoke"];
+  const fastPackageSmoke = pkg.scripts["package:smoke:fast"];
 
   assert.match(packageSmoke, /CARGO_TARGET_DIR/);
-  assert.match(packageSmoke, /package:prepare -- --skip-build/);
+  assert.match(packageSmoke, /package:prepare/);
+  assert.doesNotMatch(packageSmoke, /--skip-build/);
+  assert.match(fastPackageSmoke, /CARGO_TARGET_DIR/);
+  assert.match(fastPackageSmoke, /package:prepare -- --skip-build/);
 });
