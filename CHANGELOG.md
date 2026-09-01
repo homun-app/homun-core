@@ -10,6 +10,25 @@ single line so the site captures its full text; version delimiters are `## [x.y.
 
 ## [Unreleased]
 
+## [0.1.1099] — 2026-09-01
+
+A production-readiness hardening release for packaged smoke reliability, real-profile audit clarity and browser automation supply-chain checks.
+
+## Highlights
+- **Packaged smoke now covers the full realistic scenario matrix.** The rebuilt package has passed chat, browser, automation, MCP, skill/tool selection, memory/privacy, code-routing, payment-approval and Italian web-discovery scenarios.
+- **Real-profile integrity audit now separates hard failures from delivered historical plan debt.** Completed turns with delivered assistant output but stale open plan UI are visible as warnings instead of blocking the audit as unresolved runtime failures.
+- **Browser automation dependencies are audited as part of the release gate.** The pre-release gate now checks the packaged sidecar dependency surface, not only the Electron app dependencies.
+
+## Improvements
+- **Scenario selection now fails closed.** Requesting an extended smoke scenario outside the selected profile exits non-zero instead of producing a false green run.
+- **Package smoke avoids channel sidecar ports.** The package smoke gateway now uses `127.0.0.1:18768`, away from the WhatsApp and Telegram bridge ports.
+- **Audit timeline output remains bounded.** Noisy browser or long chat histories keep terminal evidence visible without flooding the CLI report.
+
+## Fixes
+- **Delivered numbered reports close their final plan step.** The runtime now recognizes sourced numbered reports as delivered evidence, not only markdown tables.
+- **Deleted chat threads purge their scoped runtime rows.** Smoke and real-profile cleanup no longer leave orphaned chat turn state behind.
+- **The packaged browser automation sidecar no longer ships vulnerable `nanoid`.** The sidecar locks `nanoid` to `3.3.18` and both source and staged package audits report zero high-severity vulnerabilities.
+
 ## [0.1.1098] — 2026-09-01
 
 A production hardening release for real-profile integrity, browser automation failures and model-selection clarity.
@@ -110,6 +129,7 @@ A browser that completes real tasks, and a noticeably smoother app.
 - **The local model respects its timeout.** A stuck generation no longer keeps Homun busy indefinitely.
 
 [Unreleased]: https://github.com/homun-app/homun-releases/releases
+[0.1.1099]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1099
 [0.1.1098]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1098
 [0.1.1096]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1096
 [0.1.1095]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1095
