@@ -179,6 +179,8 @@ stesso nucleo di gap diagnostici per la dashboard: run terminali senza
 round/tool/model e turn non pendenti senza `turn_events`.
 Settings -> Runtime mostra ora un riquadro "Core diagnostics" alimentato dallo
 stesso endpoint, con contatore e codici dei gap senza esporre ref di run/turn.
+Nel composer, lo stato modello `Auto` senza risoluzione osservata viene mostrato
+come `Auto (unresolved)` invece di sembrare una route gia' funzionante.
 
 La timeline non include testo utente/assistant o payload raw; riporta solo fasi,
 status, id tecnici, modello effettivo e piccoli campi diagnostici consentiti
@@ -191,6 +193,7 @@ Evidenza locale:
 - `cargo test -p local-first-task-runtime runtime_integrity_audit_exposes_observability_gaps_without_task_content -- --nocapture`
 - `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway integrity_audit_reports_runtime_lifecycle_findings_without_content -- --nocapture`
 - `cd apps/desktop && node --test src/lib/runtimeContext.test.mjs`
+- `cd apps/desktop && node --test src/lib/composerTurnContract.test.mjs src/lib/runtimeContext.test.mjs`
 - `cd apps/desktop && npm run build`
 - `python3 -m py_compile scripts/audit_homun_state.py scripts/test_audit_homun_state.py`
 - `python3 scripts/audit_homun_state.py --max-findings-per-code 0` sul profilo

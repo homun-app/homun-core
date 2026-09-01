@@ -37,11 +37,11 @@ test("model button labels display the next-turn selection instead of unavailable
   );
   assert.equal(
     composerModelButtonLabel("Unavailable", null, "Unavailable", "Auto"),
-    "Auto",
+    "Auto (unresolved)",
   );
   assert.equal(
     composerModelButtonLabel("Unavailable", "Unavailable", "Unavailable", "Auto"),
-    "Auto",
+    "Auto (unresolved)",
   );
 });
 
@@ -63,7 +63,7 @@ test("auto model button label exposes the resolved runtime route when available"
     "Auto -> chat -> ollama/qwen3.5:4b",
   );
   assert.equal(autoModelResolutionLabel({ effective_model: "qwen3.5:4b" }, "Auto"), "Auto -> qwen3.5:4b");
-  assert.equal(autoModelResolutionLabel({}, "Auto"), "Auto");
+  assert.equal(autoModelResolutionLabel({}, "Auto"), "Auto (unresolved)");
 });
 
 test("latest assistant without provenance stays unavailable instead of reusing an older model", () => {

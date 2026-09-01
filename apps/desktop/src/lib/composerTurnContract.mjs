@@ -37,7 +37,7 @@ export function autoModelResolutionLabel(runtimeContext, autoLabel) {
   if (role && provider && model) return `${auto} -> ${role} -> ${provider}/${model}`;
   if (provider && model) return `${auto} -> ${provider}/${model}`;
   if (model) return `${auto} -> ${model}`;
-  return auto;
+  return `${auto} (unresolved)`;
 }
 
 export function composerModelButtonLabel(
