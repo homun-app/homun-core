@@ -162,6 +162,41 @@ class ProductionSmokeTests(unittest.TestCase):
             )
         )
 
+    def test_x7_allows_forbidden_terms_in_explicit_negative_statement(self):
+        scenario = next(item for item in smoke.build_scenarios(profile="extended") if item.id == "X7")
+
+        output = smoke.smoke_output(
+            [
+                {
+                    "kind": "plan_update",
+                    "payload": {
+                        "markdown": (
+                            "**Goal**: processo lungo\n\n"
+                            "- [x] **Definire perimetro** (`s1`): done\n"
+                            "- [x] **Definire regole** (`s2`): done\n"
+                            "- [x] **Definire cadenza** (`s3`): done\n"
+                            "- [x] **Definire flusso** (`s4`): done\n"
+                            "- [x] **Definire report** (`s5`): done\n"
+                            "- [x] **Checkpoint operativo** (`s6`): done"
+                        )
+                    },
+                },
+                {
+                    "kind": "done",
+                    "payload": {
+                        "text": (
+                            "Checkpoint operativo: definito il processo. "
+                            "Prossimo passo: avviare la prima run. "
+                            "Nessun browser, nessun file creato, nessun messaggio inviato. "
+                            "LONG_TASK_CHECKPOINT_OK"
+                        )
+                    },
+                },
+            ]
+        )
+
+        self.assertTrue(smoke.status_allows_success("completed", scenario, output))
+
     def test_browser_scenarios_require_semantic_success_not_just_completed_status(self):
         s6 = next(scenario for scenario in smoke.build_scenarios() if scenario.id == "S6")
         success = 'Fatto: Text input contiene "smoke" sulla pagina.'

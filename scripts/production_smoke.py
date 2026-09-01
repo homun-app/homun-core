@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -458,6 +459,28 @@ def smoke_output(events: Any) -> str:
 def marker_present(output: str, marker: str) -> bool:
     aliases = {marker, marker.lower(), MARKER_KIND_ALIASES.get(marker, "")}
     return any(alias and alias in output for alias in aliases)
+
+
+def forbidden_output_present(output: str, forbidden: str) -> bool:
+    """Return true when a forbidden phrase appears outside an explicit negation."""
+    if not forbidden:
+        return False
+    pattern = re.compile(re.escape(forbidden), re.IGNORECASE)
+    for match in pattern.finditer(output):
+        prefix = output[max(0, match.start() - 48) : match.start()].lower()
+        suffix = output[match.end() : match.end() + 32].lower()
+        if re.search(r"(?:^|[\s.,:;!?])nessun[oa]?\s+$", prefix):
+            continue
+        if re.search(r"(?:^|[\s.,:;!?])senza\s+(?:aver\s+)?$", prefix):
+            continue
+        if re.search(r"(?:^|[\s.,:;!?])non\s+(?:ho|abbiamo|e'|è|sono stati?|risulta)\s+$", prefix):
+            continue
+        if re.match(r"\s+(?:usato|creato|inviato|avviato|aperto)\b", suffix):
+            negated_prefix = re.search(r"(?:^|[\s.,:;!?])non\s+$", prefix)
+            if negated_prefix:
+                continue
+        return True
+    return False
 
 
 def ensure_vault_identity_record(base: str, token: str) -> dict[str, Any]:
@@ -966,7 +989,7 @@ def status_allows_success(status: str, scenario: Scenario, output: str) -> bool:
     output_lower = output.lower()
     if any(required.lower() not in output_lower for required in scenario.require_text):
         return False
-    if any(forbidden.lower() in output_lower for forbidden in scenario.forbid_output):
+    if any(forbidden_output_present(output, forbidden) for forbidden in scenario.forbid_output):
         return False
     if scenario.expect_marker:
         return marker_present(output, scenario.expect_marker) and normalized in MARKER_SUCCESS_STATUSES
@@ -1006,7 +1029,7 @@ def run_scenario(base: str, scenario: Scenario, token: str) -> bool:
             print(f"FAIL {scenario.id}: missing required text {required!r}", flush=True)
             ok = False
     for forbidden in scenario.forbid_output:
-        if forbidden.lower() in output.lower():
+        if forbidden_output_present(output, forbidden):
             print(f"FAIL {scenario.id}: forbidden output {forbidden!r}", flush=True)
             ok = False
     print(f"{'PASS' if ok else 'FAIL'} {scenario.id}: {elapsed:.1f}s", flush=True)
