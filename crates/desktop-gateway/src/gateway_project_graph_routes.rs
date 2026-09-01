@@ -417,6 +417,9 @@ fn integrity_preview_for_actions(
             IntegrityRepairAction::FailOrphanedWaitingApprovals => store
                 .count_orphaned_waiting_approval_tasks()
                 .map_err(|error| integrity_internal_error("integrity_preview_failed", error))?,
+            IntegrityRepairAction::FailCompletedBrowserBudgetExceeded => store
+                .count_completed_browser_budget_exceeded_tasks()
+                .map_err(|error| integrity_internal_error("integrity_preview_failed", error))?,
             _ => 0,
         };
         (
@@ -683,6 +686,9 @@ pub(crate) async fn integrity_repair_apply(
                 .map_err(|error| integrity_internal_error("integrity_repair_failed", error))?,
             IntegrityRepairAction::FailOrphanedWaitingApprovals => store
                 .fail_orphaned_waiting_approval_tasks()
+                .map_err(|error| integrity_internal_error("integrity_repair_failed", error))?,
+            IntegrityRepairAction::FailCompletedBrowserBudgetExceeded => store
+                .fail_completed_browser_budget_exceeded_tasks()
                 .map_err(|error| integrity_internal_error("integrity_repair_failed", error))?,
             _ => 0,
         };

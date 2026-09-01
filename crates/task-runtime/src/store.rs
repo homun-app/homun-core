@@ -5426,6 +5426,78 @@ impl TaskStore {
         Ok(changed)
     }
 
+    pub fn count_completed_browser_budget_exceeded_tasks(&self) -> TaskRuntimeResult<u64> {
+        Ok(self.connection.query_row(
+            "SELECT COUNT(*)
+             FROM (
+               SELECT t.task_id
+               FROM tasks t
+               JOIN turn_events e ON e.turn_id = t.task_id
+               WHERE t.status = 'completed'
+                 AND e.payload_json LIKE '%browser_budget_exceeded%'
+               GROUP BY t.task_id, t.user_id, t.workspace_id
+             )",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub fn fail_completed_browser_budget_exceeded_tasks(&self) -> TaskRuntimeResult<u64> {
+        let rows = {
+            let mut stmt = self.connection.prepare(
+                "SELECT t.task_id, t.user_id, t.workspace_id, t.task_json
+                 FROM tasks t
+                 JOIN turn_events e ON e.turn_id = t.task_id
+                 WHERE t.status = 'completed'
+                   AND e.payload_json LIKE '%browser_budget_exceeded%'
+                 GROUP BY t.task_id, t.user_id, t.workspace_id
+                 ORDER BY MAX(e.created_at) DESC
+                 LIMIT 100",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let now = OffsetDateTime::now_utc();
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let mut changed = 0_u64;
+        for (task_id, user_id, workspace_id, task_json) in rows {
+            let mut task: TaskRecord = serde_json::from_str(&task_json)?;
+            task.status = TaskStatus::Failed;
+            task.blocked_reason = Some("browser_budget_exceeded_repaired".to_string());
+            task.updated_at = now;
+            let affected = tx.execute(
+                "UPDATE tasks
+                 SET status = ?1, updated_at = ?2, blocked_reason = ?3, task_json = ?4
+                 WHERE task_id = ?5
+                   AND user_id = ?6
+                   AND workspace_id = ?7
+                   AND status = 'completed'",
+                params![
+                    TaskStatus::Failed.as_str(),
+                    now.unix_timestamp(),
+                    "browser_budget_exceeded_repaired",
+                    serde_json::to_string(&task)?,
+                    task_id,
+                    user_id,
+                    workspace_id,
+                ],
+            )?;
+            changed += affected as u64;
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+
     pub fn audit_runtime_integrity(&self) -> TaskRuntimeResult<RuntimeIntegrityReport> {
         let mut findings = Vec::new();
 
@@ -8247,6 +8319,70 @@ mod chat_turn_query_tests {
             !after
                 .finding_counts
                 .contains_key("waiting_approval_task_without_canonical_approval")
+        );
+    }
+
+    #[test]
+    fn runtime_integrity_repair_fails_completed_browser_budget_exceeded_tasks() {
+        let s = store();
+        let task = make_chat_turn(
+            "turn_completed_browser_budget",
+            "thread_completed_browser_budget",
+            TaskStatus::Completed,
+        );
+        s.insert_chat_turn(
+            &task,
+            "thread_completed_browser_budget",
+            "req-completed-browser-budget",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_completed_browser_budget",
+            TurnEventKind::Activity,
+            json!({"status": "browser_budget_exceeded:stall"}),
+        )
+        .unwrap();
+
+        let before = s.audit_runtime_integrity().unwrap();
+        assert_eq!(
+            before
+                .finding_counts
+                .get("completed_task_with_browser_budget_exceeded"),
+            Some(&1)
+        );
+        assert_eq!(
+            s.count_completed_browser_budget_exceeded_tasks().unwrap(),
+            1
+        );
+
+        let repaired = s.fail_completed_browser_budget_exceeded_tasks().unwrap();
+        assert_eq!(repaired, 1);
+        let repaired_task = s
+            .get_task(
+                &TaskId::new("turn_completed_browser_budget"),
+                &UserId::new("u"),
+                &WorkspaceId::new("w"),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(repaired_task.status, TaskStatus::Failed);
+        assert_eq!(
+            repaired_task.blocked_reason.as_deref(),
+            Some("browser_budget_exceeded_repaired")
+        );
+        assert_eq!(
+            s.count_completed_browser_budget_exceeded_tasks().unwrap(),
+            0
+        );
+        assert_eq!(s.fail_completed_browser_budget_exceeded_tasks().unwrap(), 0);
+
+        let after = s.audit_runtime_integrity().unwrap();
+        assert!(
+            !after
+                .finding_counts
+                .contains_key("completed_task_with_browser_budget_exceeded")
         );
     }
 
