@@ -56,23 +56,129 @@ class AuditInputs:
     vault_db: Path
     logs_dir: Path
     routing_decisions: Path
+    data_dir: Path | None = None
+    data_dir_source: str = "explicit_inputs"
+    runtime_db_source: str = "explicit_inputs"
+    memory_db_source: str = "explicit_inputs"
+    vault_db_source: str = "explicit_inputs"
+    logs_dir_source: str = "explicit_inputs"
+    routing_decisions_source: str = "explicit_inputs"
+
+
+def default_data_dir_with_source() -> tuple[Path, str]:
+    if value := os.environ.get("HOMUN_DATA_DIR"):
+        return Path(value), "HOMUN_DATA_DIR"
+    return Path(os.path.expanduser("~/.homun")), "default:~/.homun"
 
 
 def default_data_dir() -> Path:
-    if value := os.environ.get("HOMUN_DATA_DIR"):
-        return Path(value)
-    return Path(os.path.expanduser("~/.homun"))
+    root, _ = default_data_dir_with_source()
+    return root
 
 
 def default_inputs() -> AuditInputs:
-    root = default_data_dir()
+    root, root_source = default_data_dir_with_source()
+    runtime_env = os.environ.get("HOMUN_DESKTOP_GATEWAY_DB")
+    memory_env = os.environ.get("HOMUN_MEMORY_DB")
+    vault_env = os.environ.get("HOMUN_VAULT_DB")
     return AuditInputs(
-        runtime_db=Path(os.environ.get("HOMUN_DESKTOP_GATEWAY_DB", root / "homun.sqlite")),
-        memory_db=Path(os.environ.get("HOMUN_MEMORY_DB", root / "memory.sqlite")),
-        vault_db=Path(os.environ.get("HOMUN_VAULT_DB", root / "vault.sqlite")),
+        runtime_db=Path(runtime_env) if runtime_env else root / "homun.sqlite",
+        memory_db=Path(memory_env) if memory_env else root / "memory.sqlite",
+        vault_db=Path(vault_env) if vault_env else root / "vault.sqlite",
         logs_dir=root / "logs",
         routing_decisions=root / "routing-decisions.json",
+        data_dir=root,
+        data_dir_source=root_source,
+        runtime_db_source="HOMUN_DESKTOP_GATEWAY_DB" if runtime_env else f"{root_source}/homun.sqlite",
+        memory_db_source="HOMUN_MEMORY_DB" if memory_env else f"{root_source}/memory.sqlite",
+        vault_db_source="HOMUN_VAULT_DB" if vault_env else f"{root_source}/vault.sqlite",
+        logs_dir_source=f"{root_source}/logs",
+        routing_decisions_source=f"{root_source}/routing-decisions.json",
     )
+
+
+def inputs_from_args(args: argparse.Namespace) -> AuditInputs:
+    if args.data_dir is not None:
+        root = args.data_dir
+        root_source = "--data-dir"
+        prefer_data_dir_defaults = True
+    else:
+        root, root_source = default_data_dir_with_source()
+        prefer_data_dir_defaults = False
+
+    runtime_env = os.environ.get("HOMUN_DESKTOP_GATEWAY_DB")
+    memory_env = os.environ.get("HOMUN_MEMORY_DB")
+    vault_env = os.environ.get("HOMUN_VAULT_DB")
+
+    runtime_db = args.runtime_db or (
+        root / "homun.sqlite" if prefer_data_dir_defaults or not runtime_env else Path(runtime_env)
+    )
+    memory_db = args.memory_db or (
+        root / "memory.sqlite" if prefer_data_dir_defaults or not memory_env else Path(memory_env)
+    )
+    vault_db = args.vault_db or (
+        root / "vault.sqlite" if prefer_data_dir_defaults or not vault_env else Path(vault_env)
+    )
+    logs_dir = args.logs_dir or root / "logs"
+    routing_decisions = args.routing_decisions or root / "routing-decisions.json"
+
+    return AuditInputs(
+        runtime_db=runtime_db,
+        memory_db=memory_db,
+        vault_db=vault_db,
+        logs_dir=logs_dir,
+        routing_decisions=routing_decisions,
+        data_dir=root,
+        data_dir_source=root_source,
+        runtime_db_source=path_source(
+            flag=args.runtime_db,
+            flag_name="--runtime-db",
+            env=runtime_env,
+            env_name="HOMUN_DESKTOP_GATEWAY_DB",
+            root_source=root_source,
+            suffix="homun.sqlite",
+            prefer_data_dir_defaults=prefer_data_dir_defaults,
+        ),
+        memory_db_source=path_source(
+            flag=args.memory_db,
+            flag_name="--memory-db",
+            env=memory_env,
+            env_name="HOMUN_MEMORY_DB",
+            root_source=root_source,
+            suffix="memory.sqlite",
+            prefer_data_dir_defaults=prefer_data_dir_defaults,
+        ),
+        vault_db_source=path_source(
+            flag=args.vault_db,
+            flag_name="--vault-db",
+            env=vault_env,
+            env_name="HOMUN_VAULT_DB",
+            root_source=root_source,
+            suffix="vault.sqlite",
+            prefer_data_dir_defaults=prefer_data_dir_defaults,
+        ),
+        logs_dir_source="--logs-dir" if args.logs_dir else f"{root_source}/logs",
+        routing_decisions_source=(
+            "--routing-decisions" if args.routing_decisions else f"{root_source}/routing-decisions.json"
+        ),
+    )
+
+
+def path_source(
+    *,
+    flag: Path | None,
+    flag_name: str,
+    env: str | None,
+    env_name: str,
+    root_source: str,
+    suffix: str,
+    prefer_data_dir_defaults: bool,
+) -> str:
+    if flag is not None:
+        return flag_name
+    if env and not prefer_data_dir_defaults:
+        return env_name
+    return f"{root_source}/{suffix}"
 
 
 def connect_read_only(db_path: Path) -> sqlite3.Connection:
@@ -1002,23 +1108,36 @@ def audit_homun_state(
         "findings": capped_findings,
         "warnings": warnings,
         "paths": {
+            "data_dir": os.fspath(paths.data_dir) if paths.data_dir is not None else None,
             "runtime_db": os.fspath(paths.runtime_db),
             "memory_db": os.fspath(paths.memory_db),
             "vault_db": os.fspath(paths.vault_db),
             "logs_dir": os.fspath(paths.logs_dir),
             "routing_decisions": os.fspath(paths.routing_decisions),
+            "sources": {
+                "data_dir": paths.data_dir_source,
+                "runtime_db": paths.runtime_db_source,
+                "memory_db": paths.memory_db_source,
+                "vault_db": paths.vault_db_source,
+                "logs_dir": paths.logs_dir_source,
+                "routing_decisions": paths.routing_decisions_source,
+            },
         },
     }
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    defaults = default_inputs()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runtime-db", type=Path, default=defaults.runtime_db)
-    parser.add_argument("--memory-db", type=Path, default=defaults.memory_db)
-    parser.add_argument("--vault-db", type=Path, default=defaults.vault_db)
-    parser.add_argument("--logs-dir", type=Path, default=defaults.logs_dir)
-    parser.add_argument("--routing-decisions", type=Path, default=defaults.routing_decisions)
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        help="Audit a complete Homun profile directory; individual path flags still override this",
+    )
+    parser.add_argument("--runtime-db", type=Path)
+    parser.add_argument("--memory-db", type=Path)
+    parser.add_argument("--vault-db", type=Path)
+    parser.add_argument("--logs-dir", type=Path)
+    parser.add_argument("--routing-decisions", type=Path)
     parser.add_argument(
         "--max-findings-per-code",
         type=int,
@@ -1031,13 +1150,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     report = audit_homun_state(
-        AuditInputs(
-            runtime_db=args.runtime_db,
-            memory_db=args.memory_db,
-            vault_db=args.vault_db,
-            logs_dir=args.logs_dir,
-            routing_decisions=args.routing_decisions,
-        ),
+        inputs_from_args(args),
         max_findings_per_code=args.max_findings_per_code,
     )
     print(json.dumps(report, indent=2, sort_keys=True))

@@ -184,6 +184,10 @@ come `Auto (unresolved)` invece di sembrare una route gia' funzionante.
 Il percorso normale di generazione chat ora fa backfill di `model/provider`
 sulla `agent_runs` canonica appena la route effettiva e' risolta; i gap storici
 restano diagnosticabili, ma le nuove run non dovrebbero piu' nascere mute.
+Lo script diagnostico supporta ora anche `--data-dir` per auditare un profilo
+Homun completo e include `paths.data_dir`/`paths.sources` nel JSON, cosi' un
+report distingue default `~/.homun`, env e override CLI invece di confondere
+profili diversi.
 
 La timeline non include testo utente/assistant o payload raw; riporta solo fasi,
 status, id tecnici, modello effettivo e piccoli campi diagnostici consentiti
@@ -193,6 +197,8 @@ status, id tecnici, modello effettivo e piccoli campi diagnostici consentiti
 Evidenza locale:
 
 - `python3 -m unittest scripts.test_audit_homun_state -v`
+- `python3 scripts/audit_homun_state.py --data-dir "$tmp" --max-findings-per-code 0`
+  -> `paths.sources.data_dir=--data-dir`
 - `cargo test -p local-first-task-runtime runtime_integrity_audit_exposes_observability_gaps_without_task_content -- --nocapture`
 - `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway integrity_audit_reports_runtime_lifecycle_findings_without_content -- --nocapture`
 - `cd apps/desktop && node --test src/lib/runtimeContext.test.mjs`

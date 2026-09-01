@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import scripts.audit_homun_state as audit
 import scripts.repair_homun_logs as log_repair
@@ -164,6 +166,43 @@ class AuditHomunStateTests(unittest.TestCase):
 
     def finding_codes(self, report: dict) -> set[str]:
         return {finding["code"] for finding in report["findings"]}
+
+    def test_report_identifies_explicit_input_paths(self):
+        paths = self.with_paths()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertEqual(report["paths"]["data_dir"], None)
+        self.assertEqual(report["paths"]["sources"]["runtime_db"], "explicit_inputs")
+        self.assertEqual(report["paths"]["sources"]["memory_db"], "explicit_inputs")
+        self.assertEqual(report["paths"]["sources"]["vault_db"], "explicit_inputs")
+        self.assertEqual(report["paths"]["sources"]["logs_dir"], "explicit_inputs")
+        self.assertEqual(report["paths"]["sources"]["routing_decisions"], "explicit_inputs")
+
+    def test_data_dir_arg_resolves_profile_paths_ahead_of_environment_overrides(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            env = {
+                "HOMUN_DATA_DIR": os.fspath(root / "env-profile"),
+                "HOMUN_DESKTOP_GATEWAY_DB": os.fspath(root / "env.sqlite"),
+                "HOMUN_MEMORY_DB": os.fspath(root / "env-memory.sqlite"),
+                "HOMUN_VAULT_DB": os.fspath(root / "env-vault.sqlite"),
+            }
+
+            with patch.dict(os.environ, env, clear=True):
+                args = audit.parse_args(["--data-dir", os.fspath(root / "cli-profile")])
+                paths = audit.inputs_from_args(args)
+
+        self.assertEqual(paths.data_dir, root / "cli-profile")
+        self.assertEqual(paths.data_dir_source, "--data-dir")
+        self.assertEqual(paths.runtime_db, root / "cli-profile" / "homun.sqlite")
+        self.assertEqual(paths.memory_db, root / "cli-profile" / "memory.sqlite")
+        self.assertEqual(paths.vault_db, root / "cli-profile" / "vault.sqlite")
+        self.assertEqual(paths.logs_dir, root / "cli-profile" / "logs")
+        self.assertEqual(paths.routing_decisions, root / "cli-profile" / "routing-decisions.json")
+        self.assertEqual(paths.runtime_db_source, "--data-dir/homun.sqlite")
+        self.assertEqual(paths.memory_db_source, "--data-dir/memory.sqlite")
+        self.assertEqual(paths.vault_db_source, "--data-dir/vault.sqlite")
 
     def test_terminal_task_with_running_agent_run_is_reported(self):
         paths = self.with_paths()
