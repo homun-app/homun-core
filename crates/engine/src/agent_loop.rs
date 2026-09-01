@@ -50,6 +50,8 @@ const MAX_PLAN_NUDGES: u32 = 8;
 const MAX_CHOICES_CARD_NUDGES: u32 = 1;
 /// One repair nudge when the model asks for free-text fields without a CLARIFY card.
 const MAX_CLARIFY_CARD_NUDGES: u32 = 1;
+/// One repair nudge when the model mentions Payment Approval Card without the hold card.
+const MAX_PAYMENT_CARD_NUDGES: u32 = 1;
 /// One repair round when a resumed turn tries to reopen the wait that its wake just resolved.
 const MAX_RESOLVED_HITL_NUDGES: u32 = 1;
 
@@ -681,6 +683,7 @@ where
     let mut effect_resolution_receipt = None;
     let mut choices_card_nudges: u32 = 0;
     let mut clarify_card_nudges: u32 = 0;
+    let mut payment_card_nudges: u32 = 0;
     let mut resolved_hitl_nudges: u32 = 0;
     let mut grounded_browse_result: Option<crate::BrowseResult> = None;
     // Plan-before-act gate: when a complex turn starts with a work tool and no
@@ -1980,6 +1983,29 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
                 }));
                 continue;
             }
+            NoToolsClassification::NudgeEmit(HitlKind::Payment)
+                if payment_card_nudges < MAX_PAYMENT_CARD_NUDGES =>
+            {
+                payment_card_nudges += 1;
+                turn_trace.record(crate::turn_trace::TurnEvent::Nudge {
+                    reason: "prose_payment_wait_needs_payment_approval_card".into(),
+                    next_step: String::new(),
+                });
+                if !content.trim().is_empty() {
+                    ls.messages
+                        .push(serde_json::json!({ "role": "assistant", "content": content }));
+                }
+                ls.messages.push(serde_json::json!({
+                    "role": "user",
+                    "content": "You mentioned a Payment Approval Card in prose, but no valid \
+PAYMENT_APPROVAL card was emitted. Emit the Payment Approval Card NOW on its own line, using \
+actual checkout facts you already gathered. Use this exact shape:\n\
+‹‹PAYMENT_APPROVAL››{\"snapshot\":{\"approval_id\":\"pay_<uuid>\",\"merchant\":\"merchant name\",\"domain\":\"checkout domain\",\"amount_minor\":12196,\"currency\":\"USD\",\"product_summary\":\"visible products\",\"payment_method_label\":\"No payment method entered\",\"checkout_fingerprint\":\"stable checkout fingerprint\"}}‹‹/PAYMENT_APPROVAL››\n\
+Do not press Pay/Submit, do not invent missing checkout facts, and do not claim the card was \
+presented unless you emit this marker.",
+                }));
+                continue;
+            }
             NoToolsClassification::NudgeEmit(_) | NoToolsClassification::NotHitl => {
                 // Fall through to plan / deliver paths.
             }
@@ -2174,6 +2200,11 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
                 let plan_goal = plan_value_goal(&ls.plan);
                 plan_progress
                     .persist_plan(thread_id, plan_goal.as_deref(), &reconciled)
+                    .await;
+                event_sink
+                    .emit(GenerateStreamEvent::PlanUpdate {
+                        markdown: build_plan_markdown(plan_goal.as_deref(), &reconciled),
+                    })
                     .await;
                 turn_trace.record(crate::turn_trace::TurnEvent::Reconcile {
                     fired: true,
@@ -2510,6 +2541,14 @@ Reuse the same question/fields you already listed. No tools, no new search, no p
                             let plan_goal = plan_value_goal(&ls.plan);
                             plan_progress
                                 .persist_plan(thread_id, plan_goal.as_deref(), &reconciled)
+                                .await;
+                            event_sink
+                                .emit(GenerateStreamEvent::PlanUpdate {
+                                    markdown: build_plan_markdown(
+                                        plan_goal.as_deref(),
+                                        &reconciled,
+                                    ),
+                                })
                                 .await;
                             replace_latest_plan_marker(
                                 &delivered,
@@ -8207,6 +8246,150 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         }
     }
 
+    struct ReconciledDeliveryAnswerModel;
+
+    impl ModelClient for ReconciledDeliveryAnswerModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let content = "Il campo Text input contiene smoke sulla pagina Selenium.";
+            on_delta(content);
+            Ok(ModelRoundOutput {
+                message: json!({ "role": "assistant", "content": content }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct DeliveryReconcilePlan(Mutex<Vec<Vec<Value>>>);
+
+    impl PlanProgress for DeliveryReconcilePlan {
+        async fn persist_plan(
+            &self,
+            _thread_id: Option<&str>,
+            _goal: Option<&str>,
+            steps: &[Value],
+        ) {
+            self.0.lock().unwrap().push(steps.to_vec());
+        }
+
+        async fn record_step_outcome(
+            &self,
+            _thread_id: Option<&str>,
+            _step: &Value,
+            _evidence: &[String],
+        ) {
+        }
+
+        async fn verify_step_complete(
+            &self,
+            _title: &str,
+            _criterion: &str,
+            _evidence: &str,
+        ) -> (bool, String) {
+            (false, String::new())
+        }
+
+        fn reconcile_on_delivery(&self, _plan: &Value, _delivered: &str) -> Option<Vec<Value>> {
+            Some(vec![
+                json!({"id":"execute_work","title":"Execute the requested work","status":"done","detail":"typed smoke"}),
+                json!({"id":"verify_and_answer","title":"Verify and answer","status":"done","detail":"reported smoke"}),
+            ])
+        }
+
+        fn plan_value_from_steps(&self, goal: Option<&str>, steps: &[Value]) -> Value {
+            json!({"goal": goal, "steps": steps})
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn delivery_reconcile_emits_final_plan_update_event() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "fill the form" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        ls.plan = json!({
+            "goal": "fill the form",
+            "steps": [
+                {"id":"execute_work","title":"Execute the requested work","status":"done","detail":"typed smoke"},
+                {"id":"verify_and_answer","title":"Verify and answer","status":"doing","detail":"pending"},
+            ]
+        });
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let plan = DeliveryReconcilePlan::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 2;
+        turn_cfg.reconcile_on_delivery = true;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &ReconciledDeliveryAnswerModel,
+            &NoTools,
+            &mut browser,
+            &plan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "fill the form".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(outcome.stop, crate::TurnStop::Completed);
+        let events = sink.0.lock().unwrap();
+        let final_plan = events
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                GenerateStreamEvent::PlanUpdate { markdown } => Some(markdown),
+                _ => None,
+            })
+            .expect("delivery reconcile must emit a final PlanUpdate event");
+        assert!(
+            final_plan.contains("- [x] **Verify and answer** (`verify_and_answer`)"),
+            "final PlanUpdate must expose the reconciled completed plan, got: {final_plan}"
+        );
+        assert!(
+            events
+                .iter()
+                .rposition(|event| matches!(event, GenerateStreamEvent::PlanUpdate { .. }))
+                < events
+                    .iter()
+                    .rposition(|event| matches!(event, GenerateStreamEvent::Done { .. })),
+            "the final plan update must be visible before Done closes the turn"
+        );
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn substantial_blocked_answer_never_marks_an_unverified_step_done() {
         let mut ls = LoopState::new();
@@ -8470,6 +8653,106 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         assert!(
             !events.iter().any(|e| e.contains("ForcedSynthesis")),
             "no forced synthesis after CLARIFY: {events:?}"
+        );
+    }
+
+    /// Payment wait prose → one nudge to emit PAYMENT_APPROVAL, then stop on the hold card.
+    #[derive(Default)]
+    struct ProseThenPaymentApprovalModel {
+        calls: AtomicUsize,
+    }
+
+    impl ModelClient for ProseThenPaymentApprovalModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let content = if index == 0 {
+                "Payment Approval Card già presentata: attendo la tua decisione."
+            } else {
+                concat!(
+                    "Fermato prima del pagamento.\n",
+                    r#"‹‹PAYMENT_APPROVAL››{"snapshot":{"approval_id":"pay_smoke_1","merchant":"Stripe Elements Demo","domain":"checkout.stripe.dev","amount_minor":12196,"currency":"USD","product_summary":"Pure Glow Cream + The Pure Set","payment_method_label":"No payment method entered","checkout_fingerprint":"stripe-elements-demo-12196-usd"}}‹‹/PAYMENT_APPROVAL››"#,
+                )
+            };
+            on_delta(content);
+            Ok(ModelRoundOutput {
+                message: json!({ "role": "assistant", "content": content }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn prose_payment_wait_nudges_once_then_awaits_payment_card() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "ask for payment approval" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = ProseThenPaymentApprovalModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 6;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "ask for payment approval".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(
+            model.calls.load(Ordering::SeqCst),
+            2,
+            "exactly one payment-card nudge then stop"
+        );
+        assert_eq!(outcome.stop, crate::TurnStop::SuspendedApproval);
+        assert_eq!(outcome.awaiting_user.unwrap().kind, HitlKind::Payment);
+        assert!(
+            outcome.memory_answer.contains("‹‹PAYMENT_APPROVAL››"),
+            "final answer must include PAYMENT_APPROVAL: {}",
+            outcome.memory_answer
+        );
+        let events = journal.0.lock().unwrap().clone();
+        assert!(
+            !events.iter().any(|e| e.contains("ForcedSynthesis")),
+            "no forced synthesis after PAYMENT_APPROVAL: {events:?}"
         );
     }
 

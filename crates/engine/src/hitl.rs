@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::markers::{
     ACTIONABLE_CARD_MARKER_TAGS, bodies, close, extract_numbered_option_labels, open,
     prose_asks_clarify_without_card, prose_asks_closed_choice_without_card,
-    validated_actionable_marker_blocks,
+    prose_mentions_payment_approval_without_card, validated_actionable_marker_blocks,
 };
 
 /// Canonical wire marker. Legacy tags normalize into the same envelope.
@@ -224,6 +224,9 @@ pub fn classify_no_tools_stop(content: &str) -> NoToolsClassification {
     }
     if prose_asks_clarify_without_card(content) {
         return NoToolsClassification::NudgeEmit(HitlKind::Clarify);
+    }
+    if prose_mentions_payment_approval_without_card(content) {
+        return NoToolsClassification::NudgeEmit(HitlKind::Payment);
     }
     NoToolsClassification::NotHitl
 }
@@ -503,6 +506,15 @@ quale preferisci?"#;
         assert_eq!(
             classify_no_tools_stop(prose),
             NoToolsClassification::NudgeEmit(HitlKind::Choice)
+        );
+    }
+
+    #[test]
+    fn prose_payment_approval_claim_is_nudge_payment() {
+        let prose = "Payment Approval Card già presentata: attendo la tua decisione.";
+        assert_eq!(
+            classify_no_tools_stop(prose),
+            NoToolsClassification::NudgeEmit(HitlKind::Payment)
         );
     }
 

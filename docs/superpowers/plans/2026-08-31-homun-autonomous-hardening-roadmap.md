@@ -33,6 +33,14 @@
 - The next autonomous tranche should start with extended scenarios X1/X2/X4/X6, then inspect long-running lifecycle/budget behavior before returning to public release readiness.
 - Do not treat addon architecture as closed in this plan; keep it as a separate product-design session.
 
+## Current Checkpoint - 2026-09-01 Morning
+
+- S6 Browser form fill passed on the packaged gateway after the engine began emitting a final structured `PlanUpdate` when delivery reconciliation closes the last open plan step.
+- S7 Dead URL plan settles passed on the same packaged gateway; the URL-failure path did not hang or surface browser-unavailable fallbacks.
+- S8 briefly regressed by completing with checkout facts while only claiming "Payment Approval Card already presented"; the engine now treats prose-only Payment Approval Card claims as a repair nudge and admits `PAYMENT_APPROVAL` as an actionable hold card.
+- Latest packaged smoke evidence: S5 passed in 282.5s, S6 in 59.3s, S7 in 81.3s, S8 in 75.2s, and S9 in 163.4s. Functional green, but discovery latency remains a product-readiness risk.
+- Next tranche: run X1/X2/X4/X6 on the packaged gateway, then inspect long-running lifecycle/action-budget invariants with canonical `agent_runs`, `runtime_plans`, `turn_events`, and integrity audit output.
+
 ---
 
 ### Task 1: Reproduce And Diagnose S6 Browser Form Fill

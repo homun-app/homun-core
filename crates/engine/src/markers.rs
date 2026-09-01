@@ -116,7 +116,7 @@ const DISPLAY_MARKER_TAGS: [&str; 21] = [
 ///
 /// Free kinds (`CHOICES` / `CLARIFY` / `AWAIT_USER`) and Hold kinds (confirm/…) all
 /// admit through this list; [`crate::hitl::HitlEnvelope`] is the typed protocol.
-pub const ACTIONABLE_CARD_MARKER_TAGS: [&str; 8] = [
+pub const ACTIONABLE_CARD_MARKER_TAGS: [&str; 9] = [
     "COMPOSIO_CONFIRM",
     "MCP_CONFIRM",
     "FS_AUTHORIZE",
@@ -124,6 +124,7 @@ pub const ACTIONABLE_CARD_MARKER_TAGS: [&str; 8] = [
     "CONNECT_SUGGEST",
     "CHOICES",
     "CLARIFY",
+    "PAYMENT_APPROVAL",
     "AWAIT_USER",
 ];
 
@@ -243,6 +244,20 @@ pub fn prose_asks_clarify_without_card(text: &str) -> bool {
     prose_collects_user_fields(text)
 }
 
+/// Payment approval is a hold-card protocol, never plain prose. If the model says a Payment
+/// Approval Card is needed or has been presented without a valid envelope, the loop must nudge it
+/// to emit `PAYMENT_APPROVAL` instead of delivering a misleading text-only wait.
+pub fn prose_mentions_payment_approval_without_card(text: &str) -> bool {
+    if text_awaits_user(text) {
+        return false;
+    }
+    let lower = text.to_lowercase();
+    lower.contains("payment approval card")
+        || lower.contains("payment approval")
+        || lower.contains("card di approvazione")
+        || lower.contains("carta di approvazione")
+}
+
 /// True when the answer handed (or is about to hand) control to the user: actionable
 /// card, prose closed-choice, or prose field request. Used to suppress plan nudges —
 /// not as an AwaitingUser ingress (that requires a validated marker).
@@ -250,6 +265,7 @@ pub fn text_requests_user_reply(text: &str) -> bool {
     text_awaits_user(text)
         || prose_asks_closed_choice_without_card(text)
         || prose_collects_user_fields(text)
+        || prose_mentions_payment_approval_without_card(text)
 }
 
 fn prose_collects_user_fields(text: &str) -> bool {
