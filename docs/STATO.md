@@ -181,6 +181,9 @@ Settings -> Runtime mostra ora un riquadro "Core diagnostics" alimentato dallo
 stesso endpoint, con contatore e codici dei gap senza esporre ref di run/turn.
 Nel composer, lo stato modello `Auto` senza risoluzione osservata viene mostrato
 come `Auto (unresolved)` invece di sembrare una route gia' funzionante.
+Il percorso normale di generazione chat ora fa backfill di `model/provider`
+sulla `agent_runs` canonica appena la route effettiva e' risolta; i gap storici
+restano diagnosticabili, ma le nuove run non dovrebbero piu' nascere mute.
 
 La timeline non include testo utente/assistant o payload raw; riporta solo fasi,
 status, id tecnici, modello effettivo e piccoli campi diagnostici consentiti
@@ -195,6 +198,9 @@ Evidenza locale:
 - `cd apps/desktop && node --test src/lib/runtimeContext.test.mjs`
 - `cd apps/desktop && node --test src/lib/composerTurnContract.test.mjs src/lib/runtimeContext.test.mjs`
 - `cd apps/desktop && npm run build`
+- `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway agent_run_api_tests -- --nocapture`
+- `python3 scripts/check_gateway_main_contract.py`
+- `cargo fmt --all -- --check`
 - `python3 -m py_compile scripts/audit_homun_state.py scripts/test_audit_homun_state.py`
 - `python3 scripts/audit_homun_state.py --max-findings-per-code 0` sul profilo
   reale -> `ok=true`, `errors=0`, `warnings=218`,

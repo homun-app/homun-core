@@ -992,6 +992,37 @@ mod agent_run_api_tests {
         assert_eq!(runs[0].provider.as_deref(), Some("local_preflight"));
     }
 
+    #[test]
+    fn normal_agent_turn_backfills_model_and_provider_attribution() {
+        let state = AppState::for_tests();
+        seed_run(
+            &state,
+            "run-normal-attribution",
+            "turn-normal-attribution",
+            gateway_user_id().as_str(),
+        );
+
+        backfill_normal_agent_run_attribution(
+            &state,
+            Some("run-normal-attribution"),
+            "http://127.0.0.1:11434/v1",
+            "qwen3.5:4b",
+        );
+
+        let runs = state
+            .task_store
+            .lock()
+            .unwrap()
+            .list_agent_runs_for_turn(
+                "turn-normal-attribution",
+                gateway_user_id().as_str(),
+                gateway_workspace_id().as_str(),
+            )
+            .unwrap();
+        assert_eq!(runs[0].model.as_deref(), Some("qwen3.5:4b"));
+        assert_eq!(runs[0].provider.as_deref(), Some("local"));
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn agent_run_api_is_ordered_cursor_based_and_scope_checked() {
         let state = AppState::for_tests();
@@ -1936,6 +1967,12 @@ async fn stream_chat_via_openai(
     let http = chat_streaming_http_client(&state.http);
     let state_owned = state.clone();
     let temperature = request.temperature;
+    backfill_normal_agent_run_attribution(
+        state,
+        request.agent_run_id.as_deref(),
+        &base_url,
+        &model,
+    );
     let execution_identity =
         resolve_agent_turn_execution_identity(&request.request_id, request.agent_run_id.as_deref());
     // Thread this chat belongs to: lets browser work reuse a persistent
@@ -2143,6 +2180,50 @@ fn backfill_early_response_agent_run_attribution(
             "could not backfill early-response agent run attribution"
         );
     }
+}
+
+fn backfill_normal_agent_run_attribution(
+    state: &AppState,
+    agent_run_id: Option<&str>,
+    base_url: &str,
+    effective_model: &str,
+) {
+    let Some(run_id) = agent_run_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    let provider = diagnostic_provider_label(base_url);
+    if effective_model.trim().is_empty() || provider.is_none() {
+        return;
+    }
+    if let Ok(store) = state.task_store.lock()
+        && let Err(error) = store.backfill_agent_run_attribution(
+            run_id,
+            Some(effective_model),
+            provider.as_deref(),
+            None,
+        )
+    {
+        tracing::warn!(
+            target: "agent::journal",
+            %run_id,
+            %error,
+            "could not backfill normal agent run attribution"
+        );
+    }
+}
+
+fn diagnostic_provider_label(base_url: &str) -> Option<String> {
+    let trimmed = base_url.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.contains("127.0.0.1") || trimmed.contains("localhost") {
+        return Some("local".to_string());
+    }
+    Some("remote".to_string())
 }
 
 // ADR 0024 inc 5 (5.D1a): the agent turn's round loop + forced synthesis + post-turn
