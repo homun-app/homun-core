@@ -149,7 +149,14 @@ browser, memoria, skill, MCP e automation combinati.
 python3 scripts/production_smoke.py --list
 python3 scripts/production_smoke.py --profile baseline --gateway-base http://127.0.0.1:18765
 python3 scripts/production_smoke.py --profile extended --gateway-base http://127.0.0.1:18765
+python3 scripts/clean_runtime_smoke.py --profile baseline --scenario S1 --seed-config-from ~/.homun --copy-secrets --keep
 ```
+
+**Evidenza 2026-09-02:** aggiunto `scripts/clean_runtime_smoke.py`, wrapper per
+gateway con `HOMUN_DATA_DIR` isolato e audit finale sullo stesso profilo. Smoke
+verificati localmente: `--skip-smoke` -> audit zero; `S1` con config+secret
+seeded -> `PASS S1: 10.7s`; `X5` automation API e `X6` MCP stdio API -> pass
+con audit zero.
 
 ### 5. Task Lunghi E Budget Azioni
 

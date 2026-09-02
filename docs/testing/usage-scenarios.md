@@ -17,6 +17,19 @@ python3 scripts/production_smoke.py --profile baseline --gateway-base http://127
 python3 scripts/production_smoke.py --profile extended --gateway-base http://127.0.0.1:18765
 ```
 
+Per separare regressioni correnti da debito storico del profilo reale, usare il
+wrapper profilo pulito:
+
+```bash
+python3 scripts/clean_runtime_smoke.py --skip-smoke
+python3 scripts/clean_runtime_smoke.py --profile baseline --scenario S1 --seed-config-from ~/.homun --copy-secrets --keep
+python3 scripts/clean_runtime_smoke.py --profile all --scenario X5 --scenario X6 --seed-config-from ~/.homun --copy-secrets --keep
+```
+
+Il wrapper non cancella chat o DB reali: avvia un gateway su `HOMUN_DATA_DIR`
+isolato, copia solo configurazione selezionata quando richiesto, lancia gli
+scenari e poi esegue `audit_homun_state.py --data-dir` sullo stesso profilo.
+
 ## Baseline
 
 | ID | Scenario | Domini | Successo minimo |

@@ -20,6 +20,7 @@ class PreReleaseGateTests(unittest.TestCase):
         self.assertIn("kernel projection smoke", labels)
         self.assertIn("scripts.test_e2e_browser_diagnostic", by_label["eval unit tests"].command)
         self.assertIn("scripts.test_audit_homun_state", by_label["eval unit tests"].command)
+        self.assertIn("scripts.test_clean_runtime_smoke", by_label["eval unit tests"].command)
         self.assertIn("engine tests", labels)
         self.assertIn("desktop unit tests", labels)
         self.assertIn("stability soak unit tests", labels)

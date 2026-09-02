@@ -89,6 +89,33 @@ devono girare su profilo isolato quando possibile, raccogliendo prima e dopo:
 - output di `audit_homun_state.py`;
 - thread id, turn id, run id, terminal status e assistant text redatto.
 
+Wrapper profilo pulito:
+
+```bash
+python3 scripts/clean_runtime_smoke.py --skip-smoke
+python3 scripts/clean_runtime_smoke.py \
+  --profile baseline \
+  --scenario S1 \
+  --seed-config-from ~/.homun \
+  --copy-secrets \
+  --keep
+python3 scripts/clean_runtime_smoke.py \
+  --profile all \
+  --scenario X5 \
+  --scenario X6 \
+  --seed-config-from ~/.homun \
+  --copy-secrets \
+  --keep
+```
+
+`clean_runtime_smoke.py` avvia un gateway dedicato con `HOMUN_DATA_DIR`
+temporaneo o esplicito, porta libera, token dedicato, smoke e audit finale sullo
+stesso profilo. Non copia DB runtime/memoria/vault dal profilo reale. Con
+`--seed-config-from` copia solo configurazione selezionata; i secret cifrati sono
+copiati solo con `--copy-secrets`, insieme a `secret-key`, per mantenere coerente
+lo store cifrato. Ogni run scrive evidenza JSON sotto
+`clean-smoke-evidence/`.
+
 Baseline stabile:
 
 ```bash

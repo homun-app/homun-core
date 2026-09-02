@@ -257,6 +257,30 @@ Evidenza locale:
   `warnings=218`, `observability.timelines=20`,
   `observability.diagnostic_gaps=100`
 
+## Clean Runtime Smoke - 2026-09-02
+
+Slice locale su `main`: aggiunto `scripts/clean_runtime_smoke.py` per eseguire
+smoke live e audit su un profilo Homun isolato invece di cancellare il DB reale.
+Il wrapper avvia un gateway dedicato con `HOMUN_DATA_DIR` temporaneo o passato
+da CLI, token dedicato e porta libera; poi lancia `production_smoke.py` e
+`audit_homun_state.py --data-dir` sullo stesso profilo. `--seed-config-from`
+copia solo file di configurazione non-DB; `--copy-secrets` e' esplicito e copia
+anche `secret-key`, necessario per leggere `secrets.json` cifrato.
+
+Evidenza locale:
+
+- `python3 -m unittest scripts.test_clean_runtime_smoke -v`
+- `python3 scripts/clean_runtime_smoke.py --skip-smoke --keep` -> audit zero su
+  profilo vergine; solo warning informativo se manca `routing-decisions.json`
+- `python3 scripts/clean_runtime_smoke.py --profile baseline --scenario S1 --seed-config-from ~/.homun --copy-secrets --keep`
+  -> `PASS S1: 10.7s`, audit zero
+- `python3 scripts/clean_runtime_smoke.py --profile all --scenario X5 --scenario X6 --seed-config-from ~/.homun --copy-secrets --keep`
+  -> `PASS X5`, `PASS X6`, audit zero
+
+Decisione operativa: non cancellare `~/.homun/homun.sqlite` per ottenere test
+puliti. Usare profili isolati per regressioni correnti e mantenere il profilo
+reale come canary/migration debt, applicando solo repair canonici con backup.
+
 ## Packaged Production Smoke - 2026-09-01
 
 Slice locale su `main`: il package smoke e' stato ricostruito e rieseguito sul
