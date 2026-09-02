@@ -9,6 +9,7 @@ dependencies = [
     "mlx-vlm>=0.1",
     "pillow>=12.3.0",
     "pydantic>=2",
+    "transformers>=5.10.0",
     "uvicorn[standard]>=0.30",
 ]
 

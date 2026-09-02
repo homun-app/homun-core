@@ -396,6 +396,9 @@ Stato profilo reale dopo la classificazione del piano finale:
 
 Blocchi residui prima di dichiarare una release production-grade:
 
+- verificare chiusura GitHub dell'alert Dependabot #120 dopo push: sorgente
+  aggiornato a `transformers=5.16.1` in `uv.lock` con vincolo root
+  `transformers>=5.10.0`;
 - attendere CI verde sull'ultimo commit di `main` prima di taggare una nuova
   release;
 - se si taglia una build pubblica, verificare artefatti, checksum,

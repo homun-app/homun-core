@@ -20,6 +20,13 @@ Un blocco e' chiuso solo quando:
 
 ## Stato Corrente
 
+Sicurezza dependency:
+
+- Alert Dependabot #120 (`transformers < 5.10.0`, GHSA-xrqw-3rrv-vx5w) chiuso
+  lato sorgente aggiornando il lock a `transformers=5.16.1` e aggiungendo il
+  vincolo root `transformers>=5.10.0`; resta da verificare la chiusura
+  dell'alert dopo push e scansione GitHub.
+
 Ultimo audit reale verificato:
 
 ```bash
