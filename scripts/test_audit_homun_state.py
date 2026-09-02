@@ -81,6 +81,19 @@ def create_runtime_schema(conn: sqlite3.Connection) -> None:
             payload_json text not null,
             created_at integer not null
         );
+        create table runtime_plans (
+            user_id text not null,
+            workspace_id text not null,
+            thread_id text not null,
+            status text not null,
+            plan_json text not null,
+            revision integer not null,
+            stall_turns integer not null,
+            last_resume_done integer,
+            created_at integer not null,
+            updated_at integer not null,
+            objective_revision integer not null default 0
+        );
         create table task_approvals (
             approval_id text primary key,
             task_id text not null,
@@ -159,6 +172,22 @@ def create_vault_schema(conn: sqlite3.Connection) -> None:
             updated_at text not null
         );
         """
+    )
+
+
+def insert_open_runtime_plan(conn: sqlite3.Connection, thread_id: str = "thread-1") -> None:
+    conn.execute(
+        """
+        insert into runtime_plans (
+            user_id, workspace_id, thread_id, status, plan_json, revision,
+            stall_turns, last_resume_done, created_at, updated_at, objective_revision
+        ) values (
+            'user-1', 'workspace-1', ?, 'open',
+            '{"goal":"fixture","steps":[{"id":"verify","title":"Verify and answer","status":"doing"}]}',
+            1, 0, null, 10, 40, 1
+        )
+        """,
+        (thread_id,),
     )
 
 
@@ -424,6 +453,7 @@ class AuditHomunStateTests(unittest.TestCase):
             values ('turn-plan-open', 2, 'done', '{}', 40)
             """
         )
+        insert_open_runtime_plan(conn)
         conn.commit()
 
         report = audit.audit_homun_state(paths)
@@ -460,6 +490,7 @@ class AuditHomunStateTests(unittest.TestCase):
                 40)
             """
         )
+        insert_open_runtime_plan(conn)
         conn.commit()
 
         report = audit.audit_homun_state(paths)
@@ -507,6 +538,7 @@ class AuditHomunStateTests(unittest.TestCase):
                 40)
             """
         )
+        insert_open_runtime_plan(conn)
         conn.commit()
 
         report = audit.audit_homun_state(paths)
@@ -516,6 +548,57 @@ class AuditHomunStateTests(unittest.TestCase):
         self.assertEqual(
             by_code["completed_turn_with_unreconciled_delivered_plan"]["severity"],
             "warning",
+        )
+
+    def test_completed_turn_with_delivered_answer_and_settled_runtime_plan_is_not_reported(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-plan-settled', 'user-1', 'workspace-1', 'chat_turn',
+                'completed', 10, 40, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into turn_events (turn_id, seq, kind, payload_json, created_at)
+            values ('turn-plan-settled', 1, 'plan_update',
+                '{"markdown":"- [x] **Gather** (`gather`): done\\n- [-] **Verify** (`verify`): pending"}',
+                20)
+            """
+        )
+        conn.execute(
+            """
+            insert into turn_events (turn_id, seq, kind, payload_json, created_at)
+            values ('turn-plan-settled', 2, 'done',
+                '{"assistant_message_id":"assistant-1","text":"Final answer"}',
+                40)
+            """
+        )
+        conn.execute(
+            """
+            insert into runtime_plans (
+                user_id, workspace_id, thread_id, status, plan_json, revision,
+                stall_turns, last_resume_done, created_at, updated_at, objective_revision
+            ) values (
+                'user-1', 'workspace-1', 'thread-1', 'settled',
+                '{"goal":"fixture","steps":[{"id":"verify","title":"Verify and answer","status":"done"}]}',
+                1, 0, null, 10, 40, 1
+            )
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertNotIn(
+            "completed_turn_with_unreconciled_delivered_plan",
+            self.finding_codes(report),
         )
 
     def test_active_task_with_terminal_turn_event_is_reported(self):

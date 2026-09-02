@@ -310,12 +310,17 @@ Evidenza locale aggiunta:
 Stato profilo reale dopo la classificazione del piano finale:
 
 - `scripts/audit_homun_state.py --max-findings-per-code 3 --max-timeline-events 20`
-  -> `ok=true`, `errors=0`, `warnings=185`
+  -> `ok=true`, `errors=0`, `warnings=151`
 - I vecchi `completed_turn_with_incomplete_plan` con risposta consegnata sono
   ora classificati come
-  `completed_turn_with_unreconciled_delivered_plan=62`, warning owner
-  `runtime_plan_projection`: sono debito UX/osservabilita' del piano, non turni
-  bloccati senza risposta.
+  `completed_turn_with_unreconciled_delivered_plan=28` solo quando anche
+  l'ultimo `runtime_plans` del thread e' ancora `open` con step aperti. I marker
+  storici su thread senza piano runtime corrente o gia' `settled` non sono piu'
+  conteggiati come bug corrente.
+- La delivery reconciliation ora copre due casi moderni osservati negli smoke
+  reali: risposta breve ma verificata con source (es. form Selenium compilato) e
+  failure terminale browser/DNS, che blocca l'ultimo step invece di lasciarlo
+  `doing`.
 - I vecchi `agent_run_missing_model_attribution` con `prompt_snapshot` che
   contiene gia' `model` e `provider` non sono piu' contati come gap
   diagnostici: Auto/Unavailable e' spiegabile dagli eventi canonici anche se la
@@ -327,7 +332,7 @@ Stato profilo reale dopo la classificazione del piano finale:
   `turn_events` ma senza owner osservabile per la run.
 - Warning: `agent_run_missing_model_attribution=23`,
   `legacy_memory_without_evidence=100`,
-  `completed_turn_with_unreconciled_delivered_plan=62`.
+  `completed_turn_with_unreconciled_delivered_plan=28`.
 
 Blocchi residui prima di dichiarare una release production-grade:
 

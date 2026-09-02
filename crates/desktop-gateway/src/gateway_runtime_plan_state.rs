@@ -59,9 +59,6 @@ fn plan_steps_reconciled_on_delivery(
     text: &str,
 ) -> Option<Vec<serde_json::Value>> {
     let delivered_chars = text.trim().chars().count();
-    if delivered_chars < MIN_DELIVERED_CHARS_TO_CONCLUDE {
-        return None;
-    }
     let mut steps = execution_plan_steps(plan);
     if steps.is_empty() || steps.iter().any(|step| plan_step_status(step) == "blocked") {
         return None;
@@ -78,10 +75,17 @@ fn plan_steps_reconciled_on_delivery(
     if *open_index + 1 != steps.len() {
         return None;
     }
+    if delivered_answer_reports_terminal_failure(text, delivered_chars) {
+        steps[*open_index]["status"] = serde_json::json!("blocked");
+        steps[*open_index]["detail"] = serde_json::json!("failed in final answer");
+        return Some(steps);
+    }
     if !plan_step_is_delivery_report(&steps[*open_index]) {
         return None;
     }
-    if !delivered_answer_has_result_evidence(text) {
+    if !delivered_answer_has_result_evidence(text)
+        && !delivered_answer_has_verified_short_result(text, delivered_chars)
+    {
         return None;
     }
     steps[*open_index]["status"] = serde_json::json!("done");
@@ -119,9 +123,67 @@ fn plan_step_is_delivery_report(step: &serde_json::Value) -> bool {
 
 fn delivered_answer_has_result_evidence(text: &str) -> bool {
     let source_count = text.matches("http://").count() + text.matches("https://").count();
-    source_count > 0
+    text.trim().chars().count() >= MIN_DELIVERED_CHARS_TO_CONCLUDE
+        && source_count > 0
         && (delivered_answer_has_markdown_table(text)
             || delivered_answer_has_numbered_result_list(text))
+}
+
+fn delivered_answer_has_verified_short_result(text: &str, delivered_chars: usize) -> bool {
+    if delivered_chars < 240 {
+        return false;
+    }
+    let lower = text.to_ascii_lowercase();
+    let has_source = lower.contains("http://") || lower.contains("https://");
+    let claims_verified = [
+        "completed and verified",
+        "completato e verificato",
+        "gia' stato completato e verificato",
+        "già stato completato e verificato",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    let denies_pending_plan = [
+        "non ho passi",
+        "nessun passo",
+        "no pending",
+        "nothing pending",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    has_source && claims_verified && denies_pending_plan
+}
+
+fn delivered_answer_reports_terminal_failure(text: &str, delivered_chars: usize) -> bool {
+    if delivered_chars < 240 {
+        return false;
+    }
+    let lower = text.to_ascii_lowercase();
+    let has_terminal_error = [
+        "err_name_not_resolved",
+        "dns non",
+        "dominio non",
+        "browser non",
+        "non e' raggiungibile",
+        "non è raggiungibile",
+        "non disponibile",
+        "non posso completare",
+        "non ho potuto completare",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    let denies_result = [
+        "non posso",
+        "non ho potuto",
+        "nessun titolo",
+        "titolo non disponibile",
+        "nessun dato verificabile",
+        "non c'e' alcun contenuto",
+        "non c'è alcun contenuto",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    has_terminal_error && denies_result
 }
 
 fn delivered_answer_has_markdown_table(text: &str) -> bool {

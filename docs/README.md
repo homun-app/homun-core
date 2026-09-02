@@ -12,6 +12,7 @@
 | [`CAPISALDI.md`](CAPISALDI.md) | Principi vincolanti (non la mappa del codice) |
 | [`architecture/`](architecture/) | Mappa as-built dei sottosistemi (riscritta dal codice) |
 | [`architecture/action-budget-contract.md`](architecture/action-budget-contract.md) | Contratto unico per budget azioni, loop, tool/plugin e UI |
+| [`production-readiness-roadmap.md`](production-readiness-roadmap.md) | Checklist unica production-grade: blocchi aperti, owner, done e verifiche |
 | [`decisions/`](decisions/) | ADR immutabili — il “perché” storico, non lo stato corrente |
 | [`testing/anti-regression-protocol.md`](testing/anti-regression-protocol.md) | Gate minimo per non far rientrare regressioni chat/runtime/UI |
 | [`testing/kernel-contract-matrix.md`](testing/kernel-contract-matrix.md) | Matrix owner/test/smoke dei contratti kernel vivi |

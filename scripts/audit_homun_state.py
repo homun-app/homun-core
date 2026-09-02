@@ -240,6 +240,40 @@ def events_have_delivered_answer_after_plan(events: Iterable[dict[str, Any]]) ->
     return has_terminal_assistant_id and has_visible_text
 
 
+def runtime_plan_json_has_open_step(raw: str) -> bool:
+    payload = json_object(raw)
+    steps = payload.get("steps")
+    if not isinstance(steps, list):
+        return False
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        status = str(step.get("status") or "").strip().lower()
+        if status in {"todo", "doing", "in_progress", "in-progress"}:
+            return True
+    return False
+
+
+def thread_has_open_runtime_plan(conn: sqlite3.Connection, thread_id: str) -> bool:
+    if not thread_id or not table_exists(conn, "runtime_plans"):
+        return False
+    row = conn.execute(
+        """
+        select status, plan_json
+        from runtime_plans
+        where thread_id = ?
+        order by updated_at desc
+        limit 1
+        """,
+        (thread_id,),
+    ).fetchone()
+    if row is None:
+        return False
+    return str(row["status"] or "").strip().lower() == "open" and runtime_plan_json_has_open_step(
+        str(row["plan_json"] or "")
+    )
+
+
 def finding(
     findings: list[dict[str, Any]],
     *,
@@ -441,11 +475,11 @@ def audit_runtime(paths: AuditInputs, findings: list[dict[str, Any]], warnings: 
                     summary="completed task contains a browser budget exhaustion event",
                     ref=row["task_id"],
                 )
-            latest_plan_by_turn: dict[str, tuple[int, str]] = {}
+            latest_plan_by_turn: dict[str, tuple[str, int, str]] = {}
             for row in row_dicts(
                 conn,
                 """
-                select t.task_id, e.seq, e.payload_json
+                select t.task_id, t.thread_id, e.seq, e.payload_json
                 from tasks t
                 join turn_events e on e.turn_id = t.task_id
                 where t.kind = 'chat_turn'
@@ -457,9 +491,15 @@ def audit_runtime(paths: AuditInputs, findings: list[dict[str, Any]], warnings: 
             ):
                 payload = json_object(row["payload_json"])
                 markdown = str(payload.get("markdown") or "")
-                latest_plan_by_turn[row["task_id"]] = (int(row["seq"]), markdown)
-            for task_id, (_seq, markdown) in latest_plan_by_turn.items():
+                latest_plan_by_turn[row["task_id"]] = (
+                    str(row["thread_id"] or ""),
+                    int(row["seq"]),
+                    markdown,
+                )
+            for task_id, (thread_id, _seq, markdown) in latest_plan_by_turn.items():
                 if not plan_markdown_is_incomplete(markdown):
+                    continue
+                if not thread_has_open_runtime_plan(conn, thread_id):
                     continue
                 delivered_answer = events_have_delivered_answer_after_plan(
                     row_dicts(

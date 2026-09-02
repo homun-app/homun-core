@@ -9562,6 +9562,53 @@ Sources\n- https://news.google.com/topics/technology\n\n{}",
 }
 
 #[test]
+fn reconcile_final_plan_marker_closes_verified_short_browser_answer_with_source() {
+    let plan = super::runtime_execution_plan(&[
+        serde_json::json!({"id":"validate_request","title":"Validate request constraints","status":"done","detail":"ok"}),
+        serde_json::json!({"id":"execute_work","title":"Execute the requested work","status":"done","detail":"ok"}),
+        serde_json::json!({"id":"verify_and_answer","title":"Verify and answer","status":"doing","detail":"pending"}),
+    ]);
+    let answer_body = "Non c'e' alcun piano in corso ne' file creati da riutilizzare: \
+l'unico obiettivo era aprire la pagina e compilare il campo **Text input** con `smoke`, \
+ed e' gia' stato completato e verificato (valore confermato sul campo: `smoke`).\n\n\
+Non ho passi \"Verify and answer\" pendenti da eseguire.\n\n\
+**Sources**\n- https://www.selenium.dev/selenium/web/web-form.html";
+    let answer = format!(
+        "‹‹PLAN››{}‹‹/PLAN››\n{}",
+        super::build_plan_markdown(None, &super::execution_plan_steps(&plan)),
+        answer_body
+    );
+
+    let updated = super::reconcile_final_plan_marker_on_delivery(&plan, &answer);
+
+    assert!(updated.contains("- [x] **Verify and answer** (`verify_and_answer`)"));
+    assert!(!updated.contains("- [-] **Verify and answer** (`verify_and_answer`)"));
+}
+
+#[test]
+fn reconcile_final_plan_marker_blocks_failed_browser_delivery_step() {
+    let plan = super::runtime_execution_plan(&[
+        serde_json::json!({"id":"s1","title":"Attivare il browser","status":"done","detail":"ok"}),
+        serde_json::json!({"id":"s2","title":"Aprire l'URL e leggere il titolo","status":"doing","detail":"pending"}),
+    ]);
+    let answer_body = "Non posso dirti il titolo della pagina, perche' la pagina non esiste.\n\n\
+Ho provato ad aprire `https://nonexistent-homun-validation-zzzz.invalid/dead-page` con il browser reale, \
+ma il caricamento e' fallito con l'errore **ERR_NAME_NOT_RESOLVED**: il dominio non e' risolvibile dal DNS, \
+quindi non c'e' alcun contenuto ne' titolo da leggere.";
+    let answer = format!(
+        "‹‹PLAN››{}‹‹/PLAN››\n{}",
+        super::build_plan_markdown(None, &super::execution_plan_steps(&plan)),
+        answer_body
+    );
+
+    let updated = super::reconcile_final_plan_marker_on_delivery(&plan, &answer);
+
+    assert!(updated.contains("- [!] **Aprire l'URL e leggere il titolo** (`s2`)"));
+    assert!(!updated.contains("- [-] **Aprire l'URL e leggere il titolo** (`s2`)"));
+    assert!(!updated.contains("- [x] **Aprire l'URL e leggere il titolo** (`s2`)"));
+}
+
+#[test]
 fn reconcile_final_plan_marker_does_not_launder_blocked_steps() {
     let plan = super::runtime_execution_plan(&[
         serde_json::json!({"id":"s1","title":"Preparare la ricerca","status":"done","detail":"ok"}),
