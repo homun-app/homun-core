@@ -140,12 +140,16 @@ fn delivered_answer_has_verified_short_result(text: &str, delivered_chars: usize
         "completato e verificato",
         "gia' stato completato e verificato",
         "già stato completato e verificato",
+        "completa e verificata",
+        "gia' completa e verificata",
+        "già completa e verificata",
     ]
     .iter()
     .any(|needle| lower.contains(needle));
     let denies_pending_plan = [
         "non ho passi",
         "nessun passo",
+        "non ci sono altri passi",
         "no pending",
         "nothing pending",
     ]

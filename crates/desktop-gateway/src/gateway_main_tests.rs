@@ -9586,6 +9586,29 @@ Non ho passi \"Verify and answer\" pendenti da eseguire.\n\n\
 }
 
 #[test]
+fn reconcile_final_plan_marker_closes_real_s6_verified_browser_answer() {
+    let plan = super::runtime_execution_plan(&[
+        serde_json::json!({"id":"validate_request","title":"Validate request constraints","status":"done","detail":"ok"}),
+        serde_json::json!({"id":"execute_work","title":"Execute the requested work","status":"done","detail":"ok"}),
+        serde_json::json!({"id":"verify_and_answer","title":"Verify and answer","status":"doing","detail":"pending"}),
+    ]);
+    let answer_body = "L'attivita' e' gia' completa e verificata: il campo **\"Text input\"** \
+e' stato compilato con `smoke` e il valore e' stato confermato nella pagina \
+(textbox attivo con contenuto `smoke`). Non ci sono altri passi in sospeso.\n\n\
+**Sources**\n- https://www.selenium.dev/selenium/web/web-form.html";
+    let answer = format!(
+        "‹‹PLAN››{}‹‹/PLAN››\n{}",
+        super::build_plan_markdown(None, &super::execution_plan_steps(&plan)),
+        answer_body
+    );
+
+    let updated = super::reconcile_final_plan_marker_on_delivery(&plan, &answer);
+
+    assert!(updated.contains("- [x] **Verify and answer** (`verify_and_answer`)"));
+    assert!(!updated.contains("- [-] **Verify and answer** (`verify_and_answer`)"));
+}
+
+#[test]
 fn reconcile_final_plan_marker_blocks_failed_browser_delivery_step() {
     let plan = super::runtime_execution_plan(&[
         serde_json::json!({"id":"s1","title":"Attivare il browser","status":"done","detail":"ok"}),

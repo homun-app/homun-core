@@ -740,6 +740,15 @@ fn resolve_model_value_for_context(
     }
     match validate_decision(decision, registry, active) {
         Ok(mut validated) => {
+            if let Some(message) = latest_message {
+                let inferred = fallback_memory_intent_from_latest_message(message);
+                if inferred.search_personal || inferred.vault_value_requested {
+                    validated.decision.memory_intent.search_personal |= inferred.search_personal;
+                    validated.decision.memory_intent.vault_value_requested |=
+                        inferred.vault_value_requested;
+                    validated.decision.memory_intent.standalone_choice_request = false;
+                }
+            }
             validated.provenance.provider = provider.map(str::to_string);
             validated.provenance.model = model.map(str::to_string);
             validated
@@ -1113,6 +1122,26 @@ mod tests {
             validated.provenance.fallback_reason.as_deref(),
             Some("missing_capability")
         );
+        assert!(validated.decision.memory_intent.search_personal);
+        assert!(validated.decision.memory_intent.vault_value_requested);
+    }
+
+    #[test]
+    fn valid_model_decision_keeps_explicit_vault_value_request_from_latest_message() {
+        let mut decision = read_only_decision();
+        decision.memory_intent.search_personal = false;
+        decision.memory_intent.vault_value_requested = false;
+
+        let validated = resolve_model_value_with_latest_message(
+            Ok(serde_json::to_value(decision).unwrap()),
+            &registry(),
+            None,
+            Some("provider"),
+            Some("model"),
+            "Qual e' il valore del codice fiscale smoke QA salvato nel Vault?",
+        );
+
+        assert_eq!(validated.provenance.fallback_reason, None);
         assert!(validated.decision.memory_intent.search_personal);
         assert!(validated.decision.memory_intent.vault_value_requested);
     }

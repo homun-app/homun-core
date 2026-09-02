@@ -210,8 +210,9 @@ Evidenza locale:
 - `python3 scripts/audit_homun_state.py --data-dir "$tmp" --max-findings-per-code 0`
   -> `paths.sources.data_dir=--data-dir`
 - `python3 scripts/audit_homun_state.py --max-findings-per-code 0` sul profilo
-  reale -> `legacy_memory_without_evidence=100`, nessun
-  `memory_without_evidence`
+  reale -> evidenza precedente `legacy_memory_without_evidence=100`; dopo la
+  classificazione delle proiezioni tecniche runtime il profilo reale corrente è
+  `ok=true`, `errors=0`, `warnings=59`
 - Packaged smoke su gateway `http://127.0.0.1:18766`:
   `X5` automation scoped lifecycle -> `PASS X5: 0.0s`,
   `X6` MCP stdio scoped lifecycle -> `PASS X6: 0.8s`,
@@ -270,12 +271,36 @@ anche `secret-key`, necessario per leggere `secrets.json` cifrato.
 Evidenza locale:
 
 - `python3 -m unittest scripts.test_clean_runtime_smoke -v`
+- `python3 -m unittest scripts.test_audit_homun_state.AuditHomunStateTests.test_runtime_plan_open_loop_projection_does_not_count_as_memory_without_evidence scripts.test_audit_homun_state.AuditHomunStateTests.test_runtime_plan_step_projection_with_metadata_evidence_is_not_memory_without_evidence scripts.test_audit_homun_state.AuditHomunStateTests.test_runtime_plan_final_delivery_step_projection_without_metadata_evidence_is_not_memory_without_evidence scripts.test_audit_homun_state.AuditHomunStateTests.test_thread_episode_summary_does_not_count_as_memory_without_evidence scripts.test_audit_homun_state.AuditHomunStateTests.test_report_caps_repeated_legacy_memory_findings_and_keeps_summary_counts scripts.test_audit_homun_state.AuditHomunStateTests.test_modern_memory_without_evidence_remains_current_pipeline_warning -v`
+- `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway "semantic_decision::tests::" -- --nocapture`
+- `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway reconcile_final_plan_marker -- --nocapture`
 - `python3 scripts/clean_runtime_smoke.py --skip-smoke --keep` -> audit zero su
   profilo vergine; solo warning informativo se manca `routing-decisions.json`
 - `python3 scripts/clean_runtime_smoke.py --profile baseline --scenario S1 --seed-config-from ~/.homun --copy-secrets --keep`
   -> `PASS S1: 10.7s`, audit zero
+- `python3 scripts/clean_runtime_smoke.py --profile baseline --scenario S2 --scenario S3 --scenario S4 --seed-config-from ~/.homun --copy-secrets --model-headers-timeout-secs 30 --model-first-token-timeout-secs 60 --model-idle-timeout-secs 60`
+  -> `PASS S2`, `PASS S3`, `PASS S4`, audit zero
+- `python3 scripts/clean_runtime_smoke.py --profile baseline --scenario S6 --seed-config-from ~/.homun --copy-secrets --model-headers-timeout-secs 30 --model-first-token-timeout-secs 60 --model-idle-timeout-secs 60`
+  -> `PASS S6: 41.9s`, audit zero
+- `python3 scripts/clean_runtime_smoke.py --profile all --scenario X4 --seed-config-from ~/.homun --copy-secrets --model-headers-timeout-secs 30 --model-first-token-timeout-secs 60 --model-idle-timeout-secs 60`
+  -> `PASS X4: 35.1s`, audit zero
 - `python3 scripts/clean_runtime_smoke.py --profile all --scenario X5 --scenario X6 --seed-config-from ~/.homun --copy-secrets --keep`
   -> `PASS X5`, `PASS X6`, audit zero
+- `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway orchestrated_subagent_gathers_on_gemma4 -- --ignored --nocapture`
+  -> `status: Done`, output con `summary`
+
+Bug trovati e chiusi durante gli scenari puliti:
+
+- `S3` poteva completare senza `VAULT_REVEAL` quando il modello riscriveva la
+  query `recall_memory` perdendo la parola "valore"; il validator ora fonde
+  sempre l'intento Vault esplicito derivabile dal messaggio utente anche quando
+  la decisione semantica del modello e' valida.
+- `S6` poteva lasciare `verify_and_answer` in `doing` dopo una risposta browser
+  breve ma verificata; il reconciler finale riconosce anche formule come
+  "completa e verificata" e "non ci sono altri passi".
+- L'audit `memory_provenance` non conta piu' come memorie utente senza evidence
+  le proiezioni tecniche `runtime_plan`/`runtime_plan_step` e gli `episode`
+  scoped al thread.
 
 Decisione operativa: non cancellare `~/.homun/homun.sqlite` per ottenere test
 puliti. Usare profili isolati per regressioni correnti e mantenere il profilo
@@ -334,7 +359,7 @@ Evidenza locale aggiunta:
 Stato profilo reale dopo la classificazione del piano finale:
 
 - `scripts/audit_homun_state.py --max-findings-per-code 3 --max-timeline-events 20`
-  -> `ok=true`, `errors=0`, `warnings=151`
+  -> `ok=true`, `errors=0`, `warnings=59`
 - I vecchi `completed_turn_with_incomplete_plan` con risposta consegnata sono
   ora classificati come
   `completed_turn_with_unreconciled_delivered_plan=28` solo quando anche
@@ -366,7 +391,7 @@ Stato profilo reale dopo la classificazione del piano finale:
   luglio precedenti alla strumentazione `agent_runs`, con evidenza runtime in
   `turn_events` ma senza owner osservabile per la run.
 - Warning: `agent_run_missing_model_attribution=23`,
-  `legacy_memory_without_evidence=100`,
+  `legacy_memory_without_evidence=8`,
   `completed_turn_with_unreconciled_delivered_plan=28`.
 
 Blocchi residui prima di dichiarare una release production-grade:

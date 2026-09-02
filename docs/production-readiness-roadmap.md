@@ -30,7 +30,7 @@ Esito:
 
 - `ok=true`
 - `errors=0`
-- `warnings=151`
+- `warnings=59`
 
 Warning residui:
 
@@ -38,7 +38,7 @@ Warning residui:
 | --- | --- | ---: | --- | --- | --- |
 | P0 | `completed_turn_with_unreconciled_delivered_plan` | 28 | `runtime_plan_projection` | parziale | turni terminali con risposta consegnata non lasciano piano UI incoerente; i 28 residui correnti vengono chiusi da repair controllata o nuovo turno, non da mutazioni manuali |
 | P1 | `agent_run_missing_model_attribution` | 23 | `model_routing` | storico da classificare | Auto/Unavailable sempre spiegabile da `agent_runs` o `agent_run_events.prompt_snapshot`; residui separati come legacy non riparabile |
-| P1 | `legacy_memory_without_evidence` | 100 | `memory_provenance` | storico da migrare/classificare | memoria live moderna ha evidence; memoria legacy e' migrata con evidenza, archiviata o esclusa con regola esplicita |
+| P1 | `legacy_memory_without_evidence` | 8 | `memory_provenance` | storico da migrare/classificare | memoria live moderna ha evidence; memoria legacy e' migrata con evidenza, archiviata o esclusa con regola esplicita |
 
 ## Roadmap
 
@@ -69,7 +69,8 @@ incompleto un lavoro gia' concluso.
 5. rieseguire audit reale e gate mirati.
 
 **Stato 2026-09-02:** il reconciler futuro chiude risposte brevi verificate con
-source e blocca failure terminali browser/DNS; l'audit ora guarda anche
+source, incluse risposte browser/form tipo `S6`, e blocca failure terminali
+browser/DNS; l'audit ora guarda anche
 `runtime_plans` corrente e non solo marker storici del transcript. L'API
 integrity repair espone inoltre
 `settle_completed_delivered_open_runtime_plans`, che chiude in modo controllato
@@ -116,7 +117,7 @@ python3 scripts/audit_homun_state.py --max-findings-per-code 0
 
 ### 3. Memoria E Provenance Legacy
 
-**Problema:** 100 memorie legacy non hanno evidence link. Non vanno mutate solo
+**Problema:** 8 memorie legacy non hanno evidence link. Non vanno mutate solo
 per abbassare il conteggio: e' un tema privacy/provenance.
 
 **Owner canonico:** `local-first-memory`, `MemoryFacade`,
@@ -155,8 +156,13 @@ python3 scripts/clean_runtime_smoke.py --profile baseline --scenario S1 --seed-c
 **Evidenza 2026-09-02:** aggiunto `scripts/clean_runtime_smoke.py`, wrapper per
 gateway con `HOMUN_DATA_DIR` isolato e audit finale sullo stesso profilo. Smoke
 verificati localmente: `--skip-smoke` -> audit zero; `S1` con config+secret
-seeded -> `PASS S1: 10.7s`; `X5` automation API e `X6` MCP stdio API -> pass
-con audit zero.
+seeded -> `PASS S1: 10.7s`; `S2/S3/S4` memoria/privacy/Vault -> pass con audit
+zero; `S6` browser form-fill -> `PASS S6: 41.9s`, audit zero; `X4` code
+workspace routing -> `PASS X4: 35.1s`, audit zero; `X5` automation API e `X6`
+MCP stdio API -> pass con audit zero; `SUB1` subagent probe -> `status: Done`.
+Durante gli scenari sono stati chiusi due bug correnti: intent Vault esplicito
+perso quando il modello riscriveva la query `recall_memory`, e piano finale non
+riconciliato su risposte browser brevi ma verificate.
 
 ### 5. Task Lunghi E Budget Azioni
 

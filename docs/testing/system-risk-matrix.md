@@ -116,6 +116,19 @@ copiati solo con `--copy-secrets`, insieme a `secret-key`, per mantenere coerent
 lo store cifrato. Ogni run scrive evidenza JSON sotto
 `clean-smoke-evidence/`.
 
+Evidenza pulita 2026-09-02:
+
+```bash
+python3 scripts/clean_runtime_smoke.py --profile baseline --scenario S2 --scenario S3 --scenario S4 --seed-config-from ~/.homun --copy-secrets --model-headers-timeout-secs 30 --model-first-token-timeout-secs 60 --model-idle-timeout-secs 60
+python3 scripts/clean_runtime_smoke.py --profile baseline --scenario S6 --seed-config-from ~/.homun --copy-secrets --model-headers-timeout-secs 30 --model-first-token-timeout-secs 60 --model-idle-timeout-secs 60
+python3 scripts/clean_runtime_smoke.py --profile all --scenario X4 --seed-config-from ~/.homun --copy-secrets --model-headers-timeout-secs 30 --model-first-token-timeout-secs 60 --model-idle-timeout-secs 60
+cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway orchestrated_subagent_gathers_on_gemma4 -- --ignored --nocapture
+```
+
+Queste run hanno coperto memoria/privacy/Vault, browser form-fill, routing
+codice read-only e subagent, con audit finale zero sui profili isolati per gli
+smoke HTTP.
+
 Baseline stabile:
 
 ```bash

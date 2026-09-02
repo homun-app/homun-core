@@ -67,15 +67,18 @@ scenari e poi esegue `audit_homun_state.py --data-dir` sullo stesso profilo.
 5. Gli scenari con privacy/vault/payment devono creare precondizioni reali
    tramite gateway o fixture raggiungibile dal browser; un prompt che chiede al
    modello di simulare lo stato non e' uno scenario live valido.
-6. `S8` deve navigare una pagina `https://` pubblica o passata con
+6. `S3` deve restare valido anche se il modello riscrive la query
+   `recall_memory`: l'intento di reveal deriva dal messaggio utente originale e
+   deve arrivare al fallback Vault.
+7. `S8` deve navigare una pagina `https://` pubblica o passata con
    `HOMUN_SMOKE_CHECKOUT_URL`; `data:`, `file://` e loopback locale non sono
    validi perche' possono produrre falsi positivi o blocchi di rete privata.
-7. Le fixture persistenti create dal runner, come il record Vault smoke di `S3`,
+8. Le fixture persistenti create dal runner, come il record Vault smoke di `S3`,
    devono essere rimosse dal runner stesso; record preesistenti non vanno
    cancellati.
-8. Gli scenari codice devono creare un workspace/cartella reale: senza workspace
+9. Gli scenari codice devono creare un workspace/cartella reale: senza workspace
    il turno `Auto` resta orchestrator e non prova il routing/capability coding.
-9. `SUB1` e' un probe live separato dal runner HTTP finche' non esiste un
+10. `SUB1` e' un probe live separato dal runner HTTP finche' non esiste un
    trigger broker stabile per `subagent.*`. Comando verificato:
 
 ```bash

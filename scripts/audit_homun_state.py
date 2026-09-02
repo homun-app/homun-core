@@ -723,7 +723,7 @@ def audit_memory(paths: AuditInputs, findings: list[dict[str, Any]], warnings: l
             for row in row_dicts(
                 conn,
                 """
-                select m.ref, m.metadata_json
+                select m.ref, m.memory_type, m.metadata_json
                 from memories m
                 left join memory_evidence e on e.memory_ref = m.ref
                 where m.status not in ('Deleted', 'Rejected', 'Stale', 'deleted', 'rejected', 'stale')
@@ -732,6 +732,13 @@ def audit_memory(paths: AuditInputs, findings: list[dict[str, Any]], warnings: l
                 """,
             ):
                 metadata = json_object(row.get("metadata_json"))
+                if metadata.get("source") in {"runtime_plan", "runtime_plan_step"}:
+                    continue
+                if (
+                    (row.get("memory_type") or "") == "episode"
+                    and metadata.get("scope") == "thread"
+                ):
+                    continue
                 admission = metadata.get("admission") if isinstance(metadata.get("admission"), dict) else None
                 is_legacy = admission is None
                 finding(

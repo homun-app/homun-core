@@ -904,6 +904,122 @@ class AuditHomunStateTests(unittest.TestCase):
             3,
         )
 
+    def test_runtime_plan_open_loop_projection_does_not_count_as_memory_without_evidence(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.memory_db)
+        self.addCleanup(conn.close)
+        create_memory_schema(conn)
+        conn.execute(
+            """
+            insert into memories (
+                ref, user_id, workspace_id, memory_type, text, aliases_json,
+                language_hints_json, confidence, status, privacy_domain,
+                sensitivity, metadata_json, created_at, updated_at,
+                last_seen_at, supersedes_json, superseded_by, correction_of
+            ) values (
+                'mem-runtime-plan', 'user-1', 'workspace-1', 'open_loop',
+                'Runtime plan state: 1/2 steps done. Next step: Answer.',
+                '[]', '[]', 1.0, 'confirmed', 'work', 'internal',
+                '{"source":"runtime_plan","thread_id":"thread-1","status":"open"}',
+                '1', '1', null, '[]', null, null
+            )
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertNotIn("legacy_memory_without_evidence", self.finding_codes(report))
+        self.assertNotIn("memory_without_evidence", self.finding_codes(report))
+        self.assertEqual(report["summary"]["total"], 0)
+
+    def test_runtime_plan_step_projection_with_metadata_evidence_is_not_memory_without_evidence(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.memory_db)
+        self.addCleanup(conn.close)
+        create_memory_schema(conn)
+        conn.execute(
+            """
+            insert into memories (
+                ref, user_id, workspace_id, memory_type, text, aliases_json,
+                language_hints_json, confidence, status, privacy_domain,
+                sensitivity, metadata_json, created_at, updated_at,
+                last_seen_at, supersedes_json, superseded_by, correction_of
+            ) values (
+                'mem-runtime-plan-step', 'user-1', 'workspace-1', 'fact',
+                'Runtime plan step completed: Fetch records.',
+                '[]', '[]', 1.0, 'confirmed', 'work', 'internal',
+                '{"source":"runtime_plan_step","thread_id":"thread-1","step_id":"s1","evidence":["tool result redacted"]}',
+                '1', '1', null, '[]', null, null
+            )
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertNotIn("legacy_memory_without_evidence", self.finding_codes(report))
+        self.assertNotIn("memory_without_evidence", self.finding_codes(report))
+        self.assertEqual(report["summary"]["total"], 0)
+
+    def test_runtime_plan_final_delivery_step_projection_without_metadata_evidence_is_not_memory_without_evidence(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.memory_db)
+        self.addCleanup(conn.close)
+        create_memory_schema(conn)
+        conn.execute(
+            """
+            insert into memories (
+                ref, user_id, workspace_id, memory_type, text, aliases_json,
+                language_hints_json, confidence, status, privacy_domain,
+                sensitivity, metadata_json, created_at, updated_at,
+                last_seen_at, supersedes_json, superseded_by, correction_of
+            ) values (
+                'mem-runtime-plan-final-step', 'user-1', 'workspace-1', 'fact',
+                'Runtime plan step completed: Verify and answer.',
+                '[]', '[]', 1.0, 'confirmed', 'work', 'internal',
+                '{"source":"runtime_plan_step","thread_id":"thread-1","step_id":"verify_and_answer","evidence":[]}',
+                '1', '1', null, '[]', null, null
+            )
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertNotIn("legacy_memory_without_evidence", self.finding_codes(report))
+        self.assertNotIn("memory_without_evidence", self.finding_codes(report))
+        self.assertEqual(report["summary"]["total"], 0)
+
+    def test_thread_episode_summary_does_not_count_as_memory_without_evidence(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.memory_db)
+        self.addCleanup(conn.close)
+        create_memory_schema(conn)
+        conn.execute(
+            """
+            insert into memories (
+                ref, user_id, workspace_id, memory_type, text, aliases_json,
+                language_hints_json, confidence, status, privacy_domain,
+                sensitivity, metadata_json, created_at, updated_at,
+                last_seen_at, supersedes_json, superseded_by, correction_of
+            ) values (
+                'mem-thread-episode', 'user-1', '__threads__', 'episode',
+                'The user asked a smoke question and the assistant answered.',
+                '[]', '[]', 1.0, 'confirmed', 'personal', 'internal',
+                '{"scope":"thread","thread_id":"thread-1"}',
+                '1', '1', null, '[]', null, null
+            )
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertNotIn("legacy_memory_without_evidence", self.finding_codes(report))
+        self.assertNotIn("memory_without_evidence", self.finding_codes(report))
+        self.assertEqual(report["summary"]["total"], 0)
+
     def test_modern_memory_without_evidence_remains_current_pipeline_warning(self):
         paths = self.with_paths()
         conn = sqlite3.connect(paths.memory_db)
