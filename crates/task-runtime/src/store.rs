@@ -86,6 +86,16 @@ fn runtime_plan_steps(plan: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+fn runtime_plan_has_open_step(plan: &Value) -> bool {
+    runtime_plan_steps(plan).iter().any(|step| {
+        step.get("status")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .map(|status| matches!(status, "todo" | "doing" | "in_progress" | "in-progress"))
+            .unwrap_or(false)
+    })
+}
+
 fn kernel_plan_step_status(
     raw_status: Option<&str>,
     turn_is_terminal: bool,
@@ -5696,6 +5706,113 @@ impl TaskStore {
         Ok(changed)
     }
 
+    fn completed_delivered_open_runtime_plan_rows(
+        &self,
+    ) -> TaskRuntimeResult<Vec<(String, String, String, String)>> {
+        let rows = {
+            let mut stmt = self.connection.prepare(
+                "SELECT t.task_id, t.user_id, t.workspace_id, t.thread_id, p.plan_json
+                 FROM tasks t
+                 JOIN runtime_plans p
+                   ON p.user_id = t.user_id
+                  AND p.workspace_id = t.workspace_id
+                  AND p.thread_id = t.thread_id
+                 JOIN turn_events latest_plan
+                   ON latest_plan.turn_id = t.task_id
+                  AND latest_plan.kind = 'plan_update'
+                  AND latest_plan.seq = (
+                    SELECT MAX(e.seq)
+                    FROM turn_events e
+                    WHERE e.turn_id = t.task_id
+                      AND e.kind = 'plan_update'
+                  )
+                 WHERE t.kind = 'chat_turn'
+                   AND t.status = 'completed'
+                   AND p.status = 'open'
+                   AND (
+                     latest_plan.payload_json LIKE '%- [-]%'
+                     OR latest_plan.payload_json LIKE '%- [ ]%'
+                   )
+                   AND EXISTS (
+                     SELECT 1
+                     FROM turn_events delivered
+                     WHERE delivered.turn_id = t.task_id
+                       AND delivered.seq > latest_plan.seq
+                       AND (
+                         (delivered.kind = 'delta'
+                          AND COALESCE(json_extract(delivered.payload_json, '$.text'), '') <> '')
+                         OR
+                         (delivered.kind = 'done'
+                          AND COALESCE(json_extract(delivered.payload_json, '$.assistant_message_id'), '') <> ''
+                          AND COALESCE(json_extract(delivered.payload_json, '$.text'), '') <> '')
+                       )
+                   )
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM tasks newer
+                     WHERE newer.thread_id = t.thread_id
+                       AND newer.updated_at > t.updated_at
+                   )
+                 GROUP BY t.task_id, t.user_id, t.workspace_id, t.thread_id, p.plan_json
+                 ORDER BY t.updated_at DESC
+                 LIMIT 100",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        let candidates = rows
+            .into_iter()
+            .filter_map(|(task_id, user_id, workspace_id, thread_id, plan_json)| {
+                let plan = serde_json::from_str::<Value>(&plan_json).ok()?;
+                runtime_plan_has_open_step(&plan).then_some((
+                    task_id,
+                    user_id,
+                    workspace_id,
+                    thread_id,
+                ))
+            })
+            .collect::<Vec<_>>();
+        Ok(candidates)
+    }
+
+    pub fn count_completed_delivered_open_runtime_plans(&self) -> TaskRuntimeResult<u64> {
+        Ok(self.completed_delivered_open_runtime_plan_rows()?.len() as u64)
+    }
+
+    pub fn settle_completed_delivered_open_runtime_plans(&self) -> TaskRuntimeResult<u64> {
+        let rows = self.completed_delivered_open_runtime_plan_rows()?;
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let mut changed = 0_u64;
+        for (_task_id, user_id, workspace_id, thread_id) in rows {
+            let affected = tx.execute(
+                "UPDATE runtime_plans
+                 SET status = 'settled',
+                     updated_at = ?1,
+                     revision = revision + 1
+                 WHERE user_id = ?2
+                   AND workspace_id = ?3
+                   AND thread_id = ?4
+                   AND status = 'open'",
+                params![now, user_id, workspace_id, thread_id],
+            )?;
+            changed += affected as u64;
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+
     pub fn audit_runtime_integrity(&self) -> TaskRuntimeResult<RuntimeIntegrityReport> {
         let mut findings = Vec::new();
 
@@ -5864,6 +5981,19 @@ impl TaskStore {
                 "browser_outcome_projection",
                 "completed task contains a browser budget exhaustion event",
                 Some(task_id?),
+            ));
+        }
+
+        for (task_id, _user_id, _workspace_id, _thread_id) in
+            self.completed_delivered_open_runtime_plan_rows()?
+        {
+            findings.push(runtime_integrity_finding(
+                "chat_runtime",
+                "completed_turn_with_unreconciled_delivered_plan",
+                "warning",
+                "runtime_plan_projection",
+                "completed chat turn delivered an answer but its current runtime plan is still open",
+                Some(task_id),
             ));
         }
 
@@ -9149,6 +9279,91 @@ mod chat_turn_query_tests {
             !after
                 .finding_counts
                 .contains_key("completed_task_with_browser_budget_exceeded")
+        );
+    }
+
+    #[test]
+    fn runtime_integrity_repair_settles_completed_delivered_open_runtime_plan() {
+        let s = store();
+        let task = make_chat_turn(
+            "turn_delivered_open_plan",
+            "thread_delivered_open_plan",
+            TaskStatus::Completed,
+        );
+        s.insert_chat_turn(
+            &task,
+            "thread_delivered_open_plan",
+            "req-delivered-open-plan",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.upsert_runtime_plan(
+            "u",
+            "w",
+            "thread_delivered_open_plan",
+            0,
+            &json!({
+                "steps": [
+                    {"id": "report", "title": "Verify and answer", "status": "doing"}
+                ]
+            }),
+            "open",
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_delivered_open_plan",
+            TurnEventKind::PlanUpdate,
+            json!({
+                "markdown": "- [x] Execute the requested work\n- [-] Verify and answer"
+            }),
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_delivered_open_plan",
+            TurnEventKind::Done,
+            json!({
+                "assistant_message_id": "assistant-delivered-open-plan",
+                "text": "The requested work was completed and verified with source evidence."
+            }),
+        )
+        .unwrap();
+
+        let before = s.audit_runtime_integrity().unwrap();
+        assert_eq!(
+            before
+                .finding_counts
+                .get("completed_turn_with_unreconciled_delivered_plan"),
+            Some(&1)
+        );
+        assert_eq!(s.count_completed_delivered_open_runtime_plans().unwrap(), 1);
+
+        let repaired = s.settle_completed_delivered_open_runtime_plans().unwrap();
+        assert_eq!(repaired, 1);
+        let task_after = s
+            .get_task(
+                &TaskId::new("turn_delivered_open_plan"),
+                &UserId::new("u"),
+                &WorkspaceId::new("w"),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(task_after.status, TaskStatus::Completed);
+        assert_eq!(task_after.blocked_reason, None);
+        assert_eq!(
+            s.load_runtime_plan("u", "w", "thread_delivered_open_plan")
+                .unwrap()
+                .unwrap()
+                .status,
+            "settled"
+        );
+        assert_eq!(s.count_completed_delivered_open_runtime_plans().unwrap(), 0);
+
+        let after = s.audit_runtime_integrity().unwrap();
+        assert!(
+            !after
+                .finding_counts
+                .contains_key("completed_turn_with_unreconciled_delivered_plan")
         );
     }
 

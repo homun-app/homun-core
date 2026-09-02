@@ -70,13 +70,21 @@ incompleto un lavoro gia' concluso.
 
 **Stato 2026-09-02:** il reconciler futuro chiude risposte brevi verificate con
 source e blocca failure terminali browser/DNS; l'audit ora guarda anche
-`runtime_plans` corrente e non solo marker storici del transcript.
+`runtime_plans` corrente e non solo marker storici del transcript. L'API
+integrity repair espone inoltre
+`settle_completed_delivered_open_runtime_plans`, che chiude in modo controllato
+solo i piani ancora `open` quando il task chat piu' recente del thread e'
+`completed`, l'ultimo `plan_update` e' incompleto e un `done`/`delta` successivo
+ha consegnato risposta assistant. La repair non fallisce il task e non muta il
+testo della chat.
 
 **Verifica minima:**
 
 ```bash
 python3 -m unittest scripts.test_audit_homun_state -v
 cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway reconcile_final_plan -- --nocapture
+cargo test -p local-first-task-runtime runtime_integrity_repair_settles_completed_delivered_open_runtime_plan -- --nocapture
+cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway integrity_repair_apply_settles_completed_delivered_open_runtime_plan_without_exposing_paths -- --nocapture
 python3 scripts/audit_homun_state.py --max-findings-per-code 3 --max-timeline-events 20
 ```
 

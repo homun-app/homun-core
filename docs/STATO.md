@@ -321,6 +321,17 @@ Stato profilo reale dopo la classificazione del piano finale:
   reali: risposta breve ma verificata con source (es. form Selenium compilato) e
   failure terminale browser/DNS, che blocca l'ultimo step invece di lasciarlo
   `doing`.
+- `settle_completed_delivered_open_runtime_plans` e' disponibile come repair
+  runtime controllata nell'API integrity: fa preview/apply con backup del DB
+  runtime, richiede token/confirm come le altre repair e marca `settled` solo il
+  `runtime_plans` corrente quando il task chat piu' recente del thread e'
+  `completed` e ha risposta assistant consegnata dopo l'ultimo piano aperto. Non
+  cambia lo stato del task e non riscrive testo chat.
+- Nota profilo reale: il gateway installato verificato subito dopo questa patch
+  non riconosce ancora l'action
+  `settle_completed_delivered_open_runtime_plans`; i 28 residui restano quindi
+  da applicare con un build/release che includa questa repair, non con update
+  manuali SQLite.
 - I vecchi `agent_run_missing_model_attribution` con `prompt_snapshot` che
   contiene gia' `model` e `provider` non sono piu' contati come gap
   diagnostici: Auto/Unavailable e' spiegabile dagli eventi canonici anche se la

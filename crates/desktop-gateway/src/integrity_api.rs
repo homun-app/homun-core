@@ -52,6 +52,7 @@ pub enum IntegrityRepairAction {
     FailOrphanedWaitingApprovals,
     FailWaitingTimeWithoutPendingWake,
     FailCompletedBrowserBudgetExceeded,
+    SettleCompletedDeliveredOpenRuntimePlans,
 }
 
 impl IntegrityRepairAction {
@@ -75,7 +76,8 @@ impl IntegrityRepairAction {
             | Self::FailStaleStreamingAssistants
             | Self::FailOrphanedWaitingApprovals
             | Self::FailWaitingTimeWithoutPendingWake
-            | Self::FailCompletedBrowserBudgetExceeded => None,
+            | Self::FailCompletedBrowserBudgetExceeded
+            | Self::SettleCompletedDeliveredOpenRuntimePlans => None,
         }
     }
 
@@ -89,7 +91,8 @@ impl IntegrityRepairAction {
             Self::FailStaleStreamingAssistants
             | Self::FailOrphanedWaitingApprovals
             | Self::FailWaitingTimeWithoutPendingWake
-            | Self::FailCompletedBrowserBudgetExceeded => IntegrityRepairDomain::Runtime,
+            | Self::FailCompletedBrowserBudgetExceeded
+            | Self::SettleCompletedDeliveredOpenRuntimePlans => IntegrityRepairDomain::Runtime,
             Self::RemoveGraphifyDuplicateRelations { .. }
             | Self::RemoveOrphanEmbeddings
             | Self::RemoveOrphanEvidenceLinks
