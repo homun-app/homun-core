@@ -1,6 +1,6 @@
 # Production Readiness Roadmap
 
-Verificato 2026-09-02 su `main`.
+Verificato 2026-09-03 su `main`.
 
 Questo documento e' la lista unica di ripartenza per portare Homun verso una
 release production-grade. `docs/STATO.md` resta lo stato vivo dettagliato; le
@@ -24,26 +24,29 @@ Sicurezza dependency:
 
 - Alert Dependabot #120 (`transformers < 5.10.0`, GHSA-xrqw-3rrv-vx5w) chiuso
   lato sorgente aggiornando il lock a `transformers=5.16.1` e aggiungendo il
-  vincolo root `transformers>=5.10.0`; resta da verificare la chiusura
-  dell'alert dopo push e scansione GitHub.
+  vincolo root `transformers>=5.10.0`; Dependency Graph, CI e Container image
+  verdi su `9b8fbb44`, e la query Dependabot `state=open` non restituisce alert.
+- `apps/desktop npm audit --audit-level=high` e'
+  tornato pulito dopo aggiornamento lock transitive:
+  `fast-uri=3.1.7`, `@xmldom/xmldom=0.8.15`.
 
 Ultimo audit reale verificato:
 
 ```bash
-python3 scripts/audit_homun_state.py --max-findings-per-code 3 --max-timeline-events 20
+python3 scripts/audit_homun_state.py --max-findings-per-code 0 --max-timeline-events 20
 ```
 
 Esito:
 
 - `ok=true`
 - `errors=0`
-- `warnings=59`
+- `warnings=31`
 
 Warning residui:
 
 | Priorita' | Codice | Conteggio | Owner | Stato | Done |
 | --- | --- | ---: | --- | --- | --- |
-| P0 | `completed_turn_with_unreconciled_delivered_plan` | 28 | `runtime_plan_projection` | parziale | turni terminali con risposta consegnata non lasciano piano UI incoerente; i 28 residui correnti vengono chiusi da repair controllata o nuovo turno, non da mutazioni manuali |
+| P0 | `completed_turn_with_unreconciled_delivered_plan` | 0 | `runtime_plan_projection` | chiuso | repair canonica applicata via `/api/integrity/repair/apply` su preview `estimated_rows=28`, backup DB creato, audit reale post-repair senza questo codice |
 | P1 | `agent_run_missing_model_attribution` | 23 | `model_routing` | storico da classificare | Auto/Unavailable sempre spiegabile da `agent_runs` o `agent_run_events.prompt_snapshot`; residui separati come legacy non riparabile |
 | P1 | `legacy_memory_without_evidence` | 8 | `memory_provenance` | storico da migrare/classificare | memoria live moderna ha evidence; memoria legacy e' migrata con evidenza, archiviata o esclusa con regola esplicita |
 
@@ -85,6 +88,13 @@ solo i piani ancora `open` quando il task chat piu' recente del thread e'
 `completed`, l'ultimo `plan_update` e' incompleto e un `done`/`delta` successivo
 ha consegnato risposta assistant. La repair non fallisce il task e non muta il
 testo della chat.
+
+**Stato 2026-09-03:** repair applicata sul profilo reale attraverso il gateway
+locale aggiornato (`/api/integrity/repair/preview` -> `estimated_rows=28`,
+`/api/integrity/repair/apply` con `confirm=true`). Backup automatico:
+`created=true`, `bytes=343629824`. L'audit reale successivo torna `ok=true`,
+`errors=0`, `warnings=31`, senza
+`completed_turn_with_unreconciled_delivered_plan`.
 
 **Verifica minima:**
 

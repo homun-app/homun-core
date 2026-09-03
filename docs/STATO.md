@@ -376,11 +376,17 @@ Stato profilo reale dopo la classificazione del piano finale:
   `runtime_plans` corrente quando il task chat piu' recente del thread e'
   `completed` e ha risposta assistant consegnata dopo l'ultimo piano aperto. Non
   cambia lo stato del task e non riscrive testo chat.
-- Nota profilo reale: il gateway installato verificato subito dopo questa patch
-  non riconosce ancora l'action
-  `settle_completed_delivered_open_runtime_plans`; i 28 residui restano quindi
-  da applicare con un build/release che includa questa repair, non con update
-  manuali SQLite.
+- Applicazione profilo reale 2026-09-03: il gateway installato `0.1.1099` non
+  riconosceva ancora l'action, quindi la repair e' stata applicata via gateway
+  locale aggiornato dal target Cargo reale
+  (`/Users/fabio/.cache/cargo-target/release/local-first-desktop-gateway`) su
+  porta `18769`. Preview:
+  `settle_completed_delivered_open_runtime_plans`, `estimated_rows=28`; apply
+  con `confirm=true`; backup DB runtime `created=true`, `bytes=343629824`.
+  Audit successivo:
+  `python3 scripts/audit_homun_state.py --max-findings-per-code 0 --max-timeline-events 20`
+  -> `ok=true`, `errors=0`, `warnings=31`, senza
+  `completed_turn_with_unreconciled_delivered_plan`.
 - I vecchi `agent_run_missing_model_attribution` con `prompt_snapshot` che
   contiene gia' `model` e `provider` non sono piu' contati come gap
   diagnostici: Auto/Unavailable e' spiegabile dagli eventi canonici anche se la
@@ -390,17 +396,15 @@ Stato profilo reale dopo la classificazione del piano finale:
   thread non sono piu' contati come gap HITL moderno: sono conversazioni di
   luglio precedenti alla strumentazione `agent_runs`, con evidenza runtime in
   `turn_events` ma senza owner osservabile per la run.
-- Warning: `agent_run_missing_model_attribution=23`,
-  `legacy_memory_without_evidence=8`,
-  `completed_turn_with_unreconciled_delivered_plan=28`.
+- Warning residui: `agent_run_missing_model_attribution=23`,
+  `legacy_memory_without_evidence=8`.
 
 Blocchi residui prima di dichiarare una release production-grade:
 
-- verificare chiusura GitHub dell'alert Dependabot #120 dopo push: sorgente
-  aggiornato a `transformers=5.16.1` in `uv.lock` con vincolo root
-  `transformers>=5.10.0`;
-- attendere CI verde sull'ultimo commit di `main` prima di taggare una nuova
-  release;
+- Dependabot #120 verificato chiuso dopo push: Dependency Graph, CI e Container
+  image verdi su `9b8fbb44`; query GitHub Dependabot `state=open` vuota;
+- `apps/desktop npm audit --audit-level=high` pulito dopo aggiornamento lock:
+  `fast-uri=3.1.7`, `@xmldom/xmldom=0.8.15`;
 - se si taglia una build pubblica, verificare artefatti, checksum,
   signing/notarization e smoke sull'app installata, non solo sul sorgente.
 
