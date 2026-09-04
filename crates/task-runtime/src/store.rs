@@ -6135,14 +6135,35 @@ impl TaskStore {
              FROM agent_runs
              WHERE status IN ('running', 'completed', 'failed', 'aborted')
                AND (
-                 COALESCE(role, '') = ''
-                 OR (
-                   (COALESCE(model, '') = '' OR COALESCE(provider, '') = '')
+                 (
+                   COALESCE(role, '') = ''
+                   AND EXISTS (
+                     SELECT 1
+                     FROM agent_run_events e
+                     WHERE e.run_id = agent_runs.run_id
+                       AND e.kind IN ('prompt_snapshot', 'model_response')
+                   )
                    AND NOT EXISTS (
                      SELECT 1
                      FROM agent_run_events e
                      WHERE e.run_id = agent_runs.run_id
                        AND e.kind = 'prompt_snapshot'
+                       AND LOWER(COALESCE(json_extract(e.payload_json, '$.messages[0].content'), '')) LIKE '%acting as %'
+                   )
+                 )
+                 OR (
+                   (COALESCE(model, '') = '' OR COALESCE(provider, '') = '')
+                   AND EXISTS (
+                     SELECT 1
+                     FROM agent_run_events e
+                     WHERE e.run_id = agent_runs.run_id
+                       AND e.kind IN ('prompt_snapshot', 'model_response')
+                   )
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM agent_run_events e
+                     WHERE e.run_id = agent_runs.run_id
+                       AND e.kind IN ('prompt_snapshot', 'semantic_decision')
                        AND COALESCE(json_extract(e.payload_json, '$.model'), '') <> ''
                        AND COALESCE(json_extract(e.payload_json, '$.provider'), '') <> ''
                    )
@@ -8795,6 +8816,14 @@ mod chat_turn_query_tests {
             prompt_fingerprint: None,
         })
         .unwrap();
+        s.append_agent_run_event(
+            "run-observable",
+            2,
+            Some(0),
+            "model_response",
+            &json!({"status": "completed"}),
+        )
+        .unwrap();
         s.finish_agent_run("run-observable", AgentRunStatus::Completed, None)
             .unwrap();
 
@@ -8865,6 +8894,271 @@ mod chat_turn_query_tests {
             "turn_snapshot_attributed",
             TurnEventKind::Done,
             json!({"text": "ok"}),
+        )
+        .unwrap();
+
+        let report = s.audit_runtime_integrity().unwrap();
+        let codes = report
+            .observability
+            .diagnostic_gaps
+            .iter()
+            .map(|gap| gap.code.as_str())
+            .collect::<BTreeSet<_>>();
+
+        assert!(!codes.contains("run_missing_model_attribution"));
+        assert_eq!(report.observability.summary.diagnostic_gaps, 0);
+    }
+
+    #[test]
+    fn runtime_integrity_audit_uses_semantic_decision_as_model_attribution_evidence() {
+        let s = store();
+        let completed = make_chat_turn(
+            "turn_semantic_decision_attributed",
+            "thread_semantic_decision_attributed",
+            TaskStatus::Completed,
+        );
+        s.insert_chat_turn(
+            &completed,
+            "thread_semantic_decision_attributed",
+            "req-semantic-decision-attributed",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.create_agent_run(&NewAgentRun {
+            run_id: "run-semantic-decision-attributed".into(),
+            turn_id: "turn_semantic_decision_attributed".into(),
+            thread_id: "thread_semantic_decision_attributed".into(),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            role: Some("orchestrator".into()),
+            model: None,
+            provider: None,
+            prompt_fingerprint: None,
+        })
+        .unwrap();
+        s.append_agent_run_event(
+            "run-semantic-decision-attributed",
+            2,
+            Some(0),
+            "semantic_decision",
+            &json!({
+                "model": "deepseek-v4-pro",
+                "provider": "8eb2018b-e43c-410c-b992-484bfadbe689",
+                "mode": "read_only_analysis"
+            }),
+        )
+        .unwrap();
+        s.finish_agent_run(
+            "run-semantic-decision-attributed",
+            AgentRunStatus::Completed,
+            Some("canonical_completed"),
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_semantic_decision_attributed",
+            TurnEventKind::Done,
+            json!({"text": "ok"}),
+        )
+        .unwrap();
+
+        let report = s.audit_runtime_integrity().unwrap();
+        let codes = report
+            .observability
+            .diagnostic_gaps
+            .iter()
+            .map(|gap| gap.code.as_str())
+            .collect::<BTreeSet<_>>();
+
+        assert!(!codes.contains("run_missing_model_attribution"));
+        assert_eq!(report.observability.summary.diagnostic_gaps, 0);
+    }
+
+    #[test]
+    fn runtime_integrity_audit_uses_prompt_snapshot_role_evidence() {
+        let s = store();
+        let completed = make_chat_turn(
+            "turn_prompt_role_attributed",
+            "thread_prompt_role_attributed",
+            TaskStatus::Completed,
+        );
+        s.insert_chat_turn(
+            &completed,
+            "thread_prompt_role_attributed",
+            "req-prompt-role-attributed",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.create_agent_run(&NewAgentRun {
+            run_id: "run-prompt-role-attributed".into(),
+            turn_id: "turn_prompt_role_attributed".into(),
+            thread_id: "thread_prompt_role_attributed".into(),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            role: None,
+            model: None,
+            provider: None,
+            prompt_fingerprint: None,
+        })
+        .unwrap();
+        s.append_agent_run_event(
+            "run-prompt-role-attributed",
+            2,
+            Some(0),
+            "prompt_snapshot",
+            &json!({
+                "model": "deepseek-v4-pro",
+                "provider": "https://ollama.com/v1",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are the local assistant acting as ORCHESTRATOR."
+                    }
+                ]
+            }),
+        )
+        .unwrap();
+        s.finish_agent_run(
+            "run-prompt-role-attributed",
+            AgentRunStatus::Completed,
+            Some("canonical_completed"),
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_prompt_role_attributed",
+            TurnEventKind::Done,
+            json!({"text": "ok"}),
+        )
+        .unwrap();
+
+        let report = s.audit_runtime_integrity().unwrap();
+        let codes = report
+            .observability
+            .diagnostic_gaps
+            .iter()
+            .map(|gap| gap.code.as_str())
+            .collect::<BTreeSet<_>>();
+
+        assert!(!codes.contains("run_missing_model_attribution"));
+        assert_eq!(report.observability.summary.diagnostic_gaps, 0);
+    }
+
+    #[test]
+    fn runtime_integrity_audit_allows_pre_model_capability_failure_without_model_attribution() {
+        let s = store();
+        let failed = make_chat_turn(
+            "turn_pre_model_capability_failure",
+            "thread_pre_model_capability_failure",
+            TaskStatus::Failed,
+        );
+        s.insert_chat_turn(
+            &failed,
+            "thread_pre_model_capability_failure",
+            "req-pre-model-capability-failure",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.create_agent_run(&NewAgentRun {
+            run_id: "run-pre-model-capability-failure".into(),
+            turn_id: "turn_pre_model_capability_failure".into(),
+            thread_id: "thread_pre_model_capability_failure".into(),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            role: Some("orchestrator".into()),
+            model: None,
+            provider: None,
+            prompt_fingerprint: None,
+        })
+        .unwrap();
+        s.append_agent_run_event(
+            "run-pre-model-capability-failure",
+            2,
+            Some(0),
+            "semantic_decision",
+            &json!({
+                "mode": "read_only_analysis",
+                "selected_capability": "missing_capability",
+                "fallback_reason": "missing_capability"
+            }),
+        )
+        .unwrap();
+        s.finish_agent_run(
+            "run-pre-model-capability-failure",
+            AgentRunStatus::Failed,
+            Some("canonical_failed"),
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_pre_model_capability_failure",
+            TurnEventKind::Error,
+            json!({"text": "failed"}),
+        )
+        .unwrap();
+
+        let report = s.audit_runtime_integrity().unwrap();
+        let codes = report
+            .observability
+            .diagnostic_gaps
+            .iter()
+            .map(|gap| gap.code.as_str())
+            .collect::<BTreeSet<_>>();
+
+        assert!(!codes.contains("run_missing_model_attribution"));
+        assert_eq!(report.observability.summary.diagnostic_gaps, 0);
+    }
+
+    #[test]
+    fn runtime_integrity_audit_allows_pre_model_failure_without_role() {
+        let s = store();
+        let failed = make_chat_turn(
+            "turn_pre_model_failure_without_role",
+            "thread_pre_model_failure_without_role",
+            TaskStatus::Failed,
+        );
+        s.insert_chat_turn(
+            &failed,
+            "thread_pre_model_failure_without_role",
+            "req-pre-model-failure-without-role",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.create_agent_run(&NewAgentRun {
+            run_id: "run-pre-model-failure-without-role".into(),
+            turn_id: "turn_pre_model_failure_without_role".into(),
+            thread_id: "thread_pre_model_failure_without_role".into(),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            role: None,
+            model: None,
+            provider: None,
+            prompt_fingerprint: None,
+        })
+        .unwrap();
+        s.append_agent_run_event(
+            "run-pre-model-failure-without-role",
+            2,
+            Some(0),
+            "semantic_decision",
+            &json!({
+                "mode": "read_only_analysis",
+                "selected_capability": "missing_capability",
+                "fallback_reason": "missing_capability"
+            }),
+        )
+        .unwrap();
+        s.finish_agent_run(
+            "run-pre-model-failure-without-role",
+            AgentRunStatus::Failed,
+            Some("no_reply_generated"),
+        )
+        .unwrap();
+        s.insert_turn_event(
+            "turn_pre_model_failure_without_role",
+            TurnEventKind::Error,
+            json!({"text": "failed"}),
         )
         .unwrap();
 

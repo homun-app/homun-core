@@ -335,6 +335,163 @@ class AuditHomunStateTests(unittest.TestCase):
 
         self.assertNotIn("agent_run_missing_model_attribution", self.finding_codes(report))
 
+    def test_semantic_decision_evidence_suppresses_model_attribution_finding(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into agent_runs (
+                run_id, turn_id, thread_id, user_id, workspace_id, attempt,
+                status, role, model, provider, prompt_fingerprint, started_at,
+                completed_at, terminal_reason, schema_version
+            ) values ('run-1', 'turn-1', 'thread-1', 'user-1',
+                'workspace-1', 1, 'completed', 'orchestrator', '',
+                '', '', 1, 2, 'canonical_completed', 1)
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_run_events (
+                run_id, seq, round, kind, payload_json, created_at
+            ) values ('run-1', 2, 0, 'semantic_decision', ?, 1)
+            """,
+            (
+                json.dumps(
+                    {
+                        "model": "deepseek-v4-pro",
+                        "provider": "8eb2018b-e43c-410c-b992-484bfadbe689",
+                        "mode": "read_only_analysis",
+                    }
+                ),
+            ),
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertNotIn("agent_run_missing_model_attribution", self.finding_codes(report))
+
+    def test_prompt_snapshot_role_evidence_suppresses_model_attribution_finding(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into agent_runs (
+                run_id, turn_id, thread_id, user_id, workspace_id, attempt,
+                status, role, model, provider, prompt_fingerprint, started_at,
+                completed_at, terminal_reason, schema_version
+            ) values ('run-1', 'turn-1', 'thread-1', 'user-1',
+                'workspace-1', 1, 'completed', '', '',
+                '', '', 1, 2, 'canonical_completed', 1)
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_run_events (
+                run_id, seq, round, kind, payload_json, created_at
+            ) values ('run-1', 2, 0, 'prompt_snapshot', ?, 1)
+            """,
+            (
+                json.dumps(
+                    {
+                        "model": "deepseek-v4-pro",
+                        "provider": "https://ollama.com/v1",
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": "You are the local assistant acting as ORCHESTRATOR.",
+                            }
+                        ],
+                    }
+                ),
+            ),
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertNotIn("agent_run_missing_model_attribution", self.finding_codes(report))
+
+    def test_pre_model_capability_failure_does_not_require_model_attribution(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into agent_runs (
+                run_id, turn_id, thread_id, user_id, workspace_id, attempt,
+                status, role, model, provider, prompt_fingerprint, started_at,
+                completed_at, terminal_reason, schema_version
+            ) values ('run-1', 'turn-1', 'thread-1', 'user-1',
+                'workspace-1', 1, 'failed', 'orchestrator', '',
+                '', '', 1, 2, 'canonical_failed', 1)
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_run_events (
+                run_id, seq, round, kind, payload_json, created_at
+            ) values ('run-1', 2, 0, 'semantic_decision', ?, 1)
+            """,
+            (
+                json.dumps(
+                    {
+                        "mode": "read_only_analysis",
+                        "selected_capability": "missing_capability",
+                        "fallback_reason": "missing_capability",
+                    }
+                ),
+            ),
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertNotIn("agent_run_missing_model_attribution", self.finding_codes(report))
+
+    def test_pre_model_failure_without_role_is_not_model_attribution_gap(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into agent_runs (
+                run_id, turn_id, thread_id, user_id, workspace_id, attempt,
+                status, role, model, provider, prompt_fingerprint, started_at,
+                completed_at, terminal_reason, schema_version
+            ) values ('run-1', 'turn-1', 'thread-1', 'user-1',
+                'workspace-1', 1, 'failed', '', '',
+                '', '', 1, 2, 'no_reply_generated', 1)
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_run_events (
+                run_id, seq, round, kind, payload_json, created_at
+            ) values ('run-1', 2, 0, 'semantic_decision', ?, 1)
+            """,
+            (
+                json.dumps(
+                    {
+                        "mode": "read_only_analysis",
+                        "selected_capability": "missing_capability",
+                        "fallback_reason": "missing_capability",
+                    }
+                ),
+            ),
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        self.assertNotIn("agent_run_missing_model_attribution", self.finding_codes(report))
+
     def test_resolved_hitl_without_any_thread_run_is_legacy_not_followup_gap(self):
         paths = self.with_paths()
         conn = sqlite3.connect(paths.runtime_db)
@@ -1158,6 +1315,13 @@ class AuditHomunStateTests(unittest.TestCase):
                 39, null, 1)
             """
         )
+        conn.execute(
+            """
+            insert into agent_run_events (
+                run_id, seq, round, kind, payload_json, created_at
+            ) values ('run-1', 2, 0, 'model_response', '{"status":"completed"}', 20)
+            """
+        )
         conn.commit()
 
         report = audit.audit_homun_state(paths)
@@ -1165,9 +1329,8 @@ class AuditHomunStateTests(unittest.TestCase):
         gap_codes = {gap["code"] for gap in report["observability"]["diagnostic_gaps"]}
         self.assertIn("completed_run_missing_terminal_reason", gap_codes)
         self.assertIn("run_missing_model_attribution", gap_codes)
-        self.assertIn("run_without_agent_run_events", gap_codes)
         self.assertIn("turn_without_turn_events", gap_codes)
-        self.assertEqual(report["observability"]["summary"]["diagnostic_gaps"], 4)
+        self.assertEqual(report["observability"]["summary"]["diagnostic_gaps"], 3)
 
     def test_observability_uses_prompt_snapshot_as_model_attribution_evidence(self):
         paths = self.with_paths()
@@ -1215,6 +1378,235 @@ class AuditHomunStateTests(unittest.TestCase):
             insert into turn_events (
                 turn_id, seq, kind, payload_json, created_at
             ) values ('turn-1', 1, 'done', '{"text":"ok"}', 40)
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        gap_codes = {gap["code"] for gap in report["observability"]["diagnostic_gaps"]}
+        self.assertNotIn("run_missing_model_attribution", gap_codes)
+        self.assertEqual(report["observability"]["summary"]["diagnostic_gaps"], 0)
+
+    def test_observability_uses_semantic_decision_as_model_attribution_evidence(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-1', 'user-1', 'workspace-1', 'chat_turn',
+                'completed', 10, 40, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_runs (
+                run_id, turn_id, thread_id, user_id, workspace_id, attempt,
+                status, role, model, provider, prompt_fingerprint, started_at,
+                completed_at, terminal_reason, schema_version
+            ) values ('run-1', 'turn-1', 'thread-1', 'user-1', 'workspace-1',
+                1, 'completed', 'orchestrator', '', '', '', 11,
+                39, 'canonical_completed', 1)
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_run_events (
+                run_id, seq, round, kind, payload_json, created_at
+            ) values ('run-1', 2, 0, 'semantic_decision', ?, 12)
+            """,
+            (
+                json.dumps(
+                    {
+                        "model": "deepseek-v4-pro",
+                        "provider": "8eb2018b-e43c-410c-b992-484bfadbe689",
+                        "mode": "read_only_analysis",
+                    }
+                ),
+            ),
+        )
+        conn.execute(
+            """
+            insert into turn_events (
+                turn_id, seq, kind, payload_json, created_at
+            ) values ('turn-1', 1, 'done', '{"text":"ok"}', 40)
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        gap_codes = {gap["code"] for gap in report["observability"]["diagnostic_gaps"]}
+        self.assertNotIn("run_missing_model_attribution", gap_codes)
+        self.assertEqual(report["observability"]["summary"]["diagnostic_gaps"], 0)
+
+    def test_observability_uses_prompt_snapshot_role_evidence(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-1', 'user-1', 'workspace-1', 'chat_turn',
+                'completed', 10, 40, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_runs (
+                run_id, turn_id, thread_id, user_id, workspace_id, attempt,
+                status, role, model, provider, prompt_fingerprint, started_at,
+                completed_at, terminal_reason, schema_version
+            ) values ('run-1', 'turn-1', 'thread-1', 'user-1', 'workspace-1',
+                1, 'completed', '', '', '', '', 11,
+                39, 'canonical_completed', 1)
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_run_events (
+                run_id, seq, round, kind, payload_json, created_at
+            ) values ('run-1', 2, 0, 'prompt_snapshot', ?, 12)
+            """,
+            (
+                json.dumps(
+                    {
+                        "model": "deepseek-v4-pro",
+                        "provider": "https://ollama.com/v1",
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": "You are the local assistant acting as ORCHESTRATOR.",
+                            }
+                        ],
+                    }
+                ),
+            ),
+        )
+        conn.execute(
+            """
+            insert into turn_events (
+                turn_id, seq, kind, payload_json, created_at
+            ) values ('turn-1', 1, 'done', '{"text":"ok"}', 40)
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        gap_codes = {gap["code"] for gap in report["observability"]["diagnostic_gaps"]}
+        self.assertNotIn("run_missing_model_attribution", gap_codes)
+        self.assertEqual(report["observability"]["summary"]["diagnostic_gaps"], 0)
+
+    def test_observability_pre_model_capability_failure_does_not_require_model_attribution(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-1', 'user-1', 'workspace-1', 'chat_turn',
+                'failed', 10, 40, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_runs (
+                run_id, turn_id, thread_id, user_id, workspace_id, attempt,
+                status, role, model, provider, prompt_fingerprint, started_at,
+                completed_at, terminal_reason, schema_version
+            ) values ('run-1', 'turn-1', 'thread-1', 'user-1', 'workspace-1',
+                1, 'failed', 'orchestrator', '', '', '', 11,
+                39, 'canonical_failed', 1)
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_run_events (
+                run_id, seq, round, kind, payload_json, created_at
+            ) values ('run-1', 2, 0, 'semantic_decision', ?, 12)
+            """,
+            (
+                json.dumps(
+                    {
+                        "mode": "read_only_analysis",
+                        "selected_capability": "missing_capability",
+                        "fallback_reason": "missing_capability",
+                    }
+                ),
+            ),
+        )
+        conn.execute(
+            """
+            insert into turn_events (
+                turn_id, seq, kind, payload_json, created_at
+            ) values ('turn-1', 1, 'error', '{"text":"failed"}', 40)
+            """
+        )
+        conn.commit()
+
+        report = audit.audit_homun_state(paths)
+
+        gap_codes = {gap["code"] for gap in report["observability"]["diagnostic_gaps"]}
+        self.assertNotIn("run_missing_model_attribution", gap_codes)
+        self.assertEqual(report["observability"]["summary"]["diagnostic_gaps"], 0)
+
+    def test_observability_pre_model_failure_without_role_is_not_model_attribution_gap(self):
+        paths = self.with_paths()
+        conn = sqlite3.connect(paths.runtime_db)
+        self.addCleanup(conn.close)
+        create_runtime_schema(conn)
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, user_id, workspace_id, kind, status, created_at,
+                updated_at, blocked_reason, task_json, thread_id
+            ) values ('turn-1', 'user-1', 'workspace-1', 'chat_turn',
+                'failed', 10, 40, null, '{}', 'thread-1')
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_runs (
+                run_id, turn_id, thread_id, user_id, workspace_id, attempt,
+                status, role, model, provider, prompt_fingerprint, started_at,
+                completed_at, terminal_reason, schema_version
+            ) values ('run-1', 'turn-1', 'thread-1', 'user-1', 'workspace-1',
+                1, 'failed', '', '', '', '', 11,
+                39, 'no_reply_generated', 1)
+            """
+        )
+        conn.execute(
+            """
+            insert into agent_run_events (
+                run_id, seq, round, kind, payload_json, created_at
+            ) values ('run-1', 2, 0, 'semantic_decision', ?, 12)
+            """,
+            (
+                json.dumps(
+                    {
+                        "mode": "read_only_analysis",
+                        "selected_capability": "missing_capability",
+                        "fallback_reason": "missing_capability",
+                    }
+                ),
+            ),
+        )
+        conn.execute(
+            """
+            insert into turn_events (
+                turn_id, seq, kind, payload_json, created_at
+            ) values ('turn-1', 1, 'error', '{"text":"failed"}', 40)
             """
         )
         conn.commit()

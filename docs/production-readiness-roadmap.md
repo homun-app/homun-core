@@ -1,6 +1,6 @@
 # Production Readiness Roadmap
 
-Verificato 2026-09-03 su `main`.
+Verificato 2026-09-04 su `main`.
 
 Questo documento e' la lista unica di ripartenza per portare Homun verso una
 release production-grade. `docs/STATO.md` resta lo stato vivo dettagliato; le
@@ -33,22 +33,23 @@ Sicurezza dependency:
 Ultimo audit reale verificato:
 
 ```bash
-python3 scripts/audit_homun_state.py --max-findings-per-code 0 --max-timeline-events 20
+python3 scripts/audit_homun_state.py --max-findings-per-code 200 --max-timeline-events 8
 ```
 
 Esito:
 
 - `ok=true`
 - `errors=0`
-- `warnings=31`
+- `warnings=0`
 
-Warning residui:
+Stato dei codici residui storici:
 
 | Priorita' | Codice | Conteggio | Owner | Stato | Done |
 | --- | --- | ---: | --- | --- | --- |
 | P0 | `completed_turn_with_unreconciled_delivered_plan` | 0 | `runtime_plan_projection` | chiuso | repair canonica applicata via `/api/integrity/repair/apply` su preview `estimated_rows=28`, backup DB creato, audit reale post-repair senza questo codice |
-| P1 | `agent_run_missing_model_attribution` | 23 | `model_routing` | storico da classificare | Auto/Unavailable sempre spiegabile da `agent_runs` o `agent_run_events.prompt_snapshot`; residui separati come legacy non riparabile |
-| P1 | `legacy_memory_without_evidence` | 8 | `memory_provenance` | storico da migrare/classificare | memoria live moderna ha evidence; memoria legacy e' migrata con evidenza, archiviata o esclusa con regola esplicita |
+| P0 | `streaming_assistant_without_active_run` | 0 | `chat_runtime` | chiuso | repair canonica `fail_stale_streaming_assistants` applicata via `/api/integrity/repair/apply` su preview `estimated_rows=2`, backup DB creato, audit reale post-repair senza questo codice |
+| P1 | `agent_run_missing_model_attribution` | 0 | `model_routing` | chiuso | audit e runtime accettano attribution da `semantic_decision`, role evidence da `prompt_snapshot` e non marcano gap per failure pre-model senza invocazione modello |
+| P1 | `legacy_memory_without_evidence` | 0 | `memory_provenance` | chiuso | 8 memorie legacy confermate sono state collegate a eventi metadata-only `legacy_memory_evidence_repair` dopo backup DB memoria |
 
 ## Roadmap
 
@@ -124,6 +125,14 @@ python3 scripts/pre_release_gate.py
 **Done:** ogni nuova run ha attribuzione spiegabile; i residui storici non
 nascondono regressioni moderne.
 
+**Stato 2026-09-04:** chiuso sul profilo reale. I 23 warning storici erano tre
+classi diverse: run con `semantic_decision` contenente `model/provider`, run con
+role deducibile dal `prompt_snapshot` system (`acting as ...`) e failure
+pre-model/preflight senza alcuna `prompt_snapshot` o `model_response`. L'audit
+CLI e l'audit runtime ora applicano la stessa regola: chiedono attribution solo
+quando esiste evidenza di invocazione modello e accettano la decisione semantica
+come evidence di routing.
+
 **Verifica minima:**
 
 ```bash
@@ -142,6 +151,15 @@ per abbassare il conteggio: e' un tema privacy/provenance.
 
 **Done:** memoria moderna senza evidence e' errore/warning reale; memoria
 legacy e' migrata, archiviata o marcata con politica esplicita.
+
+**Stato 2026-09-04:** chiuso sul profilo reale. Prima della repair sono state
+lette solo metadata/provenance, non testo memoria: 8 record live `confirmed`
+legacy senza `memory_evidence` e senza evento sorgente. Backup manuale:
+`/Users/fabio/.homun/backups/integrity-memory/20260904T070446Z-legacy-evidence/memory.sqlite`
+(`14049280` byte). La repair ha creato 8 `memory_events` con
+`source='legacy_memory_evidence_repair'` e 8 link `memory_evidence` con note
+`legacy metadata provenance repair`. L'audit reale successivo torna
+`ok=true`, `errors=0`, `warnings=0`.
 
 **Verifica minima:**
 

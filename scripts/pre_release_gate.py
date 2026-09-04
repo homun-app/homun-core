@@ -33,6 +33,8 @@ GATEWAY_EVAL_SNIPPET = (
     "ok = e.run_gateway_checks(); "
     "raise SystemExit(0 if ok else 1)"
 )
+DEFAULT_STEP_TIMEOUT_SECONDS = 30 * 60
+NPM_AUDIT_TIMEOUT_SECONDS = 5 * 60
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,7 @@ class Step:
     command: list[str]
     cwd: str = ROOT
     env: dict[str, str] = field(default_factory=dict)
+    timeout_seconds: int = DEFAULT_STEP_TIMEOUT_SECONDS
 
 
 def truthy(value: str | None) -> bool:
@@ -76,11 +79,13 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             "desktop dependency audit",
             ["npm", "audit", "--audit-level=high"],
             cwd=DESKTOP,
+            timeout_seconds=NPM_AUDIT_TIMEOUT_SECONDS,
         ),
         Step(
             "browser automation dependency audit",
             ["npm", "audit", "--audit-level=high"],
             cwd=BROWSER_AUTOMATION,
+            timeout_seconds=NPM_AUDIT_TIMEOUT_SECONDS,
         ),
         Step(
             "capability tests",
@@ -175,7 +180,18 @@ def run_step(step: Step) -> bool:
     start = time.time()
     merged_env = os.environ.copy()
     merged_env.update(step.env)
-    result = subprocess.run(step.command, cwd=step.cwd, env=merged_env, check=False)
+    try:
+        result = subprocess.run(
+            step.command,
+            cwd=step.cwd,
+            env=merged_env,
+            check=False,
+            timeout=step.timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        elapsed = time.time() - start
+        print(f"== {step.label}: FAIL timeout after {elapsed:.0f}s ==", flush=True)
+        return False
     elapsed = time.time() - start
     status = "PASS" if result.returncode == 0 else "FAIL"
     print(f"== {step.label}: {status} ({elapsed:.0f}s) ==", flush=True)

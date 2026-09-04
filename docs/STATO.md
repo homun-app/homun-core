@@ -1,6 +1,6 @@
 # Stato - Homun (documento vivo)
 
-> **Ultimo aggiornamento: 2026-08-26 (PR #406 RC readiness verde: preflight temporale, bootstrap piano prima dei tool complessi, recovery sidebar fuori chat e fingerprint semantico browser verificati localmente; CI, release readiness e build installer macOS/Linux/Windows verdi; smoke live gateway/UI eseguiti su `electron:dev`).**
+> **Ultimo aggiornamento: 2026-09-04 (audit reale Homun `ok=true`, `errors=0`, `warnings=0`; chiusi stale streaming assistant, attribution modello storica e provenance memoria legacy con evidenza canonica/backups).**
 >
 > Hub: [`README.md`](README.md). Mappa codice: [`architecture/`](architecture/).
 > Archive stantia: [`archive/2026-07-31-doc-reset/`](archive/2026-07-31-doc-reset/).
@@ -218,6 +218,47 @@ Evidenza locale:
   `X6` MCP stdio scoped lifecycle -> `PASS X6: 0.8s`,
   `X7` long business checkpoint -> `PASS X7: 74.9s`,
   `S8` payment approval browser fixture -> `PASS S8: 61.7s`
+
+## Runtime/Memory Integrity Cleanup - 2026-09-04
+
+Slice locale su `main`: l'audit reale e' tornato pulito dopo aver chiuso gli
+ultimi codici residui con owner canonico verificato.
+
+Prima evidenza del giorno:
+
+- `streaming_assistant_without_active_run=2`
+- `agent_run_missing_model_attribution=23`
+- `legacy_memory_without_evidence=8`
+
+Azioni eseguite:
+
+- repair canonica `fail_stale_streaming_assistants` via gateway locale
+  aggiornato su `/api/integrity/repair/preview` e
+  `/api/integrity/repair/apply` (`estimated_rows=2`, backup runtime
+  `created=true`, `bytes=342970368`);
+- audit CLI e runtime allineati per attribution modello: `semantic_decision`
+  con `model/provider` vale come evidence di routing, `prompt_snapshot` system
+  con `acting as ...` vale come evidence di role, e failure pre-model senza
+  `prompt_snapshot`/`model_response` non sono gap di modello;
+- 8 memorie legacy senza evidence sono state collegate a eventi metadata-only
+  `legacy_memory_evidence_repair`, dopo backup manuale
+  `/Users/fabio/.homun/backups/integrity-memory/20260904T070446Z-legacy-evidence/memory.sqlite`
+  (`14049280` byte). La repair non ha inserito testo memoria negli eventi.
+
+Evidenza locale:
+
+- `python3 scripts/audit_homun_state.py --max-findings-per-code 200 --max-timeline-events 8`
+  -> `ok=true`, `errors=0`, `warnings=0`
+- `sqlite3 ~/.homun/memory.sqlite` -> 8 link
+  `memory_evidence.note='legacy metadata provenance repair'` e 8 eventi
+  `source='legacy_memory_evidence_repair'`
+- test mirati Python/Rust aggiunti per `semantic_decision`, role da
+  `prompt_snapshot` e failure pre-model senza invocazione modello
+- durante la verifica finale e' emerso 1 nuovo
+  `completed_turn_with_unreconciled_delivered_plan` su una chat reale recente;
+  preview/apply canonico `settle_completed_delivered_open_runtime_plans` ha
+  confermato e chiuso `estimated_rows=1`, con backup runtime `349192192` byte;
+  audit CLI successivo -> `ok=true`, `errors=0`, `warnings=0`
 - Smoke reale `S8` ha scoperto un residuo runtime: la cancellazione del thread
   passava ma lasciava il relativo `chat_turn` in `waiting_user_approval` senza
   approval/HITL canonico. Fix locale: `DELETE /api/chat/threads/{thread_id}`

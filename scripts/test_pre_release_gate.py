@@ -1,5 +1,7 @@
 import os
+import subprocess
 import unittest
+from unittest import mock
 
 import scripts.pre_release_gate as gate
 
@@ -71,8 +73,10 @@ class PreReleaseGateTests(unittest.TestCase):
         self.assertEqual(plan[3].cwd, gate.DESKTOP)
         self.assertEqual(plan[4].command, ["npm", "audit", "--audit-level=high"])
         self.assertEqual(plan[4].cwd, gate.DESKTOP)
+        self.assertEqual(plan[4].timeout_seconds, gate.NPM_AUDIT_TIMEOUT_SECONDS)
         self.assertEqual(plan[5].command, ["npm", "audit", "--audit-level=high"])
         self.assertEqual(plan[5].cwd, gate.BROWSER_AUTOMATION)
+        self.assertEqual(plan[5].timeout_seconds, gate.NPM_AUDIT_TIMEOUT_SECONDS)
         self.assertIn("capability tests", labels)
         self.assertIn("orchestrator tests", labels)
         self.assertIn("gateway tests", labels)
@@ -149,6 +153,18 @@ class PreReleaseGateTests(unittest.TestCase):
                 "ui contract",
             ],
         )
+
+    def test_step_timeout_fails_fast_instead_of_hanging_gate(self):
+        step = gate.Step("slow command", ["slow"], timeout_seconds=7)
+
+        with mock.patch("scripts.pre_release_gate.subprocess.run") as run:
+            run.side_effect = subprocess.TimeoutExpired(["slow"], 7)
+
+            ok = gate.run_step(step)
+
+        self.assertFalse(ok)
+        run.assert_called_once()
+        self.assertEqual(run.call_args.kwargs["timeout"], 7)
 
 
 if __name__ == "__main__":
