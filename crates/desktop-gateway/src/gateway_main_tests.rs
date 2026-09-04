@@ -26129,6 +26129,15 @@ async fn integrity_audit_reports_runtime_lifecycle_findings_without_content() {
             })
             .unwrap();
         store
+            .append_agent_run_event(
+                "run_runtime_integrity",
+                2,
+                Some(0),
+                "model_response",
+                &serde_json::json!({"status": "completed"}),
+            )
+            .unwrap();
+        store
             .insert_turn_event(
                 "turn_runtime_integrity",
                 local_first_task_runtime::TurnEventKind::Activity,
