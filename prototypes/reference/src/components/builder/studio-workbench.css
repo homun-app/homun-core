@@ -1,0 +1,5905 @@
+#homun-studio {
+  --ink: #23312f;
+  --muted: #78817b;
+  --line: #e6e8e1;
+  --paper: #fff;
+  --green: #dcebcf;
+  color: var(--ink);
+  background: #fafbf7;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  display: grid;
+  grid-template-columns: 76px 250px minmax(0, 1fr);
+  min-height: 100vh;
+  font-size: 14px;
+  line-height: 1.5;
+  color-scheme: light;
+}
+#homun-studio * {
+  box-sizing: border-box;
+}
+#homun-studio button {
+  cursor: pointer;
+  font: inherit;
+}
+#homun-studio button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+#homun-studio button:focus-visible,
+#homun-studio summary:focus-visible {
+  outline: 2px solid #63885a;
+  outline-offset: 4px;
+}
+#homun-studio input,
+#homun-studio textarea {
+  font: inherit;
+  color: var(--ink);
+  background: #fafbf8;
+  border: 1px solid #dce1d7;
+  border-radius: 10px;
+  padding: 12px;
+  width: 100%;
+  outline-color: #6d9462;
+}
+#homun-studio textarea {
+  min-height: 105px;
+  resize: vertical;
+}
+#homun-studio label {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  color: #6d7770;
+  margin: 20px 0;
+}
+#homun-studio h1,
+#homun-studio h2,
+#homun-studio h3,
+#homun-studio p {
+  margin: 0;
+}
+#homun-studio h1 {
+  font-size: 42px;
+  letter-spacing: -1.9px;
+  line-height: 1.16;
+  font-weight: 550;
+}
+#homun-studio h2 {
+  font-size: 20px;
+  letter-spacing: -0.5px;
+  font-weight: 550;
+}
+#homun-studio h3 {
+  font-size: 16px;
+  font-weight: 550;
+}
+#homun-studio svg {
+  flex-shrink: 0;
+}
+.st-rail {
+  background: #edf0e8;
+  border-right: 0;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  padding: 24px 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+.st-logo {
+  font-size: 38px !important;
+  line-height: 1;
+  font-weight: 850 !important;
+  letter-spacing: -5px;
+  padding-right: 6px;
+}
+.st-logo span {
+  color: #6b9661;
+  font-size: 24px;
+}
+.st-rail-links {
+  display: grid;
+  gap: 15px;
+  margin-top: 64px;
+}
+.st-rail button:not(.st-logo) {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  color: #8a938b;
+}
+.st-rail button.active {
+  color: #263f2e;
+  background: #fff;
+  box-shadow: 0 2px 5px #1d302509;
+}
+.st-rail-links svg {
+  width: 20px;
+}
+.st-rail-bottom {
+  margin-top: auto;
+  display: grid;
+  justify-items: center;
+  gap: 20px;
+}
+.st-user {
+  font-size: 10px;
+  border: 3px solid white;
+  background: #e0d7c7;
+  border-radius: 50%;
+  width: 33px;
+  height: 33px;
+  display: grid;
+  place-items: center;
+}
+.st-team {
+  background: #f4f6f0;
+  border-right: 0;
+  padding: 28px 18px;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+.st-workspace {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 6px;
+}
+.st-workspace > div {
+  flex: 1;
+}
+.st-workspace strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.st-workspace small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+}
+.st-workspace-icon {
+  width: 33px;
+  height: 33px;
+  display: grid;
+  place-items: center;
+  background: #e7eadd;
+  border: 1px solid #d9dfcf;
+  border-radius: 10px;
+  font-family: Georgia, serif;
+  font-size: 22px;
+}
+.st-team-title {
+  margin: 48px 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 9px;
+  letter-spacing: 1.6px;
+  color: #939b90;
+}
+.st-person {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+  text-align: left;
+  border-radius: 12px;
+  padding: 12px 10px;
+  width: 100%;
+  margin-bottom: 5px;
+}
+.st-person:hover,
+.st-person.selected {
+  background: #fff;
+  box-shadow: 0 4px 16px #24302604;
+}
+.st-person > span:nth-child(2) {
+  flex: 1;
+}
+.st-person strong {
+  display: block;
+  font-weight: 550;
+  font-size: 13px;
+}
+.st-person small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.st-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #85a97a;
+}
+.st-dot.amber {
+  background: #c49b67;
+}
+.st-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 15px 10px !important;
+  font-size: 11px !important;
+  color: #6a756c;
+}
+.st-face {
+  width: 82px;
+  height: 82px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 28px;
+  box-shadow: inset 0 2px 8px #ffffff90;
+}
+.st-face.mint {
+  background: linear-gradient(135deg, #dbf4c8, #b8d8ad);
+}
+.st-face.lilac {
+  background: linear-gradient(135deg, #ebe0ff, #d0bfea);
+}
+.st-face.peach {
+  background: linear-gradient(135deg, #ffe6ce, #f0c3a3);
+}
+.st-face.small {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+}
+.st-eyes {
+  display: flex;
+  gap: 10px;
+  transform: rotate(-7deg) translateY(-3px);
+}
+.st-eyes i {
+  height: 12px;
+  width: 5px;
+  border-radius: 5px;
+  background: #30423b;
+}
+.st-smile {
+  position: absolute;
+  width: 12px;
+  height: 5px;
+  border-bottom: 2px solid #30423b;
+  border-radius: 50%;
+  bottom: 22px;
+  left: 36px;
+  transform: rotate(-7deg);
+}
+.small .st-eyes {
+  gap: 5px;
+  transform: rotate(-7deg);
+}
+.small .st-eyes i {
+  height: 7px;
+  width: 3px;
+}
+.small .st-smile {
+  display: none;
+}
+.st-side-note {
+  margin-top: auto;
+  padding: 28px 12px;
+  color: #697766;
+}
+.st-mini-stack {
+  display: flex;
+  padding-left: 4px;
+  margin-bottom: 18px;
+}
+.st-mini-stack .st-face {
+  border: 3px solid #f4f6f0;
+  margin-left: -5px;
+}
+.st-side-note h3 {
+  font-family: Georgia, serif;
+  font-size: 18px !important;
+  line-height: 1.35;
+}
+.st-side-note p {
+  font-size: 11px;
+  line-height: 1.8;
+  margin-top: 10px !important;
+  color: #92998e;
+}
+.st-demo-label {
+  font-size: 9px;
+  border-top: 0;
+  padding: 20px 10px 0;
+  color: #939b90;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.st-demo-label span,
+.st-local span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #8fa683;
+  display: inline-block;
+}
+.st-main {
+  min-width: 0;
+}
+.st-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 78px;
+  border-bottom: 0;
+  padding: 0 42px;
+  font-size: 11px;
+  color: #91998f;
+}
+.st-topbar b {
+  font-weight: 500;
+  color: #44513f;
+}
+.st-topbar > div {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+}
+.st-slash {
+  margin: 0 12px;
+  color: #c9cec3;
+}
+.st-local {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+}
+.st-icon {
+  display: inline-grid;
+  place-items: center;
+  padding: 6px;
+  border-radius: 8px;
+}
+.st-content {
+  max-width: 1250px;
+  margin: auto;
+  padding: 44px 42px 25px;
+}
+.st-eyebrow {
+  display: block;
+  font-size: 9px;
+  font-weight: 550;
+  letter-spacing: 1.65px;
+  color: #88917e;
+  margin-bottom: 14px;
+}
+.st-greeting {
+  display: flex;
+  justify-content: space-between;
+  gap: 25px;
+  align-items: center;
+  margin-bottom: 32px;
+}
+.st-greeting h1 span {
+  color: #8c9787;
+}
+.st-greeting p {
+  font-size: 12px;
+  color: #85907e;
+  margin-top: 16px !important;
+}
+.st-date {
+  min-width: 90px;
+  text-align: center;
+  border-left: 0;
+  padding-left: 24px;
+}
+.st-date span {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: #8b9385;
+}
+.st-date strong {
+  font-size: 40px;
+  font-weight: 350;
+  line-height: 1.35;
+}
+.st-date small {
+  display: block;
+  font-size: 8px;
+  color: #979e92;
+}
+.st-feature {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  overflow: hidden;
+  border: 1px solid #dfe7d4;
+  border-radius: 18px;
+  background: linear-gradient(115deg, #eaf0df, #eff2e5 60%, #e1ebd7);
+  min-height: 290px;
+}
+.st-feature-copy {
+  padding: 30px 32px;
+  position: relative;
+  z-index: 2;
+}
+.st-feature-tag {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 8px;
+  letter-spacing: 1.1px;
+  color: #6c835d;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+.st-feature-tag > span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #7c995f;
+}
+.st-feature h2 {
+  font-size: 30px !important;
+  letter-spacing: -1.1px !important;
+  line-height: 1.18;
+}
+.st-feature p {
+  font-size: 11px;
+  line-height: 1.8;
+  color: #77876b;
+  margin: 14px 0 20px !important;
+}
+.st-btn {
+  border-radius: 9px;
+  display: inline-flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: center;
+  padding: 11px 16px;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+}
+.st-btn.dark {
+  background: #263d31;
+  color: #fff;
+  box-shadow: 0 2px 4px #12251a16;
+}
+.st-btn.dark:hover {
+  background: #395541;
+}
+.st-fiction {
+  display: block;
+  font-size: 8px;
+  color: #9aa48e;
+  margin-top: 12px;
+}
+.st-feature-art {
+  position: relative;
+  min-height: 280px;
+}
+.st-orbit {
+  border: 1px solid #ced9bd;
+  border-radius: 50%;
+  position: absolute;
+  left: 50%;
+  top: 47%;
+  transform: translate(-50%, -50%);
+}
+.orbit-one {
+  width: 190px;
+  height: 190px;
+}
+.orbit-two {
+  width: 275px;
+  height: 275px;
+  border-style: dashed;
+  opacity: 0.65;
+}
+.st-art-core {
+  position: absolute;
+  top: 47%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-8deg);
+  padding: 14px;
+  background: #ffffff70;
+  border: 1px solid #fff;
+  border-radius: 37px;
+  box-shadow: 0 18px 30px #49633513;
+}
+.st-art-core .st-face {
+  width: 82px;
+  height: 82px;
+}
+.st-art-label {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #fdfefb;
+  background: #ffffffbf;
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-size: 10px;
+  z-index: 2;
+  box-shadow: 0 5px 20px #45533608;
+}
+.label-log {
+  left: 7%;
+  top: 22%;
+  transform: rotate(-9deg);
+}
+.label-task {
+  right: 9%;
+  top: 15%;
+  transform: rotate(7deg);
+}
+.label-context {
+  right: 2%;
+  top: 57%;
+  transform: rotate(5deg);
+}
+.st-art-result {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border-radius: 10px;
+  padding: 11px 14px;
+  left: 25%;
+  bottom: 11%;
+  font-size: 10px;
+  box-shadow: 0 8px 16px #4553360b;
+}
+.st-art-result > span {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  background: #e7efd9;
+  border-radius: 50%;
+  color: #668054;
+}
+.st-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 32px 0 16px;
+  gap: 15px;
+}
+.st-section-head h2 {
+  font-size: 17px !important;
+}
+.st-section-head h2 > span {
+  font-size: 10px;
+  margin-left: 7px;
+  padding: 3px 6px;
+  background: #edf0e8;
+  border-radius: 6px;
+  color: #7e8c74;
+}
+.st-segment {
+  display: flex;
+  gap: 3px;
+  background: #f0f2ec;
+  padding: 3px;
+  border-radius: 8px;
+}
+.st-segment button {
+  font-size: 10px !important;
+  padding: 5px 12px;
+  border-radius: 6px;
+  color: #939c8b;
+}
+.st-segment .active {
+  background: #fff;
+  color: #42533b;
+  box-shadow: 0 1px 4px #23312f09;
+}
+.st-job-list {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+}
+.st-job {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 16px;
+  padding: 19px 22px;
+  text-align: left;
+  border-bottom: 0;
+}
+.st-job:last-child {
+  border-bottom: 0;
+}
+.st-job:hover {
+  background: #f9fbf5;
+}
+.st-job-copy {
+  flex: 1;
+  min-width: 0;
+}
+.st-job-copy strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 550;
+  margin: 3px 0;
+}
+.st-job-copy small {
+  display: block;
+  font-size: 10px;
+  color: #929a8b;
+}
+.st-job-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 9px;
+  color: #859478;
+}
+.st-job-meta i {
+  height: 3px;
+  width: 3px;
+  background: #b2bea8;
+  border-radius: 50%;
+}
+.st-job-arrow {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #e6ebdf;
+  border-radius: 50%;
+  color: #607451;
+}
+.st-bottom-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  margin-top: 28px;
+  gap: 24px;
+}
+.st-bottom-grid > section {
+  padding: 20px 0;
+}
+.st-bottom-grid .st-eyebrow {
+  font-size: 8px;
+  margin-bottom: 10px;
+}
+.st-bottom-grid h3 {
+  font-size: 16px;
+}
+.st-flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 17px 0;
+}
+.st-flow > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 9px;
+  color: #7c8a70;
+}
+.st-flow b {
+  font-size: 8px;
+  font-weight: 400;
+  border: 1px solid #dbe3d1;
+  border-radius: 50%;
+  width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+}
+.st-text-link {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px !important;
+  color: #546b43;
+}
+.st-cost {
+  border-left: 0;
+  padding-left: 25px !important;
+}
+.st-cost p {
+  font-size: 11px;
+  color: #8e9984;
+  margin: 10px 0 !important;
+}
+.st-footer {
+  padding: 20px 42px;
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  font-size: 9px;
+  color: #9aa293;
+}
+.st-footer > span:first-child {
+  font-size: 15px;
+  letter-spacing: -0.7px;
+  color: #718164;
+}
+.st-footer b {
+  font-weight: 400;
+  color: #a8b09f;
+}
+.st-notice {
+  margin: 15px 42px 0;
+  padding: 12px 16px;
+  background: #eaf0df;
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+.st-back {
+  font-size: 11px !important;
+  color: #819175;
+  margin-bottom: 25px;
+}
+.st-detail-title {
+  max-width: 780px;
+}
+.st-detail-title h1 {
+  font-size: 36px !important;
+}
+.st-detail-title > p,
+.st-intro {
+  font-size: 13px;
+  color: #829078;
+  margin: 18px 0 30px !important;
+}
+.st-review-grid {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 22px;
+}
+.st-paper {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 15px;
+  padding: 26px;
+}
+.st-plan {
+  margin: 22px 0;
+}
+.st-plan > div {
+  display: flex;
+  gap: 17px;
+  align-items: flex-start;
+  border-bottom: 0;
+  padding: 17px 0;
+}
+.st-plan > div > span {
+  color: #9aaa8f;
+  font-size: 11px;
+  padding-top: 2px;
+}
+.st-plan p {
+  font-size: 13px;
+  line-height: 1.7;
+}
+.st-approval {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  background: #f3f6ec;
+  border-radius: 11px;
+  padding: 15px;
+}
+.st-approval > p {
+  flex: 1;
+  font-size: 11px;
+}
+.st-approval small {
+  color: #8b977f;
+  font-size: 9px;
+}
+.st-context {
+  padding: 10px;
+}
+.st-context > p {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #839079;
+  margin: 12px 0 30px !important;
+}
+.st-context details {
+  border-bottom: 0;
+}
+.st-context summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 15px 0;
+  cursor: pointer;
+  font-size: 11px;
+}
+.st-context summary svg:last-child {
+  margin-left: auto;
+}
+.st-context details p {
+  font-size: 11px;
+  color: #85917c;
+  padding-bottom: 15px;
+  line-height: 1.8;
+}
+.st-profile {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  margin: 5px 0 35px;
+}
+.st-profile > div {
+  max-width: 650px;
+}
+.st-profile .st-eyebrow {
+  margin-bottom: 8px;
+}
+.st-profile h1 {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.st-profile-role {
+  font-size: 11px;
+  letter-spacing: 0;
+  color: #8e9a83;
+  font-weight: 400;
+}
+.st-profile p {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #87947c;
+  margin-top: 10px !important;
+}
+.st-tabs {
+  display: flex;
+  border-bottom: 0;
+  gap: 28px;
+  margin-bottom: 28px;
+}
+.st-tabs button {
+  font-size: 12px !important;
+  color: #92a086;
+  padding: 14px 0;
+  border-bottom: 0;
+}
+.st-tabs .active {
+  border-bottom-color: #587c43;
+  color: #384f2e;
+}
+.st-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 15px 0;
+}
+.st-tools > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #e5eadc;
+  border-radius: 7px;
+  padding: 6px 9px;
+  font-size: 10px;
+  color: #70835f;
+  background: #f9fbf5;
+}
+.st-muted {
+  font-size: 11px;
+  color: #929e86;
+}
+.st-toolbox {
+  margin-top: 22px;
+}
+.st-editor summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #768a64;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 10px 0;
+}
+.st-soft-note {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 11px;
+  padding: 16px;
+  background: #f2f6ea;
+  border-radius: 10px;
+  margin-top: 20px;
+  color: #70855e;
+}
+.st-settings {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+}
+.st-chat-greeting {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: #829274;
+  max-width: 600px;
+}
+.st-chat form {
+  display: flex;
+  gap: 10px;
+  margin-top: 35px;
+}
+.st-note-bubble {
+  margin: 20px 0 0 auto;
+  max-width: 80%;
+  padding: 15px;
+  background: #edf3e4;
+  border-radius: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.st-note-bubble small {
+  display: block;
+  font-size: 9px;
+  color: #859674;
+  margin-top: 5px;
+}
+.st-empty {
+  text-align: center;
+  padding: 45px 20px;
+}
+.st-empty > svg {
+  margin: auto;
+  color: #a1b190;
+}
+.st-empty h2 {
+  margin: 16px 0 10px !important;
+}
+.st-empty p {
+  color: #89977c;
+  font-size: 12px;
+  margin-bottom: 22px !important;
+}
+.st-library-item {
+  padding: 22px;
+  border-bottom: 0;
+}
+.st-library-item summary {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  cursor: pointer;
+}
+.st-library-item strong {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+}
+.st-library-item p {
+  font-size: 12px;
+  line-height: 1.9;
+  color: #7d8d70;
+  margin-top: 20px !important;
+}
+.st-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: #17231855;
+  backdrop-filter: blur(8px);
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  overflow-y: auto;
+}
+.st-modal {
+  position: relative;
+  background: #fafbf7;
+  border: 1px solid white;
+  box-shadow: 0 25px 120px #12211633;
+  border-radius: 24px;
+  padding: 38px;
+  max-width: 530px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.st-modal-close {
+  position: absolute;
+  right: 22px;
+  top: 22px;
+}
+.st-modal h2 {
+  font-size: 36px !important;
+  line-height: 1.1;
+  letter-spacing: -1.5px !important;
+}
+.st-modal > p {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #849577;
+  margin: 18px 0 !important;
+}
+.st-presets {
+  display: grid;
+  gap: 7px;
+  margin: 20px 0;
+}
+.st-presets button {
+  font-size: 11px !important;
+  text-align: left;
+  border: 1px solid #e0e8d6;
+  padding: 11px 13px;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.st-presets button:hover {
+  background: #eef4e5;
+}
+.st-modal > small {
+  display: block;
+  margin-top: 17px;
+  color: #9ba78f;
+  font-size: 9px;
+}
+@media (min-width: 1600px) {
+  .st-content {
+    padding-top: 58px;
+  }
+  .st-feature {
+    min-height: 330px;
+  }
+  .st-feature-copy {
+    padding: 40px;
+  }
+  .st-feature-art {
+    min-height: 330px;
+  }
+}
+@media (max-width: 1200px) {
+  #homun-studio {
+    grid-template-columns: 64px 210px minmax(0, 1fr);
+  }
+  .st-team {
+    padding: 25px 10px;
+  }
+  .st-content {
+    padding: 30px 28px;
+  }
+  .st-topbar {
+    padding: 0 28px;
+  }
+  .st-greeting h1 {
+    font-size: 34px !important;
+  }
+  .st-feature-copy {
+    padding: 26px;
+  }
+  .st-feature h2 {
+    font-size: 26px !important;
+  }
+  .st-feature-art {
+    transform: scale(0.9);
+  }
+  .st-date {
+    display: none;
+  }
+  .st-flow {
+    gap: 5px;
+  }
+  .st-review-grid {
+    grid-template-columns: 1fr;
+  }
+  .st-context {
+    padding: 15px;
+  }
+}
+@media (max-width: 900px) {
+  #homun-studio {
+    grid-template-columns: 60px minmax(0, 1fr);
+  }
+  .st-team {
+    display: none;
+  }
+  .st-main {
+    grid-column: 2;
+  }
+  .st-content {
+    padding: 28px 24px;
+  }
+  .st-feature-art {
+    transform: none;
+  }
+  .st-feature {
+    grid-template-columns: 1.2fr 1fr;
+  }
+  .st-settings {
+    grid-template-columns: 1fr;
+  }
+  .st-profile h1 {
+    font-size: 34px !important;
+  }
+  .st-rail-links {
+    margin-top: 40px;
+  }
+}
+@media (max-width: 600px) {
+  #homun-studio {
+    grid-template-columns: 1fr;
+  }
+  .st-rail {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    height: 62px;
+    flex-direction: row;
+    justify-content: space-around;
+    padding: 8px 15px;
+    z-index: 30;
+    border-top: 0;
+  }
+  .st-rail-links {
+    display: flex;
+    gap: 25px;
+    margin: 0;
+  }
+  .st-rail-bottom {
+    display: none;
+  }
+  .st-logo {
+    font-size: 30px !important;
+  }
+  .st-main {
+    grid-column: 1;
+    padding-bottom: 65px;
+  }
+  .st-topbar {
+    height: 57px;
+    padding: 0 22px;
+  }
+  .st-topbar > div {
+    gap: 15px;
+  }
+  .st-content {
+    padding: 28px 20px;
+  }
+  .st-greeting {
+    margin-bottom: 24px;
+  }
+  .st-greeting h1 {
+    font-size: 32px !important;
+    letter-spacing: -1.3px !important;
+  }
+  .st-greeting p {
+    line-height: 1.8;
+  }
+  .st-eyebrow {
+    font-size: 8px;
+  }
+  .st-feature {
+    grid-template-columns: 1fr;
+  }
+  .st-feature-art {
+    display: none;
+  }
+  .st-feature-copy {
+    padding: 26px;
+  }
+  .st-section-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 26px;
+  }
+  .st-job {
+    padding: 17px 14px;
+    gap: 11px;
+  }
+  .st-job-copy strong {
+    font-size: 12px;
+  }
+  .st-job-copy small {
+    font-size: 9px;
+  }
+  .st-job-arrow {
+    width: 26px;
+    height: 26px;
+    flex-shrink: 0;
+  }
+  .st-bottom-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .st-cost {
+    border-left: 0;
+    border-top: 0;
+    padding-left: 0 !important;
+  }
+  .st-footer {
+    padding: 15px 20px;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .st-profile {
+    align-items: flex-start;
+    gap: 15px;
+  }
+  .st-profile .st-face {
+    width: 55px;
+    height: 55px;
+    border-radius: 20px;
+  }
+  .st-profile .st-smile {
+    display: none;
+  }
+  .st-profile h1 {
+    gap: 5px;
+    display: grid;
+  }
+  .st-profile-role {
+    font-size: 10px;
+  }
+  .st-tabs {
+    gap: 17px;
+    overflow-x: auto;
+  }
+  .st-tabs button {
+    white-space: nowrap;
+    font-size: 11px !important;
+  }
+  .st-paper {
+    padding: 20px;
+  }
+  .st-chat form {
+    flex-direction: column;
+  }
+  .st-modal {
+    padding: 28px 22px;
+  }
+  .st-modal h2 {
+    font-size: 30px !important;
+  }
+  .st-notice {
+    margin: 12px 20px;
+    font-size: 11px;
+  }
+  .st-detail-title h1 {
+    font-size: 30px !important;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .st-job,
+  .st-person,
+  .st-btn {
+    transition:
+      background 0.2s,
+      transform 0.2s;
+  }
+  .st-btn:hover {
+    transform: translateY(-1px);
+  }
+  .st-art-core {
+    animation: st-float 6s ease-in-out infinite;
+  }
+  @keyframes st-float {
+    50% {
+      transform: translate(-50%, -56%) rotate(-4deg);
+    }
+  }
+}
+
+/* Studio refinement: quieter hierarchy, readable supporting text, consistent controls. */
+#homun-studio {
+  --muted: #687461;
+}
+#homun-studio .st-person small {
+  font-size: 11px;
+  color: #707b69;
+}
+#homun-studio .st-team-title {
+  color: #747f6c;
+}
+#homun-studio .st-greeting p {
+  font-size: 13px;
+  color: #6d7b62;
+}
+#homun-studio .st-feature p {
+  font-size: 12px;
+  color: #647657;
+}
+#homun-studio .st-fiction {
+  font-size: 10px;
+  color: #6c7c60;
+}
+#homun-studio .st-job-copy strong {
+  font-size: 14px;
+  line-height: 1.55;
+}
+#homun-studio .st-job-copy small {
+  font-size: 11px;
+  color: #738269;
+}
+#homun-studio .st-job-meta {
+  font-size: 10px;
+  color: #697e5c;
+}
+#homun-studio .st-job {
+  padding-top: 20px;
+  padding-bottom: 20px;
+}
+#homun-studio .st-muted,
+#homun-studio .st-profile p {
+  color: #6f7e62;
+  font-size: 12px;
+}
+#homun-studio .st-btn {
+  min-height: 40px;
+  font-size: 12px !important;
+}
+#homun-studio .st-tools > span {
+  font-size: 11px;
+}
+#homun-studio .st-topbar {
+  color: #73806a;
+}
+#homun-studio .st-topbar .st-local {
+  font-size: 11px;
+}
+#homun-studio .st-context details p {
+  font-size: 12px;
+  color: #65785a;
+}
+#homun-studio .st-context summary {
+  font-size: 12px;
+}
+#homun-studio .st-context details[open] summary {
+  color: #3f6332;
+}
+#homun-studio .st-context details[open] summary svg:last-child {
+  transform: rotate(45deg);
+}
+#homun-studio .st-editor[open] {
+  padding: 12px 16px;
+  border: 1px solid #e3ead9;
+  border-radius: 12px;
+  background: #fafcf7;
+}
+#homun-studio .st-modal > small {
+  font-size: 11px;
+  line-height: 1.7;
+  color: #778769;
+}
+#homun-studio .st-feature-art {
+  pointer-events: none;
+}
+#homun-studio .st-cost p {
+  color: #6e7f61;
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  #homun-studio .st-job-copy strong {
+    font-size: 13px;
+  }
+  #homun-studio .st-job-copy small {
+    font-size: 10px;
+  }
+  #homun-studio .st-section-head h2 > span {
+    display: inline-block;
+    margin-top: 5px;
+  }
+  #homun-studio .st-rail {
+    height: calc(62px + env(safe-area-inset-bottom));
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  }
+  #homun-studio .st-main {
+    padding-bottom: calc(65px + env(safe-area-inset-bottom));
+  }
+  #homun-studio .st-profile-role {
+    line-height: 1.7;
+  }
+}
+/* Daily work and shared projects. */
+#homun-studio .st-feature {
+  min-height: 0;
+  grid-template-columns: 1fr;
+  background: #eef3e6;
+}
+#homun-studio .st-feature-copy {
+  padding: 22px 26px;
+}
+#homun-studio .st-feature-art {
+  display: none;
+}
+#homun-studio .st-feature h2 {
+  font-size: 22px !important;
+}
+#homun-studio .st-feature h2 br,
+#homun-studio .st-feature p br {
+  display: none;
+}
+#homun-studio .st-feature h2 br:after,
+#homun-studio .st-feature p br:after {
+  content: " ";
+}
+#homun-studio .st-feature-tag {
+  margin-bottom: 10px;
+}
+#homun-studio .st-feature p {
+  margin: 10px 0 14px !important;
+}
+#homun-studio .st-greeting h1 {
+  font-size: 36px;
+}
+#homun-studio .st-bottom-grid {
+  display: none;
+}
+.st-project-members {
+  display: block;
+  margin-top: 8px;
+  color: #567847;
+  font-size: 11px;
+}
+.st-project-people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 25px;
+}
+.st-project-people button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid #dfe7d6;
+  border-radius: 20px;
+  background: white;
+  font-size: 12px !important;
+}
+.st-project-section {
+  margin-bottom: 22px;
+}
+#homun-studio .st-member-picks label {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid #e3eadc;
+  border-radius: 10px;
+  padding: 14px;
+  margin: 10px 0;
+}
+#homun-studio .st-member-picks input,
+#homun-studio .st-member-toggle input {
+  width: 17px;
+  height: 17px;
+  margin-top: 3px;
+  accent-color: #527143;
+}
+.st-member-picks strong {
+  display: block;
+  color: #33452c;
+  font-size: 13px;
+}
+.st-member-picks small {
+  display: block;
+  color: #7c8c6e;
+  line-height: 1.6;
+  margin-top: 5px;
+}
+#homun-studio .st-member-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: #34492c;
+}
+.st-assignment {
+  border-bottom: 0;
+  padding-bottom: 12px;
+  margin-bottom: 20px;
+}
+.st-handoff {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 25px 0;
+}
+.st-handoff > span {
+  flex: 1;
+  min-width: 135px;
+  border: 1px solid #e2ead8;
+  border-radius: 12px;
+  padding: 16px;
+  font-size: 12px;
+  background: #f9fbf5;
+}
+.st-handoff b {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  margin-top: 6px;
+  color: #526e41;
+}
+@media (max-width: 600px) {
+  .st-handoff {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .st-handoff > svg {
+    transform: rotate(90deg);
+    align-self: center;
+  }
+  #homun-studio .st-feature h2 {
+    line-height: 1.5;
+  }
+  .st-project-people button {
+    min-height: 40px;
+  }
+}
+#homun-studio .st-project-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  padding: 15px 10px;
+  margin-top: 20px;
+  border-top: 0;
+  border-bottom: 0;
+  color: #536d44;
+  width: 100%;
+}
+#homun-studio .st-project-entry > span {
+  flex: 1;
+}
+#homun-studio .st-project-entry strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 550;
+}
+#homun-studio .st-project-entry small {
+  display: block;
+  font-size: 10px;
+  margin-top: 3px;
+  color: #79896d;
+}
+#homun-studio .st-project-entry:hover,
+#homun-studio .st-project-entry.active {
+  background: #e9f0e0;
+  border-radius: 10px;
+}
+#homun-studio .st-rail-links button:has(.st-nav-caption) {
+  height: 53px;
+  gap: 1px;
+  padding: 6px 0;
+  width: 52px;
+}
+#homun-studio .st-nav-caption {
+  font-size: 9px;
+  line-height: 1.2;
+  color: #546d46;
+}
+/* Marketplace: capabilities shared with collaborators. */
+#homun-studio .st-market-entry {
+  margin-top: 8px;
+  border-top: 0;
+}
+.st-market-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 26px 0 18px;
+}
+#homun-studio .st-market-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  max-width: 310px;
+  width: 100%;
+  background: white;
+  border: 1px solid #dfe6d7;
+  border-radius: 10px;
+  padding: 0 12px;
+}
+#homun-studio .st-market-search input {
+  border: 0;
+  background: transparent;
+  padding: 11px 0;
+}
+.st-market-categories {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.st-market-categories button {
+  font-size: 11px !important;
+  border-radius: 20px;
+  padding: 7px 13px;
+  color: #7b896e;
+  border: 1px solid transparent;
+}
+.st-market-categories .active {
+  background: #e7efdc;
+  color: #476337;
+  border-color: #d9e4cc;
+}
+.st-plugin-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.st-plugin-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: left;
+  padding: 22px;
+  background: #fff;
+  border: 1px solid #e2e8da;
+  border-radius: 15px;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+.st-plugin-card:hover {
+  border-color: #a9bf95;
+  box-shadow: 0 7px 22px #29421c08;
+}
+.st-plugin-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 22px;
+  color: #9baa8e;
+}
+.st-plugin-icon {
+  width: 47px;
+  height: 47px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 14px;
+  flex-shrink: 0;
+  color: #526c43;
+}
+.st-plugin-icon.mint {
+  background: #e5efdb;
+}
+.st-plugin-icon.blue {
+  background: #e4ecf7;
+  color: #55769b;
+}
+.st-plugin-icon.lilac {
+  background: #efe6f6;
+  color: #887098;
+}
+.st-plugin-icon.peach {
+  background: #f9eadd;
+  color: #a78660;
+}
+#homun-studio .st-plugin-card h2 {
+  font-size: 17px;
+}
+.st-plugin-card > p {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #78886a;
+  margin: 10px 0 25px !important;
+  flex: 1;
+}
+.st-plugin-card-bottom {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 9px;
+  color: #8a987d;
+  border-top: 0;
+  padding-top: 14px;
+}
+.st-plugin-card-bottom > span:last-child {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  color: #658153;
+}
+.st-plugin-added {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: #6c8859;
+}
+.st-market-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #869679;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.st-plugin-header {
+  display: flex;
+  gap: 22px;
+  align-items: center;
+  margin-bottom: 25px;
+}
+.st-plugin-header > .st-plugin-icon {
+  width: 70px;
+  height: 70px;
+  border-radius: 20px;
+}
+.st-plugin-header .st-intro {
+  margin: 12px 0 0 !important;
+}
+.st-plugin-description {
+  font-size: 13px;
+  line-height: 1.9;
+  color: #78866b;
+  margin-top: 18px !important;
+}
+@media (max-width: 1200px) {
+  .st-plugin-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .st-plugin-grid {
+    grid-template-columns: 1fr;
+  }
+  .st-market-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 15px;
+  }
+  .st-market-toolbar > .st-segment {
+    align-self: flex-start;
+  }
+  #homun-studio .st-market-search {
+    max-width: none;
+  }
+  .st-plugin-header {
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .st-plugin-header h1 {
+    font-size: 31px !important;
+  }
+  #homun-studio .st-rail-links {
+    gap: 12px;
+  }
+}
+/* Access settings: people, project sharing and bot policy. */
+#homun-studio select {
+  width: 100%;
+  border: 1px solid #dce4d2;
+  border-radius: 9px;
+  background: #fafcf7;
+  padding: 11px;
+  color: #405936;
+  font: inherit;
+}
+#homun-studio input[type="checkbox"] {
+  accent-color: #547344;
+}
+.st-access-form,
+.st-access-list,
+.st-access-help {
+  margin-top: 24px;
+}
+.st-access-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 0;
+  border-bottom: 0;
+  flex-wrap: wrap;
+}
+.st-access-row:last-child {
+  border-bottom: 0;
+}
+.st-access-avatar {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #e9efdf;
+  color: #758963;
+  flex-shrink: 0;
+}
+.st-access-person {
+  flex: 1;
+  min-width: 170px;
+}
+.st-access-person strong,
+.st-access-person small,
+.st-access-person > span {
+  display: block;
+}
+.st-access-person small {
+  font-size: 11px;
+  color: #7d8e6d;
+  margin: 3px 0;
+}
+#homun-studio .st-access-row > label {
+  margin: 0;
+  min-width: 170px;
+}
+.st-role-fixed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #758866;
+  font-size: 12px;
+}
+.st-access-help > summary {
+  cursor: pointer;
+  font-size: 14px;
+}
+.st-role-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  margin: 24px 0;
+}
+.st-role-grid p {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #7b8c6c;
+  margin-top: 7px !important;
+}
+.st-sharing-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(200px, 2fr);
+  gap: 22px;
+  padding: 22px 0;
+  border-bottom: 0;
+}
+.st-sharing-row small {
+  display: block;
+  color: #8a997b;
+  font-size: 11px;
+  margin-top: 5px;
+}
+#homun-studio .st-sharing-row label {
+  margin: 0 0 12px;
+}
+.st-permission-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 15px 0;
+}
+#homun-studio .st-permission-checks label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 10px;
+  background: #f4f7ee;
+  border-radius: 8px;
+  font-size: 12px;
+}
+#homun-studio .st-permission-checks input {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+}
+.st-bot-access {
+  grid-column: 1/-1;
+}
+.st-access-shortcut {
+  display: none !important;
+}
+@media (max-width: 900px) {
+  .st-access-shortcut {
+    display: inline-grid !important;
+  }
+}
+@media (max-width: 600px) {
+  .st-sharing-row {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .st-role-grid {
+    grid-template-columns: 1fr;
+  }
+  #homun-studio .st-access-row > label {
+    width: 100%;
+  }
+  .st-access-person {
+    min-width: 140px;
+  }
+  #homun-studio .st-topbar > div {
+    gap: 6px;
+  }
+  .st-topbar .st-local {
+    display: none !important;
+  }
+}
+.st-file-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.st-file-actions > .st-btn:not(.dark) {
+  border: 1px solid #dfe7d5;
+  color: #637a51;
+}
+.st-file-path {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 20px 0;
+  color: #7b8e6b;
+  font-size: 12px;
+}
+.st-file-path > span {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+.st-file-path button:hover {
+  text-decoration: underline;
+}
+.st-files-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 22px;
+}
+.st-files-list {
+  min-width: 0;
+  flex: 1;
+}
+.st-file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 0;
+  padding: 15px 0;
+}
+.st-file-name {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  color: #698259;
+}
+.st-file-name strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: #3f5435;
+  overflow-wrap: anywhere;
+}
+.st-file-name small {
+  display: block;
+  color: #91a083;
+  font-size: 10px;
+  margin-top: 4px;
+}
+.st-file-permissions {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  color: #7e936a;
+  font-size: 10px !important;
+  border: 1px solid #e1e9d6;
+  border-radius: 7px;
+  padding: 7px;
+}
+.st-file-access {
+  width: 320px;
+  flex-shrink: 0;
+  background: #f7faf2;
+  border: 1px solid #e2e9d8;
+  border-radius: 12px;
+  padding: 20px;
+}
+.st-file-selected {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.st-file-principals {
+  display: grid;
+  gap: 12px;
+  margin: 20px 0;
+}
+#homun-studio .st-file-principals label {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin: 0;
+  font-size: 12px;
+}
+#homun-studio .st-file-principals input {
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+.st-file-principals small {
+  display: block;
+  font-size: 10px;
+  line-height: 1.6;
+  color: #899b77;
+}
+.st-folder-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.st-folder-form label {
+  flex: 1;
+  min-width: 180px;
+}
+@media (max-width: 1100px) {
+  .st-files-layout {
+    flex-direction: column;
+  }
+  .st-files-list,
+  .st-file-access {
+    width: 100%;
+  }
+}
+@media (max-width: 600px) {
+  .st-file-actions .st-btn {
+    font-size: 11px !important;
+    padding: 9px;
+  }
+  .st-file-row {
+    flex-wrap: wrap;
+  }
+  .st-file-access {
+    padding: 16px;
+  }
+}
+#homun-studio input.sr-only {
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  max-width: 1px;
+}
+.st-project-access-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+}
+.st-project-access-names {
+  font-size: 12px;
+  color: #5c774b;
+  margin-top: 12px !important;
+}
+@media (max-width: 600px) {
+  .st-project-access-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+/* One collapsible navigation surface, shared by desktop and mobile. */
+#homun-studio.st-sidebar-open {
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+#homun-studio.st-sidebar-closed {
+  grid-template-columns: minmax(0, 1fr);
+}
+#homun-studio .st-main {
+  grid-column: auto;
+  padding-bottom: 0;
+}
+#homun-studio .st-team {
+  display: flex;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  height: 100dvh;
+  min-height: 0;
+}
+#homun-studio .st-workspace {
+  flex-shrink: 0;
+}
+#homun-studio .st-team-title {
+  margin-top: 25px;
+}
+.st-sidebar-home {
+  display: grid;
+  gap: 6px;
+  margin: 28px 5px 0;
+}
+.st-sidebar-home button {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+  text-align: left;
+  padding: 10px;
+  border-radius: 9px;
+  color: #738569;
+  font-size: 12px !important;
+}
+.st-sidebar-home button.active,
+.st-sidebar-home button:hover {
+  background: #e8efdf;
+  color: #466439;
+}
+#homun-studio .st-topbar .st-breadcrumb {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  min-width: 0;
+}
+#homun-studio .st-breadcrumb > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+#homun-studio.st-sidebar-open #studio-menu-toggle {
+  display: none;
+}
+.st-sidebar-backdrop {
+  display: none;
+}
+@media (max-width: 900px) {
+  #homun-studio.st-sidebar-open,
+  #homun-studio.st-sidebar-closed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #homun-studio .st-team {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(285px, 85vw);
+    z-index: 45;
+    background: #f4f6f0;
+    box-shadow: 16px 0 50px #23312f15;
+    padding: 25px 18px;
+  }
+  #homun-studio .st-sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 44;
+    background: #26372b40;
+    backdrop-filter: blur(3px);
+  }
+  #homun-studio.st-sidebar-open #studio-menu-toggle {
+    display: inline-grid;
+  }
+  #homun-studio .st-side-note {
+    padding-top: 24px;
+  }
+}
+/* Oggi: decisions, current work and attributable cost. */
+.st-today-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 30px;
+}
+.st-today-header h1 {
+  font-size: 34px !important;
+}
+.st-today-header p {
+  font-size: 13px;
+  color: #7b8971;
+  margin-top: 12px !important;
+}
+.st-today-header p strong {
+  font-weight: 500;
+  color: #435b36;
+}
+.st-today-section {
+  margin-top: 28px;
+}
+.st-action-list {
+  border: 1px solid #dfe7d4;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+}
+.st-action-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 22px;
+  border-bottom: 0;
+}
+.st-action-row:last-child {
+  border-bottom: 0;
+}
+.st-action-row > div {
+  flex: 1;
+}
+.st-action-row small {
+  font-size: 10px;
+  color: #869775;
+}
+.st-action-row h3 {
+  font-size: 14px !important;
+  margin: 4px 0 !important;
+}
+.st-action-row p {
+  font-size: 12px;
+  color: #7c8e6d;
+}
+.st-action-row > .st-btn {
+  background: #edf3e4;
+  color: #4d6a3d;
+}
+.st-action-mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: #f7ecd6;
+  color: #a78646;
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.st-action-mark.neutral {
+  background: #edf1e5;
+  color: #728961;
+}
+#homun-studio .st-cost-period {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 11px;
+}
+.st-cost-period select {
+  font-size: 11px !important;
+  width: auto !important;
+}
+.st-team-table {
+  border: 1px solid #e2e8da;
+  border-radius: 14px;
+  background: white;
+  overflow: hidden;
+}
+.st-team-table-head,
+.st-team-table-row {
+  display: grid;
+  grid-template-columns: 1fr 1.6fr 1fr;
+  gap: 18px;
+  padding: 17px 22px;
+  align-items: center;
+}
+.st-team-table-head {
+  font-size: 10px;
+  color: #8a997b;
+  background: #f5f8ef;
+}
+.st-team-table-row {
+  border-top: 0;
+}
+.st-agent-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+.st-agent-link strong {
+  font-weight: 500;
+  font-size: 13px;
+}
+.st-team-table-row small {
+  display: block;
+  font-size: 10px;
+  color: #899a79;
+  margin-top: 5px;
+}
+.st-avatar-dot {
+  display: grid;
+  place-items: center;
+  width: 35px;
+  height: 35px;
+  background: #e5efda;
+  color: #6b8658;
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+.st-avatar-dot.vera {
+  background: #ebe2f4;
+  color: #87769c;
+}
+.st-avatar-dot.marta {
+  background: #f6e7d7;
+  color: #a38a6d;
+}
+.st-activity-link {
+  text-align: left;
+}
+.st-activity-link strong {
+  font-size: 12px;
+  font-weight: 400;
+  color: #607a4e;
+}
+.st-cost-link {
+  text-align: right;
+}
+.st-cost-link strong {
+  font-size: 14px;
+  font-weight: 550;
+  color: #4b653c;
+}
+.st-team-table-head > span:last-child {
+  text-align: right;
+}
+.st-cost-detail {
+  margin-top: 14px;
+}
+.st-cost-breakdown {
+  display: flex;
+  gap: 28px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+.st-cost-breakdown > span {
+  font-size: 11px;
+  color: #819373;
+}
+.st-cost-breakdown strong {
+  display: block;
+  color: #435d34;
+  font-size: 20px;
+  font-weight: 500;
+  margin-top: 7px;
+}
+.st-today-bottom {
+  margin-top: 28px;
+}
+.st-recent {
+  display: flex;
+  align-items: center;
+  text-align: left;
+  gap: 12px;
+  width: 100%;
+  padding: 16px 0;
+  border-bottom: 0;
+  color: #7f946e;
+}
+.st-recent > span {
+  flex: 1;
+  min-width: 0;
+}
+.st-recent strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: #4f6a3f;
+  overflow-wrap: anywhere;
+}
+.st-recent small {
+  display: block;
+  font-size: 10px;
+  color: #8d9c7f;
+  margin-top: 6px;
+}
+.st-assign-work {
+  margin: 22px 0;
+}
+.st-chat-context {
+  border: 1px solid #e3eadb;
+  background: #f9fbf5;
+  border-radius: 12px;
+  padding: 18px;
+  margin-top: 22px;
+}
+@media (max-width: 900px) {
+  .st-team-table-head {
+    display: none;
+  }
+  .st-team-table-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .st-activity-link {
+    grid-column: 1/-1;
+    grid-row: 2;
+  }
+  .st-cost-link {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .st-action-row {
+    flex-wrap: wrap;
+  }
+  .st-action-row > .st-btn {
+    margin-left: 46px;
+  }
+}
+@media (max-width: 600px) {
+  .st-today-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .st-action-row {
+    padding: 17px 15px;
+    gap: 12px;
+  }
+  .st-action-row > .st-btn {
+    margin-left: 42px;
+  }
+  .st-action-row > div {
+    min-width: 170px;
+  }
+  .st-team-table-row {
+    padding: 16px;
+  }
+  .st-today-header p {
+    line-height: 1.8;
+  }
+  .st-cost-link strong {
+    font-size: 13px;
+  }
+  .st-today-bottom {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Calendario e Kanban: gli stessi incarichi in due viste. */
+#homun-studio .st-schedule-toolbar {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 26px 0;
+}
+#homun-studio .st-schedule-toolbar label {
+  display: grid;
+  gap: 7px;
+  min-width: 150px;
+  font-size: 12px;
+  color: #687960;
+}
+#homun-studio .st-schedule-toolbar select,
+#homun-studio .st-schedule-toolbar input {
+  padding: 10px;
+  border: 1px solid #dce3d2;
+  border-radius: 9px;
+  background: #fafbf6;
+  color: #26382d;
+}
+#homun-studio .st-kanban {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(180px, 1fr));
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 16px;
+}
+#homun-studio .st-kanban-column {
+  background: #f0f3eb;
+  border-radius: 14px;
+  padding: 12px;
+  min-height: 310px;
+}
+#homun-studio .st-kanban-column h2 {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  margin: 4px 0 18px;
+}
+#homun-studio .st-kanban-column h2 span {
+  font-size: 12px;
+  color: #7a8771;
+}
+#homun-studio .st-kanban-column.blocked {
+  background: #f8f0e3;
+}
+#homun-studio .st-kanban-column.done {
+  background: #edf4e8;
+}
+#homun-studio .st-task-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #dfe5d7;
+  border-radius: 11px;
+  padding: 15px;
+  margin-bottom: 10px;
+  color: #27382e;
+  overflow-wrap: anywhere;
+}
+#homun-studio .st-task-card:hover {
+  border-color: #8d9f79;
+  box-shadow: 0 3px 12px #263c2310;
+}
+#homun-studio .st-task-card strong {
+  font-size: 14px;
+  line-height: 1.45;
+}
+#homun-studio .st-task-card small,
+#homun-studio .st-task-card > span {
+  font-size: 11px;
+  color: #6e7d65;
+  line-height: 1.5;
+}
+#homun-studio .st-blocked-label {
+  display: flex;
+  gap: 6px;
+  background: #fbf0dc;
+  padding: 8px;
+  border-radius: 7px;
+  color: #805c26 !important;
+  font-size: 12px;
+  align-items: flex-start;
+}
+#homun-studio .st-blocked-label small {
+  display: block;
+  color: #805c26;
+}
+#homun-studio .st-calendar-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(125px, 1fr));
+  overflow-x: auto;
+  border: 1px solid #dfe5d7;
+  border-radius: 14px;
+  background: #fff;
+}
+#homun-studio .st-calendar-week > section {
+  min-height: 310px;
+  padding: 8px;
+  border-right: 0;
+}
+#homun-studio .st-calendar-week > section.is-today {
+  background: #f2f7eb;
+}
+#homun-studio .st-day-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 10px 2px 16px;
+  color: #576c47;
+}
+#homun-studio .st-day-heading strong {
+  font-size: 22px;
+  margin-right: auto;
+}
+#homun-studio .st-day-heading span {
+  font-size: 11px;
+}
+#homun-studio .st-week-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 24px 0;
+}
+#homun-studio .st-week-heading h2 {
+  font-size: 17px;
+  flex: 1;
+  text-align: center;
+}
+#homun-studio .st-task-detail {
+  margin: 24px 0;
+  border-color: #bacaa6;
+}
+#homun-studio .st-task-detail .st-settings {
+  margin-top: 22px;
+}
+#homun-studio .st-step-edit {
+  padding: 15px 0;
+  border-bottom: 0;
+}
+#homun-studio .st-step-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+#homun-studio .st-step-check input {
+  width: 17px;
+  height: 17px;
+  accent-color: #647e4c;
+}
+#homun-studio .st-step-edit details {
+  margin: 10px 0 0 27px;
+  font-size: 12px;
+}
+#homun-studio .st-step-edit details label {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+}
+#homun-studio .st-step-add {
+  display: flex;
+  gap: 10px;
+  margin: 20px 0;
+}
+#homun-studio .st-step-add input {
+  min-width: 0;
+}
+#homun-studio .st-agenda {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 14px;
+}
+#homun-studio .st-assign-work details {
+  margin: 18px 0;
+}
+#homun-studio .st-assign-work p {
+  margin: 14px 0;
+}
+@media (max-width: 760px) {
+  #homun-studio .st-kanban {
+    grid-template-columns: repeat(5, 260px);
+  }
+  #homun-studio .st-calendar-week {
+    grid-template-columns: repeat(7, 220px);
+  }
+  #homun-studio .st-task-detail .st-section-head {
+    align-items: flex-start;
+  }
+  #homun-studio .st-step-add {
+    flex-direction: column;
+  }
+  #homun-studio .st-schedule-toolbar label {
+    min-width: 0;
+    flex: 1 1 140px;
+  }
+}
+
+#homun-studio .st-board-hint {
+  display: none;
+}
+@media (max-width: 760px) {
+  #homun-studio .st-board-hint {
+    display: block;
+    margin: 15px 0;
+  }
+}
+
+#homun-studio .st-home-switch {
+  display: flex;
+  gap: 4px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 5px;
+  margin: 0 0 28px;
+  background: #edf1e7;
+  border: 1px solid #dfe5d7;
+  border-radius: 12px;
+}
+#homun-studio .st-home-switch button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 8px;
+  color: #6c7b61;
+  font-size: 13px;
+}
+#homun-studio .st-home-switch button.active {
+  background: #fff;
+  color: #2c4433;
+  box-shadow: 0 1px 5px #263c2310;
+}
+#homun-studio .st-home-switch button:focus-visible {
+  outline: 2px solid #637f50;
+  outline-offset: 2px;
+}
+@media (max-width: 760px) {
+  #homun-studio .st-home-switch {
+    width: 100%;
+  }
+  #homun-studio .st-home-switch button {
+    flex: 1;
+    padding: 10px 8px;
+    gap: 6px;
+  }
+}
+
+#homun-studio .st-task-drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  margin: 0;
+  width: min(600px, 96vw);
+  max-width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  border: 0;
+  padding: 0;
+  background: #fafbf7;
+  color: #293b31;
+  box-shadow: -12px 0 50px #1f302321;
+  overflow-y: auto;
+}
+#homun-studio .st-task-drawer::backdrop {
+  background: #25332830;
+}
+#homun-studio .st-task-drawer .st-task-detail {
+  margin: 0;
+  padding: 28px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+#homun-studio .st-task-drawer .st-section-head {
+  align-items: flex-start;
+  margin: 0 0 18px;
+  gap: 15px;
+}
+#homun-studio .st-task-drawer h2 {
+  font-size: 23px;
+  line-height: 1.35;
+}
+#homun-studio .st-task-drawer h3 {
+  margin: 26px 0 12px;
+}
+#homun-studio .st-task-drawer .st-settings {
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+#homun-studio .st-task-drawer textarea {
+  min-height: 110px;
+}
+#homun-studio .st-task-drawer .st-step-edit {
+  padding: 13px 0;
+}
+#homun-studio .st-task-drawer .st-step-add {
+  margin-bottom: 28px;
+}
+#homun-studio .st-task-materials,
+#homun-studio .st-task-notes {
+  border-top: 0;
+  margin-top: 24px;
+}
+#homun-studio .st-result {
+  background: #edf4e7;
+  border-radius: 10px;
+  padding: 15px;
+  margin: 24px 0;
+}
+#homun-studio .st-result summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+#homun-studio .st-result p {
+  margin: 16px 0;
+}
+#homun-studio .st-result label {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+}
+#homun-studio .st-urgency {
+  color: #996128 !important;
+  font-size: 12px;
+  padding: 6px 8px;
+  background: #fbefdc;
+  border-radius: 6px;
+}
+#homun-studio .st-card-next {
+  font-weight: 600;
+  color: #45613b !important;
+}
+#homun-studio .st-task-card progress {
+  width: 100%;
+  height: 4px;
+  accent-color: #8da977;
+}
+#homun-studio .st-block-actions {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+#homun-studio .st-deadlines {
+  margin-top: 25px;
+  padding: 20px;
+}
+#homun-studio .st-deadlines h2 {
+  font-size: 17px;
+  margin-bottom: 12px;
+}
+#homun-studio .st-note-bubble .st-text-link {
+  display: block;
+  margin-top: 12px;
+}
+@media (max-width: 760px) {
+  #homun-studio .st-task-drawer {
+    width: 100vw;
+  }
+  #homun-studio .st-task-drawer .st-task-detail {
+    padding: 20px;
+  }
+  #homun-studio .st-task-drawer .st-settings {
+    grid-template-columns: 1fr;
+  }
+}
+#homun-studio .st-automation {
+  margin: 22px 0;
+  padding: 18px;
+  border: 1px solid #dae3d0;
+  border-radius: 12px;
+  background: #f5f8f0;
+}
+#homun-studio .st-automation > label,
+#homun-studio .st-automation details > label {
+  display: grid;
+  gap: 8px;
+  margin: 15px 0;
+}
+#homun-studio .st-automation .st-step-check {
+  display: flex;
+}
+#homun-studio .st-automation details {
+  margin: 18px 0;
+}
+#homun-studio .st-rule-summary {
+  padding: 16px;
+  border-radius: 10px;
+  background: #edf3e6;
+  margin: 18px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+#homun-studio .st-rule-summary p {
+  margin: 7px 0;
+}
+#homun-studio .st-sim-panel {
+  border-top: 0;
+  padding-top: 18px;
+}
+#homun-studio .st-sim-status {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+  padding: 14px;
+  background: white;
+  border-radius: 10px;
+}
+#homun-studio .st-sim-status span,
+#homun-studio .st-sim-status small {
+  font-size: 12px;
+  color: #617554;
+}
+#homun-studio .st-sim-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 15px;
+}
+#homun-studio .st-sim-actions button {
+  border: 1px solid #d5dfcb;
+  background: #fff;
+  padding: 9px 12px;
+  font-size: 12px;
+}
+#homun-studio button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+#homun-studio .st-sim-log {
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+#homun-studio .st-sim-log li {
+  padding: 7px 0;
+  border-bottom: 0;
+}
+#homun-studio .st-settings-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 25px 0;
+}
+#homun-studio .st-settings-tabs button {
+  padding: 11px 16px;
+  border-radius: 9px;
+  color: #647657;
+}
+#homun-studio .st-settings-tabs button.active {
+  background: #e7efdd;
+  color: #2b4430;
+}
+#homun-studio .st-settings-demo {
+  padding: 12px 16px;
+  background: #f0f3ea;
+  border-radius: 9px;
+  color: #6d7a61;
+  font-size: 12px;
+}
+#homun-studio .st-preferences {
+  max-width: 840px;
+}
+#homun-studio .st-preferences > label,
+#homun-studio .st-model-form label {
+  display: grid;
+  gap: 9px;
+  margin: 22px 0;
+  max-width: 560px;
+}
+#homun-studio .st-preferences .st-step-check {
+  display: flex;
+}
+#homun-studio .st-preferences h3 {
+  margin-top: 32px;
+}
+#homun-studio .st-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 0;
+  padding: 18px 0;
+  overflow-wrap: anywhere;
+}
+#homun-studio .st-model-row span {
+  min-width: 0;
+}
+#homun-studio .st-model-row small {
+  display: block;
+  font-size: 12px;
+  color: #748667;
+  margin-top: 5px;
+}
+#homun-studio .st-settings-empty {
+  padding: 25px;
+  background: #f5f7ef;
+  border-radius: 12px;
+  margin: 20px 0;
+  line-height: 1.7;
+  color: #6c7d60;
+}
+#homun-studio .st-settings-save {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+  margin: 22px 0;
+}
+#homun-studio .st-settings-save span {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  color: #526f42;
+}
+#homun-studio .st-model-assignment {
+  padding: 15px 0;
+  border-bottom: 0;
+}
+#homun-studio .st-model-assignment .st-settings {
+  margin-top: 10px;
+}
+#homun-studio .st-automation > summary {
+  cursor: pointer;
+  font-weight: 600;
+  line-height: 1.5;
+}
+#homun-studio .st-document-editor {
+  margin-top: 24px;
+  max-width: 900px;
+}
+#homun-studio .st-document-editor form label {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0;
+}
+#homun-studio .st-document-editor details {
+  margin: 20px 0;
+}
+#homun-studio .st-document-editor textarea {
+  min-height: 180px;
+}
+#homun-studio .st-document-editor .st-step-check {
+  margin: 12px 0;
+}
+#homun-studio .st-note-bubble small {
+  display: block;
+  margin-bottom: 8px;
+}
+#homun-studio .st-sim-actions .st-btn.dark {
+  background: #263f31;
+  color: #fff;
+  border-color: #263f31;
+}
+#homun-studio .st-squad {
+  margin: 22px 0;
+}
+#homun-studio .st-squad-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 16px 0 12px;
+}
+#homun-studio .st-squad-heading button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: #5d7150;
+  font-size: 13px;
+}
+#homun-studio .st-squad-filters {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+#homun-studio .st-squad-filters select,
+#homun-studio .st-squad-filters input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #dce4d3;
+  border-radius: 8px;
+  background: #fafbf7;
+  font-size: 12px;
+}
+#homun-studio .st-squad.compact .st-squad-list {
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+#homun-studio .st-squad-list .st-person {
+  width: 100%;
+  text-align: left;
+}
+#homun-studio .st-squad:not(.compact) .st-squad-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+}
+#homun-studio .st-team-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 0;
+  border-bottom: 0;
+}
+#homun-studio .st-team-group > button:first-child {
+  text-align: left;
+}
+#homun-studio .st-team-group small {
+  display: block;
+  color: #76856a;
+  margin-top: 5px;
+}
+#homun-studio .st-team-editor {
+  margin-top: 20px;
+}
+#homun-studio .st-team-editor > label:not(.st-step-check) {
+  display: grid;
+  gap: 8px;
+  margin: 15px 0;
+}
+#homun-studio .st-team-editor .st-step-check {
+  margin: 12px 0;
+}
+#homun-studio .st-squad-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+#homun-studio .st-squad-filter-toggle {
+  position: relative;
+  padding: 5px;
+  border-radius: 6px;
+}
+#homun-studio .st-squad-filter-toggle:hover,
+#homun-studio .st-squad-filter-toggle[aria-expanded="true"] {
+  background: #e8efdf;
+}
+#homun-studio .st-squad-filter-toggle.has-filter {
+  color: #355f2b;
+}
+#homun-studio .st-filter-dot {
+  position: absolute;
+  right: 1px;
+  top: 1px;
+  width: 5px;
+  height: 5px;
+  background: #527d3c;
+  border-radius: 50%;
+}
+
+/* Persistent profile and dedicated settings navigation. */
+#homun-studio .st-team {
+  overflow: hidden;
+  padding-bottom: 12px;
+}
+#homun-studio .st-sidebar-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 20px;
+  scrollbar-width: thin;
+}
+#homun-studio .st-profile-footer {
+  flex-shrink: 0;
+  border-top: 0;
+  padding-top: 10px;
+  margin-top: 8px;
+}
+#homun-studio .st-profile-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  text-align: left;
+  color: var(--ink);
+}
+#homun-studio .st-profile-trigger:hover {
+  background: #e7ecdf;
+}
+#homun-studio .st-profile-trigger > span:nth-child(2) {
+  flex: 1;
+}
+#homun-studio .st-profile-trigger strong,
+#homun-studio .st-profile-menu-heading strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+#homun-studio .st-profile-trigger small,
+#homun-studio .st-profile-menu-heading small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+#homun-studio .st-profile-avatar {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  background: #dcebcf;
+  color: #45613b;
+  font-weight: 600;
+}
+#homun-studio .st-profile-menu {
+  position: fixed;
+  inset: auto auto 88px 18px;
+  margin: 0;
+  width: 224px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 12px 45px #23312f24;
+  color: var(--ink);
+}
+#homun-studio .st-profile-menu::backdrop {
+  background: transparent;
+}
+#homun-studio .st-profile-menu-heading {
+  padding: 8px 10px 13px;
+  margin-bottom: 5px;
+  border-bottom: 0;
+}
+#homun-studio .st-profile-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  color: var(--ink);
+  font-size: 13px;
+}
+#homun-studio .st-profile-menu button:hover {
+  background: #f1f5eb;
+}
+#homun-studio .st-settings-back {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  padding: 6px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+#homun-studio .st-settings-nav-title {
+  margin: 28px 0 16px;
+  font-size: 20px;
+}
+#homun-studio .st-sidebar-scroll > input {
+  font-size: 12px;
+  padding: 10px;
+}
+#homun-studio .st-settings-navigation {
+  display: grid;
+  gap: 4px;
+  margin-top: 22px;
+}
+#homun-studio .st-settings-navigation button {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  border-radius: 10px;
+  padding: 12px 10px;
+  text-align: left;
+  color: var(--muted);
+  font-size: 13px;
+}
+#homun-studio .st-settings-navigation button:hover {
+  background: #eaf0e2;
+}
+#homun-studio .st-settings-navigation button.active {
+  background: #e2ecd8;
+  color: #38572d;
+  font-weight: 600;
+}
+#homun-studio .st-sidebar-projects {
+  margin: 20px 0;
+  border-top: 0;
+  padding-top: 2px;
+}
+#homun-studio .st-project-shortcuts {
+  display: grid;
+  gap: 3px;
+  max-height: 240px;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+#homun-studio .st-project-shortcuts button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  color: #63725f;
+  font-size: 13px;
+}
+#homun-studio .st-project-shortcuts button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#homun-studio .st-project-shortcuts button:hover,
+#homun-studio .st-project-shortcuts button.active {
+  background: #e6eedd;
+  color: #37512f;
+}
+#homun-studio .st-project-shortcuts p {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 10px;
+}
+#homun-studio .st-sidebar-projects input {
+  font-size: 12px;
+  padding: 9px;
+}
+#homun-studio .st-sidebar-team-link {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+#homun-studio .st-sidebar-team-link > button:first-child {
+  flex: 1;
+  min-width: 0;
+  gap: 8px;
+  padding-right: 2px;
+  white-space: nowrap;
+}
+#homun-studio .st-sidebar-team-link .st-sidebar-add-member {
+  flex-shrink: 0;
+  justify-content: center;
+  padding: 7px;
+  width: 30px;
+  height: 32px;
+}
+/* Operational overview: shared tasks, compact navigation. */
+#homun-studio .st-home-overview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-top: 25px;
+  align-items: start;
+}
+#homun-studio .st-home-overview > .st-paper {
+  padding: 22px;
+  min-width: 0;
+}
+#homun-studio .st-home-overview h2 {
+  margin-bottom: 12px;
+  font-size: 18px;
+}
+#homun-studio .st-overview-task {
+  text-align: left;
+  width: 100%;
+  padding: 13px 0;
+}
+#homun-studio .st-overview-task > span {
+  min-width: 0;
+  flex: 1;
+}
+#homun-studio .st-home-costs {
+  margin-top: 20px;
+  padding: 18px 22px;
+}
+#homun-studio .st-home-costs summary {
+  cursor: pointer;
+  font-size: 14px;
+}
+#homun-studio .st-home-costs summary strong {
+  margin: 0 12px;
+}
+#homun-studio .st-home-costs summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+#homun-studio .st-cost-overview-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 0;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+#homun-studio .st-home-setup {
+  margin: 22px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+#homun-studio .st-home-setup summary {
+  cursor: pointer;
+}
+#homun-studio .st-home-setup p {
+  margin: 12px 0;
+}
+#homun-studio .st-squad.compact .st-squad-list {
+  max-height: 230px;
+}
+#homun-studio .st-squad.compact .st-person {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+#homun-studio .st-team .st-project-entry {
+  padding: 13px 10px;
+  margin-top: 7px;
+  margin-bottom: 0;
+  min-height: 0;
+}
+#homun-studio .st-today-header {
+  margin-bottom: 18px;
+}
+@media (max-width: 1050px) {
+  #homun-studio .st-home-overview {
+    grid-template-columns: 1fr;
+  }
+}
+#homun-studio .st-squad.compact .st-person {
+  padding: 6px 8px;
+  margin-bottom: 2px;
+  min-height: 44px;
+}
+#homun-studio .st-squad.compact .st-person .st-face,
+#homun-studio .st-squad.compact .st-person .st-avatar-dot {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+}
+#homun-studio .st-squad.compact .st-squad-list {
+  max-height: 286px;
+  scrollbar-width: thin;
+}
+#homun-studio .st-squad.compact .st-person small {
+  font-size: 10px;
+  margin-top: 0;
+}
+#homun-studio .st-procedure-step {
+  margin: 18px 0;
+  padding: 22px;
+}
+#homun-studio .st-procedure-step .st-section-head {
+  margin-top: 0;
+}
+#homun-studio .st-procedure-actions,
+#homun-studio .st-procedure-footer {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+#homun-studio .st-procedure-footer {
+  margin: 24px 0;
+  flex-wrap: wrap;
+}
+#homun-studio .st-procedure-days {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 15px;
+}
+#homun-studio .st-procedure-days label {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  gap: 5px;
+}
+#homun-studio .st-procedure-days input {
+  width: auto;
+}
+#homun-studio .st-procedure-empty {
+  margin-top: 24px;
+}
+#homun-studio .st-procedure-empty p {
+  margin-top: 10px;
+  color: var(--muted);
+}
+#homun-studio .st-procedure-error {
+  color: #9b3b2c;
+  padding: 16px 0;
+}
+#homun-studio .st-welcome {
+  margin: 24px 0;
+  max-width: 760px;
+}
+#homun-studio .st-welcome h2 {
+  margin: 12px 0;
+}
+#homun-studio .st-welcome p {
+  margin: 14px 0;
+}
+#homun-studio .st-prototype-mode {
+  display: block;
+  padding: 10px;
+  font-size: 12px;
+  color: #526e43;
+  text-decoration: none;
+  border-radius: 8px;
+}
+#homun-studio .st-prototype-mode:hover {
+  background: #f1f5eb;
+}
+#homun-studio .st-task-cost {
+  padding: 16px;
+  margin: 16px 0;
+}
+#homun-studio .st-task-cost summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+#homun-studio .st-task-cost p {
+  margin-top: 12px;
+}
+#homun-studio .st-task-details {
+  margin: 16px 0;
+  border-bottom: 0;
+  padding-bottom: 16px;
+}
+#homun-studio .st-task-details summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+}
+#homun-studio .st-doc-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 20px 0;
+  flex-wrap: wrap;
+}
+#homun-studio .st-doc-toolbar > input {
+  flex: 1;
+  min-width: 180px;
+}
+#homun-studio .st-doc-toolbar select {
+  max-width: 250px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  color: var(--ink);
+}
+#homun-studio .st-doc-add {
+  margin: 20px 0;
+}
+#homun-studio .st-doc-crumbs {
+  display: flex;
+  gap: 8px;
+  margin: 18px 0;
+  flex-wrap: wrap;
+}
+#homun-studio .st-doc-crumbs button {
+  font-size: 12px;
+  color: var(--muted);
+}
+#homun-studio .st-doc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#homun-studio .st-doc-row > .st-job {
+  flex: 1;
+  min-width: 0;
+}
+#homun-studio .st-document-editor {
+  margin: 22px 0;
+}
+#homun-studio .st-document-editor > details {
+  margin-top: 18px;
+}
+#homun-studio .st-doc-add .st-sim-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+#homun-studio .st-doc-add .st-sim-actions .st-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  height: 34px;
+  padding: 6px 12px;
+  margin: 0;
+  font-size: 12px;
+  border-radius: 8px;
+  width: auto;
+}
+#homun-studio .st-doc-add {
+  padding: 20px;
+}
+#homun-studio .st-doc-add h2 {
+  font-size: 18px;
+  margin-bottom: 16px;
+}
+#homun-studio .st-doc-add > label {
+  margin: 14px 0;
+}
+#homun-studio .st-doc-toolbar > .st-btn {
+  height: 36px;
+  min-height: 36px;
+  padding: 7px 13px;
+  font-size: 12px;
+  border-radius: 8px;
+}
+#homun-studio .st-doc-toolbar > input {
+  height: 36px;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+#homun-studio .st-project-picker {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  margin: 12px 0;
+}
+#homun-studio .st-picker-label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+#homun-studio .st-picker-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 11px;
+  height: 36px;
+  background: #fafbf8;
+  border: 1px solid #dce1d7;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 12px;
+  color: var(--ink);
+}
+#homun-studio .st-picker-trigger > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#homun-studio .st-picker-tags {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  margin-top: 6px;
+  flex-wrap: wrap;
+  font-size: 11px;
+}
+#homun-studio .st-picker-tags > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: #eaf0e3;
+  padding: 3px 6px;
+  border-radius: 6px;
+  max-width: 100%;
+}
+#homun-studio .st-picker-tags button {
+  display: flex;
+  padding: 2px;
+}
+#homun-studio .st-picker-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  min-width: min(280px, 75vw);
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px #23312f20;
+  padding: 8px;
+  margin-top: 4px;
+}
+#homun-studio .st-picker-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 7px;
+}
+#homun-studio .st-picker-search input {
+  height: 34px;
+  font-size: 12px;
+  padding: 7px;
+}
+#homun-studio .st-picker-results {
+  max-height: 224px;
+  overflow-y: auto;
+  margin: 7px 0;
+  overscroll-behavior: contain;
+}
+#homun-studio .st-picker-results label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  margin: 0;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+#homun-studio .st-picker-results label:hover {
+  background: #f1f5eb;
+}
+#homun-studio .st-picker-results input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+#homun-studio .st-picker-footer {
+  display: flex;
+  justify-content: space-between;
+  border-top: 0;
+  padding: 8px 5px 2px;
+  font-size: 12px;
+}
+#homun-studio .st-doc-toolbar > .st-project-picker {
+  width: 230px;
+  margin: 0;
+}
+#homun-studio .st-doc-toolbar > .st-project-picker > .st-picker-label {
+  display: none;
+}
+#homun-studio .st-doc-toolbar .st-picker-tags {
+  display: none;
+}
+#homun-studio .st-doc-add .st-sim-actions label.st-btn {
+  border: 1px solid #d3ddca;
+  background: white;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+/* Contextual conversations, shared by people and agents. */
+.st-conversation {
+  margin-top: 24px;
+  min-width: 0;
+}
+.st-conversation-head,
+.st-conversation-actions,
+.st-conversation-send {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.st-conversation-actions {
+  justify-content: flex-start;
+}
+.st-conversation-filters,
+.st-conversation-references {
+  padding: 14px;
+  background: #f4f6ef;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  margin: 12px 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.st-conversation-filters > p,
+.st-conversation-references > p {
+  grid-column: 1/-1;
+}
+.st-conversation-messages {
+  margin: 18px 0;
+}
+.st-conversation .st-note-bubble {
+  white-space: normal;
+}
+.st-message-text {
+  white-space: pre-wrap;
+  margin: 8px 0 !important;
+}
+.st-message-context {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+.st-message-context button {
+  font-size: 11px !important;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #dce2d5;
+  border-radius: 7px;
+  padding: 5px 8px;
+  overflow-wrap: anywhere;
+}
+.st-message-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px !important;
+  padding: 7px 9px;
+  border: 1px solid #dce2d5;
+  border-radius: 8px;
+  margin: 7px 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.st-message-file > span {
+  flex: 1;
+  min-width: 0;
+}
+.st-chat .st-conversation-compose,
+.st-conversation-compose {
+  display: block;
+  margin-top: 20px;
+  border-top: 0;
+  padding-top: 4px;
+}
+#homun-studio .st-conversation-compose > label {
+  margin: 12px 0;
+}
+#homun-studio .st-conversation .st-btn {
+  min-height: 34px;
+  padding: 7px 12px;
+  font-size: 12px;
+}
+.st-conversation-send {
+  margin-top: 14px;
+}
+.st-conversation-send > small {
+  max-width: 420px;
+  flex: 1;
+  min-width: 180px;
+  color: var(--muted);
+  font-size: 10px;
+}
+@media (max-width: 600px) {
+  .st-conversation-filters,
+  .st-conversation-references {
+    grid-template-columns: 1fr;
+  }
+  .st-conversation .st-note-bubble {
+    max-width: 100%;
+  }
+}
+.st-board-overlay-only > :not(dialog) {
+  display: none !important;
+}
+.st-board-overlay-only {
+  display: contents;
+}
+.st-quick-work {
+  margin: 20px 0;
+  max-width: 850px;
+}
+.st-quick-work > h3,
+.st-assisted-summary > h3 {
+  margin: 20px 0 10px !important;
+}
+.st-quick-work > p,
+.st-assisted-summary > p {
+  margin: 12px 0 !important;
+}
+.st-quick-work .st-conversation-actions {
+  margin: 18px 0;
+}
+.st-assisted-summary .st-result {
+  margin: 18px 0;
+}
+.st-assisted-result {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  background: #f1f5ec;
+  border-radius: 12px;
+  padding: 18px;
+  line-height: 1.7;
+}
+/* Navigation: tools above workspace content, one visual weight. */
+.st-workspace-nav {
+  display: grid;
+  gap: 3px;
+}
+#homun-studio .st-workspace-nav button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 10px;
+  min-height: 38px;
+  width: 100%;
+  border-radius: 9px;
+  text-align: left;
+  font-size: 12px;
+  color: #506349;
+}
+#homun-studio .st-workspace-nav button:hover {
+  background: #eaf0e2;
+}
+#homun-studio .st-workspace-nav button.active {
+  background: #e6eedc;
+  color: #2c442e;
+}
+#homun-studio .st-content h1 {
+  font-size: 32px;
+  letter-spacing: -1px;
+}
+#homun-studio .st-muted {
+  color: #66745e;
+}
+.st-board-item {
+  min-width: 0;
+  border: 1px solid #e0e5da;
+  background: white;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.st-board-item.is-dragging {
+  opacity: 0.45;
+  outline: 2px dashed #66825a;
+}
+#homun-studio .st-board-item .st-task-card {
+  border: 0;
+  box-shadow: none;
+  margin: 0;
+  border-radius: 0;
+  width: 100%;
+  cursor: grab;
+}
+#homun-studio .st-board-move {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 7px 10px;
+  border-top: 0;
+  font-size: 11px;
+}
+#homun-studio .st-board-move select {
+  min-width: 0;
+  flex: 1;
+  padding: 4px;
+  font-size: 11px;
+  background: transparent;
+  border: 0;
+}
+#homun-studio .st-kanban {
+  grid-template-columns: repeat(5, minmax(220px, 1fr));
+  align-items: start;
+  padding-bottom: 14px;
+}
+#homun-studio .st-kanban-column {
+  min-height: 220px;
+}
+.st-board-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 16px;
+  margin: 12px 0;
+  background: #eaf0e2;
+  border-radius: 10px;
+}
+.st-task-summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: #627058;
+  font-size: 12px;
+  margin: 20px 0;
+}
+.st-task-overview > h3 {
+  margin: 22px 0 10px !important;
+}
+.st-task-overview > p {
+  margin: 10px 0 !important;
+}
+.st-task-overview .st-conversation-actions {
+  margin: 20px 0;
+}
+.st-task-overview .st-result {
+  margin-top: 18px;
+}
+.st-overview-result {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 12px 0;
+  line-height: 1.7;
+}
+
+/* Supervised delegation: keep context and review inside the work. */
+.st-training {
+  grid-column: 1 / -1;
+}
+.st-training-row {
+  margin-top: 18px;
+  padding: 16px 0;
+  border-top: 0;
+}
+.st-training-row label,
+.st-review-feedback label {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+.st-artifacts details {
+  border: 1px solid #dce2d9;
+  border-radius: 10px;
+  padding: 12px;
+  margin: 10px 0;
+}
+.st-artifacts summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.st-artifact-preview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 330px;
+  overflow: auto;
+  background: #f3f5f0;
+  padding: 14px;
+  font: 12px/1.6 monospace;
+}
+.st-artifact-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+  margin: 12px auto;
+}
+.st-artifact-preview .st-btn {
+  display: inline-flex;
+  margin: 8px 8px 0 0;
+}
+.st-review-feedback {
+  border: 1px solid #dce2d9;
+  border-radius: 12px;
+  padding: 16px;
+  margin: 16px 0;
+}
+.st-review-feedback textarea {
+  width: 100%;
+  min-height: 85px;
+}
+.st-material-list {
+  max-height: 180px;
+  overflow: auto;
+  padding: 0;
+  list-style: none;
+}
+.st-material-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  padding: 5px 0;
+}
+.st-material-list li span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* Chat and dashboard are two views of the same workspace. */
+.st-primary-home-switch {
+  display: flex;
+  gap: 4px;
+  background: #edf0e9;
+  padding: 4px;
+  border-radius: 12px;
+  width: fit-content;
+  margin: 0 auto 20px;
+}
+.st-primary-home-switch button {
+  border: 0;
+  background: transparent;
+  color: #62715d;
+  padding: 8px 22px;
+  font-size: 13px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+.st-primary-home-switch button.active {
+  background: #fff;
+  color: #263e31;
+  box-shadow: 0 1px 4px #233b2510;
+}
+.st-home-chat {
+  max-width: 850px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100dvh - 220px);
+}
+.st-chat-contextbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+.st-chat-contextbar > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.st-chat-contextbar button {
+  max-width: 65%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.st-home-chat-history {
+  flex: 1;
+  padding: 10px 4px 25px;
+}
+.st-chat-welcome {
+  padding: 55px 0 38px;
+  text-align: center;
+  max-width: 620px;
+  margin: auto;
+}
+.st-chat-emblem {
+  display: inline-grid;
+  place-items: center;
+  background: #dfebd5;
+  color: #304d38;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  font: bold 31px Georgia;
+  transform: rotate(-6deg);
+  margin-bottom: 22px;
+}
+.st-chat-welcome h1 {
+  font-size: 38px !important;
+  letter-spacing: -1.3px;
+  margin: 0 0 14px !important;
+}
+.st-chat-welcome p {
+  color: #75806f;
+  line-height: 1.7;
+  font-size: 15px;
+}
+.st-chat-suggestions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 35px;
+}
+.st-chat-suggestions button {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  text-align: left;
+  border: 1px solid #dde4d6;
+  background: #fff;
+  border-radius: 13px;
+  padding: 17px;
+  font-size: 13px;
+  color: #334734;
+  cursor: pointer;
+}
+.st-chat-suggestions button:hover {
+  background: #eef3e8;
+  border-color: #aabb9b;
+}
+.st-chat-suggestions button span {
+  color: #829873;
+}
+.st-homun-message {
+  margin: 24px 0;
+  max-width: 95%;
+  font-size: 14px;
+}
+.st-homun-message > small {
+  display: block;
+  font-size: 11px;
+  color: #829079;
+  margin: 0 0 9px;
+}
+.st-homun-message > p {
+  white-space: pre-wrap;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.st-homun-message.user {
+  margin-left: auto;
+  background: #eaf0e3;
+  padding: 14px 18px;
+  border-radius: 18px 18px 4px 18px;
+  width: fit-content;
+  max-width: 80%;
+}
+.st-homun-message.user p {
+  margin: 0;
+}
+.st-chat-proposal {
+  background: #fff;
+  border: 1px solid #dce3d4;
+  border-radius: 16px;
+  padding: 20px;
+  margin-top: 14px;
+  max-width: 590px;
+}
+.st-chat-proposal label {
+  display: grid;
+  gap: 7px;
+  font-size: 12px;
+  margin-bottom: 14px;
+  color: #607054;
+}
+.st-chat-proposal input,
+.st-chat-proposal textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: #fafbf8;
+  border: 1px solid #dce3d4;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+  color: #283c31;
+}
+.st-chat-proposal textarea {
+  min-height: 68px;
+  resize: vertical;
+}
+.st-chat-proposal details {
+  margin: 16px 0;
+  font-size: 12px;
+}
+.st-chat-proposal summary {
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+.st-chat-result {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  text-align: left;
+  width: 100%;
+  border: 1px solid #d7e1cb;
+  background: #edf3e6;
+  padding: 18px;
+  border-radius: 12px;
+  margin-top: 15px;
+  cursor: pointer;
+  color: #2b4532;
+}
+.st-chat-result small {
+  display: block;
+  margin-top: 7px;
+  color: #6d7b61;
+}
+.st-chat-followups {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 24px 0;
+}
+.st-chat-followups button {
+  border: 1px solid #dce3d4;
+  background: transparent;
+  color: #5b7050;
+  padding: 7px 11px;
+  border-radius: 20px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.st-homun-composer {
+  position: sticky;
+  bottom: 16px;
+  background: #fff;
+  border: 1px solid #d4ddcb;
+  border-radius: 20px;
+  padding: 14px 16px 10px;
+  box-shadow: 0 6px 22px #2536240c;
+  z-index: 2;
+}
+.st-homun-composer > textarea {
+  width: 100%;
+  min-height: 60px;
+  max-height: 170px;
+  resize: vertical;
+  box-sizing: border-box;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: 14px/1.6 inherit;
+  color: #253b2e;
+  padding: 4px;
+}
+.st-homun-composer > div:last-child {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.st-homun-composer small {
+  font-size: 10px;
+  color: #839078;
+  flex: 1;
+}
+.st-chat-attach {
+  border: 0;
+  background: transparent;
+  color: #627659;
+  padding: 7px;
+  cursor: pointer;
+}
+.st-chat-send {
+  border: 0;
+  border-radius: 50%;
+  background: #263f31;
+  color: #fff;
+  width: 35px;
+  height: 35px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.st-chat-send:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.st-chat-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+.st-chat-attachments > span,
+.st-chat-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #dde3d7;
+  border-radius: 7px;
+  padding: 5px 8px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.st-chat-attachments button {
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.st-chat-task-link {
+  margin: 10px 0 15px;
+}
+@media (max-width: 600px) {
+  .st-chat-welcome {
+    padding-top: 25px;
+  }
+  .st-chat-welcome h1 {
+    font-size: 29px !important;
+  }
+  .st-chat-suggestions {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-top: 22px;
+  }
+  .st-home-chat {
+    min-height: calc(100dvh - 180px);
+  }
+  .st-homun-composer {
+    bottom: 8px;
+  }
+  .st-chat-proposal {
+    padding: 14px;
+  }
+  .st-homun-message {
+    max-width: 100%;
+  }
+  .st-chat-result {
+    flex-wrap: wrap;
+  }
+  .st-primary-home-switch {
+    margin-bottom: 18px;
+  }
+}
+#homun-studio .st-homun-composer textarea {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 4px;
+  min-height: 60px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.st-primary-home-switch {
+  position: sticky;
+  top: 12px;
+  z-index: 4;
+  box-shadow: 0 2px 12px #f8faf5;
+}
+
+/* One sidebar scroll surface; navigation remains compact at any team size. */
+#homun-studio .st-squad.compact .st-squad-list,
+#homun-studio .st-project-shortcuts {
+  max-height: none;
+  overflow: visible;
+}
+#homun-studio .st-sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+#homun-studio .st-sidebar-scroll:hover,
+#homun-studio .st-sidebar-scroll:focus-within {
+  scrollbar-color: #aab4a580 transparent;
+}
+#homun-studio .st-sidebar-scroll::-webkit-scrollbar {
+  width: 3px;
+}
+#homun-studio .st-sidebar-scroll::-webkit-scrollbar-thumb {
+  background: #aab4a550;
+  border-radius: 5px;
+}
+#homun-studio .st-primary-home-switch {
+  position: static;
+  margin: 0;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 9px;
+  box-shadow: none;
+}
+#homun-studio .st-primary-home-switch button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 30px;
+  padding: 0;
+  border-radius: 6px;
+}
+#homun-studio .st-topbar {
+  height: 60px;
+}
+#homun-studio .st-content {
+  padding-top: 24px;
+}
+#homun-studio .st-chat-contextbar {
+  justify-content: flex-end;
+  margin: 0 0 10px;
+}
+#homun-studio .st-home-chat {
+  max-width: 780px;
+  min-height: calc(100dvh - 165px);
+}
+#homun-studio .st-chat-welcome {
+  padding: 40px 0 24px;
+}
+#homun-studio .st-chat-welcome h1 {
+  font-size: 32px;
+  letter-spacing: -1px;
+}
+#homun-studio .st-chat-suggestions {
+  margin-top: 24px;
+  gap: 8px;
+}
+#homun-studio .st-chat-suggestions button {
+  padding: 12px 16px;
+  font-size: 12px;
+}
+#homun-studio .st-home-switch {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  border-radius: 0;
+  gap: 18px;
+}
+#homun-studio .st-home-switch button {
+  background: transparent;
+  border-radius: 0;
+  padding: 8px 0;
+  border-bottom: 0;
+  box-shadow: none;
+}
+#homun-studio .st-home-switch button.active {
+  border-bottom-color: #45613b;
+  background: transparent;
+}
+#homun-studio .st-sdk-composer {
+  display: block;
+  position: sticky;
+  bottom: 16px;
+  background: #fff;
+  border-radius: 16px;
+  margin-top: 16px;
+  box-shadow: 0 4px 24px #23312f08;
+}
+#homun-studio .st-sdk-composer [data-slot="input-group"] {
+  height: auto;
+  border-radius: 16px;
+  background: #fff;
+}
+#homun-studio .st-sdk-composer textarea {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  min-height: 64px;
+  max-height: 180px;
+  resize: none;
+  border-radius: 0;
+  padding: 14px 16px;
+  font-size: 14px;
+}
+#homun-studio .st-sdk-composer small {
+  font-size: 10px;
+}
+#homun-studio .st-sdk-composer [data-slot="input-group-addon"] {
+  padding: 8px 12px;
+}
+#homun-studio .st-chat-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+}
+#homun-studio .st-chat-attachments > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  background: #f0f3ec;
+  border-radius: 7px;
+  padding: 5px 8px;
+}
+#homun-studio .st-footer > span:first-child {
+  display: none;
+}
+#homun-studio .st-footer {
+  justify-content: flex-end;
+  padding-top: 8px;
+  padding-bottom: 10px;
+}
+@media (max-width: 600px) {
+  #homun-studio .st-home-chat {
+    min-height: calc(100dvh - 145px);
+  }
+  #homun-studio .st-chat-welcome {
+    padding-top: 20px;
+  }
+  #homun-studio .st-chat-suggestions {
+    grid-template-columns: 1fr 1fr;
+  }
+  #homun-studio .st-main {
+    padding-bottom: 0;
+  }
+}
+#homun-studio .st-home-chat {
+  height: calc(100dvh - 165px);
+  min-height: 0;
+}
+#homun-studio .st-home-chat-history {
+  min-height: 0;
+  padding: 0;
+  position: relative;
+}
+#homun-studio .st-sdk-history-content {
+  gap: 16px;
+  padding: 8px 4px 20px;
+}
+#homun-studio .st-home-chat:has(.st-chat-welcome) {
+  height: auto;
+  min-height: 0;
+  padding-top: 12px;
+}
+#homun-studio .st-home-chat:has(.st-chat-welcome) .st-home-chat-history {
+  flex: none;
+}
+#homun-studio .st-home-chat:has(.st-chat-welcome) .st-sdk-composer {
+  margin-top: 8px;
+}
+#homun-studio .st-sdk-composer button[type="submit"] {
+  background: #263d31;
+  color: white;
+}
+#homun-studio .st-sdk-composer {
+  flex-shrink: 0;
+}
+
+/* Team composition: same membership operation for drag, keyboard and touch. */
+#homun-studio .st-team-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 14px;
+}
+#homun-studio .st-member-zone {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fafbf7;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+#homun-studio .st-member-zone.is-over {
+  background: #e7f0dd;
+  border-color: #63885a;
+  outline: 2px solid #63885a30;
+}
+#homun-studio .st-member-zone h4,
+#homun-studio .st-member-cv h4 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+#homun-studio .st-member-zone > input {
+  padding: 8px 10px;
+  font-size: 12px;
+  background: white;
+  margin-bottom: 8px;
+}
+#homun-studio .st-member-candidates {
+  max-height: 340px;
+  overflow: auto;
+  min-height: 100px;
+  scrollbar-width: thin;
+}
+#homun-studio .st-member-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 8px;
+  margin-bottom: 6px;
+  cursor: grab;
+}
+#homun-studio .st-member-card:active {
+  cursor: grabbing;
+}
+#homun-studio .st-drag-grip {
+  color: #9da696;
+}
+#homun-studio .st-member-summary {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 3px 0;
+}
+#homun-studio .st-member-summary strong,
+#homun-studio .st-member-summary small {
+  display: block;
+}
+#homun-studio .st-member-summary strong {
+  font-size: 13px;
+}
+#homun-studio .st-member-summary small {
+  color: var(--muted);
+  font-size: 10px;
+}
+#homun-studio .st-member-summary:hover strong {
+  text-decoration: underline;
+}
+#homun-studio .st-member-empty {
+  padding: 25px 8px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+#homun-studio .st-member-cv {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  padding: 20px;
+  border-radius: 12px;
+}
+#homun-studio .st-member-cv header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+#homun-studio .st-member-cv header small {
+  color: var(--muted);
+  font-size: 10px;
+}
+#homun-studio .st-member-cv header h3 {
+  font-size: 21px;
+  margin: 3px 0;
+}
+#homun-studio .st-cv-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+#homun-studio .st-member-cv p,
+#homun-studio .st-member-cv li {
+  font-size: 12px;
+  line-height: 1.65;
+}
+#homun-studio .st-member-cv ol {
+  list-style: decimal;
+  padding-left: 18px;
+  margin: 0;
+}
+#homun-studio .st-member-cv ul {
+  list-style: disc;
+  padding-left: 18px;
+  margin: 0;
+}
+#homun-studio .st-member-cv .st-tools {
+  margin: 0;
+}
+@media (max-width: 700px) {
+  #homun-studio .st-team-columns,
+  #homun-studio .st-cv-grid {
+    grid-template-columns: 1fr;
+  }
+  #homun-studio .st-member-candidates {
+    max-height: 250px;
+  }
+}
+
+/* Action rows align with the right edge; primary confirmation ends the row. */
+#homun-studio .st-sim-actions {
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 20px;
+  gap: 10px;
+}
+#homun-studio .st-team-actions {
+  padding-top: 18px;
+  border-top: 0;
+  margin-top: 24px;
+  margin-bottom: 16px;
+}
+#homun-studio .st-team-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+#homun-studio .st-team-actions > .st-btn {
+  color: #906150;
+  border-color: transparent;
+  background: transparent;
+}
+#homun-studio .st-team-confirm-actions .st-btn {
+  min-height: 38px;
+  padding: 8px 16px;
+}
+
+/* Whitespace separates sections; selected views use a soft background. */
+#homun-studio hr,
+#homun-studio [data-slot="separator"] {
+  display: none;
+}
+#homun-studio .st-home-switch {
+  gap: 8px;
+}
+#homun-studio .st-home-switch button {
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+#homun-studio .st-home-switch button.active,
+#homun-studio .st-tabs button.active {
+  background: #eaf0e2;
+  color: #304c34;
+  border-radius: 8px;
+}
+#homun-studio .st-tabs button {
+  padding: 10px 12px;
+}
+#homun-studio .st-calendar-week {
+  gap: 8px;
+  background: transparent;
+}
+#homun-studio .st-calendar-week > section {
+  background: #fff;
+  border-radius: 10px;
+}
+#homun-studio .st-calendar-week > section.is-today {
+  background: #f1f6e9;
+}
+#homun-studio .st-squad-page-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+#homun-studio .st-squad-page-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+@media (max-width: 600px) {
+  #homun-studio .st-squad-page-actions {
+    width: 100%;
+    gap: 8px;
+  }
+}
+#homun-studio .st-leader-star {
+  display: grid;
+  place-items: center;
+  padding: 6px;
+  color: #959f90;
+  border-radius: 7px;
+}
+#homun-studio .st-leader-star[aria-pressed="true"] {
+  color: #9b7929;
+  background: #faf1d8;
+}
+#homun-studio .st-team-supervision {
+  font-size: 12px;
+  color: #66745f;
+  padding: 12px 0 0;
+}
+#homun-studio .st-autonomy-badge {
+  color: #8b7454;
+  font-size: 10px;
+}
+#homun-studio .st-agent-profile {
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+#homun-studio .st-agent-profile > div {
+  flex: 1;
+  max-width: none;
+}
+#homun-studio .st-agent-autonomy {
+  position: relative;
+  flex-shrink: 0;
+  margin-left: auto;
+  text-align: right;
+  padding-top: 16px;
+}
+#homun-studio .st-agent-autonomy summary {
+  cursor: pointer;
+  list-style: none;
+}
+#homun-studio .st-agent-autonomy summary::-webkit-details-marker {
+  display: none;
+}
+#homun-studio .st-agent-autonomy summary small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 5px;
+}
+#homun-studio .st-mode-badge {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  background: #f6ecda;
+  color: #80652b;
+}
+#homun-studio .st-mode-badge.review {
+  background: #e8edf6;
+  color: #486387;
+}
+#homun-studio .st-mode-badge.autonomous {
+  background: #e6efde;
+  color: #486239;
+}
+#homun-studio .st-autonomy-popover {
+  position: absolute;
+  right: 0;
+  top: 62px;
+  width: min(340px, 85vw);
+  padding: 16px;
+  background: white;
+  box-shadow: 0 8px 35px #23312f20;
+  border-radius: 14px;
+  z-index: 10;
+  text-align: left;
+}
+#homun-studio .st-autonomy-popover p {
+  font-size: 12px;
+  margin: 10px 0 !important;
+  color: var(--muted);
+}
+#homun-studio .st-autonomy-popover button {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  text-align: left;
+  border-radius: 8px;
+}
+#homun-studio .st-autonomy-popover button[aria-pressed="true"] {
+  background: #eef3e8;
+}
+#homun-studio .st-autonomy-popover button small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+#homun-studio .st-agent-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+#homun-studio .st-agent-navigation .st-tabs {
+  margin: 0;
+  gap: 8px;
+}
+#homun-studio .st-agent-navigation > .st-btn {
+  margin-left: auto;
+}
+#homun-studio .st-agent-profile ~ .st-chat {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+#homun-studio .st-chat .st-assign-work {
+  margin-bottom: 24px;
+}
+@media (max-width: 600px) {
+  #homun-studio .st-agent-profile {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  #homun-studio .st-agent-autonomy {
+    padding-top: 0;
+  }
+  #homun-studio .st-agent-profile > div {
+    min-width: 160px;
+  }
+}
+
+/* Assignment form: consistent field rhythm, dates paired, materials grouped. */
+#homun-studio .st-assign-work {
+  max-width: 920px;
+  margin-left: auto;
+  margin-right: auto;
+}
+#homun-studio .st-assign-work > label {
+  margin: 20px 0;
+}
+#homun-studio .st-assign-work > details {
+  margin: 24px 0;
+}
+#homun-studio .st-assign-work > details > summary {
+  font-size: 14px;
+  font-weight: 550;
+  cursor: pointer;
+  padding: 6px 0;
+}
+#homun-studio .st-assign-work > details > summary > .st-muted {
+  font-size: 11px;
+  font-weight: 400;
+  margin-left: 10px;
+}
+#homun-studio .st-assignment-schedule {
+  display: grid;
+  gap: 18px;
+  margin-top: 16px;
+}
+#homun-studio .st-assignment-dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+#homun-studio .st-assignment-dates > label {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 18px;
+}
+#homun-studio .st-assign-work input:not([type="checkbox"]):not([type="file"]),
+#homun-studio .st-assign-work select,
+#homun-studio .st-assign-work .st-picker-trigger {
+  height: 40px;
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+#homun-studio .st-assign-work .st-picker-label {
+  line-height: 18px;
+  margin-bottom: 6px;
+}
+#homun-studio .st-assign-work .st-picker-search input {
+  height: 34px;
+}
+#homun-studio .st-assign-work .st-picker-results input[type="checkbox"] {
+  height: 14px;
+  padding: 0;
+}
+#homun-studio .st-assign-work .st-field-help {
+  font-size: 11px;
+  color: var(--muted);
+  margin: -8px 0 0 !important;
+}
+#homun-studio .st-materials-content {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+#homun-studio .st-materials-content > label {
+  margin: 0;
+  gap: 6px;
+}
+#homun-studio .st-materials-content p {
+  margin: 0 !important;
+  font-size: 11px;
+}
+#homun-studio .st-material-upload-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+#homun-studio .st-material-upload-actions .st-btn {
+  border: 1px solid #dce1d7;
+  background: #fff;
+  min-height: 36px;
+  padding: 8px 12px;
+  gap: 7px;
+}
+#homun-studio .st-materials-content textarea {
+  min-height: 76px;
+}
+@media (max-width: 600px) {
+  #homun-studio .st-assignment-dates {
+    grid-template-columns: 1fr;
+  }
+  #homun-studio .st-assign-work > details > summary > .st-muted {
+    display: block;
+    margin: 4px 0 0 14px;
+  }
+}
+#homun-studio form.st-assign-work {
+  display: block;
+  width: 100%;
+}
+#homun-studio .st-assign-work > .st-section-head {
+  margin-top: 0;
+}
+#homun-studio form.st-assign-work {
+  max-width: none;
+  margin-left: 0;
+  margin-right: 0;
+}
+#homun-studio .st-member-picker {
+  min-width: 0;
+  margin: 16px 0;
+}
+#homun-studio .st-member-card-shared {
+  cursor: default;
+  margin-top: 8px;
+}
+#homun-studio .st-member-description {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin: 5px 0;
+  line-height: 1.5;
+}
+#homun-studio .st-member-selection {
+  margin-top: 10px;
+  background: #f8faf5;
+  border-radius: 10px;
+  padding: 12px;
+}
+#homun-studio .st-member-selection-results {
+  max-height: 400px;
+  overflow: auto;
+  scrollbar-width: thin;
+  margin-top: 8px;
+}
+#homun-studio .st-member-picker-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+#homun-studio .st-member-mini {
+  margin: 8px 0 14px;
+  padding: 14px;
+  background: white;
+}
+#homun-studio .st-member-mini .st-cv-grid {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+#homun-studio .st-team-draggable {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: grab;
+}
+#homun-studio .st-team-draggable > .st-member-card {
+  flex: 1;
+  min-width: 0;
+}
+#homun-studio .st-member-selection input {
+  width: 100%;
+}
+#homun-studio .st-member-mini {
+  container-type: inline-size;
+}
+@container (min-width:550px) {
+  #homun-studio .st-member-mini .st-cv-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+#homun-studio .st-automation-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 18px 0 24px;
+  flex-wrap: wrap;
+}
+#homun-studio .st-automation-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+#homun-studio .st-automation-chat,
+#homun-studio .st-automation-flow {
+  min-width: 0;
+  padding: 22px;
+  background: #fff;
+  border-radius: 16px;
+}
+#homun-studio .st-automation-chat > p {
+  margin: 10px 0;
+  font-size: 12px;
+}
+#homun-studio .st-automation-messages {
+  display: grid;
+  gap: 16px;
+  max-height: 330px;
+  overflow: auto;
+  margin: 24px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+#homun-studio .st-automation-proposal {
+  background: #f0f4ea;
+  padding: 16px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+#homun-studio .st-automation-proposal p {
+  margin: 10px 0;
+  white-space: pre-wrap;
+}
+#homun-studio .st-automation-proposal small {
+  color: var(--muted);
+}
+#homun-studio .st-automation-workspace .st-sdk-composer {
+  position: static;
+}
+#homun-studio .st-automation-flow {
+  background: #f0f3eb;
+}
+#homun-studio .st-automation-flow .st-section-head {
+  margin: 0 0 10px;
+}
+#homun-studio .st-flow-palette {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 18px 0;
+}
+#homun-studio .st-flow-palette button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: #fff;
+  font-size: 11px;
+}
+#homun-studio .st-flow-node {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+}
+#homun-studio .st-flow-node.trigger {
+  display: grid;
+  gap: 6px;
+  background: #dfead4;
+}
+#homun-studio .st-flow-node small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+}
+#homun-studio .st-flow-node strong {
+  display: block;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  margin: 4px 0;
+}
+#homun-studio .st-flow-node span {
+  font-size: 11px;
+  color: var(--muted);
+}
+#homun-studio .st-flow-node-main {
+  flex: 1;
+  text-align: left;
+  min-width: 0;
+}
+#homun-studio .st-flow-arrow {
+  margin: 10px auto;
+  color: #8a9b80;
+}
+#homun-studio .st-flow-add {
+  display: block;
+  width: 100%;
+  padding: 18px;
+  font-size: 12px;
+  color: #617b53;
+}
+#homun-studio .st-automation-inspector-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 32px 0 16px;
+  scroll-margin-top: 20px;
+}
+#homun-studio .st-automation-inspector-heading ~ .st-preferences {
+  max-width: none;
+}
+@media (max-width: 900px) {
+  #homun-studio .st-automation-workspace {
+    grid-template-columns: 1fr;
+  }
+  #homun-studio .st-automation-chat,
+  #homun-studio .st-automation-flow {
+    padding: 16px;
+  }
+}
+/* Conversation first; the diagram remains an optional editing surface. */
+#homun-studio .st-automation-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 900px;
+  margin: auto;
+}
+#homun-studio .st-automation-workspace > section {
+  width: 100%;
+}
+#homun-studio .st-automation-flow[hidden] {
+  display: none;
+}
+#homun-studio .st-automation-summary {
+  padding: 20px;
+  background: #eff3e9;
+  border-radius: 14px;
+  display: grid;
+  gap: 10px;
+}
+#homun-studio .st-automation-summary > button {
+  text-align: left;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 13px;
+  padding: 8px;
+  flex-wrap: wrap;
+}
+#homun-studio .st-sdk-composer {
+  position: relative;
+}
+#homun-studio .st-mention-menu {
+  max-height: 260px;
+  overflow: auto;
+  padding: 10px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 6px 28px #263d3122;
+  margin-bottom: 8px;
+}
+#homun-studio .st-mention-menu > small {
+  font-size: 11px;
+  color: var(--muted);
+}
+#homun-studio .st-mention-menu > button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+#homun-studio .st-mention-menu > button[aria-selected="true"] {
+  background: #edf3e5;
+}
+#homun-studio .st-mention-menu small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+}
+#homun-studio .st-mention-profile {
+  padding: 12px;
+}
+#homun-studio .st-guided-demo {
+  max-width: 780px;
+  margin: 0 auto;
+  display: grid;
+  gap: 22px;
+  padding-bottom: 25px;
+}
+#homun-studio .st-guided-demo header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+#homun-studio .st-guided-demo h1 {
+  font-size: 30px;
+  margin: 12px 0 0;
+}
+#homun-studio .st-guided-demo p {
+  font-size: 14px;
+  line-height: 1.65;
+  margin: 8px 0;
+}
+#homun-studio .st-demo-example {
+  padding: 22px;
+  background: #ecf2e5;
+  border-radius: 14px;
+  text-align: left;
+  line-height: 1.7;
+}
+#homun-studio .st-demo-example > span {
+  display: block;
+  font-size: 12px;
+  margin-top: 12px;
+}
+#homun-studio .st-demo-plan,
+#homun-studio .st-demo-result {
+  background: white;
+  border-radius: 16px;
+  padding: 24px;
+}
+#homun-studio .st-demo-plan-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+#homun-studio .st-demo-plan-title > span {
+  font-size: 11px;
+  color: var(--muted);
+}
+#homun-studio .st-demo-inline-fields {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 20px 0;
+  font-size: 12px;
+}
+#homun-studio .st-demo-inline-fields label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+}
+#homun-studio .st-demo-inline-fields input,
+#homun-studio .st-demo-inline-fields select {
+  width: auto;
+  padding: 7px 9px;
+  font-size: 12px;
+}
+#homun-studio .st-demo-mailbox {
+  display: grid;
+  gap: 10px;
+  font-size: 13px;
+  margin: 20px 0;
+}
+#homun-studio .st-demo-mailbox select {
+  padding: 10px;
+  font-size: 13px;
+}
+#homun-studio .st-guided-demo details {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 14px 0;
+}
+#homun-studio .st-guided-demo summary {
+  cursor: pointer;
+}
+#homun-studio .st-demo-result h2 {
+  font-size: 20px;
+  margin: 10px 0 18px;
+}
+#homun-studio .st-demo-result h3 {
+  font-size: 13px;
+  margin-top: 18px;
+}
+#homun-studio .st-demo-confirmation {
+  padding: 20px;
+  background: #eaf2df;
+  border-radius: 14px;
+}
+#homun-studio .st-demo-confirmation > button {
+  display: block;
+  margin-top: 12px;
+}
+#homun-studio .st-guided-demo .st-sdk-composer {
+  position: static;
+}
+#homun-studio .st-demo-sources {
+  border: 0;
+  padding: 0;
+  margin: 16px 0;
+  font-size: 12px;
+  display: grid;
+  gap: 10px;
+}
+#homun-studio .st-demo-sources legend {
+  margin-bottom: 10px;
+  color: var(--muted);
+}
+#homun-studio .st-demo-sources label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+#homun-studio .st-demo-sources input {
+  width: 15px;
+  height: 15px;
+}
+#homun-studio .st-demo-plan > .st-text-link {
+  margin-top: 14px;
+  text-align: left;
+}
+#homun-studio .st-demo-plan-output {
+  margin-top: 24px;
+}
+#homun-studio .st-demo-plan-output h2 {
+  font-size: 20px;
+  margin-bottom: 12px;
+}
+#homun-studio .st-demo-plan-output h3 {
+  font-size: 14px;
+  margin-top: 24px;
+}
+#homun-studio .st-demo-plan-output .st-mode-badge {
+  font-size: 10px;
+  margin-left: 6px;
+}
+#homun-studio .st-activity-count {
+  font-size: 10px;
+  background: #263d31;
+  color: #fff;
+  padding: 2px 5px;
+  border-radius: 12px;
+  margin-left: 3px;
+}
+#homun-studio .st-activity-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(620px, 92vw);
+  max-height: 85dvh;
+  overflow: auto;
+  padding: 26px;
+  border: 0;
+  border-radius: 18px;
+  background: #fafbf7;
+  color: #263330;
+  box-shadow: 0 18px 80px #0003;
+}
+#homun-studio .st-activity-dialog::backdrop {
+  background: #18281f55;
+  backdrop-filter: blur(3px);
+}
+#homun-studio .st-activity-dialog header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+#homun-studio .st-activity-dialog p {
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 14px 0;
+}
+#homun-studio .st-activity-dialog h3 {
+  margin-top: 22px;
+}
+#homun-studio .st-activity-dialog footer {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 24px;
+}
+#homun-studio .st-routine-list {
+  margin: 24px 0;
+  padding: 20px;
+  background: #edf2e7;
+  border-radius: 14px;
+}
+#homun-studio .st-routine-list h2 {
+  font-size: 17px;
+  margin-bottom: 12px;
+}
+#homun-studio .st-demo-board > div {
+  padding: 12px;
+  background: #f1f5ec;
+  border-radius: 10px;
+  margin: 10px 0;
+}
+#homun-studio .st-demo-board small {
+  display: block;
+  margin-top: 8px;
+}
+#homun-studio .st-simple-chat {
+  max-width: 780px;
+  margin: 0 auto;
+  height: calc(100dvh - 170px);
+  min-height: 450px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+#homun-studio .st-simple-chat > header {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  flex-shrink: 0;
+}
+#homun-studio .st-simple-chat > header strong {
+  flex: 1;
+}
+#homun-studio .st-simple-chat > header small {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+#homun-studio .st-simple-chat > header > span {
+  font-size: 10px;
+  color: var(--muted);
+}
+#homun-studio .st-simple-history {
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+  scrollbar-width: thin;
+  padding: 8px 6px 12px;
+}
+#homun-studio .st-simple-welcome {
+  padding: 35px 0;
+}
+#homun-studio .st-simple-welcome h1 {
+  font-size: 27px;
+}
+#homun-studio .st-simple-welcome p {
+  margin: 12px 0 25px;
+}
+#homun-studio .st-simple-message {
+  margin: 18px 0;
+  font-size: 14px;
+  line-height: 1.6;
+  max-width: 90%;
+}
+#homun-studio .st-simple-message small {
+  font-size: 10px;
+  color: var(--muted);
+}
+#homun-studio .st-simple-message.user {
+  margin-left: auto;
+  background: #edf2e7;
+  border-radius: 12px;
+  padding: 10px 14px;
+  width: fit-content;
+}
+#homun-studio .st-simple-result {
+  padding: 18px;
+  background: #fff;
+  border-radius: 14px;
+  margin: 18px 0;
+}
+#homun-studio .st-simple-result h2 {
+  font-size: 18px;
+  margin: 8px 0;
+}
+#homun-studio .st-simple-result p {
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 10px 0;
+}
+#homun-studio .st-simple-result small,
+#homun-studio .st-simple-result details {
+  font-size: 11px;
+  color: var(--muted);
+}
+#homun-studio .st-simple-result summary {
+  cursor: pointer;
+}
+#homun-studio .st-simple-choice {
+  padding: 16px;
+  background: #edf2e7;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+#homun-studio .st-simple-chat .st-sdk-composer {
+  position: static;
+  flex-shrink: 0;
+}
+@media (max-width: 600px) {
+  #homun-studio .st-simple-chat {
+    height: calc(100dvh - 130px);
+  }
+  #homun-studio .st-simple-chat > header > span {
+    max-width: 100px;
+  }
+}
+/* Compact notifications: badge anchored to the bell, readable full-width results. */
+#homun-studio .st-activity-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  overflow: visible;
+  border-radius: 10px;
+}
+#homun-studio .st-activity-trigger:hover {
+  background: #eaf0e3;
+}
+#homun-studio .st-activity-trigger .st-activity-count {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  margin: 0;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-size: 10px;
+  font-weight: 600;
+  box-shadow: 0 0 0 2px #fafbf7;
+  border-radius: 10px;
+  pointer-events: none;
+}
+#homun-studio .st-routine-list {
+  background: #fff;
+  padding: 18px 20px;
+  margin: 16px 0;
+  border-radius: 14px;
+}
+#homun-studio .st-routine-list h2 {
+  font-size: 15px;
+  margin: 0 0 10px;
+}
+#homun-studio .st-activity-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: none;
+  gap: 20px;
+  padding: 13px 12px;
+  margin: 4px 0;
+  border-radius: 10px;
+  text-align: left;
+  background: transparent;
+  color: #263330;
+}
+#homun-studio .st-activity-row:hover {
+  background: #f0f4eb;
+}
+#homun-studio .st-activity-row > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+#homun-studio .st-activity-row strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #263330;
+}
+#homun-studio .st-activity-row small {
+  display: block;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #737d70;
+  margin-top: 4px;
+}
+#homun-studio .st-activity-open {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: #edf3e6;
+  color: #365334;
+  white-space: nowrap;
+}
+#homun-studio .st-activity-row:focus-visible,
+#homun-studio .st-activity-trigger:focus-visible {
+  outline: 2px solid #637d56;
+  outline-offset: 3px;
+}
+@media (max-width: 600px) {
+  #homun-studio .st-activity-row {
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  #homun-studio .st-activity-open {
+    margin-left: auto;
+  }
+  #homun-studio .st-activity-dialog {
+    padding: 18px;
+  }
+}
+#homun-studio .st-activity-row > .st-activity-open {
+  flex: 0 0 auto;
+  width: auto;
+}
+#homun-studio .st-result-page {
+  max-width: 850px;
+  margin: 0 auto;
+  display: grid;
+  gap: 18px;
+}
+#homun-studio .st-result-page header {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+#homun-studio .st-result-page h1 {
+  font-size: 28px;
+  margin: 0;
+}
+#homun-studio .st-result-page h2 {
+  font-size: 18px;
+}
+#homun-studio .st-result-page > small {
+  color: var(--muted);
+  font-size: 11px;
+}
+#homun-studio .st-result-page .st-simple-result {
+  margin: 0;
+}
+#homun-studio .st-result-page .st-sim-actions {
+  margin: 0;
+}
+#homun-studio .st-result-page textarea {
+  display: block;
+  width: 100%;
+  min-height: 110px;
+  margin: 10px 0;
+  font-size: 14px;
+  padding: 12px;
+}
+#homun-studio .st-result-message {
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.7;
+  background: #edf2e7;
+  padding: 12px;
+  border-radius: 10px;
+}
+
+.st-project-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+.st-project-heading h1 {
+  margin-bottom: 10px;
+}
+.st-project-heading .st-intro {
+  margin: 0 0 22px;
+}
+.st-project-heading > button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  margin-top: 12px;
+}
+.st-project-chat {
+  max-width: 900px;
+  margin: 0 auto;
+  display: grid;
+  gap: 18px;
+}
+.st-project-chat-history {
+  min-height: 220px;
+  max-height: 45vh;
+  overflow-y: auto;
+  padding: 12px 0;
+  scrollbar-width: thin;
+}
+.st-project-chat-welcome {
+  padding: 42px 12px;
+}
+.st-project-chat-welcome p,
+.st-project-chat-proposal p {
+  color: var(--st-muted, #788475);
+  margin-top: 10px;
+}
+.st-project-chat-proposal {
+  background: #edf2e7;
+  padding: 20px;
+  border-radius: 16px;
+  margin-top: 16px;
+}
+.st-project-chat-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+.st-project-chat .st-sdk-composer {
+  margin: 0;
+}
+@media (max-width: 640px) {
+  .st-project-heading {
+    flex-direction: column;
+    gap: 0;
+  }
+}
+.st-project-composer-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 0 16px;
+}
+.st-project-composer-tools .st-text-link {
+  font-size: 12px;
+}
+.st-project-chat-proposal ol {
+  list-style: decimal;
+  padding-left: 22px;
+  margin: 14px 0;
+}
+.st-project-chat-proposal li {
+  padding: 3px 0;
+}
+.st-contribution {
+  display: grid;
+  gap: 20px;
+  padding: 24px 0;
+}
+.st-contribution h3,
+.st-contribution p {
+  margin: 0;
+}
+.st-contribution label {
+  display: grid;
+  gap: 10px;
+}
+.st-contribution textarea {
+  min-height: 110px;
+}
+.st-contribution-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+}
+.st-contribution-file {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.st-project-chat-proposal > .st-btn {
+  margin-top: 18px;
+}

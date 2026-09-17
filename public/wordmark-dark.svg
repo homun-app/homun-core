@@ -1,0 +1,9 @@
+<svg width="1148" height="262" viewBox="0 0 1148 262" fill="none" xmlns="http://www.w3.org/2000/svg">
+<!-- Homun wordmark — dark theme: light #F4F1EE letters + teal #157A6E dot. -->
+<path d="M25 237L25 56M25 157C25 123.667 41.6667 107 75 107C108.333 107 125 123.667 125 157V237" stroke="#F4F1EE" stroke-width="50" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M263 237C298.899 237 328 207.899 328 172C328 136.101 298.899 107 263 107C227.101 107 198 136.101 198 172C198 207.899 227.101 237 263 237Z" stroke="#F4F1EE" stroke-width="50" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M401 237V157C401 123.667 417.667 107 451 107C484.333 107 501 123.667 501 157M501 157V237M501 157C501 123.667 517.667 107 551 107C584.333 107 601 123.667 601 157V237" stroke="#F4F1EE" stroke-width="50" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M674 117V187C674 220.333 708.667 237 778 237C847.333 237 882 220.333 882 187V117" stroke="#F4F1EE" stroke-width="50" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M955 237V157C955 123.667 971.667 107 1005 107C1038.33 107 1055 123.667 1055 157V237" stroke="#F4F1EE" stroke-width="50" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M778 26C794.569 26 808 39.4315 808 56C808 72.5685 794.569 86 778 86C761.431 86 748 72.5685 748 56C748 39.4315 761.431 26 778 26Z" fill="#157A6E" stroke="#157A6E" stroke-width="20"/>
+</svg>

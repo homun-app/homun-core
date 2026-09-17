@@ -1,0 +1,14 @@
+REVOKE EXECUTE ON FUNCTION public.is_org_member(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.org_role_of(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.can_see_project(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.project_role_of(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.can_manage_project(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.can_write_project(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.is_org_member(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.org_role_of(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.can_see_project(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.project_role_of(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.can_manage_project(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.can_write_project(uuid) TO authenticated;
+CREATE POLICY "blocchi non accessibili" ON public.job_locks FOR SELECT TO authenticated USING (false);

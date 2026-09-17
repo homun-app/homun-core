@@ -1,0 +1,184 @@
+@import "tailwindcss" source(none);
+@source "./";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Homun design system — "Alpine frost calm".
+ * Teal #157A6E, ink #101917, cream #F4F1EE. All colors in oklch.
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Sora", "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --shadow-frost: 0 1px 2px oklch(0.19 0.01 170 / 0.04), 0 12px 32px -16px oklch(0.19 0.01 170 / 0.14);
+  --shadow-lift: 0 2px 4px oklch(0.19 0.01 170 / 0.05), 0 24px 48px -24px oklch(0.19 0.01 170 / 0.2);
+}
+
+:root {
+  --radius: 0.875rem;
+  --background: oklch(0.982 0.004 165);
+  --foreground: oklch(0.22 0.012 170);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.012 170);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.012 170);
+  --primary: oklch(0.5 0.075 176);
+  --primary-foreground: oklch(0.98 0.005 165);
+  --secondary: oklch(0.95 0.012 170);
+  --secondary-foreground: oklch(0.3 0.02 172);
+  --muted: oklch(0.955 0.008 168);
+  --muted-foreground: oklch(0.5 0.014 172);
+  --accent: oklch(0.93 0.028 174);
+  --accent-foreground: oklch(0.34 0.045 175);
+  --destructive: oklch(0.55 0.19 25);
+  --destructive-foreground: oklch(0.98 0.005 165);
+  --success: oklch(0.62 0.13 155);
+  --success-foreground: oklch(0.98 0.005 165);
+  --warning: oklch(0.75 0.14 75);
+  --warning-foreground: oklch(0.25 0.03 75);
+  --border: oklch(0.9 0.008 170);
+  --input: oklch(0.9 0.008 170);
+  --ring: oklch(0.5 0.075 176);
+  --chart-1: oklch(0.5 0.075 176);
+  --chart-2: oklch(0.62 0.13 155);
+  --chart-3: oklch(0.75 0.14 75);
+  --chart-4: oklch(0.6 0.06 220);
+  --chart-5: oklch(0.42 0.05 176);
+  --sidebar: oklch(0.97 0.006 168);
+  --sidebar-foreground: oklch(0.24 0.012 170);
+  --sidebar-primary: oklch(0.5 0.075 176);
+  --sidebar-primary-foreground: oklch(0.98 0.005 165);
+  --sidebar-accent: oklch(0.93 0.028 174);
+  --sidebar-accent-foreground: oklch(0.34 0.045 175);
+  --sidebar-border: oklch(0.9 0.008 170);
+  --sidebar-ring: oklch(0.5 0.075 176);
+}
+
+/* Homun dark — "Verde bosco profondo": #0B1412 / #14231F / #157A6E / #8FE3D0 / #F4F1EE */
+.dark {
+  --background: #0b1412;
+  --foreground: #f4f1ee;
+  --card: #14231f;
+  --card-foreground: #f4f1ee;
+  --popover: #14231f;
+  --popover-foreground: #f4f1ee;
+  --primary: #157a6e;
+  --primary-foreground: #f4f1ee;
+  --secondary: #1b302b;
+  --secondary-foreground: #f4f1ee;
+  --muted: #162622;
+  --muted-foreground: #9db3ad;
+  --accent: #8fe3d0;
+  --accent-foreground: #0b1412;
+  --destructive: oklch(0.62 0.17 25);
+  --destructive-foreground: #0b1412;
+  --success: #8fe3d0;
+  --success-foreground: #0b1412;
+  --warning: oklch(0.82 0.13 78);
+  --warning-foreground: #0b1412;
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: #8fe3d0;
+  --chart-1: #157a6e;
+  --chart-2: #8fe3d0;
+  --chart-3: oklch(0.82 0.13 78);
+  --chart-4: oklch(0.68 0.07 220);
+  --chart-5: oklch(0.5 0.06 176);
+  --sidebar: #0e1a17;
+  --sidebar-foreground: #f4f1ee;
+  --sidebar-primary: #157a6e;
+  --sidebar-primary-foreground: #f4f1ee;
+  --sidebar-accent: #1b302b;
+  --sidebar-accent-foreground: #8fe3d0;
+  --sidebar-border: oklch(1 0 0 / 9%);
+  --sidebar-ring: #8fe3d0;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+}
+
+@utility eyebrow {
+  font-family: var(--font-display);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+@utility frost-panel {
+  background-color: color-mix(in oklab, var(--color-card) 78%, transparent);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-frost);
+}
+
+@utility alpine-glow {
+  background-image:
+    radial-gradient(60rem 32rem at 12% -10%, color-mix(in oklab, var(--color-primary) 16%, transparent), transparent 70%),
+    radial-gradient(48rem 28rem at 92% 4%, color-mix(in oklab, var(--color-chart-2) 12%, transparent), transparent 70%);
+}
