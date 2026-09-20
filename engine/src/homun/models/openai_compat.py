@@ -142,7 +142,7 @@ class OpenAICompatibleProvider:
                     # Thinking models (e.g. qwen3.5) otherwise burn the token budget in
                     # reasoning and leave content empty — structured interpret needs content.
                     "think": False,
-                    "options": {"temperature": 0, "num_predict": 1024},
+                    "options": {"temperature": 0, "num_predict": 8192},
                 }
             )
             message = payload.get("message") if isinstance(payload, dict) else None
@@ -324,7 +324,7 @@ class OpenAICompatibleProvider:
             "messages": chat_messages,
             "stream": True,
             "think": False,
-            "options": {"temperature": 0, "num_predict": 1024},
+            "options": {"temperature": 0, "num_predict": 8192},
         }
         data = json.dumps(body).encode("utf-8")
         request = Request(

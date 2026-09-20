@@ -46,8 +46,10 @@ def deliver_pending(ctx, command_id: str | None = None, wait_seconds: float = 0)
     if dbos_app.is_launched():
         from homun.runtime.workflows.material_read import deliver_reads
         from homun.runtime.workflows.price_comparison import deliver_comparisons
+        from homun.runtime.workflows.tool_chain import deliver_chains
         deliver_comparisons(ctx)
         deliver_reads(ctx)
+        deliver_chains(ctx)
         reconcile_runs(ctx, command_id=command_id, wait_seconds=wait_seconds)
     store = ctx.repository.load()
     if command_id is None:

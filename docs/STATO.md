@@ -15,6 +15,7 @@ Aggiornato il 20 settembre 2026 dopo la tranche «registro delle capacità»: fo
 - **Lettura non interrotta:** aggiornamenti e caricamenti non azzerano più lo storico; il transcript si ricarica solo a cambio lavoro o su richiesta esplicita, conservando il contenuto visibile.
 - **Registro delle capacità:** fonte singola in `domain/capabilities.py` (id, tipo, versione tool, input/output, effetti, prerequisiti, limiti, timeout); il confronto CSV e la lettura attingono versione e limiti da lì; `GET /v1/workspaces/{ws}/capabilities` espone il catalogo con disponibilità reale per attore (materiali idonei leggibili); la sintesi dell'intake riceve il catalogo reale senza segnali di disponibilità; con roster vuoto o agente unico il motore applica un collaboratore confermabile deterministico.
 - **Seconda capacità eseguibile — lettura materiale:** `read_material` (versionata `material-read-v1`) con proposta→approvazione→esecuzione DBOS→artifact di lettura (estratto limitato 8.000 caratteri, hash, provenienza) in revisione umana; fonte materiale condivisa con il confronto CSV (stessa verifica di identità/hash/permessi); cambio del materiale invalida l'approvazione; retry e riavvio non duplicano l'artifact. Scheda «Leggi un materiale» nella chat.
+- **Tool chain — primo loop multi-tool:** un turno compone più invocazioni di capacità approvate con un'unica approvazione persona che enumera ogni effetto (digest sull'intera sequenza, fonti rivalidate prima dell'avvio); esecuzione DBOS sequenziale riusando gli execute() degli strumenti; continuazione meccanica fra i passi registrata negli eventi; fallimento al passo N conserva gli artifact precedenti e blocca i successivi; V1 monocapacità (2–8 passi), via API.
 - **Selettore materiali esistenti:** le schede lettura e confronto offrono «Usa i materiali del progetto» accanto al caricamento: i riferimenti (nome·versione·byte) si scelgono da ciò che è già registrato, senza duplicare upload; i percorsi da-id non producono mai ingestioni. Primo incremento verso il loop multi-tool.
 - **Confini della delega operativa (passo D completato):** l'approvazione dell'esecuzione di azioni concrete (confronto CSV, lettura materiale) richiede una persona, anche quando il proprietario del lavoro è l'agente delegato; i delegati hanno cap di budget propri (`BudgetAllocation`: limite e contatori per attore dentro la busta del lavoro, impostabili con `work.set_budget`, contatori spesi conservati) — un delegato esaurisce il proprio sub-cap senza toccare la busta degli altri; l'agente delegato con grant conduce turni di chat supervisionati sotto il proprio cap, le azioni restano approvazione umana.
 - **Contesto autorizzato esteso (passo D):** quando la chat è legata a un lavoro, il contesto composto per il modello include un preambolo autorizzato e limitato — stato del lavoro, accordo confermato, riferimenti materiali (versione e hash, mai il contenuto) e memoria approvata pertinente — tracciato nel manifest (v2) e rivalidato prima di pubblicare effetti: un materiale che cambia versione invalida l'interpretazione in volo; i manifest legacy continuano a validare.
@@ -28,7 +29,7 @@ Aggiornato il 20 settembre 2026 dopo la tranche «registro delle capacità»: fo
 
 | Verifica | Ultima evidenza |
 | --- | --- |
-| Motore | 421 test passati, 1 saltato; warning Starlette/AnyIO |
+| Motore | 427 test passati, 1 saltato; warning Starlette/AnyIO |
 | Frontend | 164 passati (routing domanda/lavoro con lingua, lifecycle transcript, diff intake, client lettura), typecheck e build web/prototipo riusciti |
 | Desktop | 8 passati con motore incorporato |
 | Architettura | 0 errori, 29 avvisi di dimensione legacy |
@@ -37,15 +38,15 @@ Aggiornato il 20 settembre 2026 dopo la tranche «registro delle capacità»: fo
 | GUI | Browser su motore temporaneo: domanda pura → risposta e scheda «solo conversazione»; richiesta di lavoro → proposta; conferma, diff, storico integro; scheda «Leggi un materiale» con artifact pronto ed estratto |
 | Pacchetto | Build desktop riuscita con prompt e nuovi moduli incorporati, CRC ZIP verificato, 8/8 test |
 
-Build di riferimento: `dist/desktop/2026-09-20T12-09-11-805Z/Homun-darwin-arm64/Homun.app`.
-ZIP: `dist/desktop/2026-09-20T12-09-11-805Z/Homun-0.1.0-macos-arm64.zip`.
-SHA-256: `b1b75c3f8a9e7ab75269f9cb3409f5e855b0d71a646cbba3e974d19083c1543f`.
+Build di riferimento: `dist/desktop/2026-09-20T18-29-10-443Z/Homun-darwin-arm64/Homun.app`.
+ZIP: `dist/desktop/2026-09-20T18-29-10-443Z/Homun-0.1.0-macos-arm64.zip`.
+SHA-256: `de1975d68b1dc71b45e8dc56b38096d023334fd7a64061d003046f8d9a5b9a19`.
 
-Vedi [prove complete e limiti della tranche selettore materiali](research/2026-09-20-selettore-materiali.md), la [tranche confini della delega](research/2026-09-20-confini-delega.md), la [tranche contesto autorizzato](research/2026-09-20-contesto-autorizzato.md), la [tranche budget](research/2026-09-20-budget-lavoro.md), la [tranche lettura materiale](research/2026-09-20-lettura-materiale.md) e la [ricognizione Hermes e altri sistemi](research/2026-09-20-ricognizione-hermes-altri.md). Le build precedenti restano in `dist/desktop/` come prove storiche.
+Vedi [prove complete e limiti della tranche tool chain](research/2026-09-20-tool-chain.md), la [tranche selettore materiali](research/2026-09-20-selettore-materiali.md), la [tranche confini della delega](research/2026-09-20-confini-delega.md), la [tranche contesto autorizzato](research/2026-09-20-contesto-autorizzato.md), la [tranche budget](research/2026-09-20-budget-lavoro.md), la [tranche lettura materiale](research/2026-09-20-lettura-materiale.md) e la [ricognizione Hermes e altri sistemi](research/2026-09-20-ricognizione-hermes-altri.md). Le build precedenti restano in `dist/desktop/` come prove storiche.
 
 ## Ancora aperto
 
-- Il loop multi-tool generico (agente che compone più capacità in un turno) e le skill portabili restano da fare; le allocazioni di budget si impostano solo via comando/API (nessuna UI); un delegato senza allocazione esplicita spende dalla busta comune.
+- La catena è V1 monocapacità via API (nessuna UI dedicata, niente dati in pipelina fra passi); le skill portabili restano da fare; le allocazioni di budget si impostano solo via comando/API (nessuna UI); un delegato senza allocazione esplicita spende dalla busta comune.
 - Il budget copre il ciclo di modello del lavoro (intake, interpretazione, piano); restano fuori lo stream presentazionale e le chiamate senza lavoro. I ritardi di retry possono superare la stima prenotata di un'unità (documentato); nessuna stima preventiva di token; niente cap propri per delegati (arrivano con la delega operativa); il budget non è ancora nel riepilogo UI (solo via API).
 - Il picker materiali mostra il progetto della conversazione (non più progetti) e non si aggiorna da caricamenti esterni senza riapertura. La selezione della capacità da parte del 4B dipende dalle righe di esempio nel prompt: nuove capacità richiederanno esempi e riverifica della matrice.
 - **Multilingua:** la UI resta italiana (i18n delle stringhe non richiesto); il contenuto del registro capacità è in italiano; con il modello locale 4B richieste molto brevi in altra lingua ricadono sulla lingua del template (limite del modello, non dell'infrastruttura); template oltre it/en da aggiungere con il fallback a protezione.

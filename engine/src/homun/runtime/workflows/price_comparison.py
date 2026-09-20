@@ -36,6 +36,8 @@ def deliver_comparisons(ctx):
         if record.type != PROPOSAL_TYPE or record.result['status'] not in {'queued', 'running'}:
             continue
         proposal = record.result
+        if proposal.get('_chain_id'):
+            continue  # chain-owned: the tool_chain workflow dispatches it
         try:
             start(proposal['_workflow_id'], proposal['id'])
         except Exception:

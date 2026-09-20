@@ -92,6 +92,25 @@ def _model_capabilities(capabilities):
             for item in capabilities]
 
 
+def _extract_json_payload(text):
+    """Code fences first; thinking models may also prepend prose — take the JSON object."""
+    raw = text.strip()
+    if raw.startswith('```'):
+        raw = raw.split('\n',1)[1].rsplit('```',1)[0].strip()
+    try:
+        json.loads(raw)
+        return raw
+    except ValueError:
+        pass
+    start = raw.find('{')
+    end = raw.rfind('}')
+    if start >= 0 and end > start:
+        candidate = raw[start:end+1]
+        json.loads(candidate)  # raises when the braces are not a JSON object
+        return candidate
+    raise ValueError('No JSON object found in model response')
+
+
 def synthesize(registry, text, agents, *, previous_brief=None, latest_request=None, capabilities=None, language=None, usage_out=None):
     catalog = _model_capabilities(capabilities)
     # Language selection is structural: a known language picks its template, an
@@ -108,9 +127,7 @@ def synthesize(registry, text, agents, *, previous_brief=None, latest_request=No
     usage = getattr(result, 'usage', None)
     if usage_out is not None and usage is not None:
         usage_out.append(usage)
-    raw = result.text.strip()
-    if raw.startswith('```'):
-        raw = raw.split('\n',1)[1].rsplit('```',1)[0].strip()
+    raw = _extract_json_payload(result.text)
     brief = IntakeBrief.model_validate_json(raw)
     if any(len(item)>500 for item in brief.constraints + brief.missing_information):
         raise ValueError('Intake list item too long')
@@ -144,9 +161,7 @@ def classify_request(registry, text, *, pending_brief=None, usage_out=None):
     usage = getattr(result, 'usage', None)
     if usage_out is not None and usage is not None:
         usage_out.append(usage)
-    raw = result.text.strip()
-    if raw.startswith('```'):
-        raw = raw.split('\n',1)[1].rsplit('```',1)[0].strip()
+    raw = _extract_json_payload(result.text)
     classification = RequestClassification.model_validate_json(raw)
     language = (classification.language or '').strip().lower()[:8] or None
     return classification.kind, language
