@@ -1,10 +1,12 @@
 /** Compact, source-explicit summary of an engine-backed work. */
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Work } from "./conversation-types";
 import type { SpaceData, SpaceView } from "./ConversationSpace";
 import { EngineWorkObjectiveEditor } from "./EngineWorkObjectiveEditor";
 import { engineWorkPanelMessage } from "@/lib/engine-project-projection";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
+import { listEngineMaterials, type EngineMaterial } from "@/lib/engine-projects-client";
+import { resolveEngineProjectForWork } from "@/lib/engine-work-project";
 import "./engine-work-summary.css";
 
 const statusLabels: Record<string, string> = {
@@ -39,6 +41,7 @@ export function EngineWorkspaceWorkPanel({
   onOpenSpace: (view: SpaceView, initial?: string, selected?: string) => void;
   onApplyObjectivePatch?: ((objective: string) => Promise<void>) | undefined;
 }) {
+  const materials = useWorkMaterials(work);
   return (
     <aside className="cw-workspace cw-engine-summary" aria-label="Riepilogo del lavoro">
       <div className="cw-panel-top">
@@ -78,6 +81,21 @@ export function EngineWorkspaceWorkPanel({
           </div>
         )}
       </dl>
+      {materials.items.length > 0 && (
+        <section className="cw-engine-summary__materials">
+          <h3>Materiali del lavoro</h3>
+          <ul>
+            {materials.items.map((material) => (
+              <li key={material.id} title={material.content_hash ?? undefined}>
+                {material.origin_name ?? material.title} · v{material.version}
+              </li>
+            ))}
+          </ul>
+          {materials.count > materials.items.length && (
+            <p className="cw-intake-note">+{materials.count - materials.items.length} altri nel progetto</p>
+          )}
+        </section>
+      )}
       <section className="cw-engine-summary__next">
         <h3>Prossimo passo</h3>
         <p>{engineWorkPanelMessage(work.engineStatus ?? "")}</p>
@@ -86,6 +104,31 @@ export function EngineWorkspaceWorkPanel({
       <p className="cw-engine-summary__source">Fonte: motore</p>
     </aside>
   );
+}
+
+function useWorkMaterials(work: Work) {
+  const [state, setState] = useState<{ items: EngineMaterial[]; count: number }>({
+    items: [],
+    count: 0,
+  });
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const projectId = await resolveEngineProjectForWork(work, work.title);
+        const items = (await listEngineMaterials({ projectId })).filter(
+          (material) => material.status === "active",
+        );
+        if (live) setState({ items: items.slice(0, 5), count: items.length });
+      } catch {
+        if (live) setState({ items: [], count: 0 });
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [work.id, work.projectId, work.title]);
+  return state;
 }
 
 function WorkTitleEditor({

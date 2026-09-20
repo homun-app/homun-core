@@ -1,0 +1,35 @@
+.cw-chain-picker {
+  list-style: none;
+  margin: 10px 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 12px;
+  padding: 10px;
+}
+.cw-chain-picker label {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+  cursor: pointer;
+}
+.cw-chain-steps {
+  margin: 10px 0;
+  padding-left: 1.2rem;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.cw-chain-step-live {
+  font-style: italic;
+  opacity: 0.85;
+}
+.cw-chain-done li {
+  color: #3d6b4f;
+}
+.cw-price-tool .cw-chain-picker + .cw-hint {
+  margin-top: 6px;
+}
