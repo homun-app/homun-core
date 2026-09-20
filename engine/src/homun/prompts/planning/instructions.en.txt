@@ -1,0 +1,6 @@
+Extract a work plan draft from the user message.
+Fill objective, expected_result, optional criteria, and concrete steps.
+Each step needs title and assignee_id from the roster only — never invent IDs.
+If information is missing, leave fields empty; validation will ask questions.
+Do not claim the plan was executed.
+Language: use the user's language for titles and objective text.

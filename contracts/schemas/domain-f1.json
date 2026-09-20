@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://homun.local/contracts/domain-f1.json",
+  "title": "Homun domain F1 entities",
+  "description": "Canonical shapes for Work, Conversation, PlanRevision and related F1 types. Persistence and HTTP in F2.",
+  "type": "object",
+  "$defs": {
+    "WorkStatus": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "ready",
+        "running",
+        "waiting_input",
+        "waiting_approval",
+        "paused",
+        "review",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "StepStatus": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "running",
+        "waiting_input",
+        "waiting_approval",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "superseded"
+      ]
+    },
+    "Work": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "workspace_id",
+        "title",
+        "objective",
+        "status",
+        "version",
+        "primary_conversation_id",
+        "conversation_ids",
+        "requester_id",
+        "owner_id"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "workspace_id": { "type": "string" },
+        "title": { "type": "string" },
+        "objective": { "type": "string" },
+        "status": { "$ref": "#/$defs/WorkStatus" },
+        "version": { "type": "integer", "minimum": 1 },
+        "primary_conversation_id": { "type": "string" },
+        "conversation_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "project_id": { "type": ["string", "null"] },
+        "requester_id": { "type": "string" },
+        "owner_id": { "type": "string" },
+        "reviewer_id": { "type": ["string", "null"] },
+        "current_plan_revision": { "type": "integer", "minimum": 0 },
+        "current_artifact_version": { "type": "integer", "minimum": 0 },
+        "archived": { "type": "boolean" }
+      }
+    },
+    "Conversation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "workspace_id", "title", "version"],
+      "properties": {
+        "id": { "type": "string" },
+        "workspace_id": { "type": "string" },
+        "title": { "type": "string" },
+        "project_id": { "type": ["string", "null"] },
+        "version": { "type": "integer", "minimum": 1 },
+        "archived": { "type": "boolean" }
+      }
+    },
+    "PlanStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "assignee_id", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "assignee_id": { "type": "string" },
+        "status": { "$ref": "#/$defs/StepStatus" },
+        "depends_on": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "output_expected": { "type": "string" }
+      }
+    },
+    "Command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command_id", "type", "payload"],
+      "properties": {
+        "command_id": { "type": "string" },
+        "type": { "type": "string" },
+        "target_id": { "type": "string" },
+        "expected_version": { "type": "integer" },
+        "payload": { "type": "object" }
+      }
+    }
+  }
+}

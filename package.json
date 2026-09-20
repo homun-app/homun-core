@@ -14,7 +14,18 @@
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "check": "npm run typecheck && npm test && npm run build && npm run build:prototype"
+    "check": "npm run typecheck && npm test && npm run build && npm run build:prototype",
+    "architecture:check": "python3 tools/check_architecture.py",
+    "engine:install": "cd engine && uv venv .venv --python 3.13.12 && uv pip sync requirements.lock --only-binary :all: --require-hashes --python .venv/bin/python && uv pip install --no-deps --no-build-isolation -e . --python .venv/bin/python && uv pip check --python .venv/bin/python",
+    "engine:dev": "engine/.venv/bin/python -m homun serve --dev-insecure",
+    "engine:test": "cd engine && .venv/bin/pytest -q",
+    "engine:backup": "engine/.venv/bin/python -m homun backup create",
+    "engine:backup:verify": "engine/.venv/bin/python -m homun backup verify",
+    "engine:backup:restore": "engine/.venv/bin/python -m homun backup restore",
+    "desktop:dev": "npm run build && electron apps/desktop/src/main.cjs",
+    "desktop:test": "node --test apps/desktop/tests/*.test.cjs",
+    "desktop:package": "npm run build && node apps/desktop/scripts/package-app.mjs",
+    "desktop:build": "python3 tools/build_engine_bundle.py && npm run desktop:package"
   },
   "overrides": {
     "rolldown": "1.2.1"
@@ -89,12 +100,14 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@electron/packager": "20.3.0",
     "@eslint/js": "^9.32.0",
     "@lovable.dev/vite-tanstack-config": "^2.20.0",
     "@types/node": "^22.16.5",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.2.0",
+    "electron": "44.4.3",
     "eslint": "^9.32.0",
     "eslint-config-prettier": "^10.1.1",
     "eslint-plugin-prettier": "^5.2.6",

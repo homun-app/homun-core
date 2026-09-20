@@ -33,7 +33,7 @@ Le prescrizioni dei documenti descrivono il comportamento desiderato. Non dichia
 | C | Chat come ingresso principale; piani, richieste e risultati comprensibili nello stesso contesto |
 | C | Agenti configurabili, team, progetti con più chat, materiali, plugin, automazioni e settings |
 | C | Riutilizzare componenti esistenti per funzionare presto; componenti Homun sostituibili gradualmente |
-| P | Pydantic AI per agenti e DBOS per durata delle esecuzioni |
+| C | **Pydantic AI + DBOS** come runtime agenti/esecuzioni (D-RUN-01 chiusa 2026-09-17); Homun resta proprietario di piano, policy e ricevute; hardening (MCP, cifratura checkpoint, packaging) sullo stesso stack |
 | P | Una sola autorità per spazio nella prima rete, senza backend centrale Homun obbligatorio |
 | P | Archivio conoscenze portabile e adattatore memoria; Mem0 OSS candidato, non adozione irrevocabile |
 | P | HTTP/OpenAPI per comandi e letture, SSE per eventi, trasferimento file riprendibile |

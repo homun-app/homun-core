@@ -1,0 +1,103 @@
+openapi: 3.1.0
+info:
+  title: Homun Engine API
+  version: 0.1.0
+  description: >
+    Minimal contract for the Homun 2 local handshake spike.
+    Only /v1/health and /v1/capabilities are implemented.
+    FastAPI is provisional; this schema is the source of truth for these two routes.
+servers:
+  - url: http://127.0.0.1:8765
+    description: Local loopback engine (development)
+paths:
+  /v1/health:
+    get:
+      operationId: getHealth
+      summary: Engine liveness
+      tags: [system]
+      responses:
+        "200":
+          description: Engine is running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ok
+                version: "0.1.0"
+                uptime_seconds: 12.345
+  /v1/capabilities:
+    get:
+      operationId: getCapabilities
+      summary: Declared engine capabilities
+      description: >
+        Feature flags are explicit. A false flag means the capability is not
+        available; clients must not pretend agents or domain work are ready.
+      tags: [system]
+      responses:
+        "200":
+          description: Capability declaration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilitiesResponse"
+              example:
+                api_version: v1
+                version: "0.1.0"
+                features:
+                  domain: true
+                  agents: true
+                  materials: false
+                  memory: false
+                  automations: false
+                  peers: false
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status, version, uptime_seconds]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        version:
+          type: string
+        uptime_seconds:
+          type: number
+          minimum: 0
+    CapabilityFlags:
+      type: object
+      additionalProperties: false
+      required: [domain, agents, materials, memory, automations, peers, backup, models]
+      properties:
+        domain:
+          type: boolean
+        agents:
+          type: boolean
+        materials:
+          type: boolean
+        memory:
+          type: boolean
+        automations:
+          type: boolean
+        peers:
+          type: boolean
+        backup:
+          type: boolean
+          description: Consistent SQLite+manifest backup create/list (restore is CLI-only)
+        models:
+          type: boolean
+          description: Model providers, credentials, verify, and complete (F3.1)
+    CapabilitiesResponse:
+      type: object
+      additionalProperties: false
+      required: [api_version, version, features]
+      properties:
+        api_version:
+          type: string
+          enum: [v1]
+        version:
+          type: string
+        features:
+          $ref: "#/components/schemas/CapabilityFlags"

@@ -1,0 +1,26 @@
+---
+description: Prefer reusable helpers and components over duplicated one-off logic
+alwaysApply: true
+---
+
+# Reuse first
+
+When the same decision or presentation appears more than once, extract a named
+helper, hook, or component and call it from every call site.
+
+## Do
+
+- Resolve work chrome via `scenarioForWork(work, scenarios)` — never
+  `scenarios[work.scenario]` for display when `source` may be `"engine"`.
+- Put pure logic in small modules (`conversation-*.ts`, `*-client.ts`, domain
+  ports) instead of growing shell files.
+- Extend an existing port/helper before adding a parallel path.
+
+## Don't
+
+- Copy UI labels, agent names, or engine/simulation branching into a second place.
+- Leave `scenario: 0` (or similar demo indexes) as the source of truth for
+  engine-backed UI chrome.
+- When Fonte=motore but the engine is down, fall back to simulation create
+  (Marta demo). Stay on the engine path with an empty list + gate error —
+  use `resolveWorkspaceMode`.

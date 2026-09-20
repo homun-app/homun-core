@@ -50,3 +50,7 @@ runtime-data/
 *.db
 apps/*/dist/
 coverage/
+
+# Local runtime spike: source is small but carries its own .venv and data
+experiments/**/.venv/
+experiments/**/.data/

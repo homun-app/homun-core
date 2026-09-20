@@ -26,15 +26,17 @@ export function StudioChatInput({
   onSend,
   children,
   references,
+  disabled = false,
 }: {
   label: string;
+  disabled?: boolean;
   onSend: (text: string, files: File[], references?: ChatReference[]) => void;
   references?: ChatReference[];
   children?: ReactNode;
 }) {
   return (
     <PromptInputProvider>
-      <Composer label={label} onSend={onSend} references={references || []}>
+      <Composer disabled={disabled} label={label} onSend={onSend} references={references || []}>
         {children}
       </Composer>
     </PromptInputProvider>
@@ -45,6 +47,7 @@ function Composer({
   onSend,
   children,
   references = [],
+  disabled = false,
 }: Parameters<typeof StudioChatInput>[0]) {
   const attachments = usePromptInputAttachments();
   const { textInput } = usePromptInputController();
@@ -99,7 +102,7 @@ function Composer({
       maxFileSize={25 * 1024 * 1024}
       onError={({ message }) => setError(message)}
       onSubmit={async (message) => {
-        if (busy || (!message.text.trim() && !message.files.length))
+        if (disabled || busy || (!message.text.trim() && !message.files.length))
           throw new Error("Empty message");
         setBusy(true);
         setError("");
@@ -201,7 +204,7 @@ function Composer({
           }}
           aria-label={label}
           placeholder="Chiedi, crea, organizza…"
-          disabled={busy}
+          disabled={disabled || busy}
         />
       </PromptInputBody>
       {!!chosen.filter((r) => textInput.value.includes(`@${r.name}`)).length && (
@@ -237,7 +240,7 @@ function Composer({
           <PromptInputButton
             aria-label="Allega file"
             title="Allega file · puoi anche trascinarli o incollarli"
-            disabled={busy}
+            disabled={disabled || busy}
             onClick={() => attachments.openFileDialog()}
           >
             <Paperclip size={17} />
@@ -246,7 +249,7 @@ function Composer({
         <small className="st-muted">Demo locale · nessun modello collegato</small>
         <PromptInputSubmit
           aria-label="Invia messaggio"
-          disabled={busy || (!textInput.value.trim() && !attachments.files.length)}
+          disabled={disabled || busy || (!textInput.value.trim() && !attachments.files.length)}
         >
           <ArrowUp size={18} />
         </PromptInputSubmit>

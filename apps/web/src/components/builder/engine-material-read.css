@@ -1,0 +1,16 @@
+.cw-read-extract {
+  max-height: 320px;
+  overflow: auto;
+  background: #ffffff;
+  border: 1px solid #dce3d5;
+  border-radius: 12px;
+  padding: 12px;
+}
+.cw-read-extract pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #283e36;
+}

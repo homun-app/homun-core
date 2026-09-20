@@ -1,7 +1,7 @@
 import { ConversationMemberPicker } from "./ConversationMemberPicker";
 import type { MemberProfile } from "./conversation-members";
 import { useRef, useState } from "react";
-import type { Work } from "./ConversationWorkspace";
+import type { Work } from "./conversation-types";
 
 export function ConversationContribution({
   work,

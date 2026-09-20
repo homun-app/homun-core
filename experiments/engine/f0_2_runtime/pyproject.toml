@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "homun-f0-2-runtime"
+version = "0.1.0"
+description = "F0.2 spike: validate Pydantic AI + DBOS for Homun (not an adoption lock)"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic-ai-slim[dbos]>=1.0.0",
+  "dbos>=1.0.0",
+]
+
+[project.scripts]
+f0-2 = "f0_2_runtime.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/f0_2_runtime"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/f0_2_runtime" = "f0_2_runtime"

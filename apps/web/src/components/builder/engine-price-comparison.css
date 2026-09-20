@@ -1,0 +1,37 @@
+.cw-price-tool {
+  margin: 20px 0;
+  padding: 18px;
+  border: 1px solid #dce2d6;
+  border-radius: 16px;
+  background: #f4f6ef;
+  font-size: 13px;
+}
+.cw-price-tool summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.cw-price-tool p {
+  margin: 12px 0;
+  line-height: 1.6;
+}
+.cw-price-tool label {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+}
+.cw-price-tool input {
+  max-width: 100%;
+}
+.cw-price-report {
+  max-height: 400px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  margin-top: 16px;
+}
+.cw-price-report table {
+  font-size: 12px;
+  min-width: 740px;
+}
+.cw-price-tool button {
+  padding: 8px 12px;
+}

@@ -1,5 +1,7 @@
 # Homun — piano di sviluppo del motore e del prodotto
 
+> **Piano storico del 17 settembre.** Le indicazioni “da validare” e “non implementato” descrivono quel momento. Pydantic AI + DBOS sono stati adottati e il primo flusso reale è verificato. Per stato e prosecuzione usare [STATO.md](../STATO.md) e la [specifica di passaggio](../handoff/2026-09-19-ripresa-sviluppo-homun.md).
+
 > Specifica consolidata da analizzare: [pacchetto v0.1](../specifications/README.md). Chiarisce decisioni, proposte e scelta ancora aperta del backend memoria; prevale sulle ipotesi non confermate di questo documento.
 
 Data: 17 settembre 2026. Stato: piano proposto, da aggiornare con le decisioni su distribuzione e disponibilità dei dati. Nessuna implementazione del motore avviata con questo documento.
@@ -16,7 +18,7 @@ Riferimenti: [architettura](../architecture/2026-09-17-motore-homun.md), [rete t
 
 > Aggiornamento di Fabio: dati locali e trasferimento del solo necessario, con cifratura. La blockchain resta un mezzo proposto da valutare, non un requisito. Il dettaglio è nel documento sulla distribuzione dati.
 
-> Scelta tecnica raccomandata dopo confronto: **Pydantic AI + DBOS**. [Motivazioni, licenze e prova di adozione](../architecture/2026-09-17-scelta-framework.md). DBOS sostituisce lo sviluppo da zero di checkpoint, code e recovery; i task seguenti descrivono integrazione e verifiche.
+> Scelta tecnica **adottata** (D-RUN-01, 2026-09-17): **Pydantic AI + DBOS**. Evidenza F0.2 e regole in [ADR runtime](../architecture/decisions/2026-09-17-f0-2-runtime-spike.md). DBOS possiede checkpoint, code e recovery; Homun possiede dominio e policy. Si migliora in loco; non si introduce un secondo orchestratore.
 
 > Memoria: per accelerare il prodotto, raccomandato **Mem0 OSS locale dietro MemoryPort**, sostituibile in seguito con componenti Homun. [Scelta e prove](../architecture/2026-09-17-memoria-riutilizzabile.md). Prima prova di memoria anticipata in F3; F8 estende formazione e condivisione.
 
@@ -28,7 +30,7 @@ Riferimenti: [architettura](../architecture/2026-09-17-motore-homun.md), [rete t
 | D2 | Operatività offline | Letture già disponibili e bozze; comandi condivisi in attesa | Prima di rete e sync |
 | D3 | Accesso Internet | Diretto quando possibile, relay configurabile se necessario | Prima del pilot fuori LAN |
 | D4 | Runtime | Python modulare; SDK agente dietro adattatore | Fine F0 |
-| D5 | Framework esecuzione | DBOS, da validare con crash/resume, plugin dinamici e cifratura | Fine F0 |
+| D5 | Framework esecuzione | **Adottato:** DBOS + Pydantic AI; hardening MCP/cifratura/packaging sullo stesso stack | Fine F0 (adozione 2026-09-17; prove residue = miglioramento) |
 | D6 | Modelli iniziali | Un remoto e uno locale scelti su casi di prova/hardware | Prima di F3 live |
 | D7 | Connettori iniziali | Materiali locali, ricerca web, Trello; email in fase seguente | Prima di F6 |
 | D8 | Distribuzione desktop | Mac iniziale, pacchetto autosufficiente senza Docker obbligatorio | Fine F0 |
@@ -73,8 +75,8 @@ engine/
     notifications/          # inbox persistente
   tests/{unit,integration,recovery,security}/
 contracts/                  # schema API ed eventi versionati
-src/features/workspace/     # client e proiezioni UI reali
-src/components/builder/     # componenti UX esistenti, riusati gradualmente
+apps/web/src/lib/           # client motore e proiezioni UI reali (ex features/workspace)
+apps/web/src/components/builder/  # componenti UX esistenti, riusati gradualmente
 apps/desktop/               # shell Electron; packaging e processo Python da validare in F0
 runtime/network/            # solo se il trasporto richiede processo dedicato
 fixtures/engine/            # casi di prova non sensibili
@@ -90,7 +92,7 @@ Non introdurre tutti i file vuoti in anticipo. Ogni fase crea soltanto i propri 
 Dipendenze: nessuna. Output: ADR in `docs/architecture/decisions/`, prove isolate in `experiments/engine/`.
 
 - [ ] F0.1 Inventariare componenti riusabili del vecchio Homun: modelli, segreti, browser, file, memoria e packaging. Per ciascuno: interfaccia, dipendenze, licenza, test eseguibile e costo d'isolamento; scegliere riusa/adatta/non usare.
-- [ ] F0.2 Validare Pydantic AI + DBOS sullo scenario: output tipizzato → contributo umano → riavvio processo → ripresa → tool con effetto incerto. Scartare soluzioni che tengono l'attesa soltanto in RAM.
+- [x] F0.2 Validare Pydantic AI + DBOS sullo scenario: output tipizzato → contributo umano → riavvio processo → ripresa → tool con effetto incerto. **PASS** in `experiments/engine/f0_2_runtime/`; stack adottato (D-RUN-01). Hardening residuo in ADR, non sostituzione.
 - [ ] F0.3 Prova di packaging: avvio servizio Python su Mac pulito senza terminale, handshake, riavvio controllato e arresto. Annotare dimensioni e dipendenze reali.
 - [ ] F0.4 Prova rete LAN e due reti esterne: pairing, 10 MB di file, interruzione/ripresa e relay forzato. Valutare binding e manutenzione del trasporto.
 - [ ] F0.5 Provare cifratura database/file/indici, secret store, recupero su nuovo dispositivo e funzionamento con schermo bloccato; scegliere librerie supportate, senza crittografia personalizzata.
@@ -102,45 +104,51 @@ Gate: report riproducibile con comandi/versioni/macchine; una scelta per checkpo
 
 Dipendenza: D1, F0. Moduli: `domain/{work,plan,conversation,commands,events}.py`, `policy/`, `contracts/`, test unitari.
 
-- [ ] F1.1 Definire ID, Work distinto da Conversation, Project facoltativo, PlanRevision, StepAttempt, ContributionRequest e ArtifactVersion.
-- [ ] F1.2 Implementare transizioni del documento architetturale; vietare completamento senza evidenza e approvazioni su versioni obsolete.
-- [ ] F1.3 Comandi con command_id, actor autenticato, expected_version; eventi con event_id, sequence, schema_version e riferimenti.
-- [ ] F1.4 Versionare piani e modifiche concorrenti; impedirne la modifica retroattiva dopo esecuzione. Inserire nuovo passo senza duplicare il lavoro.
-- [ ] F1.5 Testare chat senza progetto, creazione progetto da chat, più chat per lavoro e progetto, agente rinominato con ID stabile.
+- [x] F1.1 Definire ID, Work distinto da Conversation, Project facoltativo, PlanRevision, StepAttempt/ContributionRequest e ArtifactVersion (`engine/src/homun/domain/`).
+- [x] F1.2 Implementare transizioni del documento architetturale; vietare completamento senza evidenza e approvazioni su versioni obsolete.
+- [x] F1.3 Comandi con command_id, actor autenticato, expected_version; eventi con event_id, sequence, schema_version e riferimenti.
+- [x] F1.4 Versionare piani e modifiche concorrenti; impedirne la modifica retroattiva dopo esecuzione. Inserire nuovo passo senza duplicare il lavoro.
+- [x] F1.5 Testare chat senza progetto, creazione progetto da chat, più chat per lavoro e progetto, agente rinominato con ID stabile.
 
-Gate: test tabellari di ogni transizione lecita/illecita, replay duplicati senza effetti aggiuntivi, conflitto esplicito tra due modifiche simultanee.
+Gate: test tabellari di ogni transizione lecita/illecita, replay duplicati senza effetti aggiuntivi, conflitto esplicito tra due modifiche simultanee. **PASS** — `npm run engine:test` (14 test). Persistenza e HTTP comandi: F2.
 
 ### F2 — Persistenza, API e collegamento UI
 
-Dipendenza: F1. Moduli: `storage/`, `api/`, `src/features/workspace/{client,events,queries}.ts`; modifiche mirate a `ConversationWorkspace.tsx` e viste.
+Dipendenza: F1. Moduli: `storage/`, `api/`, `apps/web/src/lib/{client,events,queries}.ts`; modifiche mirate a viste.
 
-- [ ] F2.1 Cifratura a riposo di database, file e indici con chiavi protette; migrazioni per dominio, accesso e outbox; transazioni e indice per workspace/id/versione.
-- [ ] F2.2 API letture/comandi e stream eventi con cursor; snapshot dopo disconnessione e versioni incompatibili gestite esplicitamente.
-- [ ] F2.3 Spostare decisioni di stato fuori da React; adattatore demo e adattatore motore dietro lo stesso contratto, scelti esplicitamente.
-- [ ] F2.4 Separare conversazione attiva, selezione UI e stato dei lavori. Non salvare identità autenticata nel selettore Vista demo.
-- [ ] F2.5 Backup consistente database+manifest file e ripristino su directory pulita. Import demo facoltativo e marcato come storico simulato, mai come esecuzione reale.
+- [x] F2.1 Persistenza SQLite (WAL) di database dominio; **cifratura a riposo ancora D-CRYPTO-01** (non fingere sicurezza). Path default macOS Application Support / `HOMUN_DATA_DIR`.
+- [x] F2.2 API letture/comandi e eventi con cursor (`/v1/workspaces/{id}/…`); conflitti 409 espliciti.
+- [x] F2.3 Adattatore demo vs motore esplicito (`resolveWorkspaceBackend` + pannello dominio); nessun fallback silenzioso. ConversationWorkspace resta simulato finché non migrato.
+- [x] F2.4 Separare shell UI (tipi/hook/pannelli) e collegare ConversationWorkspace al dominio motore quando Fonte=motore (lista/crea/messaggi; simulazione resta isolata).
+- [x] F2.5 Backup consistente database+manifest file e ripristino su directory pulita.
 
-Gate: UI e motore riavviati conservano lavoro e storia; evento duplicato non duplica il messaggio; nessun file reale perso. Demo precedente continua a funzionare.
+Gate F2: dominio persiste, API risponde, UI collega Fonte=motore, backup verificabile. Cifratura a riposo ancora D-CRYPTO-01.
 
 ### F3 — Prima chat e piano reali
 
 Dipendenza: F2, D6. Moduli: `models/`, `planning/`, `context/`, `UsageEntry`; componenti chat e piano esistenti.
 
-- [ ] F3.1 Provider fake deterministico per test e adattatore del primo provider reale; onboarding credenziale esplicito, secret store e verifica connessione.
-- [ ] F3.2 Interpretare messaggi come risposta, chiarimento o proposta di comando. Risoluzione @ per ID, candidati ambigui nella UI condivisa, mai assegnazioni per nome indovinato.
-- [ ] F3.3 Estrarre risultato atteso, criteri, input e passi; validare output del modello prima di creare bozza. Chiedere soltanto dati mancanti rilevanti.
-- [ ] F3.4 Modifiche da chat e manuali producono la stessa patch versionata; anteprima leggibile per cambi di obiettivo/responsabile/effetti.
-- [ ] F3.5a Integrare MemoryPort e Mem0 OSS locale per un ricordo approvato, persistenza, isolamento di due progetti, rettifica, cancellazione ed export; nessuna ricostruzione del piano tramite memoria semantica.
-- [ ] F3.5 Streaming interrompibile, messaggio parziale marcato, timeout e retry limitato; tracciare tentativi e consumo senza dichiarare azioni mai eseguite.
+- [x] F3.1 Provider fake deterministico per test e adattatore del primo provider reale; onboarding credenziale esplicito, secret store e verifica connessione.
+- [x] ModelPort foundation (2026-09-18): Protocol + adapters sotto `models/adapters/` (niente `pydantic_ai` fuori); `GET /v1/models/connections`, `POST /v1/models/chat`; Settings «Prova chat». Ordine oggetti: LLM → agenti → memoria → progetti → flusso prodotto.
+- [x] Agents foundation slice A (2026-09-18): `AgentProfile` con istruzioni + `preferred_connection_id` + status; `agent.create`/`agent.update`; roster interpret da agenti attivi/bozza; Settings → Agenti + prova chat. Niente tool/MCP/autonomia ancora.
+- [x] Mem0 local stack slice C (2026-09-18): `build_local_mem0_config` (Ollama+Qdrant, no OpenAI); dual-write con isolamento progetto via ledger; `GET /v1/memory/status`; Settings Memoria status + recall. Live test dietro `HOMUN_MEM0_LIVE=1`.
+- [x] Projects + Teams foundation B1 (2026-09-18): `Project`/`Team` con membership e coordinatore; comandi create/update/archive; HTTP list/get; Settings → Progetti.
+- [x] AccessGrant B2 (2026-09-18): deny-by-default su progetti; bootstrap admin al create; `grant.issue`/`revoke`; HTTP grants + filtro list/get; Settings grant UI.
+- [x] Materials B3 (2026-09-18): `MaterialVersion` metadata (note/link/file_ref); create/update/archive con write grant; HTTP materials; Settings UI; nessun upload binario.
+- [x] F3.2 Interpretare messaggi come risposta, chiarimento o proposta di comando. Risoluzione @ per ID, candidati ambigui nella UI condivisa, mai assegnazioni per nome indovinato.
+- [x] F3.3 Estrarre risultato atteso, criteri, input e passi; validare output del modello prima di creare bozza. Chiedere soltanto dati mancanti rilevanti.
+- [x] F3.4 Modifiche da chat e manuali producono la stessa patch versionata; anteprima leggibile per cambi di obiettivo/responsabile/effetti.
+- [x] F3.5 Streaming interrompibile, messaggio parziale marcato, timeout e retry limitato; UsageAttempt ledger; ModelPort/provider token stream (`/chat/stream` live + `/commands/stream` source=modelport). *(spec 2026-09-18-f35 slices A–E)*
+- [x] F3.5a Integrare MemoryPort e Mem0 OSS locale: ricordo approvato, persistenza, isolamento due progetti, rettifica, cancellazione, export; Settings export/rectify; nessuna ricostruzione piano via memoria. *(spec 2026-09-18-f35a + mem0-local-stack; packaging/cifratura ancora D-CRYPTO-01 / Electron)*
 
-Gate: tre casi diversi (catalogo, ricerca, analisi log) senza ramo hardcoded per settore; piano valido, obiettivo mantenuto in 10 messaggi di correzione. Prove live separate dai test fake.
+Gate: tre casi diversi (catalogo, ricerca, analisi log) senza ramo hardcoded per settore; piano valido, obiettivo mantenuto in 10 messaggi di correzione. Prove live separate dai test fake. **PASS (fake CI)** — `tests/test_f3_acceptance_gate.py` (2026-09-18).
 
 ### F4 — Esecuzione, input e risultati reali
 
 Dipendenza: F3. Moduli: `runtime/`, `materials/`, `notifications/`, review; `ConversationContribution`, `ConversationWork`, piano e risultati.
 
-- [ ] F4.1 Integrare code, checkpoint e recovery DBOS; adattatore Homun per tentativi, policy ed eventi aziendali, senza duplicare il runtime generico. Riavvio in ciascun punto critico: prima/dopo tool e prima/dopo commit.
-- [ ] F4.2 Ingest file/cartelle con destinazione d'origine, hash/versione, estrazione di TXT/PDF testuale/CSV; file non supportati apribili ma non dichiarati letti. OCR separato.
+- [x] F4.1 Integrare code, checkpoint e recovery DBOS; adattatore Homun per tentativi, policy ed eventi aziendali, senza duplicare il runtime generico. Slice C+B: `homun.runtime` (DBOS + receipts), `Run`, `work.start`/`provide_contribution` → workflow, `GET .../runs/{id}` + `.../works/{id}/run`. Prove: `tests/test_f41_*.py`. Kill/resume script opzionale; CI = complete in-process + reconcile.
+- [x] F4.2 Ingest file/cartelle: blob sotto `data_dir/materials/`, hash/versione, extract TXT/CSV/PDF testo (`extract_status`); non supportati archiviati senza dichiararli letti; HTTP ingest/content/blob; Settings upload/cartella + anteprima; contributo chat Fonte=motore con allegati. OCR escluso. Prove: `tests/test_f42_materials_ingest.py`.
 - [ ] F4.3 Richiesta contributo tipizzata: materiale, testo, scelta, credenziale mancante o autorizzazione; notifica porta all'azione, risposta valida sblocca lo stesso passo.
 - [ ] F4.4 Generazione artifact reali, controlli rispetto ai criteri, versioni e fonti. Anteprima per testo/PDF/immagine/tabella; download per altri tipi.
 - [ ] F4.5 Revisione e correzione riferite a versione; risultato accettato non autorizza invio. Autonomia per ambito controllata dal backend.
@@ -285,3 +293,17 @@ Dopo F0 stimare giornate per pacchetto con intervallo ottimistico/probabile/pess
 - Nessuna riscrittura della cronologia pubblicata; preservare la versione prototipo consultabile.
 
 **Primo passo concreto proposto:** chiudere il modello di distribuzione dati e avviare F0, non aggiungere subito chiamate AI al componente di 2.969 righe.
+
+
+## Aggiornamento eseguito — 19 settembre 2026
+
+Dopo il confronto con Hermes, la tranche autorizzata ha consolidato comandi, storage,
+modularità, outbox e lifecycle DBOS. Il [rapporto di consegna](../research/2026-09-19-production-foundations-delivery.md)
+riporta codice, contratti, test e limiti; sostituisce le vecchie descrizioni di solo bootstrap
+per queste aree. La [verifica dei requisiti di release](../research/2026-09-19-production-release-gates.md)
+separa fattibilità di driver/OS e prove effettive.
+
+Ordine immediato: confine di fiducia shell/motore e profilo di distribuzione; protocollo
+materiali/backup completo; poi strumenti, contesto e budget del loop agentico. Non ampliare
+la UI o introdurre un secondo orchestratore per aggirare questi contratti. Lo storico UX
+rimane conservato con budget dimensionali congelati, non dichiarato riscritto.

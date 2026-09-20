@@ -1,0 +1,40 @@
+name: Local desktop candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-arm64:
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: python -m pip install uv==0.10.0
+      - run: npm ci
+      - name: Build isolated standalone engine
+        run: python tools/build_engine_bundle.py
+      - name: Frozen runtime and recovery smoke
+        run: python engine/packaging/smoke.py dist/engine/homun-engine
+      - name: Owned frozen process lifecycle
+        run: node --test apps/desktop/tests/engine-process.test.cjs apps/desktop/tests/engine-startup-races.test.cjs
+        env:
+          HOMUN_TEST_ENGINE: ${{ github.workspace }}/dist/engine/homun-engine
+      - name: Package local candidate, without distribution signing
+        run: npm run desktop:package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: homun-macos-arm64-unsigned
+          path: |
+            dist/desktop/**/*.zip
+            dist/desktop/**/*.sha256
+          if-no-files-found: error

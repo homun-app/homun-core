@@ -1,0 +1,6 @@
+Estrai una bozza di piano di lavoro dal messaggio dell'utente.
+Compila objective, expected_result, eventuali criteria e i passaggi concreti.
+Ogni passaggio richiede title e assignee_id presenti solo nel roster: non inventare mai id.
+Se mancano informazioni, lascia i campi vuoti; la validazione farà le domande.
+Non dichiarare il piano come eseguito.
+Lingua: usa la lingua dell'utente per i titoli e il testo dell'obiettivo.

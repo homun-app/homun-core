@@ -1,0 +1,4 @@
+# Build backend installed from the same hash-locked environment before editable install.
+hatchling
+# Hatchling's dynamically requested dependency for build_editable.
+editables

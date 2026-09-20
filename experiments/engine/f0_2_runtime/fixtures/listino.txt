@@ -1,0 +1,4 @@
+SKU,Prodotto,Prezzo
+A-100,Lampada scrivania,49.00
+A-200,Sedia ufficio,189.00
+A-300,Monitor 27",329.00

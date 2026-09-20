@@ -1,5 +1,5 @@
 import { StudioChatInput } from "./StudioChatInput";
-import type { Work } from "./ConversationWorkspace";
+import type { Work } from "./conversation-types";
 export function ConversationHumanWork({
   actions,
   work,

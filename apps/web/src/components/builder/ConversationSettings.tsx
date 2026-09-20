@@ -10,8 +10,15 @@ import {
   Archive,
   Check,
   ArrowUpRight,
+  BookMarked,
+  Bot,
+  FolderKanban,
 } from "lucide-react";
 import { ConversationSelect } from "./ConversationSelect";
+import { ConversationModelsSettingsSection } from "./ConversationModelsSettingsSection";
+import { ConversationMemorySettingsSection } from "./ConversationMemorySettingsSection";
+import { ConversationAgentsSettingsSection } from "./ConversationAgentsSettingsSection";
+import { ConversationProjectsSettingsSection } from "./ConversationProjectsSettingsSection";
 import { type ConversationPreferences } from "./conversation-preferences";
 import "./conversation-settings.css";
 const sections = [
@@ -19,6 +26,9 @@ const sections = [
   { id: "preferences", label: "Preferenze", icon: Settings2 },
   { id: "notifications", label: "Notifiche", icon: Bell },
   { id: "models", label: "Modelli e budget", icon: Brain },
+  { id: "agents", label: "Agenti", icon: Bot },
+  { id: "projects", label: "Progetti", icon: FolderKanban },
+  { id: "memory", label: "Memoria", icon: BookMarked },
   { id: "archive", label: "Archivio", icon: Archive },
   { id: "data", label: "Dati della demo", icon: Database },
   { id: "help", label: "Guida", icon: HelpCircle },
@@ -232,73 +242,14 @@ export function ConversationSettings({
             </>
           )}
           {section === "models" && (
-            <>
-              <h3>Come lavorerà la squadra</h3>
-              <p>
-                Preferenze di progetto per il futuro motore. Nessun modello è collegato e queste
-                scelte non avviano richieste o spese.
-              </p>
-              <label>
-                Scelta del modello
-                <ConversationSelect
-                  label="Scelta del modello"
-                  value={draft.routing}
-                  options={[
-                    { value: "automatic", label: "Automatico · in base al lavoro" },
-                    { value: "quality", label: "Privilegia la qualità" },
-                    { value: "fast", label: "Privilegia la velocità" },
-                  ]}
-                  onChange={(v) => change("routing", v as ConversationPreferences["routing"])}
-                />
-              </label>
-              <label>
-                Ambiente preferito
-                <ConversationSelect
-                  label="Ambiente preferito"
-                  value={draft.execution}
-                  options={[
-                    { value: "cloud", label: "Provider cloud · da collegare" },
-                    { value: "local", label: "Modello locale · da collegare" },
-                  ]}
-                  onChange={(v) => change("execution", v as ConversationPreferences["execution"])}
-                />
-              </label>
-              <div className="cv-settings-grid">
-                <label>
-                  Budget mensile indicativo (€)
-                  <input
-                    type="number"
-                    min="0"
-                    max="100000"
-                    value={draft.budget}
-                    onChange={(e) => change("budget", Number(e.target.value))}
-                  />
-                </label>
-                <label>
-                  Limite per lavoro (€)
-                  <input
-                    type="number"
-                    min="0"
-                    max={draft.budget}
-                    value={draft.perWorkBudget}
-                    onChange={(e) => change("perWorkBudget", Number(e.target.value))}
-                  />
-                </label>
-              </div>
-              {draft.perWorkBudget > draft.budget && (
-                <p role="alert">Il limite per lavoro non può superare il budget mensile.</p>
-              )}
-              <div className="cv-settings-card">
-                <strong>Connessioni e strumenti</strong>
-                <p>
-                  Composio, MCP, skill e strumenti aziendali sono riuniti nel catalogo. La demo non
-                  richiede chiavi o password.
-                </p>
-                <button className="cw-secondary" onClick={() => navigate("Plugin")}>
-                  Apri plugin <ArrowUpRight size={14} />
-                </button>
-              </div>
-            </>
+            <ConversationModelsSettingsSection draft={draft} onChange={change} />
+          )}
+          {section === "agents" && <ConversationAgentsSettingsSection actorId="person_fabio" />}
+          {section === "projects" && (
+            <ConversationProjectsSettingsSection actorId="person_fabio" />
+          )}
+          {section === "memory" && (
+            <ConversationMemorySettingsSection actorId="person_fabio" />
           )}
           {section === "archive" && (
             <>

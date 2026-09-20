@@ -18,7 +18,7 @@ export const defaultPreferences: ConversationPreferences = {
   motion: true,
   resultNotifications: true,
   routing: "automatic",
-  execution: "cloud",
+  execution: "local",
   budget: 100,
   perWorkBudget: 10,
 };

@@ -1,6 +1,6 @@
 # Scelta delle librerie del motore
 
-17 settembre 2026. Raccomandazione tecnica richiesta da Fabio, basata su documentazione e licenze correnti. Non è un benchmark eseguito né una certificazione del packaging Homun.
+17 settembre 2026. **Stato: adottata (D-RUN-01).** Confermata da Fabio dopo F0.2: si costruisce e si migliora su questo stack, senza piano di sostituzione. Motivazioni e licenze sotto; evidenza runtime in [ADR F0.2](decisions/2026-09-17-f0-2-runtime-spike.md).
 
 ## Scelta
 
@@ -61,15 +61,8 @@ Verificate direttamente: [Pydantic AI MIT](https://github.com/pydantic/pydantic-
 
 MIT permette uso, modifica e redistribuzione anche commerciale preservando copyright e licenza. La scelta riguarda le librerie open source, non eventuali servizi gestiti. Modelli, API, connettori e dipendenze hanno condizioni/costi separati. Prima di distribuire bloccare versioni/commit e inventariare le licenze transitive; un ramo main può cambiare.
 
-## Prima prova d'adozione
+## Hardening sullo stesso stack (non alternative)
 
-1. Un agente produce un piano tipizzato da un file di prova.
-2. Si sospende con una richiesta di materiale; termina il processo.
-3. Dopo il riavvio riprende dallo stato corretto.
-4. Si crea un secondo profilo agente e si inserisce un passo.
-5. Si aggiunge un tool/MCP senza perdere le run precedenti.
-6. Si simula un timeout dopo un effetto: nessuna ripetizione cieca.
-7. Si ispezionano checkpoint, log e file per verificare la policy di cifratura.
-8. Si esegue nell'app Mac distribuita, non solo nell'ambiente di sviluppo.
+Dopo F0.2 restano da hardenizzare: secondo profilo agente a caldo, MCP/tool dinamici, cifratura checkpoint, packaging Electron. Si risolvono migliorando adattatori e prove Homun, non cambiando framework.
 
-I primi test possono usare provider deterministico e nessuna API a pagamento. Le prove live richiedono configurazione esplicita del provider. Fallimento sui punti 4/5/7 richiede adattamento documentato o rivalutazione mirata del runtime, non aggiunta automatica di un altro framework.
+LangGraph resta documentato solo come confronto storico nella tabella sopra: **non** è un piano B attivo e non va sommato a DBOS.

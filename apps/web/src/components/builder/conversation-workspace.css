@@ -449,6 +449,55 @@
 .cw-message.agent {
   padding-right: 15px;
 }
+.cw-patch-preview {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, canvas 88%, transparent);
+}
+.cw-engine-objective {
+  margin: 12px 0 18px;
+  display: grid;
+  gap: 8px;
+}
+.cw-engine-objective textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  font: inherit;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  background: color-mix(in srgb, canvas 92%, transparent);
+}
+.cw-patch-preview strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.cw-patch-preview ul {
+  margin: 0 0 12px;
+  padding-left: 1.1rem;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.cw-message-partial {
+  font-style: italic;
+  opacity: 0.85;
+}
+.cw-memory-promote {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 12px;
+}
+.cw-memory-saved {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.cw-engine-busy {
+  margin-top: 8px;
+}
 .cw-closed {
   display: flex;
   gap: 8px;
@@ -3649,4 +3698,27 @@ dialog.cw-overlay:not([open]) {
   padding: 8px;
   color: #66816e;
   font-size: 20px;
+}
+
+.cw-engine-banner {
+  margin: 0 16px 8px;
+  padding: 10px 12px;
+  border: 1px solid #d7e0d9;
+  background: #f3f7f4;
+  color: #263832;
+}
+.cw-engine-banner__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.cw-engine-banner__hint {
+  margin: 6px 0 0;
+  color: #66816e;
+  font-size: 12px;
+}
+.cw-engine-banner__error {
+  margin: 8px 0 0;
+  color: #8a3b2d;
 }

@@ -1,4 +1,4 @@
-import type { Work } from "./ConversationWorkspace";
+import type { Work } from "./conversation-types";
 export const busyProjects = ["Catalogo autunno", "Espansione Italia", "Qualità del servizio"].map(
   (name, i) => ({
     id: `busy-project-${i}`,

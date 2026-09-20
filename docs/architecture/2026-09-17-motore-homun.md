@@ -36,13 +36,13 @@ Non costruire subito sincronizzazione bidirezionale locale/cloud. Ogni spazio ha
 
 | Base | Evidenza locale | Conseguenza |
 |---|---|---|
-| UX attuale | `src/components/builder/ConversationWorkspace.tsx`, circa 2.969 righe | Separare orchestrazione UI e regole di dominio durante la migrazione, senza riscrittura estetica |
+| UX attuale | `apps/web/src/components/builder/ConversationWorkspace.tsx` (monolite UI) | Separare orchestrazione UI e regole di dominio durante la migrazione, senza riscrittura estetica |
 | Lavoro simulato | `Work`, `Phase`, scenari e risultati precompilati nello stesso file | Non usare gli scenari come tipi di lavoro reali |
-| Piano | `ConversationCatalogPlan.tsx`: passi con agente per nome e contatore completed | Passare a ID, stato per passo, dipendenze e revisioni |
-| Persistenza demo | `conversation-storage.ts`: snapshot IndexedDB | Utile per demo; il database del motore diventerà la fonte dei dati reali |
-| Settings | `ConversationSettings.tsx`, `conversation-preferences.ts` | Separare preferenze personali, politiche di spazio e configurazione runtime |
-| Backend precedente | `src/routes/api/chat.ts` | Richiede projectId, sceglie il primo bot del progetto, usa gateway fisso: non è il nuovo runtime |
-| Supabase | migrazioni in `supabase/migrations`, `useWorkspace.tsx` | Esistono organizzazioni, ruoli, chat e pipeline; presenza statica non prova funzionamento, adeguatezza o sicurezza |
+| Piano | `apps/web/src/components/builder/ConversationCatalogPlan.tsx`: passi con agente per nome e contatore completed | Passare a ID, stato per passo, dipendenze e revisioni |
+| Persistenza demo | `apps/web/src/components/builder/conversation-storage.ts`: snapshot IndexedDB | Utile per demo; il database del motore diventerà la fonte dei dati reali |
+| Settings | `ConversationSettings.tsx`, `conversation-preferences.ts` sotto `apps/web/src/components/builder/` | Separare preferenze personali, politiche di spazio e configurazione runtime |
+| Backend precedente | `prototypes/reference/src/routes/api/chat.ts` | Richiede projectId, sceglie il primo bot del progetto, usa gateway fisso: non è il nuovo runtime |
+| Supabase | migrazioni in `supabase/migrations`, client nel riferimento | Esistono organizzazioni, ruoli, chat e pipeline; presenza statica non prova funzionamento, adeguatezza o sicurezza |
 | Vecchio Homun | `../app` con moduli Rust, desktop e componenti Python | Candidato al riuso selettivo, non dipendenza implicita di Homun2 |
 
 Nessun servizio remoto è stato modificato o verificato durante questa analisi; nessuna credenziale è stata letta.
@@ -57,14 +57,14 @@ Nessun servizio remoto è stato modificato o verificato durante questa analisi; 
 
 Queste valutazioni sono giudizi progettuali basati sul codice e sui requisiti, non benchmark.
 
-### Stack candidato e decisioni da misurare
+### Stack runtime e decisioni da hardenizzare
 
 - React/TypeScript e componenti attuali per la UI.
-- Python, FastAPI e Pydantic per API e contratti; versioni bloccate dopo una prova di compatibilità.
+- Python, FastAPI e Pydantic per API e contratti; versioni bloccate dopo prova di compatibilità.
 - SQLite per l'host locale, migrazioni e transazioni; file conservati fuori dal database con hash e versioni. Mai database WAL su cartella di rete condivisa.
-- **Pydantic AI + DBOS** raccomandati per agenti e checkpoint: [scelta delle librerie](2026-09-17-scelta-framework.md). DBOS possiede il checkpoint; niente secondo orchestratore. Validare registrazione dinamica, cifratura e packaging prima dell'adozione definitiva.
+- **Pydantic AI + DBOS adottati** per agenti e checkpoint (D-RUN-01, 2026-09-17): [ADR F0.2](decisions/2026-09-17-f0-2-runtime-spike.md), [scelta delle librerie](2026-09-17-scelta-framework.md). DBOS possiede il checkpoint; niente secondo orchestratore. Cifratura checkpoint, MCP dinamico e packaging restano hardening sullo stesso stack.
 - Un provider remoto e un provider locale compatibile con Ollama nel pilot. Nessun nome di modello hardcoded nel dominio.
-- Electron candidato per packaging React + servizio locale; verifica di riuso e dimensioni prima della scelta definitiva. Componente Swift solo quando serve davvero una capacità nativa.
+- Electron è confermato per le versioni installabili (React UI + servizio Python locale). Packaging, dimensioni, firma e prova su Mac pulito restano da validare in F0. Componente Swift solo quando serve davvero una capacità nativa.
 - Host aziendale successivo: stessa API, storage server e autenticazione multiutente; PostgreSQL candidato. Il passaggio richiede migrazioni e test, non una semplice sostituzione del driver.
 
 ## 5. Struttura del motore

@@ -1,0 +1,69 @@
+.engine-domain-panel {
+  flex-shrink: 0;
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+  background: color-mix(in oklch, var(--background) 96%, var(--primary) 4%);
+  padding: 0.65rem 0.85rem 0.85rem;
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+}
+
+.engine-domain-panel__title {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.engine-domain-panel__hint,
+.engine-domain-panel__message {
+  margin: 0.25rem 0;
+  color: var(--muted-foreground);
+}
+
+.engine-domain-panel__error {
+  margin: 0.25rem 0;
+  color: oklch(0.48 0.16 25);
+  font-weight: 600;
+}
+
+.engine-domain-panel__form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.45rem 0;
+}
+
+.engine-domain-panel__form input,
+.engine-domain-panel__form button {
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--background);
+  color: var(--foreground);
+  padding: 0.2rem 0.45rem;
+}
+
+.engine-domain-panel__form button {
+  cursor: pointer;
+}
+
+.engine-domain-panel__lists {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.engine-domain-panel__lists h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.8rem;
+}
+
+.engine-domain-panel__lists ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+@media (max-width: 720px) {
+  .engine-domain-panel__lists {
+    grid-template-columns: 1fr;
+  }
+}

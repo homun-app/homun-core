@@ -32,7 +32,7 @@ Documenti originali e relative versioni restano nella raccolta materiali. Indici
 
 ## Confine sostituibile
 
-Definire MemoryPort con operazioni remember, recall, update, forget ed export; è un contratto Homun proposto, non un'API nativa dichiarata di Mem0. Parametri obbligatori: scope, attore autenticato, fonte/versione; risultato con ID Homun, testo, fonte e validità. La corrispondenza ID Homun/backend resta nell'adattatore.
+Definire MemoryPort con le operazioni canoniche della specifica: propose, approve, recall, revise, forget ed export (allineate a `docs/specifications/02-agenti-esecuzioni-memoria.md`). È un contratto Homun proposto, non un'API nativa dichiarata di Mem0. Parametri obbligatori: scope, attore autenticato, fonte/versione; risultato con ID Homun, testo, fonte e validità. La corrispondenza ID Homun/backend resta nell'adattatore. Nomi legacy remember/update corrispondono a propose/revise e non vanno usati nel codice nuovo.
 
 Conservare un registro esportabile dei ricordi ammessi, delle fonti e delle revoche; Mem0 svolge estrazione/ricerca, non diventa l'unica copia delle decisioni aziendali. Sostituire il backend significa ricostruire l'indice dal registro, confrontare recuperi e commutare; niente riscrittura di UI e workflow.
 

@@ -103,6 +103,34 @@
   font-size: 14px;
   margin-top: 8px;
 }
+.cv-settings-body textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #dce3d7;
+  background: white;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 14px;
+  margin-top: 8px;
+  resize: vertical;
+}
+.cv-settings-memory-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.cv-settings-memory-list li {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.cv-settings-memory-list small {
+  color: #85917e;
+}
 .cv-settings-body label small,
 .cv-settings-note {
   display: block;

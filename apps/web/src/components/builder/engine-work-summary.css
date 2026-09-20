@@ -1,0 +1,105 @@
+/* Engine-only summary: one panel scroll, no nested reading surfaces. */
+.cw-workspace.cw-engine-summary {
+  padding: 22px 20px;
+}
+.cw-engine-summary .cw-panel-top {
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.cw-engine-summary h2 {
+  font-size: 18px;
+  line-height: 1.4;
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cw-engine-summary h3 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #687a59;
+}
+.cw-engine-summary .cw-engine-objective {
+  margin: 22px 0;
+  gap: 8px;
+}
+.cw-engine-summary__section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.cw-engine-summary .cs-link {
+  font-size: 11px;
+  padding: 0;
+}
+.cw-engine-summary p {
+  font-size: 12px;
+  line-height: 1.65;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.cw-engine-objective__reading:has(details) > p {
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cw-engine-objective__reading summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: #687a59;
+  margin: 7px 0;
+}
+.cw-engine-objective__reading:has(details[open]) > p {
+  display: none;
+}
+.cw-engine-summary__facts {
+  margin: 20px 0;
+  font-size: 12px;
+  display: grid;
+  gap: 12px;
+}
+.cw-engine-summary__facts > div {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 8px;
+}
+.cw-engine-summary__facts dt {
+  color: #687a59;
+}
+.cw-engine-summary__facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.cw-engine-summary__next {
+  padding-top: 16px;
+  border-top: 1px solid #dce2d3;
+  display: grid;
+  gap: 8px;
+}
+.cw-engine-summary p.cw-engine-summary__source {
+  margin-top: 20px;
+  color: #687a59;
+  font-size: 10px;
+}
+.cw-engine-summary__rename {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+  font-size: 12px;
+}
+.cw-engine-summary__rename input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid #cbd4bf;
+  border-radius: 8px;
+  background: #fafbf7;
+  font: inherit;
+}

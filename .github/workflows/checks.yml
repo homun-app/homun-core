@@ -1,0 +1,63 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.12'
+          cache: pip
+          cache-dependency-path: engine/requirements.lock
+      - name: Install hash-locked runtime, test, and build dependencies
+        run: python -m pip install --only-binary=:all: --require-hashes -r engine/requirements.lock
+      - name: Install engine without resolving or downloading dependencies
+        run: python -m pip install --no-deps --no-build-isolation -e ./engine
+      - name: Check installed dependency metadata
+        run: python -m pip check
+      - name: Canonical OpenAPI snapshot
+        run: python tools/export_openapi.py --check
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Generated engine inventory
+        run: python -m pytest -q engine/packaging/test_inventory.py
+      - name: Desktop boundary and owned engine tests
+        run: node --test apps/desktop/tests/engine-process.test.cjs apps/desktop/tests/engine-startup-races.test.cjs apps/desktop/tests/protocol.test.cjs
+        env:
+          HOMUN_TEST_PYTHON: python
+      - name: Architecture boundaries and legacy budgets
+        run: python tools/check_architecture.py
+      - name: Engine tests
+        timeout-minutes: 8
+        working-directory: engine
+        run: python -m pytest -q
+        env:
+          HOMUN_MEM0_LIVE: '0'
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install lockfile dependencies
+        run: npm ci
+      - name: Typecheck, tests, and application builds
+        timeout-minutes: 10
+        run: npm run check
+
+      - name: Packaging allowlist
+        run: node --test apps/desktop/tests/packaging.test.cjs

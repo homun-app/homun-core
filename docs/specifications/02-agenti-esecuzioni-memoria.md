@@ -1,6 +1,6 @@
 # 02 — Agenti, esecuzioni e memoria
 
-Stato: v0.1 da analizzare. [Indice](README.md). Framework proposti: Pydantic AI e DBOS; dettagli e fonti nella [valutazione](../architecture/2026-09-17-scelta-framework.md).
+Stato: v0.1. Runtime agenti/esecuzioni: **Pydantic AI + DBOS adottati** (D-RUN-01). Dettagli e fonti nella [scelta framework](../architecture/2026-09-17-scelta-framework.md) e nell'[ADR F0.2](../architecture/decisions/2026-09-17-f0-2-runtime-spike.md).
 
 ## AG-01 — Profilo del collaboratore
 
@@ -47,7 +47,7 @@ Una modifica del piano genera nuova revisione e impact preview. Passi in corso n
 
 ## AG-05 — Esecuzione affidabile
 
-DBOS è proposto come proprietario del checkpoint; Homun conserva il dominio aziendale e associa command_id/work_id/run_id al workflow. Mutazioni aziendali atomiche con eventi/outbox; consumer idempotenti. Nessun secondo scheduler di recovery sviluppato senza necessità dimostrata.
+DBOS è il proprietario del checkpoint (D-RUN-01 adottata); Homun conserva il dominio aziendale e associa command_id/work_id/run_id al workflow. Mutazioni aziendali atomiche con eventi/outbox; consumer idempotenti. Nessun secondo scheduler di recovery sviluppato senza necessità dimostrata.
 
 Run durable solo se realmente avviata nel workflow previsto. Tool con I/O, registrazione dinamica di agenti/MCP, versionamento workflow e cifratura dei checkpoint sono prove obbligatorie prima dell'adozione. Registro di handler stabile; evitare codice generato dal modello per installare un agente.
 

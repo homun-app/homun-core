@@ -1,0 +1,142 @@
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 0;
+}
+
+.app-shell .cw {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+.engine-status-bar {
+  flex-shrink: 0;
+  z-index: 40;
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+  background: color-mix(in oklch, var(--background) 92%, var(--primary) 8%);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  padding: 0.45rem 0.85rem;
+}
+
+.engine-status-bar__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+}
+
+.engine-status-bar__dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: var(--muted-foreground);
+}
+
+.engine-status-bar__dot--connected {
+  background: oklch(0.62 0.12 160);
+}
+
+.engine-status-bar__dot--checking {
+  background: oklch(0.72 0.12 85);
+}
+
+.engine-status-bar__dot--absent {
+  background: oklch(0.58 0.16 25);
+}
+
+.engine-status-bar__source {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.engine-status-bar__source select,
+.engine-status-bar__refresh {
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--background);
+  color: var(--foreground);
+  padding: 0.15rem 0.4rem;
+}
+
+.engine-status-bar__muted {
+  color: var(--muted-foreground);
+  margin-left: 0.25rem;
+}
+
+.engine-status-bar__refresh {
+  margin-left: auto;
+  cursor: pointer;
+}
+
+.engine-status-bar__hint {
+  margin: 0.35rem 0 0;
+  color: var(--muted-foreground);
+}
+
+.engine-status-bar__dev {
+  margin: 0.35rem 0 0;
+  color: var(--muted-foreground);
+}
+
+.engine-status-bar__dev summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.engine-status-bar__dev .engine-status-bar__source {
+  display: flex;
+  margin: 0.35rem 0 0;
+  margin-left: 0;
+}
+
+.homun-error-notice {
+  margin: 0.35rem 0 0;
+  color: oklch(0.48 0.16 25);
+  font-weight: 600;
+}
+
+/* Keep healthy connection chrome to one quiet line. */
+.engine-status-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 1rem;
+  padding-block: 0.3rem;
+  font-size: 0.6875rem;
+}
+.engine-status-bar__dev {
+  margin: 0 0 0 auto;
+}
+.engine-status-bar__dev[open] {
+  flex-basis: 100%;
+  margin-left: 0;
+}
+.engine-status-bar__dev[open] summary {
+  margin-bottom: 0.5rem;
+}
+.engine-status-bar > .engine-status-bar__error {
+  flex-basis: 100%;
+}
+.cw-engine-banner.cw-engine-banner--quiet {
+  padding: 3px 12px;
+  margin-bottom: 3px;
+  border: 0;
+  background: transparent;
+}
+.cw-engine-banner__details summary {
+  cursor: pointer;
+  color: #687a59;
+  font-size: 10px;
+}
+.cw-engine-banner__details[open] .cw-engine-banner__row {
+  padding-block: 8px;
+  font-size: 12px;
+}

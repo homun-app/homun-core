@@ -1,0 +1,81 @@
+openapi: 3.1.0
+info:
+  title: Homun Engine Domain API (F2)
+  version: 0.2.0
+  description: >
+    Commands and reads for the local Homun domain over SQLite.
+    Actor identity is taken from X-Homun-Actor-* headers (F2 bootstrap, not final auth).
+servers:
+  - url: http://127.0.0.1:8765
+paths:
+  /v1/workspaces/{workspace_id}/commands:
+    post:
+      operationId: postCommand
+      parameters:
+        - in: path
+          name: workspace_id
+          required: true
+          schema: { type: string }
+        - in: header
+          name: X-Homun-Actor-Id
+          required: true
+          schema: { type: string }
+        - in: header
+          name: X-Homun-Actor-Name
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [command_id, type]
+              properties:
+                command_id: { type: string }
+                type: { type: string }
+                payload: { type: object }
+      responses:
+        "200":
+          description: Command applied or idempotent replay
+        "409":
+          description: version_conflict or command_id reuse mismatch
+  /v1/workspaces/{workspace_id}/conversations:
+    get:
+      operationId: listConversations
+      parameters:
+        - in: path
+          name: workspace_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Conversation list
+  /v1/workspaces/{workspace_id}/works:
+    get:
+      operationId: listWorks
+      parameters:
+        - in: path
+          name: workspace_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Work list
+  /v1/workspaces/{workspace_id}/events:
+    get:
+      operationId: listEvents
+      parameters:
+        - in: path
+          name: workspace_id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: after
+          schema: { type: integer, minimum: 0 }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500 }
+      responses:
+        "200":
+          description: Domain events after cursor

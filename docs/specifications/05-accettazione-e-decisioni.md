@@ -51,7 +51,7 @@ Stato: v0.1 da analizzare. [Indice](README.md).
 | D-OFF-01 | Uso offline | Consultazione cache consentita e bozze; nessuna nuova decisione condivisa autorevole | Percorso UX e gestione conflitti |
 | D-CRYPTO-01 | Cifratura di database/file/checkpoint | Primitive esistenti, chiavi nel secret store, cifratura dell'intero archivio derivato | Prova driver/package, ispezione disco e review |
 | D-KEY-01 | Recupero personale/aziendale | Recupero esplicito scelto dal proprietario; niente accesso amministrativo occulto | Ripristino su device pulito e decisione dati privati |
-| D-RUN-01 | Pydantic AI + DBOS | Raccomandati, senza secondo orchestratore | Agent/plugin dinamici, crash/resume, migrazioni, cifratura |
+| ~~D-RUN-01~~ | ~~Pydantic AI + DBOS~~ | **Chiusa 2026-09-17:** stack runtime adottato; hardening in ADR F0.2, non sostituzione | Crash/resume F0.2 PASS; resto = miglioramento in loco |
 | D-MEM-01 | Primo backend memoria | File/ricerca e Mem0 dietro unico contratto, confronto limitato | Stessi casi italiano, isolamento, rettifica, export e costo |
 | D-MODEL-01 | Modelli e hardware | Un remoto e uno locale, versioni fissate | Qualità strutturata/tool su macchina target |
 | D-TOOLS-01 | Connettori del pilot | File, ricerca web, Trello; email dopo | Ricevute e revoca reali, account di prova |
@@ -64,7 +64,7 @@ La decisione sulla blockchain non blocca la v1: proposta esclusione. La decision
 
 ## REL — Ordine di costruzione
 
-1. Chiudere autorità, accesso e perimetro del pilot; validare librerie agent/runtime, cifratura e packaging con prove ridotte.
+1. Chiudere autorità, accesso e perimetro del pilot; hardenizzare cifratura e packaging sullo stack runtime già adottato (Pydantic AI + DBOS).
 2. Dominio persistente e API, collegamento della UI attuale senza rinnovo grafico.
 3. Primo lavoro reale, file e contributi, risultato/versioni/revisione; memoria minima sostituibile.
 4. Due installazioni, pairing, trasferimenti selettivi e un contributo umano remoto.

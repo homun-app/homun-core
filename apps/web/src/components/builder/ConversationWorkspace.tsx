@@ -1,246 +1,73 @@
-import { ConversationSelectField } from "./ConversationSelect";
+import { createSimulationActions } from "./conversation-simulation-actions";
 import { ConversationSettings } from "./ConversationSettings";
 import { defaultPreferences, type ConversationPreferences } from "./conversation-preferences";
-import { readPrototype, savePrototype, resetPrototype } from "./conversation-storage";
-import {
-  busyWorks,
-  busyProjects,
-  busyRoutines,
-  busyTeams,
-  busyMaterials,
-} from "./conversation-busy-demo";
-import { ConversationCatalogPlan, type CatalogPlan } from "./ConversationCatalogPlan";
+import { resetPrototype } from "./conversation-storage";
+import { type CatalogPlan } from "./ConversationCatalogPlan";
 import { ConversationActions } from "./ConversationActions";
-import { ConversationProjectNav } from "./ConversationProjectNav";
-import { ConversationAvatar } from "./ConversationAvatar";
 import { ConversationContribution } from "./ConversationContribution";
 import { ConversationHumanWork } from "./ConversationHumanWork";
-import { ConversationCreateMember } from "./ConversationCreateMember";
-import { ConversationMaterials, type ConversationMaterial } from "./ConversationMaterials";
-import { ConversationTasks } from "./ConversationTasks";
-import { ConversationPlugins } from "./ConversationPlugins";
+import { type ConversationMaterial } from "./ConversationMaterials";
 import { memberProfile, isHumanMember } from "./conversation-members";
 import {
-  ConversationSpace,
   type SpaceData,
   type SpaceView,
-  type SpaceRoutine,
   spacePeople,
 } from "./ConversationSpace";
-import { ConversationSearch, type SearchEntry } from "./ConversationSearch";
-import { useEffect, useRef, useState } from "react";
+import { ConversationSearch } from "./ConversationSearch";
+import { ConversationWorkspaceChatStage } from "./ConversationWorkspaceChatStage";
+import { ConversationWorkspacePreview } from "./ConversationWorkspacePreview";
+import { ConversationWorkspaceSidebar } from "./ConversationWorkspaceSidebar";
+import { ConversationWorkspaceSpaceHost } from "./ConversationWorkspaceSpaceHost";
+import { ConversationWorkspaceTopbar } from "./ConversationWorkspaceTopbar";
 import {
-  ArrowUpRight,
-  Bell,
-  Check,
-  ChevronDown,
-  FileText,
-  FolderOpen,
-  MessageSquare,
-  PanelRightClose,
-  PanelRightOpen,
-  Plus,
-  Search,
-  Sparkles,
-  X,
-  ArrowLeft,
-  Clock3,
-  Paperclip,
-  Download,
-  Play,
-  Settings2,
-} from "lucide-react";
-import { StudioChatInput } from "./StudioChatInput";
+  ConversationWorkspaceWorkPanel,
+  registerPlanAgent,
+} from "./ConversationWorkspaceWorkPanel";
+import { initialScenarios, scenarioForWork } from "./conversation-scenarios";
+import {
+  applyBoardMove,
+  boardMoveSuccessMessage,
+  validateBoardMove,
+} from "./conversation-board-move";
+import { buildDemoBootstrap, resolveDemoMode } from "./conversation-demo-mode";
+import { downloadPrototypeExport, downloadWorkResult } from "./conversation-export";
+import { buildMaterialLibrary } from "./conversation-material-library";
+import {
+  buildConversationSearchEntries,
+  openWorkResultPreview,
+} from "./conversation-search-entries";
+import {
+  isCompletedNoticeForViewer,
+  isPendingForViewer,
+  workStatusLabel,
+} from "./conversation-work-status";
+import { useConversationPrototypeStorage } from "./useConversationPrototypeStorage";
+import { type Phase, type Work } from "./conversation-types";
+import { useEffect, useRef, useState } from "react";
+import { ConversationEngineBanner } from "./ConversationEngineBanner";
+import { useEngineWorkspace } from "@/hooks/useEngineWorkspace";
+import { isEngineBackedWork } from "@/lib/conversation-engine-bridge";
 
-type Phase = "proposal" | "waiting" | "ready" | "review" | "approved";
-type Message = { sender?: string; who: "you" | "agent"; text: string };
-export type Work = {
-  archived?: boolean;
-  catalogPlan?: CatalogPlan;
-  coordinatedBy?: string;
-  request?: { to: string; need: string; status: "pending" | "resolved"; childId?: string };
-  routineId?: string;
-  runNumber?: number;
-  startedAt?: string;
-  requester?: string;
-  autonomy?: "supervised" | "autonomous";
-  reviewer?: string;
-  approvedBy?: string;
-  autoDelivered?: boolean;
-  humanDraft?: string;
-  humanResult?: string;
-  materialIds?: string[];
-  projectId?: string;
-  id: string;
-  scenario: number;
-  title: string;
-  phase: Phase;
-  due: string;
-  messages: Message[];
-  files: File[];
-  contribution: string;
-  revision: number;
-  feedback: string;
-};
-const initialScenarios = [
-  {
-    title: "Il nuovo catalogo",
-    agent: "Marta",
-    initial: "Prepariamo il nuovo catalogo con @Marta, usando i listini aggiornati.",
-    role: "Ufficio e clienti",
-    color: "peach",
-    icon: "M",
-    input: "I listini aggiornati",
-    help: "Carica i listini o indica dove trovarli. Aggiungi eventuali indicazioni su prodotti e prezzi da includere.",
-    outcome: "Una prima bozza del catalogo da verificare insieme.",
-    steps: [
-      "Controllare prodotti, prezzi e informazioni mancanti",
-      "Organizzare la prima bozza",
-      "Consegnarti il catalogo per la verifica",
-    ],
-    result: "Bozza del catalogo",
-    body: "# Catalogo · struttura proposta\n\n## Presentazione\nUna breve introduzione all’azienda e alla gamma di prodotti.\n\n## Prodotti\nPer ogni prodotto: nome, descrizione, variante, prezzo e disponibilità.\n\n## Condizioni commerciali\nValidità dei prezzi, tempi di consegna e contatti.\n\n## Da completare\nInserire prodotti e importi verificati dai listini. Questa è una struttura dimostrativa: i file caricati non sono stati analizzati.",
-  },
-  {
-    title: "Uno sguardo al mercato",
-    agent: "Vera",
-    initial:
-      "@Vera, prepara una ricerca sui concorrenti e sulle opportunità per la nostra azienda.",
-    role: "Ricerca e aggiornamenti",
-    color: "violet",
-    icon: "V",
-    input: "Il mercato e le aziende da confrontare",
-    help: "Indica settore, paese e concorrenti. Puoi scrivere qui, aggiungere link o allegare un brief.",
-    outcome: "Una ricerca con fonti, confronti e opportunità da valutare.",
-    steps: [
-      "Definire il perimetro della ricerca",
-      "Confrontare le fonti e distinguere fatti da ipotesi",
-      "Presentarti le opportunità con i riferimenti",
-    ],
-    result: "Ricerca di mercato",
-    body: "# Ricerca · schema di confronto\n\n## Quadro del mercato\nSettore, area geografica e periodo di osservazione.\n\n## Confronto\nOfferta, posizionamento, prezzi pubblici e canali di vendita.\n\n## Opportunità da verificare\nBisogni poco coperti e ipotesi da testare.\n\n## Fonti\nDa raccogliere e verificare. Questa anteprima è dimostrativa: non è stata effettuata alcuna ricerca web.",
-  },
-  {
-    title: "Capire gli errori",
-    agent: "Elio",
-    initial: "@Elio, analizza i log e proponi un piano per risolvere gli errori più urgenti.",
-    role: "Operazioni e qualità",
-    color: "sage",
-    icon: "E",
-    input: "I log e il servizio da controllare",
-    help: "Allega i log o una cartella e indica servizio e intervallo da esaminare. Non inserire password o chiavi di accesso.",
-    outcome: "Un riepilogo degli errori con priorità e piano di intervento.",
-    steps: [
-      "Raccogliere i log e delimitare il problema",
-      "Distinguere sintomi, cause possibili e impatto",
-      "Proporti gli interventi prima di modificare il sistema",
-    ],
-    result: "Piano di intervento",
-    body: "# Analisi dei log · piano di verifica\n\n## Perimetro\nIdentificare servizio, ambiente e intervallo temporale.\n\n## Analisi\nRaggruppare gli errori ricorrenti, ricostruire la sequenza e verificare l’impatto.\n\n## Intervento\nProporre una correzione, verificarla in ambiente di prova e concordare il rilascio.\n\n## Evidenze\nDa estrarre dai log. Documento dimostrativo: nessun log è stato letto e nessun server è stato contattato.",
-  },
-];
-const phaseText: Record<Phase, string> = {
-  proposal: "Da concordare",
-  waiting: "Serve il tuo contributo",
-  ready: "Pronto a partire",
-  review: "Da verificare",
-  approved: "Approvato",
-};
-const busyDemo = new URLSearchParams(window.location.search).get("work-demo") === "busy";
-const scaleDemo = new URLSearchParams(window.location.search).get("materials-demo") === "large";
-const scaleProjects = Array.from({ length: 50 }, (_, i) => ({
-  id: "scale-project-" + i,
-  name: "Catalogo " + String(i + 1).padStart(2, "0"),
-  brief: "Materiali e attività dimostrativi",
-  teamId: "",
-}));
-type PrototypeSnapshot = {
-  version: 1;
-  savedAt: string;
-  scenarios: ((typeof initialScenarios)[number] & { custom?: boolean })[];
-  works: Work[];
-  materials: ConversationMaterial[];
-  spaceData: SpaceData;
-  preferences: ConversationPreferences;
-  seenResults: string[];
-  attachmentMetadata: { file: File; id: string; date: string }[];
-  view: {
-    active: string | null;
-    space: SpaceView | null;
-    sidebarOpen: boolean;
-    panel: boolean;
-    viewer: string;
-    selected?: string;
-  };
-};
-const storageKey =
-  busyDemo && new URLSearchParams(window.location.search).get("edition") === "complete"
-    ? "complete"
-    : busyDemo
-      ? "busy"
-      : scaleDemo
-        ? "materials"
-        : "normal";
+import { projectWorkspaceData } from "@/lib/engine-project-projection";
+export type { Work } from "./conversation-types";
+const demoMode = resolveDemoMode();
+const { storageKey } = demoMode;
+const demoBootstrap = buildDemoBootstrap(demoMode);
 export function ConversationWorkspace() {
+  const [active, setActive] = useState<string | null>(null);
+  const engine = useEngineWorkspace(active);
   const [preferences, setPreferences] = useState<ConversationPreferences>(defaultPreferences);
   const [loaded, setLoaded] = useState(false);
   const [storageEnabled, setStorageEnabled] = useState(false);
   const [storageStatus, setStorageStatus] = useState("Caricamento…");
-  const resetting = useRef(false);
   const attachmentIds = useRef(new WeakMap<File, string>());
+  const materialDates = useRef(new WeakMap<File, string>());
 
-  const [scenarios, setScenarios] = useState<
-    ((typeof initialScenarios)[number] & { custom?: boolean })[]
-  >(() =>
-    busyDemo
-      ? busyWorks().map((w) => ({
-          ...initialScenarios[w.scenario]!,
-          title: w.title,
-          result: "Consegna: " + w.title,
-          body:
-            "# " +
-            w.title +
-            "\n\nDocumento dimostrativo di questo lavoro.\n\n## Risultato\nRiepilogo predisposto per la verifica del richiedente. Fonti e dati sono fittizi; nessuna elaborazione reale è stata eseguita.",
-        }))
-      : initialScenarios,
-  );
+  const [scenarios, setScenarios] = useState(() => demoBootstrap.scenarios);
   const [viewer, setViewer] = useState("Fabio");
   const [assignee, setAssignee] = useState("");
-  const materialDates = useRef(new WeakMap<File, string>());
-  const [materials, setMaterials] = useState<ConversationMaterial[]>(() =>
-    busyDemo
-      ? busyMaterials()
-      : scaleDemo
-        ? Array.from({ length: 100 }, (_, i) => ({
-            id: "scale-material-" + i,
-            addedAt: new Date(Date.now() - i * 86400000).toISOString(),
-            name: "Listino " + String(i + 1).padStart(3, "0") + ".txt",
-            file: new File(["Dati dimostrativi"], "Listino " + (i + 1) + ".txt"),
-            path: "Fornitore " + (Math.floor(i / 10) + 1) + "/Listino " + (i + 1) + ".txt",
-            projectIds: [],
-          }))
-        : [],
-  );
-  const [works, setWorks] = useState<Work[]>(() =>
-    busyDemo
-      ? busyWorks().map((w, i) => ({ ...w, scenario: i }))
-      : scaleDemo
-        ? Array.from({ length: 100 }, (_, i) => ({
-            id: "scale-work-" + i,
-            title: "Verifica listini " + String(i + 1).padStart(3, "0"),
-            projectId: scaleProjects[i % 50]!.id,
-            scenario: i % 3,
-            phase: "proposal" as const,
-            due: "",
-            messages: [],
-            files: [],
-            contribution: "",
-            revision: 0,
-            feedback: "",
-          }))
-        : [],
-  );
-  const [active, setActive] = useState<string | null>(null);
+  const [materials, setMaterials] = useState<ConversationMaterial[]>(() => demoBootstrap.materials);
+  const [works, setWorks] = useState<Work[]>(() => demoBootstrap.works);
   const [workListOpen, setWorkListOpen] = useState(true);
   const [squadListOpen, setSquadListOpen] = useState(true);
   const [panel, setPanel] = useState(true);
@@ -250,18 +77,48 @@ export function ConversationWorkspace() {
   const [seenResults, setSeenResults] = useState<string[]>([]);
   const [preview, setPreview] = useState(false);
   const [settings, setSettings] = useState(false);
-  const [space, setSpace] = useState<SpaceView | null>(
-    busyDemo ? "Compiti" : scaleDemo ? "Materiali" : null,
-  );
+  const [space, setSpace] = useState<SpaceView | null>(demoBootstrap.initialSpace);
   const [spaceInitial, setSpaceInitial] = useState("");
   const [spaceSelected, setSpaceSelected] = useState("");
   const [spaceVersion, setSpaceVersion] = useState(0);
-  const [spaceData, setSpaceData] = useState<SpaceData>({
-    teams: busyDemo ? busyTeams : [],
-    projects: busyDemo ? busyProjects : scaleDemo ? scaleProjects : [],
-    routines: busyDemo ? busyRoutines : [],
-  });
+  const [spaceData, setSpaceData] = useState<SpaceData>(() => demoBootstrap.spaceData);
+  const displaySpaceData = projectWorkspaceData(engine.backend, spaceData, engine.projects);
   const [searchOpen, setSearchOpen] = useState(false);
+  const { resetting } = useConversationPrototypeStorage({
+    storageKey,
+    loaded,
+    setLoaded,
+    storageEnabled,
+    setStorageEnabled,
+    setStorageStatus,
+    scenarios,
+    setScenarios,
+    works,
+    setWorks,
+    materials,
+    setMaterials,
+    spaceData,
+    setSpaceData,
+    preferences,
+    setPreferences,
+    seenResults,
+    setSeenResults,
+    active,
+    setActive,
+    space,
+    setSpace,
+    sidebarOpen,
+    setSidebarOpen,
+    panel,
+    setPanel,
+    viewer,
+    setViewer,
+    spaceSelected,
+    setSpaceSelected,
+    attachmentIds,
+    materialDates,
+  });
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -296,138 +153,38 @@ export function ConversationWorkspace() {
     if (preview) element?.showModal();
     return () => element?.close();
   }, [preview]);
+  const work = (engine.backend === "engine" ? engine.works : works).find((w) => w.id === active);
+  const visibleWorks = (engine.backend === "engine" ? engine.works : works).filter(
+    (w) => !w.archived,
+  );
+  const scenario = work ? scenarioForWork(work, scenarios) : null;
+
   useEffect(() => {
-    let cancelled = false;
-    readPrototype<PrototypeSnapshot>(storageKey)
-      .then((saved) => {
-        if (cancelled) return;
-        if (saved) {
-          if (
-            saved.version !== 1 ||
-            !Array.isArray(saved.works) ||
-            !Array.isArray(saved.scenarios) ||
-            !saved.spaceData ||
-            saved.works.some((w) => !saved.scenarios[w.scenario])
-          )
-            throw new Error("Invalid snapshot");
-          setScenarios(saved.scenarios);
-          setWorks(saved.works);
-          setMaterials(saved.materials);
-          setSpaceData(saved.spaceData);
-          setPreferences({ ...defaultPreferences, ...saved.preferences });
-          setSeenResults(saved.seenResults || []);
-          for (const entry of saved.attachmentMetadata || []) {
-            attachmentIds.current.set(entry.file, entry.id);
-            materialDates.current.set(entry.file, entry.date);
-          }
-          setActive(saved.view.active);
-          setSpace(saved.view.space);
-          setSidebarOpen(window.innerWidth > 800 && saved.view.sidebarOpen);
-          setPanel(saved.view.panel);
-          setViewer(saved.view.viewer);
-          setSpaceSelected(saved.view.selected || "");
-        }
-        setStorageEnabled(true);
-        setStorageStatus("Salvato in questo browser");
-        setLoaded(true);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setStorageStatus(
-            "Salvataggio non disponibile: le modifiche restano solo in questa sessione.",
-          );
-          setLoaded(true);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  useEffect(() => {
-    if (!loaded || !storageEnabled || resetting.current) return;
-    setStorageStatus("Salvataggio…");
-    const timer = setTimeout(() => {
-      if (resetting.current) return;
-      const snapshot: PrototypeSnapshot = {
-        version: 1,
-        savedAt: new Date().toISOString(),
-        scenarios,
-        works,
-        materials,
-        spaceData,
-        preferences,
-        seenResults,
-        attachmentMetadata: works
-          .flatMap((w) => w.files)
-          .map((file) => ({
-            file,
-            id: attachmentIds.current.get(file) || crypto.randomUUID(),
-            date: materialDates.current.get(file) || new Date().toISOString(),
-          })),
-        view: { active, space, sidebarOpen, panel, viewer, selected: spaceSelected },
-      };
-      savePrototype(storageKey, snapshot)
-        .then(() => setStorageStatus("Salvato in questo browser"))
-        .catch(() =>
-          setStorageStatus(
-            "Salvataggio non riuscito. Esporta una copia dalle impostazioni prima di chiudere.",
-          ),
-        );
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [
-    loaded,
-    storageEnabled,
-    scenarios,
-    works,
-    materials,
-    spaceData,
-    preferences,
-    seenResults,
-    active,
-    space,
-    sidebarOpen,
-    panel,
-    viewer,
-    spaceSelected,
-  ]);
-  const work = works.find((w) => w.id === active);
-  const visibleWorks = works.filter((w) => !w.archived);
-  const scenario = work ? scenarios[work.scenario]! : null;
+    if (!active || (engine.backend === "engine" && !engine.loaded)) return;
+    const catalog = engine.backend === "engine" ? engine.works : works;
+    if (!catalog.some((w) => w.id === active)) setActive(null);
+  }, [engine.backend, engine.loaded, engine.works, works, active]);
+
   function workStatus(w: Work) {
-    if (w.request?.status === "pending") return `Aspetta ${w.request.to}`;
-    return isHumanMember(scenarios[w.scenario]!.agent, spaceData.profiles)
-      ? w.phase === "ready"
-        ? "Da svolgere"
-        : w.phase === "proposal"
-          ? "Da assegnare"
-          : phaseText[w.phase]
-      : w.phase === "approved" && w.autoDelivered
-        ? "Consegnato"
-        : phaseText[w.phase];
+    if (w.source === "engine" && w.engineStatus) {
+      return `Motore · ${w.engineStatus}`;
+    }
+    return workStatusLabel(w, scenarios, spaceData.profiles);
   }
-  const pending = works
-    .filter((w) => !w.coordinatedBy && !w.archived)
-    .filter((w) =>
-      w.request?.status === "pending"
-        ? w.request.to === viewer
-        : isHumanMember(scenarios[w.scenario]!.agent, spaceData.profiles)
-          ? (w.phase === "ready" && scenarios[w.scenario]!.agent === viewer) ||
-            (w.phase === "review" && (w.requester || "Fabio") === viewer)
-          : (w.phase === "waiting" && (w.requester || "Fabio") === viewer) ||
-            (w.phase === "review" && (w.reviewer || w.requester || "Fabio") === viewer),
-    );
-  const completedNotices = works.filter(
-    (w) =>
-      preferences.resultNotifications &&
-      !w.archived &&
-      !w.coordinatedBy &&
-      w.phase === "approved" &&
-      (w.requester || "Fabio") === viewer &&
-      !seenResults.includes(`${viewer}:${w.id}`),
+  const pending = (engine.backend === "engine" ? engine.works : works).filter((w) =>
+    isPendingForViewer(w, viewer, scenarios, spaceData.profiles),
+  );
+  const completedNotices = (engine.backend === "engine" ? engine.works : works).filter((w) =>
+    isCompletedNoticeForViewer(w, viewer, preferences.resultNotifications, seenResults),
   );
   const notificationCount = pending.length + completedNotices.length;
   function patch(change: Partial<Work>) {
+    if (isEngineBackedWork(work)) {
+      setNotice(
+        "Questo lavoro è sul motore: le modifiche di simulazione non si applicano. Usa la chat per registrare messaggi.",
+      );
+      return;
+    }
     if (change.phase === "review")
       setSeenResults((current) => current.filter((key) => !key.endsWith(`:${active}`)));
     setWorks((all) => all.map((w) => (w.id === active ? { ...w, ...change } : w)));
@@ -487,6 +244,23 @@ export function ConversationWorkspace() {
     projectId?: string,
     override?: (typeof scenarios)[number],
   ) {
+    if (engine.backend === "engine") {
+      if (engine.gateError) {
+        setNotice("Motore non pronto: impossibile creare sul dominio.");
+        return;
+      }
+      const s = override || scenarios[index]!;
+      // Never reuse demo scenario titles as identity — objective text is the work title.
+      const title = (text || s.initial || s.title).trim().slice(0, 100) || "Lavoro motore";
+      const objective = (text || s.initial).trim() || title;
+      void engine.createWork(title, objective).then((created) => {
+        if (created) {
+          open(created.id);
+          setNotice(`Creato sul motore · ${created.id}`);
+        }
+      });
+      return;
+    }
     if (spaceData.removedPeople?.includes((override || scenarios[index]!).agent)) {
       setNotice("Questo agente è stato eliminato. Scegli un altro collaboratore.");
       return;
@@ -573,7 +347,7 @@ export function ConversationWorkspace() {
       const scenarioIndex =
         previous &&
         previous.title === step.title &&
-        scenarios[previous.scenario]?.agent === step.agent
+        scenarioForWork(previous, scenarios).agent === step.agent
           ? previous.scenario
           : scenarios.length + specs.length;
       if (!previous || scenarioIndex >= scenarios.length)
@@ -646,6 +420,10 @@ export function ConversationWorkspace() {
     ]);
   }
   function confirm() {
+    if (isEngineBackedWork(work)) {
+      setNotice("Avvio piano: non ancora collegato al motore (arriva con F3).");
+      return;
+    }
     if (scenario && spaceData.removedPeople?.includes(scenario.agent)) {
       setNotice("Agente eliminato: non puoi avviare questo lavoro.");
       return;
@@ -685,6 +463,10 @@ export function ConversationWorkspace() {
     });
   }
   function deliver(text = contribution, attachments = files) {
+    if (isEngineBackedWork(work)) {
+      setNotice("Consegna simulata disabilitata: questo lavoro è sul motore.");
+      return;
+    }
     if (scenario && spaceData.removedPeople?.includes(scenario.agent)) {
       setNotice("Agente eliminato: scegli un altro collaboratore per proseguire.");
       return;
@@ -724,113 +506,38 @@ export function ConversationWorkspace() {
       ],
     });
   }
-  function simulateQuestion() {
-    if (!work?.catalogPlan || work.phase !== "ready") return;
-    const step = work.catalogPlan.steps[work.catalogPlan.completed];
-    if (!step) return;
-    const need =
-      scenario?.agent === "Marta"
-        ? "Quale lingua deve avere la consegna: italiano, inglese o entrambe?"
-        : scenario?.agent === "Vera"
-          ? "Su quale paese devo concentrare il confronto?"
-          : "Quale intervallo di tempo devo esaminare?";
-    patch({
-      phase: "waiting",
-      request: { to: work.requester || viewer, need, status: "pending" },
-      messages: [
-        ...work.messages,
-        { who: "agent", sender: step.agent, text: `Per proseguire con «${step.title}»: ${need}` },
-      ],
-    });
-  }
-  function simulate() {
-    if (scenario && spaceData.removedPeople?.includes(scenario.agent)) {
-      setNotice("L’agente è stato eliminato. Questo lavoro resta consultabile nello storico.");
-      return;
-    }
-    if (!work || !scenario || work.request?.status === "pending") return;
-    if (work.coordinatedBy) return;
-    if (work.catalogPlan) {
-      const plan = work.catalogPlan,
-        step = plan.steps[plan.completed];
-      if (!step || !step.agent || spaceData.removedPeople?.includes(step.agent)) {
-        setNotice("Assegna il prossimo passaggio a un collaboratore disponibile.");
-        return;
-      }
-      const completed = plan.completed + 1;
-      const result =
-        work.feedback && step.title.startsWith("Revisione:")
-          ? `Revisione dimostrativa preparata secondo queste indicazioni: ${work.feedback}. Apri la nuova versione per verificarle. Nessuna riscrittura AI reale.`
-          : scenario.agent === "Marta"
-            ? /prezz|listin/i.test(step.title)
-              ? "Esempio simulato: listino organizzato per prodotto, prezzo e disponibilità. Una voce senza prezzo è evidenziata come da confermare; non è stato inventato un importo. Nessun file reale è stato analizzato."
-              : "Esempio simulato: bozza organizzata in copertina, schede prodotto e riepilogo prezzi. Le informazioni da confermare restano evidenziate. Il documento dimostrativo sarà disponibile alla consegna."
-            : `Passaggio dimostrativo concluso: ${step.title}. Indicazioni utilizzate nella prova: ${work.contribution || "materiali allegati"}. Nessuna analisi reale dei materiali.`;
-      setWorks((current) =>
-        current.map((w) =>
-          w.id === work.id
-            ? {
-                ...w,
-                catalogPlan: {
-                  ...plan,
-                  completed,
-                  steps: plan.steps.map((s) => (s.id === step.id ? { ...s, result } : s)),
-                },
-                phase: completed === plan.steps.length ? "review" : "ready",
-                messages: [
-                  ...w.messages,
-                  { who: "agent" as const, sender: step.agent, text: result },
-                  ...(completed === plan.steps.length
-                    ? [
-                        {
-                          who: "agent" as const,
-                          text: "Il piano è concluso nella demo. Verifica il risultato prima di approvare la consegna.",
-                        },
-                      ]
-                    : []),
-                ],
-              }
-            : w.id === step.childId
-              ? {
-                  ...w,
-                  phase: "approved",
-                  autoDelivered: true,
-                  messages: [
-                    ...w.messages,
-                    { who: "agent" as const, sender: step.agent, text: result },
-                  ],
-                }
-              : w.id === plan.steps[completed]?.childId
-                ? { ...w, phase: "ready" }
-                : w,
-        ),
-      );
-      return;
-    }
-    patch({
-      phase: work.autonomy === "autonomous" ? "approved" : "review",
-      autoDelivered: work.autonomy === "autonomous",
-      messages: [
-        ...work.messages,
-        {
-          who: "agent",
-          text:
-            work.autonomy === "autonomous"
-              ? `«${scenario.result}» consegnato in autonomia per questo incarico. Nessuna approvazione umana registrata. Risultato simulato, non un’elaborazione dei tuoi materiali.`
-              : `La bozza «${scenario.result}» è pronta. Verifica assegnata a ${work.reviewer || work.requester || "Fabio"}. È un esempio simulato, non un’elaborazione dei tuoi materiali.`,
-        },
-      ],
-    });
-  }
+  const { simulateQuestion, simulate, runRoutine } = createSimulationActions({
+    work, scenario, works, scenarios, viewer, spaceData,
+    patch, setNotice, setWorks, setScenarios, open,
+  });
   function startAssignment(name: string) {
     open(null);
     setAssignee(name);
   }
   function moveConversation(id: string, projectId: string) {
+    if (engine.backend === "engine") {
+      setNotice("Spostamento progetto: non ancora collegato al motore.");
+      return;
+    }
     if (projectId && !spaceData.projects.some((p) => p.id === projectId)) return;
     setWorks((current) => current.map((w) => (w.id === id ? { ...w, projectId } : w)));
   }
   function conversationActions(w: Work) {
+    if (isEngineBackedWork(w)) {
+      return (
+        <ConversationActions
+          title={w.title}
+          projects={[]}
+          current=""
+          onRename={() =>
+            setNotice("Rinomina sul motore non ancora disponibile in F2.4.")
+          }
+          onMove={() => setNotice("Spostamento progetto non disponibile sul motore in F2.4.")}
+          onCreate={() => setNotice("Promozione a progetto non ancora collegata al motore.")}
+          onRepeat={() => setNotice("Automazioni motore: non in questo slice.")}
+        />
+      );
+    }
     return (
       <ConversationActions
         title={w.title}
@@ -938,6 +645,15 @@ export function ConversationWorkspace() {
     openSpace("Progetti", "", id);
   }
   function createFreeWork(name: string, text: string, attachments: File[], projectId?: string) {
+    if (engine.backend === "engine") {
+      void engine.createWork("Nuova richiesta", text).then((created) => {
+        if (created) {
+          open(created.id);
+          setNotice(`Creato sul motore per ${name} · ${created.id}`);
+        }
+      });
+      return undefined;
+    }
     const spec = {
       ...initialScenarios[0]!,
       agent: name,
@@ -976,6 +692,28 @@ export function ConversationWorkspace() {
       const page = navigation[1]!;
       if (page === "impostazioni") setSettings(true);
       else openSpace((page.charAt(0).toUpperCase() + page.slice(1)) as SpaceView);
+      return;
+    }
+
+    if (engine.backend === "engine") {
+      if (engine.gateError || attachments.length) {
+        setNotice(engine.gateError ? "Motore non pronto: impossibile scrivere sul dominio." : "Per il confronto usa i due campi file nella scheda Confronta due listini della conversazione. Gli allegati non sono stati inviati.");
+        return;
+      }
+      if (work && isEngineBackedWork(work)) {
+        void engine.postMessage(work, text).catch(() => {
+          setNotice("Invio al motore non riuscito. Controlla il banner errori.");
+        });
+        return;
+      }
+      void engine.createWork("Nuova richiesta", text).then((created) => {
+        if (created) {
+          open(created.id);
+          setNotice("");
+        } else {
+          setNotice("Creazione sul motore non riuscita. Controlla motore e modello in Impostazioni.");
+        }
+      });
       return;
     }
 
@@ -1197,137 +935,11 @@ export function ConversationWorkspace() {
       ],
     });
   }
-  function runRoutine(r: SpaceRoutine) {
-    const source = works.find((w) => w.id === r.workId);
-    if (
-      !source ||
-      !r.active ||
-      source.archived ||
-      spaceData.removedPeople?.includes(scenarios[source.scenario]!.agent)
-    ) {
-      setNotice(
-        "Questa automazione non è disponibile. Controlla il lavoro di origine e il collaboratore.",
-      );
-      return;
-    }
-    if (
-      source.catalogPlan &&
-      (!source.catalogPlan.steps.length ||
-        source.catalogPlan.steps.some(
-          (step) =>
-            !step.agent ||
-            spaceData.removedPeople?.includes(step.agent) ||
-            memberProfile(step.agent, spaceData.profiles).invitation === "pending",
-        ))
-    ) {
-      setNotice(
-        "Il piano contiene passaggi senza un collaboratore disponibile. Aggiorna il lavoro di origine prima di ripetere l’automazione.",
-      );
-      return;
-    }
-    const id = crypto.randomUUID();
-    const runNumber = works.filter((w) => w.routineId === r.id).length + 1;
-    const human = isHumanMember(scenarios[source.scenario]!.agent, spaceData.profiles);
-    const phase =
-      human || source.files.length || source.materialIds?.length || source.contribution
-        ? "ready"
-        : "waiting";
-    const run: Work = {
-      id,
-      scenario: source.scenario,
-      routineId: r.id,
-      runNumber,
-      startedAt: new Date().toISOString(),
-      requester: source.requester || "Fabio",
-      reviewer: source.reviewer || source.requester || "Fabio",
-      autonomy: source.autonomy || "supervised",
-      projectId: source.projectId || "",
-      title: `${r.name} · Esecuzione ${runNumber}`,
-      phase,
-      due: "",
-      files: [...source.files],
-      materialIds: [...(source.materialIds || [])],
-      contribution: source.contribution,
-      revision: 1,
-      feedback: "",
-      messages: [
-        {
-          who: "you",
-          sender: source.requester || "Fabio",
-          text: source.messages[0]?.text || source.title,
-        },
-        {
-          who: "agent",
-          sender: "Homun",
-          text: `Esecuzione ${runNumber} di «${r.name}» creata nella demo. Progetto, materiali e supervisione ripresi dal lavoro di origine. ${phase === "waiting" ? "Mancano le informazioni iniziali: la richiesta è nelle notifiche del richiedente." : "Puoi proseguire da qui."} Nessuna scadenza precedente o approvazione è stata riutilizzata.${source.contribution ? ` Informazioni di partenza: ${source.contribution}` : ""}`,
-        },
-      ],
-    };
-    const children: Work[] = [];
-    if (source.catalogPlan && !human) {
-      const specs = source.catalogPlan.steps.map((step) => ({
-        ...initialScenarios[0]!,
-        custom: true,
-        agent: step.agent,
-        role: "Passaggio del piano",
-        title: step.title,
-        initial: step.title,
-        outcome: step.title,
-        result: step.title,
-        body: "# " + step.title + "\n\nRisultato dimostrativo di questa esecuzione.",
-        steps: [step.title],
-      }));
-      run.catalogPlan = {
-        completed: 0,
-        steps: source.catalogPlan.steps.map((step, index) => {
-          const childId = crypto.randomUUID();
-          children.push({
-            id: childId,
-            coordinatedBy: id,
-            scenario: scenarios.length + index,
-            title: step.title,
-            phase: phase === "ready" && index === 0 ? "ready" : "waiting",
-            requester: run.requester!,
-            reviewer: run.reviewer!,
-            projectId: run.projectId!,
-            due: "",
-            files: [...run.files],
-            materialIds: [...(run.materialIds || [])],
-            contribution: run.contribution,
-            revision: 1,
-            feedback: "",
-            messages: [{ who: "you", text: step.title }],
-          });
-          return { id: crypto.randomUUID(), title: step.title, agent: step.agent, childId };
-        }),
-      };
-      setScenarios((current) => [...current, ...specs]);
-    }
-    if (phase === "waiting")
-      run.request = {
-        to: run.requester || viewer,
-        need: scenarios[source.scenario]!.input + ". " + scenarios[source.scenario]!.help,
-        status: "pending",
-      };
-    setWorks((current) => [...current, run, ...children]);
-    open(id);
-  }
-  const library = [...materials];
-  works.forEach((w) =>
-    w.files.forEach((file) => {
-      if (!materialDates.current.has(file))
-        materialDates.current.set(file, new Date().toISOString());
-      if (!attachmentIds.current.has(file)) attachmentIds.current.set(file, crypto.randomUUID());
-      if (!library.some((m) => m.file === file))
-        library.push({
-          id: attachmentIds.current.get(file)!,
-          name: file.name,
-          addedAt: materialDates.current.get(file)!,
-          file,
-          path: file.webkitRelativePath || file.name,
-          projectIds: w.projectId ? [w.projectId] : [],
-        });
-    }),
+  const library = buildMaterialLibrary(
+    materials,
+    works,
+    attachmentIds.current,
+    materialDates.current,
   );
   function updateMaterial(item: ConversationMaterial) {
     setMaterials((current) =>
@@ -1365,51 +977,23 @@ export function ConversationWorkspace() {
   }
   function moveWork(id: string, phase: string) {
     const target = works.find((w) => w.id === id);
-    if (!target) return "Compito non disponibile.";
-    if (target.request?.status === "pending")
-      return `Serve prima il contributo di ${target.request.to}.`;
-    if (spaceData.removedPeople?.includes(scenarios[target.scenario]!.agent))
-      return "L’agente è stato eliminato: il lavoro rimane nello storico.";
-    if (target.phase === phase) return "Il compito è già in questa colonna.";
-    if (
-      viewer !==
-      (isHumanMember(scenarios[target.scenario]!.agent, spaceData.profiles)
-        ? target.requester || "Fabio"
-        : target.reviewer || target.requester || "Fabio")
-    )
-      return "La verifica spetta al supervisore di questo lavoro.";
-    const allowed =
-      (target.phase === "review" && phase === "approved") ||
-      (target.phase === "approved" && phase === "review");
-    if (!allowed)
-      return "Apri la conversazione per fornire il contributo o generare il risultato prima di cambiare stato.";
+    const blocked = validateBoardMove({
+      target,
+      phase,
+      viewer,
+      scenarios,
+      removedPeople: spaceData.removedPeople,
+      profiles: spaceData.profiles,
+    });
+    if (blocked) return blocked;
     if (phase === "review")
       setSeenResults((current) => current.filter((key) => !key.endsWith(`:${id}`)));
     setWorks((current) =>
       current.map((w) =>
-        w.id === id
-          ? {
-              ...w,
-              phase: phase as Phase,
-              autoDelivered: false,
-              approvedBy: phase === "approved" ? viewer : "",
-              messages: [
-                ...w.messages,
-                {
-                  who: "you",
-                  text:
-                    phase === "approved"
-                      ? "Ho verificato e approvato il risultato dalla bacheca."
-                      : "Riapro il risultato per una nuova verifica.",
-                },
-              ],
-            }
-          : w,
+        w.id === id ? applyBoardMove(w, phase as Phase, viewer) : w,
       ),
     );
-    return phase === "approved"
-      ? "Risultato approvato. Nessuna azione esterna."
-      : "Risultato riaperto per la verifica.";
+    return boardMoveSuccessMessage(phase);
   }
   function requestContribution(to: string, need: string) {
     if (
@@ -1446,6 +1030,10 @@ export function ConversationWorkspace() {
       work.request.childId
     )
       return;
+    if (engine.backend === "engine" && work.source === "engine") {
+      void engine.fulfillContribution(work, text, attachments, ids).catch(() => undefined);
+      return;
+    }
     const selected = library.filter((m) => ids.includes(m.id));
     if (!text.trim() && !attachments.length && !selected.length) return;
     patch({
@@ -1518,7 +1106,7 @@ export function ConversationWorkspace() {
       members={[...new Set([...spacePeople, ...Object.keys(spaceData.profiles || {})])]
         .filter(
           (name) =>
-            name !== scenarios[work.scenario]!.agent &&
+            name !== scenarioForWork(work, scenarios).agent &&
             !spaceData.removedPeople?.includes(name) &&
             memberProfile(name, spaceData.profiles).invitation !== "pending",
         )
@@ -1529,97 +1117,20 @@ export function ConversationWorkspace() {
       onOpen={open}
     />
   ) : null;
-  const entries: SearchEntry[] = [
-    ...library.map((m) => ({
-      id: m.id,
-      title: m.name,
-      kind: "Materiali",
-      context: m.path || "Nota",
-      text: m.body || "",
-      open: () => openSpace("Materiali", "", m.id),
-    })),
-    ...visibleWorks.map((w) => ({
-      id: w.id,
-      title: w.title,
-      kind: "Lavori",
-      context: `${scenarios[w.scenario]!.agent} · ${workStatus(w)}`,
-      text: w.contribution,
-      open: () => open(w.id),
-    })),
-    ...visibleWorks.flatMap((w) =>
-      w.messages.map((m, i) => ({
-        id: `${w.id}:message:${i}`,
-        title: m.who === "you" ? "Tu" : scenarios[w.scenario]!.agent,
-        kind: "Messaggi",
-        context: w.title,
-        text: m.text,
-        open: () => {
-          open(w.id, `[data-message="${w.id}:${i}"]`);
-        },
-      })),
-    ),
-    ...visibleWorks
-      .filter((w) => w.phase === "review" || w.phase === "approved")
-      .map((w) => ({
-        id: `${w.id}:result`,
-        title: w.humanResult ? "Risultato consegnato" : scenarios[w.scenario]!.result,
-        kind: "Materiali",
-        context: w.title,
-        text: w.humanResult || scenarios[w.scenario]!.body,
-        open: () => {
-          open(w.id);
-          if (!isHumanMember(scenarios[w.scenario]!.agent, spaceData.profiles)) setPreview(true);
-        },
-      })),
-    ...spaceData.teams.map((t) => ({
-      id: t.id,
-      title: t.name,
-      kind: "Team",
-      context: t.members.join(", "),
-      text: [t.brief, ...(t.notes || [])].join(" "),
-      open: () => openSpace("Squadra", "", t.id),
-    })),
-    ...spaceData.projects.map((p) => ({
-      id: p.id,
-      title: p.name,
-      kind: "Progetti",
-      context: spaceData.teams.find((t) => t.id === p.teamId)?.name || "Senza squadra",
-      text: [p.brief, ...(p.notes || [])].join(" "),
-      open: () => openSpace("Progetti", "", p.id),
-    })),
-    ...spaceData.routines.map((r) => ({
-      id: r.id,
-      title: r.name,
-      kind: "Automazioni",
-      context: r.schedule,
-      text: [r.active ? "attiva" : "pausa", ...(r.notes || [])].join(" "),
-      open: () => openSpace("Automazioni", "", r.id),
-    })),
-    ...[...new Set([...spacePeople, ...Object.keys(spaceData.profiles || {})])]
-      .filter((n) => !spaceData.removedPeople?.includes(n))
-      .map((n) => ({
-        id: `person:${n}`,
-        title: n,
-        kind: "Collaboratori",
-        context: memberProfile(n, spaceData.profiles).role,
-        text: JSON.stringify(memberProfile(n, spaceData.profiles)),
-        open: () => {
-          openSpace("Squadra", "", `person:${n}`);
-        },
-      })),
-  ];
+  const entries = buildConversationSearchEntries({
+    library,
+    visibleWorks,
+    scenarios,
+    spaceData: displaySpaceData,
+    workStatus,
+    openSpace,
+    openWork: open,
+    openResultPreview: (w) =>
+      openWorkResultPreview(w, scenarios, spaceData.profiles, open, setPreview),
+  });
   function download() {
     if (!scenario || !work) return;
-    const blob = new Blob(
-      [scenario.body + (work.feedback ? `\n\n## Indicazioni di revisione\n${work.feedback}` : "")],
-      { type: "text/plain;charset=utf-8" },
-    );
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${scenario.result}.txt`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    downloadWorkResult({ scenario, work });
   }
   if (!loaded)
     return (
@@ -1654,41 +1165,14 @@ export function ConversationWorkspace() {
             setSettings(false);
             openSpace(page);
           }}
-          onExport={() => {
-            const data = {
-              exportedAt: new Date().toISOString(),
-              version: 1,
+          onExport={() =>
+            downloadPrototypeExport({
               preferences,
               spaceData,
               works,
               materials: library,
-            };
-            const blob = new Blob(
-              [
-                JSON.stringify(
-                  data,
-                  (_key, value) =>
-                    value instanceof File
-                      ? {
-                          name: value.name,
-                          size: value.size,
-                          type: value.type,
-                          path: value.webkitRelativePath,
-                          contentIncluded: false,
-                        }
-                      : value,
-                  2,
-                ),
-              ],
-              { type: "application/json" },
-            );
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = "homun-prototipo.json";
-            link.click();
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
-          }}
+            })
+          }
           onReset={async () => {
             resetting.current = true;
             try {
@@ -1709,491 +1193,108 @@ export function ConversationWorkspace() {
           onClick={() => setSidebarOpen(false)}
         />
       )}
-      <aside className="cw-sidebar" hidden={!sidebarOpen}>
-        <div className="cw-sidebar-fixed">
-          <div className="cw-sidebar-tools">
-            <button
-              aria-label="Cerca ovunque"
-              title={`Cerca ovunque (${searchShortcut})`}
-              onClick={() => setSearchOpen(true)}
-            >
-              <Search size={18} />
-              <kbd>{searchShortcut}</kbd>
-            </button>
-            <button
-              aria-label="Chiudi barra laterale"
-              title="Chiudi barra laterale"
-              onClick={() => setSidebarOpen(false)}
-            >
-              <PanelRightOpen size={18} />
-            </button>
-          </div>
-          <button className="cw-new" onClick={() => open(null)}>
-            <Plus size={17} /> Nuova conversazione
-          </button>
-        </div>
-        <div className="cw-sidebar-scroll">
-          <div className="cs-space-links">
-            {(["Compiti", "Materiali", "Automazioni", "Plugin"] as SpaceView[]).map((v) => (
-              <button className={space === v ? "active" : ""} key={v} onClick={() => openSpace(v)}>
-                {v}
-                <span>
-                  {v === "Squadra"
-                    ? spaceData.teams.length
-                    : v === "Progetti"
-                      ? spaceData.projects.length
-                      : v === "Automazioni"
-                        ? spaceData.routines.length
-                        : v === "Materiali"
-                          ? library.length
-                          : v === "Compiti"
-                            ? visibleWorks.length
-                            : (spaceData.installedPlugins || []).length}
-                </span>
-              </button>
-            ))}
-          </div>
-          <ConversationProjectNav
-            projects={spaceData.projects}
-            works={visibleWorks.filter((w) => !w.coordinatedBy)}
-            onProject={(id) => openSpace("Progetti", "", id)}
-            onWork={open}
-            onAll={() => openSpace("Progetti")}
-            onMove={moveConversation}
-            actions={(id) => {
-              const w = works.find((w) => w.id === id);
-              return w ? conversationActions(w) : null;
-            }}
-          />
-          <button
-            className="cw-nav-label cw-section-toggle"
-            aria-label="Lavori"
-            aria-expanded={workListOpen}
-            onDragOver={(e) => {
-              if (e.dataTransfer.types.includes("application/homun-work")) e.preventDefault();
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              moveConversation(e.dataTransfer.getData("application/homun-work"), "");
-            }}
-            aria-controls="cw-sidebar-works"
-            onClick={() => setWorkListOpen(!workListOpen)}
-          >
-            <span>Senza progetto</span>
-            <span className="cw-section-count">
-              {visibleWorks.filter((w) => !w.projectId && !w.coordinatedBy).length}
-            </span>
-            <ChevronDown size={14} className="cw-section-chevron" aria-hidden="true" />
-          </button>
-          <nav
-            id="cw-sidebar-works"
-            hidden={!workListOpen}
-            className="cw-work-list"
-            aria-label="Conversazioni"
-          >
-            {visibleWorks
-              .filter((w) => !w.projectId && !w.coordinatedBy)
-              .map((w) => (
-                <div
-                  key={w.id}
-                  className="cv-chat-nav-row"
-                  draggable
-                  onDragStart={(e) => e.dataTransfer.setData("application/homun-work", w.id)}
-                >
-                  <button className={w.id === active ? "selected" : ""} onClick={() => open(w.id)}>
-                    <ConversationAvatar
-                      name={scenarios[w.scenario]!.agent}
-                      human={isHumanMember(scenarios[w.scenario]!.agent, spaceData.profiles)}
-                    />
-                    <span>
-                      {w.title}
-                      <small>{workStatus(w)}</small>
-                    </span>
-                    {(w.phase === "waiting" || w.phase === "review") && <i />}
-                  </button>
-                  {conversationActions(w)}
-                </div>
-              ))}
-            {(spaceData.detachedChats || []).map((c) => (
-              <button key={c.id} onClick={() => openSpace("Progetti", "", "loose:" + c.id)}>
-                {c.title}
-              </button>
-            ))}
-            {!works.some((w) => !w.projectId) && !spaceData.detachedChats?.length && (
-              <p className="cw-nav-empty">Nessun lavoro senza progetto</p>
-            )}
-          </nav>
-          <button
-            className="cw-nav-label cw-section-toggle"
-            aria-label="Squadra"
-            aria-expanded={squadListOpen}
-            aria-controls="cw-sidebar-squad"
-            onClick={() => setSquadListOpen(!squadListOpen)}
-          >
-            <span>Squadra</span>
-            <span className="cw-section-count">
-              {
-                scenarios.filter(
-                  (s, i) =>
-                    scenarios.findIndex((a) => a.agent === s.agent) === i &&
-                    !spaceData.removedPeople?.includes(s.agent),
-                ).length
-              }
-            </span>
-            <ChevronDown size={14} className="cw-section-chevron" aria-hidden="true" />
-          </button>
-          <div id="cw-sidebar-squad" hidden={!squadListOpen} className="cw-team">
-            <button className="cv-manage-team" onClick={() => openSpace("Squadra")}>
-              Tutti i collaboratori e team <ArrowUpRight size={14} />
-            </button>
-            {scenarios
-              .filter(
-                (s, i) =>
-                  scenarios.findIndex((a) => a.agent === s.agent) === i &&
-                  !spaceData.removedPeople?.includes(s.agent),
-              )
-              .map((s) => (
-                <button key={s.agent} onClick={() => openSpace("Squadra", "", `person:${s.agent}`)}>
-                  <ConversationAvatar
-                    name={s.agent}
-                    human={isHumanMember(s.agent, spaceData.profiles)}
-                  />
-                  <span>
-                    {s.agent}
-                    <small>{memberProfile(s.agent, spaceData.profiles).role}</small>
-                  </span>
-                  <ArrowUpRight size={14} />
-                </button>
-              ))}
-          </div>
-        </div>
-        <div className="cw-sidebar-foot">
-          <a href="http://127.0.0.1:4182/prototypes/first-work.html">
-            <ArrowLeft size={14} /> Versione precedente
-          </a>
-          <button aria-label="Impostazioni dello spazio" onClick={() => setSettings(true)}>
-            <span className="cw-user">{preferences.displayName.slice(0, 1)}</span>
-            <span>
-              {preferences.displayName}
-              <small>{preferences.spaceName}</small>
-            </span>
-            <Settings2 size={17} />
-          </button>
-        </div>
-      </aside>
+      <ConversationWorkspaceSidebar engineAgents={engine.backend === "engine" ? engine.agents : undefined}
+        sidebarOpen={sidebarOpen}
+        searchShortcut={searchShortcut}
+        onSearchOpen={() => setSearchOpen(true)}
+        onCloseSidebar={() => setSidebarOpen(false)}
+        onNewConversation={() => open(null)}
+        space={space}
+        onOpenSpace={openSpace}
+        spaceData={displaySpaceData}
+        libraryCount={engine.backend === "engine" ? null : library.length}
+        visibleWorks={visibleWorks}
+        works={engine.backend === "engine" ? engine.works : works}
+        scenarios={scenarios}
+        active={active}
+        onOpenWork={open}
+        onMoveConversation={moveConversation}
+        conversationActions={conversationActions}
+        workStatus={workStatus}
+        workListOpen={workListOpen}
+        onToggleWorkList={() => setWorkListOpen(!workListOpen)}
+        squadListOpen={squadListOpen}
+        onToggleSquadList={() => setSquadListOpen(!squadListOpen)}
+        preferences={preferences}
+        onOpenSettings={() => setSettings(true)}
+      />
       <main className={`cw-main ${panel ? "" : "cw-details-hidden"}`}>
-        <header className="cw-topbar">
-          {!sidebarOpen && (
-            <button
-              className="cw-icon"
-              aria-label="Apri barra laterale"
-              title="Apri barra laterale"
-              onClick={() => setSidebarOpen(true)}
-            >
-              <PanelRightClose size={19} />
-            </button>
-          )}
-          <span>
-            {space ? (
-              space
-            ) : work ? (
-              <>
-                <span className="cw-breadcrumb">Conversazioni / </span>
-                {work.title}
-              </>
-            ) : (
-              preferences.spaceName
-            )}
-          </span>
-          <div>
-            <button
-              className="cw-icon"
-              aria-label="Apri impostazioni"
-              onClick={() => setSettings(true)}
-            >
-              <Settings2 size={18} />
-            </button>
-            <label className="cw-viewer">
-              Vista demo{" "}
-              <ConversationSelectField
-                aria-label="Vista utente demo"
-                value={viewer}
-                onChange={(e) => {
-                  setViewer(e.target.value);
-                  setNotifications(false);
-                }}
-              >
-                {[...new Set([...spacePeople, ...Object.keys(spaceData.profiles || {})])]
-                  .filter(
-                    (n) =>
-                      isHumanMember(n, spaceData.profiles) &&
-                      !spaceData.removedPeople?.includes(n) &&
-                      memberProfile(n, spaceData.profiles).invitation !== "pending",
-                  )
-                  .map((n) => (
-                    <option key={n}>{n}</option>
-                  ))}
-              </ConversationSelectField>
-            </label>
-            <button
-              className="cw-icon"
-              aria-label={`Notifiche${notificationCount ? ` · ${notificationCount} aggiornamenti` : ""}`}
-              onClick={() => setNotifications(!notifications)}
-            >
-              <Bell size={18} />
-              {!!notificationCount && <b>{notificationCount}</b>}
-            </button>
-            {(work || space) && (
-              <button
-                className="cw-icon"
-                aria-label={panel ? "Chiudi pannello dettagli" : "Apri pannello dettagli"}
-                title={panel ? "Chiudi dettagli" : "Mostra dettagli"}
-                aria-expanded={panel}
-                onClick={() => setPanel(!panel)}
-              >
-                {panel ? <PanelRightClose size={19} /> : <PanelRightOpen size={19} />}
-              </button>
-            )}
-          </div>
-        </header>
-        {notifications && (
-          <section className="cw-notifications">
-            <header>
-              <strong>Notifiche</strong>
-              <button
-                className="cw-icon"
-                aria-label="Chiudi notifiche"
-                onClick={() => setNotifications(false)}
-              >
-                <X size={16} />
-              </button>
-            </header>
-            {!notificationCount ? (
-              <p>Niente in sospeso. Puoi concentrarti sul tuo lavoro.</p>
-            ) : (
-              pending.map((w) => (
-                <button key={w.id} onClick={() => open(w.id)}>
-                  <strong>
-                    {w.request?.status === "pending"
-                      ? w.request.need
-                      : w.phase === "ready" &&
-                          isHumanMember(scenarios[w.scenario]!.agent, spaceData.profiles)
-                        ? "Nuovo incarico"
-                        : w.phase === "waiting"
-                          ? scenarios[w.scenario]!.input
-                          : "Verifica il risultato"}
-                  </strong>
-                  <small>
-                    {w.title} · {scenarios[w.scenario]!.agent}
-                  </small>
-                  <ArrowUpRight size={16} />
-                </button>
-              ))
-            )}
-            {completedNotices.length > 0 && (
-              <>
-                <strong>Risultati pronti</strong>
-                {completedNotices.map((w) => (
-                  <button key={w.id} onClick={() => open(w.id)}>
-                    <strong>
-                      {w.autoDelivered ? "Consegnato in autonomia" : "Risultato approvato"}
-                    </strong>
-                    <small>
-                      {w.title} · {scenarios[w.scenario]!.agent}
-                    </small>
-                    <ArrowUpRight size={16} />
-                  </button>
-                ))}
-              </>
-            )}
-          </section>
-        )}
-        {space === "Nuovo collaboratore" ? (
-          <ConversationCreateMember
-            names={[...spacePeople, ...Object.keys(spaceData.profiles || {})]}
-            emails={Object.entries(spaceData.profiles || {})
-              .filter(([name]) => !spaceData.removedPeople?.includes(name))
-              .map(([, p]) => p.email || "")
-              .filter(Boolean)}
-            initial={spaceInitial}
-            onReveal={() => setPanel(true)}
-            onCreate={(name, profile) => {
-              setSpaceData((current) => ({
-                ...current,
-                profiles: { ...current.profiles, [name]: profile },
-              }));
-              setScenarios((current) => [
-                ...current,
-                {
-                  ...initialScenarios[0]!,
-                  agent: name,
-                  icon: name.slice(0, 1),
-                  role: profile.role,
-                  custom: true,
-                },
-              ]);
-              openSpace("Squadra", "", `person:${name}`);
-            }}
-          />
-        ) : space === "Compiti" ? (
-          <ConversationTasks
-            onReveal={() => setPanel(true)}
-            onMove={moveWork}
-            items={visibleWorks.map((w) => ({
-              ...w,
-              agent: scenarios[w.scenario]!.agent,
-              status: workStatus(w),
-              needsYou: pending.some((p) => p.id === w.id),
-              project: spaceData.projects.find((p) => p.id === w.projectId)?.name || "",
-              unavailable: !!spaceData.removedPeople?.includes(scenarios[w.scenario]!.agent),
-            }))}
-            onOpen={open}
-            onDue={(id, due) =>
-              setWorks((current) => current.map((w) => (w.id === id ? { ...w, due } : w)))
-            }
-          />
-        ) : space === "Materiali" ? (
-          <ConversationMaterials
-            onReveal={() => setPanel(true)}
-            key={spaceVersion}
-            items={library}
-            profiles={spaceData.profiles}
-            contextWork={works.find((w) => w.id === spaceInitial)}
-            people={[...new Set([...spacePeople, ...Object.keys(spaceData.profiles || {})])].filter(
-              (n) => !spaceData.removedPeople?.includes(n),
-            )}
-            onBack={open}
-            projects={spaceData.projects}
-            works={works
-              .filter((w) => !spaceData.removedPeople?.includes(scenarios[w.scenario]!.agent))
-              .map((w) => ({ ...w, agent: scenarios[w.scenario]!.agent }))}
-            onBatchLink={(ids, targets) => {
-              const selected = library.filter((m) => ids.includes(m.id));
-              const projectIds = targets.filter((t) => t.kind === "project").map((t) => t.id);
-              const workIds = targets.filter((t) => t.kind === "work").map((t) => t.id);
-              setMaterials((current) => [
-                ...current.filter((m) => !ids.includes(m.id)),
-                ...selected.map((m) => ({
-                  ...m,
-                  projectIds: [...new Set([...m.projectIds, ...projectIds])],
-                })),
-              ]);
-              setWorks((current) =>
-                current.map((w) =>
-                  workIds.includes(w.id)
-                    ? {
-                        ...w,
-                        materialIds: [...new Set([...(w.materialIds || []), ...ids])],
-                        files: [
-                          ...new Set([
-                            ...w.files,
-                            ...selected.flatMap((m) => (m.file ? [m.file] : [])),
-                          ]),
-                        ],
-                      }
-                    : w,
-                ),
+        <ConversationWorkspaceTopbar
+          engineMode={engine.backend === "engine"}
+          sidebarOpen={sidebarOpen}
+          onOpenSidebar={() => setSidebarOpen(true)}
+          space={space}
+          work={work}
+          preferences={preferences}
+          onOpenSettings={() => setSettings(true)}
+          viewer={viewer}
+          onViewerChange={(next) => {
+            setViewer(next);
+            setNotifications(false);
+          }}
+          spaceData={displaySpaceData}
+          notificationCount={notificationCount}
+          notificationsOpen={notifications}
+          onToggleNotifications={() => setNotifications(!notifications)}
+          onCloseNotifications={() => setNotifications(false)}
+          pending={pending}
+          completedNotices={completedNotices}
+          scenarios={scenarios}
+          onOpenWork={open}
+          showPanelToggle={!!(work || space)}
+          panelOpen={panel}
+          onTogglePanel={() => setPanel(!panel)}
+        />
+        <ConversationEngineBanner
+        followups={engine.followups}
+          backend={engine.backend}
+          dataSourceSelected={engine.dataSource}
+          gateError={engine.gateError}
+          error={engine.error}
+          busy={engine.busy}
+          workCount={engine.works.length}
+          onRefresh={() => {
+            engine.clearError();
+            void engine.refresh().catch((cause: unknown) => {
+              setNotice(
+                cause instanceof Error ? cause.message : "Ricarica dominio non riuscita.",
               );
-            }}
-            onAdd={(items) => {
-              setMaterials((current) => [...current, ...items]);
-              if (spaceInitial)
-                setWorks((current) =>
-                  current.map((w) =>
-                    w.id === spaceInitial
-                      ? {
-                          ...w,
-                          materialIds: [
-                            ...new Set([...(w.materialIds || []), ...items.map((i) => i.id)]),
-                          ],
-                          files: [...w.files, ...items.flatMap((i) => (i.file ? [i.file] : []))],
-                        }
-                      : w,
-                  ),
-                );
-            }}
-            onUpdate={updateMaterial}
-            onBatchRemove={(ids) => {
-              const files = new Set(
-                library.filter((m) => ids.includes(m.id) && m.file).map((m) => m.file),
-              );
-              setMaterials((current) => current.filter((m) => !ids.includes(m.id)));
-              setWorks((current) =>
-                current.map((w) => ({
-                  ...w,
-                  files: w.files.filter((f) => !files.has(f)),
-                  materialIds: (w.materialIds || []).filter((id) => !ids.includes(id)),
-                })),
-              );
-            }}
-            onRemove={removeMaterial}
-            onLink={linkMaterial}
-            initialId={spaceSelected}
+            });
+          }}
+        />
+        {space ? (
+          <ConversationWorkspaceSpaceHost engineAgents={engine.backend === "engine" ? engine.agents : undefined}
+            engineMode={engine.backend === "engine"}
+            space={space}
+            spaceInitial={spaceInitial}
+            spaceSelected={spaceSelected}
+            spaceVersion={spaceVersion}
+            spaceData={displaySpaceData}
+            setSpaceData={setSpaceData}
+            scenarios={scenarios}
+            setScenarios={setScenarios}
+            works={engine.backend === "engine" ? engine.works : works}
+            setWorks={setWorks}
+            setMaterials={setMaterials}
+            visibleWorks={visibleWorks}
+            library={library}
+            active={active}
+            viewer={viewer}
+            setViewer={setViewer}
+            pending={pending}
+            workStatus={workStatus}
+            onRevealPanel={() => setPanel(true)}
+            onOpenSpace={openSpace}
+            onOpenWork={open}
+            onMoveWork={moveWork}
+            onStartAssignment={startAssignment}
+            onCreateFreeWork={createFreeWork}
+            onRunRoutine={runRoutine}
+            onUpdateMaterial={updateMaterial}
+            onRemoveMaterial={removeMaterial}
+            onLinkMaterial={linkMaterial}
           />
-        ) : space === "Plugin" ? (
-          <ConversationPlugins
-            onReveal={() => setPanel(true)}
-            data={spaceData}
-            onChange={setSpaceData}
-            onMember={(n) => openSpace("Squadra", "", `person:${n}`)}
-          />
-        ) : space ? (
-          <ConversationSpace
-            onCreateMember={() => openSpace("Nuovo collaboratore")}
-            onAssign={startAssignment}
-            onReveal={() => setPanel(true)}
-            key={spaceVersion}
-            view={space}
-            data={spaceData}
-            onChange={(next) => {
-              const removed = spaceData.projects
-                .filter((p) => !next.projects.some((n) => n.id === p.id))
-                .map((p) => p.id);
-              if (removed.length)
-                setWorks((current) =>
-                  current.map((w) =>
-                    w.projectId && removed.includes(w.projectId) ? { ...w, projectId: "" } : w,
-                  ),
-                );
-              if (removed.length)
-                setMaterials((current) =>
-                  current.map((m) => ({
-                    ...m,
-                    projectIds: m.projectIds.filter((id) => !removed.includes(id)),
-                  })),
-                );
-              const deleted = next.removedPeople || [];
-              if (deleted.includes(viewer)) setViewer("Fabio");
-              setSpaceData({
-                ...next,
-                routines: next.routines.map((r) =>
-                  works.some(
-                    (w) => w.id === r.workId && deleted.includes(scenarios[w.scenario]!.agent),
-                  )
-                    ? { ...r, active: false }
-                    : r,
-                ),
-              });
-            }}
-            works={(active
-              ? [...works.filter((w) => w.id === active), ...works.filter((w) => w.id !== active)]
-              : works
-            )
-              .filter((w) => !w.coordinatedBy && !w.archived)
-              .map((w) => ({
-                ...w,
-                status: workStatus(w),
-                unavailable: !!spaceData.removedPeople?.includes(scenarios[w.scenario]!.agent),
-              }))}
-            onWork={open}
-            onProjectWork={createFreeWork}
-            projectMaterials={library}
-            onMaterial={(id) => openSpace("Materiali", "", id)}
-            onRun={runRoutine}
-            initial={spaceInitial}
-            selectedId={spaceSelected}
-          />
-        ) : work && scenario && isHumanMember(scenario.agent, spaceData.profiles) ? (
+        ) : work && scenario && isHumanMember(scenario.agent, spaceData.profiles) && !isEngineBackedWork(work) ? (
           <ConversationHumanWork
             key={work.id + viewer}
             work={work}
@@ -2229,658 +1330,98 @@ export function ConversationWorkspace() {
             unavailable={!!spaceData.removedPeople?.includes(scenario.agent)}
           />
         ) : (
-          <div className={`cw-stage ${work && panel ? "with-panel" : ""}`}>
-            <section className="cw-conversation">
-              {work && scenario && spaceData.removedPeople?.includes(scenario.agent) && (
-                <p role="status" className="cw-hint">
-                  Agente eliminato · conversazione conservata nello storico. Le nuove esecuzioni
-                  sono disabilitate.
-                </p>
-              )}
-              {work && scenario && (
-                <div className="cw-conversation-head">
-                  <ConversationAvatar
-                    name={scenario.agent}
-                    human={isHumanMember(scenario.agent, spaceData.profiles)}
-                    large
-                  />
-                  <div>
-                    <strong>{work.catalogPlan ? work.title : scenario.agent}</strong>
-                    <span>
-                      {work.catalogPlan ? "Conversazione del lavoro" : scenario.role} <i />{" "}
-                      {work.autonomy === "autonomous"
-                        ? "Autonomo su questo lavoro"
-                        : "Sotto supervisione"}
-                    </span>
-                  </div>
-                  <span className="cw-private">Conversazione di lavoro</span>
-                  {conversationActions(work)}
-                </div>
-              )}
-              <div className="cw-history" ref={history}>
-                {!work ? (
-                  <div className="cw-welcome">
-                    <span className="cw-overline">MENO DA GESTIRE. PIÙ DA FARE.</span>
-                    <h1>
-                      {assignee ? (
-                        <>
-                          Cosa affidiamo
-                          <br />
-                          <em>a {assignee}?</em>
-                        </>
-                      ) : (
-                        <>
-                          Un pensiero in meno.
-                          <br />
-                          <em>Cominciamo da qui.</em>
-                        </>
-                      )}
-                    </h1>
-                    <p>
-                      Racconta cosa vuoi ottenere.
-                      <br />
-                      La tua squadra ti aiuta a portarlo a termine.
-                    </p>
-                    {!assignee && (
-                      <div className="cw-examples">
-                        {scenarios.slice(0, 3).map(
-                          (s, i) =>
-                            !spaceData.removedPeople?.includes(s.agent) && (
-                              <button key={s.title} onClick={() => create(i)}>
-                                <ConversationAvatar
-                                  name={s.agent}
-                                  human={isHumanMember(s.agent, spaceData.profiles)}
-                                />
-                                <span>
-                                  {
-                                    [
-                                      "Prepariamo il catalogo",
-                                      "Studiamo il mercato",
-                                      "Mettiamo ordine nei log",
-                                    ][i]
-                                  }
-                                  <small>Con {s.agent}</small>
-                                </span>
-                                <ArrowUpRight size={17} />
-                              </button>
-                            ),
-                        )}
-                      </div>
-                    )}
-                    <span className="cw-example-note">
-                      {assignee
-                        ? "Descrivi obiettivo, risultato atteso e vincoli. Puoi allegare i materiali."
-                        : "Tre esempi guidati, oppure scrivi @ per affidare un lavoro libero."}
-                    </span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="cw-date">OGGI · IL LAVORO COMINCIA QUI</div>
-                    {work.messages.map((m, i) => (
-                      <article
-                        key={i}
-                        data-message={`${work.id}:${i}`}
-                        className={`cw-message ${m.who}`}
-                      >
-                        <small>
-                          {m.sender || (m.who === "you" ? work.requester || "Tu" : scenario!.agent)}
-                        </small>
-                        <p>{m.text}</p>
-                      </article>
-                    ))}
-                    {work.catalogPlan &&
-                      work.catalogPlan.steps.filter((step) => step.result).length > 0 && (
-                        <div className="cc-chat-results">
-                          {work.catalogPlan.steps
-                            .filter((step) => step.result)
-                            .map((step) => (
-                              <details key={step.id}>
-                                <summary>
-                                  <Check size={15} />
-                                  <span>
-                                    {step.title}
-                                    <small>{step.agent} · Concluso nella demo</small>
-                                  </span>
-                                </summary>
-                                <p>{step.result}</p>
-                                {step.childId && (
-                                  <button className="cs-link" onClick={() => open(step.childId!)}>
-                                    Apri il passaggio ↗
-                                  </button>
-                                )}
-                              </details>
-                            ))}
-                        </div>
-                      )}
-                    {work.catalogPlan && work.request?.status === "pending" && (
-                      <div data-chat-request>{contributionPanel}</div>
-                    )}
-                    {work.catalogPlan && (work.phase === "review" || work.phase === "approved") && (
-                      <div className="cc-chat-proposal" data-chat-delivery>
-                        <strong>
-                          {work.phase === "approved"
-                            ? "Risultato approvato"
-                            : "La consegna è pronta"}{" "}
-                          · v{work.revision}
-                        </strong>
-                        <p>{scenario!.result}</p>
-                        <p className="cw-hint">
-                          Anteprima dimostrativa.{" "}
-                          {work.phase === "review"
-                            ? "Apri il risultato, oppure scrivi in chat cosa vuoi cambiare."
-                            : "Il risultato resta consultabile qui."}
-                        </p>
-                        <div className="cs-actions">
-                          <button className="cw-secondary" onClick={() => setPreview(true)}>
-                            Apri risultato
-                          </button>
-                          {work.phase === "review" && (
-                            <button
-                              className="cw-primary"
-                              disabled={viewer !== (work.reviewer || work.requester || "Fabio")}
-                              onClick={approvePlan}
-                            >
-                              Approva bozza
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                    {planEdit?.workId === work.id && (
-                      <div className="cc-chat-proposal">
-                        <strong>Modifica proposta</strong>
-                        <ol>
-                          {planEdit.plan.steps.map((s) => (
-                            <li key={s.id}>
-                              {s.title} · {s.agent || "Da assegnare"}
-                            </li>
-                          ))}
-                        </ol>
-                        <div className="cs-actions">
-                          <button className="cw-primary" onClick={() => updatePlan(planEdit.plan)}>
-                            Applica al piano
-                          </button>
-                          <button className="cs-link" onClick={() => setPlanEdit(null)}>
-                            Annulla
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    {work.phase === "approved" && (
-                      <div className="cw-closed">
-                        <Check size={17} />{" "}
-                        {work.autoDelivered
-                          ? "Risultato consegnato in autonomia."
-                          : "Risultato approvato."}{" "}
-                        Nessun invio esterno.
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-              <div className="cw-composer">
-                {assignee && (
-                  <p className="cw-hint">
-                    Nuovo incarico per <strong>{assignee}</strong> · descrivi il risultato che vuoi
-                    ottenere.
-                  </p>
-                )}
-                <StudioChatInput
-                  key={active || "new"}
-                  label="Messaggio alla squadra"
-                  onSend={send}
-                  references={scenarios
-                    .filter(
-                      (s, i) =>
-                        memberProfile(s.agent, spaceData.profiles).invitation !== "pending" &&
-                        scenarios.findIndex((a) => a.agent === s.agent) === i &&
-                        !spaceData.removedPeople?.includes(s.agent),
-                    )
-                    .map((s) => ({
-                      id: s.agent,
-                      name: s.agent,
-                      kind: "member",
-                      description: s.role,
-                    }))}
+          <ConversationWorkspaceChatStage
+            work={work}
+            scenario={scenario}
+            panelOpen={panel}
+            spaceData={displaySpaceData}
+            scenarios={scenarios}
+            assignee={assignee}
+            active={active}
+            viewer={viewer}
+            notice={notice}
+            storageStatus={storageStatus}
+            planEdit={planEdit}
+            contributionPanel={contributionPanel}
+            conversationActions={conversationActions}
+            historyRef={history}
+            onCreateExample={create}
+            onOpenWork={open}
+            onPreview={() => setPreview(true)}
+            onApprovePlan={approvePlan}
+            onApplyPlanEdit={(plan) => updatePlan(plan)}
+            onCancelPlanEdit={() => setPlanEdit(null)}
+            onSend={send}
+            onClearNotice={() => setNotice("")}
+            engineMode={engine.backend === "engine"} onRefreshEngine={engine.refresh}
+            engineBusy={engine.busy}
+            historyLoading={engine.historyLoading}
+            onConfirmPatch={(messageIndex) => {
+              if (!work) return;
+              void engine.confirmPatch(work, messageIndex).catch(() => {
+                setNotice("Applicazione patch non riuscita. Controlla il banner errori.");
+              });
+            }}
+            onDiscardPatch={(messageIndex) => {
+              if (!work) return;
+              engine.discardPatch(work, messageIndex);
+            }}
+            onSaveMemory={(messageIndex) => {
+              if (!work) return;
+              void engine.saveMemoryFromMessage(work, messageIndex).catch(() => {
+                setNotice("Salvataggio memoria non riuscito. Controlla il banner errori.");
+              });
+            }}
+            onCancelInFlight={() => engine.cancelInFlight()}
+            details={
+              work && scenario ? (
+                <ConversationWorkspaceWorkPanel
+                  work={work}
+                  scenario={scenario}
+                  viewer={viewer}
+                  spaceData={displaySpaceData}
+                  preferences={preferences}
+                  library={library}
+                  contribution={contribution}
+                  files={files}
+                  contributionPanel={contributionPanel}
+                  workStatus={workStatus}
+                  onPatch={patch}
+                  onUpdatePlan={updatePlan}
+                  onOpenSpace={openSpace}
+                  onOpenWork={open}
+                  onConfirm={confirm}
+                  onDeliver={() => deliver()}
+                  onSimulate={simulate}
+                  onSimulateQuestion={simulateQuestion}
+                  onContributionChange={setContribution}
+                  onFilesChange={setFiles}
+                  onPreview={() => setPreview(true)}
+                  engineBusy={engine.busy} onRename={work.source === "engine" ? (title) => engine.renameWork(work, title) : undefined}
+                  {...(work.source === "engine"
+                    ? {
+                        onApplyObjectivePatch: (next: string) =>
+                          engine.applyObjectivePatch(work, next).catch((cause) => {
+                            setNotice("Aggiornamento obiettivo non riuscito."); throw cause;
+                          }),
+                      }
+                    : {})}
+                  onRegisterAgent={(name, role) => {
+                    const result = registerPlanAgent(name, role, spaceData);
+                    if (!result.ok) return false;
+                    setScenarios((current) => [...current, result.scenario]);
+                    setSpaceData((current) => ({
+                      ...current,
+                      profiles: { ...current.profiles, [name]: result.profile },
+                    }));
+                    return true;
+                  }}
+                  uploadRef={upload}
+                  directoryRef={directory}
                 />
-                {notice && (
-                  <p className="cw-notice" role="status">
-                    {notice}
-                    <button aria-label="Chiudi avviso" onClick={() => setNotice("")}>
-                      <X size={14} />
-                    </button>
-                  </p>
-                )}
-                <div className="cw-composer-caption">
-                  <span>
-                    <Sparkles size={12} /> Scrivi naturalmente. Usa @ per un collaboratore.
-                  </span>
-                  <span title={storageStatus}>Demo · {storageStatus}</span>
-                </div>
-              </div>
-            </section>
-            {work && scenario && (
-              <aside className="cw-workspace" aria-label="Il lavoro adesso">
-                <div className="cw-panel-top">
-                  <span className="cw-overline">IL LAVORO, ADESSO</span>
-                  <span className={`cw-status ${work.phase}`}>{workStatus(work)}</span>
-                </div>
-                <h2 className={work.catalogPlan ? "cc-work-title" : ""}>{work.title}</h2>
-                {work.catalogPlan && (
-                  <ConversationCatalogPlan
-                    key={"plan:" + work.id}
-                    plan={work.catalogPlan}
-                    reviewer={work.requester || viewer}
-                    count={work.files.length}
-                    inputLabel={scenario.input}
-                    inputHelp={scenario.help}
-                    contribution={work.contribution}
-                    onContribution={(contribution) => patch({ contribution })}
-                    proposal={work.phase === "proposal"}
-                    approved={work.phase === "approved"}
-                    blocked={work.request?.status === "pending"}
-                    people={[
-                      ...new Set([...spacePeople, ...Object.keys(spaceData.profiles || {})]),
-                    ].filter((n) => !spaceData.removedPeople?.includes(n))}
-                    profiles={spaceData.profiles}
-                    onChange={updatePlan}
-                    onFiles={(added) => patch({ files: [...work.files, ...added] })}
-                    onLibrary={() => openSpace("Materiali", work.id)}
-                    onChild={open}
-                    onCreate={(name, role) => {
-                      if (
-                        [...spacePeople, ...Object.keys(spaceData.profiles || {})].some(
-                          (n) => n.toLowerCase() === name.toLowerCase(),
-                        )
-                      )
-                        return false;
-                      setScenarios((current) => [
-                        ...current,
-                        {
-                          ...initialScenarios[0]!,
-                          custom: true,
-                          agent: name,
-                          role,
-                          title: role,
-                          initial: role,
-                          outcome: role,
-                          result: role,
-                          steps: [role],
-                        },
-                      ]);
-                      setSpaceData((current) => ({
-                        ...current,
-                        profiles: {
-                          ...current.profiles,
-                          [name]: {
-                            kind: "agent",
-                            role,
-                            bio: role,
-                            skills: [role],
-                            tone: "Chiaro e sintetico",
-                            plugins: [],
-                          },
-                        },
-                      }));
-                      return true;
-                    }}
-                  />
-                )}
-
-                {work.routineId && (
-                  <button
-                    className="cs-link"
-                    onClick={() => openSpace("Automazioni", "", work.routineId)}
-                  >
-                    Apri automazione ↗
-                  </button>
-                )}
-                {!work.catalogPlan && <p className="cw-outcome">{scenario.outcome}</p>}
-                {work.projectId && (
-                  <button
-                    className="cs-link"
-                    onClick={() => openSpace("Progetti", "", work.projectId)}
-                  >
-                    Progetto: {spaceData.projects.find((p) => p.id === work.projectId)?.name} ↗
-                  </button>
-                )}
-                <div className="cw-owner" hidden={!!work.catalogPlan}>
-                  <ConversationAvatar
-                    name={scenario.agent}
-                    human={isHumanMember(scenario.agent, spaceData.profiles)}
-                  />
-                  <span>
-                    {scenario.agent}
-                    <small>
-                      {work.autonomy === "autonomous"
-                        ? "Consegna autonoma"
-                        : `Verifica: ${work.reviewer || work.requester || "Fabio"}`}
-                    </small>
-                  </span>
-                </div>
-                <details className="cw-details cw-supervision" hidden={!!work.catalogPlan}>
-                  <summary>
-                    Supervisione del lavoro <ChevronDown size={14} />
-                  </summary>
-                  <label>
-                    Modalità
-                    <ConversationSelectField
-                      aria-label="Modalità del lavoro"
-                      value={work.autonomy || "supervised"}
-                      disabled={
-                        !!work.catalogPlan ||
-                        !!work.coordinatedBy ||
-                        work.phase === "approved" ||
-                        viewer !== (work.requester || "Fabio")
-                      }
-                      onChange={(e) =>
-                        patch({ autonomy: e.target.value as "supervised" | "autonomous" })
-                      }
-                    >
-                      <option value="supervised">Risultato da verificare</option>
-                      <option value="autonomous">Consegna autonoma</option>
-                    </ConversationSelectField>
-                  </label>
-                  <label>
-                    Chi verifica
-                    <ConversationSelectField
-                      aria-label="Supervisore del lavoro"
-                      value={work.reviewer || work.requester || "Fabio"}
-                      disabled={
-                        !!work.catalogPlan ||
-                        !!work.coordinatedBy ||
-                        work.phase === "approved" ||
-                        viewer !== (work.requester || "Fabio")
-                      }
-                      onChange={(e) => patch({ reviewer: e.target.value })}
-                    >
-                      {[...new Set(["Fabio", "Giulia", ...Object.keys(spaceData.profiles || {})])]
-                        .filter(
-                          (name) =>
-                            isHumanMember(name, spaceData.profiles) &&
-                            !spaceData.removedPeople?.includes(name) &&
-                            memberProfile(name, spaceData.profiles).invitation !== "pending",
-                        )
-                        .map((name) => (
-                          <option key={name} value={name}>
-                            {name}
-                          </option>
-                        ))}
-                    </ConversationSelectField>
-                  </label>
-                  <p className="cw-hint">
-                    Vale solo per questo incarico. In autonomia il supervisore resta il riferimento
-                    per eventuali verifiche. Cambiare modalità non approva una bozza già in
-                    revisione.
-                  </p>
-                </details>
-                {work.coordinatedBy && (
-                  <div className="cw-hint">
-                    <p>Questo passaggio è gestito nel piano del lavoro.</p>
-                    <button className="cw-secondary" onClick={() => open(work.coordinatedBy!)}>
-                      Apri il piano del lavoro ↗
-                    </button>
-                  </div>
-                )}
-                {!work.catalogPlan && contributionPanel}
-                {work.catalogPlan && work.request?.status === "pending" && (
-                  <p className="cw-hint">
-                    Aspetta {work.request.to}. La richiesta e il campo per rispondere sono nella
-                    chat.
-                  </p>
-                )}
-                {work.coordinatedBy ? null : work.request?.status ===
-                  "pending" ? null : work.phase === "proposal" ? (
-                  <div className="cw-panel-body">
-                    {!work.catalogPlan && (
-                      <ol className="cw-plan">
-                        {scenario.steps.map((s, i) => (
-                          <li key={s}>
-                            <span>{i + 1}</span>
-                            {s}
-                          </li>
-                        ))}
-                      </ol>
-                    )}
-                    <details className="cw-details">
-                      <summary>
-                        Modifica accordo <ChevronDown size={14} />
-                      </summary>
-                      <label>
-                        Nome del lavoro
-                        <input
-                          value={work.title}
-                          onChange={(e) => patch({ title: e.target.value })}
-                        />
-                      </label>
-                      <label>
-                        Scadenza facoltativa
-                        <input
-                          aria-label="Scadenza"
-                          type="date"
-                          value={work.due}
-                          onChange={(e) => patch({ due: e.target.value })}
-                        />
-                      </label>
-                    </details>
-                    <p className="cw-hint">
-                      {work.catalogPlan
-                        ? ""
-                        : work.files.length
-                          ? `${work.files.length} allegati già collegati.`
-                          : `Ti chiederò ${scenario.input.toLowerCase()} per iniziare.`}
-                    </p>
-                    <button
-                      className="cw-primary"
-                      disabled={
-                        !work.title.trim() ||
-                        (!!work.catalogPlan &&
-                          ((!work.files.length && !work.contribution.trim()) ||
-                            !work.catalogPlan.steps.length ||
-                            work.catalogPlan.steps.some(
-                              (s) => !s.agent || spaceData.removedPeople?.includes(s.agent),
-                            )))
-                      }
-                      onClick={confirm}
-                    >
-                      {work.catalogPlan
-                        ? "Avvia il piano della squadra"
-                        : "Affida a " + scenario.agent}
-                      <ArrowUpRight size={16} />
-                    </button>
-                  </div>
-                ) : work.phase === "waiting" ? (
-                  <div className="cw-request">
-                    <span className="cw-overline">TOCCA A TE</span>
-                    <h3>{scenario.input}</h3>
-                    <p>{scenario.help}</p>
-                    <textarea
-                      aria-label="Il tuo contributo"
-                      placeholder="Scrivi qui le informazioni o un link…"
-                      value={contribution}
-                      onChange={(e) => setContribution(e.target.value)}
-                    />
-                    <div className="cw-attach">
-                      <button onClick={() => upload.current?.click()}>
-                        <Paperclip size={15} /> File
-                      </button>
-                      <button onClick={() => directory.current?.click()}>
-                        <FolderOpen size={15} /> Cartella
-                      </button>
-                    </div>
-                    {files.map((f, i) => (
-                      <div className="cw-file" key={i}>
-                        <FileText size={14} />
-                        <span>{f.webkitRelativePath || f.name}</span>
-                        <button
-                          aria-label={`Rimuovi ${f.name}`}
-                          onClick={() => setFiles(files.filter((_, j) => j !== i))}
-                        >
-                          <X size={13} />
-                        </button>
-                      </div>
-                    ))}
-                    <button
-                      className="cw-primary"
-                      disabled={!contribution.trim() && !files.length}
-                      onClick={() => deliver()}
-                    >
-                      Consegna a {scenario.agent}
-                      <ArrowUpRight size={16} />
-                    </button>
-                    <small>Puoi rispondere anche direttamente in chat.</small>
-                  </div>
-                ) : work.phase === "ready" ? (
-                  <div className="cw-ready">
-                    <span className="cw-check">
-                      <Check size={24} />
-                    </span>
-                    <h3>
-                      {work.catalogPlan ? "Prossimo passaggio" : "Tutto pronto per cominciare."}
-                    </h3>
-                    <p>
-                      {work.catalogPlan ? (
-                        `${work.catalogPlan.steps[work.catalogPlan.completed]?.agent}: ${work.catalogPlan.steps[work.catalogPlan.completed]?.title}`
-                      ) : (
-                        <>
-                          Il tuo contributo è collegato. {scenario.agent} ha il necessario per il
-                          prossimo passaggio.
-                        </>
-                      )}
-                    </p>
-                    <div className="cw-simulation">
-                      <span>PROVA IL SEGUITO</span>
-                      <p>
-                        Il motore non è ancora collegato. Simula l’arrivo di una bozza per provare
-                        la revisione.
-                      </p>
-                      <button
-                        className="cw-primary"
-                        disabled={spaceData.removedPeople?.includes(scenario.agent)}
-                        onClick={simulate}
-                      >
-                        <Play size={14} />{" "}
-                        {work.catalogPlan
-                          ? "Simula passaggio " +
-                            (work.catalogPlan.completed + 1) +
-                            " di " +
-                            work.catalogPlan.steps.length
-                          : "Simula risultato pronto"}
-                      </button>
-                      {work.catalogPlan && (
-                        <button className="cw-secondary" onClick={simulateQuestion}>
-                          Simula una domanda
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ) : work.catalogPlan ? (
-                  <p className="cw-hint">
-                    {work.phase === "review"
-                      ? "Tocca a te: verifica la consegna nella chat."
-                      : "Consegna approvata. Puoi riaprire il risultato nella chat."}
-                  </p>
-                ) : (
-                  <div className="cw-result">
-                    <div className="cw-document" onClick={() => setPreview(true)}>
-                      <FileText size={30} />
-                      <span>DOCUMENTO · V{work.revision}</span>
-                      <h3>{scenario.result}</h3>
-                      <p>Anteprima dimostrativa</p>
-                      <button className="cw-secondary" onClick={() => setPreview(true)}>
-                        Apri documento <ArrowUpRight size={15} />
-                      </button>
-                    </div>
-                    {work.phase === "review" ? (
-                      <>
-                        <p className="cw-hint">
-                          Verifica assegnata a {work.reviewer || work.requester || "Fabio"}. Apri la
-                          bozza; per proporre modifiche, scrivi nella chat.
-                        </p>
-                        <button
-                          className="cw-primary"
-                          disabled={viewer !== (work.reviewer || work.requester || "Fabio")}
-                          onClick={() => {
-                            if (viewer !== (work.reviewer || work.requester || "Fabio")) return;
-                            patch({
-                              approvedBy: viewer,
-                              autoDelivered: false,
-                              phase: "approved",
-                              messages: [
-                                ...work.messages,
-                                { who: "you", sender: viewer, text: "Approvo questa bozza." },
-                                {
-                                  who: "agent",
-                                  text: "Approvazione registrata. Il risultato resta disponibile qui; non è stato pubblicato né inviato.",
-                                },
-                              ],
-                            });
-                          }}
-                        >
-                          Approva bozza
-                          <Check size={16} />
-                        </button>
-                      </>
-                    ) : (
-                      <p className="cw-approved">
-                        <Check size={15} />{" "}
-                        {work.autoDelivered
-                          ? "Consegnato in autonomia"
-                          : `Approvata da ${work.approvedBy || work.requester || "Fabio"}`}
-                      </p>
-                    )}
-                  </div>
-                )}
-                {work.due && (
-                  <p className="cw-due">
-                    <Clock3 size={14} /> Entro{" "}
-                    {new Date(work.due + "T12:00:00").toLocaleDateString("it-IT")}
-                  </p>
-                )}
-                <button className="cs-link" onClick={() => openSpace("Materiali", work.id)}>
-                  Collega materiali dalla raccolta ↗
-                </button>
-                {(work.materialIds || [])
-                  .map((id) => library.find((m) => m.id === id))
-                  .filter((m) => m && !m.file)
-                  .map((m) => (
-                    <button
-                      key={m!.id}
-                      className="cs-example"
-                      onClick={() => openSpace("Materiali", "", m!.id)}
-                    >
-                      Nota: {m!.name} ↗
-                    </button>
-                  ))}
-                {work.files.length > 0 && (
-                  <details className="cw-details">
-                    <summary>
-                      <span>Materiali · {work.files.length}</span>
-                      <ChevronDown size={14} />
-                    </summary>
-                    {work.files.map((f, i) => (
-                      <p className="cw-file" key={i}>
-                        <FileText size={13} />
-                        {f.name}
-                      </p>
-                    ))}
-                  </details>
-                )}
-                <details className="cw-details cw-cost">
-                  <summary>
-                    <span>Costi</span>
-                    <ChevronDown size={14} />
-                  </summary>
-
-                  <p>
-                    Nessun consumo AI reale. Limite indicativo per lavoro: €
-                    {preferences.perWorkBudget}. Budget mensile: €{preferences.budget}. Le soglie
-                    saranno applicate dal futuro motore.
-                  </p>
-                </details>
-              </aside>
-            )}
-          </div>
+              ) : null
+            }
+          />
         )}
       </main>
       <input
@@ -2905,64 +1446,13 @@ export function ConversationWorkspace() {
         }}
       />
       {preview && work && scenario && (
-        <dialog
-          ref={modal}
-          className="cw-overlay"
-          aria-label="Anteprima risultato"
-          onCancel={() => setPreview(false)}
-          onClick={() => setPreview(false)}
-        >
-          <section
-            aria-label="Anteprima risultato"
-            className="cw-preview"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <header>
-              <span>
-                Risultato · {scenario.agent} · v{work.revision}
-              </span>
-              <div>
-                <button className="cw-icon" aria-label="Scarica documento" onClick={download}>
-                  <Download size={18} />
-                </button>
-                <button
-                  className="cw-icon"
-                  aria-label="Chiudi anteprima"
-                  onClick={() => setPreview(false)}
-                >
-                  <X size={19} />
-                </button>
-              </div>
-            </header>
-            <div className="cw-preview-body">
-              <span className="cw-overline">BOZZA DIMOSTRATIVA</span>
-              {scenario.body
-                .split("\n")
-                .filter(Boolean)
-                .map((p, i) =>
-                  p.startsWith("# ") ? (
-                    <h1 key={i}>{p.slice(2)}</h1>
-                  ) : p.startsWith("## ") ? (
-                    <h3 key={i}>{p.slice(3)}</h3>
-                  ) : (
-                    <p key={i}>{p}</p>
-                  ),
-                )}
-              {work.feedback && (
-                <section className="cw-feedback">
-                  <h3>Indicazioni di revisione</h3>
-                  <p>{work.feedback}</p>
-                  <small>Annotate nella demo; contenuto non riscritto automaticamente.</small>
-                </section>
-              )}
-            </div>
-            <footer>
-              <button className="cw-secondary" onClick={() => setPreview(false)}>
-                Torna alla conversazione
-              </button>
-            </footer>
-          </section>
-        </dialog>
+        <ConversationWorkspacePreview
+          work={work}
+          scenario={scenario}
+          modalRef={modal}
+          onClose={() => setPreview(false)}
+          onDownload={download}
+        />
       )}
     </div>
   );

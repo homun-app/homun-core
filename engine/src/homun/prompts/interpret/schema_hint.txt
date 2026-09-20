@@ -1,0 +1,9 @@
+{
+  "kind": "reply|clarification|command_proposal|patch_proposal",
+  "text": "string or null",
+  "command": {"type": "string", "payload": {}, "summary": "string"} or null,
+  "patch_changes": [{"field": "objective|owner_id|step_assignee", "to_value": "string", "step_id": "string or null"}],
+  "mentions": [{"raw": "@Name", "candidates": [{"id": "...", "display_name": "...", "kind": "person|agent|other"}]}],
+  "ambiguity": "string or null",
+  "language_hint": "string or null"
+}

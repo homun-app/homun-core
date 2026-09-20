@@ -1,0 +1,2 @@
+# Build-only dependencies; never installed into the engine runtime environment.
+pyinstaller==6.22.3

@@ -1,0 +1,6 @@
+Richiesta: preparare un catalogo prodotti per il cliente Acme.
+
+Vincoli:
+- serve il listino prezzi aggiornato
+- bozza revisionabile prima dell'invio
+- nessun invio automatico al cliente

@@ -1,0 +1,8 @@
+{
+  "objective": "string",
+  "expected_result": "string",
+  "criteria": ["string"],
+  "steps": [{"title": "string", "assignee_id": "roster-id", "output_expected": "string", "depends_on": []}],
+  "missing_fields": [],
+  "questions": []
+}

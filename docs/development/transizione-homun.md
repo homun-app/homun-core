@@ -6,9 +6,9 @@ React per l'interfaccia, Electron per gli installabili, Python per il motore tra
 
 ## Passaggi e criteri di uscita
 
-1. **Base separata**: prototipo di riferimento, app React, documentazione e repository locale. Typecheck, test e due build ripetibili. Questo bootstrap realizza la separazione; la UI resta simulata.
+1. **Base separata**: prototipo di riferimento, app React, documentazione e repository locale. Typecheck, test e due build ripetibili. La separazione è completata; oggi UI motore e simulazione restano distinte.
 2. **Prova Electron/Python**: shell, processo Python incluso, handshake autenticato locale, arresto e ripartenza. Verifica su macchina macOS pulita senza strumenti di sviluppo.
-3. **Primo lavoro reale**: API, persistenza, piano versionato, contributo umano, ripresa dopo riavvio e risultato approvabile. Nessun dato demo nel percorso reale.
+3. **Primo lavoro reale**: API, persistenza, piano versionato, contributo umano, ripresa dopo riavvio e risultato approvabile. Esecuzione reale su fixture sintetiche dichiarate, senza risultati simulati spacciati per output del motore.
 4. **Parità funzionale**: coprire la matrice di accettazione delle specifiche, inclusi settings, agenti, team, materiali, plugin, automazioni e memoria. Registrare differenze e limiti.
 5. **Pipeline di distribuzione**: scegliere repository remoto e ramo; CI con installazione da lock, controlli, build React e test motore; job desktop per piattaforma. Credenziali di firma solo nel secret store CI. Firma/notarizzazione macOS, canale alpha e prova aggiornamento prima del canale stabile.
 6. **Migrazione**: inventario del vecchio Homun in lettura, backup, migrazione versionata e verifica di quantità, riferimenti, file e permessi. Credenziali tramite portachiavi o nuovo collegamento. Mai sovrascrivere i dati originali durante la prova.
@@ -16,9 +16,11 @@ React per l'interfaccia, Electron per gli installabili, Python per il motore tra
 
 ## Limiti attuali
 
-Nessuna pipeline remota, firma, installer o migrazione è stata attivata. Il repository `../app` non viene modificato. Il lock npm è la fonte per nuove installazioni; il vecchio lock Bun è conservato nel riferimento storico. Gli avvisi sulle dimensioni dei bundle vanno affrontati prima della distribuzione desktop.
+Esistono un candidato .app/ZIP autonomo e workflow CI/build nel repository; questo non attesta un rilascio remoto. Firma Developer ID, notarizzazione, installazione su Mac pulito, aggiornamento e migrazione dal vecchio prodotto restano aperti. Il primo confronto CSV reale e la GUI sono provati: vedi [stato corrente](../STATO.md). Il repository `../app` non viene modificato. Il lock npm è la fonte per nuove installazioni; il vecchio lock Bun è conservato nel riferimento storico. Gli avvisi sulle dimensioni dei bundle vanno affrontati prima della distribuzione desktop.
 
-## Verifica del bootstrap — 17 settembre 2026
+## Verifica storica del bootstrap — 17 settembre 2026
+
+Le righe seguenti descrivono soltanto il bootstrap iniziale. Motore ed Electron sono stati implementati e verificati successivamente; i conteggi e l’audit qui riportati non sono risultati attuali.
 
 - TypeScript, 83 test e build app/prototipo superati con le dipendenze locali presenti.
 - Avvio della nuova app verificato nel browser su porta 4183.
